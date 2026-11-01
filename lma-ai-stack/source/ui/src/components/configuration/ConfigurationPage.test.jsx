@@ -407,6 +407,22 @@ describe('import, export and presets', () => {
     expect(sections).toEqual({ nova_sonic_config: { voiceId: 'amy' } });
   });
 
+  it('says when an import replaced unsaved edits', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    renderEditor();
+    openSection(await screen.findByText('Nova Sonic Voice Assistant'));
+    fireEvent.change(within(section('Nova Sonic Voice Assistant')).getByLabelText('Voice ID'), {
+      target: { value: 'matthew' },
+    });
+    const file = new File(
+      [JSON.stringify({ format: 'lma-configuration-profile', formatVersion: 1, sections: { nova_sonic_config: {} } })],
+      'clean.json',
+      { type: 'application/json' },
+    );
+    fireEvent.change(screen.getByTestId('configuration-import'), { target: { files: [file] } });
+    expect(await screen.findByText(/It replaced unsaved edits you had made in those sections/)).toBeTruthy();
+  });
+
   it('refuses a file that is not an export, and changes nothing', async () => {
     graphqlMock.mockResolvedValueOnce(answer());
     renderEditor();

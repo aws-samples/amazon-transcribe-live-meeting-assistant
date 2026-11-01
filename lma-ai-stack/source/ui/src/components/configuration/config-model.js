@@ -301,10 +301,10 @@ const offered = (schema, values, settings) =>
   Object.fromEntries(Object.entries(values || {}).filter(([key]) => isAvailable(schema?.properties?.[key], settings)));
 
 /**
- * A section once it becomes exactly `values`: for a "replace" section the
- * values themselves; for a "merge" section the baseline with the values over
- * it, and every shipped entry they do not name turned off, where the schema can
- * turn one off.
+ * A section once it becomes exactly `values`: where the schema's mergeStrategy
+ * is "replace", the values themselves; where it is "merge", the baseline with
+ * the values over it, and every shipped entry they do not name turned off,
+ * where the schema can turn one off.
  */
 export const replacedSection = (schema, defaults, values) => {
   if (isReplace(schema)) return clone(values);

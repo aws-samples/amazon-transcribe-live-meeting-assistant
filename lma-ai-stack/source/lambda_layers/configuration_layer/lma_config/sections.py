@@ -175,8 +175,9 @@ NOVA_SONIC_CONFIG = register(
 
 #: The on-demand ASR engine's three runtime switches: whether streaming meetings
 #: use it (``streamingEngineMicrovm``), whether Virtual Participants do
-#: (``virtualParticipantEngineMicrovm``), and whether a Virtual Participant on it
-#: asks for per-voice labels (``diarizeVirtualParticipant``). Edited in the
+#: (``virtualParticipantEngineMicrovm``), and whether a Virtual Participant, on
+#: either engine, labels the separate voices behind one attendee
+#: (``diarizeVirtualParticipant``). Edited in the
 #: Configuration page's Transcription Engine section.
 #:
 #: Short tier, which is the policy the transcriber's reader has always had: it

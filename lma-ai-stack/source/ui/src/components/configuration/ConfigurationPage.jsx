@@ -203,15 +203,22 @@ export const ConfigurationContent = () => {
     try {
       const { values, skipped } = readExport(await file.text(), sections, doc.defaults);
       setEdits((current) => ({ ...current, ...values }));
-      setComment(`Imported from ${file.name}`.slice(0, MAX_COMMENT_LENGTH));
+      setComment((current) => current || `Imported from ${file.name}`.slice(0, MAX_COMMENT_LENGTH));
       const names = sections.filter((section) => values[section.name]).map(sectionLabel);
+      const replacedEdits = sections.some(
+        (section) => values[section.name] && !deepEqual(edits[section.name], loaded[section.name]),
+      );
+      const notes = [
+        replacedEdits ? 'It replaced unsaved edits you had made in those sections.' : '',
+        skipped.length ? `Not used, because this deployment has no such section: ${skipped.join(', ')}.` : '',
+      ].filter(Boolean);
       setStatus({
-        type: skipped.length ? 'warning' : 'info',
-        text:
-          `Loaded ${names.join(', ') || 'nothing'} from ${file.name}. Nothing is saved yet: review the marked ` +
-          `changes, then save.${
-            skipped.length ? ` Not used, because this deployment has no such section: ${skipped.join(', ')}.` : ''
-          }`,
+        type: skipped.length || replacedEdits ? 'warning' : 'info',
+        text: [
+          `Loaded ${names.join(', ') || 'nothing'} from ${file.name}.`,
+          'Nothing is saved yet: review the marked changes, then save.',
+          ...notes,
+        ].join(' '),
       });
     } catch (err) {
       setStatus({ type: 'error', text: `Could not import ${file.name}: ${err.message}` });
@@ -239,10 +246,16 @@ export const ConfigurationContent = () => {
       }
     });
     setEdits((current) => ({ ...current, ...next }));
-    setComment(`Applied the preset "${preset.Title}"`.slice(0, MAX_COMMENT_LENGTH));
+    setComment((current) => current || `Applied the preset "${preset.Title}"`.slice(0, MAX_COMMENT_LENGTH));
+    const replacedEdits = Object.keys(next).some((name) => !deepEqual(edits[name], loaded[name]));
     setStatus({
-      type: 'info',
-      text: `Applied "${preset.Title}" to the page. Nothing is saved yet: review the marked changes, then save.`,
+      type: replacedEdits ? 'warning' : 'info',
+      text: [
+        `Applied "${preset.Title}" to the page. Nothing is saved yet: review the marked changes, then save.`,
+        replacedEdits ? 'It was applied over unsaved edits you had made in those sections.' : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
     });
     setPreset(null);
   };

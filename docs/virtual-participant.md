@@ -613,8 +613,8 @@ ASR engine instead, from the **Transcription Engine** section of **Configuration
 - **Virtual Participants: engine** chooses the engine for every VP that starts after the
   change. The VP acquires and releases its own MicroVM, and falls back to Amazon
   Transcribe when none can be acquired.
-- **Virtual Participant voice separation** asks the on-demand engine for per-voice
-  labels, so several people behind one attendee tile (a conference room, a shared screen
+- **Virtual Participant voice separation** asks for per-voice labels, on either engine
+  (on the on-demand engine, where its model bundle has speaker identification), so several people behind one attendee tile (a conference room, a shared screen
   playing a recording) come out as `Name (spk_0)`, `Name (spk_1)`. Off by default:
   speaker names come from the meeting roster, which is the better label for a normal
   attendee.
