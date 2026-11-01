@@ -180,3 +180,25 @@ def test_other_requests_keep_their_user_email():
         False,
         "owner@example.com",
     )
+
+
+
+@pytest.mark.parametrize(
+    "event, inline",
+    [
+        ({"transcript_segment_args": {"MessageId": "chat-1"}}, True),  # the chat panel
+        ({"transcript_segment_args": {"SegmentId": "seg-1"}}, False),  # the wake phrase
+        ({}, False),  # the voice assistant
+        ({"toolScope": "meeting_chat", "transcript_segment_args": {"MessageId": "chat-1"}}, False),
+    ],
+)
+def test_frames_are_shown_inline_only_in_the_meeting_pages_chat(built, monkeypatch, event, inline):
+    seen = []
+
+    def factory(*_args, **kwargs):
+        seen.append(kwargs["show_inline"])
+        return _named("get_meeting_frames")
+
+    monkeypatch.setattr(handler_module, "create_meeting_frames_tool", factory)
+    built({"userEmail": "owner@example.com", **event})
+    assert seen == [inline]

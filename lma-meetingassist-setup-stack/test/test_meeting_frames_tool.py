@@ -142,15 +142,20 @@ def test_a_model_that_cannot_read_images_is_sent_none_and_told_so():
     assert "cannot be shown to this model" in texts(result)
 
 
-def test_only_a_few_pictures_are_sent_at_once():
+def test_only_the_newest_few_pictures_are_sent_and_the_rest_are_said_to_be_left_out():
     many = [frame(t) for t in range(10, 110, 10)]
     selected = meeting_frames.select_frames(many, last=10)
+    chosen = meeting_frames.frames_for_pictures(selected, send_images=True)
+    assert [f["Timestamp"] for f in chosen] == [70, 80, 90, 100]
+    # Only those four are downloaded, as the tool does.
     result = meeting_frames.build_tool_result(
-        selected, [], {f["FrameId"]: b"x" for f, _ in selected},
+        selected, [], {f["FrameId"]: b"x" for f in chosen},
         total_frames=10, send_images=True, show_inline=True,
     )
     assert meeting_frames.images_in(result) == meeting_frames.MAX_IMAGES
-    assert "at most 4 are sent at once" in texts(result)
+    body = texts(result)
+    assert body.count("at most 4 are sent at once") == 6
+    assert "could not be read" not in body
 
 
 def test_a_picture_that_could_not_be_read_is_said_to_be_missing():
@@ -261,3 +266,17 @@ def test_a_read_failure_is_an_error_result_not_an_exception(tool, monkeypatch):
     monkeypatch.setattr(handler_module.meeting_frames, "load_keyframes", boom)
     result = get_meeting_frames(last=1)
     assert result["status"] == "error"
+
+
+
+def test_a_moment_before_anything_was_shared_is_said_to_be_one():
+    selected = meeting_frames.select_frames(FRAMES, at=10)
+    result = meeting_frames.build_tool_result(
+        selected, [], {}, total_frames=4, send_images=False, show_inline=False, at_time=10
+    )
+    assert "Nothing had been shared yet at 00:10" in texts(result)
+    later = meeting_frames.build_tool_result(
+        meeting_frames.select_frames(FRAMES, at=100), [], {},
+        total_frames=4, send_images=False, show_inline=False, at_time=100,
+    )
+    assert "Nothing had been shared" not in texts(later)

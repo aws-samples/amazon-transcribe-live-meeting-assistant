@@ -155,6 +155,23 @@ def transcript_between(
     return text
 
 
+def frames_for_pictures(
+    selected: Sequence[Tuple[Mapping[str, Any], Optional[float]]],
+    *,
+    send_images: bool,
+    wants: Callable[[Mapping[str, Any]], bool] = lambda _frame: True,
+) -> List[Mapping[str, Any]]:
+    """The frames whose pictures are sent: the newest MAX_IMAGES of those that want one.
+
+    The one place the picture budget is spent, so the frames downloaded and the
+    frames build_tool_result describes as pictured are the same frames.
+    """
+    if not send_images:
+        return []
+    wanting = [frame for frame, _ in selected if wants(frame)]
+    return wanting[-MAX_IMAGES:]
+
+
 def frame_markdown(frame: Mapping[str, Any]) -> str:
     """How an answer shows a frame in the meeting page's chat: resolved there to a signed link."""
     return f"![Shared screen at {format_time(frame.get('Timestamp'))}](keyframe:{frame.get('FrameId')})"
@@ -168,12 +185,15 @@ def build_tool_result(
     total_frames: int,
     send_images: bool,
     show_inline: bool,
+    at_time: Optional[float] = None,
 ) -> Dict[str, Any]:
     """The Strands tool result: a text block per frame and, where allowed, its image.
 
     ``images`` holds the downloaded pictures by FrameId; a frame without one is
     described in text only. ``show_inline`` adds how to show a frame in the
-    meeting page's chat, which only that chat can display.
+    meeting page's chat, which only that chat can display. ``at_time`` is the
+    moment asked about, if any, so a moment before anything was shared is said
+    to be one.
     """
     if not selected:
         return {"status": "success", "content": [{"text": NO_FRAMES}]}
@@ -203,7 +223,13 @@ def build_tool_result(
         header.append("This answer is text only: describe frames in words, with no image markdown.")
     content.append({"text": "\n".join(header)})
 
-    image_budget = MAX_IMAGES
+    pictured = {str(f.get("FrameId")) for f in frames_for_pictures(selected, send_images=send_images)}
+    before_first = at_time is not None and float(selected[0][0]["Timestamp"]) > at_time
+    if before_first:
+        content.append({"text": (
+            f"Nothing had been shared yet at {format_time(at_time)}; this is the first frame, "
+            "shown after that."
+        )})
     for frame, until in selected:
         frame_id = str(frame.get("FrameId"))
         went_up = float(frame["Timestamp"])
@@ -215,15 +241,14 @@ def build_tool_result(
             lines.append(f"Image markdown: {frame_markdown(frame)}")
         said = transcript_between(segment_list, went_up, until)
         lines.append(f"What was said while it was on screen:\n{said}" if said else "Nothing was said while it was on screen.")
-        image = images.get(frame_id) if send_images else None
-        if send_images and image is None:
-            lines.append("(The picture of this frame could not be read.)")
-        elif send_images and image_budget <= 0:
+        image = images.get(frame_id) if frame_id in pictured else None
+        if send_images and frame_id not in pictured:
             lines.append(f"(Picture not included: at most {MAX_IMAGES} are sent at once.)")
+        elif send_images and image is None:
+            lines.append("(The picture of this frame could not be read.)")
         content.append({"text": "\n".join(lines)})
-        if send_images and image is not None and image_budget > 0:
+        if image is not None:
             content.append({"image": {"format": "jpeg", "source": {"bytes": image}}})
-            image_budget -= 1
     return {"status": "success", "content": content}
 
 

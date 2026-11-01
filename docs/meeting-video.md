@@ -63,6 +63,7 @@ Where the answer appears decides how frames are shown:
 | The meeting page's chat panel | Shown as pictures in the answer; selecting one opens it full size. The answer refers to a frame by its id and the page fetches a signed link for it through `getVideoKeyframes`, with the same access check as the strip. |
 | The meeting chat (`LMA ask`, the Virtual Participant) | Described in words. Everyone in the meeting reads the answer, and the frames show what was shared with them. |
 | The voice assistant | Described in words, and spoken. |
+| The wake phrase (an answer written into the transcript) | Described in words. |
 
 **Cost.** A picture is billed as the model's input tokens, so it is included in
 the Meeting Assistant line of the meeting's

@@ -1623,23 +1623,24 @@ def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id:
         success = True
         try:
             frames = meeting_frames.load_keyframes(run_query, call_id)
+            at_seconds = meeting_frames.parse_meeting_time(at_time)
             selected = meeting_frames.select_frames(
                 frames,
                 last=last,
                 start=meeting_frames.parse_meeting_time(start_time),
                 end=meeting_frames.parse_meeting_time(end_time),
-                at=meeting_frames.parse_meeting_time(at_time),
+                at=at_seconds,
             )
             images = {}
-            if send_images:
-                for frame, _ in selected[-meeting_frames.MAX_IMAGES:]:
-                    data = meeting_frames.download_image(frame.get('ImageSignedUrl'))
-                    if data is not None:
-                        images[str(frame.get('FrameId'))] = data
+            for frame in meeting_frames.frames_for_pictures(selected, send_images=send_images):
+                data = meeting_frames.download_image(frame.get('ImageSignedUrl'))
+                if data is not None:
+                    images[str(frame.get('FrameId'))] = data
             segments = query_transcript_items(call_id, dynamodb_table_name) if selected and dynamodb_table_name else []
             result = meeting_frames.build_tool_result(
                 selected, segments, images,
                 total_frames=len(frames), send_images=send_images, show_inline=show_inline,
+                at_time=at_seconds,
             )
         except Exception as e:
             logger.error(f"Error reading the meeting's key frames: {str(e)}")
@@ -2162,14 +2163,15 @@ def handler(event, context):
 
         # The meeting's shared screen. In every scope, as the agenda: the
         # frames show what was shared with everyone in the meeting. Frames
-        # can be shown inline only in the meeting page's chat, which is the
-        # caller that subscribes to the answer.
+        # can be shown inline only in the meeting page's chat panel, the one
+        # caller that sends a MessageId (the wake phrase sends a SegmentId,
+        # and its answer is a transcript segment, which shows no frames).
         if APPSYNC_GRAPHQL_URL and dynamodb_table_name:
             tools.append(create_meeting_frames_tool(
                 call_id=call_id,
                 dynamodb_table_name=dynamodb_table_name,
                 model_id=model_id,
-                show_inline=bool(subscriber_id) and not meeting_chat_scope,
+                show_inline=bool(transcript_segment_args.get('MessageId')) and not meeting_chat_scope,
                 message_id=message_id
             ))
             logger.info("Meeting frames tool enabled")
