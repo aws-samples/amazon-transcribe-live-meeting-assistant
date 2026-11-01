@@ -3,6 +3,7 @@
 # See the LICENSE file in the project root for full license information.
 
 #
+import bisect
 import json
 import logging
 import os
@@ -158,15 +159,10 @@ def attach_said(frames, segments, condense, include_speaker, metadata):
     starts = [frame["Timestamp"] for frame in frames]
     by_frame = [[] for _ in frames]
     for row in segments:
-        began = segment_start(row)
-        # The last frame that went up at or before the segment began.
-        index = None
-        for position, start in enumerate(starts):
-            if start <= began:
-                index = position
-            else:
-                break
-        if index is not None:
+        # The last frame that went up at or before the segment began (frames
+        # are in time order); none before the first frame.
+        index = bisect.bisect_right(starts, segment_start(row)) - 1
+        if index >= 0:
             by_frame[index].append(row)
     for frame, rows in zip(frames, by_frame):
         frame["Said"] = "".join(

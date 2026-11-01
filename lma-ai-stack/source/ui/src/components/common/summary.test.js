@@ -94,6 +94,11 @@ describe('a summary with pictures of the shared screen', () => {
     expect(decodeURIComponent(getEmailFormattedSummary(SLIDES))).not.toContain('keyframe:');
     const edited = 'Notes\n\n![Slide at 01:00](keyframe:f1)';
     expect(getTextFileFormattedSummary(edited)).toBe('Notes\n\n(Slide at 01:00)');
+    // The meetings list's preview and popover.
+    expect(getTextOnlySummary(edited)).toBe('Notes\n\n(Slide at 01:00)');
+    expect(getTextOnlySummary(JSON.stringify({ SUMMARY: 'See ![Slide at 00:30](keyframe:f2)' }))).toBe(
+      'See (Slide at 00:30)',
+    );
   });
 
   it('keeps the pictures for the page, and leaves other images and links alone', () => {

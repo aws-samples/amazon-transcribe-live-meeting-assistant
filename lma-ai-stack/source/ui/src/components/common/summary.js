@@ -28,9 +28,9 @@ export const getTextOnlySummary = (callSummaryText) => {
       summary = jsonObj[summary];
     }
   } catch (e) {
-    return callSummaryText;
+    return keyframeImagesAsText(callSummaryText);
   }
-  return summary;
+  return keyframeImagesAsText(summary);
 };
 
 export const getMarkdownSummary = (callSummaryText) => {

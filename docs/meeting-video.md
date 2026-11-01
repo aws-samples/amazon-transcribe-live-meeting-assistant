@@ -106,7 +106,8 @@ How it is built:
   reference as the frame's thumbnail, read through `getVideoKeyframes` for that
   meeting with the same access check as the strip; selecting it opens the full
   picture. A frame that cannot be read, because the meeting's retention has
-  removed it, shows as its alt text. Copy, download, Word and email show the alt
+  removed it, shows as its alt text. Copy, download, Word, email, the meetings
+  list's summary preview and the MCP `get_meeting_summary` tool show the alt
   text too, and so does the summary document for the meeting-history knowledge
   base.
 
@@ -116,17 +117,19 @@ other, so it can be edited, replaced or removed (set it to `NONE`) on the
 
 Measured with the shipped prompt on the synthetic meeting (14 key frames: ten
 slides, one of them taken twice, and three pages of a document), every model
-copied every picture reference exactly:
+copied every picture reference exactly, and none copied the `Image:` label
+with it:
 
 | Model | Entries | Input / output tokens | Cost for the section |
 |---|---|---|---|
-| Claude Sonnet 5.5 (the stack's default summary model) | 11 | 2,879 / 1,058 | about $0.016 |
-| Claude Haiku 4.5 | 13 | 1,933 / 821 | about $0.006 |
-| Amazon Nova 2 Lite | 13 | 1,743 / 650 | about $0.002 |
-| Amazon Nova Lite | 12 | 1,883 / 767 | about $0.0003 |
+| Claude Sonnet 5.5 (the stack's default summary model) | 11 | 2,895 / 1,001 | about $0.016 |
+| Claude Haiku 4.5 | 13 | 1,943 / 816 | about $0.006 |
+| Amazon Nova 2 Lite | 11 | 1,753 / 598 | about $0.002 |
+| Amazon Nova Lite | 13 | 1,893 / 757 | about $0.0003 |
 
-Sonnet merged the repeated slide and the document's pages into one entry each;
-the others kept some of them apart. The cost is metered with the rest of the
+A reasonable count is 11 to 13, depending on whether the three document pages
+are taken as one item or three, with the repeated slide merged; every result
+falls in that range. The cost is metered with the rest of the
 summary, under **Summary**.
 
 ## Asking the assistant about the shared screen
