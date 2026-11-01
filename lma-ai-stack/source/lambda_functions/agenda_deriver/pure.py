@@ -148,7 +148,9 @@ _FILLER = frozenset(
 
 
 def _stems(text: str) -> List[str]:
-    # The first five letters, so "hire" and "hiring", "plan" and "planning" meet.
+    # The first five letters: enough to match a plural or an inflection that
+    # keeps them ("budget" and "budgets", "hiring" and "hirings"), not a real
+    # stemmer -- "hire" and "hiring" do not meet.
     return [word[:5] for word in _normalise(text).split()]
 
 

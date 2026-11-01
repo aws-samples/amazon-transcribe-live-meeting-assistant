@@ -95,7 +95,8 @@ the meeting".
 stated, for its items, and for the words it was stated in, and is told that
 topics which merely come up are not an agenda. Its answer is accepted only if
 those quoted words are actually in the transcript, and each item is kept only
-if it is drawn from them — most of its words appear in the quote — so an agenda
+if it is drawn from them — at least half of its content words appear in the
+quote — so an agenda
 made up from the discussion has nothing to point at and is discarded. Both passes read at
 most about the first half hour of conversation, where agendas are stated.
 

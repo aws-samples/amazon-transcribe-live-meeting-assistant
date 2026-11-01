@@ -195,3 +195,19 @@ def agenda_derivation_due(
         return float(end_time) >= after_seconds
     except (TypeError, ValueError):
         return False
+
+
+def agenda_derivation_after_seconds(raw: Optional[str]) -> float:
+    """The automatic agenda pass's threshold from its environment variable.
+
+    Read at import time, so a value that is not a number turns the pass off
+    rather than stopping the whole function -- and with it the transcript
+    pipeline -- from loading. Blank or absent turns it off too.
+    """
+    try:
+        return float(raw or 0)
+    except ValueError:
+        print(
+            f"AGENDA_DERIVATION_AFTER_SECONDS is not a number ({raw!r}); the automatic agenda pass is off"
+        )
+        return 0.0

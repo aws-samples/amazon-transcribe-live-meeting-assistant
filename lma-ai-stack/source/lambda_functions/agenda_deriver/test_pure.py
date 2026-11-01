@@ -190,3 +190,10 @@ def test_an_item_is_matched_by_its_content_words():
     assert pure.item_is_in_evidence("Q3", evidence)
     assert not pure.item_is_in_evidence("Q4", evidence)
     assert not pure.item_is_in_evidence("Office relocation", evidence)
+
+
+def test_words_meet_on_their_first_five_letters_only():
+    assert pure.item_is_in_evidence("Budgets", "the budget first")
+    assert pure.item_is_in_evidence("Hirings", "then hiring")
+    # Not a stemmer: these share fewer than five letters.
+    assert not pure.item_is_in_evidence("Hire", "then hiring")

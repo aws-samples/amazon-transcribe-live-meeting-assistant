@@ -42,6 +42,7 @@ if str(HERE) not in sys.path:
 
 from pure import (  # noqa: E402
     QUARTER_COUNT,
+    agenda_derivation_after_seconds,
     agenda_derivation_due,
     convert_keys_to_uppercamelcase,
     get_sentiment_per_quarter,
@@ -330,3 +331,10 @@ def test_the_agenda_pass_is_not_due_twice_off_or_without_a_meeting():
     assert agenda_derivation_due("c1", 900, 0, set()) is False
     assert agenda_derivation_due("", 900, 300, set()) is False
     assert agenda_derivation_due("c1", None, 300, set()) is False
+
+
+def test_a_bad_agenda_threshold_turns_the_pass_off_rather_than_failing_the_import():
+    assert agenda_derivation_after_seconds("300") == 300.0
+    assert agenda_derivation_after_seconds("") == 0.0
+    assert agenda_derivation_after_seconds(None) == 0.0
+    assert agenda_derivation_after_seconds("five minutes") == 0.0

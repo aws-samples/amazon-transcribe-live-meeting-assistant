@@ -53,6 +53,7 @@ from pure import (  # noqa: E402
     SentimentByPeriodEntry,
     SentimentEntry,
     SentimentPerChannel,
+    agenda_derivation_after_seconds,
     agenda_derivation_due,
     convert_keys_to_uppercamelcase,
     get_sentiment_per_quarter,
@@ -95,7 +96,9 @@ SPEAKER_NAME_RESOLVER_ARN = getenv("SPEAKER_NAME_RESOLVER_ARN", "")
 # The automatic agenda pass: a meeting with no agenda is read once, about this
 # far in, for an agenda somebody stated. 0 turns it off. See agenda_deriver.
 AGENDA_DERIVER_ARN = getenv("AGENDA_DERIVER_ARN", "")
-AGENDA_DERIVATION_AFTER_SECONDS = float(getenv("AGENDA_DERIVATION_AFTER_SECONDS", "300") or 0)
+AGENDA_DERIVATION_AFTER_SECONDS = agenda_derivation_after_seconds(
+    getenv("AGENDA_DERIVATION_AFTER_SECONDS", "300")
+)
 # Meetings this execution environment has already queued the pass for; see
 # agenda_derivation_due for why this is not what makes the pass run once.
 AGENDA_PASS_QUEUED: set = set()
