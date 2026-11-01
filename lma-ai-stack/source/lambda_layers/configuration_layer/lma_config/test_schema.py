@@ -81,6 +81,18 @@ def test_a_constraint_the_validator_would_ignore_is_reported(fragment):
     assert schema.unknown_keywords({"type": "object", **fragment})
 
 
+@pytest.mark.parametrize("name", sorted(sections.registered_sections()))
+def test_no_pattern_uses_a_class_escape_the_two_languages_read_differently(name):
+    """Python's \\d, \\w, \\s and \\b match non-ASCII characters; JavaScript's do not.
+
+    The patterns spell their classes out, such as [0-9], so the server and the
+    editor agree on what they accept.
+    """
+    text = json.dumps(schema.section_schema(name))
+    for escape in ("\\\\d", "\\\\D", "\\\\w", "\\\\W", "\\\\s", "\\\\S", "\\\\b", "\\\\B"):
+        assert escape not in text, f"{name} uses {escape}"
+
+
 def test_the_chat_buttons_are_the_one_section_a_profile_replaces_whole():
     replaced = {
         name

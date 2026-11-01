@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lma:configuration/nova_sonic_config",
   "title": "Nova Sonic voice assistant",
-  "description": "How the Nova Sonic voice assistant speaks and behaves in a meeting. A saved change applies to the next meeting the voice assistant joins.",
+  "description": "How the Nova Sonic voice assistant speaks and behaves in a meeting.",
   "sectionLabel": "Nova Sonic Voice Assistant",
   "order": 3,
   "collapsible": true,

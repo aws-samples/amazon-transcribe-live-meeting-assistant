@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lma:configuration/asr_engine",
   "title": "Transcription engine",
-  "description": "Which engine transcribes each kind of meeting. The on-demand speech engine is experimental: English only, with transcript quality below Amazon Transcribe. A saved change applies to meetings that start after it, within 30 seconds.",
+  "description": "Which engine transcribes each kind of meeting. The on-demand speech engine is experimental: English only, with transcript quality below Amazon Transcribe.",
   "sectionLabel": "Transcription Engine (experimental)",
   "order": 4,
   "collapsible": true,

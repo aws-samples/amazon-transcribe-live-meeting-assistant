@@ -1,0 +1,20 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
+
+/* A value that differs from the shipped default: a coloured rule beside it,
+   alongside the "Changed" badge, so a long section can be scanned for edits. */
+.lma-config-field {
+  border-left: 3px solid transparent;
+  padding-left: 10px;
+}
+
+.lma-config-field-changed {
+  border-left-color: #0972d3;
+}
+
+.awsui-dark-mode .lma-config-field-changed {
+  border-left-color: #539fe5;
+}

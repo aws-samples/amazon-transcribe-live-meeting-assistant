@@ -38,9 +38,11 @@ The left sidebar organizes the application into the following sections:
 - **Meetings Query Tool** — Advanced search and filtering across meetings
 
 ### Configuration (admin only)
+- **Configuration** — Every runtime setting in one place: summary prompts, chat buttons, Nova Sonic, transcription engine and meeting cost prices (see [Configuration Guide](configuration-guide.md))
 - **MCP Servers** — Install and manage MCP server integrations
 - **Nova Sonic** — Configure the Nova Sonic voice assistant
 - **Transcript Summary** — Manage summary prompt templates
+- **Configuration History** — Every saved revision of the configuration: view, compare, label and restore
 - **User Management** — Create and delete LMA users (see [User Management](user-management.md))
 
 ### Deployment Info
@@ -228,15 +230,38 @@ On the first three pages, a user outside the group sees a short message naming
 the setting in place of the form. The Chat Buttons dialog is reached from a menu
 that only an Admin is shown, so nothing about it changes for other users.
 
-Each of those four records carries `UpdatedBy` — the saver's email address, or
-their Cognito subject where the token carries no email — and `UpdatedAt` in
-ISO-8601 UTC. Both are taken from the signed-in identity rather than from the
-request. Each page writes the whole record on save, so where two administrators
-edit the same setting at once, the later save is the one that stands.
+All of these settings, and the meeting cost prices, are saved into one
+configuration profile, which records who saved it — the saver's email address,
+or their Cognito username where the token carries none — and when, taken from
+the signed-in identity rather than from the request. A save is refused if
+someone else saved after the page was loaded, rather than replacing their
+change, and every save is recorded as a revision on the **Configuration
+History** page. The **Configuration** page edits every section at once; see the
+[Configuration Guide](configuration-guide.md).
 
 The other two pages in this section work differently and none of the above
 applies to them: **MCP Servers** manages one row per installed server, and
 **User Management** acts on the Cognito user pool directly.
+
+### Configuration
+
+**Route**: `/#/configuration/settings`
+
+One page for every runtime setting, one section per part of the configuration,
+with the form for each generated from that section's schema:
+
+- Values that differ from the shipped defaults are marked, with **Reset to
+  default** beside each and **Reset section to defaults** for a whole section
+- Values are checked as you type, against the same rules a save is checked
+  against
+- **Save changes** asks for an optional comment and label for the revision the
+  save records, and saves every changed section together
+- A save refused because someone else saved first can be reloaded with your
+  changes kept over theirs
+- `?section=<name>` opens one section directly, for example
+  `/#/configuration/settings?section=call_pricing`
+
+See the [Configuration Guide](configuration-guide.md) for full documentation.
 
 ### MCP Servers
 

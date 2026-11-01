@@ -25,12 +25,12 @@ compare and restore revisions; see [Revisions and audit](#revisions-and-audit).
 Each section has a JSON Schema document, and every administrator's save is
 checked against it before anything is written; see
 [Section schemas and validation](#section-schemas-and-validation). The
-documents also carry the layout hints a schema-driven configuration editor
-renders, and `getConfiguration` / `updateConfiguration` serve them with the
-configuration they describe. The SSM settings blob moves later, with the CloudFormation parameters; see
+documents also carry the layout hints the web UI's **Configuration** page renders
+its form from; see [The configuration editor](#the-configuration-editor). The
+SSM settings blob moves later, with the CloudFormation parameters; see
 [Still to come](#still-to-come) for that, for the MCP server list, and for the
 troubleshooting agent's prompt, which shares the summary prompts' old table and
-moves after the configuration UI.
+is the next store to move in.
 
 ## The table
 
@@ -387,8 +387,9 @@ for example
 `call_pricing › regions › default › transcribe/streaming › seconds: must be at least 0; got -1`.
 The path separator is ` › ` rather than `/` or `.`, because keys here hold both.
 The message spells out the first ten problems and counts the rest.
-`updateConfiguration` answers such a refusal, and only such a refusal, with an error starting `Invalid: `,
-for a configuration editor to match on.
+`updateConfiguration` answers such a refusal — a value that does not match its
+schema, or a section name that has none — and only such a refusal, with an error
+starting `Invalid: `, which the web UI's Configuration page matches on.
 
 ### The editor's read and save
 
@@ -401,6 +402,55 @@ again in the resolver Lambda behind them, which is the configuration history's:
 | `Mutation.updateConfiguration(input: {Profile, Sections, ExpectedVersion, Comment})` | Saves every section named in `Sections`, a JSON object of section name to that section's complete stored values, in **one** write and one revision. Sections not named keep what the profile holds. `ExpectedVersion` is required, and a save against a profile someone has saved since is refused with `Conflict: `. Saves only into a profile that exists. Answers with the new `Version`, the `Revision` it recorded, and `Unchanged` when the save changed nothing |
 
 `Profile` defaults to `custom` for both.
+
+### The configuration editor
+
+The web UI's **Configuration ▸ Configuration** page
+(`/#/configuration/settings`, for Admin users) is built on those two operations.
+It renders one section per schema, in each schema's `order`, and a form inside
+each from the schema's properties and annotations: a select for an `enum`, a
+long text box for `format: textarea`, suggestions for `examples`, a number field,
+a switch or a pair of radio buttons for a boolean, a list editor for an `array`,
+an editable map for an object whose members are named by the administrator, and
+a list of entries for `numberedKeys`. A section whose `availableWhen` setting
+does not hold is not shown, and a field whose `dependsOn` does not hold is
+hidden. A section can open by itself from a link:
+`/#/configuration/settings?section=<name>`.
+
+What it edits is each section's **effective** values — the baseline with the
+profile combined over it according to the schema's `mergeStrategy`, so what the
+section's readers use — and it turns them back into a delta only when it saves.
+Its rules, in `lma-ai-stack/source/ui/src/components/configuration/config-model.js`:
+
+- **Only what differs is stored.** For a `merge` section the delta is every key
+  the baseline lacks and every value that differs from it; a value put back to
+  its default is left out, which is what keeps the release improving it. A
+  `replace` section is stored whole, or as `{}` while it equals the shipped one.
+- **Only sections that changed are sent**, each as its complete delta, in one
+  `updateConfiguration`, so the save is one revision.
+- **"Differs from default" is marked on every value**, with a badge and a rule
+  beside it, and every such value has **Reset to default**, which puts back the
+  shipped value or, for an entry the release does not ship, removes it. Each
+  section also has **Reset section to defaults** and **Undo changes**.
+- **A shipped entry of a `merge` map cannot be removed**, because leaving it out
+  of the delta would let the baseline supply it again. It can be reset; and where
+  the schema declares a `disabledValue` — the summary prompts' `NONE` — it can be
+  turned off and back on. Renaming a shipped summary section turns the old title
+  off and adds the new one under the same number. An entry the administrator
+  added can be removed, and a `replace` list such as the chat buttons can be
+  reordered, which renumbers it from 1.
+- **Values are checked as they are edited**, by the editor's copy of the
+  validator against the delta a save would send, and the save is not offered
+  while any problem stands. The server checks again.
+- **A conflict keeps the administrator's work if they ask.** When the save is
+  refused with `Conflict: `, the page offers to reload and keep the changes: it
+  reads the profile again, re-applies each of the administrator's changes — a
+  value set or a key removed, relative to what the page loaded — over what is
+  now saved, and lists every setting both saves changed, which now holds the
+  administrator's value. Nothing is saved until they save again.
+- **Every save asks for an optional comment and label**, recorded on the revision
+  the save creates; the label is set with `labelConfigurationRevision` straight
+  after the save.
 
 ## Revisions and audit
 
@@ -508,10 +558,11 @@ index names. The bucket expires nothing else.
 In the web UI this is the **Configuration ▸ Configuration History** page, for
 Admin users. It lists the revisions with who saved each, when, what it changed,
 how it came to be and its comment, and marks the current one. Select one
-revision to **View** its whole configuration or **Restore** it, which asks for
-an optional comment first. Select two to **Compare** them, setting by setting,
-from the older to the newer. The page does not edit labels; set them with
-`labelConfigurationRevision`.
+revision to **View** its whole configuration, **Label** it, or **Restore** it,
+which asks for an optional comment first. A label left empty removes the label.
+Select two to **Compare** them, setting by setting, from the older to the newer.
+The configuration editor can also label the revision a save records, as part of
+the save.
 
 Underneath, these are GraphQL operations for the **Admin** group, pinned on the
 AppSync field and checked again in the resolver Lambda behind it. Each takes a
@@ -892,21 +943,16 @@ configuration pages' saves.
 | Stage | What it adds |
 |---|---|
 | Import / export | Export as a client-side download; import that always routes into a create-new-profile flow rather than applying in place |
-| Schema-driven UI | A form generated from the section schemas, through `getConfiguration` and `updateConfiguration`, with a marker on every value that differs from the baseline, per-field "restore default", and a comment field on every save. The schemas, the validation and the two operations are in place |
-| Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired. It waits for the schema-driven UI: today the custom prompt is edited in the DynamoDB console, which is exactly the route a compressed body closes, so moving it first would leave it with no way to edit it |
+| Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired. It waited for the configuration editor: the custom prompt is edited in the DynamoDB console today, which is exactly the route a compressed body closes, so moving it before there was an editor would have left it with no way to edit it. With the editor in place, it needs a schema and a seeder adoption |
 | Moving CloudFormation parameters | The parameters that are read only at request time and do not gate a resource, a condition or an IAM policy |
 | Replacing the SSM settings blob | The `<stack>-LMASettings` parameter is written only by CloudFormation, at deploy time, and read by the web app for every signed-in user. It is a deployment's wiring rather than something an administrator edits, so it moves with the parameters above, when the web app reads its configuration at run time |
 
-One known gap belongs to that third row and is worth stating rather than leaving
-to be discovered. A shipped prompt section that has been turned off is hidden
-from the Transcript Summary page, which is right — the page shows what will run
-— but it means the only way to bring that one section back is **Reset to
-Defaults**, which discards every other edit as well. Re-adding it by hand
-usually gives it a new sequence number and leaves the suppression behind — the
-page numbers a new section above the highest one it can see, so it comes back
-under its own key only when the section that was turned off was the last one.
-The per-field "restore default" control in the schema-driven editor is where
-that belongs.
+A shipped summary section that has been turned off is hidden from the
+Transcript Summary page, which shows what will run, so on that page the only way
+to bring one such section back is **Reset to Defaults**, which discards every
+other edit as well. The configuration editor lists a turned-off section, marked
+**Turned off**, with **Turn on**, which brings back that one section and nothing
+else.
 
 One of the six stores this page's opening counts is not migrated at all.
 **The MCP server list** (`MCPServersTable`) is a registry of installed servers,
@@ -917,8 +963,8 @@ mix them into a record every configuration page reads. It stays a table of its
 own; the `standard` tier is its caching policy, generalised.
 
 The troubleshooting agent's prompt is not one of the six — it lives in the table
-the summary prompts moved out of — and it does move, but after the schema-driven
-UI, for the reason given in its row of the table above.
+the summary prompts moved out of — and it does move, for the reason given in its
+row of the table above.
 
 ## Reference
 
@@ -930,6 +976,7 @@ UI, for the reason given in its row of the table above.
 | Revision history | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/revisions.py`, driven from `store.py` |
 | Section schemas, and the validator that applies them | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/schemas/` and `schema.py`; the shared validation fixture `lma-ai-stack/test/fixtures/configuration_schema_cases.json` |
 | Editor and history resolver (read and save the configuration; list, read, compare, restore, label revisions) | `lma-ai-stack/source/lambda_functions/configuration_revisions_resolver/` |
+| The configuration editor in the web UI | `lma-ai-stack/source/ui/src/components/configuration/`: `ConfigurationPage.jsx`, the controls in `fields.jsx`, the rules in `config-model.js` and the validator copy in `schema-validation.js` |
 | Deploy-time seeder | `lma-ai-stack/source/lambda_functions/configuration_seeder/` |
 | Table, bucket, layer, custom resource and the `ConfigurationRevisionWriteAccess` policy every writer attaches | `lma-ai-stack/deployment/lma-ai-stack.yaml` |
 | Content-hash computation | `lib/lma_sdk/lma_sdk/_core/publish.py` |

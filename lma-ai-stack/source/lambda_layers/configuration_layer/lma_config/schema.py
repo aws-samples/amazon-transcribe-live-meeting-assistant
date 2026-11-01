@@ -313,7 +313,9 @@ def check(schema: Mapping[str, Any], value: Any, path: Tuple[str, ...] = ()) -> 
 
     Empty when the value is valid. The JavaScript copy in the web UI
     (``ui/src/components/configuration/schema-validation.js``) produces the same
-    problems in the same order; the shared fixture asserts it.
+    problems in the same order, except that JavaScript lists an object's
+    whole-number keys first, and no section has such keys; the shared fixture
+    asserts it.
     """
     problems: List[str] = []
     where = format_path(path)

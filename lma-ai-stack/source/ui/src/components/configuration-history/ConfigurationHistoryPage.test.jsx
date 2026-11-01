@@ -166,6 +166,36 @@ describe('ConfigurationHistoryContent', () => {
     expect(within(dialog).getByRole('textbox').value).toBe('typed once');
   });
 
+  it('labels a revision, and clears a label left empty', async () => {
+    graphqlMock.mockImplementation(async (request) =>
+      request.query.includes('mutation LabelConfigurationRevision')
+        ? { data: { labelConfigurationRevision: { Success: true, Revision: 2 } } }
+        : LISTING,
+    );
+    render(<ConfigurationHistoryContent />);
+    await screen.findByText('first@example.com');
+
+    selectRow('first@example.com');
+    fireEvent.click(button('Label'));
+    let dialog = await screen.findByRole('dialog', { name: /Label revision 2/ });
+    fireEvent.change(within(dialog).getByLabelText('Label'), { target: { value: '  before the launch  ' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save label' }));
+    await screen.findByText(/Labelled revision 2 "before the launch"/);
+
+    selectRow('first@example.com');
+    fireEvent.click(button('Label'));
+    dialog = await screen.findByRole('dialog', { name: /Label revision 2/ });
+    fireEvent.change(within(dialog).getByLabelText('Label'), { target: { value: '' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save label' }));
+    await screen.findByText(/Removed the label from revision 2/);
+
+    const labels = graphqlMock.mock.calls.filter((call) => operationOf(call) === 'LabelConfigurationRevision');
+    expect(labels.map((call) => call[0].variables.input)).toEqual([
+      { Profile: 'custom', Revision: 2, Label: 'before the launch' },
+      { Profile: 'custom', Revision: 2, Label: null },
+    ]);
+  });
+
   it('compares two revisions from the older to the newer', async () => {
     graphqlMock.mockImplementation(async (request) =>
       request.query.includes('query DiffConfigurationRevisions')

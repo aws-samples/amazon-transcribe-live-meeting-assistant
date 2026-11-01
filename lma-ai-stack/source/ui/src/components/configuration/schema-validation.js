@@ -4,12 +4,14 @@
  * See the LICENSE file in the project root for full license information.
  */
 
-// The web UI's copy of the validator the configuration store applies to every
-// save (lma_config/schema.py in the configuration layer), for a configuration
-// editor to run on what it is about to send, so a problem can be shown beside
-// the setting before the save rather than coming back as a refusal after it.
+// The configuration editor's copy of the validator the configuration store
+// applies to every save (lma_config/schema.py in the configuration layer). The
+// editor runs it on what it is about to send, so a problem is shown beside the
+// setting before the save, rather than coming back as a refusal after it.
 //
-// The two copies must report the same problems in the same words and order.
+// The two copies must report the same problems in the same words and order. The
+// one place the order can differ is an object with keys that are whole numbers,
+// which JavaScript lists first; no configuration section has such keys.
 // lma-ai-stack/test/fixtures/configuration_schema_cases.json is run through
 // both, by pytest and by vitest, so neither can drift unnoticed. The server's
 // check is the one that decides; this one only makes it visible sooner.

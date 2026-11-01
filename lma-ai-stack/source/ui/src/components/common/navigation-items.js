@@ -20,6 +20,7 @@ import {
   TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
   CONFIGURATION_HISTORY_PATH,
+  CONFIGURATION_PATH,
   VOICE_ENROLLMENT_PATH,
   DEFAULT_PATH,
 } from '../../routes/constants';
@@ -93,6 +94,12 @@ export const generateNavigationItems = (settings, isAdmin) => {
       type: 'section',
       text: 'Configuration',
       items: [
+        // Every section of the runtime configuration, edited from its schema.
+        {
+          type: 'link',
+          text: 'Configuration',
+          href: `#${CONFIGURATION_PATH}`,
+        },
         {
           type: 'link',
           text: 'MCP Servers',

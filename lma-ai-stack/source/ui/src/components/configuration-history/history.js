@@ -62,6 +62,18 @@ export const restoreRevisionMutation = `
   }
 `;
 
+export const labelRevisionMutation = `
+  mutation LabelConfigurationRevision($input: LabelConfigurationRevisionInput!) {
+    labelConfigurationRevision(input: $input) {
+      Success
+      Revision
+    }
+  }
+`;
+
+// The limit the store applies to a label; a labelled revision is never pruned.
+export const MAX_LABEL_LENGTH = 100;
+
 // The one profile every configuration page saves into.
 export const PROFILE = 'custom';
 
