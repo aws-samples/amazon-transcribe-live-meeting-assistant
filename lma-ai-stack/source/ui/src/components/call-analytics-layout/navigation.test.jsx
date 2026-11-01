@@ -7,14 +7,21 @@ import { describe, it, expect } from 'vitest';
 
 import { NAV_PATHS } from './navigation';
 import { generateNavigationItems } from '../common/navigation-items';
-import { DESKTOP_CAPTURE_APP_PATH, ASR_CONFIG_PATH, VOICE_ENROLLMENT_PATH } from '../../routes/constants';
+import {
+  ASR_CONFIG_PATH,
+  CONFIGURATION_PATH,
+  DESKTOP_CAPTURE_APP_PATH,
+  NOVA_SONIC_CONFIG_PATH,
+  TRANSCRIPT_SUMMARY_PATH,
+  VOICE_ENROLLMENT_PATH,
+} from '../../routes/constants';
 
 // Pages whose route deliberately renders no side navigation.
 const NO_SIDE_NAV = new Set([DESKTOP_CAPTURE_APP_PATH, VOICE_ENROLLMENT_PATH]);
 
 describe('side navigation visibility', () => {
   it('renders on every internal page it links to', () => {
-    // The Transcription Engine page shipped with an empty navigation panel: its route mounted
+    // A configuration page once shipped with an empty navigation panel: its route mounted
     // <Navigation />, but the component returns null off NAV_PATHS, and only the
     // activeHref branch had been added for the new path. Any admin nav link that
     // is an internal route must also be a path the navigation renders on.
@@ -27,15 +34,19 @@ describe('side navigation visibility', () => {
     expect(missing).toEqual([]);
   });
 
-  it('offers the Transcription Engine page only when the on-demand engine is deployed', () => {
-    const hrefs = (settings) =>
-      generateNavigationItems(settings, true)
+  it('offers one Configuration page to admins, in place of the pages for single sections', () => {
+    const hrefs = (settings, isAdmin = true) =>
+      generateNavigationItems(settings, isAdmin)
         .flatMap((entry) => (entry.type === 'section' ? entry.items : [entry]))
         .filter((item) => item.type === 'link')
         .map((item) => item.href.slice(1));
 
-    expect(hrefs({ AsrEngineAvailable: 'true' })).toContain(ASR_CONFIG_PATH);
-    expect(hrefs({})).not.toContain(ASR_CONFIG_PATH);
+    expect(hrefs({ AsrEngineAvailable: 'true' })).toContain(CONFIGURATION_PATH);
+    expect(hrefs({}, false)).not.toContain(CONFIGURATION_PATH);
+    // Those paths still open, as a redirect to their section of the Configuration page.
+    [ASR_CONFIG_PATH, NOVA_SONIC_CONFIG_PATH, TRANSCRIPT_SUMMARY_PATH].forEach((path) => {
+      expect(hrefs({ AsrEngineAvailable: 'true' })).not.toContain(path);
+    });
   });
 
   it('offers the enrollment portal only where the deployment stores voiceprints', () => {

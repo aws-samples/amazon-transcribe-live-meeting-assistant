@@ -147,10 +147,10 @@ The Meeting Assistant uses prompt templates stored in DynamoDB to guide its beha
 - **Default prompts** are provided with LMA and may be updated with new releases.
 - **Custom prompts** override the defaults and persist across stack updates. They are never overwritten by LMA upgrades.
 
-Administrators can view and edit custom prompt templates via the LMA admin UI at:
+Administrators can view and edit custom prompt templates in the **Transcript Summary** section of **Configuration ▸ Configuration** in the LMA admin UI:
 
 ```
-/#/configuration/transcript-summary
+/#/configuration/settings?section=summary_prompt_templates
 ```
 
 Custom prompts allow you to tailor the assistant's behavior, tone, and output format to your organization's needs.

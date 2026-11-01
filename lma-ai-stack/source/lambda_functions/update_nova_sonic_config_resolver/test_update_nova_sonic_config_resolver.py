@@ -3,7 +3,7 @@
 # See the LICENSE file in the project root for full license information.
 """Unit tests for the Nova Sonic configuration resolver (no AWS calls).
 
-This resolver serves both halves of the Nova Sonic Configuration page -- the read
+This resolver serves both halves of the Nova Sonic settings' own GraphQL fields -- the read
 that fills the form and the write that saves it -- from the shared
 configuration table. The behaviours asserted here are the ones that are silent
 when wrong:

@@ -40,8 +40,6 @@ The left sidebar organizes the application into the following sections:
 ### Configuration (admin only)
 - **Configuration** — Every runtime setting in one place: summary prompts, chat buttons, Nova Sonic, transcription engine and meeting cost prices (see [Configuration Guide](configuration-guide.md))
 - **MCP Servers** — Install and manage MCP server integrations
-- **Nova Sonic** — Configure the Nova Sonic voice assistant
-- **Transcript Summary** — Manage summary prompt templates
 - **Configuration History** — Every saved revision of the configuration: view, compare, label and restore
 - **User Management** — Create and delete LMA users (see [User Management](user-management.md))
 
@@ -217,18 +215,15 @@ Live translation applies to the transcript panel and updates as new segments arr
 
 The following configuration pages are available to admin users only.
 
-**Nova Sonic**, **Transcript Summary**, **Transcription Engine** and **Chat
-Buttons** each edit one account-wide record — a single stored item drives every
-meeting in the deployment — so saving a change requires membership of the
-**Admin** Cognito group. That is enforced by the API, not just by the menu: the
-AppSync field pins the operation to the group and the resolver behind it checks
-the caller's group membership again, so the two are independent. Add someone to
-the group on [User Management](user-management.md) if they need to change these
-settings.
-
-On the first three pages, a user outside the group sees a short message naming
-the setting in place of the form. The Chat Buttons dialog is reached from a menu
-that only an Admin is shown, so nothing about it changes for other users.
+The **Configuration** page and the **Edit Chat Buttons** dialog edit settings
+that apply to every meeting in the deployment, so saving a change requires
+membership of the **Admin** Cognito group. That is enforced by the API, not just
+by the menu: the AppSync field pins the operation to the group and the resolver
+behind it checks the caller's group membership again, so the two are
+independent. Add someone to the group on [User Management](user-management.md)
+if they need to change these settings. A user outside the group who opens the
+Configuration page sees a short message in place of the form; the Chat Buttons
+dialog is reached from a menu that only an Admin is shown.
 
 All of these settings, and the meeting cost prices, are saved into one
 configuration profile, which records who saved it — the saver's email address,
@@ -236,8 +231,7 @@ or their Cognito username where the token carries none — and when, taken from
 the signed-in identity rather than from the request. A save is refused if
 someone else saved after the page was loaded, rather than replacing their
 change, and every save is recorded as a revision on the **Configuration
-History** page. The **Configuration** page edits every section at once; see the
-[Configuration Guide](configuration-guide.md).
+History** page. See the [Configuration Guide](configuration-guide.md).
 
 The other two pages in this section work differently and none of the above
 applies to them: **MCP Servers** manages one row per installed server, and
@@ -271,46 +265,17 @@ Install and manage MCP (Model Context Protocol) servers to extend the meeting as
 
 See [MCP Servers](mcp-servers.md) for full documentation.
 
-### Nova Sonic
+### Pages that moved into Configuration
 
-**Route**: `/#/configuration/nova-sonic`
+The **Nova Sonic**, **Transcript Summary** and **Transcription Engine** pages
+each edited one section of the configuration. They are now sections of the
+**Configuration** page, and their addresses open those sections:
 
-Configure the Nova Sonic voice assistant settings:
-- Voice assistant prompt customization
-- Voice ID selection
-- Endpointing sensitivity adjustment
-- Group meeting mode toggle
-
-See [Nova Sonic 2 Setup](nova-sonic-setup.md) for full documentation.
-
-### Transcript Summary
-
-**Route**: `/#/configuration/transcript-summary`
-
-Manage the prompt templates used for generating meeting summaries:
-- View default prompts provided by LMA
-- Create custom prompt templates
-- Edit and delete existing custom templates
-
-A prompt template is stored under a key of the form `N#Title`, where `N` orders
-the sections of the summary. A key in any other form is not used as a prompt and
-is reported in the summary function's log.
-
-### Transcription Engine
-
-**Route**: `/#/configuration/asr`
-
-Choose which engine transcribes each kind of meeting. Experimental, and shown
-only when the on-demand speech engine is deployed (`EnableMicrovmAsr=true`):
-
-- Pick Amazon Transcribe or the on-demand engine for streaming meetings — Stream
-  Audio, the Chrome extension and the Desktop Capture apps
-- Pick the engine for Virtual Participants independently
-- Turn on voice separation for a Virtual Participant, so several people behind
-  one attendee are labelled individually
-
-Changes apply to meetings started after you save. See
-[MicroVM ASR](microvm-asr.md) for full documentation.
+| Earlier address | Opens |
+|---|---|
+| `/#/configuration/nova-sonic` | The **Nova Sonic Voice Assistant** section. See [Nova Sonic 2 Setup](nova-sonic-setup.md) |
+| `/#/configuration/transcript-summary` | The **Transcript Summary** section. See [Transcript Summarization](transcript-summarization.md) |
+| `/#/configuration/asr` | The **Transcription Engine** section, shown only when the on-demand speech engine is deployed (`EnableMicrovmAsr=true`). See [MicroVM ASR](microvm-asr.md) |
 
 ### User Management
 

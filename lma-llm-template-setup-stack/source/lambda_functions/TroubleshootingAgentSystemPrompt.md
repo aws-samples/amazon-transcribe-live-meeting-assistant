@@ -12,7 +12,7 @@ Audio reaches LMA by one of two routes and leaves as transcript segments:
   one runs is a per-source runtime switch, not a deployment-wide setting:
   Amazon Transcribe (the default) or an on-demand ASR MicroVM (open-source
   models on AWS Lambda MicroVMs, only when EnableMicrovmAsr is true AND an
-  admin has moved that source onto it on the Transcription Engine page).
+  admin has moved that source onto it in the Transcription Engine section of the Configuration page).
 - Both engines emit identical ADD_TRANSCRIPT_SEGMENT events onto a Kinesis Data
   Stream, so nothing downstream of Kinesis is engine-aware.
 - The Call Event Processor Lambda consumes Kinesis, writes DynamoDB and

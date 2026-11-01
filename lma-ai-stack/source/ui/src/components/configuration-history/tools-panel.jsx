@@ -12,9 +12,9 @@ const header = <h2>Configuration History</h2>;
 const content = (
   <>
     <p>
-      The Configuration page and the pages for single parts of it — Transcript Summary, Nova Sonic, Transcription Engine
-      and the chat buttons — all save into one configuration, which also holds the meeting cost prices. Every save
-      records a revision of the whole of it: who saved it, when, which parts it changed, and its comment.
+      The Configuration page and the Edit Chat Buttons dialog save into one configuration: the summary prompts, Nova
+      Sonic, the chat buttons, the transcription engine and the meeting cost prices. Every save records a revision of
+      the whole of it: who saved it, when, which parts it changed, and its comment.
     </p>
     <h3>Restoring</h3>
     <p>

@@ -3,8 +3,8 @@
 # See the LICENSE file in the project root for full license information.
 """Unit tests for the summary prompt templates resolver (no AWS calls).
 
-This resolver serves both halves of the Transcript Summary page -- the read that
-fills the editor and the write that saves it -- and the behaviours asserted
+This resolver serves both halves of the summary prompts' own GraphQL fields -- the
+read and the write -- and the behaviours asserted
 here are the ones that are silent when wrong:
 
 * **A concurrent save is refused, not applied.** Two administrators with the

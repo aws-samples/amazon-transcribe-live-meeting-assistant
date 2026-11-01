@@ -3,7 +3,7 @@
 # See the LICENSE file in the project root for full license information.
 """Unit tests for the ASR runtime-switch resolver (no AWS calls).
 
-The resolver serves the Transcription Engine page's read and save, the Stream
+The resolver serves updateAsrConfig's save and getAsrConfig's read for the Stream
 Audio and Upload Audio forms' read, and the Virtual Participant's SigV4 read,
 from the shared configuration table. Asserted here:
 
@@ -270,7 +270,7 @@ def test_a_json_array_is_rejected(table: FakeConfigurationTable) -> None:
 
 def test_the_allow_list_is_exactly_the_three_switches() -> None:
     """Adding a field here means adding it to the AppSync type, the transcriber's
-    and the VP's readers and the Transcription Engine page - fail loudly if it drifts."""
+    and the VP's readers and the asr_engine schema - fail loudly if it drifts."""
     assert index.ALLOWED_FIELDS == {
         "streamingEngineMicrovm",
         "virtualParticipantEngineMicrovm",

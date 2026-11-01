@@ -133,7 +133,7 @@ def registered_sections() -> Dict[str, SectionSpec]:
 
 #: The summary prompt templates: one prompt per section of a meeting summary,
 #: keyed "N#Title" where N orders the sections. Read by the meeting-summary
-#: Lambda once per summary and edited from the Transcript Summary page.
+#: Lambda once per summary and edited in the Configuration page's Transcript Summary section.
 #:
 #: Standard tier, because an end-of-meeting summary runs unattended and a prompt
 #: edit reaching the next one a few minutes later is what the page says happens.
@@ -156,7 +156,7 @@ SUMMARY_PROMPT_TEMPLATES = register(
 #: the meeting mode, and the translator languages and trigger phrases. Read by
 #: the Virtual Participant when its voice assistant starts -- the ElevenLabs
 #: provider reads the meeting-mode and translator fields from it too -- and
-#: edited from the Nova Sonic Configuration page.
+#: edited in the Configuration page's Nova Sonic section.
 #:
 #: Immediate tier. The reader runs once per meeting, so a cache would save at
 #: most a read or two per meeting, and the page says a saved change applies to
@@ -176,8 +176,8 @@ NOVA_SONIC_CONFIG = register(
 #: The on-demand ASR engine's three runtime switches: whether streaming meetings
 #: use it (``streamingEngineMicrovm``), whether Virtual Participants do
 #: (``virtualParticipantEngineMicrovm``), and whether a Virtual Participant on it
-#: asks for per-voice labels (``diarizeVirtualParticipant``). Edited on the
-#: Transcription Engine page.
+#: asks for per-voice labels (``diarizeVirtualParticipant``). Edited in the
+#: Configuration page's Transcription Engine section.
 #:
 #: Short tier, which is the policy the transcriber's reader has always had: it
 #: reads at the start of each streaming meeting, and 30 seconds keeps a burst of

@@ -40,8 +40,7 @@ lma-ai-stack/source/ui/src/
 │   ├── meetings-query-layout/
 │   ├── virtual-participant-layout/
 │   ├── mcp-servers-page/
-│   ├── nova-sonic-config/
-│   ├── transcript-summary-config/
+│   ├── configuration/          (the schema-driven Configuration page)
 │   └── ...
 ├── contexts/              # React Context providers
 │   ├── app.js             # AppContext (auth, awsConfig, navigation)

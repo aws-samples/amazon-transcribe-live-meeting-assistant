@@ -57,7 +57,7 @@ one speakerphone shares one roster entry, so a whole room arrives as a single
 speaker.
 
 **Virtual Participant voice separation** on
-**Configuration ▸ Transcription Engine** fixes that. With it on, the VP tells
+The **Transcription Engine** section of **Configuration ▸ Configuration** fixes that. With it on, the VP tells
 apart the distinct voices behind one attendee and labels them
 `Conference Room (spk_0)`, `Conference Room (spk_1)` and so on — the roster name
 for who the platform says is talking, the voice id for which voice within it.
@@ -608,7 +608,7 @@ always the mix of both, as is the video recording's audio track.
 
 A deployment with
 `EnableMicrovmAsr=true` can move Virtual Participants onto the on-demand MicroVM
-ASR engine instead, from **Configuration ▸ Transcription Engine** (admin only):
+ASR engine instead, from the **Transcription Engine** section of **Configuration ▸ Configuration** (admin only):
 
 - **Virtual Participants: engine** chooses the engine for every VP that starts after the
   change. The VP acquires and releases its own MicroVM, and falls back to Amazon

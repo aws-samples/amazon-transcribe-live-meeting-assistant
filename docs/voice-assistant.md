@@ -156,7 +156,7 @@ On **ElevenLabs**, only the transcript mechanism and audio barge-in apply. The E
 
 ## Meeting Mode
 
-The voice assistant supports three meeting modes, configured via the **Meeting Mode** selector on the Nova Sonic Configuration page (admin-only). The `group` and `translator` modes need the assistant to be always listening: if the stack is deployed with `VoiceAssistantActivationMode = wake_phrase` they have no effect and the UI surfaces a warning. On Nova Sonic, the chat commands for those two modes switch activation for the current meeting as well, so they work on a `wake_phrase` deployment — see [Changing Mode During a Meeting](#changing-mode-during-a-meeting).
+The voice assistant supports three meeting modes, configured via the **Meeting Mode** selector on the Nova Sonic section of the Configuration page (admin-only). The `group` and `translator` modes need the assistant to be always listening: if the stack is deployed with `VoiceAssistantActivationMode = wake_phrase` they have no effect and the UI surfaces a warning. On Nova Sonic, the chat commands for those two modes switch activation for the current meeting as well, so they work on a `wake_phrase` deployment — see [Changing Mode During a Meeting](#changing-mode-during-a-meeting).
 
 | Mode | Starts muted? | Speaks when… | Stops when asked to? | Typical use |
 |---|---|---|---|---|
@@ -183,7 +183,7 @@ https://github.com/user-attachments/assets/160be5d7-010e-446c-82b3-f496ba2c5969
 
 Translator mode turns the voice assistant into a live bidirectional interpreter between two configured languages. The assistant listens continuously, automatically detects which of the two languages each utterance is in, and speaks the translation in the other language.
 
-Configuration attributes (set on the Nova Sonic Configuration page, which stores them in the shared [configuration store](configuration-store.md)):
+Configuration attributes (set on the Nova Sonic section of the Configuration page, which stores them in the shared [configuration store](configuration-store.md)):
 
 - `meetingMode`: `translator`
 - `translatorLanguageA`: the first language (default `English`)
@@ -229,7 +229,7 @@ The ElevenLabs agent's persona is configured in the ElevenLabs dashboard — LMA
 
 *Nova Sonic only.*
 
-The meeting mode and the activation mode are both read when the Virtual Participant starts, from the Nova Sonic Configuration page and the **VoiceAssistantActivationMode** stack parameter respectively. Participants can also change either one while the meeting is running, by typing a command in the meeting chat.
+The meeting mode and the activation mode are both read when the Virtual Participant starts, from the Nova Sonic section of the Configuration page and the **VoiceAssistantActivationMode** stack parameter respectively. Participants can also change either one while the meeting is running, by typing a command in the meeting chat.
 
 A runtime change lasts for the rest of that meeting and is not written back to configuration: the configuration page keeps holding the deployment's default, and the next meeting starts in it. Anyone in the meeting may issue these commands, like the existing `LMA leave`.
 
@@ -246,7 +246,7 @@ Every command must address LMA by name, and the whole message must be the name p
 | `LMA translate` | Switch to translator mode, and to always-listening, keeping the language pair in use (the configured one unless changed in this meeting). Aliases: `LMA translator`, `LMA translate mode`, `LMA translator mode`, `LMA interpret` |
 | `LMA translate <language>` | The same, translating between the meeting's language and `<language>` for the rest of this meeting — see [Choosing the Language from Chat](#choosing-the-language-from-chat). Also `LMA translate to <language>`, `LMA translate into <language>` |
 | `LMA assist` | Switch to `normal` assistant mode. After `LMA translate` or `LMA listen`, also restores the activation mode they replaced (see below). Aliases: `LMA assistant`, `LMA assist mode`, `LMA assistant mode`, `LMA normal`, `LMA normal mode` |
-| `LMA listen` | Switch to listen mode — the **Group Meeting** mode on the Nova Sonic Configuration page (`group`): the assistant goes quiet and waits to be addressed by wake phrase — and to always-listening. Aliases: `LMA listen mode`, `LMA listening mode`, and `LMA group` / `LMA group mode`, which are also accepted (the configuration's name for the mode) but not listed by `LMA help` |
+| `LMA listen` | Switch to listen mode — the **Group Meeting** mode on the Nova Sonic section of the Configuration page (`group`): the assistant goes quiet and waits to be addressed by wake phrase — and to always-listening. Aliases: `LMA listen mode`, `LMA listening mode`, and `LMA group` / `LMA group mode`, which are also accepted (the configuration's name for the mode) but not listed by `LMA help` |
 
 `LMA listen` chooses the meeting mode and is a different command from `LMA always listen`, an alias of `LMA always` that only changes activation; each is matched as a whole message, so neither is mistaken for the other.
 
@@ -273,7 +273,7 @@ These commands do not overlap with the existing chat commands: `LMA leave` / `LM
 
 - **The meeting's language** is the one it is transcribed in: the Virtual Participant's Transcribe language code (`en-US` is English, `fr-CA` is French, and so on). With language identification it is the preferred language, if one is set. When there is no single language to go on, or the meeting is transcribed in a language Nova Sonic does not speak (Japanese, say), the configured `translatorLanguageA` is kept as the first half (or `translatorLanguageB`, if `translatorLanguageA` is the language asked for). Asking for the meeting's own language is answered with a reminder to name the other one, and changes nothing.
 - **Supported languages** are the ones Amazon Nova 2 Sonic [documents speech support for](https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-language-support.html): English, Spanish, French, German, Italian, Portuguese and Hindi. Names are matched case- and accent-insensitively, in English or in the language itself and a few neighbours — `Spanish`, `español`, `espanol` and `castellano` all work. One language is named at a time: `LMA translate English to French` is answered with a reminder to name only the other language. A single unrecognised word (`LMA translate Klingon`) is answered with the supported list; a longer message that merely starts with "translate" is ordinary chat and is left alone.
-- **It lasts for this meeting only.** The reply says so: `switched to translator mode (English and French), now always listening. This applies to this meeting only; the default language pair is set on the Nova Sonic Configuration page.` The choice is **not** saved as the deployment default for anyone, including the person who launched the Virtual Participant. A chat sender is known to the Virtual Participant only by the display name the meeting platform shows, which participants choose for themselves, and the Virtual Participant knows its owner only as an LMA sign-in (an email address), so no chat sender can be matched to the owner with confidence. Rather than guess, the chat never writes configuration; the default pair stays an Admin setting on the Nova Sonic Configuration page.
+- **It lasts for this meeting only.** The reply says so: `switched to translator mode (English and French), now always listening. This applies to this meeting only; the default language pair is set on the Nova Sonic section of the Configuration page.` The choice is **not** saved as the deployment default for anyone, including the person who launched the Virtual Participant. A chat sender is known to the Virtual Participant only by the display name the meeting platform shows, which participants choose for themselves, and the Virtual Participant knows its owner only as an LMA sign-in (an email address), so no chat sender can be matched to the owner with confidence. Rather than guess, the chat never writes configuration; the default pair stays an Admin setting on the Nova Sonic section of the Configuration page.
 - The `[assistant-toggle]` line carries a `translator="English<->French"` field when a pair was asked for, marked `(unchanged)` when it was already in use.
 
 ### Asking the Assistant
