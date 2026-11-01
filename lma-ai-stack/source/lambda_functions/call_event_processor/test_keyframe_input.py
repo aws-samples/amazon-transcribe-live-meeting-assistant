@@ -68,13 +68,9 @@ def test_optional_fields_left_unset_are_not_written():
 
 def test_a_frame_with_no_share_signal_is_stored_without_one():
     item = build_keyframe_input(
-        {**EVENT, "ShareDetected": None, "Source": "DESKTOP_CAPTURE"},
-        owner="o",
-        shared_with=None,
-        expires_after=1,
+        {**EVENT, "ShareDetected": None}, owner="o", shared_with=None, expires_after=1
     )
     assert "ShareDetected" not in item
-    assert item["Source"] == "DESKTOP_CAPTURE"
 
 
 @pytest.mark.parametrize(
@@ -91,6 +87,7 @@ def test_a_frame_with_no_share_signal_is_stored_without_one():
         {"ImageUrl": "s3://bucket/key.jpg"},
         {"ThumbnailUrl": None},
         {"Source": "SOMETHING_ELSE"},
+        {"Source": None},
         {"ShareDetected": "yes"},
         {"VideoOffset": -0.5},
     ],
@@ -156,3 +153,17 @@ def test_the_handler_fails_the_record_when_the_meeting_is_not_there(schema):  # 
     with pytest.raises(Exception):
         run(cep.execute_add_video_keyframe_mutation(message=dict(EVENT), appsync_session=session))
     assert len(session.queries) == 1, "nothing is written for a meeting that does not exist"
+
+
+@pytest.mark.skipif(cep is None, reason="needs gql, graphql-core and the layer")
+def test_the_handler_drops_an_event_that_can_never_be_stored(schema):  # noqa: F811
+    """Dropped, not raised: a raised error is redelivered and holds up the shard."""
+    session = SequenceSession(schema, [])
+    result = run(
+        cep.execute_add_video_keyframe_mutation(
+            message={**EVENT, "ImageUrl": "s3://bucket/key.jpg"}, appsync_session=session
+        )
+    )
+    assert result == {"ok": False, "Dropped": True}
+    assert session.queries == [], "nothing is read or written for it"
+    assert any("cannot be stored" in m for m in cep.LOGGER.at_level("ERROR"))

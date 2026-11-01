@@ -6,8 +6,7 @@
 
 /**
  * Key frames of the meeting display: the slides and documents that were on
- * screen, captured when they change, for the meeting page's timeline and the
- * meeting assistant.
+ * screen, captured when they change and stored on the meeting.
  *
  * One low-rate FFmpeg process samples the VP's X11 display (the same display
  * video-recorder.ts records) once a second, scaled down to a 64x36 grayscale

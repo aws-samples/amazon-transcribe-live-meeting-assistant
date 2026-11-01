@@ -46,7 +46,7 @@ from graphql_helpers import (
 )
 
 # Validation of ADD_VIDEO_KEYFRAME, AWS-free for the same reason as pure.py below.
-from keyframe_input import build_keyframe_input  # noqa: E402
+from keyframe_input import KeyframeEventError, build_keyframe_input  # noqa: E402
 from metrics_utils import catalogue as metric_names
 from metrics_utils.emf import METRICS
 
@@ -811,14 +811,31 @@ async def execute_add_video_keyframe_mutation(
     trusted from the event, so it is visible to the people who can see the
     transcript; see keyframe_input.py. A meeting that is not there yet fails the
     record, which is redelivered, as a transcript segment's would be.
+
+    An event that can never be stored -- a field missing or of the wrong kind --
+    is logged and dropped rather than raised: raising reports the record for
+    redelivery, and it would fail the same way every time while holding up the
+    rest of its shard (see the failure policy in batch_item_failures.py).
     """
+    try:
+        keyframe = build_keyframe_input(
+            message, owner=None, shared_with=None, expires_after=get_transcription_ttl()
+        )
+    except KeyframeEventError as error:
+        LOGGER.error(
+            "dropping an ADD_VIDEO_KEYFRAME event that cannot be stored: %s",
+            error,
+            extra=dict(call_id=message.get("CallId"), frame_id=message.get("FrameId")),
+        )
+        return {"ok": False, "Dropped": True}
+
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
 
     access_query = dsl_gql(
         DSLQuery(
-            schema.Query.getCall.args(CallId=message.get("CallId")).select(
+            schema.Query.getCall.args(CallId=keyframe["CallId"]).select(
                 schema.Call.CallId,
                 schema.Call.Owner,
                 schema.Call.SharedWith,
@@ -831,13 +848,10 @@ async def execute_add_video_keyframe_mutation(
         logger=LOGGER,
     )
     call = require_graphql_field(access, "getCall", logger=LOGGER)
+    for field in ("Owner", "SharedWith"):
+        if call.get(field) is not None:
+            keyframe[field] = call[field]
 
-    keyframe = build_keyframe_input(
-        message,
-        owner=call.get("Owner"),
-        shared_with=call.get("SharedWith"),
-        expires_after=get_transcription_ttl(),
-    )
     query = dsl_gql(
         DSLMutation(
             schema.Mutation.addVideoKeyframe.args(input=keyframe).select(

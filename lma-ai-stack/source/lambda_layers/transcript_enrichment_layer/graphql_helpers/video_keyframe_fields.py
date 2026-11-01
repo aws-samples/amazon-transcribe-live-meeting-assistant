@@ -13,7 +13,7 @@ def video_keyframe_fields(schema: DSLSchema) -> Tuple[DSLField, ...]:
     """VideoKeyframe type field selector.
 
     The onAddVideoKeyframe subscription delivers only what the mutation
-    selected, so this is every field the meeting page reads, plus Owner and
+    selected, so this is every field of the type, including Owner and
     SharedWith, which the subscription filter needs.
     """
     return (

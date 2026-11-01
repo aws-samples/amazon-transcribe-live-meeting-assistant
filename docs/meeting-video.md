@@ -102,10 +102,12 @@ a-second recording picture, used 1.8% of a core; it compares each frame only
 with the one before, which is what makes a camera strip or a slow transition
 trip it.
 
-Settings can be changed per deployment through environment variables on the
-Virtual Participant task, for example `KEYFRAME_CHANGE_FRACTION`,
+The thresholds and limits are read from environment variables of the Virtual
+Participant process — for example `KEYFRAME_CHANGE_FRACTION`,
 `KEYFRAME_STRICT_CHANGE_FRACTION`, `KEYFRAME_MIN_INTERVAL_MS` and
-`KEYFRAME_MAX_PER_MEETING`; see `keyframe-sampler.ts`.
+`KEYFRAME_MAX_PER_MEETING`; see `keyframe-sampler.ts`. They are not stack
+parameters: they are meant for local runs and calibration, and a value added to
+the task definition by hand is replaced at the next stack update.
 
 ## What is stored
 
@@ -120,7 +122,7 @@ in the event-sourcing table (partition key `kf#<CallId>`), with:
 | `Timestamp` | Seconds on the transcript's timeline, the same clock as a transcript segment's start time. |
 | `VideoOffset` | Seconds into the meeting's video recording, for playing the recording from that frame. |
 | `ImageUrl`, `ThumbnailUrl` | The two images. |
-| `Source` | `VIRTUAL_PARTICIPANT`. |
+| `Source` | What took the frame: `VIRTUAL_PARTICIPANT`. |
 | `ShareDetected` | `true` when the frame was taken while the platform showed a share; absent on platforms without the signal. |
 | `ChangeScore` | The part of the picture that differed from the previous key frame. |
 
@@ -184,7 +186,8 @@ that uploads its own images can send the same event:
 ```
 
 `Timestamp`, both URLs (HTTPS), a known `Source` and a `FrameId` of at most 64
-characters are required; an event without them is not stored. The meeting must
+characters are required; an event without them is logged and dropped, not
+retried. The meeting must
 already exist. Owner, sharing and expiry are taken from the meeting, not from
 the event. `<meeting>` is the CallId with every character other than letters,
 digits, `_` and `.` replaced by `_`, which is how meeting deletion finds the

@@ -27,7 +27,7 @@ export interface VideoKeyframeEvent {
   ThumbnailUrl: string;
   Width: number;
   Height: number;
-  Source: 'VIRTUAL_PARTICIPANT' | 'DESKTOP_CAPTURE';
+  Source: 'VIRTUAL_PARTICIPANT';
   /** Whether the platform showed a screen share; null where it gives no signal. */
   ShareDetected: boolean | null;
   /** Fraction of the picture that differs from the previous key frame. */
@@ -293,8 +293,7 @@ class KinesisStreamManager {
   /**
    * ADD_VIDEO_KEYFRAME: one key frame of the meeting display (see
    * keyframe-sampler.ts). The call_event_processor stores it on the meeting and
-   * publishes it to the meeting page. The desktop capture path in the WebSocket
-   * transcriber sends the same shape.
+   * publishes it on the onAddVideoKeyframe subscription.
    */
   async sendVideoKeyframe(frame: VideoKeyframeEvent): Promise<void> {
     const record: any = {

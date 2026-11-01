@@ -739,9 +739,9 @@ const main = async (): Promise<void> => {
             console.error('Error starting video recording:', error);
         }
 
-        // Key frames of the shared screen, for the meeting timeline. Same
-        // switch as the screen recording; samples are only judged once the
-        // meeting is being transcribed (see keyframe-sampler.ts).
+        // Key frames of the shared screen, stored on the meeting. Same switch
+        // as the screen recording; samples are only judged once the meeting
+        // is being transcribed (see keyframe-sampler.ts).
         if (details.enableVideoRecording && details.recordingsBucketName) {
             try {
                 const { kinesisStreamManager } = await import('./kinesis-stream.js');
@@ -827,6 +827,16 @@ const main = async (): Promise<void> => {
             console.error('Error stopping transcription:', error);
         }
 
+        // Stop key frame sampling before anything else in the recording
+        // teardown, in its own try so a failure there cannot leave its FFmpeg
+        // process and share poll running, and so a frame being captured is
+        // announced before the END event.
+        try {
+            await keyframeSampler.stop();
+        } catch (keyframeError) {
+            console.error('Error stopping key frame sampling:', keyframeError);
+        }
+
         try {
             // Stop recording and upload to S3
             const recordingUrl = await recordingService.cleanup();
@@ -835,14 +845,6 @@ const main = async (): Promise<void> => {
                 // Send separate recording URL event (matching Python)
                 const { kinesisStreamManager } = await import('./kinesis-stream.js');
                 await kinesisStreamManager.sendCallRecording(recordingUrl);
-            }
-
-            // Stop key frame sampling first, so a frame being captured is
-            // announced before the END event.
-            try {
-                await keyframeSampler.stop();
-            } catch (keyframeError) {
-                console.error('Error stopping key frame sampling:', keyframeError);
             }
 
             // Stop screen (video) recording and upload to S3. Independent of

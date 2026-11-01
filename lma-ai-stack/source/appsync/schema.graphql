@@ -699,12 +699,13 @@ type VideoKeyframe implements DynamoDbBase @aws_cognito_user_pools
 	Timestamp: Float!
 	# Seconds into the meeting's video recording, when there is one.
 	VideoOffset: Float
-	# HTTPS S3 URLs of the large image and the thumbnail, presigned by the UI.
+	# HTTPS S3 URLs of the large image and the thumbnail, in the shape a client
+	# presigns, as for RecordingUrl.
 	ImageUrl: String!
 	ThumbnailUrl: String!
 	Width: Int
 	Height: Int
-	# VIRTUAL_PARTICIPANT or DESKTOP_CAPTURE.
+	# What took the frame: VIRTUAL_PARTICIPANT.
 	Source: String
 	# Whether the meeting platform showed a screen share when the frame was
 	# taken; absent where the platform gives no such signal.

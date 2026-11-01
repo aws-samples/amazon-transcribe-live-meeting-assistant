@@ -6,7 +6,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
- * Whether the meeting page is showing somebody's screen share.
+ * Whether the meeting platform's page in the VP's browser is showing somebody's
+ * screen share.
  *
  * Key frames are only sampled while a share is on screen where the platform
  * gives a reliable signal for it, which keeps camera tiles and the gallery out
