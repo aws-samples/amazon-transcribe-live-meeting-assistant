@@ -145,6 +145,16 @@ def test_the_entries_block_reads_every_stored_shape() -> None:
     assert ".trim()" in block
 
 
+@pytest.mark.parametrize("name", ENTRIES_TEMPLATES)
+def test_each_item_is_read_on_its_own_shared_with(name: str) -> None:
+    """A Velocity #set whose value is null leaves the variable as it was, so the
+    value read is defaulted: in a loop over items, an item without SharedWith
+    must not be judged on the previous item's."""
+    assignments = re.findall(r"#set\( \$sharedWithRaw = (.+) \)", _read(name))
+    assert len(assignments) == 1, assignments
+    assert assignments[0].startswith("$util.defaultIfNull(") and assignments[0].endswith(', "")')
+
+
 # ── every access decision uses the entries ──────────────────────────────────
 
 

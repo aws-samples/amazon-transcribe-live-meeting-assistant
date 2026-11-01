@@ -139,6 +139,37 @@ def test_a_virtual_participant_is_answered_to_exactly_the_people_it_is_for(
     assert len(json.loads(listed["evaluationResult"])) == (1 if expected else 0)
 
 
+@pytest.mark.parametrize(
+    "name,read",
+    [
+        (
+            "getTranscriptSegments.response.vtl",
+            lambda output: [s["PK"] for s in json.loads(output)["TranscriptSegments"]],
+        ),
+        (
+            "listVirtualParticipants.response.vtl",
+            lambda output: [r["PK"] for r in json.loads(output)],
+        ),
+    ],
+)
+def test_each_item_of_a_list_is_judged_on_its_own_shared_with(client, name: str, read) -> None:
+    """An item with no SharedWith, or a null one, after an item shared with the
+    caller is not answered to them."""
+    items = [
+        {"PK": "shared", "Owner": OWNER, "SharedWith": [LISTED]},
+        {"PK": "absent", "Owner": OWNER},
+        {"PK": "null", "Owner": OWNER, "SharedWith": None},
+        {"PK": "text", "Owner": OWNER, "SharedWith": SHAPES["bracketed"]},
+        {"PK": "absent-again", "Owner": OWNER},
+    ]
+    response = _evaluate(
+        client,
+        name,
+        {"result": {"items": items, "nextToken": None}, "identity": COGNITO["listed"][0]},
+    )
+    assert read(response["evaluationResult"]) == ["shared", "text"]
+
+
 # ── the writes: authorizeCallWrite, then the condition ──────────────────────
 
 

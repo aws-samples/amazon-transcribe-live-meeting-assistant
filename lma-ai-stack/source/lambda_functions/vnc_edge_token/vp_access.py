@@ -64,7 +64,8 @@ def authorize_vp_access(dynamodb, table_name: str, vp_id: str, identity: dict, l
 
     # Field names and semantics match the canonical subscription filter in
     # source/appsync/subscription.js: Owner (capital O) equals identity.username,
-    # and SharedWith CONTAINS it. SharedWith is a comma-ish String, not a List --
+    # or identity.username is a whole entry of SharedWith, as the VTL access
+    # checks compare it. SharedWith is a comma-ish String, not a List --
     # reading it as a List (and "owner" lowercase) made every request fail
     # "Not authorized", because both lookups silently returned empty.
     owner = vp.get("Owner", {}).get("S", "") or vp.get("owner", {}).get("S", "")

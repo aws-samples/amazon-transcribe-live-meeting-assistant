@@ -25,6 +25,7 @@ import { CategoryAlertPill } from './CategoryAlertPill';
 import { CategoryPills } from './CategoryPills';
 import { getTextOnlySummary } from '../common/summary';
 import { shareModal, deleteModal } from '../common/meeting-controls';
+import { sharedWithEntries } from '../common/shared-with';
 import CustomDateRangeModal from './CustomDateRangeModal';
 
 export const KEY_COLUMN_ID = 'callId';
@@ -67,7 +68,9 @@ export const COLUMN_DEFINITIONS_MAIN = [
   {
     id: 'sharedWith',
     header: 'Shared With',
-    cell: (item) => item.sharedWith,
+    // A row read by query carries SharedWith as stored ("[a, b]" or "a,b"); one
+    // updated by a subscription message carries "[a, b]". Both show the same.
+    cell: (item) => sharedWithEntries(item.sharedWith).join(', '),
     sortingField: 'sharedWith',
   },
   {

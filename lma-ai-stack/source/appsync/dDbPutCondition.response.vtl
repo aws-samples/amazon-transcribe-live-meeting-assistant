@@ -9,7 +9,7 @@
 ## the onUpdateCall and onAddTranscriptSegment subscriptions, filtered on
 ## SharedWith in subscription.js.
 #if( $context.result )
-  #set( $sharedWithRaw = $context.result.SharedWith )
+  #set( $sharedWithRaw = $util.defaultIfNull($context.result.SharedWith, "") )
 ## BEGIN SharedWith entries -- one text in every template that reads SharedWith;
 ## test_shared_with_access.py holds the copies to it.
 ## Reads $sharedWithRaw into $sharedWithEntries, a list of trimmed, non-empty
@@ -18,6 +18,9 @@
 ## "[a, b]" String (older meeting rows; transcript segments and key frames, which
 ## take the meeting's SharedWith as getCall returns it; Virtual Participant rows).
 ## Membership is then a comparison of whole entries, as in the Lambda resolvers.
+## Every template sets $sharedWithRaw through $util.defaultIfNull(..., ""): a
+## #set whose value is null leaves the variable as it was, which in a loop
+## would carry one item's SharedWith over to the next.
 #set( $sharedWithEntries = [] )
 #if( $util.isList($sharedWithRaw) )
   #foreach( $sharedWithEntry in $sharedWithRaw )
