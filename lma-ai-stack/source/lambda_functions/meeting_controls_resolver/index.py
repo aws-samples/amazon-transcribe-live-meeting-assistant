@@ -9,6 +9,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from os import environ
+from urllib.parse import unquote, urlparse
 
 import boto3
 from appsync_utils import AppsyncRequestsGqlClient
@@ -38,6 +39,11 @@ S3_TRANSCRIPTS_PREFIX = environ["S3_TRANSCRIPTS_PREFIX"]
 # Key frames of the shared screen (docs/meeting-video.md): images under this
 # prefix, one folder per meeting, and items under PK kf#<CallId>.
 S3_KEYFRAMES_PREFIX = environ.get("S3_KEYFRAMES_PREFIX", "lma-video-keyframes/")
+# Meeting video recordings (docs/meeting-video.md): the final .mp4 under the
+# first prefix, and the Virtual Participant's in-progress segments under
+# <chunks prefix><CallId>/ until the .mp4 is assembled.
+S3_VIDEO_RECORDINGS_PREFIX = environ.get("S3_VIDEO_RECORDINGS_PREFIX", "lma-video-recordings/")
+S3_VIDEO_CHUNKS_PREFIX = environ.get("S3_VIDEO_CHUNKS_PREFIX", "lma-video-chunks/")
 VP_TABLE_NAME = environ.get("VP_TABLE_NAME")
 VP_TASK_REGISTRY_TABLE_NAME = environ.get("VP_TASK_REGISTRY_TABLE_NAME")
 KINESIS_STREAM_NAME = environ.get("KINESIS_STREAM_NAME")
@@ -109,6 +115,63 @@ def delete_recordings_transcripts(callid):
                 raise
 
 
+def _video_key_from_url(url):
+    """The recordings-bucket key a stored VideoRecordingUrl points at, or None.
+
+    The producers store ``https://<bucket>.s3.<region>.<suffix>/<key>``, with the
+    key URL-encoded by the Virtual Participant and as-is by the transcriber. Only
+    a key in this deployment's bucket and directly under the video prefix is
+    returned, so the deletion stays inside the video recordings.
+    """
+    if not url or not isinstance(url, str):
+        return None
+    parsed = urlparse(url)
+    if not (parsed.hostname or "").startswith(f"{S3_BUCKET_NAME}.s3."):
+        return None
+    key = unquote(parsed.path.lstrip("/"))
+    name = key[len(S3_VIDEO_RECORDINGS_PREFIX) :]
+    if not key.startswith(S3_VIDEO_RECORDINGS_PREFIX) or not name or "/" in name:
+        return None
+    return key
+
+
+def delete_video_recordings(callid, video_url=None):
+    """Delete the meeting's video recording and any leftover recording segments.
+
+    Two keys are known exactly, so only those are deleted: the file the meeting
+    record's VideoRecordingUrl names, and the Virtual Participant's segments
+    under ``<chunks prefix><CallId>/``, a folder named with the CallId as it is
+    (the trailing slash keeps one meeting's folder from matching another whose
+    id merely begins the same way). The video file names themselves are not
+    searched: both producers turn the CallId into a file name by replacing
+    characters, so two meetings can share one, and a name is no proof of whose
+    file it is. Returns the number of recording files deleted (0 or 1).
+    """
+    if not callid:
+        return 0
+    deleted = 0
+    stored = _video_key_from_url(video_url)
+    if stored:
+        response = s3_client.delete_objects(
+            Bucket=S3_BUCKET_NAME, Delete={"Objects": [{"Key": stored}], "Quiet": True}
+        )
+        errors = response.get("Errors") or []
+        for error in errors:
+            logger.error(
+                "Could not delete video recording %s of %s: %s",
+                error.get("Key"),
+                callid,
+                error.get("Code"),
+            )
+        deleted = 0 if errors else 1
+    segments = _batch_delete_prefix(S3_BUCKET_NAME, f"{S3_VIDEO_CHUNKS_PREFIX}{callid}/")
+    if deleted or segments:
+        logger.info(
+            "Deleted %d video recording(s) and %d segment(s) for %s", deleted, segments, callid
+        )
+    return deleted
+
+
 def get_call_details(appsync_session, schema, callid):
     try:
         query = dsl_gql(
@@ -121,6 +184,7 @@ def get_call_details(appsync_session, schema, callid):
                     schema.Call.Owner,
                     schema.Call.SharedWith,
                     schema.Call.RecordingUrl,
+                    schema.Call.VideoRecordingUrl,
                 )
             )
         )
@@ -508,9 +572,11 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
             metering_future.result()
             keyframes_future.result()
 
-        shared_with = (
-            details_result.get("getCall", {}).get("SharedWith") if details_result else None
-        )
+        call_details = (details_result or {}).get("getCall") or {}
+        shared_with = call_details.get("SharedWith")
+
+        # After the details, because the stored VideoRecordingUrl names the file.
+        delete_video_recordings(callid, call_details.get("VideoRecordingUrl"))
 
         input = {
             "CallId": callid,
