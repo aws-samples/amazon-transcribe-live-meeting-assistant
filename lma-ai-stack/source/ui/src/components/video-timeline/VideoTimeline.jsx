@@ -18,6 +18,10 @@
  * next when the strip is scrolled to its end. The images are signed links
  * from getVideoKeyframes that last an hour, so a thumbnail that fails to load
  * reloads the frames, at most once a minute.
+ *
+ * A frame that begins one of the meeting's chapters (from its summary) is
+ * labelled with the chapter, and **Export slides (PDF)** prints every frame as
+ * a deck (common/slide-deck.js).
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
@@ -28,11 +32,17 @@ import { Box, Button, Container, Header, SpaceBetween, Spinner, TextFilter } fro
 import getVideoKeyframes from '../../graphql/queries/getVideoKeyframes';
 import onAddVideoKeyframe from '../../graphql/queries/onAddVideoKeyframe';
 import { formatFrameTime, frameMatches, matchSnippet, mergeKeyframes } from '../common/video-keyframes';
+import { chapterTitlesByFrame } from '../common/chapters';
+import { printDeck as defaultPrintDeck } from '../common/slide-deck';
 import './VideoTimeline.css';
 
 const logger = new ConsoleLogger('VideoTimeline');
 
 export const PAGE_SIZE = 100;
+// The resolver's largest page, for reading every frame at once for the deck.
+const EXPORT_PAGE_SIZE = 500;
+// A meeting keeps at most 1,000 frames; the bound stops a looping token.
+const MAX_EXPORT_PAGES = 10;
 const RELOAD_AFTER_MS = 60 * 1000;
 
 const defaultLoadFrames = async (variables) => {
@@ -59,8 +69,12 @@ const VideoTimeline = ({
   canPlayRecording = false,
   onShowInTranscript = undefined,
   onPlayFrom = undefined,
+  chapters = [],
+  onClockOffset = undefined,
+  title = '',
   loadFrames = defaultLoadFrames,
   subscribe = defaultSubscribe,
+  printDeck = defaultPrintDeck,
 }) => {
   const [frames, setFrames] = useState([]);
   const [nextToken, setNextToken] = useState(null);
@@ -69,6 +83,8 @@ const VideoTimeline = ({
   const [error, setError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [search, setSearch] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState(null);
   const stripRef = useRef(null);
   const sentinelRef = useRef(null);
   const framesRef = useRef(frames);
@@ -254,6 +270,43 @@ const VideoTimeline = ({
     });
   };
 
+  // The difference between the transcript's clock and the recording's, from the
+  // first frame that has both, so a chapter (which has only a transcript time)
+  // plays from the right place.
+  useEffect(() => {
+    if (!onClockOffset) return;
+    const timed = frames.find((f) => Number.isFinite(Number(f.VideoOffset)) && f.VideoOffset !== null);
+    if (timed) onClockOffset(Number(timed.Timestamp) - Number(timed.VideoOffset));
+  }, [frames, onClockOffset]);
+
+  const chapterTitles = useMemo(() => chapterTitlesByFrame(chapters, frames), [chapters, frames]);
+
+  /** Every frame, read fresh (for links that last the print), then the deck. */
+  const exportDeck = async () => {
+    setExporting(true);
+    setExportError(null);
+    try {
+      let all = [];
+      let token = null;
+      let pages = 0;
+      do {
+        // eslint-disable-next-line no-await-in-loop
+        const page = await loadFrames({ callId, limit: EXPORT_PAGE_SIZE, nextToken: token, afterFrameId: null });
+        const incoming = page?.VideoKeyframes || [];
+        all = mergeKeyframes(all, incoming);
+        token = (incoming.length && page?.nextToken) || null;
+        pages += 1;
+      } while (token && pages < MAX_EXPORT_PAGES);
+      const opened = await printDeck({ title: title || callId, frames: all, chapters });
+      if (!opened) setExportError('The browser blocked the new tab. Allow pop-ups for this site and try again.');
+    } catch (e) {
+      logger.error('could not export the key frames', e);
+      setExportError('The key frames could not be exported.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const select = (frame) => {
     setSelectedId(frame.FrameId);
     if (onShowInTranscript) onShowInTranscript(frame.Timestamp);
@@ -301,6 +354,11 @@ const VideoTimeline = ({
           variant="h4"
           counter={`(${frames.length}${nextToken ? '+' : ''})`}
           description="The shared screen each time it changed. Select one to move the transcript to that time."
+          actions={
+            <Button iconName="download" loading={exporting} onClick={exportDeck}>
+              Export slides (PDF)
+            </Button>
+          }
         >
           Shared screen
         </Header>
@@ -308,6 +366,7 @@ const VideoTimeline = ({
     >
       <SpaceBetween size="s">
         {error && <Box color="text-status-error">{error}</Box>}
+        {exportError && <Box color="text-status-error">{exportError}</Box>}
         <TextFilter
           filteringText={search}
           filteringPlaceholder="Find text on the shared screen"
@@ -332,6 +391,9 @@ const VideoTimeline = ({
               aria-pressed={frame.FrameId === selectedId}
               title={`Key frame at ${formatFrameTime(frame.Timestamp)}`}
             >
+              {chapterTitles.has(frame.FrameId) && (
+                <span className="video-timeline-chapter">{chapterTitles.get(frame.FrameId).join(' / ')}</span>
+              )}
               {frame.ThumbnailSignedUrl ? (
                 <img
                   src={frame.ThumbnailSignedUrl}
@@ -410,8 +472,12 @@ VideoTimeline.propTypes = {
   canPlayRecording: PropTypes.bool,
   onShowInTranscript: PropTypes.func,
   onPlayFrom: PropTypes.func,
+  chapters: PropTypes.arrayOf(PropTypes.shape({ seconds: PropTypes.number, title: PropTypes.string })),
+  onClockOffset: PropTypes.func,
+  title: PropTypes.string,
   loadFrames: PropTypes.func,
   subscribe: PropTypes.func,
+  printDeck: PropTypes.func,
 };
 
 export default VideoTimeline;

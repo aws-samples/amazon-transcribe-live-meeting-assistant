@@ -813,6 +813,7 @@ def test_the_transcript_request_names_the_call_and_asks_for_speaker_labels(
         "ProcessTranscript": False,
         "IncludeSpeaker": True,
         "IncludeKeyframes": True,
+        "IncludeTimes": True,
     }
 
 
@@ -1246,7 +1247,7 @@ def test_the_handler_passes_the_meetings_key_frames(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         index,
         "generate_summary",
-        lambda transcript, override, refresh=False, call_id=None, agenda=None, keyframes=None: (
+        lambda transcript, override, refresh=False, call_id=None, agenda=None, keyframes=None, **_: (
             seen.append(keyframes) or "a summary"
         ),
     )
@@ -1321,3 +1322,66 @@ def test_the_shipped_slides_section_names_the_slides_and_asks_for_the_pictures_u
     assert "{slides}" in prompt and "{transcript}" not in prompt
     assert "copied exactly" in prompt
     assert "never identify" in prompt
+
+
+# --------------------------------------------------------------------------
+# The chapters section
+# --------------------------------------------------------------------------
+
+CHAPTERS_PROMPT = "Chapters:<br>{timed_transcript}"
+
+
+def test_a_prompt_naming_the_timed_transcript_gets_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "S {transcript}", "2#Chapters": CHAPTERS_PROMPT}),
+        custom=ddb_item(),
+    )
+    index.generate_summary("T", None, timed_transcript="\n[00:01] Alice: hi")
+    assert prompts_sent(bedrock) == ["S T", "Chapters:\n\n[00:01] Alice: hi"]
+
+
+def test_a_meeting_without_a_timed_transcript_gets_no_chapters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "S {transcript}", "2#Chapters": CHAPTERS_PROMPT}),
+        custom=ddb_item(),
+    )
+    for timed in (None, "", "\n"):
+        bedrock.requests.clear()
+        index.generate_summary("T", None, timed_transcript=timed)
+        assert prompts_sent(bedrock) == ["S T"]
+
+
+def test_the_handler_passes_the_timed_transcript(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = []
+    monkeypatch.setattr(
+        index,
+        "generate_summary",
+        lambda transcript, override, refresh=False, call_id=None, agenda=None, **kw: (
+            seen.append(kw.get("timed_transcript")) or "a summary"
+        ),
+    )
+    client = FakeLambdaClient()
+    client.payload["timedTranscript"] = "\n[00:01] Alice: hi"
+    install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "p"}),
+        custom=ddb_item(),
+        lambda_client=client,
+    )
+    index.handler({"CallId": CALL_ID}, None)
+    assert seen == ["\n[00:01] Alice: hi"]
+
+
+def test_the_shipped_chapters_section_asks_for_one_timed_line_per_chapter() -> None:
+    shipped = json.loads(
+        (
+            HERE.parent / "configuration_seeder" / "defaults" / "LLMPromptSummaryTemplate.json"
+        ).read_text(encoding="utf-8")
+    )
+    prompt = shipped["CHAPTERS"]
+    assert "{timed_transcript}" in prompt
+    assert "- [MM:SS] " in prompt

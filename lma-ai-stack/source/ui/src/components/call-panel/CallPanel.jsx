@@ -56,6 +56,8 @@ import CallCostPanel from './CallCostPanel';
 import RecordingPlayer from '../recording-player';
 import VideoPlayer from '../video-player';
 import VideoTimeline from '../video-timeline';
+import MeetingChapters from '../meeting-chapters/MeetingChapters';
+import { chaptersFromSummary } from '../common/chapters';
 import { recordingSecondsFor, scrollTranscriptToTime } from '../common/video-keyframes';
 import useSettingsContext from '../../contexts/settings';
 
@@ -2473,6 +2475,29 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
       setVideoSeekRequest({ seconds: recordingSecondsFor(frame), at: Date.now(), reveal }),
     [],
   );
+  // Chapters from the summary, and the recording's clock against the
+  // transcript's, learnt from the key frames (null until a frame says).
+  const chapters = useMemo(() => chaptersFromSummary(item.callSummaryText), [item.callSummaryText]);
+  const clockOffsetRef = useRef(null);
+  useEffect(() => {
+    clockOffsetRef.current = null;
+  }, [item.callId]);
+  const setClockOffset = useCallback((offset) => {
+    clockOffsetRef.current = offset;
+  }, []);
+  const canPlayRecording = Boolean(item.videoRecordingUrl) && item.recordingStatusLabel !== IN_PROGRESS_STATUS;
+  const selectChapter = useCallback(
+    (chapter) => {
+      showInTranscript(chapter.seconds);
+      if (!canPlayRecording) return;
+      const offset = clockOffsetRef.current;
+      playRecordingFrom({
+        Timestamp: chapter.seconds,
+        VideoOffset: offset === null ? null : Math.max(0, chapter.seconds - offset),
+      });
+    },
+    [showInTranscript, playRecordingFrom, canPlayRecording],
+  );
   const [vpData, setVpData] = useState(null);
   const [loadingVP, setLoadingVP] = useState(false);
 
@@ -2601,13 +2626,18 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
         />
       )}
 
+      <MeetingChapters chapters={chapters} onSelect={selectChapter} canPlayRecording={canPlayRecording} />
+
       <VideoTimeline
         key={item.callId}
         callId={item.callId}
+        title={item.callId}
         isLive={item.recordingStatusLabel === IN_PROGRESS_STATUS}
-        canPlayRecording={Boolean(item.videoRecordingUrl) && item.recordingStatusLabel !== IN_PROGRESS_STATUS}
+        canPlayRecording={canPlayRecording}
         onShowInTranscript={showInTranscript}
         onPlayFrom={playRecordingFrom}
+        chapters={chapters}
+        onClockOffset={setClockOffset}
       />
 
       <AgendaPanel

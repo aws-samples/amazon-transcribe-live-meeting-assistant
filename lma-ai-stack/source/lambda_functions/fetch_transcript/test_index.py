@@ -1058,3 +1058,40 @@ def test_what_was_said_is_bounded_per_frame(monkeypatch):
     assert len(first["Said"]) == index.MAX_SAID_CHARS
     assert first["Said"].startswith("word word")
     assert 0 < len(last["Said"]) <= index.MAX_SAID_CHARS
+
+
+def test_the_timed_transcript_marks_each_line_and_each_change_of_the_shared_screen(monkeypatch):
+    install(
+        monkeypatch,
+        items=[
+            segment("welcome", 3, StartTime=Decimal("1"), speaker="Alice"),
+            segment("the budget is fine", 40, StartTime=Decimal("31"), speaker="Bob"),
+            segment("hiring next", 3700, StartTime=Decimal("3690"), speaker="Alice"),
+        ],
+    )
+    monkeypatch.setattr(
+        index,
+        "get_keyframes",
+        lambda callid: [
+            {"FrameId": "1", "Timestamp": 30.0, "SlideText": "Budget\n- Q3   numbers"},
+            {"FrameId": "2", "Timestamp": 3600.0, "SlideText": ""},
+        ],
+    )
+    response = index.lambda_handler(
+        {"CallId": CALL_ID, "IncludeSpeaker": True, "IncludeTimes": True}, None
+    )
+    assert response["timedTranscript"] == (
+        "\n[00:01] Alice: welcome"
+        "\n[00:30] (The shared screen changed: Budget - Q3 numbers)"
+        "\n[00:31] Bob: the budget is fine"
+        "\n[1:00:00] (The shared screen changed)"
+        "\n[1:01:30] Alice: hiring next"
+    )
+    # Asked for alone, the frames themselves are not returned.
+    assert "keyframes" not in response
+    assert response["transcript"] == "\nAlice: welcome\nBob: the budget is fine\nAlice: hiring next"
+
+
+def test_the_timed_transcript_is_only_returned_when_asked_for(monkeypatch):
+    response, _ = run(monkeypatch, items=[segment("hello", 2)])
+    assert "timedTranscript" not in response

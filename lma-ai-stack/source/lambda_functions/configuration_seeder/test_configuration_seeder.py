@@ -164,6 +164,7 @@ def test_the_baseline_document_holds_the_shipped_prompts_under_its_section(seede
         "3#ACTIONS",
         "4#AGENDA COVERAGE",
         "5#SLIDES PRESENTED",
+        "6#CHAPTERS",
     }
     assert "{transcript}" in body["summary_prompt_templates"]["1#SUMMARY"]
 
@@ -954,6 +955,7 @@ def test_adoption_lines_a_prompt_up_with_the_baseline_by_its_title(seeder) -> No
         "3#ACTIONS",
         "4#AGENDA COVERAGE",
         "5#SLIDES PRESENTED",
+        "6#CHAPTERS",
     ]
     assert merged["2#DETAILS"] == "my details prompt"
     assert merged["3#ACTIONS"] == "my actions prompt"
