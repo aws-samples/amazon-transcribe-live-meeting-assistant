@@ -288,8 +288,11 @@ two jobs:
   writes before it reads or writes anything, so a value its readers could not use
   is refused at the save rather than discovered when a meeting reads it.
 - **It is what a configuration editor renders.** Beside the validation keywords,
-  the documents carry layout annotations in the vocabulary IDP's configuration
-  schema uses, and `Query.getConfiguration` serves them as they stand.
+  the documents carry layout annotations — `order`, `sectionLabel`,
+  `collapsible`, `dependsOn`, `format: textarea` and the like — in the vocabulary
+  the configuration schema of the
+  [GenAI Intelligent Document Processing accelerator](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws)
+  uses, and `Query.getConfiguration` serves them as they stand.
 
 The schemas are standalone files rather than YAML inside a CloudFormation
 template, and they ship inside the configuration layer. The layer's build is
@@ -308,8 +311,8 @@ so a release cannot ship a default its own save would refuse.
 
 | Section | What the schema holds it to |
 |---|---|
-| `summary_prompt_templates` | Keys of the form `N#Title`, each a text prompt; `NONE` turns a shipped section off |
-| `chat_buttons` | Keys of the form `N#Label`, each a text prompt of at most 4,000 characters |
+| `summary_prompt_templates` | Keys of the form `N#Title`, with `N` in the digits 0–9 and a title that is not empty, each a text prompt; `NONE` turns a shipped section off |
+| `chat_buttons` | Keys of the form `N#Label`, each a text prompt |
 | `nova_sonic_config` | The eleven settings the voice assistant reads, nothing else; `promptMode`, `endpointingSensitivity` and `meetingMode` from their fixed lists; model and voice ids and the translator fields non-empty and bounded in length |
 | `asr_engine` | The three switches, each `true` or `false`, nothing else |
 | `call_pricing` | Prices that are finite and not negative, under `regions › <region or default> › <service>/<api-or-model> › <unit>`; region codes in the form `us-east-1`; the lists and notes as lists and objects of text; `currency` `USD`; no keys the estimator does not read |
@@ -334,11 +337,15 @@ than ignored, because an ignored keyword is a constraint that looks enforced and
 is not. The UI annotations are listed in the module as `UI_ANNOTATIONS`, and the
 same test refuses a key that is in neither list, which catches a misspelt one.
 
-The validator's behaviour is pinned by a fixture,
-`lma-ai-stack/test/fixtures/configuration_schema_cases.json`: each case is a
-schema, a value, and the exact problems that must be reported, in order. It is
-kept outside the layer so that a second implementation — a configuration editor
-checking a value before it sends the save — can be held to the same file.
+The web UI holds a JavaScript copy of the validator,
+`lma-ai-stack/source/ui/src/components/configuration/schema-validation.js`, for a
+configuration editor to check a value before it sends the save. The two copies
+are held to one fixture, `lma-ai-stack/test/fixtures/configuration_schema_cases.json`:
+each case is a schema, a value, and the exact problems both must report, in order,
+and pytest and vitest each run every case. The UI's tests also compile every
+pattern in the shipped schemas as a JavaScript regular expression, since a pattern
+only one language accepted would make the two disagree. The server's check is
+the one that decides.
 
 ### Which writes are checked
 
@@ -355,10 +362,15 @@ into a failure.
 The four older configuration mutations still filter their input the way they
 always have — dropping a field they do not know, a Nova Sonic setting outside its
 list, a switch that is not a boolean — before the store sees it. What they keep
-is then checked like any other save. In practice the schema adds two refusals to
-those mutations: a chat button prompt that is not text, and a
-Nova Sonic system prompt, model id or voice id that is not text, or an id longer
-than its limit.
+is then checked like any other save. In practice the schema adds these refusals
+to those mutations:
+
+- a chat button or summary prompt key whose label is empty (`3#`), or whose
+  number uses digits other than `0`–`9` — the resolvers' own filters accept both;
+- a chat button prompt that is not text;
+- a Nova Sonic system prompt, model id or voice id that is not text, or an id
+  longer than its limit (256 characters for a model id, 128 for a voice id).
+
 `updateCallPricing` has no checks of its own; the schema is the whole of what it
 enforces.
 

@@ -32,7 +32,9 @@ with the standard library only: the layer has no third-party dependencies, so it
 can be attached to functions on either architecture. A keyword it does not
 implement is refused by the tests rather than silently ignored, because an
 ignored keyword is a constraint that looks enforced and is not. The web UI holds
-a JavaScript copy of the same validator; ``lma-ai-stack/test/fixtures/
+a JavaScript copy of the same validator, for an editor to check a value before
+it sends the save (``lma-ai-stack/source/ui/src/components/configuration/
+schema-validation.js``); ``lma-ai-stack/test/fixtures/
 configuration_schema_cases.json`` is run through both, so the two cannot drift
 apart unnoticed.
 """
@@ -223,8 +225,8 @@ def check(schema: Mapping[str, Any], value: Any, path: Tuple[str, ...] = ()) -> 
     """Every problem with ``value`` against ``schema``, as messages naming the path.
 
     Empty when the value is valid. The JavaScript copy in the web UI
-    (``schema-validation.js``) produces the same problems in the same order;
-    the shared fixture asserts it.
+    (``ui/src/components/configuration/schema-validation.js``) produces the same
+    problems in the same order; the shared fixture asserts it.
     """
     problems: List[str] = []
     where = format_path(path)

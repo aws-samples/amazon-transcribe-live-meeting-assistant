@@ -135,9 +135,7 @@ def _caller(event: Mapping[str, Any]) -> Dict[str, Any]:
 
 def _require_admin(caller: Mapping[str, Any]) -> None:
     if not caller["is_admin"]:
-        LOGGER.info(
-            "refused a configuration history request to %s", caller["subject"] or "(no subject)"
-        )
+        LOGGER.info("refused a configuration request to %s", caller["subject"] or "(no subject)")
         raise ForbiddenError(
             f"Unauthorized: only members of the {ADMIN_GROUP} group can read or change "
             "the configuration and its history"

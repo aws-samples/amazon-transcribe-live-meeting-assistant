@@ -19,8 +19,7 @@
       "title": "Prompt",
       "description": "What the button sends to the meeting assistant.",
       "format": "textarea",
-      "rows": 3,
-      "maxLength": 4000
+      "rows": 3
     }
   },
   "additionalProperties": false
