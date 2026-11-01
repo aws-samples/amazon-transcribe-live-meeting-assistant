@@ -11,8 +11,8 @@ the five that read and act on the history every save records (see
 
 ``Query.getConfiguration(Profile)``
     Everything the editor needs in one read: each section's schema and cache
-    tier, the shipped baseline, the profile's stored delta, and the profile's
-    version, which is what a save sends back.
+    tier, the shipped baseline, the profile's stored delta, the profile's
+    version, which is what a save sends back, and the library of presets.
 
 ``Mutation.updateConfiguration(input)``
     Save the sections the editor changed, together, as one revision. Each is
@@ -61,6 +61,7 @@ from lma_config import (  # from the configuration layer
     RevisionNotFound,
     registered_sections,
     section_schemas,
+    shipped_presets,
     validate_profile_name,
 )
 
@@ -212,6 +213,9 @@ def get_configuration(arguments: Mapping[str, Any]) -> Dict[str, Any]:
         "Sections": json.dumps(sections, sort_keys=True),
         "Default": json.dumps(_registered_only(baseline.body), sort_keys=True),
         "Custom": json.dumps(_registered_only(head.body), sort_keys=True),
+        # The configuration library: named presets the editor can apply to the
+        # page as unsaved changes. See lma_config/presets.py.
+        "Presets": json.dumps(shipped_presets(), sort_keys=True),
     }
 
 

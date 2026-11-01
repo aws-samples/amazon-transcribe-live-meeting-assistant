@@ -109,7 +109,7 @@ names, then save again.
 
 **The save is checked against the version you loaded.** All the sections are
 stored together, and a save is refused if anyone saved any of them after your
-page loaded — on this page or in the Edit Chat Buttons dialog — rather than silently
+page loaded — on this page, in the Edit Chat Buttons dialog, by a restore from the history, or through the API — rather than silently
 replacing their change. The page then offers two ways on:
 
 - **Reload and keep my changes** loads what they saved and applies your changes
@@ -127,6 +127,33 @@ label or relabel one, or restore an earlier one. A restore puts back every secti
 as it was in that revision and is itself recorded as a new revision, so it can be
 undone the same way. See
 [Revisions and audit](configuration-store.md#revisions-and-audit).
+
+## Copying configuration between deployments, and presets
+
+The **Import, export and presets** menu at the top of the Configuration page
+offers three things. None of them saves anything: what they change appears on the
+page as unsaved changes, marked like your own edits, and is stored only when you
+select **Save changes**.
+
+- **Export to a file** downloads the configuration as saved — your changes over
+  the release defaults, not the defaults themselves — as a JSON file. Unsaved
+  edits on the page are not in it.
+- **Import from a file** loads such a file, for example one exported from a
+  staging deployment, onto the page. Because the file holds changes rather than
+  whole settings, importing it into a deployment of a later release keeps that
+  release's defaults for everything the file does not change. A section the file
+  holds that this deployment does not have is listed and left out. The save
+  comment is filled in with the file's name; change it if you like.
+- **Apply a preset** applies one of the configurations LMA ships:
+  - **Healthcare summary** — the summary sections of the healthcare prompt domain,
+    with the other shipped sections turned off;
+  - **Translator voice assistant** — Nova Sonic's Translator meeting mode between
+    English and Spanish;
+  - **On-demand speech engine with voice separation** — offered only where the
+    engine is deployed.
+
+  The dialog says which sections a preset changes, and whether it replaces a
+  section or changes only the settings it names.
 
 ## Changing a setting outside the web UI
 

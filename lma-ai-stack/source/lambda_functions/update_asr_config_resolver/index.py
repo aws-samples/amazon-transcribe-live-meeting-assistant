@@ -9,8 +9,8 @@ read at the start of each meeting so a change needs no stack update:
 * streamingEngineMicrovm - streaming meetings (Stream Audio, the Chrome extension,
   the Desktop Capture apps) use the on-demand engine instead of Amazon Transcribe.
 * virtualParticipantEngineMicrovm - Virtual Participants use the on-demand engine.
-* diarizeVirtualParticipant - a Virtual Participant on the on-demand engine asks
-  for per-voice labels, so several people behind one attendee tile come out as
+* diarizeVirtualParticipant - a Virtual Participant, on either engine, asks for
+  per-voice labels, so several people behind one attendee tile come out as
   "Name (spk_0)", "Name (spk_1)" instead of one name.
 
 There are deliberately no tuning fields. The diarization operating point (the

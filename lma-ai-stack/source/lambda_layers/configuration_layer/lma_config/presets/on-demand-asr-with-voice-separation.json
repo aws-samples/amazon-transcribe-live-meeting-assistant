@@ -1,0 +1,14 @@
+{
+  "title": "On-demand speech engine with voice separation",
+  "description": "Moves streaming meetings and Virtual Participants onto the experimental on-demand speech engine, and has a Virtual Participant label the separate voices behind one attendee. For evaluating the engine; Amazon Transcribe remains the recommended engine. Available only where the engine is deployed.",
+  "sections": {
+    "asr_engine": {
+      "mode": "merge",
+      "values": {
+        "streamingEngineMicrovm": true,
+        "virtualParticipantEngineMicrovm": true,
+        "diarizeVirtualParticipant": true
+      }
+    }
+  }
+}

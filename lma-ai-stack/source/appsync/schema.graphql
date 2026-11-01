@@ -1222,6 +1222,10 @@ type ConfigurationDocument @aws_cognito_user_pools {
 	# profile's changes over it as stored.
 	Default: String
 	Custom: String
+	# A JSON list of the presets an editor can apply: {"Id", "Title",
+	# "Description", "Sections"}, where Sections maps a section name to
+	# {"mode": "merge" | "replace", "values"}. Applying one saves nothing.
+	Presets: String
 }
 
 input UpdateConfigurationInput {

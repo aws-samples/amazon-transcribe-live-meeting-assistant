@@ -29,7 +29,7 @@ lma-ai-stack/source/ui/src/
 ├── App.jsx                # Root: ThemeProvider > Authenticator > AppContent
 ├── index.jsx              # Entry point
 ├── aws-exports.js         # Amplify config (rewritten at deploy time)
-├── components/            # 22 feature directories + common/
+├── components/            # feature directories + common/
 │   ├── common/
 │   ├── call-list/
 │   ├── call-details/

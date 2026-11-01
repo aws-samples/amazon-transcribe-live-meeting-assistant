@@ -473,6 +473,63 @@ Participant read `getAsrConfig`, and `getNovaSonicConfig` keeps its IAM
 authorization for backend callers. Their saves are checked against the same
 schemas.
 
+### Export, import and the configuration library
+
+The Configuration page's **Import, export and presets** menu moves configuration
+between deployments, and applies named presets. None of the three saves anything
+by itself: an import or a preset becomes unsaved changes on the page, marked and
+checked like any edit, and is saved only when the administrator saves it, as one
+revision that can be compared and restored like any other.
+
+- **Export** is a download the browser makes; no API is involved. The file holds,
+  for every section the deployment offers, what the profile *stores* — its
+  changes over the release defaults — as saved, not the page's unsaved edits:
+
+  ```json
+  {
+    "format": "lma-configuration-profile",
+    "formatVersion": 1,
+    "exportedAt": "2026-11-01T12:00:00.000Z",
+    "stackName": "LMA-prod",
+    "profile": "custom",
+    "revision": 12,
+    "sections": { "nova_sonic_config": { "voiceId": "matthew" }, "call_pricing": {} }
+  }
+  ```
+
+  Exporting the changes rather than the merged configuration is what makes a file
+  portable between releases: imported into a deployment of a later release, it
+  gives that release's defaults with the same changes over them.
+- **Import** reads such a file, refusing anything that is not one, and sets each
+  section it holds to what the file stores, over this deployment's defaults. A
+  section the deployment does not offer is reported and left out. The save
+  comment is filled in with the file's name.
+- **Presets** are the configuration library: named, shipped changes, each
+  `lma_config/presets/<id>.json` in the configuration layer, served by
+  `getConfiguration` as `Presets`. A preset names the sections it changes, and
+  for each one how: `merge` lays its values over the section as it stands, so the
+  settings it names change and every other one stays; `replace` makes the section
+  exactly its values, with every shipped entry it does not name turned off where
+  the section can turn one off. A setting the deployment does not offer is left
+  out. The layer's tests hold every preset to that shape and its values to the
+  section schemas, and the healthcare preset to the prompts the healthcare domain
+  ships.
+
+| Preset | What it changes |
+|---|---|
+| Healthcare summary | Replaces the summary sections with the healthcare domain's — summary, details, and SOAP and BIRP notes — turning the other shipped sections off |
+| Translator voice assistant | Sets the Nova Sonic meeting mode to Translator, English and Spanish, with the shipped trigger phrases |
+| On-demand speech engine with voice separation | Moves streaming meetings and Virtual Participants onto the on-demand engine, and turns on Virtual Participant voice separation. Offered only where the engine is deployed |
+
+**Why import does not create a profile.** The plan for this store has an import
+route into a *new* profile rather than apply in place, so that importing cannot
+overwrite the configuration in force. LMA has one profile, `custom`, which every
+reader resolves, and nothing yet selects another. A second profile would be a
+record that nothing reads. The same protection comes from the import never saving:
+the administrator sees every change it makes, marked against the defaults, before
+anything is stored, and the save that stores it is one revision a restore takes
+back. Named profiles, with a way to choose the active one, remain to come.
+
 ## Revisions and audit
 
 Every write that changes a profile's body records a **revision**: a numbered,
@@ -964,7 +1021,7 @@ configuration pages' saves.
 
 | Stage | What it adds |
 |---|---|
-| Import / export | Export as a client-side download; import that always routes into a create-new-profile flow rather than applying in place |
+| Named profiles | More than one profile, a way to choose the one in force, and an import that can create one. Export, import and presets work today on the one `custom` profile; see [Export, import and the configuration library](#export-import-and-the-configuration-library) |
 | Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired. It waited for the configuration editor: the custom prompt is edited in the DynamoDB console today, which is exactly the route a compressed body closes, so moving it before there was an editor would have left it with no way to edit it. With the editor in place, it needs a schema and a seeder adoption |
 | Moving CloudFormation parameters | The parameters that are read only at request time and do not gate a resource, a condition or an IAM policy |
 | Replacing the SSM settings blob | The `<stack>-LMASettings` parameter is written only by CloudFormation, at deploy time, and read by the web app for every signed-in user. It is a deployment's wiring rather than something an administrator edits, so it moves with the parameters above, when the web app reads its configuration at run time |
@@ -995,6 +1052,7 @@ row of the table above.
 | Revision history | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/revisions.py`, driven from `store.py` |
 | Section schemas, and the validator that applies them | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/schemas/` and `schema.py`; the shared validation fixture `lma-ai-stack/test/fixtures/configuration_schema_cases.json` |
 | Editor and history resolver (read and save the configuration; list, read, compare, restore, label revisions) | `lma-ai-stack/source/lambda_functions/configuration_revisions_resolver/` |
+| The configuration library | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/presets/` and `presets.py` |
 | The configuration editor in the web UI | `lma-ai-stack/source/ui/src/components/configuration/`: `ConfigurationPage.jsx`, the controls in `fields.jsx`, the rules in `config-model.js` and the validator copy in `schema-validation.js` |
 | Deploy-time seeder | `lma-ai-stack/source/lambda_functions/configuration_seeder/` |
 | Table, bucket, layer, custom resource and the `ConfigurationRevisionWriteAccess` policy every writer attaches | `lma-ai-stack/deployment/lma-ai-stack.yaml` |

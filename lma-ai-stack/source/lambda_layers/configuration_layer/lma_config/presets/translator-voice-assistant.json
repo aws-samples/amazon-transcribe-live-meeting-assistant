@@ -1,0 +1,16 @@
+{
+  "title": "Translator voice assistant",
+  "description": "Sets the Nova Sonic voice assistant's meeting mode to Translator, between English and Spanish, with the shipped trigger phrases to pause and resume it. Takes effect only where the Virtual Participant's voice assistant activation mode is always_active. Change the two languages after applying it.",
+  "sections": {
+    "nova_sonic_config": {
+      "mode": "merge",
+      "values": {
+        "meetingMode": "translator",
+        "translatorLanguageA": "English",
+        "translatorLanguageB": "Spanish",
+        "translatorMutePhrases": "translator mute, alex mute",
+        "translatorUnmutePhrases": "translator unmute, alex unmute"
+      }
+    }
+  }
+}

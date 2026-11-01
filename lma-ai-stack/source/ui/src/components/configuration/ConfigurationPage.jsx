@@ -10,6 +10,7 @@ import {
   Alert,
   Box,
   Button,
+  ButtonDropdown,
   FormField,
   Header,
   Input,
@@ -26,10 +27,13 @@ import { isConflict } from '../common/config-conflict';
 import { MAX_LABEL_LENGTH, labelRevisionMutation } from '../configuration-history/history';
 import {
   appliesText,
+  applyPresetSection,
   changedCount,
   deepEqual,
   effectiveSection,
+  exportDocument,
   isAvailable,
+  readExport,
   rebaseSection,
   storedSection,
 } from './config-model';
@@ -83,7 +87,9 @@ export const ConfigurationContent = () => {
   const [label, setLabel] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
+  const [preset, setPreset] = useState(null);
   const scrolled = useRef(false);
+  const fileInput = useRef(null);
 
   const read = useCallback(async () => {
     const result = await client.graphql({ query: getConfigurationQuery, variables: { Profile: PROFILE } });
@@ -160,6 +166,99 @@ export const ConfigurationContent = () => {
   };
 
   const setSection = (name) => (values) => setEdits((current) => ({ ...current, [name]: values }));
+
+  // Export is a download made here, of the configuration as saved: what the
+  // profile stores for each section, its changes over the release defaults.
+  const exportConfiguration = () => {
+    const now = new Date().toISOString();
+    const document = exportDocument({
+      sections,
+      defaults: doc.defaults,
+      values: loaded,
+      profile: doc.profile,
+      revision: doc.publishedRevision,
+      stackName: settings?.StackName,
+      now,
+    });
+    const blob = new Blob([`${JSON.stringify(document, null, 2)}\n`], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = window.document.createElement('a');
+    link.href = url;
+    link.download = `lma-configuration-${settings?.StackName || 'export'}-${now.slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setStatus({
+      type: 'info',
+      text: dirty
+        ? 'Exported the configuration as saved. Your unsaved changes are not in the file.'
+        : 'Exported the configuration as saved.',
+    });
+  };
+
+  // Import never saves. What the file holds becomes unsaved changes on the
+  // page, marked and checked like any edit, and is saved, as one revision that
+  // can be restored, only when the admin saves it.
+  const importConfiguration = async (file) => {
+    if (!file) return;
+    try {
+      const { values, skipped } = readExport(await file.text(), sections, doc.defaults);
+      setEdits((current) => ({ ...current, ...values }));
+      setComment((current) => current || `Imported from ${file.name}`.slice(0, MAX_COMMENT_LENGTH));
+      const names = sections.filter((section) => values[section.name]).map(sectionLabel);
+      const replacedEdits = sections.some(
+        (section) => values[section.name] && !deepEqual(edits[section.name], loaded[section.name]),
+      );
+      const notes = [
+        replacedEdits ? 'It replaced unsaved edits you had made in those sections.' : '',
+        skipped.length ? `Not used, because this deployment has no such section: ${skipped.join(', ')}.` : '',
+      ].filter(Boolean);
+      setStatus({
+        type: skipped.length || replacedEdits ? 'warning' : 'info',
+        text: [
+          `Loaded ${names.join(', ') || 'nothing'} from ${file.name}.`,
+          'Nothing is saved yet: review the marked changes, then save.',
+          ...notes,
+        ].join(' '),
+      });
+    } catch (err) {
+      setStatus({ type: 'error', text: `Could not import ${file.name}: ${err.message}` });
+    }
+  };
+
+  const presetSections = (entry) =>
+    Object.keys(entry?.Sections || {}).map((name) => ({
+      name,
+      section: sections.find((candidate) => candidate.name === name),
+    }));
+
+  // A preset, like an import, only changes the page.
+  const applyPreset = () => {
+    const next = {};
+    presetSections(preset).forEach(({ name, section }) => {
+      if (section) {
+        next[name] = applyPresetSection(
+          section.schema,
+          doc.defaults[name],
+          edits[name],
+          preset.Sections[name],
+          settings,
+        );
+      }
+    });
+    setEdits((current) => ({ ...current, ...next }));
+    setComment((current) => current || `Applied the preset "${preset.Title}"`.slice(0, MAX_COMMENT_LENGTH));
+    const replacedEdits = Object.keys(next).some((name) => !deepEqual(edits[name], loaded[name]));
+    setStatus({
+      type: replacedEdits ? 'warning' : 'info',
+      text: [
+        `Applied "${preset.Title}" to the page. Nothing is saved yet: review the marked changes, then save.`,
+        replacedEdits ? 'It was applied over unsaved edits you had made in those sections.' : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
+    });
+    setPreset(null);
+  };
 
   const openSave = () => {
     setSaveError(null);
@@ -297,6 +396,36 @@ export const ConfigurationContent = () => {
             <Button href={`#${CONFIGURATION_HISTORY_PATH}`} onFollow={confirmLeaving}>
               View history
             </Button>
+            <ButtonDropdown
+              disabled={!doc || readOnly || saving}
+              items={[
+                { id: 'export', text: 'Export to a file', disabled: !doc },
+                { id: 'import', text: 'Import from a file' },
+                ...(doc?.presets?.length
+                  ? [
+                      {
+                        id: 'presets',
+                        text: 'Apply a preset',
+                        items: doc.presets.map((entry) => ({
+                          id: `preset:${entry.Id}`,
+                          text: entry.Title,
+                          disabled: presetSections(entry).every(({ section }) => !section),
+                          disabledReason: 'This deployment has none of the sections it changes.',
+                        })),
+                      },
+                    ]
+                  : []),
+              ]}
+              onItemClick={({ detail }) => {
+                if (detail.id === 'export') exportConfiguration();
+                else if (detail.id === 'import') fileInput.current?.click();
+                else if (detail.id.startsWith('preset:')) {
+                  setPreset(doc.presets.find((entry) => `preset:${entry.Id}` === detail.id));
+                }
+              }}
+            >
+              Import, export and presets
+            </ButtonDropdown>
             <Button iconName="refresh" onClick={load} disabled={loading || saving} ariaLabel="Reload" />
             <Button onClick={() => setEdits(loaded)} disabled={!dirty || saving}>
               Discard changes
@@ -377,6 +506,57 @@ export const ConfigurationContent = () => {
           onChange={setSection(section.name)}
         />
       ))}
+
+      <input
+        ref={fileInput}
+        type="file"
+        accept="application/json,.json"
+        style={{ display: 'none' }}
+        aria-label="Configuration file to import"
+        data-testid="configuration-import"
+        onChange={(event) => {
+          importConfiguration(event.target.files?.[0]);
+          // So choosing the same file again imports it again.
+          // eslint-disable-next-line no-param-reassign -- resetting the picker
+          event.target.value = '';
+        }}
+      />
+
+      <Modal
+        visible={Boolean(preset)}
+        onDismiss={() => setPreset(null)}
+        header={preset ? `Apply "${preset.Title}"?` : ''}
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setPreset(null)}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={applyPreset}>
+                Apply to the page
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          <Box>{preset?.Description}</Box>
+          <ul>
+            {presetSections(preset).map(({ name, section }) => (
+              <li key={name}>
+                {section
+                  ? `${sectionLabel(section)}: ${
+                      preset.Sections[name].mode === 'replace'
+                        ? 'replaced by the preset'
+                        : 'the settings the preset names change, and the others stay'
+                    }`
+                  : `${name}: not in this deployment, so left out`}
+              </li>
+            ))}
+          </ul>
+          <Box>Nothing is saved until you review the changes and save them.</Box>
+        </SpaceBetween>
+      </Modal>
 
       <Modal
         visible={saveOpen}

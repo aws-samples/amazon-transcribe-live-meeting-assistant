@@ -29,9 +29,13 @@ import {
   nextNumber,
   numberedEntries,
   orderedProperties,
+  applyPresetSection,
+  exportDocument,
+  readExport,
   rebase,
   rebaseSection,
   removeAt,
+  replacedSection,
   renameEntry,
   renumbered,
   resetAt,
@@ -238,5 +242,87 @@ describe('keeping your changes when someone else saved first', () => {
       '1#A': 'a',
       '3#C': 'c',
     });
+  });
+});
+
+describe('presets, export and import', () => {
+  const SECTIONS = [
+    { name: 'nova_sonic_config', schema: { ...MERGE, properties: { voiceId: {}, meetingMode: {} } } },
+    { name: 'summary_prompt_templates', schema: PROMPTS },
+    { name: 'chat_buttons', schema: REPLACE },
+  ];
+  const DEFAULTS = {
+    nova_sonic_config: { voiceId: 'tiffany', meetingMode: 'normal' },
+    summary_prompt_templates: { '1#SUMMARY': 's', '2#ACTIONS': 'a' },
+    chat_buttons: { '1#A': 'a' },
+  };
+
+  it('lays a merge preset over the section as it stands', () => {
+    const change = { mode: 'merge', values: { meetingMode: 'translator' } };
+    expect(
+      applyPresetSection(
+        SECTIONS[0].schema,
+        DEFAULTS.nova_sonic_config,
+        { voiceId: 'matthew', meetingMode: 'normal' },
+        change,
+      ),
+    ).toEqual({
+      voiceId: 'matthew',
+      meetingMode: 'translator',
+    });
+  });
+
+  it('leaves out a setting this deployment does not offer', () => {
+    const schema = { ...MERGE, properties: { a: {}, b: { availableWhen: { setting: 'Thing', value: 'true' } } } };
+    const change = { mode: 'merge', values: { a: true, b: true } };
+    expect(applyPresetSection(schema, {}, {}, change, {})).toEqual({ a: true });
+    expect(applyPresetSection(schema, {}, {}, change, { Thing: 'true' })).toEqual({ a: true, b: true });
+  });
+
+  it('replaces a section, turning off every shipped entry the preset does not name', () => {
+    const replaced = replacedSection(PROMPTS, DEFAULTS.summary_prompt_templates, { '1#SUMMARY': 's', '3#SOAP': 'p' });
+    expect(replaced).toEqual({ '1#SUMMARY': 's', '2#ACTIONS': 'NONE', '3#SOAP': 'p' });
+    expect(storedSection(PROMPTS, DEFAULTS.summary_prompt_templates, replaced)).toEqual({
+      '2#ACTIONS': 'NONE',
+      '3#SOAP': 'p',
+    });
+  });
+
+  it('exports what each section stores, and imports it back to the same values', () => {
+    const values = {
+      nova_sonic_config: { voiceId: 'matthew', meetingMode: 'normal' },
+      summary_prompt_templates: { '1#SUMMARY': 's', '2#ACTIONS': 'NONE' },
+      chat_buttons: { '1#B': 'b' },
+    };
+    const document = exportDocument({
+      sections: SECTIONS,
+      defaults: DEFAULTS,
+      values,
+      profile: 'custom',
+      revision: 4,
+      now: 'T',
+    });
+    expect(document.sections).toEqual({
+      nova_sonic_config: { voiceId: 'matthew' },
+      summary_prompt_templates: { '2#ACTIONS': 'NONE' },
+      chat_buttons: { '1#B': 'b' },
+    });
+    const imported = readExport(JSON.stringify(document), SECTIONS, DEFAULTS);
+    expect(imported.values).toEqual(values);
+    expect(imported.skipped).toEqual([]);
+  });
+
+  it('reports a section the deployment does not have, and refuses a file that is not an export', () => {
+    const file = JSON.stringify({
+      format: 'lma-configuration-profile',
+      formatVersion: 1,
+      sections: { asr_engine: {}, chat_buttons: {} },
+    });
+    expect(readExport(file, SECTIONS, DEFAULTS).skipped).toEqual(['asr_engine']);
+    expect(() => readExport('not json', SECTIONS, DEFAULTS)).toThrow('not JSON');
+    expect(() => readExport('{"sections": {}}', SECTIONS, DEFAULTS)).toThrow('not a configuration exported');
+    expect(() => readExport('{"format": "lma-configuration-profile", "formatVersion": 2}', SECTIONS, DEFAULTS)).toThrow(
+      'version 2',
+    );
   });
 });

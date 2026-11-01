@@ -19,6 +19,7 @@ export const getConfigurationQuery = `
       Sections
       Default
       Custom
+      Presets
     }
   }
 `;
@@ -67,6 +68,9 @@ export const parseConfiguration = (answer) => {
     sections,
     defaults: parseObject(answer?.Default, {}),
     custom: parseObject(answer?.Custom, {}),
+    presets: parseObject(answer?.Presets, []).filter(
+      (preset) => preset && preset.Id && preset.Sections && typeof preset.Sections === 'object',
+    ),
   };
 };
 

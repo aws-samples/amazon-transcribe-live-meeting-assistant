@@ -78,6 +78,15 @@ const DEFAULTS = {
   },
 };
 
+const PRESETS = [
+  {
+    Id: 'translator-voice-assistant',
+    Title: 'Translator voice assistant',
+    Description: 'Translator mode.',
+    Sections: { nova_sonic_config: { mode: 'merge', values: { meetingMode: 'translator' } } },
+  },
+];
+
 const answer = ({ version = 4, custom = {} } = {}) => ({
   data: {
     getConfiguration: {
@@ -90,6 +99,7 @@ const answer = ({ version = 4, custom = {} } = {}) => ({
       Sections: JSON.stringify(SECTIONS),
       Default: JSON.stringify(DEFAULTS),
       Custom: JSON.stringify(custom),
+      Presets: JSON.stringify(PRESETS),
     },
   },
 });
@@ -153,7 +163,7 @@ describe('ConfigurationContent', () => {
     expect(within(nova).getAllByText('Changed')).toHaveLength(2);
 
     fireEvent.click(pageButton('Save changes'));
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
     expect(within(dialog).getByText(/Nova Sonic Voice Assistant: 1 setting\./)).toBeTruthy();
     fireEvent.change(within(dialog).getByLabelText('Comment'), { target: { value: 'deeper voice' } });
     fireEvent.change(within(dialog).getByLabelText('Label'), { target: { value: 'before launch' } });
@@ -186,7 +196,7 @@ describe('ConfigurationContent', () => {
     expect(within(nova).queryByText('Changed')).toBeNull();
     // A change from what was loaded: saving it stores an empty section.
     fireEvent.click(pageButton('Save changes'));
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
     graphqlMock.mockResolvedValueOnce(saved()).mockResolvedValueOnce(answer({ version: 5 }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     await screen.findByText(/Saved as revision/);
@@ -218,7 +228,7 @@ describe('ConfigurationContent', () => {
     expect(within(summary).getByText('Turned off')).toBeTruthy();
 
     fireEvent.click(pageButton('Save changes'));
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
     graphqlMock.mockResolvedValueOnce(saved()).mockResolvedValueOnce(answer({ version: 5 }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     await screen.findByText(/Saved as revision/);
@@ -243,7 +253,7 @@ describe('ConfigurationContent', () => {
     fireEvent.change(within(nova).getByLabelText('Voice ID'), { target: { value: 'matthew' } });
 
     fireEvent.click(pageButton('Save changes'));
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
     graphqlMock.mockRejectedValueOnce({ errors: [{ message: 'Conflict: the configuration profile was saved' }] });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     await screen.findByText('Someone else saved the configuration after this page loaded it');
@@ -254,7 +264,7 @@ describe('ConfigurationContent', () => {
     await screen.findByText(/Your changes are applied over the configuration as it is now saved/);
 
     fireEvent.click(pageButton('Save changes'));
-    const again = await screen.findByRole('dialog');
+    const again = await screen.findByRole('dialog', { name: /Save the configuration/ });
     graphqlMock.mockResolvedValueOnce(saved(11, 7)).mockResolvedValueOnce(answer({ version: 7 }));
     fireEvent.click(within(again).getByRole('button', { name: 'Save' }));
     await screen.findByText(/Saved as revision 11/);
@@ -271,7 +281,7 @@ describe('ConfigurationContent', () => {
       target: { value: 'matthew' },
     });
     fireEvent.click(pageButton('Save changes'));
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
     graphqlMock.mockRejectedValueOnce({
       errors: [{ message: 'Invalid: the configuration was not saved: 1 problem: nova_sonic_config › voiceId: bad' }],
     });
@@ -300,7 +310,7 @@ describe('ConfigurationContent', () => {
     fireEvent.change(region.getByLabelText('seconds'), { target: { value: '0.0002' } });
 
     fireEvent.click(pageButton('Save changes'));
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
     graphqlMock.mockResolvedValueOnce(saved()).mockResolvedValueOnce(answer({ version: 5 }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     await screen.findByText(/Saved as revision/);
@@ -325,7 +335,7 @@ describe('ConfigurationContent', () => {
     const buttons = section('Meeting Assist Chat Buttons');
     fireEvent.click(within(buttons).getByRole('button', { name: 'Move ACTIONS up' }));
     fireEvent.click(pageButton('Save changes'));
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
     graphqlMock.mockResolvedValueOnce(saved()).mockResolvedValueOnce(answer({ version: 5 }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     await screen.findByText(/Saved as revision/);
@@ -333,6 +343,120 @@ describe('ConfigurationContent', () => {
     expect(JSON.parse(callsOf('UpdateConfiguration')[0][0].variables.input.Sections)).toEqual({
       chat_buttons: { '1#ACTIONS': 'What were the action items?', '2#SUMMARIZE': 'Summarize this meeting' },
     });
+  });
+});
+
+describe('import, export and presets', () => {
+  beforeEach(() => {
+    graphqlMock.mockReset();
+  });
+
+  const menuItem = async (text) => {
+    fireEvent.click(screen.getByRole('button', { name: 'Import, export and presets' }));
+    fireEvent.click(await screen.findByText(text));
+  };
+
+  const saveAndRead = async () => {
+    fireEvent.click(pageButton('Save changes'));
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
+    const comment = within(dialog).getByLabelText('Comment').value;
+    graphqlMock.mockResolvedValueOnce(saved()).mockResolvedValueOnce(answer({ version: 5 }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await screen.findByText(/Saved as revision/);
+    const { input } = callsOf('UpdateConfiguration')[0][0].variables;
+    return { comment, sections: JSON.parse(input.Sections), input };
+  };
+
+  it('applies a preset to the page only, and saves it with a comment naming it', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    renderEditor();
+    await screen.findByText('Nova Sonic Voice Assistant');
+    await menuItem('Apply a preset');
+    fireEvent.click(await screen.findByText('Translator voice assistant'));
+    const dialog = await screen.findByRole('dialog', { name: /Apply "Translator voice assistant"/ });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Apply to the page' }));
+    expect(await screen.findByText(/Nothing is saved yet/)).toBeTruthy();
+    expect(callsOf('UpdateConfiguration')).toHaveLength(0);
+
+    const { comment, sections } = await saveAndRead();
+    expect(comment).toBe('Applied the preset "Translator voice assistant"');
+    expect(sections).toEqual({ nova_sonic_config: { meetingMode: 'translator' } });
+  });
+
+  it('imports a file as unsaved changes, and saves exactly what it held', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    renderEditor();
+    await screen.findByText('Nova Sonic Voice Assistant');
+    const file = new File(
+      [
+        JSON.stringify({
+          format: 'lma-configuration-profile',
+          formatVersion: 1,
+          sections: { nova_sonic_config: { voiceId: 'amy' }, not_here: {} },
+        }),
+      ],
+      'staging.json',
+      { type: 'application/json' },
+    );
+    fireEvent.change(screen.getByTestId('configuration-import'), { target: { files: [file] } });
+    expect(await screen.findByText(/Loaded Nova Sonic Voice Assistant from staging.json/)).toBeTruthy();
+    expect(screen.getByText(/no such section: not_here/)).toBeTruthy();
+
+    const { comment, sections } = await saveAndRead();
+    expect(comment).toBe('Imported from staging.json');
+    expect(sections).toEqual({ nova_sonic_config: { voiceId: 'amy' } });
+  });
+
+  it('says when an import replaced unsaved edits', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    renderEditor();
+    openSection(await screen.findByText('Nova Sonic Voice Assistant'));
+    fireEvent.change(within(section('Nova Sonic Voice Assistant')).getByLabelText('Voice ID'), {
+      target: { value: 'matthew' },
+    });
+    const file = new File(
+      [JSON.stringify({ format: 'lma-configuration-profile', formatVersion: 1, sections: { nova_sonic_config: {} } })],
+      'clean.json',
+      { type: 'application/json' },
+    );
+    fireEvent.change(screen.getByTestId('configuration-import'), { target: { files: [file] } });
+    expect(await screen.findByText(/It replaced unsaved edits you had made in those sections/)).toBeTruthy();
+  });
+
+  it('refuses a file that is not an export, and changes nothing', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    renderEditor();
+    await screen.findByText('Nova Sonic Voice Assistant');
+    const file = new File(['{"hello": 1}'], 'other.json', { type: 'application/json' });
+    fireEvent.change(screen.getByTestId('configuration-import'), { target: { files: [file] } });
+    expect(
+      await screen.findByText(/Could not import other.json: The file is not a configuration exported/),
+    ).toBeTruthy();
+    expect(pageButton('Save changes').disabled).toBe(true);
+  });
+
+  it('exports the configuration as saved, as a download', async () => {
+    const created = [];
+    const createObjectURL = vi.fn((blob) => {
+      created.push(blob);
+      return 'blob:configuration';
+    });
+    vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    graphqlMock.mockResolvedValueOnce(answer({ custom: { nova_sonic_config: { voiceId: 'amy' } } }));
+    renderEditor({ settings: { StackName: 'LMA-test' } });
+    await screen.findByText('Nova Sonic Voice Assistant');
+    await menuItem('Export to a file');
+
+    expect(click).toHaveBeenCalled();
+    const exported = JSON.parse(await created[0].text());
+    expect(exported.format).toBe('lma-configuration-profile');
+    expect(exported.stackName).toBe('LMA-test');
+    expect(exported.revision).toBe(9);
+    expect(exported.sections.nova_sonic_config).toEqual({ voiceId: 'amy' });
+    expect(exported.sections.call_pricing).toEqual({});
+    click.mockRestore();
+    vi.unstubAllGlobals();
   });
 });
 
