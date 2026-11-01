@@ -266,9 +266,8 @@ export const ConfigurationContent = () => {
       <Header
         variant="h1"
         description={
-          'Every setting LMA reads at run time, in one place. A value that differs from the shipped default is ' +
-          'marked, and only those are stored, so a later release keeps improving the rest. ' +
-          provenance
+          `Every setting LMA reads at run time, in one place. A value that differs from the shipped default is ` +
+          `marked, and only those are stored, so a later release keeps improving the rest. ${provenance}`
         }
         actions={
           <SpaceBetween direction="horizontal" size="xs">

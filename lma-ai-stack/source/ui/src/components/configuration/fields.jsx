@@ -23,7 +23,6 @@ import {
   FormField,
   Header,
   Input,
-  Link,
   RadioGroup,
   Select,
   SpaceBetween,
@@ -51,6 +50,31 @@ import {
   setAt,
 } from './config-model';
 
+const PATH = PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number]));
+
+// The parts of a section schema the controls read. JSON Schema nests, so a
+// nested schema is checked one level down only.
+const SCHEMA = PropTypes.shape({
+  type: PropTypes.oneOfType([PropTypes.string, PropTypes.arrayOf(PropTypes.string)]),
+  title: PropTypes.string,
+  description: PropTypes.string,
+  enum: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.bool])),
+  enumLabels: PropTypes.objectOf(PropTypes.string),
+  booleanLabels: PropTypes.shape({ true: PropTypes.string, false: PropTypes.string }),
+  widget: PropTypes.string,
+  format: PropTypes.string,
+  rows: PropTypes.number,
+  examples: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])),
+  itemLabel: PropTypes.string,
+  keyLabel: PropTypes.string,
+  mergeStrategy: PropTypes.string,
+  disabledValue: PropTypes.string,
+  numberedKeys: PropTypes.bool,
+  propertyNames: PropTypes.shape({ pattern: PropTypes.string }),
+  properties: PropTypes.objectOf(PropTypes.shape({})),
+  items: PropTypes.shape({}),
+});
+
 /**
  * What every control in one section needs: the section's values and the
  * shipped ones, the deployment settings some fields are shown for, the
@@ -69,7 +93,14 @@ const displayValue = (value) => {
 };
 
 // The label, the "Changed" marker, the reset link and the problems of one value.
-const FieldFrame = ({ label, description, path, children, constraintText = undefined, secondaryControl = null }) => {
+const FieldFrame = ({
+  label,
+  description = undefined,
+  path,
+  children,
+  constraintText = undefined,
+  secondaryControl = null,
+}) => {
   const { values, defaults, reset, problemsAt, readOnly } = useSection();
   const changed = differsAt(defaults, values, path);
   const shipped = hasAt(defaults, path);
@@ -88,9 +119,9 @@ const FieldFrame = ({ label, description, path, children, constraintText = undef
         description={description}
         info={
           changed && shipped && !readOnly ? (
-            <Link variant="info" onFollow={() => reset(path)} ariaLabel={`Reset ${label} to the default`}>
+            <Button variant="inline-link" onClick={() => reset(path)} ariaLabel={`Reset ${label} to the default`}>
               Reset to default
-            </Link>
+            </Button>
           ) : undefined
         }
         constraintText={constraintText || (showDefault ? `Default: ${displayValue(shippedValue)}` : undefined)}
@@ -107,7 +138,7 @@ const FieldFrame = ({ label, description, path, children, constraintText = undef
 FieldFrame.propTypes = {
   label: PropTypes.node.isRequired,
   description: PropTypes.node,
-  path: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])).isRequired,
+  path: PATH.isRequired,
   children: PropTypes.node.isRequired,
   constraintText: PropTypes.node,
   secondaryControl: PropTypes.node,
@@ -118,7 +149,7 @@ const NUMBER_TEXT = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/;
 // A number typed as text. The text is kept while it is being typed, so "0.0"
 // on the way to "0.05" is not rewritten to "0"; a value that is not a number
 // is kept as text, which the validator reports.
-const NumberInput = ({ value, onChange, ariaLabel, disabled }) => {
+const NumberInput = ({ value = undefined, onChange, ariaLabel, disabled = false }) => {
   const [draft, setDraft] = useState(value === undefined ? '' : `${value}`);
   useEffect(() => {
     setDraft((current) => (Number(current) === value && current.trim() !== '' ? current : `${value ?? ''}`));
@@ -146,7 +177,7 @@ NumberInput.propTypes = {
 };
 
 // The control for one value that is not an object or a list.
-const ScalarControl = ({ schema, value, onChange, ariaLabel }) => {
+const ScalarControl = ({ schema, value = undefined, onChange, ariaLabel }) => {
   const { readOnly } = useSection();
   const type = typeOf(schema);
   if (type === 'boolean') {
@@ -226,7 +257,7 @@ const ScalarControl = ({ schema, value, onChange, ariaLabel }) => {
 };
 
 ScalarControl.propTypes = {
-  schema: PropTypes.shape({}).isRequired,
+  schema: SCHEMA.isRequired,
   value: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.bool]),
   onChange: PropTypes.func.isRequired,
   ariaLabel: PropTypes.string.isRequired,
@@ -247,8 +278,8 @@ const ScalarField = ({ schema, path, label, secondaryControl = null }) => {
 };
 
 ScalarField.propTypes = {
-  schema: PropTypes.shape({ description: PropTypes.string }).isRequired,
-  path: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])).isRequired,
+  schema: SCHEMA.isRequired,
+  path: PATH.isRequired,
   label: PropTypes.node.isRequired,
   secondaryControl: PropTypes.node,
 };
@@ -266,6 +297,8 @@ const ListField = ({ schema, path, label }) => {
         definition={[
           {
             label: schema.itemLabel || 'Item',
+            // A render callback AttributeEditor calls for each row, not a component.
+            // eslint-disable-next-line react/no-unstable-nested-components
             control: ({ item, index }) => (
               <ScalarControl
                 schema={itemSchema}
@@ -302,12 +335,8 @@ const ListField = ({ schema, path, label }) => {
 };
 
 ListField.propTypes = {
-  schema: PropTypes.shape({
-    description: PropTypes.string,
-    items: PropTypes.shape({}),
-    itemLabel: PropTypes.string,
-  }).isRequired,
-  path: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])).isRequired,
+  schema: SCHEMA.isRequired,
+  path: PATH.isRequired,
   label: PropTypes.node.isRequired,
 };
 
@@ -362,7 +391,7 @@ const AddEntry = ({ schema, existing, onAdd }) => {
 };
 
 AddEntry.propTypes = {
-  schema: PropTypes.shape({ keyLabel: PropTypes.string, propertyNames: PropTypes.shape({}) }).isRequired,
+  schema: SCHEMA.isRequired,
   existing: PropTypes.arrayOf(PropTypes.string).isRequired,
   onAdd: PropTypes.func.isRequired,
 };
@@ -374,7 +403,7 @@ const ChangedBadges = ({ path }) => {
 };
 
 ChangedBadges.propTypes = {
-  path: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])).isRequired,
+  path: PATH.isRequired,
 };
 
 // A group of settings under a heading: an object with named properties, or
@@ -414,13 +443,17 @@ const Group = ({ label, description = undefined, path, actions = null, children 
 Group.propTypes = {
   label: PropTypes.string.isRequired,
   description: PropTypes.string,
-  path: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])).isRequired,
+  path: PATH.isRequired,
   actions: PropTypes.node,
   children: PropTypes.node.isRequired,
 };
 
-// eslint-disable-next-line no-use-before-define -- the editor's controls are mutually recursive
-const renderNode = (props) => <SchemaNode {...props} />;
+// The editor's controls are mutually recursive.
+// eslint-disable-next-line no-use-before-define
+const renderNode = ({ schema, path, label, nested = false }) => (
+  // eslint-disable-next-line no-use-before-define
+  <SchemaNode schema={schema} path={path} label={label} nested={nested} />
+);
 
 // An object whose entries are named by the administrator: prices by region,
 // notes by service. An entry the release ships can be reset, not removed,
@@ -467,8 +500,8 @@ const MapField = ({ schema, path }) => {
 };
 
 MapField.propTypes = {
-  schema: PropTypes.shape({}).isRequired,
-  path: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])).isRequired,
+  schema: SCHEMA.isRequired,
+  path: PATH.isRequired,
 };
 
 // An object with named properties, in their declared order, each shown only
@@ -490,8 +523,8 @@ const ObjectFields = ({ schema, path }) => {
 };
 
 ObjectFields.propTypes = {
-  schema: PropTypes.shape({}).isRequired,
-  path: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])).isRequired,
+  schema: SCHEMA.isRequired,
+  path: PATH.isRequired,
 };
 
 // The label of a numbered entry, applied when the field is left rather than
@@ -559,9 +592,10 @@ const NumberedMap = ({ schema, path }) => {
   const itemLabel = schema.itemLabel || 'Entry';
   const keys = entries.map((entry) => entry.key);
   const unique = (base) => {
+    const labels = new Set(entries.map((entry) => entry.label));
     let label = base;
     let n = 2;
-    while (entries.some((entry) => entry.label === label)) {
+    while (labels.has(label)) {
       label = `${base} ${n}`;
       n += 1;
     }
@@ -676,13 +710,8 @@ const NumberedMap = ({ schema, path }) => {
 };
 
 NumberedMap.propTypes = {
-  schema: PropTypes.shape({
-    mergeStrategy: PropTypes.string,
-    disabledValue: PropTypes.string,
-    keyLabel: PropTypes.string,
-    itemLabel: PropTypes.string,
-  }).isRequired,
-  path: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])).isRequired,
+  schema: SCHEMA.isRequired,
+  path: PATH.isRequired,
 };
 
 /** The control for any value, chosen from its schema. */
@@ -709,8 +738,8 @@ export const SchemaNode = ({ schema, path, label = '', nested = false }) => {
 };
 
 SchemaNode.propTypes = {
-  schema: PropTypes.shape({ numberedKeys: PropTypes.bool, properties: PropTypes.shape({}) }).isRequired,
-  path: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])).isRequired,
+  schema: SCHEMA.isRequired,
+  path: PATH.isRequired,
   label: PropTypes.string,
   nested: PropTypes.bool,
 };
@@ -719,7 +748,15 @@ SchemaNode.propTypes = {
  * The provider every control of one section reads. `onChange` receives the
  * section's whole new values.
  */
-export const SectionProvider = ({ values, defaults, settings, problems, readOnly, onChange, children }) => {
+export const SectionProvider = ({
+  values,
+  defaults,
+  settings = {},
+  problems,
+  readOnly = false,
+  onChange,
+  children,
+}) => {
   const context = useMemo(() => {
     const byPath = new Map();
     problems.forEach((problem) => {
@@ -745,8 +782,7 @@ SectionProvider.propTypes = {
   values: PropTypes.shape({}).isRequired,
   defaults: PropTypes.shape({}).isRequired,
   settings: PropTypes.shape({}),
-  problems: PropTypes.arrayOf(PropTypes.shape({ path: PropTypes.arrayOf(PropTypes.any), message: PropTypes.string }))
-    .isRequired,
+  problems: PropTypes.arrayOf(PropTypes.shape({ path: PATH, message: PropTypes.string })).isRequired,
   readOnly: PropTypes.bool,
   onChange: PropTypes.func.isRequired,
   children: PropTypes.node.isRequired,

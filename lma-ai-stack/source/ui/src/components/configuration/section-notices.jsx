@@ -23,7 +23,7 @@ const NovaSonicNotice = () =>
     </Alert>
   );
 
-const AsrEngineNotice = ({ settings }) => {
+const AsrEngineNotice = ({ settings = {} }) => {
   const diarization = `${settings?.AsrDiarizationAvailable}` === 'true';
   return (
     <>
@@ -49,7 +49,13 @@ const AsrEngineNotice = ({ settings }) => {
   );
 };
 
-AsrEngineNotice.propTypes = { settings: PropTypes.shape({}) };
+const SETTINGS = PropTypes.shape({
+  AsrDiarizationAvailable: PropTypes.oneOfType([PropTypes.string, PropTypes.bool]),
+  AsrModelBundleName: PropTypes.string,
+  AsrModelBundleId: PropTypes.string,
+});
+
+AsrEngineNotice.propTypes = { settings: SETTINGS };
 
 const NOTICES = {
   nova_sonic_config: NovaSonicNotice,
@@ -63,7 +69,7 @@ const SectionNotice = ({ section, settings = {} }) => {
 
 SectionNotice.propTypes = {
   section: PropTypes.string.isRequired,
-  settings: PropTypes.shape({}),
+  settings: SETTINGS,
 };
 
 export default SectionNotice;
