@@ -802,10 +802,11 @@ def test_replacing_a_whole_profile_checks_every_section_in_it() -> None:
     assert not dynamo.puts()
 
 
-def test_the_seeder_and_a_restore_are_not_held_to_the_schema() -> None:
-    """What they write was accepted when it was first saved.
+def test_the_seeder_is_not_held_to_the_schema() -> None:
+    """What it adopts was accepted when it was first saved.
 
-    Refusing it would turn a deployment, or a recovery, into a failure.
+    Refusing it would turn a deployment into a failure. A restore is covered in
+    test_revisions.py.
     """
     store, dynamo, _ = build()
     store.write_default(DEFAULT_BODY)

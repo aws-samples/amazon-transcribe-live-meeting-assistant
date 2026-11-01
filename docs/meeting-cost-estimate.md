@@ -174,7 +174,10 @@ profile and keep winning over the baseline:
   `call_pricing` section's [schema](configuration-store.md#section-schemas-and-validation)
   and refused as a whole, naming each problem, if a price is not a finite,
   non-negative number, a region, service or unit name is not in the form the table
-  uses, or a key is one the table does not have. `ExpectedVersion` is required, and a
+  uses (a region is `default` or a code such as `us-east-1`, a service is
+  `<service>/<api-or-model>`, a unit is a word such as `inputTokens`), `currency`
+  is anything but `USD`, `pricesAsOf` is not a `YYYY-MM-DD` date, or a key is one
+  the table does not have. `ExpectedVersion` is required, and a
   save against a version another Admin has since saved is refused rather than
   overwriting their change.
   The version is that of the whole `custom` profile, which the Transcript Summary

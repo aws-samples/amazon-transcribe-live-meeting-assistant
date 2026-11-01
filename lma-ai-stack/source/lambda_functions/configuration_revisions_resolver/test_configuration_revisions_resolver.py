@@ -34,6 +34,7 @@ if str(LAYER) not in sys.path:
 os.environ.setdefault("CONFIGURATION_TABLE_NAME", "lma-configuration")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
+from lma_config.errors import UnknownConfigurationSection  # noqa: E402
 from lma_config.store import ConfigurationStore  # noqa: E402
 from lma_config.test_revisions import BUCKET, TABLE, FakeDynamo, FakeS3  # noqa: E402
 
@@ -274,10 +275,10 @@ def test_a_section_with_no_schema_is_not_reported_as_invalid_input(
     store, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def missing() -> Dict[str, Any]:
-        raise index.UnknownConfigurationSection("no schema shipped")
+        raise UnknownConfigurationSection("no schema shipped")
 
     monkeypatch.setattr(index, "section_schemas", missing)
-    with pytest.raises(index.UnknownConfigurationSection):
+    with pytest.raises(UnknownConfigurationSection):
         call("getConfiguration")
 
 

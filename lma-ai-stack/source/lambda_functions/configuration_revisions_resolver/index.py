@@ -59,7 +59,6 @@ from lma_config import (  # from the configuration layer
     InvalidConfiguration,
     RevisionEntry,
     RevisionNotFound,
-    UnknownConfigurationSection,
     registered_sections,
     section_schemas,
     validate_profile_name,
@@ -233,6 +232,9 @@ def update_configuration(
         raise ValueError(f"Sections is not valid JSON: {error}") from error
     if not isinstance(sections, dict) or not sections:
         raise ValueError("Sections must be a JSON object naming at least one section")
+    unknown = sorted(name for name in sections if name not in registered_sections())
+    if unknown:
+        raise InvalidConfiguration([f"{name}: is not a configuration section" for name in unknown])
     # The editor saves into a profile that exists. Creating one is a different
     # operation, with its own name to choose, and is not offered here.
     if not CONFIG_STORE.read_profile(profile, consistent_read=True).exists:
@@ -366,11 +368,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # the answer to the admin, not in CloudWatch.
         LOGGER.info("refused a %s against a superseded profile", field)
         raise Exception(f"Conflict: {error}") from error  # pylint: disable=broad-exception-raised
-    except (InvalidConfiguration, UnknownConfigurationSection) as error:
-        if field != UPDATE_CONFIGURATION_FIELD:
-            # Not something the caller sent: a read that meets a section with no
-            # schema is a packaging fault, and is reported as one.
-            raise
+    except InvalidConfiguration as error:
+        # Only what the caller sent. A registered section that ships no schema is
+        # a packaging fault, and reaches the client as itself.
         # The prefix a configuration editor is to match on, to show the problems
         # beside the save rather than as a failure to try again.
         raise Exception(f"Invalid: {error}") from error  # pylint: disable=broad-exception-raised

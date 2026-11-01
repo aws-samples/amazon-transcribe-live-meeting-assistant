@@ -245,6 +245,59 @@
       "problems": []
     },
     {
+      "name": "a dot does not match a carriage return",
+      "schema": {
+        "type": "string",
+        "pattern": "^[0-9]+#.+$"
+      },
+      "value": "1#A\r",
+      "problems": [
+        "(the value): \"1#A\\r\" does not match ^[0-9]+#.+$"
+      ]
+    },
+    {
+      "name": "a dot inside a character class is a dot",
+      "schema": {
+        "type": "string",
+        "pattern": "^[.]$"
+      },
+      "value": ".",
+      "problems": []
+    },
+    {
+      "name": "a whole-number float is written as JavaScript writes it",
+      "schema": {
+        "type": "number",
+        "minimum": 0
+      },
+      "value": -1.0,
+      "problems": [
+        "(the value): must be at least 0; got -1"
+      ]
+    },
+    {
+      "name": "a small number is written as JavaScript writes it",
+      "schema": {
+        "type": "number",
+        "maximum": 1e-08
+      },
+      "value": 7e-08,
+      "problems": [
+        "(the value): must be at most 1e-8; got 7e-8"
+      ]
+    },
+    {
+      "name": "a number below one millionth",
+      "schema": {
+        "type": "number",
+        "minimum": 2.5e-05
+      },
+      "value": 1e-07,
+      "problems": [
+        "(the value): must be at least 0.000025; got 1e-7"
+      ]
+    },
+    {
       "name": "unknown property refused",
       "schema": {
         "type": "object",

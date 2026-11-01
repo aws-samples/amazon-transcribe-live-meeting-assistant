@@ -44,6 +44,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
@@ -185,32 +186,98 @@ def _type_matches(expected: str, value: Any) -> bool:
     return expected == "number"
 
 
-#: A ``$`` that is an anchor: not escaped. The shipped patterns use none inside a
-#: character class, which the layer's tests assert.
-_END_ANCHOR = re.compile(r"(?<!\\)\$")
+#: What JavaScript's ``.`` does not match, outside a ``s``-flagged expression.
+#: Python's ``.`` excludes only ``\n``.
+_JS_DOT = "[^\\n\\r\\u2028\\u2029]"
+
+
+def _translate(pattern: str) -> str:
+    """``pattern`` rewritten so Python's ``re`` reads it as JavaScript does.
+
+    The patterns here meet two differences. Python's ``$`` also matches just
+    before a final newline, where JavaScript's matches only at the end, so
+    "us-east-1\\n" would pass the server and fail the editor; ``\\Z`` is
+    Python's end of the text. And Python's ``.`` matches a carriage return and
+    the Unicode line and paragraph separators, which JavaScript's does not.
+    Only a ``$`` or ``.`` that is neither escaped nor inside a character class
+    is rewritten.
+    """
+    out: List[str] = []
+    in_class = False
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "\\":
+            out.append(pattern[index : index + 2])
+            index += 2
+            continue
+        if in_class:
+            in_class = char != "]"
+            out.append(char)
+        elif char == "[":
+            in_class = True
+            out.append(char)
+        elif char == "$":
+            out.append("\\Z")
+        elif char == ".":
+            out.append(_JS_DOT)
+        else:
+            out.append(char)
+        index += 1
+    return "".join(out)
 
 
 @lru_cache(maxsize=None)
 def _compiled(pattern: str) -> "re.Pattern[str]":
-    """``pattern`` as JavaScript reads it, for Python's ``re``.
-
-    The one difference the patterns here can meet: Python's ``$`` also matches
-    just before a final newline, JavaScript's does not, so "us-east-1\\n" would
-    pass the server and fail the editor. ``\\Z`` is Python's end of the text.
-    """
-    return re.compile(_END_ANCHOR.sub(r"\\Z", pattern))
+    return re.compile(_translate(pattern))
 
 
 def _search(pattern: str, text: str) -> bool:
     return _compiled(pattern).search(text) is not None
 
 
-def _json(value: Any) -> str:
-    """A value as a message quotes it: JSON, with non-ASCII text left as it is.
+def _number(value: Any) -> str:
+    """A number as JavaScript prints it, so both copies word a message alike.
 
-    ``ensure_ascii=False`` because the UI's copy uses ``JSON.stringify``, which
-    does not escape it either.
+    Python writes ``-1.0`` and ``7e-08`` where JavaScript writes ``-1`` and
+    ``7e-8``. This is ECMAScript's Number-to-String: the shortest digits that
+    read back as the same number, in plain form from 1e-6 up to 1e21 and in
+    exponent form outside it.
     """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, int):
+        return str(value)
+    if not math.isfinite(value):
+        return str(value)
+    if value == 0:
+        return "0"
+    sign = "-" if value < 0 else ""
+    _, digit_tuple, exponent = Decimal(repr(abs(value))).normalize().as_tuple()
+    digits = "".join(str(d) for d in digit_tuple)
+    k = len(digits)
+    n = k + int(exponent)
+    if k <= n <= 21:
+        text = digits + "0" * (n - k)
+    elif 0 < n <= 21:
+        text = f"{digits[:n]}.{digits[n:]}"
+    elif -6 < n <= 0:
+        text = "0." + "0" * (-n) + digits
+    else:
+        power = n - 1
+        mantissa = digits[0] + (f".{digits[1:]}" if k > 1 else "")
+        text = f"{mantissa}e{'+' if power > 0 else '-'}{abs(power)}"
+    return sign + text
+
+
+def _json(value: Any) -> str:
+    """A value as a message quotes it, as the UI's ``JSON.stringify`` would.
+
+    Non-ASCII text is left as it is, and a number is written as JavaScript
+    writes it.
+    """
+    if isinstance(value, float):
+        return _number(value)
     return json.dumps(value, ensure_ascii=False)
 
 
@@ -266,9 +333,13 @@ def check(schema: Mapping[str, Any], value: Any, path: Tuple[str, ...] = ()) -> 
 
     if _type_matches("number", value):
         if "minimum" in schema and value < schema["minimum"]:
-            problems.append(f"{where}: must be at least {schema['minimum']}; got {value}")
+            problems.append(
+                f"{where}: must be at least {_number(schema['minimum'])}; got {_number(value)}"
+            )
         if "maximum" in schema and value > schema["maximum"]:
-            problems.append(f"{where}: must be at most {schema['maximum']}; got {value}")
+            problems.append(
+                f"{where}: must be at most {_number(schema['maximum'])}; got {_number(value)}"
+            )
 
     if isinstance(value, str):
         # Code points, as JSON Schema counts them; Python's len and the UI's

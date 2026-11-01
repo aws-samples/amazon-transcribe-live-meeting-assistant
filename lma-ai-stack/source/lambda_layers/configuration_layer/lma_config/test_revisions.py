@@ -598,6 +598,19 @@ def test_restore_records_the_old_body_as_a_new_revision() -> None:
     assert s3.envelope(4)["RestoredFrom"] == 2
 
 
+def test_a_restore_is_not_held_to_the_schema() -> None:
+    """A revision holds what was accepted when it was saved; a recovery must not fail on it."""
+    store, dynamo, _ = build()
+    # Seeded, so not checked: a value a later schema would refuse.
+    store.seed_profile(PROFILE, {SECTION: {"promptMode": "legacy-value"}})
+    save(store, {"voiceId": "matthew"})
+
+    outcome = store.restore_revision(PROFILE, 1, updated_by="a@example.com", expected_version=2)
+
+    assert outcome.revision == 3
+    assert dynamo.body(PROFILE_KEY) == {SECTION: {"promptMode": "legacy-value"}}
+
+
 def test_restoring_the_body_the_profile_already_holds_records_nothing() -> None:
     store, dynamo, _ = build()
     store.seed_profile(PROFILE, {})

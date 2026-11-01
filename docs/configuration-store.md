@@ -344,8 +344,12 @@ are held to one fixture, `lma-ai-stack/test/fixtures/configuration_schema_cases.
 each case is a schema, a value, and the exact problems both must report, in order,
 and pytest and vitest each run every case. The UI's tests also compile every
 pattern in the shipped schemas as a JavaScript regular expression, since a pattern
-only one language accepted would make the two disagree. The server's check is
-the one that decides.
+only one language accepted would make the two disagree. Where the two languages
+read a pattern differently, the server's copy reads it as JavaScript does: `$`
+matches only at the end of the text, where Python's would also match before a
+final newline, and `.` does not match a carriage return or a Unicode line or
+paragraph separator. It also writes numbers in messages as JavaScript does
+(`-1`, `7e-8`). The server's check is the one that decides.
 
 ### Which writes are checked
 
