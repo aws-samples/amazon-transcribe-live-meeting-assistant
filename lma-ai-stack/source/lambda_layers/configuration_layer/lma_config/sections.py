@@ -297,6 +297,27 @@ RECORDING = register(
     )
 )
 
+#: The Virtual Participant's own settings: its voice assistant provider, wake
+#: phrases and activation duration, the ElevenLabs agent and the Simli face, and
+#: how a Teams Virtual Participant decides its meeting has ended. Read once, when
+#: a Virtual Participant starts, and applied to its environment before anything
+#: in it reads them (stack-settings.ts in the Virtual Participant).
+#:
+#: Immediate tier, as for the Nova Sonic settings the same reader takes at the
+#: same moment: one read per Virtual Participant, and the page says a change
+#: applies to the next one to start.
+VIRTUAL_PARTICIPANT = register(
+    SectionSpec(
+        name="virtual_participant",
+        cache_tier=CacheTier.IMMEDIATE,
+        description=(
+            "Virtual Participant settings read when it starts: the voice assistant provider, "
+            "wake phrases and activation duration, the ElevenLabs agent and Simli face, and "
+            "Teams meeting-end detection."
+        ),
+    )
+)
+
 #: The phrase that wakes the meeting assistant, as a regular expression matched
 #: against each finished transcript segment by the call event processor.
 #:

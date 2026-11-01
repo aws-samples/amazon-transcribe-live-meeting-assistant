@@ -14,5 +14,13 @@
   "EnableAudioRecording": {"section": "recording", "setting": "recordAudio", "type": "boolean"},
   "AssistantWakePhraseRegEx": {"section": "meeting_assist", "setting": "wakePhraseRegex", "type": "string"},
   "TranscriptLambdaHookFunctionNonPartialOnly": {"section": "meeting_processing", "setting": "transcriptHookNonPartialOnly", "type": "boolean"},
-  "MeetingInactivityLookbackInDays": {"section": "meeting_processing", "setting": "inactiveMeetingLookbackDays", "type": "integer"}
+  "MeetingInactivityLookbackInDays": {"section": "meeting_processing", "setting": "inactiveMeetingLookbackDays", "type": "integer"},
+  "VoiceAssistantProvider": {"section": "virtual_participant", "setting": "voiceAssistantProvider", "type": "string"},
+  "VoiceAssistantWakePhrases": {"section": "virtual_participant", "setting": "voiceAssistantWakePhrases", "type": "string"},
+  "VoiceAssistantActivationDuration": {"section": "virtual_participant", "setting": "voiceAssistantActivationDuration", "type": "integer"},
+  "ElevenLabsAgentId": {"section": "virtual_participant", "setting": "elevenLabsAgentId", "type": "string"},
+  "SimliFaceId": {"section": "virtual_participant", "setting": "simliFaceId", "type": "string"},
+  "VPAttendeePollMs": {"section": "virtual_participant", "setting": "attendeePollMs", "type": "integer"},
+  "VPPollsBeforeEnd": {"section": "virtual_participant", "setting": "pollsBeforeEnd", "type": "integer"},
+  "VPPollsBeforeEndMissing": {"section": "virtual_participant", "setting": "pollsBeforeEndMissing", "type": "integer"}
 }

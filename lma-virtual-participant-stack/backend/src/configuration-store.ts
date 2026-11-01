@@ -263,6 +263,72 @@ export const RECORDING = declareSection({
 });
 
 /**
+ * The Virtual Participant's own settings -- its voice assistant and avatar, and
+ * how a Teams Virtual Participant decides a meeting has ended -- read once when
+ * it starts. Immediate, as in the Python half, like the Nova Sonic settings the
+ * same reader takes at the same moment.
+ */
+export const VIRTUAL_PARTICIPANT = declareSection({
+    name: 'virtual_participant',
+    cacheTier: 'immediate',
+    description:
+        'Virtual Participant settings read when it starts: the voice assistant provider, wake phrases and ' +
+        'activation duration, the ElevenLabs agent and Simli face, and Teams meeting-end detection.',
+});
+
+/** The Amazon Transcribe options whose combination is checked; see transcribeOptionsProblem. */
+export interface TranscribeOptionCombination {
+    readonly languageCode: string;
+    readonly languageOptions: string;
+    readonly preferredLanguage: string;
+    readonly customVocabularyName: string;
+    readonly customLanguageModelName: string;
+}
+
+/**
+ * Why a set of Amazon Transcribe options cannot be used together, or undefined
+ * when it can.
+ *
+ * The checks the stack makes of its parameters while it deploys
+ * (ValidateParameters in lma-main.yaml), which a value saved on the
+ * Configuration page has not been through: language identification needs
+ * language options, at most one dialect per language, a preferred language
+ * among them, and no custom vocabulary or language model. Here rather than in a
+ * reader because both readers of these options, the WebSocket transcriber and
+ * the Virtual Participant, make them.
+ */
+export const transcribeOptionsProblem = (options: TranscribeOptionCombination): string | undefined => {
+    if (options.languageCode !== 'identify-language' && options.languageCode !== 'identify-multiple-languages') {
+        return undefined;
+    }
+    if (options.customVocabularyName) {
+        return `a custom vocabulary cannot be used with ${options.languageCode}`;
+    }
+    if (options.customLanguageModelName) {
+        return `a custom language model cannot be used with ${options.languageCode}`;
+    }
+    const languages = options.languageOptions
+        .split(',')
+        .map((code) => code.trim())
+        .filter((code) => code.length > 0);
+    if (languages.length === 0) {
+        return `${options.languageCode} needs language options`;
+    }
+    const seen = new Set<string>();
+    for (const code of languages) {
+        const language = code.split('-')[0];
+        if (seen.has(language)) {
+            return `the language options name more than one dialect of '${language}'`;
+        }
+        seen.add(language);
+    }
+    if (options.preferredLanguage !== 'None' && options.preferredLanguage !== '' && !languages.includes(options.preferredLanguage)) {
+        return `the preferred language ${options.preferredLanguage} is not one of the language options`;
+    }
+    return undefined;
+};
+
+/**
  * The type of a setting whose default is a stack parameter, as the Python
  * half's `parameter_defaults.json` names it.
  */

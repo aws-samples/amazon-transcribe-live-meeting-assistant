@@ -4,6 +4,9 @@
  * Creates the appropriate voice assistant provider based on configuration
  */
 
+// First, so the Configuration page's values are in the environment before this
+// module reads it at import: see stack-settings.ts.
+import './stack-settings.js';
 import { VoiceAssistantProvider, ProviderConfig } from './voice-assistant-interface.js';
 import { ElevenLabsAgent } from './elevenlabs-agent.js';
 import { NovaAgent } from './nova-agent.js';

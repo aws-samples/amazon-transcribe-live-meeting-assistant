@@ -379,6 +379,12 @@ The voice used by the assistant is configurable per provider. Set the desired vo
 
 The following CloudFormation parameters control voice assistant behavior:
 
+> These are also settings in the **Virtual Participant** section of the
+> [Configuration page](configuration-guide.md): the provider, the wake phrases and the activation duration can be changed there while
+> the stack runs, and apply to the next Virtual Participant to start. The stack
+> parameters are their defaults, and a value saved on the page takes precedence
+> until it is reset. The activation mode and the API keys are stack parameters only.
+
 | Parameter | Values | Description |
 |---|---|---|
 | **VoiceAssistantProvider** | `none` (default), `elevenlabs`, `amazon_nova_sonic` | Selects the voice provider or disables the voice assistant |

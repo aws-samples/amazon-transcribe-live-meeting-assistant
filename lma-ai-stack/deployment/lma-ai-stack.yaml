@@ -271,6 +271,51 @@ Parameters:
     Default: ""
     Description: Default of whether meeting audio is recorded, written into the configuration baseline.
 
+  # The Virtual Participant's own settings. Read by the Virtual Participant, not
+  # by anything in this stack; passed here only so the configuration seeder can
+  # write them into the baseline as the defaults of the Virtual Participant
+  # section. lma-main.yaml validates them; empty, as a standalone deployment of
+  # this stack leaves them, is not written where the section needs a value.
+  VoiceAssistantProvider:
+    Type: String
+    Default: ""
+    Description: Default of the voice assistant provider, written into the configuration baseline.
+
+  VoiceAssistantWakePhrases:
+    Type: String
+    Default: ""
+    Description: Default of the voice assistant wake phrases, written into the configuration baseline.
+
+  VoiceAssistantActivationDuration:
+    Type: String
+    Default: ""
+    Description: Default of the voice assistant activation duration, written into the configuration baseline.
+
+  ElevenLabsAgentId:
+    Type: String
+    Default: ""
+    Description: Default of the ElevenLabs agent, written into the configuration baseline.
+
+  SimliFaceId:
+    Type: String
+    Default: ""
+    Description: Default of the Simli avatar face, written into the configuration baseline.
+
+  VPAttendeePollMs:
+    Type: String
+    Default: ""
+    Description: Default of the Teams meeting-check interval, written into the configuration baseline.
+
+  VPPollsBeforeEnd:
+    Type: String
+    Default: ""
+    Description: Default of the Teams checks alone before leaving, written into the configuration baseline.
+
+  VPPollsBeforeEndMissing:
+    Type: String
+    Default: ""
+    Description: Default of the Teams checks without a meeting before leaving, written into the configuration baseline.
+
   BedrockModelId:
     Default: "global.anthropic.claude-sonnet-5-5"
     Type: String
@@ -2989,7 +3034,8 @@ Resources:
       Handler: lambda_function.handler
       Layers:
         - !Ref TranscriptEnrichmentPythonLayer
-        # lma_metering, for the Comprehend sentiment counter. Pure Python, so
+        # lma_metering, for the Comprehend sentiment counter, and lma_config,
+        # for the wake phrase and the transcript hook mode. Pure Python, so
         # compatible with this function's arm64 architecture.
         - !Ref ConfigurationPythonLayer
       MemorySize: 3000
@@ -3445,6 +3491,14 @@ Resources:
         AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
         TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
         MeetingInactivityLookbackInDays: !Ref MeetingInactivityLookbackInDays
+        VoiceAssistantProvider: !Ref VoiceAssistantProvider
+        VoiceAssistantWakePhrases: !Ref VoiceAssistantWakePhrases
+        VoiceAssistantActivationDuration: !Ref VoiceAssistantActivationDuration
+        ElevenLabsAgentId: !Ref ElevenLabsAgentId
+        SimliFaceId: !Ref SimliFaceId
+        VPAttendeePollMs: !Ref VPAttendeePollMs
+        VPPollsBeforeEnd: !Ref VPPollsBeforeEnd
+        VPPollsBeforeEndMissing: !Ref VPPollsBeforeEndMissing
 
   # Revision bodies for the configuration history: one gzipped object per
   # revision at config_revisions/<profile>/<nnnnnn>.json.gz, with the metadata

@@ -90,6 +90,7 @@ const SECTION_LABELS = {
   recording: 'Meeting recording',
   meeting_assist: 'Meeting assistant',
   meeting_processing: 'Meeting processing',
+  virtual_participant: 'Virtual Participant',
 };
 
 export const sectionLabel = (section) => SECTION_LABELS[section] || section;
