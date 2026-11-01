@@ -37,6 +37,11 @@
  *
  * Kept free of I/O so it can be tested on synthetic frames; see
  * keyframe-sampler.ts for the FFmpeg side.
+ *
+ * This file is the original. The WebSocket transcriber judges desktop video
+ * with a copy (lma-websocket-transcriber-stack/source/app/src/
+ * keyframe-detector.ts), and a test there fails when the two differ in
+ * anything but comments and braces, so make a change in both.
  */
 
 export interface KeyframeThresholds {

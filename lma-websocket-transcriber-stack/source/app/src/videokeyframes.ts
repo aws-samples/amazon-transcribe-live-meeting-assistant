@@ -188,6 +188,10 @@ export class KeyframeLane {
     private readonly samples: Buffer[] = [];
     private readonly frames: Array<{ n: number, ptsSeconds: number, width: number, height: number }> = [];
     private judged = 0;
+    /** Samples below this index have had their images removed. */
+    private swept = 0;
+    /** The index of the sample whose images are being saved, or -1. */
+    private savingIndex = -1;
     private emitted = 0;
     private capturing: Promise<void> | null = null;
     private stopped = false;
@@ -283,11 +287,15 @@ export class KeyframeLane {
         }
         this.inputEnded = true;
         this.proc?.stdin?.end();
-        const timeout = new Promise<void>((resolve) => setTimeout(() => {
-            this.kill();
-            resolve();
-        }, 15_000));
+        let timer: NodeJS.Timeout | undefined;
+        const timeout = new Promise<void>((resolve) => {
+            timer = setTimeout(() => {
+                this.kill();
+                resolve();
+            }, 15_000);
+        });
         await Promise.race([this.exited, timeout]);
+        clearTimeout(timer);
         this.stopped = true;
         if (this.capturing) {
             await this.capturing.catch(() => undefined);
@@ -335,11 +343,34 @@ export class KeyframeLane {
         }
     }
 
+    /** The two image files FFmpeg writes for sample `index` (image2 numbers them from 1). */
+    private filesFor(index: number): { image: string, thumbnail: string } {
+        const stem = path.join(this.dir, String(index + 1).padStart(6, '0'));
+        return { image: `${stem}.jpg`, thumbnail: `${stem}_t.jpg` };
+    }
+
+    /**
+     * Removes the images of every earlier sample except one being saved. The
+     * images of a sample can be written after the sample itself has been
+     * judged, so removing them only then would miss a late write; sweeping
+     * again at each later sample catches it, and keeps the scratch folder to a
+     * few files however long the stream runs.
+     */
+    private sweep(below: number): void {
+        for (let i = this.swept; i < below; i++) {
+            if (i !== this.savingIndex) {
+                const files = this.filesFor(i);
+                this.io.remove(files.image);
+                this.io.remove(files.thumbnail);
+            }
+        }
+        this.swept = Math.min(below, this.savingIndex === -1 ? below : this.savingIndex);
+    }
+
     private judge(sample: Buffer, frame: { n: number, ptsSeconds: number, width: number, height: number }): void {
         const index = this.judged++;
-        // image2 numbers its files from 1, in output order.
-        const stem = path.join(this.dir, String(index + 1).padStart(6, '0'));
-        const files = { image: `${stem}.jpg`, thumbnail: `${stem}_t.jpg` };
+        this.sweep(index);
+        const files = this.filesFor(index);
         const ptsMs = Math.max(0, frame.ptsSeconds * 1000);
         const decision = this.detector.push(sample, ptsMs, DESKTOP_THRESHOLDS);
         const keep = decision.keep && !this.stopped && this.emitted < MAX_PER_STREAM && !this.capturing;
@@ -364,6 +395,7 @@ export class KeyframeLane {
         const width = Math.min(IMAGE_WIDTH, frame.width);
         const height = frame.width > 0 ? Math.round((width * frame.height) / frame.width / 2) * 2 : 0;
         const kept = decision.kept;
+        this.savingIndex = index;
         this.capturing = this.save(files, timestamp, videoOffset, width, height, decision.changeFraction)
             .catch((err) => {
                 // Not saved, so not the reference either: a slide still on
@@ -376,6 +408,7 @@ export class KeyframeLane {
             .finally(() => {
                 this.io.remove(files.image);
                 this.io.remove(files.thumbnail);
+                this.savingIndex = -1;
                 this.capturing = null;
             });
     }

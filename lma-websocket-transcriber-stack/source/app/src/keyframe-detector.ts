@@ -11,7 +11,9 @@
  *
  * A copy of the Virtual Participant's keyframe-detector.ts
  * (lma-virtual-participant-stack/backend/src), so the desktop capture app's
- * video is judged by the same rule; keep the two in step. The sampler
+ * video is judged by the same rule. That one is the original;
+ * videorecording-keyframes.test.ts fails when the two differ in anything but
+ * comments and braces. The sampler
  * (videokeyframes.ts) feeds it a small grayscale image of each key frame of
  * the incoming H.264 stream, one about every two seconds (a 64x36 grid, each
  * cell the average of a block of the picture). Two comparisons are made:

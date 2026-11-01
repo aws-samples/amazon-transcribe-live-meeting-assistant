@@ -13,6 +13,8 @@
  * not end the lane.
  */
 import { strict as assert } from 'node:assert';
+import fs from 'node:fs';
+import path from 'node:path';
 import { test } from 'node:test';
 import { FastifyInstance } from 'fastify';
 import {
@@ -93,7 +95,40 @@ test('a settled picture is kept once, with both clocks offset from the stream st
         `lma-video-keyframes/Desk_call_7/${e.FrameId}_thumb.jpg`,
     ]);
     // Every sample's images are deleted once judged, the kept one's after upload.
-    assert.equal(h.removed.length, 12);
+    for (let i = 1; i <= 6; i++) {
+        const stem = String(i).padStart(6, '0');
+        assert.ok(h.removed.some((f) => f.endsWith(`${stem}.jpg`)), `sample ${i} image removed`);
+        assert.ok(h.removed.some((f) => f.endsWith(`${stem}_t.jpg`)), `sample ${i} thumbnail removed`);
+    }
+});
+
+test('images written after their sample was judged are removed by a later sample', async () => {
+    const h = harness();
+    // A remove that, like unlink, does nothing for a file that is not there yet.
+    h.io.remove = (file) => {
+        if (fs.existsSync(file)) {
+            fs.unlinkSync(file);
+        }
+    };
+    fs.mkdirSync(h.lane.dir, { recursive: true });
+    try {
+        let v = 0;
+        for (let i = 0; i < 40; i++) {
+            // A moving picture, so nothing is kept and every image is scratch.
+            h.lane.onStdout(flat((v += 37) % 256));
+            h.lane.onStderr(showinfo(i, i * 2));
+            // FFmpeg's write of this sample's images lands after it was judged.
+            const stem = path.join(h.lane.dir, String(i + 1).padStart(6, '0'));
+            fs.writeFileSync(`${stem}.jpg`, 'x');
+            fs.writeFileSync(`${stem}_t.jpg`, 'x');
+            await tick();
+        }
+        assert.equal(h.emitted.length, 0);
+        // Only the newest sample's late images remain, until the next sample.
+        assert.deepEqual(fs.readdirSync(h.lane.dir).sort(), ['000040.jpg', '000040_t.jpg']);
+    } finally {
+        fs.rmSync(h.lane.dir, { recursive: true, force: true });
+    }
 });
 
 test('samples wait for their time, whichever pipe delivers first', async () => {
