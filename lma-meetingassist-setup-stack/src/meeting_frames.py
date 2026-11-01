@@ -193,6 +193,7 @@ def build_tool_result(
     send_images: bool,
     show_inline: bool,
     at_time: Optional[float] = None,
+    first_frame_at: Optional[float] = None,
 ) -> Dict[str, Any]:
     """The Strands tool result: a text block per frame and, where allowed, its image.
 
@@ -200,8 +201,15 @@ def build_tool_result(
     described in text only. ``show_inline`` adds how to show a frame in the
     meeting page's chat, which only that chat can display. ``at_time`` is the
     moment asked about, if any, so a moment before anything was shared is said
-    to be one.
+    to be one. ``first_frame_at`` is when the meeting's first frame went up, so
+    a time range with no frame in it is told apart from a meeting with none.
     """
+    if not selected and total_frames > 0:
+        first = f"; the first went up at {format_time(first_frame_at)}" if first_frame_at is not None else ""
+        return {"status": "success", "content": [{"text": (
+            f"None of the meeting's {total_frames} key frame(s) was on screen in that range{first}. "
+            "Say so; do not describe slides you cannot see."
+        )}]}
     if not selected:
         return {"status": "success", "content": [{"text": NO_FRAMES}]}
     segment_list = list(segments)

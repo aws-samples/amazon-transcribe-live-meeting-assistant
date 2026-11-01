@@ -165,7 +165,9 @@ def test_a_picture_that_could_not_be_read_is_said_to_be_missing():
 
 
 def test_a_meeting_without_frames_is_said_to_have_none():
-    result = result_for([])
+    result = meeting_frames.build_tool_result(
+        [], SEGMENTS, {}, total_frames=0, send_images=True, show_inline=True
+    )
     assert texts(result) == meeting_frames.NO_FRAMES
 
 
@@ -280,6 +282,19 @@ def test_a_moment_before_anything_was_shared_is_said_to_be_one():
         total_frames=4, send_images=False, show_inline=False, at_time=100,
     )
     assert "Nothing had been shared" not in texts(later)
+
+
+def test_a_range_with_no_frame_in_it_is_told_apart_from_a_meeting_with_none():
+    selected = meeting_frames.select_frames(FRAMES, start=0, end=20)
+    assert selected == []
+    result = meeting_frames.build_tool_result(
+        selected, [], {}, total_frames=4, send_images=False, show_inline=False, first_frame_at=30
+    )
+    assert "None of the meeting's 4 key frame(s) was on screen in that range" in texts(result)
+    assert "the first went up at 00:30" in texts(result)
+    assert meeting_frames.NO_FRAMES not in texts(result)
+    none = meeting_frames.build_tool_result([], [], {}, total_frames=0, send_images=False, show_inline=False)
+    assert texts(none) == meeting_frames.NO_FRAMES
 
 
 

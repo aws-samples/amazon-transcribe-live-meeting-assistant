@@ -250,7 +250,7 @@ The AppSync API has a query and a subscription:
 
 ```graphql
 query {
-  getVideoKeyframes(callId: "<CallId>", limit: 100, nextToken: null, afterFrameId: null) {
+  getVideoKeyframes(callId: "<CallId>", limit: 100, nextToken: null, afterFrameId: null, frameId: null) {
     VideoKeyframes { FrameId Timestamp VideoOffset ShareDetected ThumbnailSignedUrl ImageSignedUrl }
     nextToken
   }
@@ -266,7 +266,9 @@ subscription {
 The query returns frames in time order, up to 500 at a time (100 by default),
 with `ThumbnailSignedUrl` and `ImageSignedUrl` filled in; `afterFrameId` returns
 only the frames after the one given, which is how the meeting page fetches a
-frame the subscription announced. The subscription carries no signed links. As
+frame the subscription announced. `frameId` returns just that frame, and with it
+`limit`, `nextToken` and `afterFrameId` are not used; it is how a chat answer's
+picture is resolved. The subscription carries no signed links. As
 with `onAddTranscriptSegment`, its selection must include `Owner` and
 `SharedWith`.
 

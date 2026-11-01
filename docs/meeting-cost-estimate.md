@@ -147,6 +147,11 @@ is guessed from a similar-looking entry. A line with no price is reported as
 unpriced, shown without a cost, left out of every total and counted in
 `UnpricedCount`. A plausible wrong number is worse than a visible gap.
 
+A unit named in `nonChargeableUnits` (the `images` the meeting assistant sends,
+for example) is shown with no cost and is not counted as unpriced. Changes to the
+price table replace a list rather than merging into it, so a custom
+`nonChargeableUnits` must list every such unit, `images` included.
+
 ### Changing a price
 
 The price table is the `call_pricing` section of the

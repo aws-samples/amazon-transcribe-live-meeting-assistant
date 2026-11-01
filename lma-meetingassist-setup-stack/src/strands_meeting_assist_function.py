@@ -1648,6 +1648,10 @@ def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id:
                 selected, segments, images,
                 total_frames=len(frames), send_images=send_images, show_inline=show_inline,
                 at_time=at_seconds,
+                first_frame_at=min(
+                    (float(f['Timestamp']) for f in frames if isinstance(f.get('Timestamp'), (int, float))),
+                    default=None,
+                ),
             )
         except Exception as e:
             logger.error(f"Error reading the meeting's key frames: {str(e)}")
