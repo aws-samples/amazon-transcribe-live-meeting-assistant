@@ -19,15 +19,15 @@
  * from getVideoKeyframes that last an hour, so a thumbnail that fails to load
  * reloads the frames, at most once a minute.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
-import { Box, Button, Container, Header, SpaceBetween, Spinner } from '@cloudscape-design/components';
+import { Box, Button, Container, Header, SpaceBetween, Spinner, TextFilter } from '@cloudscape-design/components';
 
 import getVideoKeyframes from '../../graphql/queries/getVideoKeyframes';
 import onAddVideoKeyframe from '../../graphql/queries/onAddVideoKeyframe';
-import { formatFrameTime, mergeKeyframes } from '../common/video-keyframes';
+import { formatFrameTime, frameMatches, matchSnippet, mergeKeyframes } from '../common/video-keyframes';
 import './VideoTimeline.css';
 
 const logger = new ConsoleLogger('VideoTimeline');
@@ -68,6 +68,7 @@ const VideoTimeline = ({
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
+  const [search, setSearch] = useState('');
   const stripRef = useRef(null);
   const sentinelRef = useRef(null);
   const framesRef = useRef(frames);
@@ -260,6 +261,14 @@ const VideoTimeline = ({
   };
 
   const selected = frames.find((f) => f.FrameId === selectedId);
+  const searching = Boolean(search.trim());
+  const shown = useMemo(() => (searching ? frames.filter((f) => frameMatches(f, search)) : frames), [frames, search]);
+
+  // A search covers the whole meeting: the pages not loaded yet are loaded,
+  // one after another, while it is typed.
+  useEffect(() => {
+    if (searching && nextToken && !loading) loadPage({ token: nextToken });
+  }, [searching, nextToken, loading, loadPage]);
 
   if (loaded && !frames.length && !error) {
     // Nothing to show: a meeting without video, or before its first frame.
@@ -281,8 +290,22 @@ const VideoTimeline = ({
     >
       <SpaceBetween size="s">
         {error && <Box color="text-status-error">{error}</Box>}
+        <TextFilter
+          filteringText={search}
+          filteringPlaceholder="Find text on the shared screen"
+          filteringAriaLabel="Find text on the shared screen"
+          countText={
+            searching
+              ? `${shown.length} ${shown.length === 1 ? 'frame' : 'frames'}${nextToken ? ' so far' : ''}`
+              : undefined
+          }
+          onChange={({ detail }) => setSearch(detail.filteringText)}
+        />
+        {searching && !shown.length && !loading && !nextToken && (
+          <Box color="text-body-secondary">No frame shows that text.</Box>
+        )}
         <div className="video-timeline-strip" ref={stripRef} onScroll={onStripScroll} data-testid="video-timeline">
-          {frames.map((frame) => (
+          {shown.map((frame) => (
             <button
               type="button"
               key={frame.FrameId}
@@ -302,12 +325,13 @@ const VideoTimeline = ({
                 <span className="video-timeline-missing">No image</span>
               )}
               <span className="video-timeline-time">{formatFrameTime(frame.Timestamp)}</span>
+              {searching && <span className="video-timeline-snippet">{matchSnippet(frame, search)}</span>}
             </button>
           ))}
           <div ref={sentinelRef} className="video-timeline-sentinel" />
           {loading && <Spinner />}
         </div>
-        {nextToken && !loading && (
+        {nextToken && !loading && !searching && (
           <Button variant="inline-link" onClick={() => loadPage({ token: nextToken })}>
             Load more
           </Button>
@@ -342,6 +366,11 @@ const VideoTimeline = ({
                 </Button>
               )}
             </SpaceBetween>
+            {selected.SlideText && (
+              <Box variant="small" color="text-body-secondary">
+                <span className="video-timeline-slide-text">{selected.SlideText}</span>
+              </Box>
+            )}
             {selected.ImageSignedUrl && (
               <img
                 className="video-timeline-preview"

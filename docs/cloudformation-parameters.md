@@ -232,6 +232,7 @@ missing.
 |-----------|-------------|---------|----------------|
 | EndOfCallTranscriptSummary | Method used to generate end-of-call summaries | BEDROCK | BEDROCK, LAMBDA |
 | BedrockModelId | Bedrock model used for summarization | Claude Haiku 4.5 | See [Bedrock model choices](#bedrock-model-choices) |
+| KeyframeTextModelId | Bedrock model that reads the text of each key frame of the shared screen (image-capable models only) | Amazon Nova Lite | See [Meeting Video and Key Frames](meeting-video.md#slide-text) |
 | EndOfCallLambdaHookFunctionArn | ARN of a custom Lambda function for summarization (when using LAMBDA mode) | (none) | Valid Lambda ARN |
 
 ### Bedrock model choices

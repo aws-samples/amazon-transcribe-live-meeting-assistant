@@ -32,27 +32,69 @@ went up.
   are taken, and the strip follows them unless it has been scrolled back.
 - **Long meetings** load a hundred frames at a time; the next hundred load as
   the strip is scrolled to its end (or with **Load more**).
+- **Find text on the shared screen** filters the strip to the frames whose
+  [slide text](#slide-text) holds every word typed, in any order, ignoring case
+  and accents, with the line that matched under each thumbnail. It searches the
+  whole meeting: the frames not loaded yet are loaded first. A selected frame
+  shows its text under the picture.
 
 The pictures are shown through links signed by the server for whoever opened
 the page, after the same access check as the transcript, and they last an
 hour; the strip renews them when one has expired. A meeting without key frames
 shows no section at all.
 
+## Slide text
+
+Each key frame's text is read once, a few seconds after the frame is stored: a
+vision model (the `KeyframeTextModelId` stack parameter, Amazon Nova Lite by
+default) transcribes the readable text, top to bottom, and adds a line in
+brackets for a chart, diagram or picture, for example
+`[Bar chart of revenue by quarter]`. It is told not to describe or name people.
+The text is stored on the frame (`SlideText`; empty when the frame holds none)
+and is what:
+
+- the [meeting assistant](#asking-the-assistant-about-the-shared-screen) reads
+  first, before it looks at any picture;
+- the meeting page [searches](#on-the-meeting-page);
+- the meeting-history knowledge base indexes, so the **meeting history** tool
+  and the MCP `search_meetings` tool find a meeting by what was shown as well as
+  by what was said. The text is added to the meeting's transcript document, as a
+  **SHARED SCREEN** section with each frame's time, when the meeting's summary
+  is written (stacks that summarize with Bedrock, which write that document).
+
+A vision model was chosen over Amazon Textract by measurement, on the synthetic
+meeting's frames with their true text known:
+
+| Method | Words read (recall / precision), 4 slides | Dense document page (22 lines) | Cost per frame |
+|---|---|---|---|
+| Amazon Nova Lite | 100% / 100% | 100% / 100% | about $0.0002 |
+| Amazon Nova 2 Lite | 100% / 100% | 100% / 100% | about $0.0002 |
+| Claude Haiku 4.5 | 100% / 100% | 100% / 100% | about $0.0019 |
+| Amazon Textract (`DetectDocumentText`) | 100% / 97% | 100% / 99.6% | $0.0015 |
+
+Every method read every word; the model costs a tenth of Textract and also says
+what a chart shows, which Textract does not. The text read is metered against
+the meeting under **Slide text** in its [cost estimate](meeting-cost-estimate.md).
+
 ## Asking the assistant about the shared screen
 
 The meeting assistant has a `get_meeting_frames` tool that reads the key frames
 a question is about — the last few, those in a time range, or the one on screen
-at a moment — each with what was said while it was on screen. For example:
+at a moment — each with its [slide text](#slide-text) and what was said while it
+was on screen. For example:
 
 - "Summarize that slide." / "What's on this slide?"
 - "Translate the last slide into French."
 - "Show me the last two slides."
 - "What was on screen at 12:30?" / "Which slides did we see between 10:00 and 20:00?"
 
-The pictures go to the model as images when it reads them, which every model the
-stack offers does except Amazon Nova Micro; with Nova Micro the assistant gets
-the times and the transcript only, and says it could not read the slide. At most
-four pictures are sent with one tool call, and at most ten frames are listed.
+The text usually answers the question, so pictures are sent only when it does
+not: when the assistant asks to look (a chart, a diagram, a layout), or for a
+frame whose text has not been read yet. They go to the model as images when it
+reads them, which every model the stack offers does except Amazon Nova Micro;
+with Nova Micro the assistant answers from the text, the times and the
+transcript. At most four pictures are sent with one tool call, and at most ten
+frames are listed.
 The assistant is told to describe what a frame shows and never to identify
 people from their faces.
 
@@ -227,6 +269,7 @@ finds the images. The item has:
 | `Source` | What took the frame: `VIRTUAL_PARTICIPANT` or `DESKTOP_CAPTURE`. |
 | `ShareDetected` | `true` when the frame was taken while the platform showed a share; absent on platforms without the signal and for desktop video. |
 | `ChangeScore` | The part of the picture that differed from the previous key frame. |
+| `SlideText` | The text on the frame, read once after it is stored (see [Slide text](#slide-text)); empty when it holds none. |
 
 ### Retention, access and deletion
 

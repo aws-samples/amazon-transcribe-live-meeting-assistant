@@ -15,7 +15,7 @@ asserted here rather than only at the call sites:
   return no text at all. Reading block zero either stores the model's working as
   the answer or raises, depending on the block's keys.
 
-The module is duplicated verbatim into five deployment packages across two
+The module is duplicated verbatim into six deployment packages across two
 CloudFormation stacks, because each is zipped on its own and there is no layer
 they share. ``test_every_package_ships_the_same_compat_module`` is what keeps the
 copies honest; the rest of the file tests the canonical one.
@@ -38,6 +38,7 @@ COMPAT_COPIES = (
     LAMBDA_FUNCTIONS / "meeting_invitation_parser" / "bedrock_compat.py",
     LAMBDA_FUNCTIONS / "speaker_name_resolver" / "bedrock_compat.py",
     LAMBDA_FUNCTIONS / "agenda_deriver" / "bedrock_compat.py",
+    LAMBDA_FUNCTIONS / "keyframe_text_extractor" / "bedrock_compat.py",
     REPO / "lma-meetingassist-setup-stack" / "src" / "bedrock_compat.py",
 )
 
@@ -59,9 +60,9 @@ def compat():
 
 
 def test_every_package_ships_the_same_compat_module() -> None:
-    """Five packages carry this file; editing one and not the others is the risk.
+    """Six packages carry this file; editing one and not the others is the risk.
 
-    The four Lambda directories are zipped separately by SAM and the meeting
+    The five Lambda directories are zipped separately by SAM and the meeting
     assist copy belongs to a different CloudFormation stack, so none of them can
     import a shared one. Only this test would notice a divergence: each copy is
     exercised by its own package's tests, which would all still pass.
@@ -76,7 +77,7 @@ def test_every_package_ships_the_same_compat_module() -> None:
 
 
 def test_the_compat_module_has_no_third_party_imports(compat) -> None:
-    """It has to import cleanly in five packages with five different requirements."""
+    """It has to import cleanly in six packages with six different requirements."""
     source = COMPAT_COPIES[0].read_text()
     imports = {
         line.split()[1].split(".")[0]

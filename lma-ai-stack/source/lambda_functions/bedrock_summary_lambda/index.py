@@ -179,6 +179,9 @@ def get_transcripts(callId):
         "CallId": callId,
         "ProcessTranscript": PROCESS_TRANSCRIPT,
         "IncludeSpeaker": True,
+        # The text of the shared screen's key frames, for the knowledge base
+        # document (docs/meeting-video.md).
+        "IncludeKeyframes": True,
     }
     print("Invoking lambda", payload)
     response = lambda_client.invoke(
@@ -298,7 +301,34 @@ def format_summary(summary, metadata):
     return json.dumps(summary_dict)
 
 
-def write_to_s3(callId, metadata, transcript, summary):
+def format_elapsed(seconds):
+    """A time from the start of the meeting as [MM:SS], or [H:MM:SS] from an hour."""
+    total = max(0, int(float(seconds or 0)))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"[{hours}:{minutes:02d}:{secs:02d}]" if hours else f"[{minutes:02d}:{secs:02d}]"
+
+
+def shared_screen_section(keyframes):
+    """The text of the shared screen, frame by frame with its time, or "" when there is none.
+
+    Appended to the meeting's transcript document so the meeting-history
+    knowledge base finds a meeting by what was shown as well as what was said.
+    """
+    entries = []
+    for frame in keyframes or []:
+        text = (frame.get("SlideText") or "").strip() if isinstance(frame, dict) else ""
+        if text:
+            entries.append(f"{format_elapsed(frame.get('Timestamp'))} {text}")
+    if not entries:
+        return ""
+    return (
+        "\n\nSHARED SCREEN (the text of each slide, page or view shown, with the time it went up):\n"
+        + "\n\n".join(entries)
+    )
+
+
+def write_to_s3(callId, metadata, transcript, summary, keyframes=None):
     s3 = boto3.client("s3")
     filename = posixify_filename(f"{callId}")
     summary_file_key = f"{S3_PREFIX}{filename}-SUMMARY.txt"
@@ -311,7 +341,11 @@ def write_to_s3(callId, metadata, transcript, summary):
     print(f"Wrote summary to S3: s3://{S3_BUCKET_NAME}/{summary_file_key}")
     s3.put_object(Bucket=S3_BUCKET_NAME, Key=f"{summary_file_key}.metadata.json", Body=kbMetadata)
     print(f"Wrote summary metadata to S3: s3://{S3_BUCKET_NAME}/{summary_file_key}.metadata.json")
-    s3.put_object(Bucket=S3_BUCKET_NAME, Key=transcript_file_key, Body=transcript)
+    s3.put_object(
+        Bucket=S3_BUCKET_NAME,
+        Key=transcript_file_key,
+        Body=transcript + shared_screen_section(keyframes),
+    )
     print(f"Wrote transcript to S3: s3://{S3_BUCKET_NAME}/{transcript_file_key}")
     s3.put_object(
         Bucket=S3_BUCKET_NAME, Key=f"{transcript_file_key}.metadata.json", Body=kbMetadata
@@ -345,7 +379,7 @@ def handler(event, context):
         )
         if not prompt_override:
             # only write to S3 when using default summary prompt
-            write_to_s3(callId, metadata, transcript, summary)
+            write_to_s3(callId, metadata, transcript, summary, transcript_json.get("keyframes"))
     except Exception as e:
         print(e)
         summary = "An error occurred."

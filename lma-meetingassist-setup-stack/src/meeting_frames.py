@@ -6,8 +6,10 @@
 A key frame is a picture of the shared screen kept each time it changed and held
 still (docs/meeting-video.md). The ``get_meeting_frames`` tool hands the agent
 the frames a question is about -- the last few, those in a time range, or the
-one on screen at a moment -- each with what was said while it was on screen,
-and, for a model that reads images, the pictures themselves.
+one on screen at a moment -- each with its text (read once when the frame was
+stored) and what was said while it was on screen. The pictures themselves go
+to the model only when the text is not enough: when the agent asks to look
+(a chart, a diagram, a layout), or for a frame whose text has not been read.
 
 Frames are read through the ``getVideoKeyframes`` query, which signs short-lived
 links to the images; this function's role signs with IAM and is answered as the
@@ -40,7 +42,7 @@ MAX_IMAGE_BYTES = 3_500_000
 KEYFRAMES_QUERY = """
 query GetVideoKeyframes($callId: ID!, $limit: Int, $nextToken: String) {
   getVideoKeyframes(callId: $callId, limit: $limit, nextToken: $nextToken) {
-    VideoKeyframes { FrameId Timestamp VideoOffset Width Height ImageSignedUrl }
+    VideoKeyframes { FrameId Timestamp VideoOffset Width Height SlideText ImageSignedUrl }
     nextToken
   }
 }
@@ -162,6 +164,11 @@ def transcript_between(
     return text
 
 
+def needs_picture(frame: Mapping[str, Any], look: bool) -> bool:
+    """Whether a frame wants its picture sent: when asked to look, or when its text is not there."""
+    return look or not isinstance(frame.get("SlideText"), str)
+
+
 def frames_for_pictures(
     selected: Sequence[Tuple[Mapping[str, Any], Optional[float]]],
     *,
@@ -194,15 +201,18 @@ def build_tool_result(
     show_inline: bool,
     at_time: Optional[float] = None,
     first_frame_at: Optional[float] = None,
+    look: bool = False,
 ) -> Dict[str, Any]:
-    """The Strands tool result: a text block per frame and, where allowed, its image.
+    """The Strands tool result: a text block per frame and, where needed, its image.
 
-    ``images`` holds the downloaded pictures by FrameId; a frame without one is
-    described in text only. ``show_inline`` adds how to show a frame in the
-    meeting page's chat, which only that chat can display. ``at_time`` is the
-    moment asked about, if any, so a moment before anything was shared is said
-    to be one. ``first_frame_at`` is when the meeting's first frame went up, so
-    a time range with no frame in it is told apart from a meeting with none.
+    ``images`` holds the downloaded pictures by FrameId. A picture is sent only
+    for a frame that wants one (see needs_picture; ``look`` is the agent asking
+    to see them) and only to a model that reads images. ``show_inline`` adds how
+    to show a frame in the meeting page's chat, which only that chat can
+    display. ``at_time`` is the moment asked about, if any, so a moment before
+    anything was shared is said to be one. ``first_frame_at`` is when the
+    meeting's first frame went up, so a time range with no frame in it is told
+    apart from a meeting with none.
     """
     if not selected and total_frames > 0:
         first = f"; the first went up at {format_time(first_frame_at)}" if first_frame_at is not None else ""
@@ -216,18 +226,20 @@ def build_tool_result(
     content: List[Dict[str, Any]] = []
     header = [
         f"{len(selected)} of the meeting's {total_frames} key frame(s) of the shared screen, "
-        "oldest first. Each is listed with the time it went up, how long it stayed, and what "
-        "was said while it was on screen."
+        "oldest first. Each is listed with the time it went up, how long it stayed, the text on "
+        "it, and what was said while it was on screen. Describe only what is shown; do not "
+        "identify people from their faces."
     ]
     if send_images:
         header.append(
-            "The pictures follow their descriptions. Read what is on them to answer: titles, "
-            "text, figures. Describe only what is shown; do not identify people from their faces."
+            "Pictures follow the frames whose text was not enough. If the question needs the "
+            "picture of a frame listed without one -- a chart, a diagram, a layout -- call this "
+            "tool again with look_at_pictures=True."
         )
     else:
         header.append(
-            "The pictures cannot be shown to this model, so answer from the times and the "
-            "transcript, and say that the slide itself could not be read."
+            "Pictures cannot be shown to this model, so answer from the text, the times and the "
+            "transcript, and say so when the question needs the picture itself."
         )
     if show_inline:
         header.append(
@@ -238,7 +250,10 @@ def build_tool_result(
         header.append("This answer is text only: describe frames in words, with no image markdown.")
     content.append({"text": "\n".join(header)})
 
-    pictured = {str(f.get("FrameId")) for f in frames_for_pictures(selected, send_images=send_images)}
+    pictured = {
+        str(f.get("FrameId"))
+        for f in frames_for_pictures(selected, send_images=send_images, wants=lambda f: needs_picture(f, look))
+    }
     before_first = at_time is not None and float(selected[0][0]["Timestamp"]) > at_time
     if before_first:
         content.append({"text": (
@@ -254,12 +269,18 @@ def build_tool_result(
         lines = [f"Frame {frame_id}: on screen {span}."]
         if show_inline:
             lines.append(f"Image markdown: {frame_markdown(frame)}")
+        slide_text = frame.get("SlideText")
+        if isinstance(slide_text, str):
+            lines.append(f"Text on it:\n{slide_text}" if slide_text.strip() else "It has no readable text.")
+        else:
+            lines.append("Its text has not been read yet.")
         said = transcript_between(segment_list, went_up, until)
         lines.append(f"What was said while it was on screen:\n{said}" if said else "Nothing was said while it was on screen.")
+        wanted = send_images and needs_picture(frame, look)
         image = images.get(frame_id) if frame_id in pictured else None
-        if send_images and frame_id not in pictured:
+        if wanted and frame_id not in pictured:
             lines.append(f"(Picture not included: at most {MAX_IMAGES} are sent at once.)")
-        elif send_images and image is None:
+        elif wanted and image is None:
             lines.append("(The picture of this frame could not be read.)")
         content.append({"text": "\n".join(lines)})
         if image is not None:

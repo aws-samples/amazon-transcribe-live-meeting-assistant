@@ -22,6 +22,7 @@ export default /* GraphQL */ `
         Height
         Source
         ShareDetected
+        SlideText
         ImageSignedUrl
         ThumbnailSignedUrl
       }

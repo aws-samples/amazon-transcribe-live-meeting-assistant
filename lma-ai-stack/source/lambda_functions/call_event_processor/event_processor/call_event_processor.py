@@ -101,6 +101,9 @@ SPEAKER_NAME_RESOLVER_ARN = getenv("SPEAKER_NAME_RESOLVER_ARN", "")
 # The automatic agenda pass: a meeting with no agenda is read once, about this
 # far in, for an agenda somebody stated. 0 turns it off. See agenda_deriver.
 AGENDA_DERIVER_ARN = getenv("AGENDA_DERIVER_ARN", "")
+# Reads the text of each key frame, once, after it is stored. See
+# keyframe_text_extractor.
+KEYFRAME_TEXT_EXTRACTOR_ARN = getenv("KEYFRAME_TEXT_EXTRACTOR_ARN", "")
 AGENDA_DERIVATION_AFTER_SECONDS = agenda_derivation_after_seconds(
     getenv("AGENDA_DERIVATION_AFTER_SECONDS", "300")
 )
@@ -119,6 +122,7 @@ if (
     or ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN
     or SPEAKER_NAME_RESOLVER_ARN
     or AGENDA_DERIVER_ARN
+    or KEYFRAME_TEXT_EXTRACTOR_ARN
     or ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN
     or START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN
     or POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN
@@ -865,7 +869,36 @@ async def execute_add_video_keyframe_mutation(
         logger=LOGGER,
     )
     LOGGER.debug("video keyframe stored", extra=dict(frame_id=keyframe["FrameId"]))
+    queue_keyframe_text(keyframe)
     return result
+
+
+def queue_keyframe_text(keyframe: Mapping[str, Any]) -> None:
+    """Have the frame's text read, asynchronously, once it is stored.
+
+    Fire-and-forget, as the agenda pass: nothing in this batch waits on it, and
+    a frame without its text is handled by every reader. The extractor skips a
+    frame that already has its text, so a redelivered event costs nothing.
+    """
+    if not KEYFRAME_TEXT_EXTRACTOR_ARN:
+        return
+    try:
+        LAMBDA_HOOK_CLIENT.invoke(
+            FunctionName=KEYFRAME_TEXT_EXTRACTOR_ARN,
+            InvocationType="Event",
+            Payload=json.dumps(
+                {
+                    "CallId": keyframe["CallId"],
+                    "FrameId": keyframe["FrameId"],
+                    "ImageUrl": keyframe["ImageUrl"],
+                }
+            ),
+        )
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.exception(
+            "Could not queue the text read of a key frame; continuing",
+            extra=dict(call_id=keyframe.get("CallId"), frame_id=keyframe.get("FrameId")),
+        )
 
 
 async def execute_add_pca_url_mutation(

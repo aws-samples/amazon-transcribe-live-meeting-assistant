@@ -99,3 +99,30 @@ export const scrollTranscriptToTime = (container, seconds) => {
   row.classList.add(HIGHLIGHT_CLASS);
   return row;
 };
+
+/** Lower-case, accents removed, so a search for "resume" finds "Résumé". */
+const fold = (text) =>
+  String(text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+/** Whether a frame's text contains every word of a search, in any order. */
+export const frameMatches = (frame, search) => {
+  const words = fold(search).split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const text = fold(frame?.SlideText);
+  return words.every((word) => text.includes(word));
+};
+
+/** The first line of a frame's text holding a search word, shortened around it. */
+export const matchSnippet = (frame, search, width = 60) => {
+  const words = fold(search).split(/\s+/).filter(Boolean);
+  const lines = String(frame?.SlideText || '').split('\n');
+  const line = lines.find((l) => words.some((w) => fold(l).includes(w)));
+  if (!line) return '';
+  const at = Math.max(0, fold(line).indexOf(words.find((w) => fold(line).includes(w))));
+  const start = Math.max(0, at - Math.floor(width / 3));
+  const piece = line.slice(start, start + width).trim();
+  return `${start > 0 ? '…' : ''}${piece}${start + width < line.length ? '…' : ''}`;
+};
