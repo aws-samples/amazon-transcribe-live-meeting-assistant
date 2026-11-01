@@ -62,8 +62,10 @@ RUNTIME = Kind(
     "Read at run time",
     "Passed to application code as an environment variable or a deployment "
     "setting, and only read by that code. Changing it is a stack update that "
-    "changes no resource other than the configuration of the functions and tasks "
-    "that read it.",
+    "changes only the configuration of whatever reads it; for a value built into "
+    "the web app, that means the web app is rebuilt. Where the entry says a value "
+    "is checked while the stack deploys, a value that fails the check fails the "
+    "update.",
 )
 CREDENTIAL = Kind(
     "Credential",

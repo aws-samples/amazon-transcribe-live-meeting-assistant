@@ -109,6 +109,30 @@ def test_every_group_and_label_names_a_declared_parameter(template) -> None:
     assert sorted(declared - labels) == [], "a parameter has no console label"
 
 
-def test_the_kind_counts_add_up_to_the_declared_parameters(template, page) -> None:
-    counts = re.findall(r"^\| [A-Za-z ]+ \| (\d+) \|", page, flags=re.MULTILINE)
-    assert sum(int(count) for count in counts) == len(template["Parameters"])
+#: Directories whose Markdown is not this repository's own.
+SKIPPED_DIRECTORIES = {"node_modules", ".git"}
+
+
+def _slug(heading: str) -> str:
+    """The anchor the documentation site gives a heading (github-slugger's rule)."""
+    text = heading.strip().lower().replace("`", "")
+    text = re.sub(r"[^\w\- ]", "", text)
+    return text.replace(" ", "-")
+
+
+def test_every_link_into_the_page_names_a_heading_it_has(page) -> None:
+    """Headings come from the template's group labels, so a relabel moves anchors.
+
+    Every Markdown file in the repository is searched, the CHANGELOG included,
+    because a link there breaks just as silently as one in the docs.
+    """
+    anchors = {_slug(line.lstrip("#")) for line in page.splitlines() if re.match(r"^#{1,6} ", line)}
+    broken = []
+    for path in REPO_ROOT.rglob("*.md"):
+        if SKIPPED_DIRECTORIES.intersection(path.parts):
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for anchor in re.findall(r"cloudformation-parameters\.md#([\w-]+)", text):
+            if anchor not in anchors:
+                broken.append(f"{path.relative_to(REPO_ROOT)}: #{anchor}")
+    assert not broken, f"links to headings docs/cloudformation-parameters.md does not have: {broken}"

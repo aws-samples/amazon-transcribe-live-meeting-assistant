@@ -28,9 +28,12 @@ Each parameter has a **kind**, which says what changing it does:
 - **Read at run time** parameters reach the application only as a value it
   reads: an environment variable of a function or task, or a deployment setting.
   A stack update that changes one changes only the configuration of whatever
-  reads it. The entry says what reads it and when, because that is when a change
+  reads it; for a value built into the web app, that means the web app is
+  rebuilt. The entry says what reads it and when, because that is when a change
   takes effect: a function reads its environment on each cold start, and a
-  Virtual Participant reads its own when it starts.
+  Virtual Participant reads its own when it starts. Where the entry says a value
+  is checked while the stack deploys, a value that fails the check fails the
+  update.
 - **Credential** parameters are secrets, the ARNs of secrets, or the identifier
   paired with one. They are held in AWS Secrets Manager.
 - A **Deployment check** is read only while the stack is being deployed.
@@ -48,7 +51,7 @@ The template declares 91 parameters.
 | Kind | Parameters | What changing one does |
 |---|---|---|
 | Resource | 47 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
-| Read at run time | 31 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes no resource other than the configuration of the functions and tasks that read it. |
+| Read at run time | 31 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
 | Credential | 11 | A secret, the ARN of a secret, or the identifier paired with one. Values are stored in AWS Secrets Manager; see [Integration Credentials](infrastructure-and-security.md#integration-credentials). |
 | Deployment check | 1 | Read only while the stack is deployed, by a check that runs before anything else is created. |
 | No effect | 1 | Declared by the template and read by nothing. Kept so that existing deploy commands and pipelines that pass it keep working. |
