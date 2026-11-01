@@ -65,10 +65,15 @@ class StubLogger:
     def exception(self, *args, **kwargs):
         pass
 
+    #: The names of the functions decorated, so a test can check the decorator
+    #: is on the handler: it expects (event, context) and fails on anything else.
+    decorated: list = []
+
     def inject_lambda_context(self, func=None, **kwargs):
         """Identity decorator, so the handler stays callable as written."""
         if func is None:
-            return lambda inner: inner
+            return lambda inner: StubLogger.decorated.append(inner.__name__) or inner
+        StubLogger.decorated.append(func.__name__)
         return func
 
 
@@ -466,6 +471,11 @@ def test_zulu_and_offset_timestamps_both_parse():
     )
     assert reaper._parse_iso("not-a-timestamp") is None
     assert reaper._parse_iso(None) is None
+
+
+def test_the_lambda_context_decorator_is_on_the_handler_alone():
+    """Powertools' wrapper takes (event, context); on any other function it fails."""
+    assert StubLogger.decorated == ["handler"]
 
 
 class _ConfigurationStore:

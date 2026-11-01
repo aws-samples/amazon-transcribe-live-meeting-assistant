@@ -295,7 +295,6 @@ def _emit_end_event(call_row: Dict[str, Any]) -> None:
     )
 
 
-@LOGGER.inject_lambda_context
 def lookback_days() -> int:
     """How many days back a run looks for meetings to close.
 
@@ -303,6 +302,8 @@ def lookback_days() -> int:
     the MeetingInactivityLookbackInDays stack parameter; that parameter's
     environment variable when the section cannot be read. Read per run, so a
     change applies from the next scheduled run that starts five minutes after it.
+    A whole number of days: a fractional value, which CloudFormation's Number
+    type would accept, is not one the setting takes, and the default applies.
     """
     return read_setting(
         MEETING_PROCESSING.name,
@@ -312,6 +313,7 @@ def lookback_days() -> int:
     )
 
 
+@LOGGER.inject_lambda_context
 def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
     """Scheduled entry point. Returns a summary of the run for the logs."""
     if INACTIVITY_TIMEOUT_MINUTES <= 0:

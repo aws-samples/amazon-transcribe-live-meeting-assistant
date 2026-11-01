@@ -248,7 +248,7 @@ Console label: *Meeting Assist Wake Phrase Regular Expression*
 - **Allowed values:** Any text
 - **Kind:** Configuration page default. Configuration page: **Meeting Assistant › Wake phrase (regular expression)**. Written to the deployment settings and read by the meeting event processor.
 
-A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Assistant' This is the default; an Admin can change it at run time on the Configuration page (Meeting Assistant section), which takes precedence.
+A regular expression for the wake phrase that invokes the Meeting Assistant. The shipped pattern matches 'OK Assistant'. This is the default; an Admin can change it at run time on the Configuration page (Meeting Assistant section), which takes precedence.
 
 ## Meeting Assist Voice Assistant
 

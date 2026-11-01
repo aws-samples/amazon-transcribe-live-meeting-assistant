@@ -139,8 +139,8 @@ def _compiled_wake_phrase(pattern: str) -> Optional[Pattern[str]]:
         return re.compile(pattern)
     except re.error as error:
         LOGGER.warning(
-            "the wake phrase on the Configuration page is not a regular expression (%s); "
-            "using the deployment's own until it is corrected",
+            "the configured wake phrase is not a regular expression (%s); using the "
+            "pattern in the deployment settings until it is corrected",
             error,
         )
         return None

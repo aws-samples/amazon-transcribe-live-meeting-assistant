@@ -299,7 +299,7 @@ Parameters:
     Default: "(OK|Okay)[.,! ]*[Aa]ssistant"
     Description: >
       A regular expression for the wake phrase that invokes the Meeting Assistant.
-      Default is 'OK Assistant'
+      The shipped pattern matches 'OK Assistant'.
       This is the default; an Admin can change it at run time on the Configuration page (Meeting
       Assistant section), which takes precedence.
 
