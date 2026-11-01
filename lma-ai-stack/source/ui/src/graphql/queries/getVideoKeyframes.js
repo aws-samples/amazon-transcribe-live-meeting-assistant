@@ -1,0 +1,25 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
+
+export default /* GraphQL */ `
+  query GetVideoKeyframes($callId: ID!, $limit: Int, $nextToken: String, $afterFrameId: ID) {
+    getVideoKeyframes(callId: $callId, limit: $limit, nextToken: $nextToken, afterFrameId: $afterFrameId) {
+      VideoKeyframes {
+        CallId
+        FrameId
+        Timestamp
+        VideoOffset
+        Width
+        Height
+        Source
+        ShareDetected
+        ImageSignedUrl
+        ThumbnailSignedUrl
+      }
+      nextToken
+    }
+  }
+`;

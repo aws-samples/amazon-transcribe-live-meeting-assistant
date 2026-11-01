@@ -12,8 +12,31 @@ the shared screen each time it changes to something new and holds still — each
 slide of a deck, each page of a document, each new view of an application. Key
 frames are stored on the meeting beside the transcript, with times on the
 transcript's clock, so they can be lined up with what was said while each one
-was on screen. The frames are listed through the AppSync API, described below;
-the images are not yet shown in the web UI.
+was on screen. The meeting page shows them as a strip of thumbnails, below.
+
+## On the meeting page
+
+A meeting with key frames has a **Shared screen** section on its page, below the
+summary: a strip of thumbnails in time order, each labelled with the time it
+went up.
+
+- **Selecting a thumbnail** shows the picture large and moves the transcript to
+  that time, highlighting the segment that was under way. During a live meeting
+  this pauses following the newest segment, as scrolling up does; **Resume** in
+  the transcript returns to it.
+- **After the meeting**, when it has a video recording, selecting a thumbnail
+  also plays the recording from that frame. **Play recording from here** does
+  the same for the frame already selected, and **Open full size** opens the
+  picture in a new tab.
+- **During the meeting**, new frames are added to the end of the strip as they
+  are taken, and the strip follows them unless it has been scrolled back.
+- **Long meetings** load a hundred frames at a time; the next hundred load as
+  the strip is scrolled to its end (or with **Load more**).
+
+The pictures are shown through links signed by the server for whoever opened
+the page, after the same access check as the transcript, and they last an
+hour; the strip renews them when one has expired. A meeting without key frames
+shows no section at all.
 
 ## Which meetings have key frames
 
@@ -160,7 +183,7 @@ finds the images. The item has:
 | `FrameId` | The frame's id: its time in milliseconds, zero-padded, and a short suffix. Frames sort by it in time order. |
 | `Timestamp` | Seconds on the transcript's timeline, the same clock as a transcript segment's start time. |
 | `VideoOffset` | Seconds into the meeting's video recording, for playing the recording from that frame. |
-| `ImageUrl`, `ThumbnailUrl` | The two images. |
+| `ImageUrl`, `ThumbnailUrl` | Where the two images are stored. |
 | `Source` | What took the frame: `VIRTUAL_PARTICIPANT` or `DESKTOP_CAPTURE`. |
 | `ShareDetected` | `true` when the frame was taken while the platform showed a share; absent on platforms without the signal and for desktop video. |
 | `ChangeScore` | The part of the picture that differed from the previous key frame. |
@@ -175,9 +198,10 @@ finds the images. The item has:
   `getVideoKeyframes` and `onAddVideoKeyframe` return them to the meeting's
   owner, to the people it is shared with, and to administrators. Sharing or
   unsharing a meeting shares or unshares its key frames with it. The images
-  themselves are private objects in the recordings bucket: the stored URLs are
-  plain object addresses, and the web UI's identity has no read access to
-  `lma-video-keyframes/`.
+  are private objects in the recordings bucket, which the web UI's identity
+  cannot read: `getVideoKeyframes` checks the caller's access to the meeting
+  and then signs an hour-long link to each image, and only for an image stored
+  in that meeting's own folder of this deployment's bucket.
 - **Deletion.** Deleting a meeting deletes its key frames and their images.
 
 ## Reading key frames
@@ -186,22 +210,25 @@ The AppSync API has a query and a subscription:
 
 ```graphql
 query {
-  getVideoKeyframes(callId: "<CallId>", limit: 200, nextToken: null) {
-    VideoKeyframes { FrameId Timestamp VideoOffset ThumbnailUrl ImageUrl ShareDetected }
+  getVideoKeyframes(callId: "<CallId>", limit: 100, nextToken: null, afterFrameId: null) {
+    VideoKeyframes { FrameId Timestamp VideoOffset ShareDetected ThumbnailSignedUrl ImageSignedUrl }
     nextToken
   }
 }
 
 subscription {
   onAddVideoKeyframe(CallId: "<CallId>") {
-    CallId FrameId Timestamp VideoOffset ThumbnailUrl ImageUrl Owner SharedWith
+    CallId FrameId Timestamp Owner SharedWith
   }
 }
 ```
 
-The query returns frames in time order, up to 500 at a time (200 by default).
-As with `onAddTranscriptSegment`, the subscription's selection must include
-`Owner` and `SharedWith`.
+The query returns frames in time order, up to 500 at a time (100 by default),
+with `ThumbnailSignedUrl` and `ImageSignedUrl` filled in; `afterFrameId` returns
+only the frames after the one given, which is how the meeting page fetches a
+frame the subscription announced. The subscription carries no signed links. As
+with `onAddTranscriptSegment`, its selection must include `Owner` and
+`SharedWith`.
 
 ### The `ADD_VIDEO_KEYFRAME` event
 

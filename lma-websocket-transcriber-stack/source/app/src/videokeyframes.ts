@@ -20,7 +20,8 @@
  * When the detector keeps a sample, its two JPEGs are uploaded to the
  * recordings bucket under lma-video-keyframes/<posixified CallId>/ and an
  * ADD_VIDEO_KEYFRAME event is written to the call data stream. The other JPEGs
- * are deleted as soon as their sample has been judged.
+ * are deleted once their sample has been judged, and swept again at each later
+ * sample in case FFmpeg wrote them after it.
  *
  * The desktop app gives no screen-share signal, so every sample is judged
  * against the stricter thresholds the Virtual Participant uses where its
@@ -35,8 +36,10 @@
  * wall-clock time instead, and has no VideoOffset, because the mux joins the
  * parts end to end rather than at their wall-clock times.
  *
- * Nothing here may disturb the recording or the audio: every failure stops the
- * key frames for that stream and is logged, and none is thrown to the caller.
+ * Nothing here may disturb the recording or the audio. A decoder that fails or
+ * falls behind ends the key frames for that stream; a frame that cannot be
+ * saved is logged and given back to the detector, and sampling carries on.
+ * Nothing is thrown to the caller.
  */
 import fs from 'fs';
 import path from 'path';
@@ -105,15 +108,20 @@ export const keyframeKeys = (callId: string, frameId: string): { image: string, 
     return { image: `${base}.jpg`, thumbnail: `${base}_thumb.jpg` };
 };
 
-const SHOWINFO = /\bn:\s*(\d+)\s+pts:\s*-?\d+\s+pts_time:(-?[\d.]+).*?\bs:(\d+)x(\d+)/;
+// Any value for the times: a frame without one prints NOPTS, and has to be
+// counted all the same, because samples are paired with these lines in order.
+const SHOWINFO = /\bn:\s*(\d+)\s+pts:\s*(\S+)\s+pts_time:(\S+).*?\bs:(\d+)x(\d+)/;
 
-/** The frame number, presentation time and size from one showinfo line, or null. */
+/**
+ * The frame number, presentation time and size from one showinfo line, or
+ * null for any other line. The time is NaN when the frame has none.
+ */
 export const parseShowinfo = (line: string): { n: number, ptsSeconds: number, width: number, height: number } | null => {
     const m = SHOWINFO.exec(line);
     if (!m) {
         return null;
     }
-    return { n: Number(m[1]), ptsSeconds: Number(m[2]), width: Number(m[3]), height: Number(m[4]) };
+    return { n: Number(m[1]), ptsSeconds: Number(m[3]), width: Number(m[4]), height: Number(m[5]) };
 };
 
 /** A JPEG is complete once it ends with the end-of-image marker. */
@@ -192,6 +200,7 @@ export class KeyframeLane {
     private swept = 0;
     /** The index of the sample whose images are being saved, or -1. */
     private savingIndex = -1;
+    private lastPtsMs = 0;
     private emitted = 0;
     private capturing: Promise<void> | null = null;
     private stopped = false;
@@ -371,7 +380,11 @@ export class KeyframeLane {
         const index = this.judged++;
         this.sweep(index);
         const files = this.filesFor(index);
-        const ptsMs = Math.max(0, frame.ptsSeconds * 1000);
+        // A frame without a time is taken to follow the last one that had one.
+        if (Number.isFinite(frame.ptsSeconds)) {
+            this.lastPtsMs = Math.max(0, frame.ptsSeconds * 1000);
+        }
+        const ptsMs = this.lastPtsMs;
         const decision = this.detector.push(sample, ptsMs, DESKTOP_THRESHOLDS);
         const keep = decision.keep && !this.stopped && this.emitted < MAX_PER_STREAM && !this.capturing;
         if (!keep) {

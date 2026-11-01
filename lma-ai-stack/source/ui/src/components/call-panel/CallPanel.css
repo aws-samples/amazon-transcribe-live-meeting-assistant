@@ -81,3 +81,19 @@ span.issue-pill {
   border-bottom: 1px dotted currentColor;
   cursor: help;
 }
+
+/* A transcript segment moved to from the key frame strip. */
+.transcript-segment-highlight {
+  animation: transcript-segment-flash 2.5s ease-out;
+}
+
+@keyframes transcript-segment-flash {
+  0% {
+    background-color: #f2f8fd;
+    box-shadow: inset 3px 0 0 #0972d3;
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 3px 0 0 transparent;
+  }
+}
