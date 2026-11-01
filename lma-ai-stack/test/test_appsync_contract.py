@@ -167,6 +167,10 @@ ADMIN_ONLY_FIELDS = [
     ("Query", "diffConfigurationRevisions"),
     ("Mutation", "restoreConfigurationRevision"),
     ("Mutation", "labelConfigurationRevision"),
+    # The configuration editor: every section of the account-wide configuration,
+    # read and saved together.
+    ("Query", "getConfiguration"),
+    ("Mutation", "updateConfiguration"),
 ]
 
 # Reads every signed-in user performs in the course of using the product, so the

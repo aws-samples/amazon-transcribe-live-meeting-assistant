@@ -1,0 +1,432 @@
+{
+  "_comment": "Run through both copies of the configuration schema validator: lma_config/schema.py (pytest, test_schema.py) and the web UI schema-validation.js (vitest). Each case lists the exact problems both must report, in order.",
+  "cases": [
+    {
+      "name": "a valid object passes",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "value": {
+        "a": "x"
+      },
+      "problems": []
+    },
+    {
+      "name": "wrong type stops further checks",
+      "schema": {
+        "type": "string",
+        "minLength": 3
+      },
+      "value": 5,
+      "problems": [
+        "(the value): must be text; got a number"
+      ]
+    },
+    {
+      "name": "a boolean is not a number",
+      "schema": {
+        "type": "number"
+      },
+      "value": true,
+      "problems": [
+        "(the value): must be a number; got a boolean"
+      ]
+    },
+    {
+      "name": "a whole number is an integer",
+      "schema": {
+        "type": "integer"
+      },
+      "value": 3,
+      "problems": []
+    },
+    {
+      "name": "a fraction is not an integer",
+      "schema": {
+        "type": "integer"
+      },
+      "value": 3.5,
+      "problems": [
+        "(the value): must be a whole number; got a number"
+      ]
+    },
+    {
+      "name": "null is named as null",
+      "schema": {
+        "type": "string"
+      },
+      "value": null,
+      "problems": [
+        "(the value): must be text; got null"
+      ]
+    },
+    {
+      "name": "a list is not an object",
+      "schema": {
+        "type": "object"
+      },
+      "value": [
+        1
+      ],
+      "problems": [
+        "(the value): must be an object; got a list"
+      ]
+    },
+    {
+      "name": "one of several types",
+      "schema": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "value": null,
+      "problems": []
+    },
+    {
+      "name": "one of several types refused",
+      "schema": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "value": 2,
+      "problems": [
+        "(the value): must be text or null; got a number"
+      ]
+    },
+    {
+      "name": "enum refuses an unlisted value",
+      "schema": {
+        "type": "string",
+        "enum": [
+          "a",
+          "b"
+        ]
+      },
+      "value": "c",
+      "problems": [
+        "(the value): must be one of \"a\", \"b\"; got \"c\""
+      ]
+    },
+    {
+      "name": "enum true is not 1",
+      "schema": {
+        "enum": [
+          1
+        ]
+      },
+      "value": true,
+      "problems": [
+        "(the value): must be one of 1; got true"
+      ]
+    },
+    {
+      "name": "enum quotes text as written",
+      "schema": {
+        "enum": [
+          "café"
+        ]
+      },
+      "value": "cafe",
+      "problems": [
+        "(the value): must be one of \"café\"; got \"cafe\""
+      ]
+    },
+    {
+      "name": "minimum",
+      "schema": {
+        "type": "number",
+        "minimum": 0
+      },
+      "value": -0.5,
+      "problems": [
+        "(the value): must be at least 0; got -0.5"
+      ]
+    },
+    {
+      "name": "maximum",
+      "schema": {
+        "type": "number",
+        "maximum": 10
+      },
+      "value": 11,
+      "problems": [
+        "(the value): must be at most 10; got 11"
+      ]
+    },
+    {
+      "name": "empty text where minLength is 1",
+      "schema": {
+        "type": "string",
+        "minLength": 1
+      },
+      "value": "",
+      "problems": [
+        "(the value): must not be empty"
+      ]
+    },
+    {
+      "name": "minLength above 1",
+      "schema": {
+        "type": "string",
+        "minLength": 3
+      },
+      "value": "ab",
+      "problems": [
+        "(the value): must be at least 3 characters"
+      ]
+    },
+    {
+      "name": "maxLength counts code points",
+      "schema": {
+        "type": "string",
+        "maxLength": 2
+      },
+      "value": "😀😀",
+      "problems": []
+    },
+    {
+      "name": "maxLength exceeded",
+      "schema": {
+        "type": "string",
+        "maxLength": 2
+      },
+      "value": "abc",
+      "problems": [
+        "(the value): must be at most 2 characters; got 3"
+      ]
+    },
+    {
+      "name": "pattern is a search, not a full match",
+      "schema": {
+        "type": "string",
+        "pattern": "b"
+      },
+      "value": "abc",
+      "problems": []
+    },
+    {
+      "name": "pattern refused",
+      "schema": {
+        "type": "string",
+        "pattern": "^[0-9]+$"
+      },
+      "value": "12a",
+      "problems": [
+        "(the value): \"12a\" does not match ^[0-9]+$"
+      ]
+    },
+    {
+      "name": "unknown property refused",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {}
+        },
+        "additionalProperties": false
+      },
+      "value": {
+        "a": 1,
+        "b": 2
+      },
+      "problems": [
+        "b: is not a setting this section has"
+      ]
+    },
+    {
+      "name": "pattern properties checked, unmatched refused",
+      "schema": {
+        "type": "object",
+        "patternProperties": {
+          "^[0-9]+#.+$": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "value": {
+        "1#A": "ok",
+        "2#B": 3,
+        "C": "x"
+      },
+      "problems": [
+        "2#B: must be text; got a number",
+        "C: is not a setting this section has"
+      ]
+    },
+    {
+      "name": "additional properties schema checked",
+      "schema": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "value": {
+        "x": 1,
+        "y": -1
+      },
+      "problems": [
+        "y: must be at least 0; got -1"
+      ]
+    },
+    {
+      "name": "property names refused before values",
+      "schema": {
+        "type": "object",
+        "propertyNames": {
+          "pattern": "^[a-z]+$"
+        },
+        "additionalProperties": {
+          "type": "number"
+        }
+      },
+      "value": {
+        "ok": 1,
+        "Bad": "x"
+      },
+      "problems": [
+        "Bad: the name does not match ^[a-z]+$"
+      ]
+    },
+    {
+      "name": "nested maps report the full path",
+      "schema": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      },
+      "value": {
+        "default": {
+          "transcribe/streaming": -2
+        }
+      },
+      "problems": [
+        "default › transcribe/streaming: must be at least 0; got -2"
+      ]
+    },
+    {
+      "name": "list items numbered from one",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "value": [
+        "a",
+        2,
+        "c",
+        null
+      ],
+      "problems": [
+        "item 2: must be text; got a number",
+        "item 4: must be text; got null"
+      ]
+    },
+    {
+      "name": "minItems",
+      "schema": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 3
+      },
+      "value": [
+        1
+      ],
+      "problems": [
+        "(the value): must hold at least 2 items"
+      ]
+    },
+    {
+      "name": "maxItems",
+      "schema": {
+        "type": "array",
+        "maxItems": 1
+      },
+      "value": [
+        1,
+        2
+      ],
+      "problems": [
+        "(the value): must hold at most 1 item"
+      ]
+    },
+    {
+      "name": "required",
+      "schema": {
+        "type": "object",
+        "required": [
+          "a",
+          "b"
+        ]
+      },
+      "value": {
+        "a": 1
+      },
+      "problems": [
+        "(the value): \"b\" is required"
+      ]
+    },
+    {
+      "name": "maxProperties",
+      "schema": {
+        "type": "object",
+        "maxProperties": 1
+      },
+      "value": {
+        "a": 1,
+        "b": 2
+      },
+      "problems": [
+        "(the value): must hold at most 1 entry"
+      ]
+    },
+    {
+      "name": "annotations are ignored",
+      "schema": {
+        "type": "string",
+        "title": "T",
+        "order": 3,
+        "format": "textarea",
+        "dependsOn": {
+          "field": "x",
+          "value": 1
+        }
+      },
+      "value": "fine",
+      "problems": []
+    },
+    {
+      "name": "several problems on one value, in order",
+      "schema": {
+        "type": "string",
+        "enum": [
+          "abcdef"
+        ],
+        "maxLength": 3,
+        "pattern": "^x"
+      },
+      "value": "abcd",
+      "problems": [
+        "(the value): must be one of \"abcdef\"; got \"abcd\"",
+        "(the value): must be at most 3 characters; got 4",
+        "(the value): \"abcd\" does not match ^x"
+      ]
+    }
+  ]
+}

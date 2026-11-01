@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/chat_buttons",
+  "title": "Meeting Assist chat buttons",
+  "description": "The quick-action buttons in the Meeting Assist chat panel. Each button has a label and the prompt it sends. A saved list replaces the shipped buttons as a whole; while nothing is saved, the shipped buttons apply.",
+  "sectionLabel": "Meeting Assist Chat Buttons",
+  "order": 2,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "replace",
+  "numberedKeys": true,
+  "keyLabel": "Button label",
+  "listLabel": "Buttons",
+  "itemLabel": "Button",
+  "type": "object",
+  "patternProperties": {
+    "^[0-9]+#.+$": {
+      "type": "string",
+      "title": "Prompt",
+      "description": "What the button sends to the meeting assistant.",
+      "format": "textarea",
+      "rows": 3,
+      "maxLength": 4000
+    }
+  },
+  "additionalProperties": false
+}

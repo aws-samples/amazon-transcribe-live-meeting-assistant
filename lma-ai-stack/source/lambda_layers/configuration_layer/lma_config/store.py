@@ -25,6 +25,13 @@ two admin sessions saving the same page cannot silently discard one another's
 edits. ``Config#default`` is the exception and is written unconditionally: it is
 the deployment baseline and CloudFormation is its only author.
 
+Every operator save is also checked against the schema of each section it
+writes (see :mod:`lma_config.schema`), before anything is read or written, and
+refused with :class:`~lma_config.errors.InvalidConfiguration` if a value does
+not match. The seeder's writes and a restore are not: what the seeder adopts
+from a previous table and what a revision holds were accepted when they were
+saved, and refusing them would turn a deployment or a recovery into a failure.
+
 History
 -------
 When the store is given a revision bucket, every write that changes a profile's
@@ -57,6 +64,7 @@ from .errors import (
     ConcurrentModification,
     ConfigurationError,
     ConfigurationTableNotConfigured,
+    InvalidConfiguration,
     RevisionHistoryUnavailable,
     RevisionNotFound,
 )
@@ -85,6 +93,7 @@ from .revisions import (
     clean_text,
     diff_bodies,
 )
+from .schema import validate_section
 from .sections import (
     TIER_CONSISTENT_READ,
     TIER_TTL_SECONDS,
@@ -179,6 +188,28 @@ def _fingerprint(values: Any) -> str:
         default=str,
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def _validate_sections(body: Mapping[str, Any]) -> None:
+    """Check every section of ``body`` against its schema, reporting all problems.
+
+    One refusal for the whole save rather than one per section, so an editor
+    that sent several sections hears about every problem at once.
+
+    Raises:
+        UnknownConfigurationSection: a section is not registered.
+        InvalidConfiguration: one or more sections do not match their schemas.
+    """
+    problems: List[str] = []
+    for name in body:
+        section_spec(name)
+    for name, values in body.items():
+        try:
+            validate_section(name, values)
+        except InvalidConfiguration as error:
+            problems.extend(error.problems)
+    if problems:
+        raise InvalidConfiguration(problems)
 
 
 def deep_merge(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> Dict[str, Any]:
@@ -556,11 +587,15 @@ class ConfigurationStore:
             The version now stored.
 
         Raises:
+            UnknownConfigurationSection: the body holds a section that is not
+                registered.
+            InvalidConfiguration: a section does not match its schema.
             ConcurrentModification: the stored version is not the expected one.
             ConfigurationTooLarge: the compressed record would not fit.
             RevisionHistoryUnavailable: the record this save would replace could
                 not be recorded, so nothing was written.
         """
+        _validate_sections(body)
         return self._save(
             name,
             lambda _current: dict(body),
@@ -610,15 +645,56 @@ class ConfigurationStore:
 
         Raises:
             UnknownConfigurationSection: ``section`` is not registered.
+            InvalidConfiguration: ``values`` do not match the section's schema.
             ConcurrentModification: the stored version is not the expected one.
             ConfigurationTooLarge: the compressed record would not fit.
             RevisionHistoryUnavailable: the record this save would replace could
                 not be recorded, so nothing was written.
         """
         spec = section_spec(section)
+        return self.write_sections(
+            name,
+            {spec.name: values},
+            updated_by=updated_by,
+            expected_version=expected_version,
+            comment=comment,
+        ).version
+
+    def write_sections(
+        self,
+        name: str,
+        sections: Mapping[str, Mapping[str, Any]],
+        *,
+        updated_by: str,
+        expected_version: Optional[int],
+        comment: Optional[str] = None,
+    ) -> SaveOutcome:
+        """Save several sections of a profile in one write, and one revision.
+
+        What the configuration editor sends: every section an administrator
+        changed, saved together, so a change spanning sections is one revision
+        to compare or restore rather than several. Each named section is
+        replaced outright, as by :meth:`write_section`; sections not named keep
+        what the profile holds.
+
+        Every section is checked against its schema before anything is read, so
+        a save with one invalid value writes nothing at all.
+
+        Raises:
+            UnknownConfigurationSection: a section is not registered.
+            InvalidConfiguration: a section does not match its schema. Its
+                ``problems`` lists every problem across every section.
+            ConcurrentModification: the stored version is not the expected one.
+            ConfigurationTooLarge: the compressed record would not fit.
+            RevisionHistoryUnavailable: the record this save would replace could
+                not be recorded, so nothing was written.
+        """
+        requested = {section_spec(section).name: values for section, values in sections.items()}
+        _validate_sections(requested)
+        replacements = {section: dict(values) for section, values in requested.items()}
         return self._save(
             name,
-            lambda current: {**current.body, spec.name: dict(values)},
+            lambda current: {**current.body, **replacements},
             updated_by=updated_by,
             expected_version=expected_version,
             # Conditional whatever the caller offered. This is a read, a merge
@@ -629,7 +705,7 @@ class ConfigurationStore:
             # pre-check, which is what produces the message naming who saved.
             condition_on_read=True,
             comment=comment,
-        ).version
+        )
 
     def _save(
         self,

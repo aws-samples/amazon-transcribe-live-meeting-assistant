@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/asr_engine",
+  "title": "Transcription engine",
+  "description": "Which engine transcribes each kind of meeting. The on-demand speech engine is experimental: English only, with transcript quality below Amazon Transcribe. A saved change applies to meetings that start after it, within 30 seconds.",
+  "sectionLabel": "Transcription Engine (experimental)",
+  "order": 4,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "availableWhen": { "setting": "AsrEngineAvailable", "value": "true" },
+  "type": "object",
+  "properties": {
+    "streamingEngineMicrovm": {
+      "order": 0,
+      "type": "boolean",
+      "title": "Stream Audio, Chrome extension and Desktop Capture",
+      "description": "Speaker identification per channel is chosen per meeting, on the Stream Audio form or in the desktop app's settings.",
+      "widget": "radio",
+      "booleanLabels": {
+        "false": "Amazon Transcribe",
+        "true": "On-demand speech engine (experimental)"
+      }
+    },
+    "virtualParticipantEngineMicrovm": {
+      "order": 1,
+      "type": "boolean",
+      "title": "Virtual Participants",
+      "description": "Speaker names come from the meeting roster with either engine.",
+      "widget": "radio",
+      "booleanLabels": {
+        "false": "Amazon Transcribe",
+        "true": "On-demand speech engine (experimental)"
+      }
+    },
+    "diarizeVirtualParticipant": {
+      "order": 2,
+      "type": "boolean",
+      "title": "Virtual Participant voice separation",
+      "description": "When one attendee is several people, such as a conference room, label their voices \"Name (spk_0)\", \"Name (spk_1)\". Requires the on-demand engine for Virtual Participants, and a model bundle with speaker identification.",
+      "dependsOn": { "field": "virtualParticipantEngineMicrovm", "value": true },
+      "availableWhen": { "setting": "AsrDiarizationAvailable", "value": "true" }
+    }
+  },
+  "additionalProperties": false
+}

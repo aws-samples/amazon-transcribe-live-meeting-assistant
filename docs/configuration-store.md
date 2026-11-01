@@ -22,7 +22,12 @@ served from them, alongside the meeting cost estimate's price table, which had n
 earlier store. Every save into the store records a revision — who saved it,
 when, which sections it changed, and an optional comment — and an Admin can list,
 compare and restore revisions; see [Revisions and audit](#revisions-and-audit).
-The SSM settings blob moves later, with the CloudFormation parameters; see
+Each section has a JSON Schema document, and every administrator's save is
+checked against it before anything is written; see
+[Section schemas and validation](#section-schemas-and-validation). The
+documents also carry the layout hints a schema-driven configuration editor
+renders, and `getConfiguration` / `updateConfiguration` serve them with the
+configuration they describe. The SSM settings blob moves later, with the CloudFormation parameters; see
 [Still to come](#still-to-come) for that, for the MCP server list, and for the
 troubleshooting agent's prompt, which shares the summary prompts' old table and
 moves after the configuration UI.
@@ -38,7 +43,7 @@ store holds is distinguished by a prefix on that one key:
 | `Config#default` | The deployment baseline. CloudFormation writes it on create and rewrites it whenever the shipped content or the code that writes it changes, so it holds the content the installed release ships. |
 | `Config#<name>` | A profile: an administrator's edits, stored as a *delta* over the baseline. Today there is one, `Config#custom`. |
 | `Config#__active` | A pointer naming the profile in force. |
-| `Schema` | The form schema a configuration UI renders. Reserved; written by a later release. |
+| `Schema` | Reserved, and not written. The section schemas ship inside the configuration layer instead, so a save is always checked against the schema its readers were released with; see [Section schemas and validation](#section-schemas-and-validation). |
 | `ConfigRevIndex#<name>` | The revision index of a profile: one small entry per retained revision. See [Revisions and audit](#revisions-and-audit). |
 
 Two details in that layout are load-bearing rather than cosmetic.
@@ -272,6 +277,111 @@ reads nothing to build it, such as an import, may opt out.
 
 The baseline `Config#default` is written unconditionally by design: CloudFormation
 is its only author, and a new release's content has to land.
+
+## Section schemas and validation
+
+Every registered section has one JSON Schema document,
+`lma_config/schemas/<section>.json` in the configuration layer. The document does
+two jobs:
+
+- **It is what a save is checked against.** The store checks every section a save
+  writes before it reads or writes anything, so a value its readers could not use
+  is refused at the save rather than discovered when a meeting reads it.
+- **It is what a configuration editor renders.** Beside the validation keywords,
+  the documents carry layout annotations in the vocabulary IDP's configuration
+  schema uses, and `Query.getConfiguration` serves them as they stand.
+
+The schemas are standalone files rather than YAML inside a CloudFormation
+template, and they ship inside the configuration layer. The layer's build is
+what puts them in front of the code: the schema a save is checked against is
+always the one released with the code that reads the section. The `Schema` key
+the table reserves is therefore not written.
+
+### What a schema describes
+
+A schema describes the section **as a profile stores it**, which is a delta over
+the baseline. That is why no section schema lists `required` properties at its
+top level: a profile that changes one Nova Sonic setting stores that one setting,
+and an empty section is what **Reset to Defaults** stores. The shipped baseline is
+checked against the same documents by the layer's tests, for both prompt domains,
+so a release cannot ship a default its own save would refuse.
+
+| Section | What the schema holds it to |
+|---|---|
+| `summary_prompt_templates` | Keys of the form `N#Title`, each a text prompt; `NONE` turns a shipped section off |
+| `chat_buttons` | Keys of the form `N#Label`, each a text prompt of at most 4,000 characters |
+| `nova_sonic_config` | The eleven settings the voice assistant reads, nothing else; `promptMode`, `endpointingSensitivity` and `meetingMode` from their fixed lists; model and voice ids and the translator fields non-empty and bounded in length |
+| `asr_engine` | The three switches, each `true` or `false`, nothing else |
+| `call_pricing` | Prices that are finite and not negative, under `regions › <region or default> › <service>/<api-or-model> › <unit>`; region codes in the form `us-east-1`; the lists and notes as lists and objects of text; `currency` `USD`; no keys the estimator does not read |
+
+### The validator
+
+`lma_config/schema.py` implements the subset of JSON Schema (2020-12) the
+documents use, with the standard library only, so the layer keeps its property
+of having no third-party dependencies:
+
+| Keywords | Meaning |
+|---|---|
+| `type` | `object`, `array`, `string`, `number`, `integer`, `boolean`, `null`, or a list of them. A boolean is never a number, and `NaN` or `Infinity` — which Python's JSON reader accepts and JSON has no form for — is never a number either |
+| `enum` | The value is one of the listed ones, compared as JSON compares them, so `true` is not `1` |
+| `minimum`, `maximum` | Inclusive bounds on a number |
+| `minLength`, `maxLength`, `pattern` | Text length in characters, and a regular expression that must match somewhere in the text |
+| `properties`, `patternProperties`, `additionalProperties`, `propertyNames`, `required`, `maxProperties` | Object members, with the standard rule: a member named in `properties` or matching a `patternProperties` pattern is checked against those, and only a member matching neither falls to `additionalProperties` |
+| `items`, `minItems`, `maxItems` | List members and length |
+
+A keyword the validator does not implement is refused by the layer's tests rather
+than ignored, because an ignored keyword is a constraint that looks enforced and
+is not. The UI annotations are listed in the module as `UI_ANNOTATIONS`, and the
+same test refuses a key that is in neither list, which catches a misspelt one.
+
+The validator's behaviour is pinned by a fixture,
+`lma-ai-stack/test/fixtures/configuration_schema_cases.json`: each case is a
+schema, a value, and the exact problems that must be reported, in order. It is
+kept outside the layer so that a second implementation — a configuration editor
+checking a value before it sends the save — can be held to the same file.
+
+### Which writes are checked
+
+| Write | Checked |
+|---|---|
+| `updateLLMPromptTemplate`, `updateNovaSonicConfig`, `updateChatButtonConfig`, `updateAsrConfig`, `updateCallPricing`, `updateConfiguration` | Yes, every section the save writes |
+| What the deploy-time seeder writes or carries across from a previous table | No |
+| `restoreConfigurationRevision` | No |
+
+The seeder and a restore are not checked because what they write was accepted
+when it was first saved, and refusing it would turn a deployment or a recovery
+into a failure.
+
+The four older configuration mutations still filter their input the way they
+always have — dropping a field they do not know, a Nova Sonic setting outside its
+list, a switch that is not a boolean — before the store sees it. What they keep
+is then checked like any other save. In practice the schema adds two refusals to
+those mutations: a chat button prompt that is not text, and a
+Nova Sonic system prompt, model id or voice id that is not text, or an id longer
+than its limit.
+`updateCallPricing` has no checks of its own; the schema is the whole of what it
+enforces.
+
+A refused save writes nothing at all, even when only one of several sections is
+wrong, and its error names every problem with the path of the value it is about,
+for example
+`call_pricing › regions › default › transcribe/streaming › seconds: must be at least 0; got -1`.
+The path separator is ` › ` rather than `/` or `.`, because keys here hold both.
+The message spells out the first ten problems and counts the rest.
+`updateConfiguration` answers such a refusal with an error starting `Invalid: `,
+which the configuration editor matches on.
+
+### The editor's read and save
+
+Two GraphQL operations, both for the **Admin** group on the AppSync field and
+again in the resolver Lambda behind them, which is the configuration history's:
+
+| Operation | What it does |
+|---|---|
+| `Query.getConfiguration(Profile)` | Everything an editor needs in one read: `Sections`, a JSON list of each section's `Name`, `CacheTier` and `Schema`; `Default`, the shipped baseline; `Custom`, the profile's stored delta; and the profile's `Version`, `UpdatedBy`, `UpdatedAt` and `PublishedRevision`. Read consistently from the stored records, never from a cache. Only registered sections are returned |
+| `Mutation.updateConfiguration(input: {Profile, Sections, ExpectedVersion, Comment})` | Saves every section named in `Sections`, a JSON object of section name to that section's complete stored values, in **one** write and one revision. Sections not named keep what the profile holds. `ExpectedVersion` is required, and a save against a profile someone has saved since is refused with `Conflict: `. Saves only into a profile that exists. Answers with the new `Version`, the `Revision` it recorded, and `Unchanged` when the save changed nothing |
+
+`Profile` defaults to `custom` for both.
 
 ## Revisions and audit
 
@@ -763,7 +873,7 @@ configuration pages' saves.
 | Stage | What it adds |
 |---|---|
 | Import / export | Export as a client-side download; import that always routes into a create-new-profile flow rather than applying in place |
-| Schema-driven UI | A profile table, a form generated from the `Schema` document, a diff against the baseline and per-field "restore default", and a comment field on every save |
+| Schema-driven UI | A form generated from the section schemas, through `getConfiguration` and `updateConfiguration`, with a marker on every value that differs from the baseline, per-field "restore default", and a comment field on every save. The schemas, the validation and the two operations are in place |
 | Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired. It waits for the schema-driven UI: today the custom prompt is edited in the DynamoDB console, which is exactly the route a compressed body closes, so moving it first would leave it with no way to edit it |
 | Moving CloudFormation parameters | The parameters that are read only at request time and do not gate a resource, a condition or an IAM policy |
 | Replacing the SSM settings blob | The `<stack>-LMASettings` parameter is written only by CloudFormation, at deploy time, and read by the web app for every signed-in user. It is a deployment's wiring rather than something an administrator edits, so it moves with the parameters above, when the web app reads its configuration at run time |
@@ -799,7 +909,8 @@ UI, for the reason given in its row of the table above.
 | TypeScript accessor | `lma-websocket-transcriber-stack/source/app/src/config/configuration-store.ts` (edit this one) and its copy `lma-virtual-participant-stack/backend/src/configuration-store.ts` |
 | The Virtual Participant's Nova Sonic reader | `lma-virtual-participant-stack/backend/src/nova-sonic-config-loader.ts` |
 | Revision history | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/revisions.py`, driven from `store.py` |
-| History resolver (list, read, compare, restore, label) | `lma-ai-stack/source/lambda_functions/configuration_revisions_resolver/` |
+| Section schemas, and the validator that applies them | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/schemas/` and `schema.py`; the shared validation fixture `lma-ai-stack/test/fixtures/configuration_schema_cases.json` |
+| Editor and history resolver (read and save the configuration; list, read, compare, restore, label revisions) | `lma-ai-stack/source/lambda_functions/configuration_revisions_resolver/` |
 | Deploy-time seeder | `lma-ai-stack/source/lambda_functions/configuration_seeder/` |
 | Table, bucket, layer, custom resource and the `ConfigurationRevisionWriteAccess` policy every writer attaches | `lma-ai-stack/deployment/lma-ai-stack.yaml` |
 | Content-hash computation | `lib/lma_sdk/lma_sdk/_core/publish.py` |

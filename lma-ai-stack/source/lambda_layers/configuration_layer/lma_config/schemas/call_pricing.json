@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/call_pricing",
+  "title": "Meeting cost prices",
+  "description": "The unit prices the per-meeting cost estimate is computed with, in US dollars per unit. A price you change is kept over the shipped one; every price you leave alone keeps coming from the release, so a later release's price updates still reach it. A saved change shows in estimates within about five minutes.",
+  "sectionLabel": "Meeting Cost Prices",
+  "order": 5,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "type": "object",
+  "properties": {
+    "regions": {
+      "order": 0,
+      "type": "object",
+      "title": "Prices by region",
+      "description": "Prices under 'default' apply in every region; a region listed here overrides the prices it names. Each service is keyed '<service>/<api-or-model>', and each of its units holds a price per unit.",
+      "keyLabel": "Region",
+      "itemLabel": "Region",
+      "propertyNames": { "pattern": "^(default|[a-z]{2}(-gov)?-[a-z]+-[0-9])$" },
+      "additionalProperties": {
+        "type": "object",
+        "title": "Services",
+        "keyLabel": "Service",
+        "itemLabel": "Service",
+        "propertyNames": { "pattern": "^[a-z0-9-]+/.+$" },
+        "additionalProperties": {
+          "type": "object",
+          "title": "Units",
+          "keyLabel": "Unit",
+          "itemLabel": "Unit",
+          "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9]*$" },
+          "additionalProperties": {
+            "type": "number",
+            "title": "USD per unit",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "baseRegion": {
+      "order": 1,
+      "type": "string",
+      "title": "Base region",
+      "description": "The region whose prices stand in for a region the table does not list.",
+      "pattern": "^[a-z]{2}(-gov)?-[a-z]+-[0-9]$"
+    },
+    "pricedRegions": {
+      "order": 2,
+      "type": "array",
+      "title": "Regions with listed prices",
+      "description": "The regions the shipped prices were read for. An estimate in any other region says it used the base region's prices.",
+      "itemLabel": "Region",
+      "items": { "type": "string", "pattern": "^[a-z]{2}(-gov)?-[a-z]+-[0-9]$" }
+    },
+    "nonChargeableUnits": {
+      "order": 3,
+      "type": "array",
+      "title": "Units shown for reference only",
+      "description": "Units an estimate lists but does not charge for on their own, such as requests and runtime seconds.",
+      "itemLabel": "Unit",
+      "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" }
+    },
+    "notes": {
+      "order": 4,
+      "type": "object",
+      "title": "Notes by service",
+      "description": "Explanations shown beside a service's line in an estimate.",
+      "keyLabel": "Service",
+      "itemLabel": "Note",
+      "additionalProperties": { "type": "string", "format": "textarea", "rows": 2 }
+    },
+    "notIncluded": {
+      "order": 5,
+      "type": "array",
+      "title": "Not included",
+      "description": "What every estimate says it leaves out.",
+      "itemLabel": "Item",
+      "items": { "type": "string", "format": "textarea", "rows": 2 }
+    },
+    "pricesAsOf": {
+      "order": 6,
+      "type": "string",
+      "title": "Prices as of",
+      "description": "The date the prices were read, as YYYY-MM-DD.",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "source": {
+      "order": 7,
+      "type": "string",
+      "title": "Source",
+      "description": "Where the prices came from.",
+      "format": "textarea",
+      "rows": 2
+    },
+    "currency": {
+      "order": 8,
+      "type": "string",
+      "title": "Currency",
+      "description": "The estimate is in US dollars; this names it, and does not convert anything.",
+      "enum": ["USD"]
+    }
+  },
+  "additionalProperties": false
+}

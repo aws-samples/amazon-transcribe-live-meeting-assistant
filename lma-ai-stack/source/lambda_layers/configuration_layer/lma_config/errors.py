@@ -59,6 +59,30 @@ class ConcurrentModification(ConfigurationError):
     """
 
 
+class InvalidConfiguration(ConfigurationError, ValueError):
+    """The values do not match the section's schema, so nothing was saved.
+
+    ``problems`` lists every problem found, each naming the path of the value it
+    is about. The message holds the first few and a count of the rest. Also a
+    ``ValueError``, so a resolver that already answers a malformed input with
+    its message keeps doing so.
+    """
+
+    #: How many problems the message spells out.
+    REPORTED = 10
+
+    def __init__(self, problems: "list[str]") -> None:
+        self.problems = list(problems)
+        shown = self.problems[: self.REPORTED]
+        rest = len(self.problems) - len(shown)
+        summary = "; ".join(shown) + (f"; and {rest} more" if rest > 0 else "")
+        count = len(self.problems)
+        super().__init__(
+            f"the configuration was not saved: {count} "
+            f"{'problem' if count == 1 else 'problems'}: {summary}"
+        )
+
+
 class RevisionNotFound(ConfigurationError):
     """The revision asked for is not one the profile's history retains.
 

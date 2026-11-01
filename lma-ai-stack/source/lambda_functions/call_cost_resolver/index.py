@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import os
 from typing import Any, Dict, Mapping, Optional
 
@@ -206,74 +205,19 @@ def get_call_pricing() -> Dict[str, Any]:
     return {"Pricing": json.dumps(payload)}
 
 
-#: The top-level keys a price table has. Anything else is refused, because the
-#: estimator would ignore it and the Admin who saved it would not know.
-KNOWN_PRICING_KEYS = {
-    "currency",
-    "pricesAsOf",
-    "source",
-    "baseRegion",
-    "pricedRegions",
-    "regions",
-    "nonChargeableUnits",
-    "notes",
-    "notIncluded",
-}
-
-
-def _validate_pricing_delta(delta: Any) -> Dict[str, Any]:
-    """Refuse a price table the estimator could not use, before it is stored.
-
-    A price must be a finite, non-negative number: a string or a negative value
-    stored here would make every estimate wrong at once, with the error far from
-    the save that caused it.
-    """
-    if not isinstance(delta, dict):
-        raise ValueError("Pricing must be a JSON object")
-    regions = delta.get("regions", {})
-    if not isinstance(regions, dict):
-        raise ValueError("'regions' must be an object of region -> service -> unit -> price")
-    for region, services in regions.items():
-        if not isinstance(services, dict):
-            raise ValueError(f"regions.{region} must be an object of service -> unit -> price")
-        for service, units in services.items():
-            if not isinstance(units, dict):
-                raise ValueError(f"regions.{region}.{service} must be an object of unit -> price")
-            for unit, price in units.items():
-                if (
-                    isinstance(price, bool)
-                    or not isinstance(price, (int, float))
-                    or not math.isfinite(price)
-                    or price < 0
-                ):
-                    raise ValueError(
-                        f"regions.{region}.{service}.{unit} must be a non-negative number; "
-                        f"got {price!r}"
-                    )
-    for key in ("nonChargeableUnits", "pricedRegions", "notIncluded"):
-        if key in delta and (
-            not isinstance(delta[key], list) or not all(isinstance(v, str) for v in delta[key])
-        ):
-            raise ValueError(f"'{key}' must be a list of strings")
-    notes = delta.get("notes", {})
-    if not isinstance(notes, dict) or not all(isinstance(v, str) for v in notes.values()):
-        raise ValueError("'notes' must be an object of service -> text")
-    for key in ("currency", "pricesAsOf", "source", "baseRegion"):
-        if key in delta and not isinstance(delta[key], str):
-            raise ValueError(f"'{key}' must be a string")
-    unknown = sorted(set(delta) - KNOWN_PRICING_KEYS)
-    if unknown:
-        raise ValueError(f"unknown price-table keys: {unknown}")
-    return delta
-
-
 def update_call_pricing(input_data: Mapping[str, Any], caller: Mapping[str, Any]) -> Dict[str, Any]:
     raw = input_data.get("Pricing")
     try:
         delta = json.loads(raw) if isinstance(raw, str) else raw
     except json.JSONDecodeError as error:
         raise ValueError(f"Pricing is not valid JSON: {error}") from error
-    delta = _validate_pricing_delta(delta if delta is not None else {})
+    delta = delta if delta is not None else {}
+    # Checked against the section's schema by the store before anything is
+    # written (lma_config/schemas/call_pricing.json): a price must be a finite,
+    # non-negative number and every key one the estimator reads, because a
+    # value stored here that it cannot use makes every estimate wrong at once,
+    # with the error far from the save that caused it. A refusal is an
+    # InvalidConfiguration, which is a ValueError naming each problem.
     # Required, unlike on the older configuration fields, which keep it optional
     # only for clients written before it existed. The save replaces the whole
     # section with this delta, so without the version a save made from a stale

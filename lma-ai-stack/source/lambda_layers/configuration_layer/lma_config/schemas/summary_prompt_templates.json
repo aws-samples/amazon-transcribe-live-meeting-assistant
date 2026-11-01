@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/summary_prompt_templates",
+  "title": "Transcript summary prompts",
+  "description": "The prompts behind each section of an end-of-meeting summary. Each section has a title and a prompt; the number in front of the title orders the sections of the summary. Use {transcript} where the meeting transcript goes. Turning a shipped section off stores it as NONE, which the summarizer skips.",
+  "sectionLabel": "Transcript Summary",
+  "order": 1,
+  "collapsible": true,
+  "defaultExpanded": true,
+  "mergeStrategy": "merge",
+  "numberedKeys": true,
+  "keyLabel": "Section title",
+  "listLabel": "Summary sections",
+  "itemLabel": "Summary section",
+  "disabledValue": "NONE",
+  "type": "object",
+  "patternProperties": {
+    "^[0-9]+#.+$": {
+      "type": "string",
+      "title": "Prompt",
+      "description": "Use {transcript} where the meeting transcript goes.",
+      "format": "textarea",
+      "rows": 8
+    }
+  },
+  "additionalProperties": false
+}

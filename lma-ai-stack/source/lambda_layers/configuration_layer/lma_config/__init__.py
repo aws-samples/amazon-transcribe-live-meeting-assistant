@@ -27,6 +27,7 @@ from .errors import (
     ConfigurationError,
     ConfigurationTableNotConfigured,
     ConfigurationTooLarge,
+    InvalidConfiguration,
     InvalidProfileName,
     ReservedProfileName,
     RevisionHistoryUnavailable,
@@ -54,6 +55,7 @@ from .revisions import (
     RevisionEntry,
     diff_bodies,
 )
+from .schema import section_schema, section_schemas, validate_section
 from .sections import (
     ASR_ENGINE,
     CALL_PRICING,
@@ -113,6 +115,7 @@ __all__ = [
     "ConfigurationStore",
     "ConfigurationTableNotConfigured",
     "ConfigurationTooLarge",
+    "InvalidConfiguration",
     "InvalidProfileName",
     "ReservedProfileName",
     "ResolvedDocument",
@@ -131,6 +134,9 @@ __all__ = [
     "profile_key",
     "register",
     "registered_sections",
+    "section_schema",
+    "section_schemas",
     "section_spec",
     "validate_profile_name",
+    "validate_section",
 ]

@@ -258,6 +258,9 @@ type Mutation @aws_iam {
 	updateLLMPromptTemplate(input: UpdateLLMPromptTemplateInput!): UpdateLLMPromptTemplateOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	# The price table the per-meeting cost estimate is computed with.
 	updateCallPricing(input: UpdateCallPricingInput!): UpdateCallPricingOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# The schema-driven configuration editor's save: every section it changed,
+	# checked against each section's schema and saved as one revision.
+	updateConfiguration(input: UpdateConfigurationInput!): UpdateConfigurationOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	# The configuration history: every save above records a revision. Restoring
 	# saves an earlier revision's body as a new one, so it is forward-only.
 	restoreConfigurationRevision(input: RestoreConfigurationRevisionInput!): RestoreConfigurationRevisionOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
@@ -336,6 +339,9 @@ type Query @aws_cognito_user_pools
 	getCallCost(CallId: ID!): CallCost @aws_cognito_user_pools @aws_iam
 	# The price table behind those estimates, for the Admin who edits it.
 	getCallPricing: CallPricing @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# What the configuration editor renders: every section's schema, the shipped
+	# baseline and a profile's changes over it. Profile defaults to "custom".
+	getConfiguration(Profile: String): ConfigurationDocument @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	# The configuration history, for the Admin group. Profile defaults to
 	# "custom", the profile every configuration page saves into.
 	listConfigurationRevisions(Profile: String): ConfigurationRevisionList @aws_cognito_user_pools(cognito_groups: ["Admin"])
@@ -1191,6 +1197,52 @@ type UpdateLLMPromptTemplateOutput @aws_cognito_user_pools @aws_iam {
 	Success: Boolean!
 	# The version now stored, so the editor can save again without reloading.
 	Version: Int
+}
+
+# The configuration editor
+#
+# Each section of the configuration has a JSON Schema document with layout
+# annotations; the editor renders a form from it, and every save is checked
+# against it. See docs/configuration-store.md.
+type ConfigurationDocument @aws_cognito_user_pools {
+	Profile: String!
+	# Whether the profile is stored. The editor saves only into one that is.
+	Exists: Boolean
+	# What a save sends back as ExpectedVersion.
+	Version: Int
+	UpdatedBy: String
+	UpdatedAt: String
+	# The revision the profile's current state is.
+	PublishedRevision: Int
+	# A JSON list of {"Name", "CacheTier", "Schema"}, one per section, where
+	# CacheTier is immediate, short or standard and decides how soon a saved
+	# change is read.
+	Sections: String
+	# JSON objects of section name -> values: the shipped baseline, and the
+	# profile's changes over it as stored.
+	Default: String
+	Custom: String
+}
+
+input UpdateConfigurationInput {
+	Profile: String
+	# A JSON object of section name -> that section's complete stored values,
+	# for every section being saved. Sections not named keep what is stored.
+	Sections: String!
+	# The Version getConfiguration returned. Required: a save made from a stale
+	# read would replace whatever was saved since.
+	ExpectedVersion: Int!
+	# Recorded on the revision this save creates. At most 500 characters are kept.
+	Comment: String
+}
+
+type UpdateConfigurationOutput @aws_cognito_user_pools {
+	Success: Boolean!
+	Profile: String
+	Version: Int
+	# The revision the save recorded; null when nothing changed.
+	Revision: Int
+	Unchanged: Boolean
 }
 
 # Configuration history
