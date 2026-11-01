@@ -10,8 +10,9 @@ from the topics that happen to come up. Two things hold that line:
 * the prompt asks for a stated agenda and for the words it was stated in, and
   says plainly that "none" is the expected answer for most meetings; and
 * the answer is accepted only if that quoted evidence is actually in the
-  transcript, so an agenda the model made up has nothing to point at and is
-  discarded.
+  transcript, and each item is kept only if it is drawn from that quote, so an
+  agenda the model made up -- from nothing, or from later discussion -- has
+  nothing to point at and is discarded.
 
 No AWS here; index.py is the plumbing.
 """
@@ -138,6 +139,37 @@ def evidence_is_in_transcript(evidence: Any, transcript: str) -> bool:
     return len(quote) >= MIN_EVIDENCE_CHARS and quote in spoken
 
 
+# Words too common to show that an item came from the quoted statement.
+_FILLER = frozenset(
+    "the and for with our about then next first last also will well lets let's "
+    "this that these those from into over under item items agenda today talk "
+    "discuss discussion cover review update updates".split()
+)
+
+
+def _stems(text: str) -> List[str]:
+    # The first five letters, so "hire" and "hiring", "plan" and "planning" meet.
+    return [word[:5] for word in _normalise(text).split()]
+
+
+def item_is_in_evidence(item: str, evidence: str) -> bool:
+    """Whether an agenda item was drawn from the quoted statement of the agenda.
+
+    At least half of the item's content words (three letters or more, common
+    filler left out) must appear in the quote; an item with no content words --
+    "Q3", say -- must appear in it whole. That allows the short paraphrase an
+    item list naturally is ("the budget" from "first, the budget") and refuses
+    an item taken from anywhere else.
+    """
+    quoted = set(_stems(evidence))
+    words = _normalise(item).split()
+    content = [w[:5] for w in words if len(w) >= 3 and w not in _FILLER]
+    if not content:
+        return bool(words) and all(w[:5] in quoted for w in words)
+    found = sum(1 for stem in content if stem in quoted)
+    return found * 2 >= len(content)
+
+
 def _json_object(raw: str) -> Optional[Dict[str, Any]]:
     try:
         parsed = json.loads(raw)
@@ -163,14 +195,15 @@ def parse_model_response(raw: str, transcript: str) -> Optional[List[str]]:
     answer = _json_object(raw)
     if not answer or answer.get("agenda_stated") is not True:
         return None
-    if not evidence_is_in_transcript(answer.get("evidence"), transcript):
+    evidence = answer.get("evidence")
+    if not evidence_is_in_transcript(evidence, transcript):
         return None
     items = []
     for item in answer.get("items") or []:
         if not isinstance(item, str):
             continue
         text = " ".join(item.split())[:MAX_ITEM_CHARS]
-        if text and text not in items:
+        if text and text not in items and item_is_in_evidence(text, evidence):
             items.append(text)
         if len(items) >= MAX_ITEMS:
             break

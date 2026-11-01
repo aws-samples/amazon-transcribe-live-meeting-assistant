@@ -54,6 +54,7 @@ PROMPT_KEY_PATTERN = re.compile(r"^\d+#")
 # and for a meeting without one there is nothing to report, so the section is
 # left out of the summary rather than generated empty. See docs/meeting-agenda.md.
 AGENDA_PLACEHOLDER = "{agenda}"
+PLACEHOLDERS = re.compile(r"\{transcript\}|\{agenda\}")
 
 # List marks at the start of an agenda line, hidden as the meeting page hides
 # them (ui/src/components/common/agenda.js), so the prompt numbers the items the
@@ -247,8 +248,10 @@ def generate_summary(
             if not agenda_text:
                 print(f"Skipping summary section '{key}': the meeting has no agenda.")
                 continue
-            prompt = prompt.replace(AGENDA_PLACEHOLDER, agenda_text)
-        prompt = prompt.replace("{transcript}", transcript)
+        # Both placeholders in one pass, so text inserted for one -- an agenda
+        # line that reads "{transcript}", say -- is never read as the other.
+        values = {"{transcript}": transcript, AGENDA_PLACEHOLDER: agenda_text}
+        prompt = PLACEHOLDERS.sub(lambda match: values[match.group(0)], prompt)
         print("Prompt:", prompt)
         response = call_bedrock(prompt, call_id)
         print("API Response:", response)

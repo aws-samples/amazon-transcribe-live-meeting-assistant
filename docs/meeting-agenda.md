@@ -74,7 +74,9 @@ such a statement in two ways, and stores what it finds with source `derived`.
 **Automatically, once per meeting.** When a meeting that has no agenda passes
 about five minutes of transcript, the transcript so far is read once for a
 stated agenda. If one was stated, it is stored; if not, nothing is stored and
-the meeting is not read again automatically. The same holds if the pass fails —
+the meeting is not read again automatically. For an uploaded recording, whose
+segments arrive in a burst, the pass can run before the whole opening has been
+stored, so it may read less than five minutes. The same holds if the pass fails —
 the model call is throttled, say: it is not retried, and **Derive agenda**
 remains the way to try again. The pass never replaces an agenda:
 it writes only while the meeting still has none, checked in the same database
@@ -92,8 +94,9 @@ the meeting".
 **Only a stated agenda is stored.** The model is asked whether an agenda was
 stated, for its items, and for the words it was stated in, and is told that
 topics which merely come up are not an agenda. Its answer is accepted only if
-those quoted words are actually in the transcript, so an agenda made up from
-the discussion has nothing to point at and is discarded. Both passes read at
+those quoted words are actually in the transcript, and each item is kept only
+if it is drawn from them — most of its words appear in the quote — so an agenda
+made up from the discussion has nothing to point at and is discarded. Both passes read at
 most about the first half hour of conversation, where agendas are stated.
 
 **Model and cost.** Derivation uses the model selected by the **BedrockModelId**

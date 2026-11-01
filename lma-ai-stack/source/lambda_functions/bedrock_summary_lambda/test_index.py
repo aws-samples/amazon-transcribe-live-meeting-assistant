@@ -1150,3 +1150,15 @@ def test_the_agenda_is_split_on_line_breaks_only_as_the_page_does() -> None:
         index.numbered_agenda("Budget\u2028review\r\nHiring") == "1. Budget\u2028review\n2. Hiring"
     )
     assert index.numbered_agenda(None) == ""
+
+
+def test_text_inserted_for_one_placeholder_is_not_read_as_the_other(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Agenda Coverage": AGENDA_PROMPT}),
+        custom=ddb_item(),
+    )
+    index.generate_summary("T", None, agenda="{transcript}")
+    assert prompts_sent(bedrock) == ["Agenda:\n1. {transcript}\nTranscript:\nT"]

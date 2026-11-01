@@ -1224,6 +1224,10 @@ def queue_agenda_derivation(call_id: str) -> None:
     a few times over costs only a conditional write each. A failure to queue is
     logged and the segment processed regardless: an agenda is an enhancement.
     """
+    # Bounded: a warm environment sees meeting after meeting. Forgetting them
+    # all costs at most a repeat queue each, which the deriver's claim absorbs.
+    if len(AGENDA_PASS_QUEUED) >= 5000:
+        AGENDA_PASS_QUEUED.clear()
     AGENDA_PASS_QUEUED.add(call_id)
     try:
         LAMBDA_HOOK_CLIENT.invoke(

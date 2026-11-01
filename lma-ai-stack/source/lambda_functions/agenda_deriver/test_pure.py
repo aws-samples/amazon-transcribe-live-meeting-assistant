@@ -124,13 +124,21 @@ def test_json_wrapped_in_prose_is_read():
 
 
 def test_items_are_cleaned_deduplicated_and_bounded():
-    evidence = "three things to get through: the budget, hiring"
+    # Every item is drawn from the quote, so only the cleaning and the bounds
+    # decide what is kept.
+    statement = (
+        "The agenda: the budget, "
+        + "x" * 300
+        + ", "
+        + ", ".join(f"workstream{i}" for i in range(40))
+    )
+    transcript = pure.build_transcript([seg(1, statement)])
     raw = answer(
         items=["  the   budget ", "the budget", 7, "", "x" * 500]
-        + [f"item {i}" for i in range(40)],
-        evidence=evidence,
+        + [f"workstream{i}" for i in range(40)],
+        evidence=statement,
     )
-    items = pure.parse_model_response(raw, TRANSCRIPT)
+    items = pure.parse_model_response(raw, transcript)
     assert items[0] == "the budget"
     assert len(items[1]) == pure.MAX_ITEM_CHARS
     assert len(items) == pure.MAX_ITEMS
@@ -155,3 +163,30 @@ def test_overlapping_channels_read_in_start_order():
         {**seg(20, "Short one.", speaker="Bob", channel="CALLER"), "EndTime": 22},
     ]
     assert pure.build_transcript(segments) == "[00:10] Ann: Long turn.\n[00:20] Bob: Short one."
+
+
+def test_items_not_drawn_from_the_quoted_statement_are_dropped():
+    """A real quote does not license items taken from the later discussion."""
+    raw = answer(
+        items=["the budget", "office relocation", "hiring"],
+        evidence="Today we have three things to get through: the budget, hiring, and the Q3 plan.",
+    )
+    assert pure.parse_model_response(raw, TRANSCRIPT) == ["the budget", "hiring"]
+
+
+def test_a_real_quote_with_only_invented_items_stores_nothing():
+    transcript = pure.build_transcript([seg(1, "Morning everyone, let's get started now.")])
+    raw = answer(
+        items=["Office relocation", "Holiday party"],
+        evidence="Morning everyone, let's get started now.",
+    )
+    assert pure.parse_model_response(raw, transcript) is None
+
+
+def test_an_item_is_matched_by_its_content_words():
+    evidence = "first the budget, then hiring plans, and finally Q3"
+    assert pure.item_is_in_evidence("Budget review", evidence)
+    assert pure.item_is_in_evidence("Hiring plan", evidence)
+    assert pure.item_is_in_evidence("Q3", evidence)
+    assert not pure.item_is_in_evidence("Q4", evidence)
+    assert not pure.item_is_in_evidence("Office relocation", evidence)
