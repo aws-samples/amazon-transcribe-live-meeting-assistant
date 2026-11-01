@@ -415,7 +415,9 @@ finds the images. The item has:
   cannot read: `getVideoKeyframes` checks the caller's access to the meeting
   and then signs an hour-long link to each image, and only for an image stored
   in that meeting's own folder of this deployment's bucket.
-- **Deletion.** Deleting a meeting deletes its key frames and their images.
+- **Deletion.** Deleting a meeting deletes its key frames and their images,
+  and its video recording: the file named on the meeting record, and any
+  Virtual Participant recording segments left under `lma-video-chunks/`.
 
 ## Reading key frames
 
