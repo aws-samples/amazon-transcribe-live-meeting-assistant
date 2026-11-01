@@ -71,3 +71,31 @@ export const segmentIndexForTime = (startTimes, seconds) => {
   });
   return first;
 };
+
+export const HIGHLIGHT_CLASS = 'transcript-segment-highlight';
+
+/**
+ * Scrolls a transcript container to the segment under way at `seconds` and
+ * highlights it. Rows are the container's elements with a `data-start-time`.
+ * Measured against the container itself, so a positioned element between a
+ * row and the container does not move the target. Returns the row, or null
+ * when there is none.
+ */
+export const scrollTranscriptToTime = (container, seconds) => {
+  if (!container || !Number.isFinite(seconds)) return null;
+  const rows = [...container.querySelectorAll('[data-start-time]')];
+  const index = segmentIndexForTime(
+    rows.map((row) => Number(row.getAttribute('data-start-time'))),
+    seconds,
+  );
+  if (index === -1) return null;
+  const row = rows[index];
+  const top = row.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+  if (container.scrollTo) container.scrollTo({ top: Math.max(0, top - 8), behavior: 'smooth' });
+  row.classList.remove(HIGHLIGHT_CLASS);
+  // Read layout so the animation restarts even for the row highlighted last.
+  // eslint-disable-next-line no-unused-expressions
+  row.offsetWidth;
+  row.classList.add(HIGHLIGHT_CLASS);
+  return row;
+};

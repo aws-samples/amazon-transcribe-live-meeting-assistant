@@ -56,7 +56,7 @@ import CallCostPanel from './CallCostPanel';
 import RecordingPlayer from '../recording-player';
 import VideoPlayer from '../video-player';
 import VideoTimeline from '../video-timeline';
-import { recordingSecondsFor, segmentIndexForTime } from '../common/video-keyframes';
+import { recordingSecondsFor, scrollTranscriptToTime } from '../common/video-keyframes';
 import useSettingsContext from '../../contexts/settings';
 
 import { DONE_STATUS, IN_PROGRESS_STATUS } from '../common/get-recording-status';
@@ -1140,22 +1140,9 @@ const CallInProgressTranscript = ({
   // Move to the segment at a requested time (a key frame was selected), and
   // pause following the live end so the transcript stays there.
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container || !scrollRequest || !Number.isFinite(scrollRequest.seconds)) return;
-    const rows = [...container.querySelectorAll('[data-start-time]')];
-    const index = segmentIndexForTime(
-      rows.map((row) => Number(row.getAttribute('data-start-time'))),
-      scrollRequest.seconds,
-    );
-    if (index === -1) return;
-    const row = rows[index];
-    if (item.recordingStatusLabel === IN_PROGRESS_STATUS) setUserHasScrolled(true);
-    container.scrollTo({ top: Math.max(0, row.offsetTop - container.offsetTop - 8), behavior: 'smooth' });
-    row.classList.remove('transcript-segment-highlight');
-    // Restart the highlight even for the same row.
-    // eslint-disable-next-line no-unused-expressions
-    row.offsetWidth;
-    row.classList.add('transcript-segment-highlight');
+    if (!scrollRequest) return;
+    const row = scrollTranscriptToTime(containerRef.current, scrollRequest.seconds);
+    if (row && item.recordingStatusLabel === IN_PROGRESS_STATUS) setUserHasScrolled(true);
   }, [scrollRequest]);
 
   useEffect(() => {

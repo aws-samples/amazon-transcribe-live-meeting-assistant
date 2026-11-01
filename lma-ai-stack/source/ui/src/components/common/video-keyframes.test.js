@@ -3,9 +3,16 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
-import { formatFrameTime, mergeKeyframes, recordingSecondsFor, segmentIndexForTime } from './video-keyframes';
+import {
+  HIGHLIGHT_CLASS,
+  formatFrameTime,
+  mergeKeyframes,
+  recordingSecondsFor,
+  scrollTranscriptToTime,
+  segmentIndexForTime,
+} from './video-keyframes';
 
 const frame = (ms, extra = {}) => ({
   FrameId: `${String(ms).padStart(10, '0')}-ab12cd`,
@@ -62,5 +69,38 @@ describe('segmentIndexForTime', () => {
   it('copes with segments listed out of start order', () => {
     // The transcript is sorted by end time, so a long segment can come later.
     expect(segmentIndexForTime([10, 2, 25], 12)).toBe(0);
+  });
+});
+
+describe('scrollTranscriptToTime', () => {
+  const transcript = (starts) => {
+    const container = document.createElement('div');
+    container.scrollTo = vi.fn();
+    starts.forEach((start, i) => {
+      const row = document.createElement('div');
+      row.setAttribute('data-start-time', String(start));
+      row.textContent = `segment ${i}`;
+      // Each row 50px below the last, measured from a container at y=100 scrolled by 30.
+      row.getBoundingClientRect = () => ({ top: 100 - 30 + i * 50 });
+      container.appendChild(row);
+    });
+    container.getBoundingClientRect = () => ({ top: 100 });
+    Object.defineProperty(container, 'scrollTop', { value: 30, configurable: true });
+    return container;
+  };
+
+  it('scrolls to and highlights the segment under way at that time', () => {
+    const container = transcript([0, 12, 30, 61]);
+    const row = scrollTranscriptToTime(container, 35);
+    expect(row.textContent).toBe('segment 2');
+    expect(row.classList.contains(HIGHLIGHT_CLASS)).toBe(true);
+    // Row 2 sits 100px into the content (its top 170 - container 100 + scrolled 30).
+    expect(container.scrollTo).toHaveBeenCalledWith({ top: 92, behavior: 'smooth' });
+  });
+
+  it('does nothing for an empty transcript or a time that is not one', () => {
+    expect(scrollTranscriptToTime(transcript([]), 5)).toBeNull();
+    expect(scrollTranscriptToTime(transcript([0, 10]), NaN)).toBeNull();
+    expect(scrollTranscriptToTime(null, 5)).toBeNull();
   });
 });
