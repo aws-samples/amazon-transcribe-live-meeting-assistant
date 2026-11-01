@@ -491,7 +491,7 @@ release, so the release is its history.
 | `CreatedAt` | When it was saved, ISO-8601 UTC |
 | `CreatedBy` | Who saved it: the same identity the record holds as `UpdatedBy` — the saver's email address, or their Cognito username where the token carries none — taken from the verified token, never from the request. `cloudformation` for what the seeder writes |
 | `Sections` | The sections this revision changed relative to the one before it. For the first revision of a profile, every section it holds |
-| `Comment` | Optional, at most 500 characters. Every configuration save mutation accepts a `Comment` input; the configuration pages do not send one yet, a restore can |
+| `Comment` | Optional, at most 500 characters. Every configuration save mutation accepts a `Comment` input; the Configuration page asks for one on every save, and a restore can send one |
 | `Source` | `save`, `restore`, `deploy` (the seeder), `backfill` (the profile as it stood when history began) or `recovered` (see below) |
 | `RestoredFrom` | For a restore, the revision whose body it restored |
 | `Label` | Optional, at most 100 characters. A labelled revision is never pruned |
@@ -886,11 +886,12 @@ in the DynamoDB console stops having any effect, as for the summary prompts:
 edit the settings on the Configuration page.
 
 **One consequence of one shared profile.** The version a save is checked against
-is the profile's, and every configuration page saves into the same profile. So a
-save is also refused when another administrator saved a *different*
-configuration page after this one was loaded. Nothing is lost either way — the
-message says to reload and apply the change again — but it is a refusal that a
-per-page record would not have produced.
+is the profile's, and every section is saved into the same profile — from the
+Configuration page, the Edit Chat Buttons dialog or the API. So a save is also
+refused when another administrator saved a *different* section after this one
+was loaded. Nothing is lost either way — the Configuration page offers to reload
+and keep the changes — but it is a refusal that a per-section record would not
+have produced.
 
 ### The Meeting Assist chat buttons
 

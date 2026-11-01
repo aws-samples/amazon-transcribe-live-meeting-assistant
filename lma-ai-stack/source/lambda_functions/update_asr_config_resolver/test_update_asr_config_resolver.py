@@ -271,6 +271,10 @@ def test_a_json_array_is_rejected(table: FakeConfigurationTable) -> None:
 def test_the_allow_list_is_exactly_the_three_switches() -> None:
     """Adding a field here means adding it to the AppSync type, the transcriber's
     and the VP's readers and the asr_engine schema - fail loudly if it drifts."""
+    schema = json.loads(
+        (LAYER / "lma_config" / "schemas" / "asr_engine.json").read_text(encoding="utf-8")
+    )
+    assert set(schema["properties"]) == index.ALLOWED_FIELDS
     assert index.ALLOWED_FIELDS == {
         "streamingEngineMicrovm",
         "virtualParticipantEngineMicrovm",

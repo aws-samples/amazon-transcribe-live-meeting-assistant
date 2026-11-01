@@ -325,11 +325,11 @@ Resources:
       BundleId: !Ref AsrModelBundle
       BaselineMemoryMiB: !FindInMap [BundleMemory, !Ref AsrModelBundle, MiB]
 
-  # Runtime overrides for the diarization operating point, edited from the web UI's
-  # Transcription Engine section of the Configuration page. Everything here is per-session in the WebSocket protocol, so a
-  # change takes effect on the NEXT meeting with no rebuild and no stack update —
-  # which is what makes the threshold practical to tune (it is model-specific and
-  # measured, see source/catalog.json).
+  # Where the Transcription Engine switches were stored before the shared
+  # configuration table; the configuration seeder reads it once, on upgrade, to
+  # carry them across (docs/configuration-store.md). Records written by older
+  # releases can also hold retired diarization tuning fields: the operating point
+  # is now the model bundle's, baked into the image (see source/catalog.json).
   AsrConfigTable:
     Type: AWS::DynamoDB::Table
     # DDB-002: Data plane logging disabled due to cost; control plane logging via CloudTrail is sufficient
