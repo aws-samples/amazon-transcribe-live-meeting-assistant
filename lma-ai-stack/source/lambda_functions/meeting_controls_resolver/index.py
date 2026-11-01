@@ -9,6 +9,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from os import environ
+from urllib.parse import unquote, urlparse
 
 import boto3
 from appsync_utils import AppsyncRequestsGqlClient
@@ -38,6 +39,14 @@ S3_TRANSCRIPTS_PREFIX = environ["S3_TRANSCRIPTS_PREFIX"]
 # Key frames of the shared screen (docs/meeting-video.md): images under this
 # prefix, one folder per meeting, and items under PK kf#<CallId>.
 S3_KEYFRAMES_PREFIX = environ.get("S3_KEYFRAMES_PREFIX", "lma-video-keyframes/")
+# Meeting video recordings (docs/meeting-video.md): the final .mp4 under the
+# first prefix, and the Virtual Participant's in-progress segments under
+# <chunks prefix><CallId>/ until the .mp4 is assembled.
+S3_VIDEO_RECORDINGS_PREFIX = environ.get("S3_VIDEO_RECORDINGS_PREFIX", "lma-video-recordings/")
+S3_VIDEO_CHUNKS_PREFIX = environ.get("S3_VIDEO_CHUNKS_PREFIX", "lma-video-chunks/")
+# The time stamp both video producers end the file name with:
+# new Date().toISOString() with ":" and "." replaced by "-".
+_VIDEO_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.mp4")
 VP_TABLE_NAME = environ.get("VP_TABLE_NAME")
 VP_TASK_REGISTRY_TABLE_NAME = environ.get("VP_TASK_REGISTRY_TABLE_NAME")
 KINESIS_STREAM_NAME = environ.get("KINESIS_STREAM_NAME")
@@ -109,6 +118,81 @@ def delete_recordings_transcripts(callid):
                 raise
 
 
+def _video_key_from_url(url):
+    """The recordings-bucket key a stored VideoRecordingUrl points at, or None.
+
+    The producers store ``https://<bucket>.s3.<region>.<suffix>/<key>``, with the
+    key URL-encoded by the Virtual Participant and as-is by the transcriber. Only
+    a key in this deployment's bucket and directly under the video prefix is
+    returned, so the deletion stays inside the video recordings.
+    """
+    if not url or not isinstance(url, str):
+        return None
+    parsed = urlparse(url)
+    if not (parsed.hostname or "").startswith(f"{S3_BUCKET_NAME}.s3."):
+        return None
+    key = unquote(parsed.path.lstrip("/"))
+    name = key[len(S3_VIDEO_RECORDINGS_PREFIX) :]
+    if not key.startswith(S3_VIDEO_RECORDINGS_PREFIX) or not name or "/" in name:
+        return None
+    return key
+
+
+def _video_recording_keys(callid):
+    """Every video recording file written for the meeting, found by name.
+
+    The Virtual Participant names its file ``call_<id>_<stamp>.mp4``, with each
+    character of the CallId outside [A-Za-z0-9_-] replaced by "_"; the
+    transcriber names the desktop app's ``<posixified id>_<stamp>.mp4``. A key
+    is taken only when what follows the meeting's name is exactly a time stamp,
+    so meeting "m" never takes meeting "m_2"'s file.
+    """
+    names = {
+        "call_" + re.sub(r"[^a-zA-Z0-9_-]", "_", callid) + "_",
+        posixify_filename(callid) + "_",
+    }
+    keys = set()
+    paginator = s3_client.get_paginator("list_objects_v2")
+    for name in sorted(names):
+        prefix = f"{S3_VIDEO_RECORDINGS_PREFIX}{name}"
+        for page in paginator.paginate(Bucket=S3_BUCKET_NAME, Prefix=prefix):
+            for obj in page.get("Contents", []) or []:
+                if _VIDEO_STAMP.fullmatch(obj["Key"][len(prefix) :]):
+                    keys.add(obj["Key"])
+    return keys
+
+
+def delete_video_recordings(callid, video_url=None):
+    """Delete the meeting's video recording and any leftover recording segments.
+
+    The file the meeting record points at is deleted, and so is any other file
+    named for the meeting: a Virtual Participant that recorded more than once
+    leaves one file per run, and only the last is on the record. The segments
+    live under ``<chunks prefix><CallId>/``; the trailing slash keeps one
+    meeting's folder from matching another whose id merely begins the same way.
+    Returns the number of recording files deleted.
+    """
+    if not callid:
+        return 0
+    keys = _video_recording_keys(callid)
+    stored = _video_key_from_url(video_url)
+    if stored:
+        keys.add(stored)
+    ordered = sorted(keys)
+    for i in range(0, len(ordered), S3_BATCH_DELETE_LIMIT):
+        objects = [{"Key": k} for k in ordered[i : i + S3_BATCH_DELETE_LIMIT]]
+        s3_client.delete_objects(Bucket=S3_BUCKET_NAME, Delete={"Objects": objects, "Quiet": True})
+    segments = _batch_delete_prefix(S3_BUCKET_NAME, f"{S3_VIDEO_CHUNKS_PREFIX}{callid}/")
+    if ordered or segments:
+        logger.info(
+            "Deleted %d video recording(s) and %d segment(s) for %s",
+            len(ordered),
+            segments,
+            callid,
+        )
+    return len(ordered)
+
+
 def get_call_details(appsync_session, schema, callid):
     try:
         query = dsl_gql(
@@ -121,6 +205,7 @@ def get_call_details(appsync_session, schema, callid):
                     schema.Call.Owner,
                     schema.Call.SharedWith,
                     schema.Call.RecordingUrl,
+                    schema.Call.VideoRecordingUrl,
                 )
             )
         )
@@ -508,9 +593,11 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
             metering_future.result()
             keyframes_future.result()
 
-        shared_with = (
-            details_result.get("getCall", {}).get("SharedWith") if details_result else None
-        )
+        call_details = (details_result or {}).get("getCall") or {}
+        shared_with = call_details.get("SharedWith")
+
+        # After the details, because the stored VideoRecordingUrl names the file.
+        delete_video_recordings(callid, call_details.get("VideoRecordingUrl"))
 
         input = {
             "CallId": callid,
