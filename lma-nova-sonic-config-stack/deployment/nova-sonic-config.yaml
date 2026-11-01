@@ -164,5 +164,5 @@ Outputs:
     Description: >-
       View the *custom* Nova Sonic voice assistant configuration as it was saved
       before the settings moved into the stack's configuration table. Edits here
-      have no effect; edit the settings on the Nova Sonic Configuration page.
+      have no effect; edit the settings in the Nova Sonic Voice Assistant section of the Configuration page.
     Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=CustomNovaSonicConfig&route=ROUTE_ITEM_EXPLORER&table=${NovaSonicConfigTable}'

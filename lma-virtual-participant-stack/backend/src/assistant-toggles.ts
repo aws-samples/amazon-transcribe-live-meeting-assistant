@@ -661,7 +661,7 @@ export async function applyAssistantChatCommand(
     if (translatorLanguages && outcome.result === 'applied') {
         return [
             `${reply[0]} This applies to this meeting only; the default language pair is set`
-                + ' on the Nova Sonic Configuration page.',
+                + ' in the Nova Sonic Voice Assistant section of the Configuration page.',
         ];
     }
     return reply;

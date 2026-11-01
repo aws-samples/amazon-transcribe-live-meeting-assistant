@@ -24,6 +24,7 @@ import MCPServersRoutes from './MCPServersRoutes';
 import UserManagementRoutes from './UserManagementRoutes';
 import ConfigurationHistoryRoutes from './ConfigurationHistoryRoutes';
 import ConfigurationRoutes from './ConfigurationRoutes';
+import movedConfigurationRoutes from './moved-configuration-routes';
 import EmbedRoutes from './EmbedRoutes';
 import VoiceEnrollmentRoutes from './VoiceEnrollmentRoutes';
 import ManualActionAlerts from '../components/virtual-participant-layout/ManualActionAlerts';
@@ -40,7 +41,6 @@ import {
   DESKTOP_CAPTURE_APP_PATH,
   MEETINGS_QUERY_PATH,
   MCP_SERVERS_PATH,
-  MOVED_CONFIGURATION_PAGES,
   USER_MANAGEMENT_PATH,
   CONFIGURATION_HISTORY_PATH,
   CONFIGURATION_PATH,
@@ -90,13 +90,7 @@ const AuthRoutes = ({ redirectParam }) => {
         <Route path={`${MCP_SERVERS_PATH}/*`} element={<MCPServersRoutes />} />
         {/* The pages that each edited one section moved into the Configuration
             page; a bookmark to one opens that section there. */}
-        {Object.entries(MOVED_CONFIGURATION_PAGES).map(([path, section]) => (
-          <Route
-            key={path}
-            path={`${path}/*`}
-            element={<Navigate to={`${CONFIGURATION_PATH}?section=${section}`} replace />}
-          />
-        ))}
+        {movedConfigurationRoutes()}
         <Route path={`${USER_MANAGEMENT_PATH}/*`} element={<UserManagementRoutes />} />
         <Route path={`${CONFIGURATION_HISTORY_PATH}/*`} element={<ConfigurationHistoryRoutes />} />
         <Route path={`${CONFIGURATION_PATH}/*`} element={<ConfigurationRoutes />} />

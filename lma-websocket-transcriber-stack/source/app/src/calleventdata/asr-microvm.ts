@@ -249,7 +249,7 @@ export const resolveMaxSpeakers = (
 /**
  * Which engine transcribes this meeting.
  *
- * The engine is the deployment's choice (the Transcription Engine page) and diarization the client's;
+ * The engine is the deployment's choice (the Configuration page's Transcription Engine section) and diarization the client's;
  * a client may still name an engine (--asr-engine). Unservable requests fall back.
  */
 export const resolveAsrEngine = (

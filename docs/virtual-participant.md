@@ -56,8 +56,8 @@ an ordinary remote attendee and useless for a conference room: everybody sharing
 one speakerphone shares one roster entry, so a whole room arrives as a single
 speaker.
 
-**Virtual Participant voice separation** on
-The **Transcription Engine** section of **Configuration ▸ Configuration** fixes that. With it on, the VP tells
+**Virtual Participant voice separation**, in the **Transcription Engine** section of
+**Configuration ▸ Configuration**, fixes that. With it on, the VP tells
 apart the distinct voices behind one attendee and labels them
 `Conference Room (spk_0)`, `Conference Room (spk_1)` and so on — the roster name
 for who the platform says is talking, the voice id for which voice within it.

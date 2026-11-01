@@ -17,12 +17,13 @@
 import React from 'react';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
-import { MemoryRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SettingsContext } from '../../contexts/settings';
 import { CONFIGURATION_PATH, MOVED_CONFIGURATION_PAGES } from '../../routes/constants';
+import movedConfigurationRoutes from '../../routes/moved-configuration-routes';
 import { ConfigurationContent } from './ConfigurationPage';
 
 // The page renders every section's form; under a full parallel run that can take
@@ -345,10 +346,11 @@ describe('the pages that each edited one section', () => {
     'send %s to its section of the Configuration page',
     (path, name) => {
       expect(SECTIONS.map((entry) => entry.Name)).toContain(name);
+      // The routes AuthRoutes renders.
       render(
         <MemoryRouter initialEntries={[path]}>
           <Routes>
-            <Route path={`${path}/*`} element={<Navigate to={`${CONFIGURATION_PATH}?section=${name}`} replace />} />
+            {movedConfigurationRoutes()}
             <Route path={`${CONFIGURATION_PATH}/*`} element={<Where />} />
           </Routes>
         </MemoryRouter>,

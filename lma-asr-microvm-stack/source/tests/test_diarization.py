@@ -843,7 +843,7 @@ def test_new_session_honours_per_session_diarization_overrides() -> None:
     """All four knobs must be changeable per session.
 
     The operating point is empirical and model-specific, so it has to be tunable
-    from runtime config (the Transcription Engine page) rather than only by rebuilding the
+    from runtime config (the Configuration page's Transcription Engine section) rather than only by rebuilding the
     image — a five-minute rebuild per experiment made tuning impractical.
     """
     engine = DiarizingEngine(

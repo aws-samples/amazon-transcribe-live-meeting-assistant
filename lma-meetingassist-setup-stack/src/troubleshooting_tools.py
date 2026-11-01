@@ -1265,7 +1265,7 @@ class TroubleshootingTools:
         "EnableMicrovmAsr": (
             "Whether the on-demand ASR engine is deployed at all. Even when "
             "true, a meeting is only transcribed by it once an admin moves its "
-            "source onto it on the Transcription Engine page, so a deployment "
+            "source onto it in the Transcription Engine section of the Configuration page, so a deployment "
             "with this on may still be using Amazon Transcribe for every "
             "meeting."
         ),

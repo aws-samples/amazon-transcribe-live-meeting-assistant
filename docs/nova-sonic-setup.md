@@ -23,7 +23,7 @@ This guide walks you through setting up the AWS Nova Sonic 2 voice assistant wit
 - **Secure:** All data stays within your AWS environment
 - **Async Tool Processing:** Tools execute in background without blocking conversation
 - **Pre-Tool Acknowledgment:** Announces tool execution to set user expectations
-- **Customizable Config:** Edit system prompts and voice ID in the Nova Sonic section of the Configuration page
+- **Customizable Config:** Edit system prompts and voice ID in the Nova Sonic Voice Assistant section of the Configuration page
 
 ## Step 1: Enable AWS Nova Sonic 2 Model Access
 
@@ -282,7 +282,7 @@ Amazon Nova Sonic supports 16 different voices:
 
 ### 4.7 Example Customizations
 
-Each example lists the fields to set in the Nova Sonic section of the Configuration page, by their stored names; anything not listed keeps its default.
+Each example lists the fields to set in the Nova Sonic Voice Assistant section of the Configuration page, by their stored names; anything not listed keeps its default.
 
 **Example 1: Professional Assistant (Fast Response)**
 ```json
@@ -348,7 +348,7 @@ Each example lists the fields to set in the Nova Sonic section of the Configurat
 ### 4.8 Apply Configuration Changes
 
 1. Change the settings in the **Nova Sonic Voice Assistant** section of the Configuration page
-2. Press **Save Changes**
+2. Select **Save changes**, then **Save** in the dialog
 3. **No redeployment needed** - the next virtual participant to start uses them; one already in a meeting keeps the settings it started with
 4. Start a new virtual participant to test
 

@@ -11,11 +11,11 @@ DEFAULT_CONFIG_PK = "DefaultNovaSonicConfig"
 CUSTOM_CONFIG_PK = "CustomNovaSonicConfig"
 
 DEFAULT_CONFIG_INFO = """Default Nova Sonic voice assistant configuration, kept so a deployment can be rolled back to a release that reads this table.
-The voice assistant reads its settings from the stack's configuration table. Edit them on the Nova Sonic Configuration page in the LMA web UI; edits made here have no effect.
+The voice assistant reads its settings from the stack's configuration table. Edit them in the Nova Sonic Voice Assistant section of the Configuration page in the LMA web UI; edits made here have no effect.
 """
 
 CUSTOM_CONFIG_INFO = f"""Custom Nova Sonic voice assistant configuration as it was saved before the settings moved into the stack's configuration table, which carries it across on upgrade.
-The voice assistant reads its settings from the configuration table, so edit them on the Nova Sonic Configuration page in the LMA web UI; edits made here have no effect.
+The voice assistant reads its settings from the configuration table, so edit them in the Nova Sonic Voice Assistant section of the Configuration page in the LMA web UI; edits made here have no effect.
 Attribute values here override the default config in item: {DEFAULT_CONFIG_PK}. Available attributes:
 - systemPrompt (String): The system prompt text for the voice assistant (Nova Sonic only; ElevenLabs agents are configured in the ElevenLabs dashboard)
 - promptMode (String): How to apply custom prompt - 'base' (use as-is), 'inject' (append to default), or 'replace' (fully replace default)
@@ -47,7 +47,7 @@ def get_default_config():
         'translatorUnmutePhrases': 'translator unmute, alex unmute',
         # Legacy field kept in sync with meetingMode for back-compat readers.
         'groupMeetingMode': False,
-        'description': 'Default Nova Sonic configuration, kept for rollback. Settings are edited on the Nova Sonic Configuration page.'
+        'description': 'Default Nova Sonic configuration, kept for rollback. Settings are edited in the Nova Sonic Voice Assistant section of the Configuration page.'
     }
 
 def get_empty_custom_config():
@@ -55,7 +55,7 @@ def get_empty_custom_config():
     return {
         'NovaSonicConfigId': CUSTOM_CONFIG_PK,
         '*Information*': CUSTOM_CONFIG_INFO,
-        'description': 'Custom Nova Sonic configuration as saved before the move to the configuration table. Settings are edited on the Nova Sonic Configuration page.'
+        'description': 'Custom Nova Sonic configuration as saved before the move to the configuration table. Settings are edited in the Nova Sonic Voice Assistant section of the Configuration page.'
     }
 
 def lambda_handler(event, context):
