@@ -446,8 +446,12 @@
             });
             if (!missing.size) return;
             const requestId = `kf-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            // A page that does not answer leaves the placeholders with their
+            // text, and no listener behind.
+            const giveUp = setTimeout(() => window.removeEventListener('message', onFrames), 30000);
             const onFrames = (event) => {
                 if (!isFromParent(event) || event.data?.type !== 'STRANDS_KEYFRAMES' || event.data.requestId !== requestId) return;
+                clearTimeout(giveUp);
                 window.removeEventListener('message', onFrames);
                 const fetchedAt = Date.now();
                 Object.entries(event.data.frames || {}).forEach(([frameId, link]) =>

@@ -1636,7 +1636,14 @@ def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id:
                 data = meeting_frames.download_image(frame.get('ImageSignedUrl'))
                 if data is not None:
                     images[str(frame.get('FrameId'))] = data
-            segments = query_transcript_items(call_id, dynamodb_table_name) if selected and dynamodb_table_name else []
+            segments = []
+            if selected and dynamodb_table_name:
+                # A transcript that cannot be read costs the frames their
+                # transcript, not the frames themselves.
+                try:
+                    segments = query_transcript_items(call_id, dynamodb_table_name)
+                except Exception as e:
+                    logger.warning(f"Meeting frames tool: transcript unreadable, frames go without it: {str(e)}")
             result = meeting_frames.build_tool_result(
                 selected, segments, images,
                 total_frames=len(frames), send_images=send_images, show_inline=show_inline,
@@ -2548,6 +2555,7 @@ Examples:
 - "What's on this slide?", "Summarize that slide" → get_meeting_frames(last=1)
 - "Translate the last slide into French" → get_meeting_frames(last=1), then translate what it shows
 - "Show me the last two slides" → get_meeting_frames(last=2), and include each frame's image markdown
+  when the tool gives one (it does only where the answer can show pictures)
 - "What was on screen at 12:30?" → get_meeting_frames(at_time="12:30")
 - Combine what the frame shows with what was said while it was on screen. Describe content, not
   people: never identify anyone from a face or a camera tile.
