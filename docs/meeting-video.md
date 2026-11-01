@@ -416,9 +416,8 @@ finds the images. The item has:
   and then signs an hour-long link to each image, and only for an image stored
   in that meeting's own folder of this deployment's bucket.
 - **Deletion.** Deleting a meeting deletes its key frames and their images,
-  and its video recording: the file named on the meeting record, any other
-  recording file written for the meeting, and any recording segments left
-  under `lma-video-chunks/`.
+  and its video recording: the file named on the meeting record, and any
+  Virtual Participant recording segments left under `lma-video-chunks/`.
 
 ## Reading key frames
 

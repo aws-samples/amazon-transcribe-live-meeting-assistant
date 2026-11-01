@@ -27,9 +27,10 @@ class FakePaginator:
 
 
 class FakeS3:
-    def __init__(self, keys):
+    def __init__(self, keys, errors=None):
         self.keys = set(keys)
         self.deleted = []
+        self.errors = errors or []
 
     def get_paginator(self, name):
         assert name == "list_objects_v2"
@@ -38,6 +39,7 @@ class FakeS3:
     def delete_objects(self, Bucket, Delete):  # noqa: N803
         assert Bucket == "bucket"
         self.deleted.extend(o["Key"] for o in Delete["Objects"])
+        return {"Errors": self.errors} if self.errors else {}
 
 
 def _url(key, encode=True):
@@ -51,8 +53,7 @@ def test_the_virtual_participants_recording_and_its_segments_are_deleted(monkeyp
             vp_file,
             "lma-video-chunks/Team sync+ab/segment_000.ts",
             "lma-video-chunks/Team sync+ab/segment_001.ts",
-            # Another meeting whose id begins the same way keeps its files.
-            f"lma-video-recordings/call_Team_sync_ab_2_{STAMP}.mp4",
+            # Another meeting whose id begins the same way keeps its segments.
             "lma-video-chunks/Team sync+ab 2/segment_000.ts",
         ]
     )
@@ -67,22 +68,32 @@ def test_the_virtual_participants_recording_and_its_segments_are_deleted(monkeyp
 
 def test_the_desktop_apps_recording_is_deleted(monkeypatch) -> None:
     desktop_file = f"lma-video-recordings/Team_sync_ab_{STAMP}.mp4"
-    s3 = FakeS3([desktop_file, f"lma-video-recordings/Team_sync_ab_2_{STAMP}.mp4"])
+    s3 = FakeS3([desktop_file])
     monkeypatch.setattr(index, "s3_client", s3)
     # The transcriber stores the key unencoded.
     assert index.delete_video_recordings("Team sync+ab", _url(desktop_file, encode=False)) == 1
     assert s3.deleted == [desktop_file]
 
 
-def test_every_recording_run_of_the_meeting_is_deleted_not_only_the_stored_one(
+def test_only_the_file_on_the_record_is_deleted_not_files_with_a_matching_name(
     monkeypatch,
 ) -> None:
-    first = f"lma-video-recordings/call_m1_{STAMP}.mp4"
-    second = "lma-video-recordings/call_m1_2026-10-30T15-00-00-000Z.mp4"
-    s3 = FakeS3([first, second])
+    """Different CallIds can give one file name, so names are never searched.
+
+    "Team sync+ab" and "Team sync ab" both name their VP file call_Team_sync_ab_*
+    and their desktop file Team_sync_ab_*; and meeting "X"'s VP prefix call_X_
+    also begins the desktop file of a meeting whose id is "call_X".
+    """
+    mine = f"lma-video-recordings/call_Team_sync_ab_{STAMP}.mp4"
+    others = [
+        "lma-video-recordings/call_Team_sync_ab_2026-10-30T15-00-00-000Z.mp4",
+        f"lma-video-recordings/Team_sync_ab_{STAMP}.mp4",
+        f"lma-video-recordings/call_Team_sync_ab_{STAMP}.mp4.bak",
+    ]
+    s3 = FakeS3([mine, *others])
     monkeypatch.setattr(index, "s3_client", s3)
-    assert index.delete_video_recordings("m1", _url(second)) == 2
-    assert sorted(s3.deleted) == [first, second]
+    assert index.delete_video_recordings("Team sync+ab", _url(mine)) == 1
+    assert s3.deleted == [mine]
 
 
 def test_a_stored_url_outside_the_video_recordings_is_not_followed(monkeypatch) -> None:
@@ -102,10 +113,18 @@ def test_a_stored_url_outside_the_video_recordings_is_not_followed(monkeypatch) 
 
 
 def test_a_meeting_without_video_deletes_nothing(monkeypatch) -> None:
-    s3 = FakeS3(["lma-video-recordings/call_other_" + STAMP + ".mp4"])
+    s3 = FakeS3([f"lma-video-recordings/call_m1_{STAMP}.mp4"])
     monkeypatch.setattr(index, "s3_client", s3)
     assert index.delete_video_recordings("m1", None) == 0
     assert s3.deleted == []
+
+
+def test_a_recording_s3_did_not_delete_is_logged_and_not_counted(monkeypatch, caplog) -> None:
+    key = f"lma-video-recordings/call_m1_{STAMP}.mp4"
+    s3 = FakeS3([key], errors=[{"Key": key, "Code": "AccessDenied"}])
+    monkeypatch.setattr(index, "s3_client", s3)
+    assert index.delete_video_recordings("m1", _url(key)) == 0
+    assert "AccessDenied" in caplog.text and key in caplog.text
 
 
 def test_deleting_a_meeting_deletes_the_video_named_on_its_record(monkeypatch) -> None:

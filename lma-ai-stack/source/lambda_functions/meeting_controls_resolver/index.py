@@ -44,9 +44,6 @@ S3_KEYFRAMES_PREFIX = environ.get("S3_KEYFRAMES_PREFIX", "lma-video-keyframes/")
 # <chunks prefix><CallId>/ until the .mp4 is assembled.
 S3_VIDEO_RECORDINGS_PREFIX = environ.get("S3_VIDEO_RECORDINGS_PREFIX", "lma-video-recordings/")
 S3_VIDEO_CHUNKS_PREFIX = environ.get("S3_VIDEO_CHUNKS_PREFIX", "lma-video-chunks/")
-# The time stamp both video producers end the file name with:
-# new Date().toISOString() with ":" and "." replaced by "-".
-_VIDEO_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.mp4")
 VP_TABLE_NAME = environ.get("VP_TABLE_NAME")
 VP_TASK_REGISTRY_TABLE_NAME = environ.get("VP_TASK_REGISTRY_TABLE_NAME")
 KINESIS_STREAM_NAME = environ.get("KINESIS_STREAM_NAME")
@@ -138,59 +135,41 @@ def _video_key_from_url(url):
     return key
 
 
-def _video_recording_keys(callid):
-    """Every video recording file written for the meeting, found by name.
-
-    The Virtual Participant names its file ``call_<id>_<stamp>.mp4``, with each
-    character of the CallId outside [A-Za-z0-9_-] replaced by "_"; the
-    transcriber names the desktop app's ``<posixified id>_<stamp>.mp4``. A key
-    is taken only when what follows the meeting's name is exactly a time stamp,
-    so meeting "m" never takes meeting "m_2"'s file.
-    """
-    names = {
-        "call_" + re.sub(r"[^a-zA-Z0-9_-]", "_", callid) + "_",
-        posixify_filename(callid) + "_",
-    }
-    keys = set()
-    paginator = s3_client.get_paginator("list_objects_v2")
-    for name in sorted(names):
-        prefix = f"{S3_VIDEO_RECORDINGS_PREFIX}{name}"
-        for page in paginator.paginate(Bucket=S3_BUCKET_NAME, Prefix=prefix):
-            for obj in page.get("Contents", []) or []:
-                if _VIDEO_STAMP.fullmatch(obj["Key"][len(prefix) :]):
-                    keys.add(obj["Key"])
-    return keys
-
-
 def delete_video_recordings(callid, video_url=None):
     """Delete the meeting's video recording and any leftover recording segments.
 
-    The file the meeting record points at is deleted, and so is any other file
-    named for the meeting: a Virtual Participant that recorded more than once
-    leaves one file per run, and only the last is on the record. The segments
-    live under ``<chunks prefix><CallId>/``; the trailing slash keeps one
-    meeting's folder from matching another whose id merely begins the same way.
-    Returns the number of recording files deleted.
+    Two keys are known exactly, so only those are deleted: the file the meeting
+    record's VideoRecordingUrl names, and the Virtual Participant's segments
+    under ``<chunks prefix><CallId>/``, a folder named with the CallId as it is
+    (the trailing slash keeps one meeting's folder from matching another whose
+    id merely begins the same way). The video file names themselves are not
+    searched: both producers turn the CallId into a file name by replacing
+    characters, so two meetings can share one, and a name is no proof of whose
+    file it is. Returns the number of recording files deleted (0 or 1).
     """
     if not callid:
         return 0
-    keys = _video_recording_keys(callid)
+    deleted = 0
     stored = _video_key_from_url(video_url)
     if stored:
-        keys.add(stored)
-    ordered = sorted(keys)
-    for i in range(0, len(ordered), S3_BATCH_DELETE_LIMIT):
-        objects = [{"Key": k} for k in ordered[i : i + S3_BATCH_DELETE_LIMIT]]
-        s3_client.delete_objects(Bucket=S3_BUCKET_NAME, Delete={"Objects": objects, "Quiet": True})
-    segments = _batch_delete_prefix(S3_BUCKET_NAME, f"{S3_VIDEO_CHUNKS_PREFIX}{callid}/")
-    if ordered or segments:
-        logger.info(
-            "Deleted %d video recording(s) and %d segment(s) for %s",
-            len(ordered),
-            segments,
-            callid,
+        response = s3_client.delete_objects(
+            Bucket=S3_BUCKET_NAME, Delete={"Objects": [{"Key": stored}], "Quiet": True}
         )
-    return len(ordered)
+        errors = response.get("Errors") or []
+        for error in errors:
+            logger.error(
+                "Could not delete video recording %s of %s: %s",
+                error.get("Key"),
+                callid,
+                error.get("Code"),
+            )
+        deleted = 0 if errors else 1
+    segments = _batch_delete_prefix(S3_BUCKET_NAME, f"{S3_VIDEO_CHUNKS_PREFIX}{callid}/")
+    if deleted or segments:
+        logger.info(
+            "Deleted %d video recording(s) and %d segment(s) for %s", deleted, segments, callid
+        )
+    return deleted
 
 
 def get_call_details(appsync_session, schema, callid):
