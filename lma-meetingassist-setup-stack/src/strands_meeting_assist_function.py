@@ -28,6 +28,20 @@ import call_metering
 import meeting_agenda
 import meeting_frames
 
+# Loaded once at import time, before any tool can run. Strands runs the
+# assistant's tool calls on concurrent threads, and several tools import the
+# GraphQL client inside the call; when two of them do that first import at the
+# same moment, Python's per-module import lock can report a deadlock and fail
+# the whole answer. Importing here means those later imports find the modules
+# already loaded. Unit tests that run without the gql package still import this
+# module, so a missing package is tolerated and the lazy imports stay as they are.
+try:
+    import gql  # noqa: F401
+    import gql.client  # noqa: F401
+    import asst_gql_client  # noqa: F401
+except ImportError:
+    pass
+
 # Import MCP server loader
 try:
     from mcp_server_loader import load_account_mcp_servers
