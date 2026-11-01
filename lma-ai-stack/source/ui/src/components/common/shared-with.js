@@ -7,7 +7,8 @@
  * Reading a meeting's or Virtual Participant's SharedWith.
  *
  * The API returns SharedWith as a string, in one of two shapes. A subscription
- * message always carries "[a, b]". A query returns the value as stored: "[a, b]"
+ * message carries "[a, b]" whenever SharedWith has entries (and an empty or
+ * absent value otherwise). A query returns the value as stored: "[a, b]"
  * for a meeting shared through the app, "a,b" (or "a, b") for an older meeting
  * row and for a Virtual Participant row. Both read as the same list of entries,
  * and membership is a comparison of whole entries, as the API's own access

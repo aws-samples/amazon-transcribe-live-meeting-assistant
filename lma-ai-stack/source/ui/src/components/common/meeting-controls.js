@@ -22,6 +22,7 @@ import {
 } from '@cloudscape-design/components';
 import shareMeetings from '../../graphql/queries/shareMeetings';
 import deleteMeetings from '../../graphql/queries/deleteMeetings';
+import { sharedWithEntries } from './shared-with';
 
 const client = generateClient();
 const getListKeys = (callId, createdAt) => {
@@ -109,14 +110,6 @@ export const shareModal = (props) => {
 
   const { getCallDetailsFromCallIds } = props;
 
-  const parseSharedWith = (sharedWithString) => {
-    return (sharedWithString || '')
-      .replace(/[[\]]/g, '')
-      .split(',')
-      .map((email) => email.trim())
-      .filter((email) => email);
-  };
-
   const openShareSettings = async () => {
     setShare(true);
     setIsLoading(true);
@@ -124,7 +117,7 @@ export const shareModal = (props) => {
 
     const recipients = new Set();
     callDetails.forEach((call) => {
-      const sharedWithArray = parseSharedWith(call.SharedWith);
+      const sharedWithArray = sharedWithEntries(call.SharedWith);
       sharedWithArray.forEach((email) => recipients.add(email));
     });
 
