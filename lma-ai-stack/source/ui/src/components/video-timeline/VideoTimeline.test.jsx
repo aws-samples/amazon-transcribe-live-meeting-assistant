@@ -146,13 +146,67 @@ describe('VideoTimeline', () => {
     const loadFrames = vi
       .fn()
       .mockResolvedValueOnce({ VideoKeyframes: [frame(30000)], nextToken: null })
-      .mockResolvedValueOnce({ VideoKeyframes: [frame(30000, { ThumbnailSignedUrl: 'https://signed.example/fresh' })] });
+      .mockResolvedValueOnce({
+        VideoKeyframes: [frame(30000, { ThumbnailSignedUrl: 'https://signed.example/fresh' })],
+      });
     render(<VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} />);
     const image = await screen.findByAltText('Shared screen at 0:30');
     fireEvent.error(image);
     fireEvent.error(image); // a second failure inside the minute does not reload again
-    await waitFor(() => expect(screen.getByAltText('Shared screen at 0:30').getAttribute('src')).toBe('https://signed.example/fresh'));
+    await waitFor(() =>
+      expect(screen.getByAltText('Shared screen at 0:30').getAttribute('src')).toBe('https://signed.example/fresh'),
+    );
     expect(loadFrames).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the frames already paged through when it renews expired links', async () => {
+    const loadFrames = vi
+      .fn()
+      .mockResolvedValueOnce({ VideoKeyframes: [frame(1000)], nextToken: 't1' })
+      .mockResolvedValueOnce({ VideoKeyframes: [frame(2000)], nextToken: 't2' })
+      // The renewal walks the same two pages again.
+      .mockResolvedValueOnce({
+        VideoKeyframes: [frame(1000, { ThumbnailSignedUrl: 'https://signed.example/f1' })],
+        nextToken: 't1',
+      })
+      .mockResolvedValueOnce({
+        VideoKeyframes: [frame(2000, { ThumbnailSignedUrl: 'https://signed.example/f2' })],
+        nextToken: 't2',
+      });
+    render(<VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} />);
+    fireEvent.click(await screen.findByText('Load more'));
+    fireEvent.click(await screen.findByTitle('Key frame at 0:02'));
+    fireEvent.error(screen.getByAltText('Shared screen at 0:02'));
+    await waitFor(() =>
+      expect(screen.getByAltText('Shared screen at 0:02').getAttribute('src')).toBe('https://signed.example/f2'),
+    );
+    expect(screen.getByAltText('Shared screen at 0:01').getAttribute('src')).toBe('https://signed.example/f1');
+    expect(loadFrames).toHaveBeenCalledTimes(4);
+    expect(loadFrames.mock.calls[3][0]).toEqual(expect.objectContaining({ nextToken: 't1' }));
+    // Still selected, and the cursor is where it was.
+    expect(screen.getByAltText('Shared screen at 0:02, full size')).toBeTruthy();
+    expect(screen.getByText('Load more')).toBeTruthy();
+  });
+
+  it("does not show one meeting's frames under another after a quick switch", async () => {
+    let releaseFirst;
+    const loadFrames = vi.fn(({ callId }) => {
+      if (callId === 'm-1') {
+        return new Promise((resolve) => {
+          releaseFirst = () => resolve({ VideoKeyframes: [frame(1000, { CallId: 'm-1' })], nextToken: null });
+        });
+      }
+      return Promise.resolve({ VideoKeyframes: [frame(5000, { CallId: 'm-2' })], nextToken: null });
+    });
+    const { rerender } = render(<VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} />);
+    await waitFor(() => expect(releaseFirst).toBeDefined());
+    rerender(<VideoTimeline callId="m-2" loadFrames={loadFrames} subscribe={noSubscribe} />);
+    await screen.findByTitle('Key frame at 0:05');
+    releaseFirst();
+    await new Promise((r) => {
+      setTimeout(r, 20);
+    });
+    expect(screen.queryByTitle('Key frame at 0:01')).toBeNull();
   });
 
   it('says so when the frames cannot be loaded', async () => {

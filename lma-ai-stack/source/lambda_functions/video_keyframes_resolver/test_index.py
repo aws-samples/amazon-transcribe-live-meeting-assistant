@@ -217,4 +217,6 @@ def test_arguments_that_cannot_be_used_are_refused(fakes, arguments):
 def test_the_limit_is_capped(fakes):
     dynamo, _ = fakes([item(1000)])
     call(OWNER, limit=100000)
-    assert dynamo.queries[0]["Limit"] == index.MAX_LIMIT
+    call(OWNER, limit=0)
+    call(OWNER)
+    assert [q["Limit"] for q in dynamo.queries] == [index.MAX_LIMIT, 1, index.DEFAULT_LIMIT]

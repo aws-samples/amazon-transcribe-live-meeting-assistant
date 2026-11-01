@@ -75,56 +75,115 @@ const VideoTimeline = ({
   const loadingRef = useRef(false);
   // A frame announced while a page was loading: fetch what came after once it is done.
   const pendingNewRef = useRef(false);
+  // Which meeting the requests in flight belong to. A response for an earlier
+  // meeting is dropped rather than merged into this one's strip.
+  const generationRef = useRef(0);
   const lastReloadRef = useRef(0);
   const followRef = useRef(true);
 
   framesRef.current = frames;
   nextTokenRef.current = nextToken;
 
+  /**
+   * Runs `work` as the one load in flight: `fetchPage(variables)` asks for a
+   * page, and `apply(page)` merges it, only while this is still the meeting the
+   * load was started for.
+   */
+  const runLoad = useCallback(
+    async (work) => {
+      if (loadingRef.current) return false;
+      const generation = generationRef.current;
+      const current = () => generation === generationRef.current;
+      loadingRef.current = true;
+      setLoading(true);
+      try {
+        await work({
+          fetchPage: (variables) => loadFrames({ callId, limit: PAGE_SIZE, ...variables }),
+          apply: (merge) => {
+            if (!current()) return false;
+            framesRef.current = merge(framesRef.current);
+            setFrames(framesRef.current);
+            return true;
+          },
+          current,
+        });
+        if (current()) setError(null);
+      } catch (e) {
+        logger.error('could not load key frames', e);
+        if (current()) setError('The key frames could not be loaded.');
+      } finally {
+        if (current()) {
+          loadingRef.current = false;
+          setLoading(false);
+          setLoaded(true);
+        }
+      }
+      return current();
+    },
+    [callId, loadFrames],
+  );
+
+  /** One page by token (paging), or the frames after a given one (new frames). */
   const loadPage = useCallback(
-    async ({ token = null, after = null, replace = false } = {}) => {
+    async ({ token = null, after = null } = {}) => {
       if (loadingRef.current) {
         if (after !== null) pendingNewRef.current = true;
         return;
       }
-      loadingRef.current = true;
-      setLoading(true);
-      try {
-        const page = await loadFrames({ callId, limit: PAGE_SIZE, nextToken: token, afterFrameId: after || null });
-        const incoming = page?.VideoKeyframes || [];
-        framesRef.current = mergeKeyframes(replace ? [] : framesRef.current, incoming);
-        setFrames(framesRef.current);
+      const ran = await runLoad(async ({ fetchPage, apply }) => {
+        const page = await fetchPage({ nextToken: token, afterFrameId: after || null });
+        const applied = apply((shown) => mergeKeyframes(shown, page?.VideoKeyframes || []));
         // A page of frames after a given one does not move the paging cursor.
-        if (after === null) {
+        if (applied && after === null) {
           nextTokenRef.current = page?.nextToken || null;
           setNextToken(nextTokenRef.current);
         }
-        setError(null);
-      } catch (e) {
-        logger.error('could not load key frames', e);
-        setError('The key frames could not be loaded.');
-      } finally {
-        loadingRef.current = false;
-        setLoading(false);
-        setLoaded(true);
-      }
-      if (pendingNewRef.current && !nextTokenRef.current) {
+      });
+      if (ran && pendingNewRef.current && !nextTokenRef.current) {
         pendingNewRef.current = false;
         const last = framesRef.current[framesRef.current.length - 1];
         // eslint-disable-next-line no-use-before-define
         loadPage({ after: last?.FrameId || '' });
       }
     },
-    [callId, loadFrames],
+    [runLoad],
   );
+
+  /**
+   * Fetches again every page already shown, for fresh signed links, keeping
+   * the strip as it is: the frames merge in place, and the paging cursor ends
+   * where it was.
+   */
+  const refreshShown = useCallback(async () => {
+    const shown = framesRef.current.length;
+    await runLoad(async ({ fetchPage, apply, current }) => {
+      let token = null;
+      let fetched = 0;
+      do {
+        // eslint-disable-next-line no-await-in-loop
+        const page = await fetchPage({ nextToken: token, afterFrameId: null });
+        const incoming = page?.VideoKeyframes || [];
+        if (!apply((shownFrames) => mergeKeyframes(shownFrames, incoming))) return;
+        fetched += incoming.length;
+        token = page?.nextToken || null;
+      } while (token && fetched < shown && current());
+      nextTokenRef.current = token;
+      setNextToken(token);
+    });
+  }, [runLoad]);
 
   // First page, and a fresh start when the meeting changes.
   useEffect(() => {
+    generationRef.current += 1;
+    loadingRef.current = false;
+    pendingNewRef.current = false;
+    framesRef.current = [];
+    nextTokenRef.current = null;
     setFrames([]);
     setNextToken(null);
     setLoaded(false);
     setSelectedId(null);
-    loadPage({ replace: true });
+    loadPage();
   }, [callId]);
 
   // The next page when the end of the strip comes into view.
@@ -173,12 +232,12 @@ const VideoTimeline = ({
     if (strip) followRef.current = strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 40;
   };
 
-  // A signed link has expired (or failed): reload what is shown, not too often.
+  // A signed link has expired (or failed): renew what is shown, not too often.
   const onImageError = () => {
     const now = Date.now();
     if (now - lastReloadRef.current < RELOAD_AFTER_MS) return;
     lastReloadRef.current = now;
-    loadPage({ replace: true });
+    refreshShown();
   };
 
   const select = (frame) => {

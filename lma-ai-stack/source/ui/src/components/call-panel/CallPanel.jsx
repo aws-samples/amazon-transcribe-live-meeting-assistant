@@ -2611,6 +2611,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
       )}
 
       <VideoTimeline
+        key={item.callId}
         callId={item.callId}
         isLive={item.recordingStatusLabel === IN_PROGRESS_STATUS}
         canPlayRecording={Boolean(item.videoRecordingUrl) && item.recordingStatusLabel !== IN_PROGRESS_STATUS}

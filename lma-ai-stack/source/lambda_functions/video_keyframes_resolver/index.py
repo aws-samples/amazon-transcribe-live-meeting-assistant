@@ -235,7 +235,9 @@ def get_video_keyframes(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     call_id = arguments.get("callId")
     if not isinstance(call_id, str) or not call_id:
         raise BadRequestError("callId is required")
-    limit = arguments.get("limit") or DEFAULT_LIMIT
+    limit = arguments.get("limit")
+    if limit is None:
+        limit = DEFAULT_LIMIT
     if not isinstance(limit, int) or isinstance(limit, bool):
         raise BadRequestError("limit must be a whole number")
     limit = max(1, min(MAX_LIMIT, limit))
