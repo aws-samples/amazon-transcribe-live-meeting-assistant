@@ -20,6 +20,9 @@
  *   2. AudioContext.connect() patch to block connections to AudioDestinationNode
  */
 
+// First, so the Configuration page's values are in the environment before this
+// module reads it at import: see stack-settings.ts.
+import './stack-settings.js';
 import { BrowserContext, Page, Frame, Route } from 'playwright-core';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as fs from 'fs';

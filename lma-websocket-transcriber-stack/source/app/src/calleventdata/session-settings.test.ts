@@ -22,7 +22,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { FastifyBaseLogger } from 'fastify';
 
-import type { ConfigurationStore } from '../config/configuration-store';
+import { transcribeOptionsProblem, type ConfigurationStore } from '../config/configuration-store';
 import {
     getSessionSettings,
     isRedactionApplied,
@@ -231,6 +231,19 @@ test('the speaker-partitioning default applies only when the client chose nothin
         diarizeSystemChannel: false,
         diarizeMicChannel: true,
     });
+});
+
+test('an empty preferred language means no preference, and passes the combination check', () => {
+    withEnv({ CUSTOM_VOCABULARY_NAME: '', TRANSCRIBE_PREFERRED_LANGUAGE: '' });
+    const transcription = sessionSettingsFrom(
+        { languageCode: 'identify-language', languageOptions: 'en-US, es-US', preferredLanguage: '' },
+        {}
+    ).transcription;
+    assert.equal(transcription.preferredLanguage, 'None');
+    assert.equal(transcriptionProblem(transcription), undefined);
+    // The shared check accepts '' itself, for the Virtual Participant, whose
+    // environment carries it unconverted.
+    assert.equal(transcribeOptionsProblem({ ...transcription, preferredLanguage: '' }), undefined);
 });
 
 test('options that cannot be used together are named, as the deploy-time check names them', () => {

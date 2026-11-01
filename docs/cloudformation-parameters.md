@@ -59,8 +59,8 @@ The template declares 91 parameters.
 | Kind | Parameters | What changing one does |
 |---|---|---|
 | Resource | 47 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
-| Configuration page default | 16 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
-| Read at run time | 15 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
+| Configuration page default | 24 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
+| Read at run time | 7 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
 | Credential | 11 | A secret, the ARN of a secret, or the identifier paired with one. Values are stored in AWS Secrets Manager; see [Integration Credentials](infrastructure-and-security.md#integration-credentials). |
 | Deployment check | 1 | Read only while the stack is deployed, by a check that runs before anything else is created. |
 | No effect | 1 | Declared by the template and read by nothing. Kept so that existing deploy commands and pipelines that pass it keep working. |
@@ -145,9 +145,9 @@ Maximum number of EC2 instances for scaling (only used if VPLaunchType=EC2).
 
 | Parameter | Default | Kind |
 |---|---|---|
-| [`VPAttendeePollMs`](#vpattendeepollms) | `20000` | Read at run time |
-| [`VPPollsBeforeEnd`](#vppollsbeforeend) | `3` | Read at run time |
-| [`VPPollsBeforeEndMissing`](#vppollsbeforeendmissing) | `15` | Read at run time |
+| [`VPAttendeePollMs`](#vpattendeepollms) | `20000` | Configuration page default |
+| [`VPPollsBeforeEnd`](#vppollsbeforeend) | `3` | Configuration page default |
+| [`VPPollsBeforeEndMissing`](#vppollsbeforeendmissing) | `15` | Configuration page default |
 
 ### `VPAttendeePollMs`
 
@@ -155,9 +155,9 @@ Console label: *VP Teams Meeting-End Poll Interval (ms)*
 
 - **Default:** `20000`
 - **Allowed values:** 1000 to 120000
-- **Kind:** Read at run time. Read by the Virtual Participant when it starts, from its task environment.
+- **Kind:** Configuration page default. Configuration page: **Virtual Participant › Teams: milliseconds between meeting checks**. Read by the Virtual Participant when it starts, from its task environment.
 
-How often a Teams Virtual Participant samples the meeting UI to decide whether the meeting is still running, in milliseconds. Leave at the default unless advised otherwise.
+How often a Teams Virtual Participant samples the meeting UI to decide whether the meeting is still running, in milliseconds. Leave at the default unless advised otherwise. This is the default; an Admin can change it at run time on the Configuration page (Virtual Participant section), which takes precedence.
 
 ### `VPPollsBeforeEnd`
 
@@ -165,9 +165,9 @@ Console label: *VP Teams Polls Before Leaving An Empty Meeting*
 
 - **Default:** `3`
 - **Allowed values:** 1 to 90
-- **Kind:** Read at run time. Read by the Virtual Participant when it starts, from its task environment.
+- **Kind:** Configuration page default. Configuration page: **Virtual Participant › Teams: checks alone before leaving**. Read by the Virtual Participant when it starts, from its task environment.
 
-Consecutive polls on which a Teams meeting must show one or fewer attendees before the Virtual Participant leaves. 3 polls at the default cadence is about 60 seconds.
+Consecutive polls on which a Teams meeting must show one or fewer attendees before the Virtual Participant leaves. 3 polls at the default cadence is about 60 seconds. This is the default; an Admin can change it at run time on the Configuration page (Virtual Participant section), which takes precedence.
 
 ### `VPPollsBeforeEndMissing`
 
@@ -175,9 +175,9 @@ Console label: *VP Teams Polls Before Leaving An Unreadable Meeting*
 
 - **Default:** `15`
 - **Allowed values:** 1 to 90
-- **Kind:** Read at run time. Read by the Virtual Participant when it starts, from its task environment.
+- **Kind:** Configuration page default. Configuration page: **Virtual Participant › Teams: checks without a meeting before leaving**. Read by the Virtual Participant when it starts, from its task environment.
 
-Consecutive polls on which a Teams meeting must show neither a readable attendee count nor any in-meeting controls before the Virtual Participant leaves. 15 polls at the default cadence is about 5 minutes. Raise this if participants report the Virtual Participant leaving meetings that are still in progress. A value producing a tolerance outside 4 to 30 minutes at the chosen cadence is adjusted into that range, so at the default cadence anything below 12 is raised.
+Consecutive polls on which a Teams meeting must show neither a readable attendee count nor any in-meeting controls before the Virtual Participant leaves. 15 polls at the default cadence is about 5 minutes. Raise this if participants report the Virtual Participant leaving meetings that are still in progress. A value producing a tolerance outside 4 to 30 minutes at the chosen cadence is adjusted into that range, so at the default cadence anything below 12 is raised. This is the default; an Admin can change it at run time on the Configuration page (Virtual Participant section), which takes precedence.
 
 ## Meeting Assist Options
 
@@ -256,15 +256,15 @@ A regular expression for the wake phrase that invokes the Meeting Assistant. The
 |---|---|---|
 | [`ElevenLabsApiKey`](#elevenlabsapikey) | (empty) | Credential |
 | [`ElevenLabsApiKeySecretArn`](#elevenlabsapikeysecretarn) | (empty) | Credential |
-| [`ElevenLabsAgentId`](#elevenlabsagentid) | (empty) | Read at run time |
+| [`ElevenLabsAgentId`](#elevenlabsagentid) | (empty) | Configuration page default |
 | [`SimliApiKey`](#simliapikey) | (empty) | Credential |
 | [`SimliApiKeySecretArn`](#simliapikeysecretarn) | (empty) | Credential |
-| [`SimliFaceId`](#simlifaceid) | (empty) | Read at run time |
-| [`VoiceAssistantProvider`](#voiceassistantprovider) | `none` | Read at run time |
+| [`SimliFaceId`](#simlifaceid) | (empty) | Configuration page default |
+| [`VoiceAssistantProvider`](#voiceassistantprovider) | `none` | Configuration page default |
 | [`AmazonNovaSonicRegion`](#amazonnovasonicregion) | (empty) | Resource |
 | [`VoiceAssistantActivationMode`](#voiceassistantactivationmode) | `wake_phrase` | Read at run time |
-| [`VoiceAssistantWakePhrases`](#voiceassistantwakephrases) | `hey alex,ok alex,hi alex,hello alex` | Read at run time |
-| [`VoiceAssistantActivationDuration`](#voiceassistantactivationduration) | `30` | Read at run time |
+| [`VoiceAssistantWakePhrases`](#voiceassistantwakephrases) | `hey alex,ok alex,hi alex,hello alex` | Configuration page default |
+| [`VoiceAssistantActivationDuration`](#voiceassistantactivationduration) | `30` | Configuration page default |
 | [`ZoomMeetingSdkClientId`](#zoommeetingsdkclientid) | (empty) | Credential |
 | [`ZoomMeetingSdkClientSecret`](#zoommeetingsdkclientsecret) | (empty) | Credential |
 | [`ZoomMeetingSdkClientSecretArn`](#zoommeetingsdkclientsecretarn) | (empty) | Credential |
@@ -297,9 +297,9 @@ Console label: *ElevenLabs Agent ID for Custom Personality (Optional)*
 
 - **Default:** (empty)
 - **Allowed values:** Must be empty or a valid ElevenLabs Agent ID
-- **Kind:** Read at run time. Read by the Virtual Participant when its voice assistant starts.
+- **Kind:** Configuration page default. Configuration page: **Virtual Participant › ElevenLabs agent ID**. Read by the Virtual Participant when its voice assistant starts.
 
-(Optional) ElevenLabs Conversational AI Agent ID for customized voice assistant behavior. Create an agent at https://elevenlabs.io/app/conversational-ai and copy its ID here. Leave blank to use default conversational AI without custom personality.
+(Optional) ElevenLabs Conversational AI Agent ID for customized voice assistant behavior. Create an agent at https://elevenlabs.io/app/conversational-ai and copy its ID here. Leave blank to use default conversational AI without custom personality. This is the default; an Admin can change it at run time on the Configuration page (Virtual Participant section), which takes precedence.
 
 ### `SimliApiKey`
 
@@ -327,9 +327,9 @@ Console label: *Simli Face ID for Avatar Appearance (Optional)*
 
 - **Default:** (empty)
 - **Allowed values:** Any text
-- **Kind:** Read at run time. Read by the Virtual Participant when its avatar starts.
+- **Kind:** Configuration page default. Configuration page: **Virtual Participant › Simli face ID**. Read by the Virtual Participant when its avatar starts.
 
-(Optional) Simli Face ID for the avatar appearance. Required when SimliApiKey is set — the avatar is enabled only when BOTH parameters are non-empty. Get this from your Simli dashboard at https://simli.com.
+(Optional) Simli Face ID for the avatar appearance. Required when SimliApiKey is set — the avatar is enabled only when BOTH parameters are non-empty. Get this from your Simli dashboard at https://simli.com. This is the default; an Admin can change it at run time on the Configuration page (Virtual Participant section), which takes precedence.
 
 ### `VoiceAssistantProvider`
 
@@ -337,9 +337,9 @@ Console label: *Voice Assistant Provider (none, elevenlabs, amazon_nova_sonic)*
 
 - **Default:** `none`
 - **Allowed values:** `none`, `elevenlabs`, `amazon_nova_sonic`
-- **Kind:** Read at run time. Read by the Virtual Participant when it starts.
+- **Kind:** Configuration page default. Configuration page: **Virtual Participant › Voice assistant**. Read by the Virtual Participant when it starts.
 
-Voice AI assistant provider for Virtual Participant. Choose 'none' to disable voice responses (default), 'elevenlabs' for ElevenLabs Conversational AI (requires API key above), or 'amazon_nova_sonic' for Amazon Nova Sonic, which needs no API key and is configured on the Nova Sonic page in the LMA UI.
+Voice AI assistant provider for Virtual Participant. Choose 'none' to disable voice responses (default), 'elevenlabs' for ElevenLabs Conversational AI (requires API key above), or 'amazon_nova_sonic' for Amazon Nova Sonic, which needs no API key and is configured in the Nova Sonic Voice Assistant section of the Configuration page in the LMA UI. This is the default; an Admin can change it at run time on the Configuration page (Virtual Participant section), which takes precedence.
 
 ### `AmazonNovaSonicRegion`
 
@@ -367,9 +367,9 @@ Console label: *Voice Assistant Wake Phrases (comma-separated)*
 
 - **Default:** `hey alex,ok alex,hi alex,hello alex`
 - **Allowed values:** Any text
-- **Kind:** Read at run time. Read by the Virtual Participant when it starts.
+- **Kind:** Configuration page default. Configuration page: **Virtual Participant › Wake phrases**. Read by the Virtual Participant when it starts.
 
-Comma-separated list of wake phrases for voice assistant activation (case-insensitive). Only used when VoiceAssistantActivationMode is 'wake_phrase'. Example: "hey alex,ok alex,hi alex"
+Comma-separated list of wake phrases for voice assistant activation (case-insensitive). Only used when VoiceAssistantActivationMode is 'wake_phrase'. Example: "hey alex,ok alex,hi alex" This is the default; an Admin can change it at run time on the Configuration page (Virtual Participant section), which takes precedence.
 
 ### `VoiceAssistantActivationDuration`
 
@@ -377,9 +377,9 @@ Console label: *Voice Assistant Activation Duration (seconds)*
 
 - **Default:** `30`
 - **Allowed values:** 5 to 300
-- **Kind:** Read at run time. Read by the Virtual Participant when it starts.
+- **Kind:** Configuration page default. Configuration page: **Virtual Participant › Seconds the voice assistant stays active**. Read by the Virtual Participant when it starts.
 
-How long the voice assistant stays active after wake phrase detection (in seconds). Only used when VoiceAssistantActivationMode is 'wake_phrase'. Default is 30 seconds. Maximum is 300 seconds.
+How long the voice assistant stays active after wake phrase detection (in seconds). Only used when VoiceAssistantActivationMode is 'wake_phrase'. Default is 30 seconds. Maximum is 300 seconds. This is the default; an Admin can change it at run time on the Configuration page (Virtual Participant section), which takes precedence.
 
 ### `ZoomMeetingSdkClientId`
 
@@ -572,7 +572,7 @@ Console label: *Enable Content Redaction for Transcripts*
 - **Allowed values:** `true`, `false`
 - **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Redact personal information**. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts. Redaction applies only for the languages Amazon Transcribe redacts.
 
-Enable content redaction from Amazon Transcribe transcription output. This is only used when the 'en-US' language is selected in the TranscribeLanguageCode parameter. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
+Enable content redaction from Amazon Transcribe transcription output. This is only used when the 'en-US' language is selected in the TranscribeLanguageCode parameter. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence.
 
 ### `TranscribeLanguageCode`
 
@@ -582,7 +582,7 @@ Console label: *Language for Transcription*
 - **Allowed values:** `identify-language`, `identify-multiple-languages`, `en-US`, `es-US`, `en-GB`, `fr-CA`, `fr-FR`, `en-AU`, `it-IT`, `de-DE`, `pt-BR`, `ja-JP`, `ko-KR`, `zh-CN`, `hi-IN`, `th-TH`
 - **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Language**. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts; checked once while the stack is deployed.
 
-Language code or language identification setting for Amazon Transcribe. NOTE: Language identification can't be combined with custom language models or redaction. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
+Language code or language identification setting for Amazon Transcribe. NOTE: Language identification can't be combined with custom language models or redaction. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence.
 
 ### `TranscribeLanguageOptions`
 
@@ -592,7 +592,7 @@ Console label: *Transcribe Language Options*
 - **Allowed values:** Unsupported language code or invalid syntax. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
 - **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Language options**. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts; checked once while the stack is deployed.
 
-When using language identification, specify two or more language codes, e.g. "en-US, es-US" that represent the languages that may be used in your meeting. Including more than five is not recommended. Enter only one language dialect per language - e.g. 'en-US, en-AU' is not allowed. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH NOTE: The identify-language feature has not yet been applied to the virtual participant. If selected, the virtual participant will use the value of TranscribePreferredLanguage (if set) or 'en-US' (by default). This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
+When using language identification, specify two or more language codes, e.g. "en-US, es-US" that represent the languages that may be used in your meeting. Including more than five is not recommended. Enter only one language dialect per language - e.g. 'en-US, en-AU' is not allowed. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH NOTE: The identify-language feature has not yet been applied to the virtual participant. If selected, the virtual participant will use the value of TranscribePreferredLanguage (if set) or 'en-US' (by default). This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence.
 
 ### `TranscribePreferredLanguage`
 
@@ -602,7 +602,7 @@ Console label: *Transcribe Preferred Language*
 - **Allowed values:** `None`, `en-US`, `es-US`, `en-GB`, `fr-CA`, `fr-FR`, `en-AU`, `it-IT`, `de-DE`, `pt-BR`, `ja-JP`, `ko-KR`, `zh-CN`, `hi-IN`, `th-TH`
 - **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Preferred language**. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts; checked once while the stack is deployed.
 
-Optionally select a preferred language when using language identification - must be one of the languages entered for TranscribeLanguageOptions. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
+Optionally select a preferred language when using language identification - must be one of the languages entered for TranscribeLanguageOptions. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence.
 
 ### `TranscribeContentRedactionType`
 
@@ -622,7 +622,7 @@ Console label: *Default for Speaker Identification on Streaming Sessions*
 - **Allowed values:** `true`, `false`
 - **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Identify speakers within a channel by default**. Read by the WebSocket transcriber for each streaming session.
 
-Default for Amazon Transcribe speaker partitioning (diarization) on WebSocket streaming sessions - the desktop capture app and the Stream Audio browser tab. When enabled, Transcribe tells apart individual voices within an audio channel and each distinct voice is appended to the channel's speaker name as "(spk_0)", "(spk_1)", and so on. Works best with five or fewer voices per channel. This is only the DEFAULT: clients that offer per-channel speaker identification settings (the desktop capture app and the Stream Audio tab) send their own choice per meeting, which takes precedence. Leave "false" unless you want it on for clients that do not. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
+Default for Amazon Transcribe speaker partitioning (diarization) on WebSocket streaming sessions - the desktop capture app and the Stream Audio browser tab. When enabled, Transcribe tells apart individual voices within an audio channel and each distinct voice is appended to the channel's speaker name as "(spk_0)", "(spk_1)", and so on. Works best with five or fewer voices per channel. This is only the DEFAULT: clients that offer per-channel speaker identification settings (the desktop capture app and the Stream Audio tab) send their own choice per meeting, which takes precedence. Leave "false" unless you want it on for clients that do not. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence.
 
 ### `TranscribePiiEntityTypes`
 
@@ -632,7 +632,7 @@ Console label: *Transcription PII Redaction Entity Types*
 - **Allowed values:** Any text
 - **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Entity types to redact**. Read by the WebSocket transcriber for each streaming session.
 
-Select the PII entity types you want to identify or redact. Remove the values that you don't want to redact from the default. DO NOT ADD CUSTOM VALUES HERE. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
+Select the PII entity types you want to identify or redact. Remove the values that you don't want to redact from the default. DO NOT ADD CUSTOM VALUES HERE. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence.
 
 ### `CustomVocabularyName`
 
@@ -642,7 +642,7 @@ Console label: *Transcription Custom Vocabulary Name*
 - **Allowed values:** Any text
 - **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Custom vocabulary**. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts; checked once while the stack is deployed.
 
-The name of the vocabulary to use when processing the transcription job. Leave blank if no custom vocabulary to be used. If yes, the custom vocabulary must pre-exist in your account. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
+The name of the vocabulary to use when processing the transcription job. Leave blank if no custom vocabulary to be used. If yes, the custom vocabulary must pre-exist in your account. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence.
 
 ### `CustomLanguageModelName`
 
@@ -652,7 +652,7 @@ Console label: *Transcription Custom Language Model Name*
 - **Allowed values:** Any text
 - **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Custom language model**. Read by the WebSocket transcriber for each streaming session; checked once while the stack is deployed.
 
-The name of the custom language model to use when processing the transcription job. Leave blank if no custom language model is to be used. If specified, the custom language model must pre-exist in your account, match the Language Code selected above, and use the 'Narrow Band' base model. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
+The name of the custom language model to use when processing the transcription job. Leave blank if no custom language model is to be used. If specified, the custom language model must pre-exist in your account, match the Language Code selected above, and use the 'Narrow Band' base model. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence.
 
 ## On-demand speech engine (EXPERIMENTAL)
 
@@ -911,7 +911,7 @@ Console label: *Record Meeting Audio*
 - **Allowed values:** `true`, `false`
 - **Kind:** Configuration page default. Configuration page: **Meeting Recording › Record meeting audio**. Read by the WebSocket transcriber as the default for each meeting, and by the Virtual Participant when it starts.
 
-Enable or disable recording of audio during a meeting. If set to false, the meeting will not be recorded. If set to true, the meeting will be recorded. This is the default; an Admin can change it at run time on the Configuration page (Meeting Recording section), which takes precedence for streaming meetings.
+Enable or disable recording of audio during a meeting. If set to false, the meeting will not be recorded. If set to true, the meeting will be recorded. This is the default; an Admin can change it at run time on the Configuration page (Meeting Recording section), which takes precedence.
 
 ### `EnableVideoRecording`
 
@@ -991,7 +991,7 @@ Console label: *Meeting Inactivity Lookback In Days*
 - **Allowed values:** 1 to 90
 - **Kind:** Configuration page default. Configuration page: **Meeting Processing › Days to look back for meetings that were never ended**. Read by the inactive-meeting reaper.
 
-How far back to look for meetings to close. A meeting that started longer ago than this is never closed automatically, so raise it temporarily if you are updating a deployment that has accumulated older meetings stuck in progress. Higher values read more meeting records on every run. This is the default; an Admin can change it at run time on the Configuration page (Meeting Processing section), which takes precedence.
+How far back to look for meetings to close. A meeting that started longer ago than this is never closed automatically, so raise it temporarily if you are updating a deployment that has accumulated older meetings stuck in progress. Higher values read more meeting records on every run. A whole number of days: a fractional value is not used, and the reaper looks back 2 days instead. This is the default; an Admin can change it at run time on the Configuration page (Meeting Processing section), which takes precedence.
 
 ### `EnableDataRetentionOnDelete`
 
@@ -1337,7 +1337,8 @@ finalizer.
 `MeetingInactivityLookbackInDays` bounds how much history each run examines. A
 meeting that started before the window is never closed automatically, so if you
 are updating a deployment that has accumulated older meetings stuck in progress,
-raise it once, let a run complete, and put it back. Each run also stops after
+raise it once on the Configuration page (Meeting Processing section), let a run
+complete, and put it back; no stack update is needed. Each run also stops after
 reading 500 candidate meetings, newest first. See
 [Troubleshooting → Meeting Stuck In Progress](troubleshooting.md#meeting-stuck-in-progress).
 

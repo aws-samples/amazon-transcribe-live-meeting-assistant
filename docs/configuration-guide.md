@@ -39,10 +39,11 @@ stack parameter; see
 | Transcription Engine | Virtual Participant voice separation, which works on Amazon Transcribe, and, where the experimental on-demand speech engine is deployed, which engine transcribes streaming meetings and which transcribes Virtual Participants. Without that engine only the voice separation switch is shown | To meetings that start within 30 seconds of the save or later |
 | Meeting Cost Prices | The unit prices the per-meeting [cost estimate](meeting-cost-estimate.md) is computed with | To estimates drawn within about five minutes of the save |
 | Amazon Bedrock Models | The Amazon Bedrock model used for summaries and meeting insights, for the meeting assistant and the troubleshooting agent, for the meeting assistant's knowledge bases, and for reading the text of key frames | To each summary, answer or key frame started about five minutes after the save or later |
-| Amazon Transcribe | The Amazon Transcribe options of meetings streamed from the Stream Audio page, the browser extension and the desktop app: language or language identification, redaction, custom vocabulary and language model, and the default for identifying speakers within a channel | To streaming meetings that start after the save |
-| Meeting Recording | Whether those meetings' audio is recorded when the client does not say | To streaming meetings that start after the save |
+| Amazon Transcribe | The Amazon Transcribe options of meetings streamed from the Stream Audio page, the browser extension and the desktop app, and of Virtual Participants: language or language identification, redaction, custom vocabulary and language model, and the default for identifying speakers within a channel | To streaming meetings that start after the save, and to the next Virtual Participant to start |
+| Meeting Recording | Whether those meetings' audio is recorded when the client does not say | To streaming meetings that start after the save, and to the next Virtual Participant to start |
 | Meeting Assistant | The regular expression that wakes the meeting assistant in a transcript | To transcript segments processed about five minutes after the save or later |
 | Meeting Processing | Whether a transcript Lambda hook is sent partial segments, and how far back the inactive-meeting reaper looks | Within about five minutes of the save |
+| Virtual Participant | The Virtual Participant's voice assistant provider, wake phrases and activation duration, the ElevenLabs agent and Simli face, and how a Teams Virtual Participant decides its meeting has ended | To the next Virtual Participant to start |
 
 Every section is on **Configuration ▸ Configuration**. The pages that each edited
 one section — Transcript Summary, Nova Sonic Config and Transcription Engine — are
@@ -95,10 +96,24 @@ is the default of.
 | Meeting Assistant › Wake phrase (regular expression) | `AssistantWakePhraseRegEx` |
 | Meeting Processing › Send only finished segments to the transcript Lambda hook | `TranscriptLambdaHookFunctionNonPartialOnly` |
 | Meeting Processing › Days to look back for meetings that were never ended | `MeetingInactivityLookbackInDays` |
+| Virtual Participant › Voice assistant | `VoiceAssistantProvider` |
+| Virtual Participant › Wake phrases | `VoiceAssistantWakePhrases` |
+| Virtual Participant › Seconds the voice assistant stays active | `VoiceAssistantActivationDuration` |
+| Virtual Participant › ElevenLabs agent ID | `ElevenLabsAgentId` |
+| Virtual Participant › Simli face ID | `SimliFaceId` |
+| Virtual Participant › Teams: milliseconds between meeting checks | `VPAttendeePollMs` |
+| Virtual Participant › Teams: checks alone before leaving | `VPPollsBeforeEnd` |
+| Virtual Participant › Teams: checks without a meeting before leaving | `VPPollsBeforeEndMissing` |
 
 The Amazon Transcribe and Meeting Recording settings apply to meetings streamed
-to LMA from the Stream Audio page, the browser extension and the desktop app.
-A Virtual Participant reads the stack parameters, as it always has.
+to LMA from the Stream Audio page, the browser extension and the desktop app,
+and to Virtual Participants. A Virtual Participant uses the language, language
+options, preferred language, redaction and custom vocabulary; the custom
+language model, the redacted entity types and the speaker-identification default
+apply to streaming meetings only. The voice assistant's activation mode and the
+integration API keys stay stack parameters: the activation mode is built into
+the web app, and a provider or avatar chosen on the page without its key on the
+stack does not start.
 
 Some things differ from setting these with the parameters:
 
@@ -113,7 +128,8 @@ Some things differ from setting these with the parameters:
   page that do not fit together are logged, and the meeting is transcribed with
   the deployment's parameter values for the language, language options,
   preferred language, custom vocabulary and custom language model until they are
-  corrected. Redaction and recording keep the values saved on the page.
+  corrected. Redaction and recording keep the values saved on the page. A
+  Virtual Participant makes the same check as it starts, with the same result.
 - If the WebSocket transcriber cannot read the configuration when a meeting
   starts, that meeting uses the stack parameters' values for all of these
   settings, redaction and recording included, and the next meeting reads the

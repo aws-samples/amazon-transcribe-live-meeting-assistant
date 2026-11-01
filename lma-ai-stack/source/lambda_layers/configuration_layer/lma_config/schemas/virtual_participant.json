@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/virtual_participant",
+  "title": "Virtual Participant",
+  "description": "The Virtual Participant's voice assistant and avatar, and how a Teams Virtual Participant decides its meeting has ended. The defaults are the values the stack was deployed with; a value set here is used instead until it is reset. The API keys these features need are stack parameters: a provider or avatar chosen here without its key configured does not start.",
+  "sectionLabel": "Virtual Participant",
+  "appliesText": "A saved change applies to the next Virtual Participant to start; one already in a meeting keeps the settings it started with.",
+  "order": 11,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "type": "object",
+  "properties": {
+    "voiceAssistantProvider": {
+      "order": 0,
+      "type": "string",
+      "title": "Voice assistant",
+      "description": "none for no spoken answers; elevenlabs for ElevenLabs Conversational AI, which needs the ElevenLabs API key configured on the stack; amazon_nova_sonic for Amazon Nova Sonic, set up in the Nova Sonic Voice Assistant section. Default: the VoiceAssistantProvider stack parameter.",
+      "enum": ["none", "elevenlabs", "amazon_nova_sonic"],
+      "enumLabels": {
+        "none": "None",
+        "elevenlabs": "ElevenLabs",
+        "amazon_nova_sonic": "Amazon Nova Sonic"
+      }
+    },
+    "voiceAssistantWakePhrases": {
+      "order": 1,
+      "type": "string",
+      "title": "Wake phrases",
+      "description": "Comma-separated phrases that activate the voice assistant, case-insensitive. Used when the stack's voice assistant activation mode is wake_phrase. Default: the VoiceAssistantWakePhrases stack parameter.",
+      "examples": ["hey alex,ok alex,hi alex,hello alex"],
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "voiceAssistantActivationDuration": {
+      "order": 2,
+      "type": "integer",
+      "title": "Seconds the voice assistant stays active",
+      "description": "How long the voice assistant stays active after a wake phrase. Default: the VoiceAssistantActivationDuration stack parameter.",
+      "minimum": 5,
+      "maximum": 300
+    },
+    "elevenLabsAgentId": {
+      "order": 3,
+      "type": "string",
+      "title": "ElevenLabs agent ID",
+      "description": "An ElevenLabs Conversational AI agent, for a customised voice assistant; empty for the default one. Default: the ElevenLabsAgentId stack parameter.",
+      "maxLength": 128,
+      "pattern": "^([A-Za-z0-9_-]{10,})?$"
+    },
+    "simliFaceId": {
+      "order": 4,
+      "type": "string",
+      "title": "Simli face ID",
+      "description": "The face of the Simli avatar; the avatar is on only when this and the Simli API key are both set. Default: the SimliFaceId stack parameter.",
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9_-]*$"
+    },
+    "attendeePollMs": {
+      "order": 5,
+      "type": "integer",
+      "title": "Teams: milliseconds between meeting checks",
+      "description": "How often a Teams Virtual Participant checks whether its meeting is still running. Default: the VPAttendeePollMs stack parameter.",
+      "minimum": 1000,
+      "maximum": 120000
+    },
+    "pollsBeforeEnd": {
+      "order": 6,
+      "type": "integer",
+      "title": "Teams: checks alone before leaving",
+      "description": "Consecutive checks on which the meeting shows one attendee or none before the Virtual Participant leaves. Default: the VPPollsBeforeEnd stack parameter.",
+      "minimum": 1,
+      "maximum": 90
+    },
+    "pollsBeforeEndMissing": {
+      "order": 7,
+      "type": "integer",
+      "title": "Teams: checks without a meeting before leaving",
+      "description": "Consecutive checks on which the meeting shows neither an attendee count nor its controls before the Virtual Participant leaves. Raise it if Virtual Participants leave meetings that are still running. Default: the VPPollsBeforeEndMissing stack parameter.",
+      "minimum": 1,
+      "maximum": 90
+    }
+  },
+  "additionalProperties": false
+}

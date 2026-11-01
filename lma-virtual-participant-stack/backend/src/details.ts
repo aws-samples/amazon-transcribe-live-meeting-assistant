@@ -1,3 +1,6 @@
+// First, so the Configuration page's values are in the environment before this
+// module reads it at import: see stack-settings.ts.
+import './stack-settings.js';
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeChatText } from './chat-text.js';
 

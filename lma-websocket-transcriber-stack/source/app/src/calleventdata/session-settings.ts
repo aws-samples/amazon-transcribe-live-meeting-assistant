@@ -29,6 +29,7 @@ import {
     SettingType,
     TRANSCRIPTION,
     parameterBackedSetting,
+    transcribeOptionsProblem,
 } from '../config/configuration-store';
 import { normalizeErrorForLogging } from '../utils/common';
 
@@ -133,44 +134,12 @@ export const sessionSettingsFrom = (
 });
 
 /**
- * Why a set of options cannot be used together, or undefined when it can.
- *
- * The checks the stack makes of its parameters while it deploys
- * (ValidateParameters in lma-main.yaml), which a value saved on the page has not
- * been through: language identification needs language options, at most one
- * dialect per language, a preferred language among them, and no custom
- * vocabulary or language model.
+ * Why a meeting's options cannot be used together, or undefined when they can:
+ * the deploy-time combination checks, shared with the Virtual Participant (see
+ * transcribeOptionsProblem).
  */
-export const transcriptionProblem = (settings: TranscriptionSettings): string | undefined => {
-    if (settings.languageCode !== 'identify-language' && settings.languageCode !== 'identify-multiple-languages') {
-        return undefined;
-    }
-    if (settings.customVocabularyName) {
-        return `a custom vocabulary cannot be used with ${settings.languageCode}`;
-    }
-    if (settings.customLanguageModelName) {
-        return `a custom language model cannot be used with ${settings.languageCode}`;
-    }
-    const languages = settings.languageOptions
-        .split(',')
-        .map((code) => code.trim())
-        .filter((code) => code.length > 0);
-    if (languages.length === 0) {
-        return `${settings.languageCode} needs language options`;
-    }
-    const seen = new Set<string>();
-    for (const code of languages) {
-        const language = code.split('-')[0];
-        if (seen.has(language)) {
-            return `the language options name more than one dialect of '${language}'`;
-        }
-        seen.add(language);
-    }
-    if (settings.preferredLanguage !== 'None' && !languages.includes(settings.preferredLanguage)) {
-        return `the preferred language ${settings.preferredLanguage} is not one of the language options`;
-    }
-    return undefined;
-};
+export const transcriptionProblem = (settings: TranscriptionSettings): string | undefined =>
+    transcribeOptionsProblem(settings);
 
 /** The languages Amazon Transcribe redacts while streaming. */
 const REDACTED_LANGUAGES: ReadonlySet<string> = new Set(['en-US', 'en-AU', 'en-GB', 'es-US']);

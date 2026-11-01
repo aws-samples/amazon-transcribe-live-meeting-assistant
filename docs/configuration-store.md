@@ -190,6 +190,7 @@ Today's sections and their tiers:
 | `recording` | `immediate` | Read with `transcription`, for the same reason: whether a meeting is recorded is privacy-bearing |
 | `meeting_assist` | `standard` | Read by the call event processor for each batch of transcript segments |
 | `meeting_processing` | `standard` | Read by the call event processor for each segment it hands to a transcript Lambda hook, and by the inactive-meeting reaper as each run starts |
+| `virtual_participant` | `immediate` | Read once by each Virtual Participant as it starts, with the `transcription` and `recording` sections, as for the Nova Sonic settings it reads at the same moment; the page says a change applies to the next one to start |
 | `language_models` | `standard` | Read once per summary, answer, agenda pass, naming pass, knowledge-base query or key frame; nobody is waiting on a model change, and the summariser's **Regenerate** drops the cache before reading, as for the prompts |
 
 ### Resolving a read
@@ -328,6 +329,7 @@ so a release cannot ship a default its own save would refuse.
 | `recording` | `recordAudio`, `true` or `false`, nothing else |
 | `meeting_assist` | `wakePhraseRegex`, text of 1 to 256 characters |
 | `meeting_processing` | `transcriptHookNonPartialOnly`, `true` or `false`; `inactiveMeetingLookbackDays`, a whole number from 1 to 90, the parameter's range |
+| `virtual_participant` | The provider from its parameter's list; wake phrases as text; the activation duration, poll interval and poll counts as whole numbers in their parameters' ranges; the ElevenLabs agent and Simli face ids in the characters their services use, empty for none |
 | `call_pricing` | Prices that are finite and not negative, under `regions › <region or default> › <service>/<api-or-model> › <unit>`; region codes in the form `us-east-1`; the lists and notes as lists and objects of text; `currency` `USD`; no keys the estimator does not read |
 
 ### The validator
@@ -1128,7 +1130,33 @@ recording keep the saved values. When the table cannot be read, the meeting uses
 the task's values for everything, and the next meeting reads again. Whether a
 named custom vocabulary or language model exists is not checked.
 
-A Virtual Participant reads the parameters' values, as before.
+### The Virtual Participant
+
+The `virtual_participant` section holds `VoiceAssistantProvider`,
+`VoiceAssistantWakePhrases`, `VoiceAssistantActivationDuration`,
+`ElevenLabsAgentId`, `SimliFaceId`, `VPAttendeePollMs`, `VPPollsBeforeEnd` and
+`VPPollsBeforeEndMissing`. A Virtual Participant also reads the `transcription`
+and `recording` sections.
+
+Every one of these reached the Virtual Participant as an environment variable
+of its task, and many places read them. So rather than change those places,
+`stack-settings.ts` in the Virtual Participant reads the three sections once as
+it starts and sets each variable the configuration holds a value for, leaving
+the others as the task was started. Some of the readers run when their module
+is imported (`details.ts`, `voice-assistant.ts`, `simli-avatar.ts`, `scribe.ts`); each imports
+`stack-settings.ts` first, and that module's top-level `await` makes the ES module
+loader finish the read before their own evaluation starts. On both launch paths
+the process starts when the meeting does, so what is applied is what is saved at
+that moment. Its table of settings and variables is held to the parameter list
+and to the task definition by `test_parameter_backed_settings.py`, which also
+checks that each of those three modules imports it first.
+
+Options that fail the deploy-time combination checks (in the shared accessor,
+`transcribeOptionsProblem`, which the transcriber uses too) are logged, and the
+options those checks cover keep the task's values while the page's redaction
+choices still apply, as in the transcriber. Redaction is derived as the template
+derives it, from the flag and the language. The three sections, all on the
+immediate tier, are taken from one consistent read of the resolved document.
 
 ### The wake phrase, the transcript hook mode and the reaper's lookback
 
@@ -1142,8 +1170,9 @@ and that one is used.
 
 ### Stack parameters that stay
 
-Three parameters that only application code reads are deliberately not on the
-Configuration page:
+Of the parameters that only application code reads, these three are kept as
+stack parameters by design (the others not yet on the Configuration page are
+listed under [Still to come](#still-to-come)):
 
 - `LogLevel` is read by each process's logging when the process starts, so a
   runtime value would apply at an unpredictable later time.
@@ -1156,6 +1185,10 @@ Configuration page:
   guardrail applies. The guardrail is a safety control, so changing which version
   applies stays a deployment.
 
+`TranscribeContentRedactionType` stays because it has one allowed value, `PII`,
+so there is nothing to choose; whether redaction applies is the **Redact
+personal information** switch in the Amazon Transcribe section.
+
 `VoiceEnrollmentRetentionDays` and `VoiceEnrollmentTermsVersion` stay too, for
 the reason given in [Voice Enrollment](voice-enrollment.md): they are part of
 the consent terms each enrollment agrees to.
@@ -1166,7 +1199,9 @@ the consent terms each enrollment agrees to.
 |---|---|
 | Named profiles | More than one profile, a way to choose the one in force, and an import that can create one. Export, import and presets work today on the one `custom` profile; see [Export, import and the configuration library](#export-import-and-the-configuration-library) |
 | Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired. It waited for the configuration editor: the custom prompt is edited in the DynamoDB console today, which is exactly the route a compressed body closes, so moving it before there was an editor would have left it with no way to edit it. With the editor in place, it needs a schema and a seeder adoption |
-| Moving more CloudFormation parameters | The other parameters that are read only by application code and do not gate a resource, a condition or an IAM policy, in the way described under [Stack parameters as defaults](#stack-parameters-as-defaults) |
+| Settings the web app reads | `VoiceAssistantActivationMode` is built into the web app when the stack deploys it, as well as read by the Virtual Participant, so moving it means the web app reading its configuration at run time, with the SSM settings blob below |
+| Parameters with a resource half | `TranscriptionExpirationInDays` sets a bucket lifecycle rule as well as the expiry of transcript records, and `MeetingInactivityTimeoutInMinutes` decides whether the reaper's schedule exists as well as its timeout. Each would be split: the record arithmetic moves, the resource half stays |
+| Upper bounds rather than defaults | Retention settings such as `MeetingRecordExpirationInDays` (see [Stack parameters that stay](#stack-parameters-that-stay)): a runtime value the parameter bounds, rather than one it defaults |
 | Replacing the SSM settings blob | The `<stack>-LMASettings` parameter is written only by CloudFormation, at deploy time, and read by the web app for every signed-in user. It is a deployment's wiring rather than something an administrator edits, so it moves with the parameters above, when the web app reads its configuration at run time |
 
 A shipped summary section that has been turned off is listed by the

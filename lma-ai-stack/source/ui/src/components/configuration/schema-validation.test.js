@@ -63,6 +63,7 @@ describe('schema-validation', () => {
       'recording',
       'summary_prompt_templates',
       'transcription',
+      'virtual_participant',
     ]);
   });
 

@@ -470,6 +470,87 @@ def test_a_readers_last_resort_is_the_parameters_own_default(parameter, fallback
     assert str(fallback) == str(MAIN["Parameters"][parameter]["Default"])
 
 
+# ── the Virtual Participant ─────────────────────────────────────────────────
+
+VP_BACKEND = REPO_ROOT / "lma-virtual-participant-stack" / "backend" / "src"
+VP_TEMPLATE = REPO_ROOT / "lma-virtual-participant-stack" / "template.yaml"
+
+#: A row of the Virtual Participant's table, one per line.
+VP_TABLE_ENTRY = re.compile(
+    r"^\s+\{ section: '(\w+)', setting: '(\w+)', envVar: '(\w+)', type: '(\w+)' \},$"
+)
+
+#: The modules that read these variables when they are imported, and so must
+#: import stack-settings.js before anything else.
+VP_IMPORT_TIME_READERS = ("details.ts", "voice-assistant.ts", "simli-avatar.ts", "scribe.ts")
+
+
+def _vp_entries() -> List[Tuple[str, str, str, str]]:
+    text = (VP_BACKEND / "stack-settings.ts").read_text(encoding="utf-8")
+    start = text.index("export const VIRTUAL_PARTICIPANT_SETTINGS")
+    end = text.index("];", start)
+    return [m.groups() for m in map(VP_TABLE_ENTRY.match, text[start:end].splitlines()) if m]
+
+
+VP_ENTRIES = _vp_entries()
+
+
+def _vp_environment() -> Dict[str, Any]:
+    container = _load(VP_TEMPLATE)["Resources"]["TaskDefinition"]["Properties"]["ContainerDefinitions"][0]
+    return {variable["Name"]: variable["Value"] for variable in container["Environment"]}
+
+
+def test_the_virtual_participant_table_is_found() -> None:
+    assert len(VP_ENTRIES) >= 13
+    assert {section for section, *_ in VP_ENTRIES} == {"transcription", "recording", "virtual_participant"}
+
+
+@pytest.mark.parametrize("section, setting, env_var, value_type", VP_ENTRIES)
+def test_a_virtual_participant_setting_is_a_mapped_one_of_the_same_type(
+    section, setting, env_var, value_type
+) -> None:
+    entry = _by_setting().get((section, setting))
+    assert entry is not None, f"the Virtual Participant applies {section} › {setting}, which no parameter backs"
+    assert entry.value_type == value_type
+
+
+@pytest.mark.parametrize("section, setting, env_var, value_type", VP_ENTRIES)
+def test_the_virtual_participant_task_sets_the_variable_from_the_same_parameter(
+    section, setting, env_var, value_type
+) -> None:
+    entry = _by_setting()[(section, setting)]
+    environment = _vp_environment()
+    assert env_var in environment, f"the Virtual Participant task sets no {env_var}"
+    # Either form passes the parameter's own value through.
+    assert environment[env_var] in ({"Ref": entry.parameter}, {"Fn::Sub": f"${{{entry.parameter}}}"})
+    passed = MAIN["Resources"]["VIRTUALPARTICIPANTSTACK"]["Properties"]["Parameters"]
+    assert passed.get(entry.parameter) == {"Ref": entry.parameter}
+
+
+def test_every_virtual_participant_section_setting_is_applied() -> None:
+    """A setting on the page that nothing applies would be a setting that does nothing."""
+    applied = {setting for section, setting, *_ in VP_ENTRIES if section == "virtual_participant"}
+    declared = set(schema.section_schema("virtual_participant")["properties"])
+    assert applied == declared
+
+
+@pytest.mark.parametrize("module", VP_IMPORT_TIME_READERS)
+def test_an_import_time_reader_imports_the_settings_first(module) -> None:
+    text = (VP_BACKEND / module).read_text(encoding="utf-8")
+    first_import = next(line for line in text.splitlines() if line.startswith("import "))
+    assert first_import == "import './stack-settings.js';", (
+        f"{module} reads the environment when it is imported, so its first import must be "
+        f"stack-settings.js, which applies the Configuration page's values; it is {first_import!r}"
+    )
+
+
+def test_the_virtual_participant_task_can_read_the_configuration_table() -> None:
+    environment = _vp_environment()
+    assert environment["CONFIGURATION_TABLE_NAME"] == {"Ref": "ConfigurationTableName"}
+    rendered = json.dumps(_load(VP_TEMPLATE)["Resources"]["TaskRole"]["Properties"], default=str)
+    assert "dynamodb:GetItem" in rendered and "ConfigurationTableName" in rendered
+
+
 @pytest.mark.parametrize("entry", ENTRIES, ids=_ids)
 def test_the_configuration_guide_names_the_parameter_a_default(entry) -> None:
     guide = (REPO_ROOT / "docs" / "configuration-guide.md").read_text(encoding="utf-8")

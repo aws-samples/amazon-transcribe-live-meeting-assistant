@@ -48,6 +48,7 @@ const TIERS = {
   recording: 'immediate',
   meeting_assist: 'standard',
   meeting_processing: 'standard',
+  virtual_participant: 'immediate',
 };
 const SECTIONS = readdirSync(SCHEMA_DIR)
   .filter((name) => name.endsWith('.json'))
@@ -101,6 +102,16 @@ const DEFAULTS = {
   recording: { recordAudio: true },
   meeting_assist: { wakePhraseRegex: '(OK|Okay)[.,! ]*[Aa]ssistant' },
   meeting_processing: { transcriptHookNonPartialOnly: true, inactiveMeetingLookbackDays: 2 },
+  virtual_participant: {
+    voiceAssistantProvider: 'none',
+    voiceAssistantWakePhrases: 'hey alex,ok alex',
+    voiceAssistantActivationDuration: 30,
+    elevenLabsAgentId: '',
+    simliFaceId: '',
+    attendeePollMs: 20000,
+    pollsBeforeEnd: 3,
+    pollsBeforeEndMissing: 15,
+  },
 };
 
 const PRESETS = [

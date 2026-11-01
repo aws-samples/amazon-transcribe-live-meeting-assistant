@@ -162,6 +162,8 @@ Parameters:
       (Optional) ElevenLabs Conversational AI Agent ID for customized voice assistant behavior.
       Create an agent at https://elevenlabs.io/app/conversational-ai and copy its ID here.
       Leave blank to use default conversational AI without custom personality.
+      This is the default; an Admin can change it at run time on the Configuration page (Virtual
+      Participant section), which takes precedence.
     AllowedPattern: "^(|[a-zA-Z0-9_-]{10,})$"
     ConstraintDescription: "Must be empty or a valid ElevenLabs Agent ID"
 
@@ -201,6 +203,8 @@ Parameters:
       (Optional) Simli Face ID for the avatar appearance. Required when
       SimliApiKey is set — the avatar is enabled only when BOTH parameters
       are non-empty. Get this from your Simli dashboard at https://simli.com.
+      This is the default; an Admin can change it at run time on the Configuration page (Virtual
+      Participant section), which takes precedence.
 
   VoiceAssistantProvider:
     Type: String
@@ -213,8 +217,10 @@ Parameters:
       Voice AI assistant provider for Virtual Participant. Choose 'none' to
       disable voice responses (default), 'elevenlabs' for ElevenLabs
       Conversational AI (requires API key above), or 'amazon_nova_sonic' for
-      Amazon Nova Sonic, which needs no API key and is configured on the Nova
-      Sonic page in the LMA UI.
+      Amazon Nova Sonic, which needs no API key and is configured in the Nova
+      Sonic Voice Assistant section of the Configuration page in the LMA UI.
+      This is the default; an Admin can change it at run time on the Configuration page (Virtual
+      Participant section), which takes precedence.
 
   AmazonNovaSonicRegion:
     Type: String
@@ -247,6 +253,8 @@ Parameters:
     Description: >-
       Comma-separated list of wake phrases for voice assistant activation (case-insensitive).
       Only used when VoiceAssistantActivationMode is 'wake_phrase'. Example: "hey alex,ok alex,hi alex"
+      This is the default; an Admin can change it at run time on the Configuration page (Virtual
+      Participant section), which takes precedence.
 
   VoiceAssistantActivationDuration:
     Type: Number
@@ -256,6 +264,8 @@ Parameters:
     Description: >-
       How long the voice assistant stays active after wake phrase detection (in seconds).
       Only used when VoiceAssistantActivationMode is 'wake_phrase'. Default is 30 seconds. Maximum is 300 seconds.
+      This is the default; an Admin can change it at run time on the Configuration page (Virtual
+      Participant section), which takes precedence.
 
   BedrockGuardrailId:
     Type: String
@@ -347,7 +357,7 @@ Parameters:
       only used when
       the 'en-US' language is selected in the TranscribeLanguageCode parameter.
       This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence for streaming meetings.
+      Transcribe section), which takes precedence.
     AllowedValues:
       - "true"
       - "false"
@@ -366,7 +376,7 @@ Parameters:
       Language code or language identification setting for Amazon Transcribe. NOTE:
       Language identification can't  be combined with custom language models or redaction.
       This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence for streaming meetings.
+      Transcribe section), which takes precedence.
 
     Default: en-US
     AllowedValues:
@@ -405,7 +415,7 @@ Parameters:
       NOTE: The identify-language feature has not yet been applied to the virtual participant. 
       If selected, the virtual participant will use the value of TranscribePreferredLanguage (if set) or 'en-US' (by default).
       This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence for streaming meetings.
+      Transcribe section), which takes precedence.
 
   TranscribePreferredLanguage:
     Type: String
@@ -413,7 +423,7 @@ Parameters:
       Optionally select a preferred language when using language identification -
       must be one of the languages entered for TranscribeLanguageOptions.
       This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence for streaming meetings.
+      Transcribe section), which takes precedence.
     Default: None
     AllowedValues:
       - None
@@ -449,7 +459,7 @@ Parameters:
       the Stream Audio tab) send their own choice per meeting, which takes
       precedence. Leave "false" unless you want it on for clients that do not.
       This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence for streaming meetings.
+      Transcribe section), which takes precedence.
 
   TranscribePiiEntityTypes:
     Type: String
@@ -458,7 +468,7 @@ Parameters:
       Select the PII entity types you want to identify or redact. Remove the values
       that you don't want to redact from the default.  DO NOT ADD CUSTOM VALUES HERE.
       This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence for streaming meetings.
+      Transcribe section), which takes precedence.
 
   CustomVocabularyName:
     Type: String
@@ -468,7 +478,7 @@ Parameters:
       blank if no custom vocabulary to be used. If yes, the custom
       vocabulary must pre-exist in your account.
       This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence for streaming meetings.
+      Transcribe section), which takes precedence.
 
   CustomLanguageModelName:
     Type: String
@@ -480,7 +490,7 @@ Parameters:
       must pre-exist in your account,  match the Language Code selected above, and
       use the 'Narrow Band' base model.
       This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence for streaming meetings.
+      Transcribe section), which takes precedence.
 
   EnableMicrovmAsr:
     Type: String
@@ -744,7 +754,7 @@ Parameters:
       meeting will not be recorded.
       If set to true, the meeting will be recorded.
       This is the default; an Admin can change it at run time on the Configuration page (Meeting
-      Recording section), which takes precedence for streaming meetings.
+      Recording section), which takes precedence.
 
   ZoomMeetingSdkClientId:
     Type: String
@@ -889,7 +899,9 @@ Parameters:
       How far back to look for meetings to close. A meeting that started longer
       ago than this is never closed automatically, so raise it temporarily if you
       are updating a deployment that has accumulated older meetings stuck in
-      progress. Higher values read more meeting records on every run.
+      progress. Higher values read more meeting records on every run. A whole
+      number of days: a fractional value is not used, and the reaper looks back 2
+      days instead.
       This is the default; an Admin can change it at run time on the Configuration page (Meeting
       Processing section), which takes precedence.
 
@@ -1104,6 +1116,8 @@ Parameters:
       How often a Teams Virtual Participant samples the meeting UI to
       decide whether the meeting is still running, in milliseconds.
       Leave at the default unless advised otherwise.
+      This is the default; an Admin can change it at run time on the Configuration page (Virtual
+      Participant section), which takes precedence.
 
   VPPollsBeforeEnd:
     Type: Number
@@ -1114,6 +1128,8 @@ Parameters:
       Consecutive polls on which a Teams meeting must show one or fewer
       attendees before the Virtual Participant leaves. 3 polls at the default
       cadence is about 60 seconds.
+      This is the default; an Admin can change it at run time on the Configuration page (Virtual
+      Participant section), which takes precedence.
 
   VPPollsBeforeEndMissing:
     Type: Number
@@ -1128,6 +1144,8 @@ Parameters:
       that are still in progress. A value producing a tolerance outside 4 to
       30 minutes at the chosen cadence is adjusted into that range, so at the
       default cadence anything below 12 is raised.
+      This is the default; an Admin can change it at run time on the Configuration page (Virtual
+      Participant section), which takes precedence.
 
   TranscriberDesiredTaskCount:
     Type: Number
@@ -3281,6 +3299,16 @@ Resources:
         CustomLanguageModelName: !Ref CustomLanguageModelName
         ShowSpeakerLabel: !Ref ShowSpeakerLabel
         EnableAudioRecording: !Ref EnableAudioRecording
+        # And the Virtual Participant's own settings, which it reads from the
+        # Virtual Participant section when it starts.
+        VoiceAssistantProvider: !Ref VoiceAssistantProvider
+        VoiceAssistantWakePhrases: !Ref VoiceAssistantWakePhrases
+        VoiceAssistantActivationDuration: !Ref VoiceAssistantActivationDuration
+        ElevenLabsAgentId: !Ref ElevenLabsAgentId
+        SimliFaceId: !Ref SimliFaceId
+        VPAttendeePollMs: !Ref VPAttendeePollMs
+        VPPollsBeforeEnd: !Ref VPPollsBeforeEnd
+        VPPollsBeforeEndMissing: !Ref VPPollsBeforeEndMissing
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
         StartOfCallLambdaHookFunctionArn: !Ref StartOfCallLambdaHookFunctionArn
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
