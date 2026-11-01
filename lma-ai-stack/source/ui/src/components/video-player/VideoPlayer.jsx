@@ -30,21 +30,28 @@ export const VideoPlayer = ({ videoRecordingUrl, seekRequest }) => {
   const [preSignedUrl, setPreSignedUrl] = useState();
   const { setErrorMessage, currentCredentials } = useAppContext();
   const videoRef = useRef(null);
+  // The request last applied. The URL is signed again whenever the session's
+  // credentials are refreshed, and a request must not be applied again then:
+  // it would jump back to that time however far the viewer has moved since.
+  const appliedRef = useRef(null);
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !seekRequest || !Number.isFinite(seekRequest.seconds)) return;
+    if (!video || !seekRequest || !Number.isFinite(seekRequest.seconds)) return undefined;
+    if (appliedRef.current === seekRequest.at) return undefined;
     const play = () => {
+      appliedRef.current = seekRequest.at;
       video.currentTime = Math.max(0, seekRequest.seconds);
       video.play()?.catch((error) => logger.debug('video play was not allowed', error));
     };
+    if (video.scrollIntoView) video.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     // Before its metadata has loaded a video cannot be positioned.
     if (video.readyState >= 1) {
       play();
-    } else {
-      video.addEventListener('loadedmetadata', play, { once: true });
+      return undefined;
     }
-    if (video.scrollIntoView) video.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    video.addEventListener('loadedmetadata', play, { once: true });
+    return () => video.removeEventListener('loadedmetadata', play);
   }, [seekRequest, preSignedUrl]);
 
   useEffect(() => {

@@ -38,4 +38,32 @@ describe('VideoPlayer', () => {
     expect(video.currentTime).toBe(41.5);
     expect(play).toHaveBeenCalledTimes(1);
   });
+
+  it('does not apply the same request again when the link is signed again', async () => {
+    const play = vi.fn().mockResolvedValue(undefined);
+    window.HTMLMediaElement.prototype.play = play;
+    const original = Object.getOwnPropertyDescriptor(window.HTMLMediaElement.prototype, 'readyState');
+    Object.defineProperty(window.HTMLMediaElement.prototype, 'readyState', { configurable: true, get: () => 4 });
+    try {
+      const url = 'https://bucket.s3.us-east-1.amazonaws.com/lma-video-recordings%2Fm.mp4';
+      const request = { seconds: 41.5, at: 7 };
+      const { container, rerender } = render(<VideoPlayer videoRecordingUrl={url} seekRequest={request} />);
+      await waitFor(() => expect(container.querySelector('video')).not.toBeNull());
+      await waitFor(() => expect(play).toHaveBeenCalledTimes(1));
+      const video = container.querySelector('video');
+      video.currentTime = 300; // the viewer moved on
+      // A credential refresh signs the URL again; the request is unchanged.
+      rerender(<VideoPlayer videoRecordingUrl={`${url}?refresh`} seekRequest={request} />);
+      await new Promise((r) => {
+        setTimeout(r, 20);
+      });
+      expect(video.currentTime).toBe(300);
+      expect(play).toHaveBeenCalledTimes(1);
+      rerender(<VideoPlayer videoRecordingUrl={`${url}?refresh`} seekRequest={{ seconds: 12, at: 8 }} />);
+      expect(video.currentTime).toBe(12);
+      expect(play).toHaveBeenCalledTimes(2);
+    } finally {
+      Object.defineProperty(window.HTMLMediaElement.prototype, 'readyState', original);
+    }
+  });
 });

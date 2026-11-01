@@ -156,7 +156,7 @@ const VideoTimeline = ({
    */
   const refreshShown = useCallback(async () => {
     const shown = framesRef.current.length;
-    await runLoad(async ({ fetchPage, apply, current }) => {
+    const ran = await runLoad(async ({ fetchPage, apply, current }) => {
       let token = null;
       let fetched = 0;
       do {
@@ -170,7 +170,13 @@ const VideoTimeline = ({
       nextTokenRef.current = token;
       setNextToken(token);
     });
-  }, [runLoad]);
+    // A frame announced during the renewal is fetched now, as after a page.
+    if (ran && pendingNewRef.current && !nextTokenRef.current) {
+      pendingNewRef.current = false;
+      const last = framesRef.current[framesRef.current.length - 1];
+      loadPage({ after: last?.FrameId || '' });
+    }
+  }, [runLoad, loadPage]);
 
   // First page, and a fresh start when the meeting changes.
   useEffect(() => {

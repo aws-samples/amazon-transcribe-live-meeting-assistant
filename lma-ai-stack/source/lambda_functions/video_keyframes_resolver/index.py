@@ -107,7 +107,12 @@ def _shared_with(raw: Any) -> set:
 
 
 def require_call_access(caller: Mapping[str, Any], call_id: str) -> None:
-    """The ``getCall`` rule: Admin, owner, shared-with, or the backend."""
+    """The ``getCall`` rule: Admin, owner, shared-with, or the backend.
+
+    call_cost_resolver applies the same rule. This copy also reads a SharedWith
+    stored as a list, which is how meeting sharing writes it, and as the
+    "[a, b]" string a meeting created shared carries.
+    """
     if caller["is_admin"] or caller["is_backend"]:
         return
     response = DYNAMODB.get_item(
