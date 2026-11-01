@@ -116,7 +116,8 @@ def _shared_with(raw: Any) -> set:
 def _require_call_access(caller: Mapping[str, Any], call_id: str) -> None:
     """The ``getCall`` rule: Admin, owner, shared-with, or the backend.
 
-    The same check as ``require_call_access`` in video_keyframes_resolver, so the
+    An identical copy of ``require_call_access`` in video_keyframes_resolver
+    (each function is packaged on its own); keep the two the same, so the
     estimate and the key frames are answered to the same people. SharedWith is
     read in every shape it is stored in: the list meeting sharing writes, a
     string set, and the comma-separated or "[a, b]" string of older and
