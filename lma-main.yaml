@@ -344,6 +344,8 @@ Parameters:
       Enable content redaction from Amazon Transcribe transcription output. This is
       only used when
       the 'en-US' language is selected in the TranscribeLanguageCode parameter.
+      This is the default; an Admin can change it at run time on the Configuration page (Amazon
+      Transcribe section), which takes precedence for streaming meetings.
     AllowedValues:
       - "true"
       - "false"
@@ -352,7 +354,9 @@ Parameters:
     Type: String
     Default: PII
     Description: >-
-      Type of content redaction from Amazon Transcribe transcription output
+      Type of content redaction from Amazon Transcribe transcription output.
+      This is the default; an Admin can change it at run time on the Configuration page (Amazon
+      Transcribe section), which takes precedence for streaming meetings.
     AllowedValues:
       - PII
 
@@ -361,6 +365,8 @@ Parameters:
     Description: >-
       Language code or language identification setting for Amazon Transcribe. NOTE:
       Language identification can't  be combined with custom language models or redaction.
+      This is the default; an Admin can change it at run time on the Configuration page (Amazon
+      Transcribe section), which takes precedence for streaming meetings.
 
     Default: en-US
     AllowedValues:
@@ -398,12 +404,16 @@ Parameters:
       pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
       NOTE: The identify-language feature has not yet been applied to the virtual participant. 
       If selected, the virtual participant will use the value of TranscribePreferredLanguage (if set) or 'en-US' (by default).
+      This is the default; an Admin can change it at run time on the Configuration page (Amazon
+      Transcribe section), which takes precedence for streaming meetings.
 
   TranscribePreferredLanguage:
     Type: String
     Description: >-
       Optionally select a preferred language when using language identification -
       must be one of the languages entered for TranscribeLanguageOptions.
+      This is the default; an Admin can change it at run time on the Configuration page (Amazon
+      Transcribe section), which takes precedence for streaming meetings.
     Default: None
     AllowedValues:
       - None
@@ -438,6 +448,8 @@ Parameters:
       per-channel speaker identification settings (the desktop capture app and
       the Stream Audio tab) send their own choice per meeting, which takes
       precedence. Leave "false" unless you want it on for clients that do not.
+      This is the default; an Admin can change it at run time on the Configuration page (Amazon
+      Transcribe section), which takes precedence for streaming meetings.
 
   TranscribePiiEntityTypes:
     Type: String
@@ -445,6 +457,8 @@ Parameters:
     Description: >-
       Select the PII entity types you want to identify or redact. Remove the values
       that you don't want to redact from the default.  DO NOT ADD CUSTOM VALUES HERE.
+      This is the default; an Admin can change it at run time on the Configuration page (Amazon
+      Transcribe section), which takes precedence for streaming meetings.
 
   CustomVocabularyName:
     Type: String
@@ -453,6 +467,8 @@ Parameters:
       The name of the vocabulary to use when processing the transcription job. Leave
       blank if no custom vocabulary to be used. If yes, the custom
       vocabulary must pre-exist in your account.
+      This is the default; an Admin can change it at run time on the Configuration page (Amazon
+      Transcribe section), which takes precedence for streaming meetings.
 
   CustomLanguageModelName:
     Type: String
@@ -463,6 +479,8 @@ Parameters:
       custom language model is to be used. If specified, the custom language model
       must pre-exist in your account,  match the Language Code selected above, and
       use the 'Narrow Band' base model.
+      This is the default; an Admin can change it at run time on the Configuration page (Amazon
+      Transcribe section), which takes precedence for streaming meetings.
 
   EnableMicrovmAsr:
     Type: String
@@ -723,6 +741,8 @@ Parameters:
       Enable or disable recording of audio during a meeting. If set to false, the
       meeting will not be recorded.
       If set to true, the meeting will be recorded.
+      This is the default; an Admin can change it at run time on the Configuration page (Meeting
+      Recording section), which takes precedence for streaming meetings.
 
   ZoomMeetingSdkClientId:
     Type: String
@@ -3245,6 +3265,19 @@ Resources:
         # the Amazon Bedrock Models section, which the meeting assistant reads.
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
         MeetingAssistKnowledgeBaseModelID: !Ref MeetingAssistKnowledgeBaseModelID
+        # Likewise the Amazon Transcribe options and the audio-recording
+        # default, which the WebSocket transcriber reads from the Amazon
+        # Transcribe and Meeting Recording sections.
+        TranscribeLanguageCode: !Ref TranscribeLanguageCode
+        TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
+        TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
+        IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
+        TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
+        TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
+        CustomVocabularyName: !Ref CustomVocabularyName
+        CustomLanguageModelName: !Ref CustomLanguageModelName
+        ShowSpeakerLabel: !Ref ShowSpeakerLabel
+        EnableAudioRecording: !Ref EnableAudioRecording
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
         StartOfCallLambdaHookFunctionArn: !Ref StartOfCallLambdaHookFunctionArn
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn

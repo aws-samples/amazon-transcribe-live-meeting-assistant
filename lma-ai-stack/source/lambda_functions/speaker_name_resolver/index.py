@@ -50,6 +50,10 @@ from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # confi
 LOGGER = logging.getLogger()
 LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
+#: The model when neither the configuration nor BEDROCK_MODEL_ID names one;
+#: the BedrockModelId parameter's default.
+FALLBACK_MODEL_ID = "global.anthropic.claude-sonnet-5-5"
+
 EVENT_SOURCING_TABLE = os.environ["EVENT_SOURCING_TABLE"]
 APPSYNC_GRAPHQL_URL = os.environ["APPSYNC_GRAPHQL_URL"]
 BEDROCK_REGION = os.environ.get("BEDROCK_REGION_OVERRIDE") or os.environ["AWS_REGION"]
@@ -208,7 +212,12 @@ def call_bedrock(prompt, call_id=None):
     summaries' one: the Amazon Bedrock Models section of the Configuration page,
     whose default is the BedrockModelId stack parameter.
     """
-    model_id = read_setting(LANGUAGE_MODELS.name, "summaryModelId", env_var="BEDROCK_MODEL_ID")
+    model_id = read_setting(
+        LANGUAGE_MODELS.name,
+        "summaryModelId",
+        env_var="BEDROCK_MODEL_ID",
+        default=FALLBACK_MODEL_ID,
+    )
     response = bedrock.converse(
         modelId=model_id,
         messages=[{"role": "user", "content": [{"text": prompt}]}],

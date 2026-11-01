@@ -91,7 +91,14 @@ def test_a_value_is_read_back_into_its_type(value_type, raw, expected):
 
 @pytest.mark.parametrize(
     "value_type, raw",
-    [("integer", "ninety"), ("integer", True), ("integer", ""), ("boolean", "yes")],
+    [
+        ("integer", "ninety"),
+        ("integer", True),
+        ("integer", ""),
+        ("integer", "1_000"),
+        ("integer", "2.5"),
+        ("boolean", "yes"),
+    ],
 )
 def test_a_value_of_the_wrong_type_is_refused(value_type, raw):
     with pytest.raises(ValueError):
@@ -103,10 +110,15 @@ def _entry():
 
 
 def _valid_value(entry):
-    """A value the entry's setting accepts: its first listed choice, or a sample."""
+    """A value the entry's setting accepts: its first listed choice, or a sample.
+
+    Every patterned text setting here accepts empty, which means "none".
+    """
     declared = schema.section_schema(entry.section)["properties"][entry.setting]
     if "enum" in declared:
         return declared["enum"][0]
+    if "pattern" in declared:
+        return ""
     return {"string": "text", "integer": declared.get("minimum", 1), "boolean": True}[
         entry.value_type
     ]

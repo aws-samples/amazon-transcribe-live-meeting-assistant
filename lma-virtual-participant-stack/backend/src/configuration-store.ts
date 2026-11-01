@@ -243,6 +243,93 @@ export const ASR_ENGINE = declareSection({
 });
 
 /**
+ * The Amazon Transcribe options of a streaming session, read by the transcriber
+ * at the start of each meeting. Short, as in the Python half, and for the same
+ * reason as the ASR switches read beside them.
+ */
+export const TRANSCRIPTION = declareSection({
+    name: 'transcription',
+    cacheTier: 'short',
+    description:
+        'Amazon Transcribe options for streaming meetings: language or language identification, ' +
+        'content redaction, custom vocabulary and language model, and the default for speaker partitioning.',
+});
+
+/** Whether a meeting's audio is recorded when its client does not say. Short, as in the Python half. */
+export const RECORDING = declareSection({
+    name: 'recording',
+    cacheTier: 'short',
+    description: 'Whether the audio of a meeting is recorded when its client does not say.',
+});
+
+/**
+ * The type of a setting whose default is a stack parameter, as the Python
+ * half's `parameter_defaults.json` names it.
+ */
+export type SettingType = 'string' | 'integer' | 'boolean';
+
+type SettingValue<K extends SettingType> = K extends 'string' ? string : K extends 'integer' ? number : boolean;
+
+/**
+ * `raw` read back into a setting's type, or undefined when it is not one.
+ *
+ * The same rules as the Python half's `coerce`, because a value reaches a
+ * reader either from the configuration (JSON-typed) or from an environment
+ * variable (text), and the two halves must agree on what a value is:
+ * `true`/`false` in any case for a boolean, digits with an optional sign for an
+ * integer, and anything for text.
+ */
+export const coerceSetting = <K extends SettingType>(type: K, raw: unknown): SettingValue<K> | undefined => {
+    if (raw === undefined || raw === null) {
+        return undefined;
+    }
+    if (type === 'string') {
+        return String(raw) as SettingValue<K>;
+    }
+    if (type === 'boolean') {
+        if (typeof raw === 'boolean') {
+            return raw as SettingValue<K>;
+        }
+        const text = String(raw).trim().toLowerCase();
+        return text === 'true' || text === 'false' ? ((text === 'true') as SettingValue<K>) : undefined;
+    }
+    if (typeof raw === 'number') {
+        return Number.isInteger(raw) ? (raw as SettingValue<K>) : undefined;
+    }
+    if (typeof raw === 'boolean') {
+        return undefined;
+    }
+    const text = String(raw).trim();
+    return /^[+-]?[0-9]+$/.test(text) ? (Number.parseInt(text, 10) as SettingValue<K>) : undefined;
+};
+
+/**
+ * The value of a setting whose default is a stack parameter.
+ *
+ * In order of preference, as the Python half's `read_setting`: the resolved
+ * section's value (an administrator's change, or else the baseline the seeder
+ * wrote from the parameter); the parameter's environment variable; `fallback`.
+ * A value of the wrong type is passed over. An empty environment variable is a
+ * value for a text setting and not for the others.
+ */
+export const parameterBackedSetting = <K extends SettingType>(
+    values: Record<string, unknown>,
+    name: string,
+    type: K,
+    envValue: string | undefined,
+    fallback: SettingValue<K>
+): SettingValue<K> => {
+    const stored = coerceSetting(type, values[name]);
+    if (stored !== undefined) {
+        return stored;
+    }
+    if (envValue === undefined || (envValue === '' && type !== 'string')) {
+        return fallback;
+    }
+    return coerceSetting(type, envValue) ?? fallback;
+};
+
+/**
  * Decompress a body read back from DynamoDB.
  *
  * The layout is detected from the item rather than configured: a `Body`

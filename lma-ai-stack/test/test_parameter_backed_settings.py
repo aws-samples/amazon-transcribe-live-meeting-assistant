@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Tuple
@@ -309,6 +310,103 @@ def test_the_meeting_assist_configuration_is_read_only_when_both_inputs_are_give
     assert "ConfigurationTableName" in rendered and "ConfigurationLayerArn" in rendered
     for name in ("ConfigurationTableName", "ConfigurationLayerArn"):
         assert MEETING_ASSIST["Parameters"][name]["Default"] == ""
+
+
+# ── the TypeScript readers ──────────────────────────────────────────────────
+
+TRANSCRIBER_TEMPLATE = (
+    REPO_ROOT / "lma-websocket-transcriber-stack" / "deployment" / "lma-websocket-transcriber.yaml"
+)
+TRANSCRIBER_SETTINGS = (
+    REPO_ROOT
+    / "lma-websocket-transcriber-stack"
+    / "source"
+    / "app"
+    / "src"
+    / "calleventdata"
+    / "session-settings.ts"
+)
+
+#: Each TypeScript settings table, and the section its entries belong to.
+TYPESCRIPT_TABLES = {
+    (TRANSCRIBER_SETTINGS, "TRANSCRIPTION_SETTINGS"): "transcription",
+    (TRANSCRIBER_SETTINGS, "RECORDING_SETTINGS"): "recording",
+}
+
+#: A table entry, one per line: `name: { envVar: 'NAME', type: 'kind' },`.
+TABLE_ENTRY = re.compile(r"^\s+(\w+): \{ envVar: '(\w+)', type: '(\w+)' \},$")
+
+#: Environment variables the template sets through a condition rather than as
+#: the parameter itself, and why that is still the parameter's value.
+CONDITIONED_VARIABLES = {
+    # !If [ShouldEnableContentRedaction, "true", "false"]: the flag, already
+    # combined with the language check the reader also makes.
+    "IS_CONTENT_REDACTION_ENABLED",
+}
+
+
+def _typescript_entries() -> List[Tuple[str, str, str, str]]:
+    """(section, setting, env_var, type) of every TypeScript table entry."""
+    found = []
+    for (path, table), section in TYPESCRIPT_TABLES.items():
+        text = path.read_text(encoding="utf-8")
+        start = text.index(f"export const {table}")
+        end = text.index("};", start)
+        for line in text[start:end].splitlines():
+            match = TABLE_ENTRY.match(line)
+            if match:
+                found.append((section, *match.groups()))
+    return found
+
+
+TYPESCRIPT_ENTRIES = _typescript_entries()
+
+
+def _transcriber_environment() -> Dict[str, Any]:
+    template = _load(TRANSCRIBER_TEMPLATE)
+    container = template["Resources"]["TranscriberWebsocketTaskDef"]["Properties"]["ContainerDefinitions"][0]
+    return {variable["Name"]: variable["Value"] for variable in container["Environment"]}
+
+
+def test_the_typescript_tables_are_found() -> None:
+    assert {section for section, *_ in TYPESCRIPT_ENTRIES} == set(TYPESCRIPT_TABLES.values())
+
+
+@pytest.mark.parametrize("section, setting, env_var, value_type", TYPESCRIPT_ENTRIES)
+def test_a_typescript_reader_names_a_mapped_setting_of_the_same_type(
+    section, setting, env_var, value_type
+) -> None:
+    entry = _by_setting().get((section, setting))
+    assert entry is not None, f"the transcriber reads {section} › {setting}, which no parameter backs"
+    assert entry.value_type == value_type
+
+
+@pytest.mark.parametrize("section, setting, env_var, value_type", TYPESCRIPT_ENTRIES)
+def test_the_transcriber_task_carries_the_fallback_variable(section, setting, env_var, value_type) -> None:
+    entry = _by_setting()[(section, setting)]
+    environment = _transcriber_environment()
+    assert env_var in environment, f"the transcriber task sets no {env_var}"
+    if env_var not in CONDITIONED_VARIABLES:
+        assert environment[env_var] == {"Ref": entry.parameter}
+    passed = MAIN["Resources"]["WEBSOCKETTRANSCRIBERSTACK"]["Properties"]["Parameters"]
+    assert passed.get(entry.parameter) == {"Ref": entry.parameter}
+
+
+def test_the_transcriber_task_can_read_the_configuration_table() -> None:
+    environment = _transcriber_environment()
+    assert environment["CONFIGURATION_TABLE_NAME"] == {"Ref": "ConfigurationTableName"}
+    passed = MAIN["Resources"]["WEBSOCKETTRANSCRIBERSTACK"]["Properties"]["Parameters"]
+    assert passed["ConfigurationTableName"] == {"Fn::GetAtt": "AISTACK.Outputs.ConfigurationTableName"}
+    # The grant is a policy resource attached to the task role.
+    resources = _load(TRANSCRIBER_TEMPLATE)["Resources"]
+    attached = [
+        resource
+        for resource in resources.values()
+        if resource.get("Type") == "AWS::IAM::Policy"
+        and {"Ref": "TranscriberWebsocketTaskDefTaskRole"} in resource["Properties"].get("Roles", [])
+    ]
+    rendered = json.dumps(attached, default=str)
+    assert "dynamodb:GetItem" in rendered and "${ConfigurationTableName}" in rendered
 
 
 @pytest.mark.parametrize("entry", ENTRIES, ids=_ids)

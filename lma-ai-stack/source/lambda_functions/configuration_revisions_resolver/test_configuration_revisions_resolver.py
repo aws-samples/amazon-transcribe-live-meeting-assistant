@@ -187,6 +187,8 @@ def test_the_editor_read_serves_every_section_schema_with_its_tier(store) -> Non
         "asr_engine",
         "call_pricing",
         "language_models",
+        "transcription",
+        "recording",
     }
     assert sections[SECTION]["CacheTier"] == "immediate"
     assert sections["language_models"]["CacheTier"] == "standard"

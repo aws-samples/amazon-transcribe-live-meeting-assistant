@@ -23,6 +23,7 @@ import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { AsrRuntimeConfig } from './asr-config';
 import { CallMetaData, SocketCallData } from './eventtypes';
 import { TranscriptSegmentRecord, diarizationSettingsFor, writeSegmentToKds } from './transcribe';
+import { getSessionSettings } from './session-settings';
 import { diarizationEnabledFor } from './diarization';
 // Type-only in the other direction, so this is not a runtime cycle.
 import { fetchEnrolledVoices } from './voice-enrollment';
@@ -830,7 +831,10 @@ export const startMicrovmAsr = async (
     // Unlike Amazon Transcribe, whose ShowSpeakerLabel is stream-level, this engine
     // runs an independent session per channel — so "diarize the tab but not the
     // microphone" is honoured for real rather than by discarding half the labels.
-    const settings = diarizationSettingsFor(callMetadata);
+    // The deployment default beneath the client's choice is the Amazon Transcribe
+    // section's speaker-partitioning setting, read as Amazon Transcribe reads it.
+    const { transcription } = await getSessionSettings(server.log);
+    const settings = diarizationSettingsFor(callMetadata, transcription.showSpeakerLabel);
     // Only the person in the meeting knows how many people share their microphone,
     // so the client's count is the only cap; blank means discover.
     const optionsFor = (channelId: AsrChannelId): AsrSessionOptions => ({

@@ -39,6 +39,8 @@ stack parameter; see
 | Transcription Engine | Virtual Participant voice separation, which works on Amazon Transcribe, and, where the experimental on-demand speech engine is deployed, which engine transcribes streaming meetings and which transcribes Virtual Participants. Without that engine only the voice separation switch is shown | To meetings that start within 30 seconds of the save or later |
 | Meeting Cost Prices | The unit prices the per-meeting [cost estimate](meeting-cost-estimate.md) is computed with | To estimates drawn within about five minutes of the save |
 | Amazon Bedrock Models | The Amazon Bedrock model used for summaries and meeting insights, for the meeting assistant and the troubleshooting agent, for the meeting assistant's knowledge bases, and for reading the text of key frames | To each summary, answer or key frame started about five minutes after the save or later |
+| Amazon Transcribe | The Amazon Transcribe options of meetings streamed from the Stream Audio page, the browser extension and the desktop app: language or language identification, redaction, custom vocabulary and language model, and the default for identifying speakers within a channel | To streaming meetings that start within 30 seconds of the save or later |
+| Meeting Recording | Whether those meetings' audio is recorded when the client does not say | To streaming meetings that start within 30 seconds of the save or later |
 
 Every section is on **Configuration ▸ Configuration**. The pages that each edited
 one section — Transcript Summary, Nova Sonic Config and Transcription Engine — are
@@ -79,13 +81,40 @@ is the default of.
 | Amazon Bedrock Models › Meeting assistant | `MeetingAssistServiceBedrockModelID` |
 | Amazon Bedrock Models › Meeting assistant knowledge bases | `MeetingAssistKnowledgeBaseModelID` |
 | Amazon Bedrock Models › Key frame text | `KeyframeTextModelId` |
+| Amazon Transcribe › Language | `TranscribeLanguageCode` |
+| Amazon Transcribe › Language options | `TranscribeLanguageOptions` |
+| Amazon Transcribe › Preferred language | `TranscribePreferredLanguage` |
+| Amazon Transcribe › Redact personal information | `IsContentRedactionEnabled` |
+| Amazon Transcribe › Redaction type (not shown; `PII` is the only value) | `TranscribeContentRedactionType` |
+| Amazon Transcribe › Entity types to redact | `TranscribePiiEntityTypes` |
+| Amazon Transcribe › Custom vocabulary | `CustomVocabularyName` |
+| Amazon Transcribe › Custom language model | `CustomLanguageModelName` |
+| Amazon Transcribe › Identify speakers within a channel by default | `ShowSpeakerLabel` |
+| Meeting Recording › Record meeting audio | `EnableAudioRecording` |
 
-Two things differ from choosing a model with the parameter. The deployment
-checks that the parameters' models can be invoked while it deploys (unless
-`ModelValidation` is `false`); a model chosen on the page is not checked, so
-enable access to it in the Amazon Bedrock console first. And the page offers
-the same models the parameter does: a model a later release stops offering stays
-in force where it was saved, and the next save of the section asks for another.
+The Amazon Transcribe and Meeting Recording settings apply to meetings streamed
+to LMA from the Stream Audio page, the browser extension and the desktop app.
+A Virtual Participant reads the stack parameters, as it always has.
+
+Some things differ from setting these with the parameters:
+
+- While the stack deploys, it checks that the parameters' Bedrock models can be
+  invoked (unless `ModelValidation` is `false`). A model chosen on the page is
+  not checked, so enable access to it in the Amazon Bedrock console first.
+- While the stack deploys, it also checks that the parameters' Amazon Transcribe
+  options fit together: language identification needs language options, at most
+  one dialect per language, a preferred language among them, and no custom
+  vocabulary or language model. The page cannot check that across settings, so
+  the WebSocket transcriber does as each meeting starts: options saved on the
+  page that do not fit together are logged, and the meeting is transcribed with
+  the deployment's parameter values until they are corrected.
+- Nothing checks that a custom vocabulary or language model exists. Amazon
+  Transcribe checks when a meeting starts, and a meeting whose vocabulary or
+  model it does not recognise is not transcribed, so make sure the name exists
+  in this account and region, and matches the language, before saving it.
+- The page offers the same choices the parameter does. A model a later release
+  stops offering stays in force where it was saved, and the next save of the
+  section asks for another.
 
 ## Using the Configuration page
 

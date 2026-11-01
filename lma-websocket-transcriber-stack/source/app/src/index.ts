@@ -47,6 +47,7 @@ import {
 import { jwtVerifier, getAuthenticatedCaller } from './utils/jwt-verifier';
 
 import { noteStreamingSessionStarted, noteStreamingSessionEnded } from './metrics/session';
+import { getSessionSettings } from './calleventdata/session-settings';
 
 import {
     VideoSession,
@@ -75,7 +76,9 @@ const CPU_HEALTH_THRESHOLD = parseInt(
 const LOCAL_TEMP_DIR = process.env['LOCAL_TEMP_DIR'] || '/tmp/';
 const WS_LOG_LEVEL = (process.env['WS_LOG_LEVEL'] || 'debug').toLowerCase();
 const WS_LOG_INTERVAL = parseInt(process.env['WS_LOG_INTERVAL'] || '120', 10);
-const SHOULD_RECORD_CALL = (process.env['SHOULD_RECORD_CALL'] || '') === 'true';
+// Whether a meeting is recorded when its client says nothing is the Meeting
+// Recording section's setting, read per meeting with this task's
+// SHOULD_RECORD_CALL as the fallback: see calleventdata/session-settings.ts.
 
 const s3Client = new S3Client({ region: AWS_REGION });
 
@@ -442,7 +445,7 @@ const onTextMessage = async (
 
         callMetaData.shouldRecordCall = resolveShouldRecordCall(
             callMetaData.shouldRecordCall,
-            SHOULD_RECORD_CALL
+            (await getSessionSettings(server.log)).recording.recordAudio
         );
 
         callMetaData.agentId = callMetaData.agentId || randomUUID();
@@ -604,7 +607,8 @@ const onTextMessage = async (
 
         callMetaData.shouldRecordCall = resolveShouldRecordCall(
             callMetaData.shouldRecordCall,
-            socketData.callMetadata.shouldRecordCall ?? SHOULD_RECORD_CALL
+            socketData.callMetadata.shouldRecordCall ??
+                (await getSessionSettings(server.log)).recording.recordAudio
         );
         await endCall(ws, socketData, callMetaData);
     }
@@ -729,7 +733,7 @@ const endCall = async (
                     // video-only.
                     notifyAudioRecordingDone(callMetaData.callId, undefined, server);
                     server.log.info(
-                        `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Recording NOT uploaded: shouldRecordCall=${callMetaData.shouldRecordCall} (deployment default ${SHOULD_RECORD_CALL}).`
+                        `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Recording NOT uploaded: shouldRecordCall=${callMetaData.shouldRecordCall}.`
                     );
                     server.log.debug(
                         `[${callMetaData.callEvent}]: [${

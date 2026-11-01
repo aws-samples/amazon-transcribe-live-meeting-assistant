@@ -59,8 +59,8 @@ The template declares 91 parameters.
 | Kind | Parameters | What changing one does |
 |---|---|---|
 | Resource | 47 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
-| Configuration page default | 4 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
-| Read at run time | 27 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
+| Configuration page default | 14 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
+| Read at run time | 17 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
 | Credential | 11 | A secret, the ARN of a secret, or the identifier paired with one. Values are stored in AWS Secrets Manager; see [Integration Credentials](infrastructure-and-security.md#integration-credentials). |
 | Deployment check | 1 | Read only while the stack is deployed, by a check that runs before anything else is created. |
 | No effect | 1 | Declared by the template and read by nothing. Kept so that existing deploy commands and pipelines that pass it keep working. |
@@ -544,15 +544,15 @@ Comma-separated list of OAuth callback URLs for MCP clients. Default includes Qu
 | Parameter | Default | Kind |
 |---|---|---|
 | [`IsPartialTranscriptEnabled`](#ispartialtranscriptenabled) | `true` | No effect |
-| [`IsContentRedactionEnabled`](#iscontentredactionenabled) | `false` | Read at run time |
-| [`TranscribeLanguageCode`](#transcribelanguagecode) | `en-US` | Read at run time |
-| [`TranscribeLanguageOptions`](#transcribelanguageoptions) | `en-US, es-US` | Read at run time |
-| [`TranscribePreferredLanguage`](#transcribepreferredlanguage) | `None` | Read at run time |
-| [`TranscribeContentRedactionType`](#transcribecontentredactiontype) | `PII` | Read at run time |
-| [`ShowSpeakerLabel`](#showspeakerlabel) | `false` | Read at run time |
-| [`TranscribePiiEntityTypes`](#transcribepiientitytypes) | `BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN` | Read at run time |
-| [`CustomVocabularyName`](#customvocabularyname) | (empty) | Read at run time |
-| [`CustomLanguageModelName`](#customlanguagemodelname) | (empty) | Read at run time |
+| [`IsContentRedactionEnabled`](#iscontentredactionenabled) | `false` | Configuration page default |
+| [`TranscribeLanguageCode`](#transcribelanguagecode) | `en-US` | Configuration page default |
+| [`TranscribeLanguageOptions`](#transcribelanguageoptions) | `en-US, es-US` | Configuration page default |
+| [`TranscribePreferredLanguage`](#transcribepreferredlanguage) | `None` | Configuration page default |
+| [`TranscribeContentRedactionType`](#transcribecontentredactiontype) | `PII` | Configuration page default |
+| [`ShowSpeakerLabel`](#showspeakerlabel) | `false` | Configuration page default |
+| [`TranscribePiiEntityTypes`](#transcribepiientitytypes) | `BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN` | Configuration page default |
+| [`CustomVocabularyName`](#customvocabularyname) | (empty) | Configuration page default |
+| [`CustomLanguageModelName`](#customlanguagemodelname) | (empty) | Configuration page default |
 
 ### `IsPartialTranscriptEnabled`
 
@@ -570,9 +570,9 @@ Console label: *Enable Content Redaction for Transcripts*
 
 - **Default:** `false`
 - **Allowed values:** `true`, `false`
-- **Kind:** Read at run time. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts. Redaction applies only for the languages Amazon Transcribe redacts.
+- **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Redact personal information**. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts. Redaction applies only for the languages Amazon Transcribe redacts.
 
-Enable content redaction from Amazon Transcribe transcription output. This is only used when the 'en-US' language is selected in the TranscribeLanguageCode parameter.
+Enable content redaction from Amazon Transcribe transcription output. This is only used when the 'en-US' language is selected in the TranscribeLanguageCode parameter. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
 
 ### `TranscribeLanguageCode`
 
@@ -580,9 +580,9 @@ Console label: *Language for Transcription*
 
 - **Default:** `en-US`
 - **Allowed values:** `identify-language`, `identify-multiple-languages`, `en-US`, `es-US`, `en-GB`, `fr-CA`, `fr-FR`, `en-AU`, `it-IT`, `de-DE`, `pt-BR`, `ja-JP`, `ko-KR`, `zh-CN`, `hi-IN`, `th-TH`
-- **Kind:** Read at run time. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts; checked once while the stack is deployed.
+- **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Language**. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts; checked once while the stack is deployed.
 
-Language code or language identification setting for Amazon Transcribe. NOTE: Language identification can't be combined with custom language models or redaction.
+Language code or language identification setting for Amazon Transcribe. NOTE: Language identification can't be combined with custom language models or redaction. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
 
 ### `TranscribeLanguageOptions`
 
@@ -590,9 +590,9 @@ Console label: *Transcribe Language Options*
 
 - **Default:** `en-US, es-US`
 - **Allowed values:** Unsupported language code or invalid syntax. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
-- **Kind:** Read at run time. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts; checked once while the stack is deployed.
+- **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Language options**. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts; checked once while the stack is deployed.
 
-When using language identification, specify two or more language codes, e.g. "en-US, es-US" that represent the languages that may be used in your meeting. Including more than five is not recommended. Enter only one language dialect per language - e.g. 'en-US, en-AU' is not allowed. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH NOTE: The identify-language feature has not yet been applied to the virtual participant. If selected, the virtual participant will use the value of TranscribePreferredLanguage (if set) or 'en-US' (by default).
+When using language identification, specify two or more language codes, e.g. "en-US, es-US" that represent the languages that may be used in your meeting. Including more than five is not recommended. Enter only one language dialect per language - e.g. 'en-US, en-AU' is not allowed. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH NOTE: The identify-language feature has not yet been applied to the virtual participant. If selected, the virtual participant will use the value of TranscribePreferredLanguage (if set) or 'en-US' (by default). This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
 
 ### `TranscribePreferredLanguage`
 
@@ -600,9 +600,9 @@ Console label: *Transcribe Preferred Language*
 
 - **Default:** `None`
 - **Allowed values:** `None`, `en-US`, `es-US`, `en-GB`, `fr-CA`, `fr-FR`, `en-AU`, `it-IT`, `de-DE`, `pt-BR`, `ja-JP`, `ko-KR`, `zh-CN`, `hi-IN`, `th-TH`
-- **Kind:** Read at run time. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts; checked once while the stack is deployed.
+- **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Preferred language**. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts; checked once while the stack is deployed.
 
-Optionally select a preferred language when using language identification - must be one of the languages entered for TranscribeLanguageOptions.
+Optionally select a preferred language when using language identification - must be one of the languages entered for TranscribeLanguageOptions. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
 
 ### `TranscribeContentRedactionType`
 
@@ -610,9 +610,9 @@ Console label: *Content Redaction Type for Transcription*
 
 - **Default:** `PII`
 - **Allowed values:** `PII`
-- **Kind:** Read at run time. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts.
+- **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Redaction type**. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts.
 
-Type of content redaction from Amazon Transcribe transcription output
+Type of content redaction from Amazon Transcribe transcription output. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
 
 ### `ShowSpeakerLabel`
 
@@ -620,9 +620,9 @@ Console label: *Default for Speaker Identification on Streaming Sessions*
 
 - **Default:** `false`
 - **Allowed values:** `true`, `false`
-- **Kind:** Read at run time. Read by the WebSocket transcriber for each streaming session.
+- **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Identify speakers within a channel by default**. Read by the WebSocket transcriber for each streaming session.
 
-Default for Amazon Transcribe speaker partitioning (diarization) on WebSocket streaming sessions - the desktop capture app and the Stream Audio browser tab. When enabled, Transcribe tells apart individual voices within an audio channel and each distinct voice is appended to the channel's speaker name as "(spk_0)", "(spk_1)", and so on. Works best with five or fewer voices per channel. This is only the DEFAULT: clients that offer per-channel speaker identification settings (the desktop capture app and the Stream Audio tab) send their own choice per meeting, which takes precedence. Leave "false" unless you want it on for clients that do not.
+Default for Amazon Transcribe speaker partitioning (diarization) on WebSocket streaming sessions - the desktop capture app and the Stream Audio browser tab. When enabled, Transcribe tells apart individual voices within an audio channel and each distinct voice is appended to the channel's speaker name as "(spk_0)", "(spk_1)", and so on. Works best with five or fewer voices per channel. This is only the DEFAULT: clients that offer per-channel speaker identification settings (the desktop capture app and the Stream Audio tab) send their own choice per meeting, which takes precedence. Leave "false" unless you want it on for clients that do not. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
 
 ### `TranscribePiiEntityTypes`
 
@@ -630,9 +630,9 @@ Console label: *Transcription PII Redaction Entity Types*
 
 - **Default:** `BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN`
 - **Allowed values:** Any text
-- **Kind:** Read at run time. Read by the WebSocket transcriber for each streaming session.
+- **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Entity types to redact**. Read by the WebSocket transcriber for each streaming session.
 
-Select the PII entity types you want to identify or redact. Remove the values that you don't want to redact from the default. DO NOT ADD CUSTOM VALUES HERE.
+Select the PII entity types you want to identify or redact. Remove the values that you don't want to redact from the default. DO NOT ADD CUSTOM VALUES HERE. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
 
 ### `CustomVocabularyName`
 
@@ -640,9 +640,9 @@ Console label: *Transcription Custom Vocabulary Name*
 
 - **Default:** (empty)
 - **Allowed values:** Any text
-- **Kind:** Read at run time. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts; checked once while the stack is deployed.
+- **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Custom vocabulary**. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts; checked once while the stack is deployed.
 
-The name of the vocabulary to use when processing the transcription job. Leave blank if no custom vocabulary to be used. If yes, the custom vocabulary must pre-exist in your account.
+The name of the vocabulary to use when processing the transcription job. Leave blank if no custom vocabulary to be used. If yes, the custom vocabulary must pre-exist in your account. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
 
 ### `CustomLanguageModelName`
 
@@ -650,9 +650,9 @@ Console label: *Transcription Custom Language Model Name*
 
 - **Default:** (empty)
 - **Allowed values:** Any text
-- **Kind:** Read at run time. Read by the WebSocket transcriber for each streaming session; checked once while the stack is deployed.
+- **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Custom language model**. Read by the WebSocket transcriber for each streaming session; checked once while the stack is deployed.
 
-The name of the custom language model to use when processing the transcription job. Leave blank if no custom language model is to be used. If specified, the custom language model must pre-exist in your account, match the Language Code selected above, and use the 'Narrow Band' base model.
+The name of the custom language model to use when processing the transcription job. Leave blank if no custom language model is to be used. If specified, the custom language model must pre-exist in your account, match the Language Code selected above, and use the 'Narrow Band' base model. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
 
 ## On-demand speech engine (EXPERIMENTAL)
 
@@ -892,7 +892,7 @@ Specify a comma separated list of two letter country codes (uppercase ISO 3166-1
 
 | Parameter | Default | Kind |
 |---|---|---|
-| [`EnableAudioRecording`](#enableaudiorecording) | `true` | Read at run time |
+| [`EnableAudioRecording`](#enableaudiorecording) | `true` | Configuration page default |
 | [`EnableVideoRecording`](#enablevideorecording) | `true` | Resource |
 | [`MeetingRecordExpirationInDays`](#meetingrecordexpirationindays) | `90` | Read at run time |
 | [`TranscriptionExpirationInDays`](#transcriptionexpirationindays) | `90` | Resource |
@@ -909,9 +909,9 @@ Console label: *Record Meeting Audio*
 
 - **Default:** `true`
 - **Allowed values:** `true`, `false`
-- **Kind:** Read at run time. Read by the WebSocket transcriber as the default for each meeting, and by the Virtual Participant when it starts.
+- **Kind:** Configuration page default. Configuration page: **Meeting Recording › Record meeting audio**. Read by the WebSocket transcriber as the default for each meeting, and by the Virtual Participant when it starts.
 
-Enable or disable recording of audio during a meeting. If set to false, the meeting will not be recorded. If set to true, the meeting will be recorded.
+Enable or disable recording of audio during a meeting. If set to false, the meeting will not be recorded. If set to true, the meeting will be recorded. This is the default; an Admin can change it at run time on the Configuration page (Meeting Recording section), which takes precedence for streaming meetings.
 
 ### `EnableVideoRecording`
 

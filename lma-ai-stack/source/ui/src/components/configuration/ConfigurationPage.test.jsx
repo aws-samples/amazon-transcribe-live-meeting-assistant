@@ -44,6 +44,8 @@ const TIERS = {
   asr_engine: 'short',
   call_pricing: 'standard',
   language_models: 'standard',
+  transcription: 'short',
+  recording: 'short',
 };
 const SECTIONS = readdirSync(SCHEMA_DIR)
   .filter((name) => name.endsWith('.json'))
@@ -84,6 +86,18 @@ const DEFAULTS = {
     knowledgeBaseModelId: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
     keyframeTextModelId: 'amazon.nova-lite-v1:0',
   },
+  transcription: {
+    languageCode: 'en-US',
+    languageOptions: 'en-US, es-US',
+    preferredLanguage: 'None',
+    contentRedactionEnabled: false,
+    contentRedactionType: 'PII',
+    piiEntityTypes: 'NAME,EMAIL',
+    customVocabularyName: '',
+    customLanguageModelName: '',
+    showSpeakerLabel: false,
+  },
+  recording: { recordAudio: true },
 };
 
 const PRESETS = [
@@ -265,6 +279,18 @@ describe('ConfigurationContent', () => {
     expect(JSON.parse(callsOf('UpdateConfiguration')[0][0].variables.input.Sections)).toEqual({
       language_models: {},
     });
+  });
+
+  it('shows the redacted entity types only while redaction is on, and never the one-value redaction type', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    renderEditor();
+    openSection(await screen.findByText('Amazon Transcribe'));
+    const transcribe = section('Amazon Transcribe');
+    expect(within(transcribe).getAllByText('Custom vocabulary').length).toBeGreaterThan(0);
+    expect(within(transcribe).queryByText('Redaction type')).toBeNull();
+    expect(within(transcribe).queryByText('Entity types to redact')).toBeNull();
+    fireEvent.click(within(transcribe).getAllByRole('checkbox')[0]);
+    expect(within(transcribe).getAllByText('Entity types to redact').length).toBeGreaterThan(0);
   });
 
   it('refuses to save a value the server would refuse, and says where it is', async () => {
