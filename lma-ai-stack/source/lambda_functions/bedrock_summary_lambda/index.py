@@ -169,7 +169,7 @@ def get_templates_from_dynamodb(prompt_override, refresh_configuration=False):
                     "seeder has not run or its records were removed"
                 )
 
-            # A prompt key is "N#Title" -- the form the Transcript Summary page
+            # A prompt key is "N#Title" -- the form the configuration editor
             # writes, and the one the sequence-number stripping below assumes.
             for k in sorted(section.values):
                 if PROMPT_KEY_PATTERN.match(k):

@@ -70,7 +70,7 @@ describe('schema-validation', () => {
     });
   });
 
-  it('accepts an empty section for every schema, which is what Reset to Defaults stores', () => {
+  it('accepts an empty section for every schema, which is what Reset section to defaults stores', () => {
     Object.values(SCHEMAS).forEach((schema) => {
       expect(check(schema, {})).toEqual([]);
     });

@@ -79,7 +79,7 @@ Prompt templates live in the stack's shared configuration table, as two records:
 
 Your profile is a *delta*: it holds only the sections you changed, and everything else keeps coming from the baseline, so a release that improves a prompt you never touched still reaches you. Where both hold the same section name, yours is the one used.
 
-**Prompts are edited in the web UI, not in DynamoDB.** Each record stores its prompts compressed into a single `Body` attribute, so an attribute added beside it in the console has no effect at all — the summarizer does not read it. The console links above are for seeing what is stored and who last saved it; the Transcript Summary page below is the way to change it, and it is also the only path that refuses a save somebody else has superseded.
+**Prompts are edited in the web UI, not in DynamoDB.** Each record stores its prompts compressed into a single `Body` attribute, so an attribute added beside it in the console has no effect at all — the summarizer does not read it. The console links above are for seeing what is stored and who last saved it; the **Transcript Summary** section of the Configuration page, below, is the way to change it, and it is also the only path that refuses a save somebody else has superseded.
 
 See [Unified Configuration Store](configuration-store.md) for the key layout, the caching tiers and the conditional-save behaviour.
 
@@ -105,19 +105,21 @@ Each attribute's value contains the prompt template text that instructs the mode
 - Use the `{timed_transcript}` placeholder for the transcript with the time of each line, and a line where the shared screen changed. The shipped **CHAPTERS** section uses it, and the meeting page reads that section's `- [MM:SS] Title` lines as the meeting's chapters; see [Chapters](meeting-video.md#chapters).
 - Use `<br>` for newlines within the prompt template.
 
-The edits below are all made on the **Transcript Summary** page, which is at:
+The edits below are all made in the **Transcript Summary** section of **Configuration ▸ Configuration**, which a link can open directly:
 
 ```
-/#/configuration/transcript-summary
+/#/configuration/settings?section=summary_prompt_templates
 ```
 
-**To add a new summary section:** add a template on the page and give it a label. It is stored under the next sequence number (for example `4#Follow-Up Questions`).
+The earlier address, `/#/configuration/transcript-summary`, opens the same section.
 
-**To override a default section:** edit the prompt of the section with that name. The page starts from the baseline's sections, so changing one and saving stores your version of it in your profile.
+**To add a new summary section:** select **Add summary section** and give it a title. It is stored under the next sequence number (for example `7#Follow-Up Questions`).
 
-**To remove a default section:** set its prompt to `NONE`, or leave it empty. The summarizer skips a section whose prompt is empty or `NONE`, and skipping it also saves a model call.
+**To override a default section:** edit the prompt of the section with that name. The section is marked **Changed**, and only your version of it is stored in your profile.
 
-**To go back to the shipped prompts:** **Reset to Defaults** clears your profile, so every section comes from the baseline again.
+**To turn off a default section:** select **Turn off**. It is stored as `NONE`, the summarizer skips it, and skipping it also saves a model call. **Turn on** brings back that one section with the shipped prompt. A section whose prompt is empty is skipped too.
+
+**To go back to the shipped prompts:** **Reset to default** on one section, or **Reset section to defaults** for all of them; then save. See the [Configuration Guide](configuration-guide.md).
 
 Saving requires membership of the **Admin** group, and each save records which account made it.
 

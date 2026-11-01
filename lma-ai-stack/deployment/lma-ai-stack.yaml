@@ -441,8 +441,8 @@ Parameters:
       The table the MicroVM ASR engine's runtime switches were stored in before
       they moved into the configuration table; read by the configuration seeder
       only, to carry them across on upgrade. Empty when that engine is not
-      deployed, in which case the Transcription Engine page is not offered and
-      its resolvers are not created.
+      deployed, in which case the Configuration page offers no Transcription
+      Engine section and its resolvers are not created.
 
   AsrConfigTableArn:
     Type: String
@@ -797,7 +797,8 @@ Outputs:
       is created and reported by every later deployment, so the one value to act
       on does not vanish: 'created-previous-table-unreadable' means prompt
       templates customized before the upgrade were not carried across and have
-      to be applied again from the Transcript Summary page.
+      to be applied again from the Transcript Summary section of the
+      Configuration page.
     Value: !GetAtt SeedConfiguration.ProfileOrigin
   ConfigurationSectionAdoption:
     Description: >-
@@ -4521,8 +4522,8 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     DependsOn:
       - UpdateNovaSonicConfigResolverFunctionLogGroup
-      # The Nova Sonic Configuration page should not open on an unseeded table
-      # and show an administrator no shipped defaults.
+      # A read of the Nova Sonic settings should not meet an unseeded table and
+      # show an administrator no shipped defaults.
       - SeedConfiguration
 
   UpdateNovaSonicConfigResolverFunctionLogGroup:
@@ -4639,8 +4640,8 @@ Resources:
           Fn::Sub: /${AWS::StackName}/lambda/UpdateAsrConfigResolverFunction
     DependsOn:
       - UpdateAsrConfigResolverFunctionLogGroup
-      # The Transcription Engine page and the Virtual Participant should not read
-      # an unseeded table and get no shipped switches.
+      # The Stream Audio form and the Virtual Participant should not read an
+      # unseeded table and get no shipped switches.
       - SeedConfiguration
 
   UpdateAsrConfigResolverFunctionLogGroup:
@@ -5478,8 +5479,8 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     DependsOn:
       - UpdateLLMPromptTemplateResolverFunctionLogGroup
-      # As for the summariser: the Transcript Summary page should not open on an
-      # unseeded table and show an administrator an empty set of prompts.
+      # As for the summariser: a read of the prompts should not meet an unseeded
+      # table and show an administrator an empty set of prompts.
       - SeedConfiguration
 
   UpdateLLMPromptTemplateResolverFunctionLogGroup:

@@ -169,7 +169,7 @@ pattern does. The usual causes, in the order worth checking: the Amazon
 Transcribe concurrent-stream quota being exhausted, which
 `transcribe-concurrent-streams-near-quota` should have notified first; a
 language code or custom vocabulary the account does not have; and, where the
-MicroVM ASR engine is selected on the Transcription Engine page, an engine that
+MicroVM ASR engine is selected in the Transcription Engine section of the Configuration page, an engine that
 could not start with fallback to Amazon Transcribe switched off.
 
 What it cannot see: meetings that do not go through the transcriber. A Virtual

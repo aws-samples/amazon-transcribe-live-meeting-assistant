@@ -339,7 +339,7 @@ const startTranscription = async (
     server_: typeof server
 ): Promise<void> => {
     // Runtime config decides the deployment default, so the engine can be switched
-    // from the Transcription Engine page without redeploying the task.
+    // from the Transcription Engine section of the Configuration page without redeploying the task.
     const runtime = await getAsrRuntimeConfig(server_);
     if (resolveAsrEngine(socketData.callMetadata, server_, runtime) === 'microvm') {
         if (await startMicrovmAsr(socketData, server_)) {

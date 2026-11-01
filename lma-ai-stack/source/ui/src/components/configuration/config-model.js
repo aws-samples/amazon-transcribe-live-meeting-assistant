@@ -117,7 +117,7 @@ export const mergeDelta = (base, effective) => {
  * Only what differs from the baseline, so nothing the release ships is pinned.
  * A "replace" section stores its whole value, or nothing when it is the
  * shipped one. An empty object is a section that holds nothing of its own,
- * which is what Reset to Defaults stores.
+ * which is what Reset section to defaults stores.
  */
 export const storedSection = (schema, defaults, effective) => {
   if (isReplace(schema)) return deepEqual(effective, defaults || {}) ? {} : clone(effective);
@@ -174,7 +174,7 @@ export const renumbered = (entries) =>
  * entry cannot be removed, only turned off: the profile is a delta, and leaving
  * the old key out would let the baseline supply it again. So renaming one turns
  * the old key off with the section's `disabledValue` and adds the new key under
- * the same number, which is what the Transcript Summary page has always done.
+ * the same number, which keeps the section where it was in the summary.
  */
 export const renameEntry = (schema, defaults, effective, key, label) => {
   const match = key.match(NUMBERED_KEY);

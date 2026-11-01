@@ -338,7 +338,7 @@ Parameters:
     Default: ""
     Description: >-
       (Optional) The shared configuration table created by the AI stack. The
-      Transcription Engine page's switches are read from it at meeting start, so a
+      Transcription Engine switches are read from it at meeting start, so a
       change needs no stack update.
 
   AsrDiarizationAvailable:
@@ -357,13 +357,13 @@ Parameters:
     Default: ""
     Description: >-
       Which model bundle the deployed ASR image was built from. Shown on the
-      Transcription Engine page.
+      Transcription Engine section of the Configuration page.
 
   AsrModelBundleName:
     Type: String
     Default: ""
     Description: >-
-      Display name of that bundle, shown on the Transcription Engine page.
+      Display name of that bundle, shown in the Transcription Engine section of the Configuration page.
 
   CloudWatchLogsExpirationInDays:
     Type: Number
@@ -1336,7 +1336,7 @@ Resources:
               Effect: Allow
               Resource: !Ref VoiceEnrollmentSeedsFunctionArn
             - !Ref AWS::NoValue
-          # The Transcription Engine page's switches, read at meeting start (and
+          # The Transcription Engine switches, read at meeting start (and
           # cached for 30 seconds) from the configuration table; the previous
           # table only as a fallback.
           - !If
@@ -1895,14 +1895,14 @@ Resources:
             - !GetAtt WebSocketCloudFrontDistribution.DomainName
             - "/api/v1/ws"
         recordingDisclaimer: !Ref RecordingDisclaimer
-        # Read by the Transcription Engine page: whether the deployed image carries a speaker
+        # Read by the Configuration page's Transcription Engine section: whether the deployed image carries a speaker
         # model, so the page can say whether speaker labels are available and
         # enable the Virtual Participant voice-separation switch.
         AsrDiarizationAvailable: !If
           - ShouldEnableMicrovmAsr
           - !Ref AsrDiarizationAvailable
           - "false"
-        # Read by the Transcription Engine page, so it can say which bundle this deployment
+        # Read by the Configuration page's Transcription Engine section, so it can say which bundle this deployment
         # runs. The engine switches are not settings here: the page, the Stream
         # Audio form and the transcriber read them live from the config table
         # (getAsrConfig).
@@ -1910,7 +1910,7 @@ Resources:
         AsrModelBundleName: !Ref AsrModelBundleName
         # Whether the on-demand engine is deployed AT ALL, as distinct from
         # AsrDiarizationAvailable (which is also false for a transcription-only
-        # bundle). The Transcription Engine page shows it, and the Stream Audio form only
+        # bundle). The Configuration page's Transcription Engine section shows it, and the Stream Audio form only
         # reads the streaming-engine switch when it is true.
         AsrEngineAvailable: !If [ShouldEnableMicrovmAsr, "true", "false"]
         # Whether this deployment has voice enrollment at all. The UI offers

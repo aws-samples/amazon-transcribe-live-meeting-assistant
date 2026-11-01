@@ -37,10 +37,11 @@ following the release.
 | Transcription Engine (experimental) | Which engine transcribes streaming meetings and Virtual Participants, and Virtual Participant voice separation. Shown only when the on-demand speech engine is deployed | To meetings that start within 30 seconds of the save or later |
 | Meeting Cost Prices | The unit prices the per-meeting [cost estimate](meeting-cost-estimate.md) is computed with | To estimates drawn within about five minutes of the save |
 
-Every section is on **Configuration ▸ Configuration**. The older pages for single
-sections — **Transcript Summary**, **Nova Sonic Config**, **Transcription
-Engine**, and **Edit Chat Buttons** in a meeting's chat panel — still work and
-save into the same configuration.
+Every section is on **Configuration ▸ Configuration**. The pages that each edited
+one section — Transcript Summary, Nova Sonic Config and Transcription Engine — are
+now sections of it, and a bookmark to one of them opens its section. The **Edit
+Chat Buttons** dialog in a meeting's chat panel stays where it is and saves into
+the same configuration.
 
 Only members of the **Admin** Cognito group can change any of these. Add someone
 to the group on [User Management](user-management.md) if they need to.
@@ -108,7 +109,7 @@ names, then save again.
 
 **The save is checked against the version you loaded.** All the sections are
 stored together, and a save is refused if anyone saved any of them after your
-page loaded — on this page or one of the older ones — rather than silently
+page loaded — on this page or in the Edit Chat Buttons dialog — rather than silently
 replacing their change. The page then offers two ways on:
 
 - **Reload and keep my changes** loads what they saved and applies your changes

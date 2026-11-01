@@ -18,9 +18,6 @@ import {
   VIRTUAL_PARTICIPANT_PATH,
   BROWSER_EXTENSION_PATH,
   MCP_SERVERS_PATH,
-  NOVA_SONIC_CONFIG_PATH,
-  ASR_CONFIG_PATH,
-  TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
   CONFIGURATION_HISTORY_PATH,
   CONFIGURATION_PATH,
@@ -39,14 +36,11 @@ const defaultOnFollowHandler = (ev) => {
 
 // Paths on which the side navigation is rendered at all. A page whose route mounts
 // <Navigation /> but whose path is missing here shows an empty navigation panel -
-// which is exactly how the Transcription Engine page shipped, because only the activeHref
+// which is exactly how one configuration page once shipped, because only the activeHref
 // branch below was added for it. Exported so a test can pin the two together.
 export const NAV_PATHS = [
   CALLS_PATH,
   MCP_SERVERS_PATH,
-  NOVA_SONIC_CONFIG_PATH,
-  ASR_CONFIG_PATH,
-  TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
   CONFIGURATION_HISTORY_PATH,
   CONFIGURATION_PATH,
@@ -75,12 +69,6 @@ const Navigation = ({ header = callsNavHeader, items, onFollowHandler = defaultO
     activeHref = `#${MEETINGS_QUERY_PATH}`;
   } else if (path.includes(MCP_SERVERS_PATH)) {
     activeHref = `#${MCP_SERVERS_PATH}`;
-  } else if (path.includes(ASR_CONFIG_PATH)) {
-    activeHref = `#${ASR_CONFIG_PATH}`;
-  } else if (path.includes(NOVA_SONIC_CONFIG_PATH)) {
-    activeHref = `#${NOVA_SONIC_CONFIG_PATH}`;
-  } else if (path.includes(TRANSCRIPT_SUMMARY_PATH)) {
-    activeHref = `#${TRANSCRIPT_SUMMARY_PATH}`;
   } else if (path.includes(USER_MANAGEMENT_PATH)) {
     activeHref = `#${USER_MANAGEMENT_PATH}`;
   } else if (path.includes(CONFIGURATION_HISTORY_PATH)) {

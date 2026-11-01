@@ -17,11 +17,13 @@
 import React from 'react';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SettingsContext } from '../../contexts/settings';
+import { CONFIGURATION_PATH, MOVED_CONFIGURATION_PAGES } from '../../routes/constants';
+import movedConfigurationRoutes from '../../routes/moved-configuration-routes';
 import { ConfigurationContent } from './ConfigurationPage';
 
 // The page renders every section's form; under a full parallel run that can take
@@ -307,6 +309,15 @@ describe('ConfigurationContent', () => {
     });
   });
 
+  it('says why a section a link asked for is not shown', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    renderEditor({ route: '/configuration/settings?section=asr_engine' });
+    expect(
+      await screen.findByText('Transcription Engine (experimental) is not available in this deployment'),
+    ).toBeTruthy();
+    expect(screen.getByText(/set EnableMicrovmAsr to true/)).toBeTruthy();
+  });
+
   it('reorders the chat buttons, renumbering them from one, and stores the list whole', async () => {
     graphqlMock.mockResolvedValueOnce(answer());
     renderEditor();
@@ -323,4 +334,28 @@ describe('ConfigurationContent', () => {
       chat_buttons: { '1#ACTIONS': 'What were the action items?', '2#SUMMARIZE': 'Summarize this meeting' },
     });
   });
+});
+
+describe('the pages that each edited one section', () => {
+  const Where = () => {
+    const location = useLocation();
+    return <span>{`${location.pathname}${location.search}`}</span>;
+  };
+
+  it.each(Object.entries(MOVED_CONFIGURATION_PAGES))(
+    'send %s to its section of the Configuration page',
+    (path, name) => {
+      expect(SECTIONS.map((entry) => entry.Name)).toContain(name);
+      // The routes AuthRoutes renders.
+      render(
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            {movedConfigurationRoutes()}
+            <Route path={`${CONFIGURATION_PATH}/*`} element={<Where />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      expect(screen.getByText(`${CONFIGURATION_PATH}?section=${name}`)).toBeTruthy();
+    },
+  );
 });

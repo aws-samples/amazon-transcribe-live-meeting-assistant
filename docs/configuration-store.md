@@ -213,9 +213,10 @@ covered.
 
 ### Keeping a profile a delta
 
-A profile is only a delta if what writes it sends one. The Transcript Summary
-page stores a section only when its prompt differs from the baseline's, so
-saving the page without editing anything stores nothing, and a later release that
+A profile is only a delta if what writes it sends one. The Configuration page
+stores a value only when it differs from the baseline's (see
+[The configuration editor](#the-configuration-editor)), so saving without
+editing anything stores nothing, and a later release that
 improves a prompt nobody touched still reaches the deployment. Removing a
 section is the case that needs saying explicitly: leaving it out would let the
 baseline supply it again, so a removal is stored as `NONE`, which the summarizer
@@ -305,7 +306,7 @@ the table reserves is therefore not written.
 A schema describes the section **as a profile stores it**, which is a delta over
 the baseline. That is why no section schema lists `required` properties at its
 top level: a profile that changes one Nova Sonic setting stores that one setting,
-and an empty section is what **Reset to Defaults** stores. The shipped baseline is
+and an empty section is what **Reset section to defaults** stores. The shipped baseline is
 checked against the same documents by the layer's tests, for both prompt domains,
 so a release cannot ship a default its own save would refuse.
 
@@ -375,7 +376,7 @@ to those mutations:
 - a chat button prompt that is not text;
 - a Nova Sonic system prompt, model id or voice id that is not text, and a model
   id or voice id that is empty or longer than its limit (256 characters for a
-  model id, 128 for a voice id). The Nova Sonic Configuration page never sends an
+  model id, 128 for a voice id). The Configuration page never sends an
   empty one, so this affects only a client calling the mutation directly.
 
 `updateCallPricing` has no checks of its own; the schema is the whole of what it
@@ -460,6 +461,18 @@ Its rules, in `lma-ai-stack/source/ui/src/components/configuration/config-model.
   the save creates; the label is set with `labelConfigurationRevision` straight
   after the save.
 
+The pages that each edited one section — Transcript Summary, Nova Sonic Config
+and Transcription Engine — were replaced by the Configuration page once it could
+do everything they did, and their addresses (`/#/configuration/transcript-summary`,
+`/#/configuration/nova-sonic`, `/#/configuration/asr`) redirect to their section.
+The **Edit Chat Buttons** dialog in a meeting's chat panel stays, because it is used
+in the context of a meeting; it saves the same section. The per-section GraphQL
+operations stay too, because other readers use them: every chat panel reads
+`getChatButtonConfig`, the Stream Audio and Upload Audio forms and the Virtual
+Participant read `getAsrConfig`, and `getNovaSonicConfig` keeps its IAM
+authorization for backend callers. Their saves are checked against the same
+schemas.
+
 ## Revisions and audit
 
 Every write that changes a profile's body records a **revision**: a numbered,
@@ -478,7 +491,7 @@ release, so the release is its history.
 | `CreatedAt` | When it was saved, ISO-8601 UTC |
 | `CreatedBy` | Who saved it: the same identity the record holds as `UpdatedBy` — the saver's email address, or their Cognito username where the token carries none — taken from the verified token, never from the request. `cloudformation` for what the seeder writes |
 | `Sections` | The sections this revision changed relative to the one before it. For the first revision of a profile, every section it holds |
-| `Comment` | Optional, at most 500 characters. Every configuration save mutation accepts a `Comment` input; the configuration pages do not send one yet, a restore can |
+| `Comment` | Optional, at most 500 characters. Every configuration save mutation accepts a `Comment` input; the Configuration page asks for one on every save, and a restore can send one |
 | `Source` | `save`, `restore`, `deploy` (the seeder), `backfill` (the profile as it stood when history began) or `recovered` (see below) |
 | `RestoredFrom` | For a restore, the revision whose body it restored |
 | `Label` | Optional, at most 100 characters. A labelled revision is never pruned |
@@ -706,7 +719,7 @@ way, so on it each later store is carried across one **section** at a time:
   profile as that section — an empty section if there was nothing to carry.
 - Once the profile holds the section, nothing is read from the previous table
   again, whether the seeder put it there or an administrator saved it. An empty
-  section counts, which is what makes **Reset to Defaults** stick: a reset saves
+  section counts, which is what makes a reset to defaults stick: a reset saves
   an empty section, and a later deployment does not bring the pre-upgrade values
   back.
 - The write is conditional on the profile as the seeder read it, so an
@@ -734,7 +747,7 @@ published as the **`ConfigurationSectionAdoption`** stack output: one
 ## What is served from the store today
 
 The **summary prompt templates** — the prompts behind each section of an
-end-of-meeting summary, edited on the Transcript Summary page. They were chosen
+end-of-meeting summary, edited in the Transcript Summary section of the Configuration page. They were chosen
 as the first migration because they exercise every part of the design: they are
 long enough for the compressed body to matter, they are seeded at deploy time and
 edited in the UI (so the "a stack update must not overwrite an edit" rule is a
@@ -787,7 +800,7 @@ deployment tries the adoption again. The stack's
 |---|---|
 | `created` | A new, empty profile — the ordinary case for a new deployment, and for an upgraded one whose prompts were never customised. |
 | `created-from-previous-table` | Customised prompts were carried across. |
-| `created-previous-table-unreadable` | **Act on this one.** Prompt templates customised before the upgrade have to be applied again from the Transcript Summary page. The previous table is retained, so the old values can be read from it. |
+| `created-previous-table-unreadable` | **Act on this one.** Prompt templates customised before the upgrade have to be applied again from the Transcript Summary section of the Configuration page. The previous table is retained, so the old values can be read from it. |
 | `unknown` | The profile was written by something other than the seeder. |
 
 It is a stack output because a custom resource's response does not appear in
@@ -828,12 +841,12 @@ Deploying the newer release again does not reconnect the old data. The resource
 declares no fixed `TableName`, so a new, empty table is created, and the seeder
 fills `Config#custom` from the previous per-store table — the pre-upgrade
 prompts again. **Any prompt edit made between the upgrade and the rollback has
-to be applied again from the Transcript Summary page**; if retention was on, the
+to be applied again from the Transcript Summary section of the Configuration page**; if retention was on, the
 orphaned table is where to read the old values from.
 
 ### The Nova Sonic voice assistant settings
 
-The settings edited on the **Nova Sonic Configuration** page — the system prompt
+The settings in the **Nova Sonic Voice Assistant** section of the Configuration page — the system prompt
 and prompt mode, model, voice, endpointing sensitivity, meeting mode, and the
 translator languages and trigger phrases — are the `nova_sonic_config` section.
 
@@ -841,9 +854,9 @@ translator languages and trigger phrases — are the `nova_sonic_config` section
   `configuration_seeder/defaults/NovaSonicConfig.json`. The Nova Sonic stack
   still ships its own copy for its own table, and a test fails if the two
   differ.
-- `Config#custom` holds the settings an administrator entered, and only those: a
-  field left empty on the page is not stored, so the shipped value applies.
-  **Reset to Defaults** stores an empty section.
+- `Config#custom` holds the settings an administrator changed, and only those: a
+  setting put back to its default is not stored, so the shipped value applies.
+  **Reset section to defaults** stores an empty section.
 - The Virtual Participant reads the section when its voice assistant starts —
   the ElevenLabs provider reads the meeting mode and translator settings from it
   too — on the `immediate` tier: a consistent read and no cache, three `GetItem`
@@ -870,14 +883,15 @@ translator languages and trigger phrases — are the `nova_sonic_config` section
 [Carrying a later store across](#carrying-a-later-store-across); check the
 `ConfigurationSectionAdoption` output afterwards. Editing `CustomNovaSonicConfig`
 in the DynamoDB console stops having any effect, as for the summary prompts:
-edit the settings on the page.
+edit the settings on the Configuration page.
 
 **One consequence of one shared profile.** The version a save is checked against
-is the profile's, and every configuration page saves into the same profile. So a
-save is also refused when another administrator saved a *different*
-configuration page after this one was loaded. Nothing is lost either way — the
-message says to reload and apply the change again — but it is a refusal that a
-per-page record would not have produced.
+is the profile's, and every section is saved into the same profile — from the
+Configuration page, the Edit Chat Buttons dialog or the API. So a save is also
+refused when another administrator saved a *different* section after this one
+was loaded. Nothing is lost either way — the Configuration page offers to reload
+and keep the changes — but it is a refusal that a per-section record would not
+have produced.
 
 ### The Meeting Assist chat buttons
 
@@ -909,7 +923,7 @@ edit the buttons from the dialog.
 
 ### The ASR engine switches
 
-The three switches on the **Transcription Engine** page — which engine streaming
+The three switches in the **Transcription Engine** section of the Configuration page — which engine streaming
 meetings use, which engine Virtual Participants use, and whether a Virtual
 Participant asks for per-voice labels — are the `asr_engine` section.
 
@@ -955,12 +969,9 @@ configuration pages' saves.
 | Moving CloudFormation parameters | The parameters that are read only at request time and do not gate a resource, a condition or an IAM policy |
 | Replacing the SSM settings blob | The `<stack>-LMASettings` parameter is written only by CloudFormation, at deploy time, and read by the web app for every signed-in user. It is a deployment's wiring rather than something an administrator edits, so it moves with the parameters above, when the web app reads its configuration at run time |
 
-A shipped summary section that has been turned off is hidden from the
-Transcript Summary page, which shows what will run, so on that page the only way
-to bring one such section back is **Reset to Defaults**, which discards every
-other edit as well. The configuration editor lists a turned-off section, marked
-**Turned off**, with **Turn on**, which brings back that one section and nothing
-else.
+A shipped summary section that has been turned off is listed by the
+Configuration page, marked **Turned off**, with **Turn on**, which brings back
+that one section and nothing else.
 
 One of the six stores this page's opening counts is not migrated at all.
 **The MCP server list** (`MCPServersTable`) is a registry of installed servers,

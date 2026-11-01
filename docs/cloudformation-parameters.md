@@ -155,7 +155,7 @@ Lambda MicroVMs is available. See [On-demand ASR & Speaker Diarization](microvm-
 
 | Parameter | Description | Default | Allowed Values |
 |-----------|-------------|---------|----------------|
-| EnableMicrovmAsr | Deploys the on-demand speech engine alongside Amazon Transcribe. Nothing changes until an admin moves meetings onto it on the Transcription Engine page | false | true, false |
+| EnableMicrovmAsr | Deploys the on-demand speech engine alongside Amazon Transcribe. Nothing changes until an admin moves meetings onto it in the Transcription Engine section of the Configuration page | false | true, false |
 
 `EnableMicrovmAsr` is the **only** deploy-time question for this engine. Two more
 values are fixed in the `AsrDefaults` mapping in `lma-main.yaml` rather than asked:

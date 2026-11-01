@@ -1141,8 +1141,8 @@ type AsrConfig @aws_cognito_user_pools @aws_iam {
 	streamingEngineMicrovm: Boolean
 	virtualParticipantEngineMicrovm: Boolean
 	diarizeVirtualParticipant: Boolean
-	# The version of the stored profile, which the Transcription Engine page sends
-	# back as ExpectedVersion when it saves.
+	# The version of the stored profile, which a client sends back as
+	# ExpectedVersion when it saves.
 	Version: Int
 }
 

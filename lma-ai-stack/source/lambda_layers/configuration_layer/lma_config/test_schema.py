@@ -111,7 +111,7 @@ def test_the_shipped_baseline_is_valid_against_the_schemas(domain):
 
 
 def test_an_empty_section_is_valid_for_every_section():
-    """What Reset to Defaults stores."""
+    """What Reset section to defaults stores."""
     for name in sections.registered_sections():
         schema.validate_section(name, {})
 

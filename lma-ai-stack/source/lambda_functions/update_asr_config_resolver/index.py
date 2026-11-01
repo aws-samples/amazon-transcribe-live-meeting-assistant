@@ -164,7 +164,7 @@ def _read(config_id: str) -> Dict[str, Any]:
     """Serve the read: the effective switches, plus the profile's version.
 
     Only the three switches are returned, typed as booleans; ``Version`` is what
-    the Transcription Engine page sends back as ``ExpectedVersion``.
+    a client sends back as ``ExpectedVersion``.
     """
     # One identifier, and nothing else: an unrecognised one is refused rather
     # than answered with plausible-looking switches.

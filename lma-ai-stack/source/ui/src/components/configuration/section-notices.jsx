@@ -57,6 +57,14 @@ const SETTINGS = PropTypes.shape({
 
 AsrEngineNotice.propTypes = { settings: SETTINGS };
 
+// Why a section a link asked for is not shown, where its schema's
+// availableWhen does not hold in this deployment.
+export const UNAVAILABLE_REASONS = {
+  asr_engine:
+    'The on-demand speech engine is not deployed. To evaluate it, set EnableMicrovmAsr to true on the main ' +
+    'stack; Amazon Transcribe remains the recommended engine.',
+};
+
 const NOTICES = {
   nova_sonic_config: NovaSonicNotice,
   asr_engine: AsrEngineNotice,

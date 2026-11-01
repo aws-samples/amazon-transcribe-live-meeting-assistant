@@ -462,7 +462,7 @@ Parameters:
       Deploys the EXPERIMENTAL on-demand speech engine (open-source models on AWS
       Lambda MicroVMs in this account) alongside Amazon Transcribe. Nothing changes
       until an admin moves Stream Audio, Chrome extension and Desktop Capture
-      meetings, or Virtual Participants, onto it on the Transcription Engine page.
+      meetings, or Virtual Participants, onto it in the Transcription Engine section of the Configuration page.
       English only; requires a region with AWS Lambda MicroVMs. See
       docs/microvm-asr.md.
 
@@ -3600,7 +3600,7 @@ Resources:
         TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
         CustomVocabularyName: !Ref CustomVocabularyName
         # The on-demand ASR engine, when deployed. Whether a Virtual Participant
-        # uses it is the Transcription Engine page's runtime switch, read at meeting start.
+        # uses it is the Transcription Engine runtime switch, read at meeting start.
         AsrLauncherFunctionArn: !If
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrLauncherFunctionArn
@@ -4658,7 +4658,7 @@ Outputs:
       profile is created and unchanged by later deployments or saves.
       'created-previous-table-unreadable' is the value to act on: summary prompt
       templates customized before the upgrade were not carried across and have
-      to be applied again from the Transcript Summary page. The table they used
+      to be applied again from the Transcript Summary section of the Configuration page. The table they used
       to live in is retained, so the old values can be read from it.
     Value: !GetAtt AISTACK.Outputs.ConfigurationProfileOrigin
 
@@ -4686,13 +4686,13 @@ Outputs:
   # Both links below point at the shared configuration table. The record's body
   # is a compressed attribute there, so these are for inspecting provenance --
   # who saved a record and when -- rather than for editing: prompts are edited
-  # on the Transcript Summary page in the web UI, which is also the only path
+  # in the Transcript Summary section of the Configuration page in the web UI, which is also the only path
   # that refuses a save another administrator has superseded.
   LLMDefaultPromptSummaryTemplate:
     Description:
       View the *default* summary prompts record. Rewritten whenever a release
       changes the prompts it ships, so edit the custom profile instead -- from
-      the Transcript Summary page in the web UI.
+      the Transcript Summary section of the Configuration page in the web UI.
     Value: !Sub
       - "https://${Domain}/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=Config%23default&route=ROUTE_ITEM_EXPLORER&sk=&table=${TableName}"
       - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
@@ -4748,7 +4748,7 @@ Outputs:
   # Like the summary prompt links above, these point at the shared
   # configuration table, where the settings are a compressed attribute: they
   # are for inspecting who saved a record and when. The settings are edited on
-  # the Nova Sonic Configuration page in the web UI.
+  # the Nova Sonic Voice Assistant section of the Configuration page in the web UI.
   DefaultNovaSonicConfig:
     Description:
       View the *default* configuration record, which holds the shipped Nova
@@ -4764,7 +4764,7 @@ Outputs:
     Description:
       View the *custom* configuration profile, which holds the Nova Sonic voice
       assistant settings that override the shipped ones and is preserved during
-      stack updates. Edit them from the Nova Sonic Configuration page in the
+      stack updates. Edit them from the Nova Sonic Voice Assistant section of the Configuration page in the
       web UI.
     Value: !Sub
       - "https://${Domain}/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=Config%23custom&route=ROUTE_ITEM_EXPLORER&sk=&table=${TableName}"

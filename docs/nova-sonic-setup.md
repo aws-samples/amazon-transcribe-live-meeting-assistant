@@ -23,7 +23,7 @@ This guide walks you through setting up the AWS Nova Sonic 2 voice assistant wit
 - **Secure:** All data stays within your AWS environment
 - **Async Tool Processing:** Tools execute in background without blocking conversation
 - **Pre-Tool Acknowledgment:** Announces tool execution to set user expectations
-- **Customizable Config:** Edit system prompts and voice ID on the Nova Sonic Configuration page
+- **Customizable Config:** Edit system prompts and voice ID in the Nova Sonic Voice Assistant section of the Configuration page
 
 ## Step 1: Enable AWS Nova Sonic 2 Model Access
 
@@ -110,7 +110,7 @@ That's it! AWS Nova Sonic 2 requires no API keys or external configuration.
 
 ### 4.1 Access Configuration
 
-Open the LMA web UI as a member of the **Admin** group and go to **Configuration ▸ Nova Sonic Config**. Each field shows the shipped default; a value you enter overrides it, and a field left empty keeps the default. **Reset to Defaults** clears every override. Your settings are preserved during stack updates.
+Open the LMA web UI as a member of the **Admin** group, go to **Configuration ▸ Configuration** and open the **Nova Sonic Voice Assistant** section (or follow `/#/configuration/settings?section=nova_sonic_config`). Each field shows the setting in force; one you have changed from the shipped default is marked **Changed**, with **Reset to default** beside it, and **Reset section to defaults** puts back every shipped value. Your settings are preserved during stack updates. See the [Configuration Guide](configuration-guide.md).
 
 The settings are stored in the stack's shared configuration table — the shipped ones in its `Config#default` record and yours in the `Config#custom` profile, as the `nova_sonic_config` section — compressed, so they are edited on the page rather than in the DynamoDB console. The `DefaultNovaSonicConfig` and `CustomNovaSonicConfig` stack outputs link to those two records, which show who last saved each one and when. See [Unified Configuration Store](configuration-store.md).
 
@@ -282,7 +282,7 @@ Amazon Nova Sonic supports 16 different voices:
 
 ### 4.7 Example Customizations
 
-Each example lists the fields to set on the Nova Sonic Configuration page, by their stored names; anything not listed keeps its default.
+Each example lists the fields to set in the Nova Sonic Voice Assistant section of the Configuration page, by their stored names; anything not listed keeps its default.
 
 **Example 1: Professional Assistant (Fast Response)**
 ```json
@@ -347,8 +347,8 @@ Each example lists the fields to set on the Nova Sonic Configuration page, by th
 
 ### 4.8 Apply Configuration Changes
 
-1. Change the settings on the **Nova Sonic Config** page
-2. Press **Save Changes**
+1. Change the settings in the **Nova Sonic Voice Assistant** section of the Configuration page
+2. Select **Save changes**, then **Save** in the dialog
 3. **No redeployment needed** - the next virtual participant to start uses them; one already in a meeting keeps the settings it started with
 4. Start a new virtual participant to test
 
@@ -654,7 +654,7 @@ For issues specific to:
 - 3 turn-taking sensitivity levels (HIGH, MEDIUM, LOW)
 - **3 meeting modes**: Normal, Group Meeting (passive), Translator (live interpreter)
 - Barge-in support (interrupt Nova mid-sentence)
-- Edit via the Nova Sonic Configuration page in the LMA UI
+- Edit in the Nova Sonic Voice Assistant section of the Configuration page in the LMA UI
 - Changes apply to the next meeting (no redeployment)
 
 That's it! Your meetings now have an AI voice assistant powered by AWS Nova Sonic 2 — from active 1-on-1 conversations, to passive group meeting support, to real-time multilingual interpretation.

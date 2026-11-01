@@ -42,6 +42,7 @@ import {
   updateConfigurationMutation,
 } from './configuration-api';
 import ConfigurationSection, { sectionElementId } from './ConfigurationSection';
+import { UNAVAILABLE_REASONS } from './section-notices';
 import { checkDetailed, formatPath } from './schema-validation';
 import './configuration.css';
 
@@ -273,6 +274,11 @@ export const ConfigurationContent = () => {
   }
 
   const readOnly = !doc?.exists;
+  // A link to a section this deployment does not offer says so, rather than
+  // opening a page without it.
+  const unavailable = (doc?.sections || []).find(
+    (section) => section.name === focus && !isAvailable(section.schema, settings),
+  );
   const provenance = doc?.updatedBy
     ? `Last saved by ${doc.updatedBy}${doc.updatedAt ? ` on ${whenText(doc.updatedAt)}` : ''}` +
       `${doc.publishedRevision ? ` (revision ${doc.publishedRevision})` : ''}.`
@@ -308,6 +314,12 @@ export const ConfigurationContent = () => {
         <Alert type="error" header="There is no configuration profile to save into">
           The configuration profile is created when the stack is deployed. Deploy or update the stack, then reload this
           page.
+        </Alert>
+      )}
+
+      {unavailable && (
+        <Alert type="info" header={`${sectionLabel(unavailable)} is not available in this deployment`}>
+          {UNAVAILABLE_REASONS[unavailable.name] || 'It depends on a part of LMA this deployment does not include.'}
         </Alert>
       )}
 

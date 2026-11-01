@@ -159,7 +159,7 @@ An Admin can change prices in the **Meeting Cost Prices** section of
 **Configuration ▸ Configuration** (`/#/configuration/settings?section=call_pricing`),
 where each price that differs from the shipped one is marked and can be reset; see
 the [Configuration Guide](configuration-guide.md). The same changes can be made
-through the API:
+through the API, as described below.
 
 The price table is the `call_pricing` section of the
 [unified configuration store](configuration-store.md). The shipped table is part of

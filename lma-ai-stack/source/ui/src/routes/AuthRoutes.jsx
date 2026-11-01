@@ -21,12 +21,10 @@ import BrowserExtensionRoutes from './BrowserExtensionRoutes';
 import DesktopCaptureAppRoutes from './DesktopCaptureAppRoutes';
 import MeetingsQueryRoutes from './MeetingsQueryRoutes';
 import MCPServersRoutes from './MCPServersRoutes';
-import NovaSonicConfigRoutes from './NovaSonicConfigRoutes';
-import AsrConfigRoutes from './AsrConfigRoutes';
-import TranscriptSummaryRoutes from './TranscriptSummaryRoutes';
 import UserManagementRoutes from './UserManagementRoutes';
 import ConfigurationHistoryRoutes from './ConfigurationHistoryRoutes';
 import ConfigurationRoutes from './ConfigurationRoutes';
+import movedConfigurationRoutes from './moved-configuration-routes';
 import EmbedRoutes from './EmbedRoutes';
 import VoiceEnrollmentRoutes from './VoiceEnrollmentRoutes';
 import ManualActionAlerts from '../components/virtual-participant-layout/ManualActionAlerts';
@@ -43,9 +41,6 @@ import {
   DESKTOP_CAPTURE_APP_PATH,
   MEETINGS_QUERY_PATH,
   MCP_SERVERS_PATH,
-  NOVA_SONIC_CONFIG_PATH,
-  ASR_CONFIG_PATH,
-  TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
   CONFIGURATION_HISTORY_PATH,
   CONFIGURATION_PATH,
@@ -93,9 +88,9 @@ const AuthRoutes = ({ redirectParam }) => {
         <Route path={`${BROWSER_EXTENSION_PATH}/*`} element={<BrowserExtensionRoutes />} />
         <Route path={`${DESKTOP_CAPTURE_APP_PATH}/*`} element={<DesktopCaptureAppRoutes />} />
         <Route path={`${MCP_SERVERS_PATH}/*`} element={<MCPServersRoutes />} />
-        <Route path={`${NOVA_SONIC_CONFIG_PATH}/*`} element={<NovaSonicConfigRoutes />} />
-        <Route path={`${ASR_CONFIG_PATH}/*`} element={<AsrConfigRoutes />} />
-        <Route path={`${TRANSCRIPT_SUMMARY_PATH}/*`} element={<TranscriptSummaryRoutes />} />
+        {/* The pages that each edited one section moved into the Configuration
+            page; a bookmark to one opens that section there. */}
+        {movedConfigurationRoutes()}
         <Route path={`${USER_MANAGEMENT_PATH}/*`} element={<UserManagementRoutes />} />
         <Route path={`${CONFIGURATION_HISTORY_PATH}/*`} element={<ConfigurationHistoryRoutes />} />
         <Route path={`${CONFIGURATION_PATH}/*`} element={<ConfigurationRoutes />} />

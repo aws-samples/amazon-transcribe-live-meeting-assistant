@@ -244,7 +244,7 @@ def align_with_baseline(prompts: Mapping[str, str], baseline: Mapping[str, str])
             # prompt it was is the only person who can tell which they wanted.
             LOGGER.warning(
                 "two adopted prompts have the title %r; keeping the first by key "
-                "and dropping %r. Check the Transcript Summary page.",
+                "and dropping %r. Check the Transcript Summary section of the Configuration page.",
                 title,
                 key,
             )
@@ -345,8 +345,8 @@ class LegacySection(NamedTuple):
     carries: Callable[[str], bool]
 
 
-#: The fields the Nova Sonic Configuration page saves, which are the ones the
-#: resolver behind it accepts.
+#: The Nova Sonic fields updateNovaSonicConfig saves, which are the ones its
+#: resolver accepts.
 #: `test_the_seeder_adopts_exactly_the_fields_this_resolver_accepts`, in the
 #: resolver's own test module,
 #: holds the two lists equal.
@@ -366,8 +366,8 @@ NOVA_SONIC_FIELDS = frozenset(
     }
 )
 
-#: The switches the Transcription Engine page saves, which are the ones the
-#: resolver behind it accepts.
+#: The switches updateAsrConfig saves, which are the ones its resolver
+#: accepts.
 #: `test_the_seeder_adopts_exactly_the_switches_this_resolver_accepts` holds the
 #: two lists equal.
 ASR_ENGINE_FIELDS = frozenset(
@@ -403,7 +403,7 @@ LEGACY_SECTIONS = (
         property_name="LegacyAsrConfigTableName",
         key_attribute="AsrConfigId",
         key="CustomAsrConfig",
-        # The three switches the Transcription Engine page saves. A record
+        # The three switches updateAsrConfig saves. A record
         # written by an older release can also hold retired tuning fields,
         # which no reader uses; they are left behind.
         carries=ASR_ENGINE_FIELDS.__contains__,

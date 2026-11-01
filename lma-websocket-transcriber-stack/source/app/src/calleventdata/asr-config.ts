@@ -7,7 +7,7 @@
 /**
  * Runtime switches for the MicroVM ASR engine.
  *
- * Three booleans, edited on the Transcription Engine page and read at meeting start. No
+ * Three booleans, edited in the Transcription Engine section of the Configuration page and read at meeting start. No
  * tuning fields: the operating point is baked into the ASR image per bundle.
  *
  * Where they are read from

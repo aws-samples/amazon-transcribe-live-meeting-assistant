@@ -18,7 +18,7 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 > Because it is experimental, nothing about it is tunable at deploy time:
 > `EnableMicrovmAsr` is the only CloudFormation question, the model bundle ships
 > with its diarization operating point already measured, and the only runtime
-> settings are three switches on the Transcription Engine page.
+> settings are three switches in the Transcription Engine section of the Configuration page.
 
 ## Table of Contents
 
@@ -251,7 +251,7 @@ two sessions and kept up; the plain bundle has not run live.
 ## Choosing the engine
 
 The engine is a **deployment** setting, chosen separately for the two kinds of
-meeting on **Configuration ▸ Transcription Engine** (admin only) and read at the start of
+meeting in the **Transcription Engine** section of **Configuration ▸ Configuration** (admin only) and read at the start of
 each meeting, so a change needs no redeploy:
 
 | Setting | Covers | Default |
@@ -271,7 +271,7 @@ transcript.
 
 ## Runtime switches
 
-**Configuration ▸ Transcription Engine** (admin only) has exactly three settings. All are read at
+The **Transcription Engine** section of **Configuration ▸ Configuration** (admin only) has exactly three settings. All are read at
 the start of each meeting, so a change needs no stack update and no image rebuild. The
 WebSocket transcriber reuses what it read for up to 30 seconds, so a streaming meeting that
 starts within 30 seconds of a save may still use the previous engine; a Virtual Participant
@@ -675,7 +675,7 @@ only, so the assistant cannot wake itself.
 
 **The "Speakers per channel" field is missing from Stream Audio.** It is shown only
 when speaker identification is ticked for at least one channel and the
-streaming-meetings engine on **Configuration ▸ Transcription Engine** is the on-demand engine. A
+streaming-meetings engine in the **Transcription Engine** section of **Configuration ▸ Configuration** is the on-demand engine. A
 deployment without `EnableMicrovmAsr=true` never shows it.
 
 **Transcripts appear but are labelled by channel.** The image has no speaker model.
