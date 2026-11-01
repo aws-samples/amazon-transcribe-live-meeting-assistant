@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/meeting_processing",
+  "title": "Meeting processing",
+  "description": "How transcript segments reach a transcript Lambda hook, and how far back meetings that were never ended are looked for. The defaults are the values the stack was deployed with; a value set here is used instead until it is reset.",
+  "sectionLabel": "Meeting Processing",
+  "appliesText": "A saved change applies within about five minutes.",
+  "order": 10,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "type": "object",
+  "properties": {
+    "transcriptHookNonPartialOnly": {
+      "order": 0,
+      "type": "boolean",
+      "title": "Send only finished segments to the transcript Lambda hook",
+      "description": "Applies only when the stack names a transcript Lambda hook (TranscriptLambdaHookFunctionArn). Off sends partial segments too. Default: the TranscriptLambdaHookFunctionNonPartialOnly stack parameter."
+    },
+    "inactiveMeetingLookbackDays": {
+      "order": 1,
+      "type": "integer",
+      "title": "Days to look back for meetings that were never ended",
+      "description": "How far back the inactive-meeting reaper looks for meetings to close. A meeting that started earlier than this is never closed automatically. Applies only when the stack runs the reaper (MeetingInactivityTimeoutInMinutes above 0). Default: the MeetingInactivityLookbackInDays stack parameter.",
+      "minimum": 1,
+      "maximum": 90
+    }
+  },
+  "additionalProperties": false
+}

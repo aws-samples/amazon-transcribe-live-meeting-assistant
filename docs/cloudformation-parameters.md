@@ -59,8 +59,8 @@ The template declares 91 parameters.
 | Kind | Parameters | What changing one does |
 |---|---|---|
 | Resource | 47 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
-| Configuration page default | 13 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
-| Read at run time | 18 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
+| Configuration page default | 16 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
+| Read at run time | 15 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
 | Credential | 11 | A secret, the ARN of a secret, or the identifier paired with one. Values are stored in AWS Secrets Manager; see [Integration Credentials](infrastructure-and-security.md#integration-credentials). |
 | Deployment check | 1 | Read only while the stack is deployed, by a check that runs before anything else is created. |
 | No effect | 1 | Declared by the template and read by nothing. Kept so that existing deploy commands and pipelines that pass it keep working. |
@@ -188,7 +188,7 @@ Consecutive polls on which a Teams meeting must show neither a readable attendee
 | [`MeetingAssistKnowledgeBaseModelID`](#meetingassistknowledgebasemodelid) | `global.anthropic.claude-haiku-4-5-20251001-v1:0` | Configuration page default |
 | [`TavilyApiKey`](#tavilyapikey) | (empty) | Credential |
 | [`TavilyApiKeySecretArn`](#tavilyapikeysecretarn) | (empty) | Credential |
-| [`AssistantWakePhraseRegEx`](#assistantwakephraseregex) | `(OK\|Okay)[.,! ]*[Aa]ssistant` | Read at run time |
+| [`AssistantWakePhraseRegEx`](#assistantwakephraseregex) | `(OK\|Okay)[.,! ]*[Aa]ssistant` | Configuration page default |
 
 ### `MeetingAssistService`
 
@@ -246,9 +246,9 @@ Console label: *Meeting Assist Wake Phrase Regular Expression*
 
 - **Default:** `(OK|Okay)[.,! ]*[Aa]ssistant`
 - **Allowed values:** Any text
-- **Kind:** Read at run time. Written to the deployment settings and read by the meeting event processor.
+- **Kind:** Configuration page default. Configuration page: **Meeting Assistant › Wake phrase (regular expression)**. Written to the deployment settings and read by the meeting event processor.
 
-A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Assistant'
+A regular expression for the wake phrase that invokes the Meeting Assistant. The shipped pattern matches 'OK Assistant'. This is the default; an Admin can change it at run time on the Configuration page (Meeting Assistant section), which takes precedence.
 
 ## Meeting Assist Voice Assistant
 
@@ -773,7 +773,7 @@ Average CPU utilization that WebSocket transcriber auto scaling aims to hold. Ke
 | Parameter | Default | Kind |
 |---|---|---|
 | [`TranscriptLambdaHookFunctionArn`](#transcriptlambdahookfunctionarn) | (empty) | Resource |
-| [`TranscriptLambdaHookFunctionNonPartialOnly`](#transcriptlambdahookfunctionnonpartialonly) | `true` | Read at run time |
+| [`TranscriptLambdaHookFunctionNonPartialOnly`](#transcriptlambdahookfunctionnonpartialonly) | `true` | Configuration page default |
 | [`EndOfCallTranscriptSummary`](#endofcalltranscriptsummary) | `BEDROCK` | Resource |
 | [`BedrockModelId`](#bedrockmodelid) | `global.anthropic.claude-sonnet-5-5` | Configuration page default |
 | [`KeyframeTextModelId`](#keyframetextmodelid) | `amazon.nova-lite-v1:0` | Configuration page default |
@@ -797,9 +797,9 @@ Console label: *Lambda Hook Function Mode Non-Partial only*
 
 - **Default:** `true`
 - **Allowed values:** `true`, `false`
-- **Kind:** Read at run time. Read by the meeting event processor.
+- **Kind:** Configuration page default. Configuration page: **Meeting Processing › Send only finished segments to the transcript Lambda hook**. Read by the meeting event processor.
 
-Specifies if Transcript Lambda Hook Function (if specified) is invoked for Non-Partial transcript segments only (true), or for both Partial and Non-Partial transcript segments (false).
+Specifies if Transcript Lambda Hook Function (if specified) is invoked for Non-Partial transcript segments only (true), or for both Partial and Non-Partial transcript segments (false). This is the default; an Admin can change it at run time on the Configuration page (Meeting Processing section), which takes precedence.
 
 ### `EndOfCallTranscriptSummary`
 
@@ -900,7 +900,7 @@ Specify a comma separated list of two letter country codes (uppercase ISO 3166-1
 | [`CloudWatchLogsExpirationInDays`](#cloudwatchlogsexpirationindays) | `90` | Resource |
 | [`VPSchedulerStateMachineLogsExpirationInDays`](#vpschedulerstatemachinelogsexpirationindays) | `7` | Resource |
 | [`MeetingInactivityTimeoutInMinutes`](#meetinginactivitytimeoutinminutes) | `240` | Resource |
-| [`MeetingInactivityLookbackInDays`](#meetinginactivitylookbackindays) | `2` | Read at run time |
+| [`MeetingInactivityLookbackInDays`](#meetinginactivitylookbackindays) | `2` | Configuration page default |
 | [`EnableDataRetentionOnDelete`](#enabledataretentionondelete) | `true` | Resource |
 
 ### `EnableAudioRecording`
@@ -989,9 +989,9 @@ Console label: *Meeting Inactivity Lookback In Days*
 
 - **Default:** `2`
 - **Allowed values:** 1 to 90
-- **Kind:** Read at run time. Read by the inactive-meeting reaper.
+- **Kind:** Configuration page default. Configuration page: **Meeting Processing › Days to look back for meetings that were never ended**. Read by the inactive-meeting reaper.
 
-How far back to look for meetings to close. A meeting that started longer ago than this is never closed automatically, so raise it temporarily if you are updating a deployment that has accumulated older meetings stuck in progress. Higher values read more meeting records on every run.
+How far back to look for meetings to close. A meeting that started longer ago than this is never closed automatically, so raise it temporarily if you are updating a deployment that has accumulated older meetings stuck in progress. Higher values read more meeting records on every run. This is the default; an Admin can change it at run time on the Configuration page (Meeting Processing section), which takes precedence.
 
 ### `EnableDataRetentionOnDelete`
 

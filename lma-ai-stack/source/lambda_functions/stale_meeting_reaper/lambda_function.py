@@ -40,7 +40,7 @@ default is deliberately several hours for that reason.
 Candidates are found through the ``TypeDateIndex`` GSI, which is range-sorted by
 the meeting-list row's ``SK`` (``ts#<ISO8601>#id#<CallId>``) and therefore
 chronological on meeting start time. The query covers meetings started between
-``REAPER_LOOKBACK_IN_DAYS`` ago and the inactivity cutoff: anything newer than
+the lookback (see ``lookback_days``) ago and the inactivity cutoff: anything newer than
 the cutoff cannot be stale yet, and the lower bound keeps a single invocation's
 work bounded. A meeting that started before the lookback window and is still
 open is not reaped, so the lookback wants to comfortably exceed the longest
@@ -74,6 +74,9 @@ from boto3.dynamodb.conditions import Key
 from botocore.config import Config as BotoCoreConfig
 from botocore.exceptions import BotoCoreError, ClientError
 
+# pylint: disable-next=import-error
+from lma_config import MEETING_PROCESSING, read_setting  # configuration layer
+
 if TYPE_CHECKING:
     from mypy_boto3_kinesis.client import KinesisClient
 else:
@@ -88,7 +91,9 @@ CALL_DATA_STREAM_NAME = os.environ["CALL_DATA_STREAM_NAME"]
 INACTIVITY_TIMEOUT_MINUTES = int(
     float(os.environ.get("MEETING_INACTIVITY_TIMEOUT_IN_MINUTES", "0"))
 )
-LOOKBACK_DAYS = float(os.environ.get("REAPER_LOOKBACK_IN_DAYS", "2"))
+#: The lookback when neither the configuration nor REAPER_LOOKBACK_IN_DAYS
+#: says; the MeetingInactivityLookbackInDays parameter's default.
+FALLBACK_LOOKBACK_DAYS = 2
 # Bounds the work a single invocation does; the next scheduled run continues.
 MAX_CANDIDATES = int(float(os.environ.get("REAPER_MAX_CANDIDATES", "500")))
 MAX_MEETINGS_PER_RUN = int(float(os.environ.get("REAPER_MAX_MEETINGS_PER_RUN", "100")))
@@ -290,6 +295,24 @@ def _emit_end_event(call_row: Dict[str, Any]) -> None:
     )
 
 
+def lookback_days() -> int:
+    """How many days back a run looks for meetings to close.
+
+    The Meeting Processing section of the Configuration page, whose default is
+    the MeetingInactivityLookbackInDays stack parameter; that parameter's
+    environment variable when the section cannot be read. Read per run, so a
+    change applies from the next scheduled run that starts five minutes after it.
+    A whole number of days: a fractional value, which CloudFormation's Number
+    type would accept, is not one the setting takes, and the default applies.
+    """
+    return read_setting(
+        MEETING_PROCESSING.name,
+        "inactiveMeetingLookbackDays",
+        env_var="REAPER_LOOKBACK_IN_DAYS",
+        default=FALLBACK_LOOKBACK_DAYS,
+    )
+
+
 @LOGGER.inject_lambda_context
 def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
     """Scheduled entry point. Returns a summary of the run for the logs."""
@@ -299,7 +322,7 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
 
     now = _now()
     cutoff = now - timedelta(minutes=INACTIVITY_TIMEOUT_MINUTES)
-    window_start = now - timedelta(days=LOOKBACK_DAYS)
+    window_start = now - timedelta(days=lookback_days())
 
     candidate_ids = _query_candidate_call_ids(window_start, cutoff)
     rows = _batch_get_rows(candidate_ids)

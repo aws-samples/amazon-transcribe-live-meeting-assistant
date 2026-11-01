@@ -44,7 +44,7 @@ LMA supports three service modes for the Meeting Assistant, configured during st
 
 Say **"OK Assistant"** during a meeting to activate the assistant by voice. The assistant detects the wake phrase in the transcript, processes your spoken question, and inserts its response inline in the transcript.
 
-The wake phrase pattern is configurable via the **Meeting Assist Wake Phrase Regular Expression** CloudFormation parameter. The default regex matches "OK Assistant" and common variations.
+The wake phrase pattern is **Wake phrase (regular expression)** in the Meeting Assistant section of the [Configuration page](configuration-guide.md), where an Admin can change it while the stack runs; its default is the **Meeting Assist Wake Phrase Regular Expression** (`AssistantWakePhraseRegEx`) CloudFormation parameter. The default regex matches "OK Assistant" and common variations. A pattern saved on the page that is not a valid regular expression is logged by the call event processor, and the parameter's pattern is used until it is corrected.
 
 ### Chat Interface
 

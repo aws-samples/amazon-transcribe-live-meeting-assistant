@@ -9,10 +9,11 @@ import json
 import re
 import uuid
 from datetime import datetime
+from functools import lru_cache
 from os import getenv
 from statistics import fmean
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Mapping, Optional, Pattern
 
 # third-party imports from Lambda layer
 import boto3
@@ -47,6 +48,7 @@ from graphql_helpers import (
 
 # Validation of ADD_VIDEO_KEYFRAME, AWS-free for the same reason as pure.py below.
 from keyframe_input import KeyframeEventError, build_keyframe_input  # noqa: E402
+from lma_config import MEETING_ASSIST, MEETING_PROCESSING, read_setting  # noqa: E402
 from metrics_utils import catalogue as metric_names
 from metrics_utils.emf import METRICS
 
@@ -114,9 +116,51 @@ IS_TRANSCRIPT_SUMMARY_ENABLED = getenv("IS_TRANSCRIPT_SUMMARY_ENABLED", "false")
 
 ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN = getenv("ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN", "")
 
-TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY = (
-    getenv("TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY", "true").lower() == "true"
-)
+
+def transcript_hook_nonpartial_only() -> bool:
+    """Whether the transcript Lambda hook is sent finished segments only.
+
+    The Meeting Processing section of the Configuration page, whose default is
+    the TranscriptLambdaHookFunctionNonPartialOnly stack parameter; that
+    parameter's environment variable when the section cannot be read.
+    """
+    return read_setting(
+        MEETING_PROCESSING.name,
+        "transcriptHookNonPartialOnly",
+        env_var="TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY",
+        default=True,
+    )
+
+
+@lru_cache(maxsize=8)
+def _compiled_wake_phrase(pattern: str) -> Optional[Pattern[str]]:
+    """``pattern`` compiled, or None when it is not a regular expression."""
+    try:
+        return re.compile(pattern)
+    except re.error as error:
+        LOGGER.warning(
+            "the configured wake phrase is not a regular expression (%s); using the "
+            "pattern in the deployment settings until it is corrected",
+            error,
+        )
+        return None
+
+
+def wake_phrase_pattern() -> Optional[Pattern[str]]:
+    """The regular expression that wakes the meeting assistant.
+
+    The Meeting Assistant section of the Configuration page, whose default is the
+    AssistantWakePhraseRegEx stack parameter. When that cannot be read, or holds
+    a pattern that does not compile, the deployment's own pattern, from its
+    settings parameter, is used, as it always was.
+    """
+    configured = read_setting(
+        MEETING_ASSIST.name, "wakePhraseRegex", env_var="ASSISTANT_WAKE_PHRASE_REGEX"
+    )
+    compiled = _compiled_wake_phrase(configured) if configured else None
+    return compiled if compiled is not None else SETTINGS.get("AssistantWakePhraseRegEx")
+
+
 if (
     TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN
     or ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN
@@ -1302,7 +1346,7 @@ def add_contact_lens_call_category(
 
 
 def invoke_transcript_lambda_hook(message: Dict[str, Any]):
-    if not message.get("IsPartial") or not TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY:
+    if not message.get("IsPartial") or not transcript_hook_nonpartial_only():
         LOGGER.debug("Transcript Lambda Hook Arn: %s", TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN)
         LOGGER.debug("Transcript Lambda Hook Request: %s", message)
         lambda_response = LAMBDA_HOOK_CLIENT.invoke(
@@ -1847,7 +1891,7 @@ async def execute_process_event_api_mutation(
                     not normalized_message["IsPartial"] or "ContactId" in normalized_message.keys()
                 )
                 and matches_wake_phrase(
-                    SETTINGS.get("AssistantWakePhraseRegEx"),
+                    wake_phrase_pattern(),
                     normalized_message["Transcript"],
                 )
             ):

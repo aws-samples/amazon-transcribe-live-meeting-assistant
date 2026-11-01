@@ -164,7 +164,9 @@ def apply_parameter_defaults(baseline: Dict[str, Any], values: Mapping[str, Any]
         except InvalidConfiguration as error:
             # An empty value is what a nested stack deployed on its own passes
             # for a parameter only lma-main.yaml supplies, so it is expected
-            # there and logged quietly; anything else is worth a warning.
+            # there and logged quietly; anything else is worth a warning. (An
+            # empty value for a boolean or integer setting is refused by the
+            # type check above instead, and logged there.)
             log = LOGGER.info if values[entry.parameter] in ("", None) else LOGGER.warning
             log(
                 "the %s parameter's value is not one the %s section accepts (%s); leaving "

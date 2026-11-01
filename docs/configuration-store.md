@@ -188,6 +188,8 @@ Today's sections and their tiers:
 | `call_pricing` | `standard` | Read whenever a meeting's cost estimate is drawn; an estimate priced a few minutes after a price change at the previous price is what [Meeting Cost Estimate](meeting-cost-estimate.md) says happens |
 | `transcription` | `immediate` | Read by the WebSocket transcriber once as each streaming meeting starts, and kept for the meeting's every Transcribe reconnect. Redaction is privacy-bearing, so a save has to reach the very next meeting |
 | `recording` | `immediate` | Read with `transcription`, for the same reason: whether a meeting is recorded is privacy-bearing |
+| `meeting_assist` | `standard` | Read by the call event processor for each batch of transcript segments |
+| `meeting_processing` | `standard` | Read by the call event processor for each segment it hands to a transcript Lambda hook, and by the inactive-meeting reaper as each run starts |
 | `language_models` | `standard` | Read once per summary, answer, agenda pass, naming pass, knowledge-base query or key frame; nobody is waiting on a model change, and the summariser's **Regenerate** drops the cache before reading, as for the prompts |
 
 ### Resolving a read
@@ -324,6 +326,8 @@ so a release cannot ship a default its own save would refuse.
 | `language_models` | The four model ids, each one of the models its stack parameter allows, nothing else |
 | `transcription` | The nine Amazon Transcribe options: language, preferred language and redaction type from their stack parameters' lists; language options as comma-separated codes from that list; entity types as comma-separated capitalised names; vocabulary and language model names in Amazon Transcribe's character set, empty for none; the two switches `true` or `false` |
 | `recording` | `recordAudio`, `true` or `false`, nothing else |
+| `meeting_assist` | `wakePhraseRegex`, text of 1 to 256 characters |
+| `meeting_processing` | `transcriptHookNonPartialOnly`, `true` or `false`; `inactiveMeetingLookbackDays`, a whole number from 1 to 90, the parameter's range |
 | `call_pricing` | Prices that are finite and not negative, under `regions › <region or default> › <service>/<api-or-model> › <unit>`; region codes in the form `us-east-1`; the lists and notes as lists and objects of text; `currency` `USD`; no keys the estimator does not read |
 
 ### The validator
@@ -1125,6 +1129,36 @@ the task's values for everything, and the next meeting reads again. Whether a
 named custom vocabulary or language model exists is not checked.
 
 A Virtual Participant reads the parameters' values, as before.
+
+### The wake phrase, the transcript hook mode and the reaper's lookback
+
+`meeting_assist` holds `AssistantWakePhraseRegEx`, and `meeting_processing`
+`TranscriptLambdaHookFunctionNonPartialOnly` and
+`MeetingInactivityLookbackInDays`. The call event processor reads the first two
+per batch, and the reaper the third per run. The wake phrase's fallback is the
+pattern in the deployment settings parameter, which the processor has always
+compiled at start; a pattern saved on the page that does not compile is logged
+and that one is used.
+
+### Stack parameters that stay
+
+Three parameters that only application code reads are deliberately not on the
+Configuration page:
+
+- `LogLevel` is read by each process's logging when the process starts, so a
+  runtime value would apply at an unpredictable later time.
+- `MeetingRecordExpirationInDays` sets when meeting and metering records expire,
+  and is read by five separate writers in two languages. Retention is a setting
+  where the stack parameter is better as an upper bound on a runtime value than
+  as a default an Admin can raise, which is a different mechanism from the one
+  above.
+- `BedrockGuardrailVersion` chooses which version of the deployment's Bedrock
+  guardrail applies. The guardrail is a safety control, so changing which version
+  applies stays a deployment.
+
+`VoiceEnrollmentRetentionDays` and `VoiceEnrollmentTermsVersion` stay too, for
+the reason given in [Voice Enrollment](voice-enrollment.md): they are part of
+the consent terms each enrollment agrees to.
 
 ## Still to come
 

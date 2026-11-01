@@ -46,6 +46,8 @@ const TIERS = {
   language_models: 'standard',
   transcription: 'immediate',
   recording: 'immediate',
+  meeting_assist: 'standard',
+  meeting_processing: 'standard',
 };
 const SECTIONS = readdirSync(SCHEMA_DIR)
   .filter((name) => name.endsWith('.json'))
@@ -97,6 +99,8 @@ const DEFAULTS = {
     showSpeakerLabel: false,
   },
   recording: { recordAudio: true },
+  meeting_assist: { wakePhraseRegex: '(OK|Okay)[.,! ]*[Aa]ssistant' },
+  meeting_processing: { transcriptHookNonPartialOnly: true, inactiveMeetingLookbackDays: 2 },
 };
 
 const PRESETS = [

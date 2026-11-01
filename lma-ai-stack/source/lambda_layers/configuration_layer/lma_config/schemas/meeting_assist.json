@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/meeting_assist",
+  "title": "Meeting assistant",
+  "description": "When a transcript wakes the meeting assistant. The default is the value the stack was deployed with; a value set here is used instead until it is reset.",
+  "sectionLabel": "Meeting Assistant",
+  "appliesText": "A saved change applies within about five minutes, to transcript segments processed after that.",
+  "order": 9,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "type": "object",
+  "properties": {
+    "wakePhraseRegex": {
+      "order": 0,
+      "type": "string",
+      "title": "Wake phrase (regular expression)",
+      "description": "A Python regular expression searched for in each finished transcript segment; a segment it matches is sent to the meeting assistant. A pattern that is not a valid regular expression is logged and the deployment's own is used. Default: the AssistantWakePhraseRegEx stack parameter.",
+      "examples": ["(OK|Okay)[.,! ]*[Aa]ssistant"],
+      "minLength": 1,
+      "maxLength": 256
+    }
+  },
+  "additionalProperties": false
+}

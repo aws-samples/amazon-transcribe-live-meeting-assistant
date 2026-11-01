@@ -162,6 +162,8 @@ def test_the_baseline_document_holds_the_shipped_prompts_under_its_section(seede
         "language_models",
         "transcription",
         "recording",
+        "meeting_assist",
+        "meeting_processing",
     }
     assert body["language_models"] == {}
     assert set(body["summary_prompt_templates"]) == {

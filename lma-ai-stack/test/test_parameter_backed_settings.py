@@ -409,8 +409,8 @@ def test_the_transcriber_task_can_read_the_configuration_table() -> None:
     assert "dynamodb:GetItem" in rendered and "${ConfigurationTableName}" in rendered
 
 
-def _module_strings(path: Path) -> Dict[str, str]:
-    """Module-level NAME = "text" assignments of a source file."""
+def _module_strings(path: Path) -> Dict[str, Any]:
+    """Module-level NAME = "text" (or a number) assignments of a source file."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     found = {}
     for node in tree.body:
@@ -419,7 +419,8 @@ def _module_strings(path: Path) -> Dict[str, str]:
             and len(node.targets) == 1
             and isinstance(node.targets[0], ast.Name)
             and isinstance(node.value, ast.Constant)
-            and isinstance(node.value.value, str)
+            and isinstance(node.value.value, (str, int))
+            and not isinstance(node.value.value, bool)
         ):
             found[node.targets[0].id] = node.value.value
     return found
@@ -465,7 +466,8 @@ def test_a_readers_last_resort_is_the_parameters_own_default(parameter, fallback
     It is a copy of the template's default, so it is pinned to it: a release that
     changes the default and not the copy would leave a reader on the old one.
     """
-    assert fallback == MAIN["Parameters"][parameter]["Default"]
+    # Compared as text: a Number parameter's default is read from YAML as a number.
+    assert str(fallback) == str(MAIN["Parameters"][parameter]["Default"])
 
 
 @pytest.mark.parametrize("entry", ENTRIES, ids=_ids)

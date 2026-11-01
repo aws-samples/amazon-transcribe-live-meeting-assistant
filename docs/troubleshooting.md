@@ -108,8 +108,11 @@ those meetings are skipped and closed by the finalizer instead).
 Two bounds decide which meetings a run can reach. `MeetingInactivityLookbackInDays`
 (default 2) is how far back it looks: **a meeting that started earlier than that is
 never closed automatically**, so if you have a backlog of older meetings stuck in
-progress — for example on the update that first introduces the reaper — raise the
-parameter, let one run complete, and set it back. Each run also stops after reading
+progress — for example on the update that first introduces the reaper — raise it,
+let one run complete, and set it back. It is **Days to look back for meetings that
+were never ended** in the Meeting Processing section of the
+[Configuration page](configuration-guide.md), so this needs no stack update: the
+parameter is its default. Each run also stops after reading
 500 candidate meetings; they are examined newest-first, so meetings that have just
 become eligible are always covered, and a run that hits the cap says so in its log.
 

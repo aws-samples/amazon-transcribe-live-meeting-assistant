@@ -296,3 +296,31 @@ RECORDING = register(
         description="Whether the audio of a meeting is recorded when its client does not say.",
     )
 )
+
+#: The phrase that wakes the meeting assistant, as a regular expression matched
+#: against each finished transcript segment by the call event processor.
+#:
+#: Standard tier: the processor reads it once per batch of segments, nobody is
+#: waiting on a change, and five minutes is what the page says.
+MEETING_ASSIST = register(
+    SectionSpec(
+        name="meeting_assist",
+        cache_tier=CacheTier.STANDARD,
+        description="The phrase that wakes the meeting assistant in a transcript.",
+    )
+)
+
+#: How the call event processor hands segments to a transcript Lambda hook, and
+#: how far back the inactive-meeting reaper looks for meetings to close.
+#:
+#: Standard tier: both are read by unattended processing.
+MEETING_PROCESSING = register(
+    SectionSpec(
+        name="meeting_processing",
+        cache_tier=CacheTier.STANDARD,
+        description=(
+            "Whether a transcript Lambda hook sees partial segments, and how far back "
+            "the inactive-meeting reaper looks for meetings to close."
+        ),
+    )
+)
