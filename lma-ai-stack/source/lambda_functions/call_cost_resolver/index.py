@@ -107,14 +107,22 @@ def _caller(event: Mapping[str, Any]) -> Dict[str, Any]:
 
 def _shared_with(raw: Any) -> set:
     if isinstance(raw, str):
-        return {s.strip() for s in raw.split(",") if s.strip()}
+        return {s.strip() for s in raw.strip("[]").split(",") if s.strip()}
     if isinstance(raw, (list, tuple, set)):
         return {str(s).strip() for s in raw if s}
     return set()
 
 
 def _require_call_access(caller: Mapping[str, Any], call_id: str) -> None:
-    """The ``getCall`` rule: Admin, owner, shared-with, or the backend."""
+    """The ``getCall`` rule: Admin, owner, shared-with, or the backend.
+
+    An identical copy of ``require_call_access`` in video_keyframes_resolver
+    (each function is packaged on its own); keep the two the same, so the
+    estimate and the key frames are answered to the same people. SharedWith is
+    read in every shape it is stored in: the list meeting sharing writes, a
+    string set, and the comma-separated or "[a, b]" string of older and
+    created-shared meetings. Entries are compared whole.
+    """
     if caller["is_admin"] or caller["is_backend"]:
         return
     response = DYNAMODB.get_item(
@@ -126,7 +134,9 @@ def _require_call_access(caller: Mapping[str, Any], call_id: str) -> None:
     item = response.get("Item") or {}
     owner = (item.get("Owner") or {}).get("S", "")
     shared_raw = item.get("SharedWith") or {}
-    shared = _shared_with(shared_raw.get("S") or shared_raw.get("SS") or [])
+    shared = _shared_with(
+        shared_raw.get("S") or shared_raw.get("SS") or [v.get("S") for v in shared_raw.get("L", [])]
+    )
     username = caller["username"]
     if username and (owner == username or username in shared):
         return

@@ -138,6 +138,29 @@ def test_the_callers_getcall_answers_see_the_frames(fakes, identity):
     assert [f["FrameId"] for f in result["VideoKeyframes"]] == ["0000001000-ab12cd"]
 
 
+#: Every shape the meeting's SharedWith is stored in; the same table as in
+#: call_cost_resolver's tests, whose check is a copy of this one.
+SHARED_WITH_SHAPES = {
+    "list": {"L": [{"S": "friend@example.com"}, {"S": "other@example.com"}]},
+    "string set": {"SS": ["friend@example.com", "other@example.com"]},
+    "string": {"S": "friend@example.com, other@example.com"},
+    "bracketed string": {"S": "[other@example.com, friend@example.com]"},
+    "single string": {"S": "friend@example.com"},
+}
+
+
+@pytest.mark.parametrize("shape", sorted(SHARED_WITH_SHAPES))
+def test_every_stored_shared_with_shape_answers_the_same_callers(fakes, shape):
+    meeting = {"Owner": {"S": "owner@example.com"}, "SharedWith": SHARED_WITH_SHAPES[shape]}
+    for identity in (OWNER, FRIEND, ADMIN, BACKEND):
+        fakes([item(1000)], call=meeting)
+        assert len(call(identity)["VideoKeyframes"]) == 1
+    for identity in (STRANGER, {"claims": {"sub": "p"}, "username": "friend@example"}):
+        fakes([item(1000)], call=meeting)
+        with pytest.raises(index.ForbiddenError):
+            call(identity)
+
+
 def test_anyone_else_is_refused_and_nothing_is_read(fakes):
     dynamo, s3 = fakes([item(1000)])
     with pytest.raises(index.ForbiddenError):

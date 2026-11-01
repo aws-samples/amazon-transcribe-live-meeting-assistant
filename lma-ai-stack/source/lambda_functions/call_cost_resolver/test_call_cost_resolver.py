@@ -139,6 +139,41 @@ def test_the_estimate_is_answered_to_the_callers_get_call_answers(tables, identi
     assert result["Currency"] == "USD" and result["PricesAsOf"] == "2026-10-28"
 
 
+#: Every shape SharedWith is stored in, each sharing with friend@example.com
+#: and somebody else: the list shareCall writes, a string set, and the
+#: comma-separated and "[a, b]" strings of older and created-shared meetings.
+SHARED_WITH_SHAPES = {
+    "list": {"L": [{"S": "friend@example.com"}, {"S": "other@example.com"}]},
+    "string set": {"SS": ["friend@example.com", "other@example.com"]},
+    "string": {"S": "friend@example.com, other@example.com"},
+    "bracketed string": {"S": "[other@example.com, friend@example.com]"},
+    "single string": {"S": "friend@example.com"},
+}
+
+
+@pytest.mark.parametrize("shape", sorted(SHARED_WITH_SHAPES))
+@pytest.mark.parametrize("identity", [OWNER, FRIEND, ADMIN, BACKEND])
+def test_every_stored_shared_with_shape_answers_the_same_callers(tables, shape, identity) -> None:
+    tables[1].call = {"Owner": {"S": "owner@example.com"}, "SharedWith": SHARED_WITH_SHAPES[shape]}
+    assert invoke("getCallCost", identity, CallId="Meeting-1")["TotalCost"] == pytest.approx(0.0015)
+
+
+@pytest.mark.parametrize("shape", sorted(SHARED_WITH_SHAPES))
+def test_every_stored_shared_with_shape_refuses_other_users(tables, shape) -> None:
+    tables[1].call = {"Owner": {"S": "owner@example.com"}, "SharedWith": SHARED_WITH_SHAPES[shape]}
+    # A username that is only part of an entry is not an entry.
+    for identity in (STRANGER, {"claims": {"sub": "p"}, "username": "friend@example"}):
+        with pytest.raises(index.ForbiddenError):
+            invoke("getCallCost", identity, CallId="Meeting-1")
+
+
+def test_a_meeting_shared_with_nobody_answers_only_its_owner(tables) -> None:
+    tables[1].call = {"Owner": {"S": "owner@example.com"}}
+    invoke("getCallCost", OWNER, CallId="Meeting-1")
+    with pytest.raises(index.ForbiddenError):
+        invoke("getCallCost", FRIEND, CallId="Meeting-1")
+
+
 def test_a_caller_the_meeting_is_not_shared_with_is_refused(tables) -> None:
     with pytest.raises(index.ForbiddenError):
         invoke("getCallCost", STRANGER, CallId="Meeting-1")

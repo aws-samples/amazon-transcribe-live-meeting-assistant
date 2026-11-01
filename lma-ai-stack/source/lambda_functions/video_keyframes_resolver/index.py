@@ -120,9 +120,10 @@ def _shared_with(raw: Any) -> set:
 def require_call_access(caller: Mapping[str, Any], call_id: str) -> None:
     """The ``getCall`` rule: Admin, owner, shared-with, or the backend.
 
-    call_cost_resolver applies the same rule. This copy also reads a SharedWith
-    stored as a list, which is how meeting sharing writes it, and as the
-    "[a, b]" string a meeting created shared carries.
+    call_cost_resolver has an identical copy of this check (each function is
+    packaged on its own); keep the two the same. SharedWith is
+    read as a list, which is how meeting sharing writes it, as a string set, and
+    as the comma-separated or "[a, b]" string a meeting created shared carries.
     """
     if caller["is_admin"] or caller["is_backend"]:
         return
