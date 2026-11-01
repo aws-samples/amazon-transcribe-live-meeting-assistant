@@ -195,6 +195,8 @@ def test_the_editor_read_serves_every_section_schema_with_its_tier(store) -> Non
     assert (result["Profile"], result["Exists"], result["Version"]) == ("custom", True, 2)
     assert result["UpdatedBy"] == "first@example.com"
     assert result["PublishedRevision"] == 2
+    presets = {preset["Id"]: preset for preset in json.loads(result["Presets"])}
+    assert presets["translator-voice-assistant"]["Sections"]["nova_sonic_config"]["mode"] == "merge"
 
 
 def test_the_editor_save_writes_every_section_it_names_as_one_revision(store) -> None:

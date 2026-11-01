@@ -46,6 +46,7 @@ from .keys import (
     profile_key,
     validate_profile_name,
 )
+from .presets import InvalidPreset, shipped_presets
 from .revisions import (
     DEFAULT_RETAINED_REVISIONS,
     MAX_COMMENT_LENGTH,
@@ -116,6 +117,7 @@ __all__ = [
     "ConfigurationTableNotConfigured",
     "ConfigurationTooLarge",
     "InvalidConfiguration",
+    "InvalidPreset",
     "InvalidProfileName",
     "ReservedProfileName",
     "ResolvedDocument",
@@ -131,6 +133,7 @@ __all__ = [
     "deep_merge",
     "diff_bodies",
     "is_profile_key",
+    "shipped_presets",
     "profile_key",
     "register",
     "registered_sections",

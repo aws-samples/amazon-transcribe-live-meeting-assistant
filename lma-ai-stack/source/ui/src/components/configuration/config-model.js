@@ -292,3 +292,92 @@ export const rebaseSection = (schema, base, mine, theirs) => {
     conflicts: deepEqual(theirs, base) || deepEqual(theirs, mine) ? [] : [[]],
   };
 };
+
+// ── presets, export and import ─────────────────────────────────────────────
+
+// Top-level settings a deployment does not offer are left out of what a
+// preset sets, as the form leaves them out of what it shows.
+const offered = (schema, values, settings) =>
+  Object.fromEntries(Object.entries(values || {}).filter(([key]) => isAvailable(schema?.properties?.[key], settings)));
+
+/**
+ * A section once it becomes exactly `values`: for a "replace" section the
+ * values themselves; for a "merge" section the baseline with the values over
+ * it, and every shipped entry they do not name turned off, where the schema can
+ * turn one off.
+ */
+export const replacedSection = (schema, defaults, values) => {
+  if (isReplace(schema)) return clone(values);
+  const result = deepMerge(clone(defaults || {}), values || {});
+  if (schema?.disabledValue !== undefined) {
+    Object.keys(defaults || {}).forEach((key) => {
+      if (!Object.prototype.hasOwnProperty.call(values || {}, key)) result[key] = schema.disabledValue;
+    });
+  }
+  return result;
+};
+
+/** What applying one section of a preset makes of the section as it stands. */
+export const applyPresetSection = (schema, defaults, current, change, settings) => {
+  const values = offered(schema, change.values, settings);
+  if (change.mode === 'replace' || isReplace(schema)) return replacedSection(schema, defaults, values);
+  return deepMerge(current || {}, values);
+};
+
+export const EXPORT_FORMAT = 'lma-configuration-profile';
+export const EXPORT_FORMAT_VERSION = 1;
+
+/**
+ * A downloadable copy of a profile: what it stores for each section, which is
+ * its changes over the release defaults. Imported into a deployment of another
+ * release, it gives that release's defaults with the same changes.
+ */
+export const exportDocument = ({ sections, defaults, values, profile, revision, stackName, now }) => ({
+  format: EXPORT_FORMAT,
+  formatVersion: EXPORT_FORMAT_VERSION,
+  exportedAt: now,
+  ...(stackName ? { stackName } : {}),
+  profile,
+  revision,
+  sections: Object.fromEntries(
+    sections.map((section) => [
+      section.name,
+      storedSection(section.schema, defaults[section.name], values[section.name]),
+    ]),
+  ),
+});
+
+/**
+ * The sections an exported file sets, as effective values, and the sections in
+ * it that could not be used. Throws, with a message to show, for a file that is
+ * not an export.
+ */
+export const readExport = (text, sections, defaults) => {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('The file is not JSON.');
+  }
+  if (!isObject(parsed) || parsed.format !== EXPORT_FORMAT) {
+    throw new Error('The file is not a configuration exported from LMA.');
+  }
+  if (parsed.formatVersion !== EXPORT_FORMAT_VERSION) {
+    throw new Error(
+      `The file is format version ${parsed.formatVersion}; this release reads version ${EXPORT_FORMAT_VERSION}.`,
+    );
+  }
+  if (!isObject(parsed.sections)) throw new Error('The file holds no sections.');
+  const byName = Object.fromEntries(sections.map((section) => [section.name, section]));
+  const values = {};
+  const skipped = [];
+  Object.entries(parsed.sections).forEach(([name, stored]) => {
+    const section = byName[name];
+    if (!section || !isObject(stored)) {
+      skipped.push(name);
+      return;
+    }
+    values[name] = effectiveSection(section.schema, defaults[name], stored);
+  });
+  return { values, skipped, source: parsed };
+};

@@ -38,9 +38,7 @@
       "order": 2,
       "type": "boolean",
       "title": "Virtual Participant voice separation",
-      "description": "When one attendee is several people, such as a conference room, label their voices \"Name (spk_0)\", \"Name (spk_1)\". Requires the on-demand engine for Virtual Participants, and a model bundle with speaker identification.",
-      "dependsOn": { "field": "virtualParticipantEngineMicrovm", "value": true },
-      "availableWhen": { "setting": "AsrDiarizationAvailable", "value": "true" }
+      "description": "When one attendee is several people, such as a conference room, label their voices \"Name (spk_0)\", \"Name (spk_1)\". Works with either engine: Amazon Transcribe's own speaker labels, or the on-demand engine's voice separation where its model bundle has speaker identification."
     }
   },
   "additionalProperties": false
