@@ -1092,14 +1092,19 @@ type MeetingConsentState @aws_cognito_user_pools
 	Settings: MeetingConsentSettings
 }
 
+# Starting again with the mode and rule already in force (or with neither
+# named, once consent has started) returns the record as it is: a restarting
+# capture client keeps the meeting's choice, and its notice, even if the
+# deployment's settings changed. NoticeText, LmaUser and MeetingName are read
+# only when consent starts or its mode changes.
 input StartMeetingConsentInput {
 	CallId: ID!
-	# "off", "notify" or "opt_in"; omitted, the deployment's mode. A mode or
-	# rule less strict than the deployment's is refused when the deployment does
-	# not allow a per-meeting choice.
+	# "off", "notify" or "opt_in"; omitted, the meeting's mode once started, or
+	# else the deployment's. A mode or rule less strict than the deployment's is
+	# refused when the deployment does not allow a per-meeting choice.
 	Mode: String
-	# For opt_in: "each_participant" or "owner_attests"; omitted, the
-	# deployment's rule.
+	# For opt_in: "each_participant" or "owner_attests"; omitted, the meeting's
+	# rule once started in opt_in, or else the deployment's.
 	Rule: String
 	# Fill the notice's {LMA_USER} and {meeting} placeholders.
 	LmaUser: String

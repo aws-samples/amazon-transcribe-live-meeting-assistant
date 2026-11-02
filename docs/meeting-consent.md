@@ -297,12 +297,18 @@ subscription {
 Arguments that are checked:
 
 - `Mode` is `off`, `notify` or `opt_in`; `Rule` is `each_participant` or
-  `owner_attests`, and is used only with `opt_in`. Both default to the
-  deployment's.
-- Starting consent again with the same mode and rule returns the record as it
-  is, so a capture client that restarts can call it again. Starting it with a
-  different mode or rule is refused once a notice, reply or attestation has been
-  recorded.
+  `owner_attests`, and is used only with `opt_in`. Omitted, each is the
+  meeting's own once its consent has started, and the deployment's before
+  that.
+- Starting consent again with the mode and rule already in force, or naming
+  neither, returns the record as it is, without a write: a capture client that
+  restarts keeps the meeting's choice and its notice even if the deployment's
+  settings have changed since. `NoticeText`, `LmaUser` and `MeetingName` are
+  read only when consent starts or its mode changes.
+- Starting it with a different mode or rule is refused once a notice, reply,
+  attestation or evidence image has been recorded. Before that, the mode is
+  changed and the change is added to the status history; the participants
+  listed and when consent was first started are kept.
 - Every other mutation is refused until consent has been started.
 - A backend role's reply names its `Source`, `chat` or `voice`; an attestation
   by a backend role names `AttestedBy`.

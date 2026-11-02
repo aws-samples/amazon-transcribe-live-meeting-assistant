@@ -441,3 +441,31 @@ def test_a_shared_user_cannot_record_a_notice(dynamo) -> None:
     result = call("recordMeetingConsentNotice", user(OWNER), Channel="chat")
     assert result["Consent"]["Notices"][0]["PostedBy"] == OWNER
     assert result["Consent"]["Status"] == "granted"
+
+
+def test_a_restart_keeps_its_mode_after_the_settings_change(dynamo, monkeypatch) -> None:
+    settings(monkeypatch, mode="notify")
+    call("startMeetingConsent", BACKEND)
+    call("recordMeetingConsentNotice", BACKEND, Channel="chat")
+    writes = dynamo.updates
+    settings(monkeypatch, mode="opt_in", consentRule="owner_attests")
+    result = call("startMeetingConsent", BACKEND)
+    assert result["Consent"]["Mode"] == "notify"
+    assert dynamo.updates == writes
+
+
+def test_changing_the_mode_before_anything_was_posted_keeps_the_history(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    call("setMeetingConsentParticipants", BACKEND, Participants=["Ana"])
+    result = call("startMeetingConsent", user(OWNER), Mode="opt_in", Rule="each_participant")
+    record = result["Consent"]
+    assert (record["Mode"], record["Status"], record["CaptureAllowed"]) == (
+        "opt_in",
+        "pending",
+        False,
+    )
+    assert record["Participants"] == ["Ana"] and record["StartedBy"] == "LMA"
+    assert record["StatusHistory"][-1]["Reason"] == (
+        f"the mode was changed to opt_in (each_participant) by {OWNER}"
+    )
+    assert [h["Status"] for h in record["StatusHistory"]] == ["pending", "pending"]

@@ -449,13 +449,46 @@ def get_meeting_consent(caller: Mapping[str, Any], arguments: Mapping[str, Any])
     }
 
 
+def requested_choice(
+    data: Mapping[str, Any], current: Optional[Mapping[str, Any]], settings: Mapping[str, Any]
+) -> tuple:
+    """The mode and rule a start asks for.
+
+    An omitted Mode or Rule means the meeting's own, once its consent has been
+    started, and the deployment's before that. So a capture client that
+    restarts and names nothing keeps the choice the meeting started with, even
+    when the deployment's settings have changed since.
+    """
+    started = current if current and current.get("Mode") in consent.MODES else None
+    mode = one_of(
+        data.get("Mode"),
+        consent.MODES,
+        "Mode",
+        default=started["Mode"] if started else settings["mode"],
+    )
+    if mode != consent.MODE_OPT_IN:
+        return mode, None
+    if started and started["Mode"] == mode and started.get("Rule") in consent.RULES:
+        default_rule = started["Rule"]
+    else:
+        default_rule = settings["consentRule"]
+    return mode, one_of(data.get("Rule"), consent.RULES, "Rule", default=default_rule)
+
+
 def start_meeting_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
     call_id = data["CallId"]
     settings = consent_settings()
-    mode = one_of(data.get("Mode"), consent.MODES, "Mode", default=settings["mode"])
-    rule = None
-    if mode == consent.MODE_OPT_IN:
-        rule = one_of(data.get("Rule"), consent.RULES, "Rule", default=settings["consentRule"])
+    meeting, access = load(caller, call_id)
+    if not (access["owner"] or access["admin"] or access["backend"]):
+        raise refuse(caller, call_id, "start")
+    current = meeting.get("Consent") or None
+    mode, rule = requested_choice(data, current, settings)
+    if current and current.get("Mode") == mode and current.get("Rule") == rule:
+        # A capture client that restarts starts again: answer with the record
+        # as it is, without a write. Its notice is the one it started with;
+        # NoticeText, LmaUser and MeetingName are not read again. Subscribers
+        # still receive the unchanged record, as for any successful mutation.
+        return update_out(meeting, call_id)
     permitted, why = consent.override_permitted(settings, mode, rule)
     if not permitted:
         raise BadRequestError(why)
@@ -493,7 +526,7 @@ def start_meeting_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) ->
                 consent_phrase=(settings["consentPhrases"] or [""])[0],
                 objection_phrase=(settings["objectionPhrases"] or [""])[0],
             )
-        return {
+        started = {
             "Mode": mode,
             "Rule": rule,
             "NoticeText": notice,
@@ -508,19 +541,28 @@ def start_meeting_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) ->
             "StartedAt": now,
             "StartedBy": actor(caller),
         }
+        if record:
+            # A change of mode before anything was posted or replied: who is
+            # present, when consent was first started and the history carry
+            # over, and the change itself is added to the history.
+            for kept in ("Participants", "ParticipantsSeen", "StartedAt", "StartedBy"):
+                started[kept] = record.get(kept) or started[kept]
+            status, allowed, _reason = consent.evaluate(started)
+            history = list(record.get("StatusHistory") or [])
+            history.append(
+                {
+                    "Status": status,
+                    "CaptureAllowed": allowed,
+                    "At": now,
+                    "Reason": f"the mode was changed to {mode}"
+                    + (f" ({rule})" if rule else "")
+                    + f" by {actor(caller)}",
+                }
+            )
+            started["StatusHistory"] = history[-consent.MAX_STATUS_HISTORY :]
+            started["Status"], started["CaptureAllowed"] = status, allowed
+        return started
 
-    meeting, access = load(caller, call_id)
-    current = meeting.get("Consent") or None
-    if (
-        current
-        and (access["owner"] or access["admin"] or access["backend"])
-        and current.get("Mode") == mode
-        and current.get("Rule") == rule
-    ):
-        # A capture client that restarts starts again: answer with the record
-        # as it is, without a write. Subscribers still receive the unchanged
-        # record, as for any successful mutation.
-        return update_out(meeting, call_id)
     return write_consent(caller, call_id, change)
 
 
