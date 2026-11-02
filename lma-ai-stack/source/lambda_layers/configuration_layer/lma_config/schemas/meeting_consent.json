@@ -5,7 +5,7 @@
   "description": "Whether participants are told that a meeting is recorded and transcribed, and whether their consent is needed first. This is the deployment's default; a meeting can be started with a different choice unless that is turned off below. What LMA records is supporting evidence of what participants said, not a legal determination of consent; see the Meeting Consent documentation.",
   "sectionLabel": "Meeting Consent",
   "appliesText": "A saved change applies to meetings whose consent starts after the save; a meeting already under way keeps the mode and rule it started with.",
-  "order": 12,
+  "order": 13,
   "collapsible": true,
   "defaultExpanded": false,
   "mergeStrategy": "merge",
@@ -78,6 +78,34 @@
       "type": "boolean",
       "title": "Allow a different choice per meeting",
       "description": "On: whoever starts a meeting may choose another mode or rule for it. Off: a meeting may only use this mode and rule or a stricter one."
+    },
+    "keepEvidenceScreenshots": {
+      "order": 7,
+      "type": "boolean",
+      "title": "Keep evidence screenshots",
+      "description": "On: screenshots kept as consent evidence stay with the meeting until it is deleted. Off: each screenshot is deleted as soon as it has been checked, and only the check's result is kept."
+    },
+    "verifierModelId": {
+      "order": 8,
+      "type": "string",
+      "title": "Evidence check model",
+      "description": "The Amazon Bedrock vision model that checks a consent evidence screenshot: whether the notice is visible, which replies are visible and from whom, and whether anybody objected. Its answer is supporting evidence only; it never changes a meeting's consent status. Image-capable models only.",
+      "enum": [
+        "amazon.nova-lite-v1:0",
+        "amazon.nova-pro-v1:0",
+        "us.amazon.nova-premier-v1:0",
+        "global.amazon.nova-2-lite-v1:0",
+        "us.amazon.nova-2-lite-v1:0",
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "us.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-haiku-5-5",
+        "us.anthropic.claude-sonnet-5-5",
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "global.anthropic.claude-sonnet-4-6",
+        "global.anthropic.claude-haiku-5-5",
+        "global.anthropic.claude-sonnet-5-5"
+      ]
     }
   },
   "additionalProperties": false

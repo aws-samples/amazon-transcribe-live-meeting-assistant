@@ -23,6 +23,7 @@ export const CONTEXT_LABELS = {
   SpeakerNaming: 'Speaker naming',
   AgendaDerivation: 'Agenda derivation',
   SlideText: 'Slide text',
+  ConsentVerification: 'Consent evidence check',
   Sentiment: 'Sentiment analysis',
   PageAutomation: 'Page automation',
 };

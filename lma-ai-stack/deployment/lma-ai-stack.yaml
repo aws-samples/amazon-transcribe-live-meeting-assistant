@@ -6206,7 +6206,10 @@ Resources:
         Lambda resolver for a meeting's consent record: notices, replies,
         attestation, evidence and the capture gate
       MemorySize: 256
-      Timeout: 30
+      # Most operations are one read and one write. verifyMeetingConsentEvidence
+      # waits for the verifier's model call; AppSync stops waiting at 30
+      # seconds, and a slower check still stores its result within this.
+      Timeout: 90
       Tracing: Active
       Environment:
         Variables:
@@ -6214,6 +6217,7 @@ Resources:
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           RECORDINGS_BUCKET: !Ref S3BucketName
           CONSENT_EVIDENCE_PREFIX: "lma-consent-evidence/"
+          VERIFIER_FUNCTION_NAME: !Ref ConsentEvidenceVerifierFunction
           ADMIN_GROUP: "Admin"
           LOG_LEVEL: !Ref LogLevel
       # Carries lma_consent (the consent rules) and lma_config (the deployment's
@@ -6291,11 +6295,17 @@ Resources:
                   - dynamodb:GetItem
                 Resource: !GetAtt ConfigurationTable.Arn
               # The signed evidence links act with this role's access, so it
-              # reads the evidence images and nothing else in the bucket.
+              # reads the evidence images and nothing else in the bucket. It
+              # deletes one once checked, when evidence screenshots are not kept.
               - Effect: Allow
                 Action:
                   - s3:GetObject
+                  - s3:DeleteObject
                 Resource: !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-consent-evidence/*"
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt ConsentEvidenceVerifierFunction.Arn
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -6343,6 +6353,129 @@ Resources:
       ServiceRoleArn: !GetAtt AppSyncMeetingConsentLambdaRole.Arn
       LambdaConfig:
         LambdaFunctionArn: !GetAtt MeetingConsentResolverFunction.Arn
+
+  # The consent evidence verifier: reads one evidence screenshot with a vision
+  # model and returns what it shows. Invoked only by the meeting consent
+  # resolver, which stores the result. See docs/meeting-consent.md.
+  ConsentEvidenceVerifierFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt ConsentEvidenceVerifierFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      CodeUri: ../source/lambda_functions/consent_evidence_verifier
+      Description: Checks a consent evidence screenshot with a vision model
+      MemorySize: 512
+      # One model call on one image, which the resolver waits for.
+      Timeout: 60
+      Tracing: Active
+      Environment:
+        Variables:
+          RECORDINGS_BUCKET: !Ref S3BucketName
+          CONSENT_EVIDENCE_PREFIX: "lma-consent-evidence/"
+          BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
+          # Token usage per check, for the meeting cost estimate. The metering
+          # records' retention is read from the configuration's Retention section,
+          # with this parameter as its limit.
+          METERING_TABLE_NAME: !Ref EventSourcingTable
+          METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          LOG_LEVEL: !Ref LogLevel
+      # Carries lma_metering and lma_consent. Pure Python, so it does not pin an
+      # architecture.
+      Layers:
+        - !Ref ConfigurationPythonLayer
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/ConsentEvidenceVerifierFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required - invoked synchronously by the resolver, which reports a failure to its caller"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only a bucket and table name, a prefix and a region"
+    DependsOn:
+      - ConsentEvidenceVerifierFunctionLogGroup
+      # Ordered behind the seeder, like every configuration reader.
+      - SeedConfiguration
+
+  ConsentEvidenceVerifierFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/ConsentEvidenceVerifierFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  ConsentEvidenceVerifierFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: ConsentEvidenceVerifier Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action:
+              - "sts:AssumeRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-ConsentEvidenceVerifier
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # The evidence images only.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-consent-evidence/*"
+              # Metering records for the meeting cost estimate, only under mtr#.
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt EventSourcingTable.Arn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "mtr#*"
+              # Scoped as the agenda deriver scopes the identical call.
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*"
+              # Read-only, on the shared configuration table: the metering
+              # records' retention. The KMS grant below covers decrypting it.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !GetAtt ConfigurationTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
   ##########################################################################
   # The configuration editor (read every section with its schema, save the
@@ -7448,6 +7581,19 @@ Resources:
       DataSourceName: !GetAtt MeetingConsentLambdaDataSource.Name
       TypeName: Mutation
       FieldName: addMeetingConsentEvidence
+      RequestMappingTemplateS3Location: ../source/appsync/meetingConsent.request.vtl
+      # Published to onUpdateMeetingConsent, filtered on SharedWith in
+      # subscription.js, so it answers in the form that filter matches.
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  VerifyMeetingConsentEvidenceAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingConsentLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: verifyMeetingConsentEvidence
       RequestMappingTemplateS3Location: ../source/appsync/meetingConsent.request.vtl
       # Published to onUpdateMeetingConsent, filtered on SharedWith in
       # subscription.js, so it answers in the form that filter matches.
