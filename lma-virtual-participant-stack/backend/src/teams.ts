@@ -14,6 +14,9 @@ import { findElementWithFallback, classifyJoinState, isResolverEnabled } from '.
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { humanClick, humanType, POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('teams');
 
 /** What one poll of the Teams roster badge told us. */
 export type AttendeeReading =
@@ -184,7 +187,7 @@ function intFromEnv(
     const trimmed = raw.trim();
     const parsed = /^\d+$/.test(trimmed) ? Number(trimmed) : NaN;
     if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
-        console.log(
+        log.info(
             `Ignoring ${variable}="${raw}" ` +
                 `(want a whole number from ${minimum} to ${maximum}) — using ${fallback}`,
         );
@@ -212,7 +215,7 @@ function clampPolls(
         pollsFor(window.maximum, pollMs, 'ceiling'),
     );
     if (resolved !== requested) {
-        console.log(
+        log.info(
             `Using ${resolved} polls for ${variable}, not ${requested}: at ${pollMs}ms per poll ` +
                 `that keeps the tolerance between ${window.minimum}ms and ${window.maximum}ms`,
         );
@@ -498,14 +501,14 @@ export default class Teams {
                 { maxRetries: 8, delayMs: 500 },
             );
             if (!chatBtn) {
-                console.log('Could not locate Teams chat panel button — dumping toolbar DOM for diagnosis.');
+                log.warn('Could not locate Teams chat panel button — dumping toolbar DOM for diagnosis.');
                 await this.dumpToolbarDom(page);
                 return false;
             }
-            console.log(`Opening chat panel (via ${chatBtn.source} selector: ${chatBtn.selector}).`);
+            log.info(`Opening chat panel (via ${chatBtn.source} selector: ${chatBtn.selector}).`);
             await humanClick(page, chatBtn.element);
         } catch (e) {
-            console.warn('Opening chat panel failed (non-fatal):', e);
+            log.warn('Opening chat panel failed (non-fatal):', e);
             return false;
         }
         const until = Date.now() + 4000;
@@ -539,9 +542,9 @@ export default class Teams {
                     // Top-of-screen toolbar controls only (y < 200), visible.
                     .filter((b) => b.vis && b.y < 200);
             });
-            console.log(`[toolbar-dom] top buttons=${JSON.stringify(btns)}`);
+            log.info(`[toolbar-dom] top buttons=${JSON.stringify(btns)}`);
         } catch (e) {
-            console.warn('[toolbar-dom] dump failed (non-fatal):', e);
+            log.warn('[toolbar-dom] dump failed (non-fatal):', e);
         }
     }
 
@@ -583,10 +586,10 @@ export default class Teams {
                     .map((el) => ({ ...attrs(el), text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 50) }));
                 return { containers, rows };
             });
-            console.log(`[chat-list-dom] containers=${JSON.stringify(info.containers)}`);
-            console.log(`[chat-list-dom] sampleRows=${JSON.stringify(info.rows)}`);
+            log.info(`[chat-list-dom] containers=${JSON.stringify(info.containers)}`);
+            log.info(`[chat-list-dom] sampleRows=${JSON.stringify(info.rows)}`);
         } catch (e) {
-            console.warn('[chat-list-dom] dump failed (non-fatal):', e);
+            log.warn('[chat-list-dom] dump failed (non-fatal):', e);
         }
     }
 
@@ -625,11 +628,11 @@ export default class Teams {
                 const regionBtns = Array.from(chatRegion.querySelectorAll('button')).slice(0, 25).map(attrs);
                 return { editables, sendBtns, regionBtns };
             });
-            console.log(`[chat-dom ${label}] editables=${JSON.stringify(info.editables)}`);
-            console.log(`[chat-dom ${label}] sendButtons=${JSON.stringify(info.sendBtns)}`);
-            console.log(`[chat-dom ${label}] chatRegionButtons=${JSON.stringify(info.regionBtns)}`);
+            log.info(`[chat-dom ${label}] editables=${JSON.stringify(info.editables)}`);
+            log.info(`[chat-dom ${label}] sendButtons=${JSON.stringify(info.sendBtns)}`);
+            log.info(`[chat-dom ${label}] chatRegionButtons=${JSON.stringify(info.regionBtns)}`);
         } catch (e) {
-            console.warn(`[chat-dom ${label}] dump failed (non-fatal):`, e);
+            log.warn(`[chat-dom ${label}] dump failed (non-fatal):`, e);
         }
     }
 
@@ -665,10 +668,10 @@ export default class Teams {
             );
             if (!found) {
                 await this.dumpChatDom(page, 'no-input');
-                console.log('Could not locate Teams chat input — skipping message post (non-fatal).');
+                log.warn('Could not locate Teams chat input — skipping message post (non-fatal).');
                 return;
             }
-            console.log(`Teams chat input resolved via ${found.source} selector: ${found.selector}`);
+            log.info(`Teams chat input resolved via ${found.source} selector: ${found.selector}`);
             for (const message of messages) {
                 // Focus + click the composer so the caret is inside it.
                 try {
@@ -713,11 +716,11 @@ export default class Teams {
                         .evaluate((el) => ((el as HTMLElement).innerText || el.textContent || '').trim())
                         .catch(() => '');
                     if (!pasted || !afterPaste.includes(message.slice(0, Math.min(20, message.length)))) {
-                        console.log(`Paste insert did not land (pasted=${pasted}) — typing with keystrokes.`);
+                        log.info(`Paste insert did not land (pasted=${pasted}) — typing with keystrokes.`);
                         await page.keyboard.type(message, { delay: 0 });
                     }
                 } catch (e) {
-                    console.warn('Chat composer typing failed (non-fatal), skipping rest:', e);
+                    log.warn('Chat composer typing failed (non-fatal), skipping rest:', e);
                     return;
                 }
                 // Verify the text actually entered the composer before submitting.
@@ -725,13 +728,13 @@ export default class Teams {
                     .evaluate((el) => ((el as HTMLElement).innerText || el.textContent || '').trim().slice(0, 120))
                     .catch(() => '');
                 const ok = typed.includes(message.slice(0, Math.min(20, message.length)));
-                console.log(`Composer content after insert: "${typed}" (matches=${ok}).`);
+                log.info(`Composer content after insert: "${typed}" (matches=${ok}).`);
 
                 // Submit. Click the real Send button (primary), fall back to
                 // Enter. Then verify the composer cleared (message left the box).
                 const sent = await this.clickSendButton(page);
                 if (!sent) {
-                    console.log('Send button not found — falling back to Enter key.');
+                    log.info('Send button not found — falling back to Enter key.');
                     await page.keyboard.press('Enter');
                 }
                 await new Promise((resolve) => setTimeout(resolve, 500));
@@ -739,16 +742,16 @@ export default class Teams {
                     .evaluate((el, text) => ((el as HTMLElement).innerText || el.textContent || '').includes((text as string).slice(0, 20)), message)
                     .catch(() => false);
                 if (stillThere) {
-                    console.log('Composer still holds text after submit — retrying Enter once.');
+                    log.info('Composer still holds text after submit — retrying Enter once.');
                     await page.keyboard.press('Enter');
                     await new Promise((resolve) => setTimeout(resolve, 400));
                 } else {
-                    console.log('Chat message submitted (composer cleared).');
+                    log.info('Chat message submitted (composer cleared).');
                 }
                 await new Promise((resolve) => setTimeout(resolve, 150));
             }
         } catch (e) {
-            console.warn('sendMessages failed (non-fatal — VP remains in meeting):', e);
+            log.warn('sendMessages failed (non-fatal — VP remains in meeting):', e);
         }
     }
 
@@ -803,12 +806,12 @@ export default class Teams {
             void startChatAnswer(chatQuestion, null, 'teams', (messages) => this.sendMessages(page, messages));
         }
         if (matchesEndCommand(message)) {
-            console.log(`LMA Virtual Participant has been asked to leave the meeting: ${JSON.stringify(message)}`);
+            log.info(`LMA Virtual Participant has been asked to leave the meeting: ${JSON.stringify(message)}`);
             try {
                 await this.sendMessages(page, exitMessagesFor(null));
             } catch (e) {
                 // Best effort — fall through to ending the meeting.
-                console.warn('Could not send goodbye message:', e);
+                log.warn('Could not send goodbye message:', e);
             }
             details.start = false;
             // Hand off to the wait-for-meeting-end race; the orchestrator's
@@ -826,15 +829,15 @@ export default class Teams {
         } else if (matchesChatCommand(message, details.helpCommand)) {
             // Answered whether or not transcription is paused: the list is how
             // someone finds out how to resume it.
-            console.log('[chat-help] posting the chat command list');
+            log.info('[chat-help] posting the chat command list');
             await this.sendMessages(page, chatHelpMessages(voiceAssistant));
         } else if (details.start && matchesChatCommand(message, details.pauseCommand)) {
             details.start = false;
-            console.log(details.pauseMessages[0]);
+            log.info(details.pauseMessages[0]);
             await this.sendMessages(page, details.pauseMessages);
         } else if (!details.start && matchesChatCommand(message, details.startCommand)) {
             details.start = true;
-            console.log(details.startMessages[0]);
+            log.info(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
         } else if (details.start) {
             details.messages.push(message);
@@ -916,7 +919,7 @@ export default class Teams {
         page.on('console', (msg) => {
             const t = msg.text();
             if (t.startsWith('DEBUG:') || t.includes('speakerChange')) {
-                console.log(`Browser: ${t}`);
+                log.info(`Browser: ${t}`);
             }
         });
         // Teams has no heavy credentialled sign-in phase, so bring the Simli
@@ -946,7 +949,7 @@ export default class Teams {
 
         await substep('Entering the meeting room…');
         try {
-            console.log("Getting meeting link.");
+            log.info("Getting meeting link.");
             await gotoMeetingPage(
                 page,
                 `https://teams.microsoft.com/v2/?meetingjoin=true#/meet/${details.invite.meetingId}?p=${details.invite.meetingPassword}&anon=true`,
@@ -954,7 +957,7 @@ export default class Teams {
                 'teams-join',
             );
         } catch {
-            console.log("Your scribe was unable to join the meeting.");
+            log.warn("Your scribe was unable to join the meeting.");
             return { reason: 'never-joined', trigger: 'pre-join:goto-failed' };
         }
 
@@ -975,7 +978,7 @@ export default class Teams {
         }
 
         await substep('Loading the meeting join screen…');
-        console.log("Entering name.");
+        log.info("Entering name.");
         // Candidate selectors span both the v2 client and the lightweight anon
         // ("light-meetings") client that anonymous joins are routed into.
         // useScreenshot lets the AI fallback recover even when the DOM snapshot
@@ -998,7 +1001,7 @@ export default class Teams {
             { maxRetries: 60, delayMs: 1000 },
         );
         if (!nameRes) {
-            console.log('Could not locate Teams display-name input — aborting join');
+            log.warn('Could not locate Teams display-name input — aborting join');
             return { reason: 'never-joined', trigger: 'pre-join:no-name-input' };
         }
         // humanType focuses the field in the DOM and types via the keyboard,
@@ -1010,7 +1013,7 @@ export default class Teams {
         // swallow the first keystroke burst), mirroring the Zoom handler.
         const displayName = sanitizeTeamsDisplayName(details.scribeIdentity);
         if (displayName !== details.scribeIdentity) {
-            console.log(
+            log.info(
                 `Display name "${details.scribeIdentity}" contains characters Teams rejects — joining as "${displayName}".`,
             );
         }
@@ -1024,7 +1027,7 @@ export default class Teams {
             (el: Element) => (el as HTMLInputElement).value || '',
         );
         if (typedName !== displayName) {
-            console.warn(
+            log.warn(
                 `Display-name value mismatch (expected "${displayName}", got "${typedName}") — clearing and re-typing.`,
             );
             await nameRes.element.evaluate((el: Element) => {
@@ -1041,7 +1044,7 @@ export default class Teams {
         // Only click mute button if voice assistant is NOT enabled
         if (!voiceAssistant.isEnabled()) {
             await new Promise((resolve) => setTimeout(resolve, 250));
-            console.log("Clicking mute button.");
+            log.info("Clicking mute button.");
             const muteRes = await findElementWithFallback(
                 page,
                 ['[data-tid="toggle-mute"]'],
@@ -1054,15 +1057,15 @@ export default class Teams {
             );
             if (muteRes) await humanClick(page, muteRes.element);
         } else {
-            console.log('Voice assistant enabled - skipping mute button for agent audio');
+            log.info('Voice assistant enabled - skipping mute button for agent audio');
         }
 
         await new Promise((resolve) => setTimeout(resolve, 250));
         if (simliAvatar.isConnected()) {
-            console.log("Simli avatar active - keeping video ON for avatar camera.");
+            log.info("Simli avatar active - keeping video ON for avatar camera.");
             // Don't click the video toggle - leave it on so Simli avatar shows
         } else {
-            console.log("Clicking video button to turn off.");
+            log.info("Clicking video button to turn off.");
             const videoRes = await findElementWithFallback(
                 page,
                 ['[data-tid="toggle-video"]'],
@@ -1078,7 +1081,7 @@ export default class Teams {
 
         await new Promise((resolve) => setTimeout(resolve, 250));
         await substep('Setting up audio and video…');
-        console.log("Clicking join button.");
+        log.info("Clicking join button.");
         const joinRes = await findElementWithFallback(
             page,
             ['[data-tid="prejoin-join-button"]'],
@@ -1090,7 +1093,7 @@ export default class Teams {
             { maxRetries: 10, delayMs: 500 },
         );
         if (!joinRes) {
-            console.log('Could not locate Teams Join button — aborting');
+            log.warn('Could not locate Teams Join button — aborting');
             return { reason: 'never-joined', trigger: 'pre-join:no-join-button' };
         }
         // humanClick bypasses the pointer_events hit-test that fails when Teams
@@ -1098,7 +1101,7 @@ export default class Teams {
         await humanClick(page, joinRes.element);
 
         // Wait for potential CAPTCHA with longer timeout
-        console.log("Checking for CAPTCHA...");
+        log.info("Checking for CAPTCHA...");
         await new Promise((resolve) => setTimeout(resolve, 250));
         
         try {
@@ -1108,8 +1111,8 @@ export default class Teams {
             );
             
             if (captchaElement) {
-                console.log("CAPTCHA detected! Waiting for manual resolution...");
-                console.log("Please solve the CAPTCHA in the VNC viewer.");
+                log.info("CAPTCHA detected! Waiting for manual resolution...");
+                log.info("Please solve the CAPTCHA in the VNC viewer.");
                 
                 // Notify frontend that manual action is required
                 if (details.invite.virtualParticipantId) {
@@ -1133,7 +1136,7 @@ export default class Teams {
                     })
                 ]);
                 
-                console.log("CAPTCHA appears to be resolved, continuing...");
+                log.info("CAPTCHA appears to be resolved, continuing...");
                 await new Promise((resolve) => setTimeout(resolve, 250));
                 
                 // Clear manual action notification after CAPTCHA is resolved
@@ -1143,7 +1146,7 @@ export default class Teams {
                 }
             }
         } catch (error) {
-            console.log("No CAPTCHA detected or CAPTCHA timeout, continuing...");
+            log.info("No CAPTCHA detected or CAPTCHA timeout, continuing...");
         }
 
         await substep('Waiting to be admitted to the meeting…');
@@ -1182,19 +1185,19 @@ export default class Teams {
                 try {
                     const verdict = await classifyJoinState(page, { platform: 'TEAMS' });
                     if (verdict) {
-                        console.log(`[teams] AI join-state check: ${verdict.state} — ${verdict.reason}`);
+                        log.info(`[teams] AI join-state check: ${verdict.state} — ${verdict.reason}`);
                         if (verdict.state === 'in-meeting') {
-                            console.log('[teams] AI confirms we are in the meeting (CSS heuristic missed it) — proceeding.');
+                            log.info('[teams] AI confirms we are in the meeting (CSS heuristic missed it) — proceeding.');
                             admitted = true;
                             break;
                         }
                         if (verdict.state === 'error') {
-                            console.warn(`[teams] AI detected an error/blocked screen during admission wait: ${verdict.reason}`);
+                            log.warn(`[teams] AI detected an error/blocked screen during admission wait: ${verdict.reason}`);
                             return { reason: 'never-joined', trigger: 'pre-join:ai-error-screen' };
                         }
                     }
                 } catch (e) {
-                    console.warn('[teams] AI join-state check failed (non-fatal):', e);
+                    log.warn('[teams] AI join-state check failed (non-fatal):', e);
                 }
             }
             // Keep the JOINING detail fresh so the long admission wait never
@@ -1221,13 +1224,13 @@ export default class Teams {
                 }
             }
             if (Date.now() > baseDeadline && !extended) {
-                console.log("Your scribe was not admitted into the meeting.");
+                log.info("Your scribe was not admitted into the meeting.");
                 return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
             }
             await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
         }
         if (!admitted) {
-            console.log("Your scribe was not admitted into the meeting.");
+            log.info("Your scribe was not admitted into the meeting.");
             return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
         }
 
@@ -1244,11 +1247,11 @@ export default class Teams {
         }
 
         await substep('In the meeting — opening chat panel…');
-        console.log("Opening chat panel.");
+        log.info("Opening chat panel.");
         await this.openChatPanel(page);
 
         await substep('In the meeting — posting introduction message…');
-        console.log("Sending introduction messages.");
+        log.info("Sending introduction messages.");
         await this.sendMessages(page, details.introMessages);
         await substep('In the meeting — listening for participants and transcript…');
 
@@ -1259,19 +1262,19 @@ export default class Teams {
         // light-meetings anon client, so a hard waitForSelector here would block
         // the intro + transcription for up to waitingTimeout (5 min) or throw
         // and abort an otherwise-successful join. Try briefly, then move on.
-        console.log("Opening view panel (best-effort).");
+        log.info("Opening view panel (best-effort).");
         try {
             const viewPanelElement = await page.waitForSelector("#custom-view-button", {
                 timeout: 5000,
             });
             await viewPanelElement?.click({ timeout: POSITIONAL_CLICK_TIMEOUT_MS });
-            console.log("Selecting speaker view.");
+            log.info("Selecting speaker view.");
             const speakerViewElement = await page.waitForSelector("#SpeakerView-button", {
                 timeout: 5000,
             });
             await speakerViewElement?.click({ timeout: POSITIONAL_CLICK_TIMEOUT_MS });
         } catch {
-            console.log("View/speaker-view controls not found (likely light-meetings client) — skipping.");
+            log.info("View/speaker-view controls not found (likely light-meetings client) — skipping.");
         }
 
         // All the in-meeting monitoring wiring below (attendee/speaker/message
@@ -1308,7 +1311,7 @@ export default class Teams {
         // Audio silence is deliberately NOT a leave signal (long silent
         // document reviews are real meetings).
         const watchdogConfig = resolveAttendeeWatchdogConfig();
-        console.log(
+        log.info(
             'Listening for attendee changes ' +
                 `(poll ${watchdogConfig.pollMs}ms, alone x${watchdogConfig.pollsBeforeEnd}, ` +
                 `badge-missing-and-not-in-meeting x${watchdogConfig.pollsBeforeEndMissing}).`,
@@ -1368,7 +1371,7 @@ export default class Teams {
                 }
 
                 if (ended.ended) {
-                    console.log(`Teams meeting has ended (${ended.how}) — leaving.`);
+                    log.info(`Teams meeting has ended (${ended.how}) — leaving.`);
                     clearInterval(attendeeWatchdog);
                     details.start = false;
                     this.requestEnd({ reason: 'host-ended', trigger: 'post-meeting-screen' });
@@ -1405,14 +1408,14 @@ export default class Teams {
 
                 const decision = decideAttendeeAction(reading, watchdogState, watchdogConfig);
                 if (reading.state === 'OK') {
-                    console.log(
+                    log.info(
                         `DEBUG: Teams attendee count: ${reading.count}, ` +
                             `hasOthers: ${reading.count > 1}, ` +
                             `consecutiveLonely: ${watchdogState.consecutiveLonely}/${watchdogConfig.pollsBeforeEnd}`,
                     );
                 } else if (reading.state === 'BADGE_MISSING_IN_MEETING') {
                     const spent = watchdogState.suppressedMissing > watchdogConfig.maxSuppressedPolls;
-                    console.log(
+                    log.info(
                         'DEBUG: Teams attendee badge missing/empty but in-meeting chrome is present ' +
                             `(matched ${inMeetingVia}) — ` +
                             `${watchdogState.suppressedMissing}/${watchdogConfig.maxSuppressedPolls} ` +
@@ -1422,7 +1425,7 @@ export default class Teams {
                                   'content share or with a collapsed toolbar.'),
                     );
                 } else {
-                    console.log(
+                    log.info(
                         'DEBUG: Teams attendee badge missing/empty AND no in-meeting chrome — ' +
                             `${watchdogState.consecutiveMissing}/${watchdogConfig.pollsBeforeEndMissing} consecutive ` +
                             '(the shape of a meeting that has ended; the post-meeting screen, when Teams ' +
@@ -1431,7 +1434,7 @@ export default class Teams {
                 }
 
                 if (decision.action === 'end') {
-                    console.log(`LMA Virtual Participant is leaving: ${decision.detail}`);
+                    log.info(`LMA Virtual Participant is leaving: ${decision.detail}`);
                     clearInterval(attendeeWatchdog);
                     details.start = false;
                     this.requestEnd({ reason: decision.reason, trigger: decision.trigger });
@@ -1485,7 +1488,7 @@ export default class Teams {
             });
         }
 
-        console.log("Listening for speaker changes.");
+        log.info("Listening for speaker changes.");
 
         await page.evaluate(() => {
             console.log('DEBUG: Setting up speaker detection for both normal and screen sharing modes...');
@@ -1574,7 +1577,7 @@ export default class Teams {
         });
 
         await new Promise((resolve) => setTimeout(resolve, 1000));
-        console.log("Listening for message changes.");
+        log.info("Listening for message changes.");
         // Incoming-message reader. The chat list is a VIRTUALIZED Fluent UI list
         // (message-pane-list-runway/viewport), so rows are recycled rather than
         // cleanly "added" — a childList MutationObserver misses them, and the
@@ -1673,10 +1676,10 @@ export default class Teams {
                             );
                             if (res?.selector) {
                                 aiMessageSelector = res.selector;
-                                console.log(`[teams] AI discovered chat message selector: ${res.selector}`);
+                                log.info(`[teams] AI discovered chat message selector: ${res.selector}`);
                             }
                         } catch (e) {
-                            console.warn('[teams] AI message-selector discovery failed (non-fatal):', e);
+                            log.warn('[teams] AI message-selector discovery failed (non-fatal):', e);
                         }
                     }
                 }
@@ -1690,19 +1693,19 @@ export default class Teams {
             // A monitoring-setup failure is non-fatal: the VP is admitted and
             // (below) transcribing. Speaker/attendee attribution may be degraded
             // but the meeting still works.
-            console.warn('In-meeting monitoring setup failed (non-fatal — VP remains in meeting):', e);
+            log.warn('In-meeting monitoring setup failed (non-fatal — VP remains in meeting):', e);
         }
 
         // Start transcription if enabled (LMA behavior). This is the actual
         // point of the VP, so it runs regardless of any best-effort chat /
         // monitoring hiccups above.
         if (details.start) {
-            console.log(details.startMessages[0]);
+            log.info(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
             transcriptionService.startTranscription();
         }
 
-        console.log("Waiting for meeting end.");
+        log.info("Waiting for meeting end.");
         let exitInfo: ExitInfo = { reason: 'unknown' };
         try {
             // Race the in-process end signal (chat command, etc.) against
@@ -1721,13 +1724,13 @@ export default class Teams {
 
             exitInfo = await Promise.race([this.endRequested, hangupHidden, rejoinAppeared, urlBlank]);
         } catch (error) {
-            console.log(`DEBUG: Teams meeting timeout error: ${error instanceof Error ? error.message : String(error)}`);
-            console.log("Meeting timed out.");
+            log.info(`DEBUG: Teams meeting timeout error: ${error instanceof Error ? error.message : String(error)}`);
+            log.info("Meeting timed out.");
             exitInfo = { reason: 'meeting-timeout', trigger: 'meetingTimeout' };
         } finally {
             details.start = false;
         }
-        console.log(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
+        log.info(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
         return exitInfo;
     }
 }

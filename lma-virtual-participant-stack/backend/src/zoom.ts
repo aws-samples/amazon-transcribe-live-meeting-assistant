@@ -21,6 +21,9 @@ import {
     dismissPostLoginInterstitials,
     gotoZoomSignin,
 } from './zoom-login.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('zoom');
 
 // Zoom's audio/video toggles use SVG icons inside a clickable <button>.
 // SVGs aren't reliable click targets, so we walk up to the nearest
@@ -56,7 +59,7 @@ async function safeEvaluate<T>(
             }),
         ]);
     } catch (e: any) {
-        console.warn(`[zoom] safeEvaluate(${label}) failed/timed out: ${e?.message || e}`);
+        log.warn(`[zoom] safeEvaluate(${label}) failed/timed out: ${e?.message || e}`);
         return fallback;
     } finally {
         if (to) clearTimeout(to);
@@ -124,10 +127,10 @@ export default class Zoom {
             { maxRetries, delayMs },
         );
         if (!result) {
-            console.log(`Failed to resolve ${step} after retries (primaries: ${selectors.join(', ')})`);
+            log.warn(`Failed to resolve ${step} after retries (primaries: ${selectors.join(', ')})`);
             return null;
         }
-        console.log(`Resolved ${step} via ${result.source}: ${result.selector}`);
+        log.info(`Resolved ${step} via ${result.source}: ${result.selector}`);
         return { element: result.element, selector: result.selector };
     }
 
@@ -190,12 +193,12 @@ export default class Zoom {
                 })
                 .catch(() => false);
             if (hasControl && Date.now() - stableSince > 1200) {
-                console.log(`[zoom] prejoin settled at ${url}`);
+                log.info(`[zoom] prejoin settled at ${url}`);
                 return true;
             }
             await new Promise((r) => setTimeout(r, 300));
         }
-        console.warn(`[zoom] prejoin did not settle within ${timeoutMs}ms (at ${(() => { try { return page.url(); } catch { return '?'; } })()}); proceeding anyway`);
+        log.warn(`[zoom] prejoin did not settle within ${timeoutMs}ms (at ${(() => { try { return page.url(); } catch { return '?'; } })()}); proceeding anyway`);
         return false;
     }
 
@@ -350,7 +353,7 @@ export default class Zoom {
             await humanClick(page, found.element);
             await simliAvatar.connectStreamToMeetingPage(page).catch(() => null);
         } else {
-            console.warn('[zoom] Could not locate a Start Video control this attempt.');
+            log.warn('[zoom] Could not locate a Start Video control this attempt.');
         }
     }
 
@@ -368,12 +371,12 @@ export default class Zoom {
         while (Date.now() < deadline) {
             const state = await this.readInMeetingVideoState(page);
             if (state === 'on') {
-                console.log('[zoom] In-meeting video is ON (avatar camera active).');
+                log.info('[zoom] In-meeting video is ON (avatar camera active).');
                 return;
             }
             if (state === 'off' && clicks < 2) {
                 clicks += 1;
-                console.log(`[zoom] In-meeting video is OFF with avatar connected — clicking Start Video (attempt ${clicks}).`);
+                log.info(`[zoom] In-meeting video is OFF with avatar connected — clicking Start Video (attempt ${clicks}).`);
                 await this.clickStartVideo(page);
                 await new Promise((r) => setTimeout(r, 2000));
                 continue;
@@ -415,7 +418,7 @@ export default class Zoom {
                     // spurious click that would disrupt the meeting layout.
                     consecutiveOff += 1;
                     if (consecutiveOff >= 2) {
-                        console.warn('[camera-watchdog] in-meeting video OFF (x2) with avatar connected — re-clicking Start Video');
+                        log.warn('[camera-watchdog] in-meeting video OFF (x2) with avatar connected — re-clicking Start Video');
                         await this.clickStartVideo(page);
                         consecutiveOff = 0;
                     }
@@ -474,10 +477,10 @@ export default class Zoom {
             { maxRetries: 10, delayMs: 500 },
         );
         if (!chatButtonResult) {
-            console.log('Could not locate chat panel button — continuing without chat');
+            log.warn('Could not locate chat panel button — continuing without chat');
             return false;
         }
-        console.log('Opening chat panel.');
+        log.info('Opening chat panel.');
         await humanClick(page, chatButtonResult.element);
         // brief settle for the panel to render its input
         const until = Date.now() + 3000;
@@ -508,7 +511,7 @@ export default class Zoom {
             { maxRetries: 4, delayMs: 300 },
         );
         if (!found) {
-            console.log('Could not locate chat message input — aborting sendMessages');
+            log.warn('Could not locate chat message input — aborting sendMessages');
             return;
         }
         for (const message of messages) {
@@ -558,22 +561,22 @@ export default class Zoom {
 
             switch (type) {
                 case 'log':
-                    console.log(`Browser Log: ${text}`);
+                    log.info(`Browser Log: ${text}`);
                     break; 
                 case 'error':
-                    console.error(`Browser Error: ${text}`);
+                    log.error(`Browser Error: ${text}`);
                     break;
                 case 'info':
-                    console.info(`Browser Info: ${text}`);
+                    log.info(`Browser Info: ${text}`);
                     break;
                 default:
-                    console.log(`Browser ${type}: ${text}`);
+                    log.info(`Browser ${type}: ${text}`);
             }
         });
 
         // Add error handlers
         page.on('pageerror', (error: unknown) => {
-            console.error('Page Error:', error);
+            log.error('Page Error:', error);
         });
 
         page.on('crash', () => {
@@ -581,7 +584,7 @@ export default class Zoom {
             // and are sitting in the wait-for-meeting-end race, requestEnd
             // unblocks it cleanly; before join, index.ts's crash latch wins the
             // initialize() race. Either way we never hang on a dead page.
-            console.error('Browser Error: page crashed (renderer crash) — ending meeting');
+            log.error('Browser Error: page crashed (renderer crash) — ending meeting');
             this.requestEnd({ reason: 'page-closed', trigger: 'renderer-crash' });
         });
 
@@ -611,17 +614,17 @@ export default class Zoom {
             // because it's the CPU-heavy phase (Bedrock + Zoom SPA hydration) and
             // the one that historically stalls; the Simli avatar is deliberately
             // NOT initialized yet so it doesn't contend for CPU here.
-            console.log('[phase] SIGNING_IN — authenticating to Zoom before join');
-            console.log(`Zoom credentials provided (secret: ${zoomCredentialsSecretName}); signing in before join.`);
+            log.info('[phase] SIGNING_IN — authenticating to Zoom before join');
+            log.info(`Zoom credentials provided (secret: ${zoomCredentialsSecretName}); signing in before join.`);
             await substep('Signing in to Zoom…');
             try {
                 const creds = await fetchZoomCredentials(zoomCredentialsSecretName);
                 const loginResult = await loginToZoom(page, creds);
                 if (loginResult.outcome === 'success') {
-                    console.log('[zoom] Sign-in succeeded — profile will persist at meeting end');
+                    log.info('[zoom] Sign-in succeeded — profile will persist at meeting end');
                     signedInToZoom = true;
                 } else if (loginResult.outcome === 'invalid-credentials') {
-                    console.error('[zoom] Sign-in failed: invalid credentials');
+                    log.error('[zoom] Sign-in failed: invalid credentials');
                     throw new Error('Zoom login failed: invalid credentials');
                 } else {
                     // manual-required: user must finish sign-in (CAPTCHA, 2FA,
@@ -630,7 +633,7 @@ export default class Zoom {
                     // silently degrade to guest join (which joins far less
                     // reliably, and the user explicitly opted into
                     // credentialled login).
-                    console.warn(`[zoom] Sign-in needs manual action (reason=${loginResult.manualReason || 'generic'}): ${loginResult.detail || ''} — escalating to user via VNC`);
+                    log.warn(`[zoom] Sign-in needs manual action (reason=${loginResult.manualReason || 'generic'}): ${loginResult.detail || ''} — escalating to user via VNC`);
 
                     // Build a clean, user-facing message by category. Never
                     // surface internal selector/loop detail (e.g. "action
@@ -654,9 +657,9 @@ export default class Zoom {
                     if (loginResult.manualReason === 'captcha') {
                         try {
                             await gotoZoomSignin(page);
-                            console.log('[zoom] Reloaded sign-in page for clean manual CAPTCHA sign-in.');
+                            log.info('[zoom] Reloaded sign-in page for clean manual CAPTCHA sign-in.');
                         } catch (e) {
-                            console.warn('[zoom] Could not reload sign-in page for manual login (non-fatal).');
+                            log.warn('[zoom] Could not reload sign-in page for manual login (non-fatal).');
                         }
                     }
 
@@ -704,14 +707,14 @@ export default class Zoom {
                         if (signInOK) {
                             signedInToZoom = true;
                             await statusManager.clearManualAction();
-                            console.log('[zoom] User completed sign-in via VNC — profile will persist at meeting end');
+                            log.info('[zoom] User completed sign-in via VNC — profile will persist at meeting end');
                         } else {
                             // Don't auto-clear the manual-action banner — let
                             // the user see what happened. Mark as FAILED with
                             // a clear errorMessage so the UI / MCP poller
                             // surfaces the reason instead of silently joining
                             // as guest (which joins far less reliably).
-                            console.warn('[zoom] User did not complete sign-in within 5 min — failing rather than joining as guest');
+                            log.warn('[zoom] User did not complete sign-in within 5 min — failing rather than joining as guest');
                             await statusManager.setFailed(
                                 'Zoom sign-in not completed in time. Open the LMA viewer next time the VP starts and complete the sign-in there. Alternatively, sign in to Zoom on your laptop with this account at least once before launching LMA so the trusted-device cookie is established.',
                             );
@@ -740,7 +743,7 @@ export default class Zoom {
                 // far less reliably. The user explicitly opted into
                 // stored-credential login, so guest-fallback violates their
                 // intent. Mark FAILED and abort instead.
-                console.error('[zoom] Sign-in attempt threw unexpectedly — failing rather than joining as guest:', err);
+                log.error('[zoom] Sign-in attempt threw unexpectedly — failing rather than joining as guest:', err);
                 if (details.invite.virtualParticipantId) {
                     const { createStatusManager } = await import('./status-manager.js');
                     const statusManager = createStatusManager(details.invite.virtualParticipantId);
@@ -757,11 +760,11 @@ export default class Zoom {
         // the Simli avatar — its background render + ~20fps JPEG encode load
         // (~1800/2048 CPU units) is acceptable here and the avatar must be
         // ready before the prejoin camera toggle below captures the camera.
-        console.log('[phase] JOINING — navigating to the meeting and joining');
+        log.info('[phase] JOINING — navigating to the meeting and joining');
         await substep('Entering the meeting room…');
         await prepareAvatar();
 
-        console.log('Getting Zoom meeting link.');
+        log.info('Getting Zoom meeting link.');
         // 60s + tolerate a late-but-successful arrival. A bare goto inherits
         // waitUntil:'load' and the 20s page default, and a live join failed
         // that way AFTER the page had already reached the meeting URL (#547).
@@ -781,7 +784,7 @@ export default class Zoom {
             try {
                 await dismissPostLoginInterstitials(page);
             } catch (err) {
-                console.warn('[zoom] post-meeting-URL interstitial dismissal threw (non-fatal):', err);
+                log.warn('[zoom] post-meeting-URL interstitial dismissal threw (non-fatal):', err);
             }
         }
 
@@ -796,9 +799,9 @@ export default class Zoom {
                 });
                 
                 if (promptText && promptText.includes('Sign in to join this meeting')) {
-                    console.error('ERROR: Enterprise Zoom authentication required!');
-                    console.error('The host requires authentication on the commercial Zoom platform.');
-                    console.error('This meeting requires signing in with a commercial Zoom account.');
+                    log.error('ERROR: Enterprise Zoom authentication required!');
+                    log.error('The host requires authentication on the commercial Zoom platform.');
+                    log.error('This meeting requires signing in with a commercial Zoom account.');
                     enterpriseLogin = true;
 
                     // Notify frontend that manual action is required.
@@ -833,7 +836,7 @@ export default class Zoom {
                     if (enterpriseLoggedIn) {
                         await new Promise((resolve) => setTimeout(resolve, 5000));
                     } else {
-                        console.warn('[zoom] Enterprise login not completed within 2 min.');
+                        log.warn('[zoom] Enterprise login not completed within 2 min.');
                     }
                     if (sm) {
                         await sm.clearManualAction().catch(() => {});
@@ -882,7 +885,7 @@ export default class Zoom {
                     const pwd = details.invite.meetingPassword;
                     let entered = false;
                     for (let attempt = 1; attempt <= 2 && !entered; attempt++) {
-                        console.log(`Typing meeting password (attempt ${attempt}).`);
+                        log.info(`Typing meeting password (attempt ${attempt}).`);
                         await passwordHandle.evaluate((el: Element) => {
                             const i = el as HTMLInputElement;
                             i.focus();
@@ -895,7 +898,7 @@ export default class Zoom {
                         if (got.length === pwd.length) {
                             entered = true;
                         } else {
-                            console.warn(
+                            log.warn(
                                 `Passcode value mismatch (expected ${pwd.length} chars, got ${got.length}) — re-locating and retrying.`,
                             );
                             const fresh = await findPwd();
@@ -904,15 +907,15 @@ export default class Zoom {
                         }
                     }
                     if (!entered) {
-                        console.warn('Could not reliably enter meeting passcode after retries — continuing; Join may reject it.');
+                        log.warn('Could not reliably enter meeting passcode after retries — continuing; Join may reject it.');
                     }
                 } else {
-                    console.log('Meeting does not require a password — skipping password entry.');
+                    log.info('Meeting does not require a password — skipping password entry.');
                 }
             }
 
             await substep('Setting up audio and video…');
-            console.log('Checking audio button state with retry...');
+            log.info('Checking audio button state with retry...');
             // Wait for audio button to appear (handles loading state)
             const audioResult = await this.waitForButtonWithRetry(
                 page,
@@ -923,22 +926,22 @@ export default class Zoom {
             
             if (audioResult && !voiceAssistant.isEnabled()) {
                 if (audioResult.selector === 'svg.SvgAudioMute') {
-                    console.log('Audio is unmuted, clicking to mute it.');
+                    log.info('Audio is unmuted, clicking to mute it.');
                     await clickClickableAncestor(audioResult.element);
                 } else {
-                    console.log('Audio is already muted, skipping click.');
+                    log.info('Audio is already muted, skipping click.');
                 }
             } else if (voiceAssistant.isEnabled()) {
-                console.log('Voice assistant enabled - keeping microphone unmuted for agent audio');
+                log.info('Voice assistant enabled - keeping microphone unmuted for agent audio');
                 if (audioResult && audioResult.selector === 'svg.SvgAudioUnmute') {
-                    console.log('Audio is muted, clicking to unmute it for voice assistant.');
+                    log.info('Audio is muted, clicking to unmute it for voice assistant.');
                     await clickClickableAncestor(audioResult.element);
                 }
             } else {
-                console.log('Warning: Could not find audio button in either state after retries.');
+                log.warn('Warning: Could not find audio button in either state after retries.');
             }
 
-            console.log('Checking video button state with retry...');
+            log.info('Checking video button state with retry...');
             // Wait for video button to appear (handles loading state)
             const videoResult = await this.waitForButtonWithRetry(
                 page,
@@ -956,12 +959,12 @@ export default class Zoom {
                 // deliberate off→on toggle guarantees a fresh getUserMedia.
                 if (videoResult.selector === 'svg.SvgVideoOff') {
                     // Currently off → single click turns it on (fresh getUserMedia).
-                    console.log('Simli avatar active - clicking to turn video ON for avatar camera.');
+                    log.info('Simli avatar active - clicking to turn video ON for avatar camera.');
                     await clickClickableAncestor(videoResult.element);
                 } else {
                     // Currently on → toggle off then on to force a fresh
                     // getUserMedia call that the override can intercept.
-                    console.log('Simli avatar active - video already on; toggling off→on to force camera (re)acquire.');
+                    log.info('Simli avatar active - video already on; toggling off→on to force camera (re)acquire.');
                     await clickClickableAncestor(videoResult.element);
                     await new Promise((r) => setTimeout(r, 800));
                     const reVideo = await this.waitForButtonWithRetry(
@@ -976,7 +979,7 @@ export default class Zoom {
                         await clickClickableAncestor(reVideo.element);
                     } else if (reVideo) {
                         // Already back on somehow — leave it on.
-                        console.log('Simli avatar active - video already back on after toggle.');
+                        log.info('Simli avatar active - video already back on after toggle.');
                     }
                 }
                 // Eagerly connect the relay consumer + canvas in the meeting
@@ -984,13 +987,13 @@ export default class Zoom {
                 await simliAvatar.connectStreamToMeetingPage(page).catch(() => null);
             } else if (videoResult) {
                 if (videoResult.selector === 'svg.SvgVideoOn') {
-                    console.log('Video is on, clicking to turn it off.');
+                    log.info('Video is on, clicking to turn it off.');
                     await clickClickableAncestor(videoResult.element);
                 } else {
-                    console.log('Video is already off, skipping click.');
+                    log.info('Video is already off, skipping click.');
                 }
             } else {
-                console.log('Warning: Could not find video button in either state after retries.');
+                log.warn('Warning: Could not find video button in either state after retries.');
             }
 
             // Always overwrite the prejoin display name with the scribe
@@ -1013,13 +1016,13 @@ export default class Zoom {
                     i.focus();
                     i.value = '';
                 });
-                console.log(`Setting display name to scribe identity ("${details.scribeIdentity}").`);
+                log.info(`Setting display name to scribe identity ("${details.scribeIdentity}").`);
                 await humanType(page, nameResult.element, details.scribeIdentity);
                 const got = await nameResult.element.evaluate(
                     (el: Element) => (el as HTMLInputElement).value || '',
                 );
                 if (got !== details.scribeIdentity) {
-                    console.warn(
+                    log.warn(
                         `Display-name value mismatch (expected "${details.scribeIdentity}", got "${got}") — clearing and re-typing.`,
                     );
                     await nameResult.element.evaluate((el: Element) => {
@@ -1030,10 +1033,10 @@ export default class Zoom {
                     await humanType(page, nameResult.element, details.scribeIdentity);
                 }
             } else if (!signedInToZoom) {
-                console.log('LMA Virtual Participant was unable to join the meeting.');
+                log.warn('LMA Virtual Participant was unable to join the meeting.');
                 throw new Error('Meeting not found or invalid meeting ID');
             } else {
-                console.log('No prejoin name field on this page — skipping.');
+                log.info('No prejoin name field on this page — skipping.');
             }
 
             // Submit the prejoin form, then VERIFY we actually left it. A
@@ -1059,13 +1062,13 @@ export default class Zoom {
                     { maxRetries: 10, delayMs: 500 },
                 );
                 if (joinButtonResult) {
-                    console.log('Clicking Join button to enter the meeting.');
+                    log.info('Clicking Join button to enter the meeting.');
                     await humanClick(page, joinButtonResult.element);
                 } else if (nameResult) {
-                    console.log('Could not locate Join button — pressing Enter on name field as fallback.');
+                    log.warn('Could not locate Join button — pressing Enter on name field as fallback.');
                     await nameResult.element.press('Enter').catch(() => {});
                 } else {
-                    console.log('Could not locate Join button or name field — pressing Enter on page.');
+                    log.warn('Could not locate Join button or name field — pressing Enter on page.');
                     await page.keyboard.press('Enter').catch(() => {});
                 }
             };
@@ -1083,7 +1086,7 @@ export default class Zoom {
             };
 
             if (!(await waitLeftPrejoin(6000))) {
-                console.warn('Join did not advance the prejoin screen — re-entering passcode and retrying once.');
+                log.warn('Join did not advance the prejoin screen — re-entering passcode and retrying once.');
                 await substep('Re-attempting to join the meeting…');
                 // Re-enter passcode if the field is still there (it being
                 // present is itself the signal Join didn't take).
@@ -1100,7 +1103,7 @@ export default class Zoom {
                 }
                 await clickJoin();
                 if (await waitLeftPrejoin(6000)) {
-                    console.log('Join succeeded on retry — left the prejoin screen.');
+                    log.info('Join succeeded on retry — left the prejoin screen.');
                 } else if (this.isOffMeetingPage(page)) {
                     // Zoom bounced us to a sign-in wall / CAPTCHA. Fail loudly:
                     // reporting ACTIVE here means transcribing silence for the
@@ -1110,10 +1113,10 @@ export default class Zoom {
                             '— sign-in or CAPTCHA challenge, so the meeting was never joined.',
                     );
                 } else {
-                    console.warn('Still on prejoin after retry — handing off to admission poll / dialog-watchdog.');
+                    log.warn('Still on prejoin after retry — handing off to admission poll / dialog-watchdog.');
                 }
             } else {
-                console.log('Left the prejoin screen — proceeding to admission wait.');
+                log.info('Left the prejoin screen — proceeding to admission wait.');
             }
         }
 
@@ -1130,7 +1133,7 @@ export default class Zoom {
             this.startUnknownDialogWatchdog(page);
         }
 
-        console.log('Waiting.');
+        log.info('Waiting.');
         await substep('Waiting to be admitted to the meeting…');
         // Poll for the avatar selector instead of a single waitForSelector
         // call so we can dynamically extend the timeout when the watchdog
@@ -1177,19 +1180,19 @@ export default class Zoom {
                 try {
                     const verdict = await classifyJoinState(page, { platform: 'ZOOM' });
                     if (verdict) {
-                        console.log(`[zoom] AI join-state check: ${verdict.state} — ${verdict.reason}`);
+                        log.info(`[zoom] AI join-state check: ${verdict.state} — ${verdict.reason}`);
                         if (verdict.state === 'in-meeting') {
-                            console.log('[zoom] AI confirms we are in the meeting (CSS heuristic missed it) — proceeding.');
+                            log.info('[zoom] AI confirms we are in the meeting (CSS heuristic missed it) — proceeding.');
                             admitted = true;
                             break;
                         }
                         if (verdict.state === 'error') {
-                            console.warn(`[zoom] AI detected an error/blocked screen during admission wait: ${verdict.reason}`);
+                            log.warn(`[zoom] AI detected an error/blocked screen during admission wait: ${verdict.reason}`);
                             return { reason: 'never-joined', trigger: 'pre-join:ai-error-screen' };
                         }
                     }
                 } catch (e) {
-                    console.warn('[zoom] AI join-state check failed (non-fatal):', e);
+                    log.warn('[zoom] AI join-state check failed (non-fatal):', e);
                 }
             }
             // Keep the UI alive during the (potentially minutes-long) wait so
@@ -1223,13 +1226,13 @@ export default class Zoom {
                 }
             }
             if (Date.now() > baseDeadline && !extended) {
-                console.log('LMA Virtual Participant was not admitted into the meeting.');
+                log.info('LMA Virtual Participant was not admitted into the meeting.');
                 return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
             }
             await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
         }
         if (!admitted) {
-            console.log('LMA Virtual Participant was not admitted into the meeting.');
+            log.info('LMA Virtual Participant was not admitted into the meeting.');
             return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
         }
 
@@ -1239,7 +1242,7 @@ export default class Zoom {
         // — the VP was in the room but never opened chat / posted intro / went
         // ACTIVE. A timeout lets the sequence proceed even if the install
         // stalls (the popup auto-dismiss is best-effort anyway).
-        console.log('Setting up Zoom popup auto-dismiss handler.');
+        log.info('Setting up Zoom popup auto-dismiss handler.');
         await safeEvaluate(page, 'popup-dismiss-install', () => {
             // Text patterns that indicate a dismissible consent/info popup.
             // Only modals whose text matches one of these will be auto-dismissed.
@@ -1354,7 +1357,7 @@ export default class Zoom {
         // later. (The dominant historical delay was CPU contention from the
         // avatar during join, now removed by deferring Simli init.)
         await new Promise(resolve => setTimeout(resolve, 500));
-        console.log('Popup handler active, proceeding to open chat.');
+        log.info('Popup handler active, proceeding to open chat.');
 
         // (Note: the unknown-dialog watchdog is already running — started
         // before the waiting-room poll above so it can catch verification /
@@ -1369,10 +1372,10 @@ export default class Zoom {
         await substep('In the meeting — posting introduction…');
         try {
             await this.openChatPanel(page);
-            console.log('Sending introduction messages.');
+            log.info('Sending introduction messages.');
             await this.sendMessages(page, details.introMessages);
         } catch (err) {
-            console.warn('[zoom] Opening chat / posting intro failed (non-fatal, staying in meeting):', err);
+            log.warn('[zoom] Opening chat / posting intro failed (non-fatal, staying in meeting):', err);
         }
 
         // The prejoin "video on" toggle often doesn't survive admission — verify
@@ -1381,7 +1384,7 @@ export default class Zoom {
         try {
             await this.ensureInMeetingVideoOn(page);
         } catch (err) {
-            console.warn('[zoom] Post-join video check failed (non-fatal):', err);
+            log.warn('[zoom] Post-join video check failed (non-fatal):', err);
         }
         // Then keep watching: Zoom's "Something went wrong" can flip the camera
         // off mid-meeting (the avatar disappears though Simli/bridge stay
@@ -1392,7 +1395,7 @@ export default class Zoom {
         // Set up attendee change monitoring
         await page.exposeFunction('attendeeChange', async (number: number) => {
             if (number <= 1) {
-                console.log('LMA Virtual Participant got lonely and left.');
+                log.info('LMA Virtual Participant got lonely and left.');
                 details.start = false;
                 this.requestEnd({ reason: 'alone-in-meeting', trigger: 'attendees-left' });
             }
@@ -1414,7 +1417,7 @@ export default class Zoom {
             attendeeCounterSelector = found ? found.selector : null;
         }
         if (attendeeCounterSelector) {
-            console.log(`Listening for attendee changes via selector: ${attendeeCounterSelector}`);
+            log.info(`Listening for attendee changes via selector: ${attendeeCounterSelector}`);
             await page.evaluate((selector: string) => {
                 const targetNode = document.querySelector(selector);
                 const config = { characterData: true, subtree: true };
@@ -1438,7 +1441,7 @@ export default class Zoom {
                 }
             }, attendeeCounterSelector);
         } else {
-            console.log('No attendee counter selector available — skipping attendee monitoring');
+            log.info('No attendee counter selector available — skipping attendee monitoring');
         }
 
         // Participants-panel watchdog: the MutationObserver above only fires
@@ -1484,7 +1487,7 @@ export default class Zoom {
                     consecutiveMissingCounter += 1;
                     consecutiveLonely = 0;
                     if (consecutiveMissingCounter >= POLLS_BEFORE_END) {
-                        console.log(
+                        log.info(
                             `[participants-watchdog] counter absent for ${consecutiveMissingCounter} polls (state=${result.state}) — VP appears to have been removed from the meeting`,
                         );
                         clearInterval(watchdogTimer);
@@ -1501,7 +1504,7 @@ export default class Zoom {
                     consecutiveLonely += 1;
                     consecutiveMissingCounter = 0;
                     if (consecutiveLonely >= POLLS_BEFORE_END) {
-                        console.log(
+                        log.info(
                             `[participants-watchdog] only ${result.count} attendee(s) for ${consecutiveLonely} polls — leaving meeting`,
                         );
                         clearInterval(watchdogTimer);
@@ -1531,7 +1534,7 @@ export default class Zoom {
             lastReportedAttendeeCount = count;
         });
 
-        console.log('Listening for speaker changes.');
+        log.info('Listening for speaker changes.');
         await page.evaluate((vpIdentity: string) => {
             let observer: MutationObserver | null = null;
             let lastSpeaker: string | null = null;
@@ -1683,7 +1686,7 @@ export default class Zoom {
                     const idleMs = Date.now() - lastSpeakerEventAt;
                     if (idleMs < SPEAKER_STALL_MS) return;
                     if (lastReportedAttendeeCount <= 1) return;
-                    console.log(
+                    log.info(
                         `[speaker-watchdog] no speaker events in ${Math.floor(idleMs / 1000)}s with ${lastReportedAttendeeCount} attendees — asking AI for a fresh selector`,
                     );
                     const found = await findElementWithFallback(
@@ -1705,7 +1708,7 @@ export default class Zoom {
                         lastSpeakerEventAt = Date.now();
                     }
                 } catch (err) {
-                    console.warn('[speaker-watchdog] error:', err);
+                    log.warn('[speaker-watchdog] error:', err);
                 }
             }, 30_000);
         }
@@ -1729,7 +1732,7 @@ export default class Zoom {
                 void startChatAnswer(chatQuestion, sender, 'zoom', (messages) => this.sendMessages(page, messages));
             }
             if (matchesEndCommand(body)) {
-                console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
+                log.info(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
                 await this.sendMessages(page, exitMessagesFor(sender));
                 details.start = false;
                 this.requestEnd({
@@ -1743,15 +1746,15 @@ export default class Zoom {
             } else if (matchesChatCommand(body, details.helpCommand)) {
                 // Answered whether or not transcription is paused: the list is how
                 // someone finds out how to resume it.
-                console.log('[chat-help] posting the chat command list');
+                log.info('[chat-help] posting the chat command list');
                 await this.sendMessages(page, chatHelpMessages(voiceAssistant));
             } else if (details.start && matchesChatCommand(body, details.pauseCommand)) {
                 details.start = false;
-                console.log(details.pauseMessages[0]);
+                log.info(details.pauseMessages[0]);
                 await this.sendMessages(page, details.pauseMessages);
             } else if (!details.start && matchesChatCommand(body, details.startCommand)) {
                 details.start = true;
-                console.log(details.startMessages[0]);
+                log.info(details.startMessages[0]);
                 await this.sendMessages(page, details.startMessages);
                 // Restart transcription if needed
                 transcriptionService.startTranscription();
@@ -1764,7 +1767,7 @@ export default class Zoom {
                 });
                 const formattedMessage = `[${timestamp}] ${message}`;
                 details.messages.push(formattedMessage);
-                console.log('New message:', formattedMessage);
+                log.info('New message:', formattedMessage);
             }
         });
 
@@ -1784,7 +1787,7 @@ export default class Zoom {
             chatListSelector = found ? found.selector : null;
         }
         if (chatListSelector) {
-            console.log(`Listening for message changes via selector: ${chatListSelector}`);
+            log.info(`Listening for message changes via selector: ${chatListSelector}`);
             await page.evaluate((selector: string) => {
                 const targetNode = document.querySelector(selector);
                 const config = { childList: true, subtree: true };
@@ -1803,16 +1806,16 @@ export default class Zoom {
                 if (targetNode) observer.observe(targetNode, config);
             }, chatListSelector);
         } else {
-            console.log('No chat list selector available — skipping chat monitoring');
+            log.info('No chat list selector available — skipping chat monitoring');
         }
 
         // Start transcription if enabled (LMA behavior)
         if (details.start) {
-            console.log(details.startMessages[0]);
+            log.info(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
             transcriptionService.startTranscription();
         }
-        console.log('Waiting for meeting end.');
+        log.info('Waiting for meeting end.');
         let exitInfo: ExitInfo = { reason: 'unknown' };
         try {
             // Detect Zoom's own meeting-end UI: host ended the meeting, or the
@@ -1858,18 +1861,18 @@ export default class Zoom {
                 // otherwise it surfaces as an unhandled rejection. Log the
                 // underlying error so unexpected mid-meeting aborts are diagnosable.
                 .catch((err): ExitInfo => {
-                    console.warn(`[zoom-end-watcher] waitForFunction rejected (page closed=${page.isClosed()}): ${err?.name ?? ''} ${err?.message ?? err}`);
+                    log.warn(`[zoom-end-watcher] waitForFunction rejected (page closed=${page.isClosed()}): ${err?.name ?? ''} ${err?.message ?? err}`);
                     return { reason: 'page-closed', trigger: 'ZOOM_END_DIALOG_ABORTED' };
                 });
 
             exitInfo = await Promise.race([this.endRequested, zoomDialogPromise]);
         } catch (error) {
-            console.log('Meeting timed out.');
+            log.info('Meeting timed out.');
             exitInfo = { reason: 'meeting-timeout', trigger: 'meetingTimeout' };
         } finally {
             details.start = false;
         }
-        console.log(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
+        log.info(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
         return exitInfo;
     }
 }
