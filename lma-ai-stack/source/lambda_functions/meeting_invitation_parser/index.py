@@ -68,7 +68,8 @@ def call_bedrock(prompt_data):
     )
 
     generated_text = get_generated_text(response)
-    logger.info(f"Bedrock response: {generated_text}")
+    # The response holds what was parsed from the invitation, so only its size is logged.
+    logger.info("Bedrock response: %d characters", len(generated_text or ""))
     return generated_text
 
 
@@ -421,7 +422,15 @@ def handler(event, context):
                     }
                 )
 
-        logger.info(f"Returning result: {json.dumps(result)}")
+        # The parsed fields can include a meeting passcode, so the result is
+        # logged by outcome, platform and the names of the fields it filled in.
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        logger.info(
+            "Returning result: success=%s, platform=%s, fields=%s",
+            result.get("success"),
+            data.get("meetingPlatform"),
+            sorted(k for k, v in data.items() if v),
+        )
         return json.dumps(result)
 
     except Exception as e:

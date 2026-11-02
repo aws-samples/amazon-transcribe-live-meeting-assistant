@@ -332,15 +332,43 @@ class TestAgenda(unittest.TestCase):
 
 
 class TestHandlerLogging(unittest.TestCase):
-    def test_invitation_text_is_not_logged(self):
-        from unittest.mock import patch
+    INVITATION = "Join Zoom https://zoom.us/j/96187501703 Passcode: 987654xyz"
 
-        text = "Join Zoom https://zoom.us/j/123 Passcode: 987654xyz"
+    def run_handler(self, model_text):
+        from unittest.mock import MagicMock, patch
+
+        bedrock = MagicMock()
+        bedrock.converse.return_value = {"output": {"message": {"content": [{"text": model_text}]}}}
         with (
-            patch.object(index, "parse_meeting_invitation", return_value={}),
+            patch.object(index, "bedrock", bedrock),
+            patch.object(index, "read_setting", return_value="us.anthropic.claude-test"),
             self.assertLogs(index.logger, level="DEBUG") as captured,
         ):
-            index.handler({"arguments": {"invitationText": text}}, None)
-        output = "\n".join(captured.output)
+            response = json.loads(
+                index.handler({"arguments": {"invitationText": self.INVITATION}}, None)
+            )
+        return response, "\n".join(captured.output)
+
+    def test_parsed_invitation_is_logged_without_its_content(self):
+        parsed = {
+            "meetingName": "Quarterly planning",
+            "meetingPlatform": "ZOOM",
+            "meetingId": "96187501703",
+            "meetingPassword": "987654xyz",
+            "agenda": None,
+        }
+        response, output = self.run_handler(json.dumps(parsed))
+        self.assertTrue(response["success"])
+        self.assertEqual(response["data"]["meetingPassword"], "987654xyz")
         self.assertNotIn("987654xyz", output)
-        self.assertIn(f"{len(text)} characters", output)
+        self.assertNotIn("Quarterly planning", output)
+        self.assertNotIn("96187501703", output)
+        self.assertIn(f"{len(self.INVITATION)} characters", output)
+        self.assertIn("success=True, platform=ZOOM", output)
+        self.assertIn("meetingPassword", output)
+
+    def test_unparseable_model_response_is_logged_without_its_content(self):
+        response, output = self.run_handler("Passcode is 987654xyz, no JSON here")
+        self.assertFalse(response["success"])
+        self.assertNotIn("987654xyz", output)
+        self.assertIn("success=False", output)
