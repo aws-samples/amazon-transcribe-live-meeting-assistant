@@ -219,7 +219,11 @@ test waits until the transcriber reports the new mode. In the module's
 teardown, whether the tests passed or not, it puts the section back exactly as
 saved, or removes it again if the profile had none, and keeps any other section
 saved in the meantime. Only a killed process skips that teardown; then restore
-the section on the Configuration page, or from its history.
+the section on the Configuration page, or from its history. The test's writes
+are not checked against a concurrent edit of the Meeting Consent section
+itself: an Admin's change to that section during the run is overwritten, and
+the teardown then puts back the value saved before the run, so the change is
+lost (it remains in the configuration history). Run it against a test stack.
 
 **The meetings.** Each is streamed as `ws_stream_probe.py` streams, from the
 same WAV fixture, at real-time pace, with a `consent` step in `START`

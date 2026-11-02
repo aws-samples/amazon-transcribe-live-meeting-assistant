@@ -97,6 +97,8 @@ class Stack:
     configuration_table: str
     configuration_bucket: str
     recordings_bucket: str
+    # Logical ids of the AI nested stack's resources.
+    ai_resources: frozenset = frozenset()
 
     @classmethod
     def find(cls, stack_name: str, region: str | None = None) -> Stack:
@@ -114,6 +116,8 @@ class Stack:
         missing = [n for n in ("EventSourcingTable", "ConfigurationTable", "ConfigurationBucket") if n not in ai]
         if missing:
             raise RuntimeError(f"{ai_stack} has no {', '.join(missing)}")
+        if not outputs.get("RecordingsS3Bucket"):
+            raise RuntimeError(f"{stack_name} has no RecordingsS3Bucket output")
         return cls(
             name=stack_name,
             region=session.region_name,
@@ -122,18 +126,13 @@ class Stack:
             event_table=ai["EventSourcingTable"],
             configuration_table=ai["ConfigurationTable"],
             configuration_bucket=ai["ConfigurationBucket"],
-            recordings_bucket=outputs.get("RecordingsS3Bucket", ""),
+            recordings_bucket=outputs["RecordingsS3Bucket"],
+            ai_resources=frozenset(ai),
         )
 
     def has_consent_api(self) -> bool:
         """Whether the deployment has the meeting consent resolver at all."""
-        cfn = self.session.client("cloudformation")
-        ai_stack = next(
-            r["PhysicalResourceId"] for r in _stack_resources(cfn, self.name)
-            if r["LogicalResourceId"] == "AISTACK"
-        )
-        return any(r["LogicalResourceId"] == "MeetingConsentResolverFunction"
-                   for r in _stack_resources(cfn, ai_stack))
+        return "MeetingConsentResolverFunction" in self.ai_resources
 
 
 # ── the configuration ─────────────────────────────────────────────────────
@@ -483,10 +482,19 @@ def wait_for(predicate, timeout: float, interval: float = 3.0):
 
 
 def object_exists(stack: Stack, key: str) -> dict | None:
+    """The object's size and type, or None when there is no such object.
+
+    Any other error (credentials, permissions) is raised, so that it is not
+    reported as a missing image.
+    """
+    from botocore.exceptions import ClientError
+
     try:
         head = stack.session.client("s3").head_object(Bucket=stack.recordings_bucket, Key=key)
-    except Exception:  # noqa: BLE001
-        return None
+    except ClientError as error:
+        if error.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+            return None
+        raise
     return {"bytes": head.get("ContentLength", 0), "content_type": head.get("ContentType")}
 
 

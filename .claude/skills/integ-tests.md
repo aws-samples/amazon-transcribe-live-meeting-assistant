@@ -46,7 +46,7 @@ LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user \
     AWS_PROFILE=default make integ-tests STACK=lma-integtest1 LMA_TEST_DESKTOP_VIDEO=1
 
 # Meeting consent on the Stream Audio path (~3 min; changes the deployment's
-# Meeting Consent setting for the run and always puts it back). Needs Pillow,
+# Meeting Consent setting for the run and puts it back in teardown). Needs Pillow,
 # from requirements-video.txt, for the evidence image:
 LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user \
     AWS_PROFILE=default make integ-tests STACK=lma-integtest1 LMA_TEST_CONSENT=1
