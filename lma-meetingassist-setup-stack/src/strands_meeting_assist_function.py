@@ -61,7 +61,7 @@ except ImportError as e:
 
 # Configure logging
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
@@ -487,7 +487,7 @@ class ThinkingStepHookProvider:
             
             logger.info(f"   Tool name: {tool_name}")
             logger.info(f"   Success: {not is_error}")
-            logger.info(f"   Result (truncated): {result_content[:100]}")
+            logger.debug(f"   Result (truncated): {result_content[:100]}")
             
             thinking_step = {
                 'type': 'tool_result',
@@ -861,7 +861,7 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
 
             response = bedrock_agent_runtime.retrieve_and_generate(**kb_input)
             
-            logger.info(f"🔍 DEBUG: KB Response (full): {json.dumps(response, indent=2, default=str)}")
+            logger.debug(f"🔍 DEBUG: KB Response (full): {json.dumps(response, indent=2, default=str)}")
             
             result = response.get("output", {}).get("text", "No past meetings found matching your query")
             
@@ -1979,7 +1979,7 @@ def handler(event, context):
                 'warmup_time_ms': int(warmup_elapsed * 1000)
             }
 
-        logger.info(f"Strands Meeting Assist - Processing event: {json.dumps(event)}")
+        logger.debug(f"Strands Meeting Assist - Processing event: {json.dumps(event)}")
 
         # Extract parameters from event - handle both 'text' and 'userInput' for compatibility
         user_input = event.get('userInput', '') or event.get('text', '')
@@ -2504,7 +2504,7 @@ def handler(event, context):
                 else:
                     response_text = response
             
-            logger.info(f"Strands agent response: {response_text}")
+            logger.debug(f"Strands agent response: {response_text}")
 
             # The tokens of every model call this answer took -- the agent loops
             # through tool calls, so one question is usually several -- as the

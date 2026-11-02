@@ -118,6 +118,10 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
             ListSK: call.ListSK || existing?.ListSK,
             SpeakerIdentities: call.SpeakerIdentities || existing?.SpeakerIdentities,
             CallSummaryState: call.CallSummaryState || existing?.CallSummaryState,
+            // Only getCall selects these, so every other update carries them.
+            TranscriptDeletionScheduledFor:
+              call.TranscriptDeletionScheduledFor || existing?.TranscriptDeletionScheduledFor,
+            TranscriptDeletedAt: call.TranscriptDeletedAt || existing?.TranscriptDeletedAt,
             ...(call.AgendaUpdatedAt
               ? {}
               : {

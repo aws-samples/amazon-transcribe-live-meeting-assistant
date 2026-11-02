@@ -27,6 +27,13 @@ try:
 except ImportError:  # pragma: no cover - every function that writes records attaches it
     _read_setting = None
 
+try:
+    # pylint: disable-next=import-error
+    from lma_config import SEGMENT_EXPIRY_LIMIT_DAYS, deletion_delay_minutes
+except ImportError:  # pragma: no cover - a configuration layer from before the setting
+    deletion_delay_minutes = None
+    SEGMENT_EXPIRY_LIMIT_DAYS = 2.0
+
 # The stack parameters' values: MeetingRecordExpirationInDays and
 # TranscriptionExpirationInDays. Each is the default of a Retention setting on
 # the Configuration page and also its upper limit, so a record is given the
@@ -90,14 +97,32 @@ def get_meeting_ttl():
     )
 
 
-def get_transcription_ttl():
-    return get_ttl(
-        _retention_days(
-            "transcriptionExpirationInDays",
-            "TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS",
-            TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS,
+def _deletes_transcripts_after_summary() -> bool:
+    """Whether the Retention section deletes each transcript once it is summarized."""
+    if deletion_delay_minutes is None:
+        return False
+    try:
+        return deletion_delay_minutes() is not None
+    except Exception:  # pylint: disable=broad-except -- a record is never lost over its expiry
+        logging.getLogger(__name__).warning(
+            "could not read the transcript deletion setting; giving the segment its usual expiry",
+            exc_info=True,
         )
+        return False
+
+
+def get_transcription_ttl():
+    days = _retention_days(
+        "transcriptionExpirationInDays",
+        "TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS",
+        TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS,
     )
+    # While transcripts are deleted after the summary, the transcript deletion
+    # function removes each segment; the short expiry is what removes it if
+    # that deletion never ran.
+    if _deletes_transcripts_after_summary():
+        days = min(days, SEGMENT_EXPIRY_LIMIT_DAYS)
+    return get_ttl(days)
 
 
 def get_owner_from_jwt(jwt_token):

@@ -147,6 +147,48 @@ def test_a_retention_longer_than_the_stack_parameter_is_not_used(monkeypatch):
     assert abs(_days_ahead(ep.get_transcription_ttl()) - 3) < 0.01
 
 
+@pytest.mark.parametrize("choice", ["immediately", "after_15_minutes", "after_60_minutes"])
+def test_segment_expiry_is_at_most_two_days_while_transcripts_are_deleted(monkeypatch, choice):
+    """The backstop expiry, should the scheduled deletion never run."""
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(
+        parameters,
+        "_SHARED_STORE",
+        _RetentionStore({"transcriptDeletionAfterSummary": choice}),
+    )
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 2) < 0.01
+
+
+def test_a_shorter_retention_still_applies_while_transcripts_are_deleted(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(
+        parameters,
+        "_SHARED_STORE",
+        _RetentionStore(
+            {"transcriptDeletionAfterSummary": "immediately", "transcriptionExpirationInDays": 0.5}
+        ),
+    )
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 0.5) < 0.01
+
+
+def test_segment_expiry_is_unchanged_while_deletion_is_off(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(
+        parameters,
+        "_SHARED_STORE",
+        _RetentionStore({"transcriptDeletionAfterSummary": "off"}),
+    )
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 90) < 0.01
+
+
+def test_the_stack_parameter_turns_the_backstop_expiry_on(monkeypatch):
+    """With nothing saved on the page, the parameter's default is what applies."""
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setenv("TRANSCRIPT_DELETION_AFTER_SUMMARY", "after_30_minutes")
+    monkeypatch.setattr(parameters, "_SHARED_STORE", _RetentionStore({}))
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 2) < 0.01
+
+
 def test_segment_expiry_uses_the_transcription_retention(monkeypatch):
     monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "3")
     monkeypatch.setenv("MEETING_RECORD_EXPIRATION_IN_DAYS", "99")

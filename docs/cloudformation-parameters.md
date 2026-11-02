@@ -61,12 +61,12 @@ disagree. The description under each parameter is the one the console shows.
 
 <!-- BEGIN GENERATED PARAMETER REFERENCE: edit lma-main.yaml or scripts/cloudformation_parameters_doc.py, then run that script -->
 
-The template declares 92 parameters.
+The template declares 94 parameters.
 
 | Kind | Parameters | What changing one does |
 |---|---|---|
-| Resource | 47 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
-| Configuration page default | 26 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
+| Resource | 48 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
+| Configuration page default | 27 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
 | Configuration page limit | 1 | The default and the upper limit of a setting an Admin can lower, and not raise, on the web UI's Configuration page while the stack runs; see [Retention: settings the stack limits](configuration-guide.md#retention-settings-the-stack-limits). Every reader uses the smaller of the saved value and the parameter's, so a stack update that lowers the parameter applies at once. |
 | Read at run time | 5 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
 | Credential | 11 | A secret, the ARN of a secret, or the identifier paired with one. Values are stored in AWS Secrets Manager; see [Integration Credentials](infrastructure-and-security.md#integration-credentials). |
@@ -915,6 +915,7 @@ Specify a comma separated list of two letter country codes (uppercase ISO 3166-1
 | [`EnableVideoRecording`](#enablevideorecording) | `true` | Resource |
 | [`MeetingRecordExpirationInDays`](#meetingrecordexpirationindays) | `90` | Configuration page limit |
 | [`TranscriptionExpirationInDays`](#transcriptionexpirationindays) | `90` | Resource |
+| [`TranscriptDeletionAfterSummary`](#transcriptdeletionaftersummary) | `off` | Configuration page default |
 | [`AudioRecordingExpirationInDays`](#audiorecordingexpirationindays) | `90` | Resource |
 | [`CloudWatchLogsExpirationInDays`](#cloudwatchlogsexpirationindays) | `90` | Resource |
 | [`VPSchedulerStateMachineLogsExpirationInDays`](#vpschedulerstatemachinelogsexpirationindays) | `7` | Resource |
@@ -961,6 +962,16 @@ Console label: *Transcription Expiration In Days*
 - **Kind:** Resource. Sets the lifecycle rules for transcript files and key-frame images on the recordings bucket, and is read by the functions that write transcript segments, to set when each expires. Also the default and upper limit of the Configuration page's **Retention › Days to keep transcript segments**.
 
 Number of days to retain turn by turn meeting transcriptions. Transcriptions will be automatically deleted from LMA after this time. Specify partial days like 0.5 to retain transcriptions for half a day. Also sets the lifecycle rules for transcript files and key-frame images in the recordings bucket, which the Configuration page does not change. This is the default and the upper limit; an Admin can set a shorter period at run time on the Configuration page (Retention section), never a longer one.
+
+### `TranscriptDeletionAfterSummary`
+
+Console label: *Delete Transcript After Summary*
+
+- **Default:** `off`
+- **Allowed values:** `off`, `immediately`, `after_15_minutes`, `after_30_minutes`, `after_60_minutes`
+- **Kind:** Configuration page default. Configuration page: **Retention › Delete the transcript after the summary**. Read by the transcript deletion function at the end of each meeting and when its summary is stored, and by the functions that write transcript segments.
+
+Delete each meeting's transcript permanently once the meeting is summarized: immediately, or 15, 30 or 60 minutes after the summary is written. "off" keeps it for TranscriptionExpirationInDays. Deletes every transcript segment and meeting assistant answer, the transcript file in the recordings bucket (all versions) and its transcript knowledge base entry; the summary and the recording are kept. If no summary has been written 60 minutes after the meeting ends, the delay counts from then. This is the default; an Admin can change it at run time on the Configuration page (Retention section).
 
 ### `AudioRecordingExpirationInDays`
 
@@ -1127,6 +1138,7 @@ ID of the private subnet in Availability Zone 2. Required if UseExistingVPC is t
 | [`EnableOperationalAlarms`](#enableoperationalalarms) | `true` | Resource |
 | [`TranscribeConcurrentStreamAlarmThreshold`](#transcribeconcurrentstreamalarmthreshold) | `20` | Resource |
 | [`LogLevel`](#loglevel) | `INFO` | Read at run time |
+| [`AppSyncFieldLogLevel`](#appsyncfieldloglevel) | `ERROR` | Resource |
 
 ### `EnableOperationalAlarms`
 
@@ -1157,6 +1169,16 @@ Console label: *Log Level*
 - **Kind:** Read at run time. Read by each function and task's logging when the process starts, so a change applies as processes are replaced.
 
 Default logging level for all Lambda functions. Set to DEBUG for troubleshooting, INFO for normal operation.
+
+### `AppSyncFieldLogLevel`
+
+Console label: *GraphQL API Log Level*
+
+- **Default:** `ERROR`
+- **Allowed values:** `NONE`, `ERROR`, `INFO`, `DEBUG`, `ALL`
+- **Kind:** Resource. Sets the GraphQL API's log level and whether its log entries carry request content.
+
+What the GraphQL API writes to its CloudWatch log group, /aws/appsync/apis/&lt;api id&gt;. ERROR logs requests that fail, without their content. DEBUG and ALL also log each request's content, which includes transcript text; use them only while diagnosing a problem. The log group keeps entries for CloudWatchLogsExpirationInDays.
 
 ## Security Configuration
 

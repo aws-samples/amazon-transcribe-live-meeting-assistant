@@ -97,6 +97,11 @@ from .store import (
     SaveOutcome,
     deep_merge,
 )
+from .transcript_deletion import (
+    SEGMENT_EXPIRY_LIMIT_DAYS,
+    SUMMARY_WAIT_MINUTES,
+    deletion_delay_minutes,
+)
 
 __all__ = [
     "ACTIVE_POINTER_KEY",
@@ -122,6 +127,8 @@ __all__ = [
     "RECORDING",
     "RESERVED_PROFILE_NAMES",
     "RETENTION",
+    "SEGMENT_EXPIRY_LIMIT_DAYS",
+    "SUMMARY_WAIT_MINUTES",
     "REVISION_BUCKET_ENV_VAR",
     "REVISION_INDEX_PREFIX",
     "REVISION_S3_PREFIX",
@@ -157,6 +164,7 @@ __all__ = [
     "UnknownConfigurationSection",
     "apply_parameter_defaults",
     "deep_merge",
+    "deletion_delay_minutes",
     "diff_bodies",
     "is_profile_key",
     "parameter_defaults",

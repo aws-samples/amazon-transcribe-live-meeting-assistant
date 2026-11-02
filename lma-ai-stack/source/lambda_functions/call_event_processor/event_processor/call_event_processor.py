@@ -105,6 +105,9 @@ POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN = getenv(
 
 ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN = getenv("ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN", "")
 SPEAKER_NAME_RESOLVER_ARN = getenv("SPEAKER_NAME_RESOLVER_ARN", "")
+# Deletes a meeting's transcript once it is summarized, when the Retention
+# section says to; told when each meeting ends and when its summary is stored.
+TRANSCRIPT_DELETION_FUNCTION_ARN = getenv("TRANSCRIPT_DELETION_FUNCTION_ARN", "")
 # The automatic agenda pass: a meeting with no agenda is read once, about
 # agenda_derivation_threshold() seconds in, for an agenda somebody stated. 0
 # turns it off. See agenda_deriver.
@@ -191,6 +194,7 @@ if (
     TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN
     or ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN
     or SPEAKER_NAME_RESOLVER_ARN
+    or TRANSCRIPT_DELETION_FUNCTION_ARN
     or AGENDA_DERIVER_ARN
     or KEYFRAME_TEXT_EXTRACTOR_ARN
     or ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN
@@ -1772,6 +1776,19 @@ async def execute_process_event_api_mutation(
                     extra=dict(call_id=message.get("CallId")),
                 )
 
+        # The transcript deletion, scheduled before the summary is asked for and
+        # not wrapped in a try, for the same reason the summary invoke below is
+        # not: a failure redelivers the record with the meeting still open, so
+        # the retry schedules it. The function is idempotent, and returns at
+        # once while the Retention section leaves transcripts alone.
+        if TRANSCRIPT_DELETION_FUNCTION_ARN and not was_already_ended:
+            LAMBDA_HOOK_CLIENT.invoke(
+                FunctionName=TRANSCRIPT_DELETION_FUNCTION_ARN,
+                InvocationType="Event",
+                Payload=json.dumps({"CallId": message.get("CallId"), "Trigger": "meeting-ended"}),
+            )
+            LOGGER.debug("END Event: told the transcript deletion function")
+
         # Summary first, status second. The invoke is not wrapped in a try, so a
         # transient failure propagates and the record is redelivered — and it has
         # to find the meeting still open when it comes back, or the check above
@@ -1817,6 +1834,24 @@ async def execute_process_event_api_mutation(
             return_value["errors"].append(response)
         else:
             return_value["successes"].append(response)
+            # The summary is stored, so the transcript deletion can count its
+            # delay from now. Fire-and-forget: if this is lost, the deletion
+            # scheduled at the end of the meeting still runs, later.
+            if TRANSCRIPT_DELETION_FUNCTION_ARN:
+                try:
+                    LAMBDA_HOOK_CLIENT.invoke(
+                        FunctionName=TRANSCRIPT_DELETION_FUNCTION_ARN,
+                        InvocationType="Event",
+                        Payload=json.dumps(
+                            {"CallId": message.get("CallId"), "Trigger": "summary-written"}
+                        ),
+                    )
+                except Exception:  # pylint: disable=broad-except
+                    LOGGER.exception(
+                        "ADD_SUMMARY: could not tell the transcript deletion function; the "
+                        "deletion scheduled at the end of the meeting still applies",
+                        extra=dict(call_id=message.get("CallId")),
+                    )
 
         if POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN:
             payload = await get_call_details(message=message, appsync_session=appsync_session)

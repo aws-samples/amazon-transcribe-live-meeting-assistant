@@ -89,6 +89,15 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# read with signed evidence links through getMeetingConsent. See
 	# docs/meeting-consent.md.
 	Consent: MeetingConsent
+	# Set by the transcript deletion function while the Retention section deletes
+	# transcripts after the summary: when this meeting's transcript is due to be
+	# deleted, when it was (the first time; a later sweep keeps it), and how many
+	# transcript segments and files were removed in all. See
+	# docs/transcript-deletion.md.
+	TranscriptDeletionScheduledFor: AWSDateTime
+	TranscriptDeletedAt: AWSDateTime
+	TranscriptSegmentsDeleted: Int
+	TranscriptFilesDeleted: Int
 	Owner: String
 	SharedWith: String
 }

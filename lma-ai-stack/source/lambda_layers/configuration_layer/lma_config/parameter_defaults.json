@@ -27,5 +27,6 @@
   "VPPollsBeforeEndMissing": {"section": "virtual_participant", "setting": "pollsBeforeEndMissing", "type": "integer"},
   "MeetingRecordExpirationInDays": {"section": "retention", "setting": "meetingRecordExpirationInDays", "type": "number"},
   "TranscriptionExpirationInDays": {"section": "retention", "setting": "transcriptionExpirationInDays", "type": "number"},
+  "TranscriptDeletionAfterSummary": {"section": "retention", "setting": "transcriptDeletionAfterSummary", "type": "string"},
   "AgendaDerivationAfterSeconds": {"section": "meeting_agenda", "setting": "autoDeriveAfterSeconds", "type": "integer"}
 }

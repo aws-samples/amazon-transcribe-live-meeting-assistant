@@ -384,7 +384,8 @@ def generate_summary(
             TIMED_TRANSCRIPT_PLACEHOLDER: timed_transcript or "",
         }
         prompt = PLACEHOLDERS.sub(lambda match: values[match.group(0)], prompt)
-        print("Prompt:", prompt)
+        # The prompt carries the whole transcript, so it is logged at DEBUG only.
+        logger.debug("Prompt: %s", prompt)
         response = call_bedrock(prompt, call_id, model_id)
         print("API Response:", response)
         result[key] = response

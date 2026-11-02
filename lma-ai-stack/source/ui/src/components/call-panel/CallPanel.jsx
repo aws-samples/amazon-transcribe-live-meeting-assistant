@@ -52,6 +52,7 @@ import {
 import SpeakerIdentitiesPanel from './SpeakerIdentitiesPanel';
 import AgendaPanel from './AgendaPanel';
 import ConsentPanel from './ConsentPanel';
+import TranscriptDeletionNotice from './TranscriptDeletionNotice';
 import useMeetingConsent from '../../hooks/use-meeting-consent';
 import CallCostPanel from './CallCostPanel';
 
@@ -1836,7 +1837,7 @@ const CallTranscriptContainer = ({
                   <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn} />
                   <span>Enable Translation</span>
                   {languageChoices()}
-                  {showDownloadTranscript && (
+                  {showDownloadTranscript && !item.transcriptDeletedAt && (
                     <SpaceBetween direction="horizontal" size="xs">
                       <ButtonDropdown
                         items={[
@@ -1865,6 +1866,10 @@ const CallTranscriptContainer = ({
           </Header>
         }
       >
+        <TranscriptDeletionNotice
+          deletedAt={item.transcriptDeletedAt}
+          scheduledFor={item.transcriptDeletionScheduledFor}
+        />
         {getTranscriptContent({
           item,
           callTranscriptPerCallId,

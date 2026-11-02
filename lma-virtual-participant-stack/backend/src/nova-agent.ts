@@ -2208,7 +2208,7 @@ export class NovaAgent implements VoiceAssistantProvider {
               }
             } else if (jsonResponse.event?.textOutput) {
               const textContent = jsonResponse.event.textOutput.content;
-              log.info('Text output:', textContent);
+              log.debug('Text output:', textContent);
               
               // Check for interruption signal
               if (textContent.includes('"interrupted"') && textContent.includes('true')) {
@@ -2610,7 +2610,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       dynamodb_pk: `c#${callId}`,  // Use callId for dynamodb_pk (matches database schema)
     };
 
-    log.info('Strands agent payload:', JSON.stringify(payload));
+    log.debug('Strands agent payload:', JSON.stringify(payload));
 
     // Invoke the Strands Lambda function with RequestResponse for synchronous result
     const command = new InvokeCommand({

@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lma:configuration/retention",
   "title": "Retention",
-  "description": "How long meeting records and transcript segments are kept. Each default is the value the stack was deployed with, and is also the longest this deployment allows: a shorter period can be set here, a longer one cannot. Recordings in the recordings bucket, and the bucket's lifecycle rules, follow the stack parameters only.",
+  "description": "How long meeting records and transcripts are kept. Each of the two periods in days defaults to the value the stack was deployed with, which is also the longest this deployment allows: a shorter period can be set here, a longer one cannot. Recordings in the recordings bucket, and the bucket's lifecycle rules, follow the stack parameters only.",
   "sectionLabel": "Retention",
-  "appliesText": "A saved change applies within about five minutes, to records written after that. A record already written keeps the expiry it was given.",
+  "appliesText": "A saved change applies within about five minutes: a period in days to records written after that, and the transcript deletion choice to meetings that end after that. A record already written keeps the expiry it was given, and a meeting already scheduled for deletion keeps its time.",
   "order": 12,
   "collapsible": true,
   "defaultExpanded": false,
@@ -26,6 +26,20 @@
       "description": "How long each turn of a meeting's transcript, and each meeting assistant answer in it, is kept after it is written; fractions of a day are allowed. At most the TranscriptionExpirationInDays stack parameter, which is also the default.",
       "minimum": 0.1,
       "maximumIsDefault": true
+    },
+    "transcriptDeletionAfterSummary": {
+      "order": 2,
+      "type": "string",
+      "title": "Delete the transcript after the summary",
+      "description": "Off: the transcript is kept for the days set above. Otherwise the meeting's transcript is deleted permanently once its summary is written, immediately or after the delay chosen here: every turn of the transcript and every meeting assistant answer, the transcript file in the recordings bucket (all of its versions), and its entry in the transcript knowledge base. The summary, the meeting record, the recording and the consent record are kept. If no summary has been written 60 minutes after the meeting ends, the delay counts from then; on a deployment with no end-of-meeting summary, it counts from the end of the meeting. See docs/transcript-deletion.md. The default is the TranscriptDeletionAfterSummary stack parameter.",
+      "enum": ["off", "immediately", "after_15_minutes", "after_30_minutes", "after_60_minutes"],
+      "enumLabels": {
+        "off": "Off (keep for the days set above)",
+        "immediately": "Immediately",
+        "after_15_minutes": "15 minutes after the summary",
+        "after_30_minutes": "30 minutes after the summary",
+        "after_60_minutes": "60 minutes after the summary"
+      }
     }
   },
   "additionalProperties": false
