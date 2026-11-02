@@ -23,7 +23,11 @@ const MAX_FRAMES = 10;
 /** The most frames getVideoKeyframes reads by id in one request. */
 export const FRAMES_PER_REQUEST = 100;
 
-/** One frame of a meeting, with its signed links, or null. Used to read a frame again when its link has lapsed. */
+/**
+ * One frame of a meeting, with its signed links, or null. Used by a summary
+ * picture read on its own: outside a summary, in a form the summary's read did
+ * not find, or again after its link has lapsed.
+ */
 export const loadKeyframe = async (callId, frameId) => {
   const client = generateClient();
   const response = await client.graphql({ query: getVideoKeyframes, variables: { callId, frameId } });

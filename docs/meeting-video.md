@@ -453,9 +453,9 @@ frame the subscription announced. `frameId` returns just that frame, and with it
 frames it names, up to 100, in the order named, each once, leaving out any that
 do not exist, also without `limit`, `nextToken` or `afterFrameId`; it is how the
 summary's pictures, and a chat answer's, are resolved, in one request rather than
-one per frame. Giving both `frameId` and `frameIds` is refused. The subscription carries no signed links. As
-with `onAddTranscriptSegment`, its selection must include `Owner` and
-`SharedWith`.
+one per frame. Giving both `frameId` and `frameIds` is refused. The subscription
+carries no signed links. As with `onAddTranscriptSegment`, its selection must
+include `Owner` and `SharedWith`.
 
 ### The `ADD_VIDEO_KEYFRAME` event
 

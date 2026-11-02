@@ -34,10 +34,11 @@ import './SummaryMarkdown.css';
 const logger = new ConsoleLogger('SummaryMarkdown');
 
 const KEYFRAME_SCHEME = 'keyframe:';
-// A picture whose source is a frame: markdown image syntax, or an <img> tag,
-// which the shared chain also renders. Only what SummaryImage shows is read.
+// A picture whose source is a frame, in the two forms the summary prompt and
+// the shared chain produce: markdown image syntax and an <img> tag. A picture in
+// any other form SummaryImage renders is not found here, and reads its own frame.
 const FRAME_REFERENCE =
-  /!\[[^\]]*\]\(keyframe:([A-Za-z0-9_-]{1,64})\)|<img\b[^>]*\bsrc=["']keyframe:([A-Za-z0-9_-]{1,64})["']/gi;
+  /!\[[^\]]*\]\(keyframe:([A-Za-z0-9_-]{1,64})\)|<img\b[^>]*\bsrc=["']keyframe:([A-Za-z0-9_-]{1,64})["']/g;
 
 /** The frame ids a summary's pictures refer to, each once, in the order they first appear. */
 export const frameIdsIn = (markdown) =>
@@ -46,8 +47,10 @@ export const frameIdsIn = (markdown) =>
     : [];
 
 /**
- * The frames the summary names, read together, as `{ frames }` by id. Absent
- * when a KeyframeImage is used on its own, which then reads its own frame.
+ * The summary's read of its frames: `requested`, the ids it asks for, and
+ * `frames`, what it has read, by id. A picture whose id was not requested reads
+ * its own frame. Absent when a KeyframeImage is used on its own, which then
+ * reads its own frame too.
  */
 const SummaryFrames = createContext(null);
 
@@ -71,6 +74,7 @@ const hasLink = (frame) => Boolean(frame?.ThumbnailSignedUrl || frame?.ImageSign
 
 export const KeyframeImage = ({ callId, frameId, alt = '', loadFrame = loadKeyframe }) => {
   const batch = useContext(SummaryFrames);
+  const inBatch = Boolean(batch?.requested.has(frameId));
   // A frame read by itself: on its own, or again after its link stopped working.
   const [ownFrame, setOwnFrame] = useState(null);
   const [failed, setFailed] = useState(false);
@@ -78,8 +82,9 @@ export const KeyframeImage = ({ callId, frameId, alt = '', loadFrame = loadKeyfr
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    // Inside a summary, the first read is the summary's, of every frame at once.
-    if (batch && attempt === 0) return undefined;
+    // Inside a summary, the first read of a frame it asked for is the summary's,
+    // of every frame at once.
+    if (inBatch && attempt === 0) return undefined;
     let current = true;
     setFailed(false);
     loadFrame(callId, frameId)
@@ -95,9 +100,9 @@ export const KeyframeImage = ({ callId, frameId, alt = '', loadFrame = loadKeyfr
     return () => {
       current = false;
     };
-  }, [batch, callId, frameId, attempt, loadFrame]);
+  }, [inBatch, callId, frameId, attempt, loadFrame]);
 
-  const batchFrame = batch && attempt === 0 ? batch.frames[frameId] : undefined;
+  const batchFrame = inBatch && attempt === 0 ? batch.frames[frameId] : undefined;
   const frame = ownFrame || (hasLink(batchFrame) ? batchFrame : null);
   if (failed || !frame) {
     return (
@@ -162,11 +167,11 @@ const SummaryMarkdown = ({ callId = '', children = '', loadFrame = loadKeyframe,
   const components = useMemo(() => componentsFor(callId, loadFrame), [callId, loadFrame]);
   const frameIds = useMemo(() => frameIdsIn(children).filter((id) => FRAME_ID.test(id)), [children]);
   const frameKey = frameIds.join(' ');
-  const [batch, setBatch] = useState({ frames: {} });
+  const [frames, setFrames] = useState({});
 
   // Another meeting's frames are never shown for this one.
   useEffect(() => {
-    setBatch({ frames: {} });
+    setFrames({});
   }, [callId]);
 
   // A changed summary (regenerated or edited) keeps showing the frames already
@@ -175,8 +180,8 @@ const SummaryMarkdown = ({ callId = '', children = '', loadFrame = loadKeyframe,
     let current = true;
     if (!callId || frameIds.length === 0) return undefined;
     loadFrames(callId, frameIds)
-      .then((frames) => {
-        if (current) setBatch((previous) => ({ frames: { ...previous.frames, ...(frames || {}) } }));
+      .then((loaded) => {
+        if (current) setFrames((previous) => ({ ...previous, ...(loaded || {}) }));
       })
       .catch((error) => {
         logger.debug('could not read the key frames for the summary', error);
@@ -186,6 +191,8 @@ const SummaryMarkdown = ({ callId = '', children = '', loadFrame = loadKeyframe,
     };
     // frameKey stands for frameIds, so a re-render of the same summary reads nothing again.
   }, [callId, frameKey, loadFrames]);
+
+  const batch = useMemo(() => ({ requested: new Set(frameIds), frames }), [frameKey, frames]);
 
   return (
     <SummaryFrames.Provider value={batch}>

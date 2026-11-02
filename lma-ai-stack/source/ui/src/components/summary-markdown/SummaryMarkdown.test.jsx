@@ -28,6 +28,9 @@ const THREE_SLIDES =
   '![Slide at 00:30](keyframe:0000030000-ab12cd)\n\n![Slide at 01:00](keyframe:0000060000-ab12cd)\n\n' +
   '![Slide at 01:30](keyframe:0000090000-ab12cd)\n\n![Slide at 00:30 again](keyframe:0000030000-ab12cd)';
 
+// A titled image: SummaryImage shows it, and the summary's read does not find it.
+const TITLED = '![Slide at 00:30](keyframe:0000030000-ab12cd "The budget slide")';
+
 /** A batch loader answering the ids it is given, less those in `missing`. */
 const framesLoader = (missing = []) =>
   vi.fn(async (_callId, ids) =>
@@ -77,6 +80,20 @@ describe('SummaryMarkdown', () => {
     expect(frameIdsIn('<img alt="x" src="keyframe:f-3"> ![y](keyframe:f-4)')).toEqual(['f-3', 'f-4']);
     // An id longer than a frame id is not cut down to one.
     expect(frameIdsIn(`![z](keyframe:${'a'.repeat(65)})`)).toEqual([]);
+  });
+
+  it('reads a picture by itself when it is in a form the summary read does not find', async () => {
+    const loadFrames = framesLoader();
+    const loadFrame = vi.fn(async (_callId, id) => frame(id));
+    render(
+      <SummaryMarkdown callId="m-1" loadFrames={loadFrames} loadFrame={loadFrame}>
+        {TITLED}
+      </SummaryMarkdown>,
+    );
+    const img = await screen.findByRole('img', { name: 'Slide at 00:30' });
+    expect(img.getAttribute('src')).toBe('https://signed.example/0000030000-ab12cd_t.jpg');
+    expect(loadFrame).toHaveBeenCalledWith('m-1', '0000030000-ab12cd');
+    expect(loadFrames).not.toHaveBeenCalled();
   });
 
   it('keeps the slides it shows while a changed summary reads the frames it now names', async () => {
