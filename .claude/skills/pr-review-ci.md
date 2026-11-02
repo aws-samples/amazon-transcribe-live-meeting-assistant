@@ -199,7 +199,7 @@ them on the one thing the reader can get for free:
 | Already run by `code_checks` | Covers |
 |---|---|
 | `make lint-cfn` | cfn-lint over every CloudFormation template |
-| `make lint-python-check` | ruff check + ruff format --check over the Lambda functions, the Lambda layers and `scripts/pr_review` |
+| `make lint-python-check` | ruff check + ruff format --check over the Lambda functions, the Lambda layers, `scripts/pr_review`, the demo recorder (`scripts/ux_recorder*.py`, `scripts/ux_test_session.py`) and `scripts/tests` |
 | `make lint-ui-force` | ESLint (airbnb-base) + Prettier over the React UI |
 | `make lint-typescript` | `tsc` + eslint for the transcriber and VP stacks and `utilities/websocket-client` |
 | `make test-sdk`, `test-cli`, `test-lambdas` | Python unit suites |
@@ -208,6 +208,7 @@ them on the one thing the reader can get for free:
 | `make test-ai-stack` | AppSync schema/resolver/UI-operation contract, template invariants |
 | `make test-asr` | ASR MicroVM runtime tests + ruff |
 | `make test-integ-plumbing` | scheduled-integration machinery |
+| `make test-ux-recorder` | demo recorder, its stack-session helper and the storyboard file (render tests skip: no Pillow or ffmpeg) |
 | transcriber `npm test` + `npm run smoke` | tsc, eslint, node:test, Fastify boot |
 | browser extension `npm test` + `npm run build` | CRA tests and production build |
 

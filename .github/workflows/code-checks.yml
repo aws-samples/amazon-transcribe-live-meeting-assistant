@@ -162,6 +162,8 @@ jobs:
 
       # The product demo recorder (scripts/ux_recorder*.py), its stack-session
       # helper and the demo skill's storyboard file. No AWS, Chrome or network.
+      # Pillow and ffmpeg are not installed here, so the render tests skip and the
+      # rendering path is covered only by a local `make test-ux-recorder`.
       - name: Demo recorder tests
         run: make test-ux-recorder
 

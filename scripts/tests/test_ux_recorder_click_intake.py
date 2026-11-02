@@ -1,5 +1,6 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: MIT-0
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 
 """Unit tests for the recorder's click intake (scripts/ux_recorder.py).
 
@@ -540,9 +541,9 @@ def test_clicks_rejected_counts_every_kind_of_refusal(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_a_timeline_of_kept_clicks_renders_the_click_table(tmp_path: Path) -> None:
-    """``render.click_table`` turns every coordinate into an ``int``, so a
-    coordinate that is not a number used to crash the render after the session.
-    Refused reports never reach it, and the kept ones render."""
+    """``render.click_table`` casts every coordinate to ``int``, so a coordinate
+    that is not a number would fail the render; ``parse_click`` refuses such
+    reports, and the kept ones render."""
     rec, session_dir, _ = _recorder(tmp_path)
     rec.begin()
     rec.handle_command({"cmd": "mark", "label": "Open the set", "say": "We open it."})

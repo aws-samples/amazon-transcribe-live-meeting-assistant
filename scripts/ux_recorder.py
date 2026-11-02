@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: MIT-0
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 """
 ux_recorder.py
 
 Record a browser session as a narrated, captioned video: a product demo
 (``.claude/skills/product-demo.md``), or a UX review of the web UI.
 
-The demo or review itself is still done by the agent following the skill: it
+``--kind review`` (the default, kept so the file stays in step with the IDP
+recorder it came from) has no skill in this repository; the product demo skill
+always passes ``--kind demo``.
+
+The demo itself is still done by the agent following the skill: it
 drives the debug Chrome through the chrome-devtools MCP server and decides what to
 show and say. This script sits beside that as a sidecar. It attaches a second
 DevTools session to the same tab, captures screencast frames while the agent works,
@@ -452,9 +457,8 @@ class Recorder:
 
         A report :func:`parse_click` refuses, one past ``CLICK_RATE_MAX`` in the
         current rate window, and one past ``CLICKS_MAX_PER_SESSION`` are all
-        rejected. A kept click is recorded with exactly the fields it always was:
-        while paused only that it happened and whether it hit nothing interactive,
-        otherwise its position and labels as well. ``arrived`` is the arrival time
+        rejected. A kept click records ``x``, ``y``, ``target``, ``under`` and
+        ``interactive``; while paused, only ``paused`` and ``off_target``. ``arrived`` is the arrival time
         of a click that waited in the backlog and becomes the event's ``t``; a click
         recorded as it arrives is stamped by the event itself, so this path reads
         :attr:`clock` exactly once.
@@ -796,6 +800,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     socket_path = meta["socket"]
     Path(socket_path).unlink(missing_ok=True)
     server = _Server(socket_path, _make_handler(recorder))
+    # Owner-only, so the socket is the user's alone, as the module docstring says.
+    os.chmod(socket_path, 0o600)
     server_thread = threading.Thread(target=server.serve_forever, name="control", daemon=True)
     server_thread.start()
     write_current(

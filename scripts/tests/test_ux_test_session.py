@@ -13,6 +13,7 @@ calls AWS: the module's ``aws`` function is replaced.
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 import sys
 from datetime import datetime, timedelta, timezone
@@ -155,15 +156,25 @@ class TestThrowawayCredentials:
 
     def test_invitation_is_suppressed_and_the_password_set_permanent(self):
         calls = []
-        with patch.object(uts, "aws", side_effect=lambda *a, **k: calls.append(a)):
+        with patch.object(uts, "aws", side_effect=lambda *a, **k: calls.append((a, k))):
             uts.create_cognito_user(CTX, "ux-test-1@example.invalid", "Admin", "Ux!pw9aZ")
-        create, set_password, add_to_group = calls
+        (create, _), (set_password, set_kwargs), (add_to_group, _) = calls
         assert create[1] == "admin-create-user" and "SUPPRESS" in create
-        assert set_password[1] == "admin-set-user-password" and "--permanent" in set_password
+        assert set_password[1] == "admin-set-user-password"
+        assert json.loads(set_kwargs["stdin"])["Permanent"] is True
         assert add_to_group[1] == "admin-add-user-to-group" and "Admin" in add_to_group
 
+    def test_the_password_is_passed_on_standard_input_not_in_the_arguments(self):
+        calls = []
+        with patch.object(uts, "aws", side_effect=lambda *a, **k: calls.append((a, k))):
+            uts.create_cognito_user(CTX, "ux-test-1@example.invalid", "Admin", "Ux!pw9aZ")
+        set_password, set_kwargs = calls[1]
+        assert "Ux!pw9aZ" not in set_password
+        assert "file:///dev/stdin" in set_password
+        assert json.loads(set_kwargs["stdin"])["Password"] == "Ux!pw9aZ"
+
     def test_a_cli_failure_never_repeats_the_password(self):
-        """admin-set-user-password carries the password in its arguments."""
+        """An error message names only the service and operation."""
         failed = SimpleNamespace(returncode=255, stdout="", stderr="InvalidPasswordException")
         with patch.object(uts.subprocess, "run", return_value=failed):
             with pytest.raises(RuntimeError) as excinfo:

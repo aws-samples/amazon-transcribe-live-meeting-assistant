@@ -87,13 +87,15 @@ DEFAULT_EMAIL_DOMAIN = "example.invalid"
 AWS_BIN = os.environ.get("AWS_CLI_BIN") or "aws"
 
 
-def aws(*args: str, region: str | None = None):
+def aws(*args: str, region: str | None = None, stdin: str | None = None):
     """Run an AWS CLI command and return parsed JSON, or the raw text for
-    ``--output text``. Raises RuntimeError with the CLI's stderr on failure."""
+    ``--output text``. Raises RuntimeError with the CLI's stderr on failure.
+    ``stdin`` is passed to the CLI's standard input, for ``--cli-input-json
+    file:///dev/stdin``, so a value in it never appears in the process list."""
     cmd = [AWS_BIN, *args]
     if region:
         cmd += ["--region", region]
-    res = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603
+    res = subprocess.run(cmd, capture_output=True, text=True, input=stdin)  # nosec B603
     if res.returncode != 0:
         # Only the service and operation are named: the full argument list of
         # admin-set-user-password includes the password.
@@ -196,14 +198,17 @@ def create_cognito_user(ctx: dict, email: str, group: str | None, password: str)
     aws(
         "cognito-idp",
         "admin-set-user-password",
-        "--user-pool-id",
-        ctx["user_pool"],
-        "--username",
-        email,
-        "--password",
-        password,
-        "--permanent",
+        "--cli-input-json",
+        "file:///dev/stdin",
         region=ctx["region"],
+        stdin=json.dumps(
+            {
+                "UserPoolId": ctx["user_pool"],
+                "Username": email,
+                "Password": password,
+                "Permanent": True,
+            }
+        ),
     )
     if group:
         aws(
