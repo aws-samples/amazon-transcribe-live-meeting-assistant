@@ -404,7 +404,9 @@ async function main(): Promise<void> {
             spawnApp: defaultSpawnApp,
             warmWorkload: defaultWarmWorkload,
             fetchConfig: defaultFetchConfig,
-            log: (m) => log.info(`[supervisor] ${m}`),
+            // Few lines, and they are how a MicroVM's start and stop are
+            // traced, so they are written at any threshold.
+            log: (m) => log.always(`[supervisor] ${m}`),
         },
         process.env as Record<string, string | undefined>,
     );

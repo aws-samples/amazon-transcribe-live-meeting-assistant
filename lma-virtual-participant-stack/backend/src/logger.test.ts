@@ -128,18 +128,18 @@ test('parseLogLevel accepts the stack parameter values in any case and falls bac
 
 test('the bound meeting context is on every record from every module', () => {
     const { lines } = captureLines();
-    bindLogContext({ vpId: 'vp-1', meetingPlatform: 'Zoom' });
+    bindLogContext({ vpId: 'vp-1', meetingPlatform: 'ZOOM' });
     createLogger('a').info('before the call id');
     bindLogContext({ callId: 'call-1' });
     createLogger('b').info('after the call id');
 
     const [first, second] = lines.map((l) => JSON.parse(l) as LogRecord);
     assert.equal(first.vpId, 'vp-1');
-    assert.equal(first.meetingPlatform, 'Zoom');
+    assert.equal(first.meetingPlatform, 'ZOOM');
     assert.equal(first.callId, undefined);
     assert.equal(second.callId, 'call-1');
     assert.equal(second.component, 'b');
-    assert.deepEqual(getLogContext(), { vpId: 'vp-1', meetingPlatform: 'Zoom', callId: 'call-1' });
+    assert.deepEqual(getLogContext(), { vpId: 'vp-1', meetingPlatform: 'ZOOM', callId: 'call-1' });
 });
 
 test('binding an empty value removes the field', () => {
@@ -289,4 +289,17 @@ test('the credential environment variables are registered as secret values', () 
     createLogger('unit').info('filled env-pass-123 and sent simli-key-456');
 
     assert.equal((JSON.parse(lines[0]) as LogRecord).msg, `filled ${REDACTED} and sent ${REDACTED}`);
+});
+
+test('always writes an INFO record at any threshold', () => {
+    const { lines } = captureLines();
+    setLogLevel('error');
+    const log = createLogger('main');
+    log.info('hidden at ERROR');
+    log.always('VP exit: reason=left trigger=chat:leave-command');
+
+    assert.equal(lines.length, 1);
+    const record = JSON.parse(lines[0]) as LogRecord;
+    assert.equal(record.level, 'INFO');
+    assert.equal(record.msg, 'VP exit: reason=left trigger=chat:leave-command');
 });

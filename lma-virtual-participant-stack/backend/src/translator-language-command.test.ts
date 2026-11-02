@@ -13,7 +13,7 @@
  * choice is never written to the configuration store.
  */
 import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import {
     applyAssistantChatCommand,
     createActivationRestore,
@@ -36,6 +36,7 @@ console.log = (...args: unknown[]) => {
 setLogSink((_line, record) => {
     captured.push(record.msg);
 });
+after(() => setLogSink(null));
 
 // ---------------------------------------------------------------------------
 // The language list

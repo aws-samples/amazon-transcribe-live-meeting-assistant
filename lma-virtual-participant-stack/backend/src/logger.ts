@@ -14,7 +14,7 @@
  *
  *   {"ts":"2026-11-02T10:15:00.123Z","level":"INFO","component":"status-manager",
  *    "msg":"Successfully updated VP <id> status to JOINED with preserved fields",
- *    "vpId":"<id>","callId":"...","meetingPlatform":"Zoom"}
+ *    "vpId":"<id>","callId":"...","meetingPlatform":"ZOOM"}
  *
  * - `msg` is the same human-readable text `console.log` would have printed
  *   for the same arguments, so the bracket markers and prefixes that the docs,
@@ -28,7 +28,8 @@
  *   {@link Logger.child} adds fields for a narrower scope, such as one voice
  *   assistant session.
  * - `LOG_LEVEL` (DEBUG, INFO, WARN or ERROR; the stack's `LogLevel` parameter)
- *   sets the threshold. Unset or unrecognised means INFO.
+ *   sets the threshold. Unset or unrecognised means INFO. The participant's
+ *   lifecycle lines use {@link Logger.always} and are written at any threshold.
  * - `LOG_FORMAT=text` writes `<ts> <LEVEL> [<component>] <msg>` instead, for
  *   reading a local run in a terminal.
  *
@@ -58,6 +59,14 @@ export interface Logger {
     info: (...args: unknown[]) => void;
     warn: (...args: unknown[]) => void;
     error: (...args: unknown[]) => void;
+    /**
+     * An INFO record written whatever the threshold. Only for the few
+     * lifecycle lines that say how a participant started and ended — the
+     * `VP exit:` line, the shutdown-signal line, the status transitions —
+     * which the troubleshooting agent and the docs rely on finding even where
+     * the stack's `LogLevel` is WARN or ERROR.
+     */
+    always: (...args: unknown[]) => void;
     /** A logger whose records also carry `fields`, for a narrower scope. */
     child: (fields: LogFields) => Logger;
     isLevelEnabled: (level: LogLevelName) => boolean;
@@ -376,8 +385,8 @@ function serialise(record: LogRecord): string {
     }
 }
 
-function write(level: LogLevelName, component: string, fields: LogFields, args: unknown[]): void {
-    if (SEVERITY[level] < SEVERITY[currentLevel()]) return;
+function write(level: LogLevelName, component: string, fields: LogFields, args: unknown[], force = false): void {
+    if (!force && SEVERITY[level] < SEVERITY[currentLevel()]) return;
     try {
         const record: LogRecord = {
             ts: new Date().toISOString(),
@@ -410,6 +419,7 @@ export function createLogger(component: string, fields: LogFields = {}): Logger 
         info: (...args) => write('info', component, own, args),
         warn: (...args) => write('warn', component, own, args),
         error: (...args) => write('error', component, own, args),
+        always: (...args) => write('info', component, own, args, true),
         child: (more) => createLogger(component, { ...own, ...more }),
         isLevelEnabled: (level) => SEVERITY[level] >= SEVERITY[currentLevel()],
     };

@@ -88,14 +88,15 @@ script and Chromium.
 | `msg` | The human-readable message. The bracket markers this guide and the feature guides refer to, such as `[stop-request]` or `VP exit:`, are in this text. |
 | `vpId` | The Virtual Participant's id, from the moment the participant starts. |
 | `callId` | The meeting's call id, from the point the participant has one. |
-| `meetingPlatform` | `Chime`, `Zoom`, `Teams` or `Webex`. |
+| `meetingPlatform` | `CHIME`, `ZOOM`, `TEAMS` or `WEBEX`. |
 
 A part of the participant may add fields of its own for a narrower scope.
 
 The stack's `LogLevel` parameter sets the threshold through the container's
 `LOG_LEVEL` variable. At `WARN` or `ERROR`, `INFO` lines are not written,
-including the `VP exit:` line that records why a participant left, so keep
-`INFO` or `DEBUG` while you are diagnosing a problem. For a local run,
+except for the participant's lifecycle lines: start-up, its status changes, the
+`VP exit:` line that records why it left, and the shutdown-signal lines. Those
+are written at every level. For a local run,
 `LOG_FORMAT=text` writes `<ts> <LEVEL> [<component>] <msg>` lines instead of
 JSON.
 

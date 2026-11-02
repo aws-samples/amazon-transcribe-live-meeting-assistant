@@ -211,10 +211,12 @@ const main = async (): Promise<void> => {
     // every module's log records carry it; the call id is added when known.
     bindLogContext({
         vpId: details.invite.virtualParticipantId,
-        meetingPlatform: details.invite.meetingPlatform,
+        // One spelling, so a filter on the field matches every participant:
+        // MEETING_PLATFORM arrives as ZOOM, Teams, Chime ...
+        meetingPlatform: details.invite.meetingPlatform.toUpperCase(),
     });
     const buildInfo = readBuildInfo();
-    log.info(
+    log.always(
         `LMA Virtual Participant starting... [build ${buildInfo.buildDate} commit ${buildInfo.gitCommit} via ${buildInfo.buildSource}]`,
     );
     if (isLocalTest) {
@@ -259,7 +261,7 @@ const main = async (): Promise<void> => {
 
             // Start with INITIALIZING status
             await statusManager.setInitializing();
-            log.info(`VP ${vpId} status: INITIALIZING`);
+            log.always(`VP ${vpId} status: INITIALIZING`);
             
             // Store task ARN for efficient termination
             try {
@@ -347,7 +349,7 @@ const main = async (): Promise<void> => {
     // Set CONNECTING status when starting browser
     if (statusManager) {
         await statusManager.setConnecting();
-        log.info(`VP ${vpId} status: CONNECTING`);
+        log.always(`VP ${vpId} status: CONNECTING`);
     }
 
     // Start the platform-agnostic agent-speaking detector (listens to
@@ -713,7 +715,7 @@ const main = async (): Promise<void> => {
         // Set JOINING status before attempting to join meeting
         if (statusManager) {
             await statusManager.setJoining();
-            log.info(`VP ${vpId} status: JOINING`);
+            log.always(`VP ${vpId} status: JOINING`);
         }
 
         // Initialize the appropriate meeting platform handler
@@ -790,7 +792,7 @@ const main = async (): Promise<void> => {
             exitInfo.requestedBy ? `requestedBy=${JSON.stringify(exitInfo.requestedBy)}` : null,
             exitInfo.matchedMessage ? `message=${JSON.stringify(exitInfo.matchedMessage)}` : null,
         ].filter(Boolean);
-        log.info(`VP exit: ${exitDetailParts.join(' ')}`);
+        log.always(`VP exit: ${exitDetailParts.join(' ')}`);
         log.info('Meeting session completed successfully');
         success = true;
 
@@ -968,7 +970,7 @@ const main = async (): Promise<void> => {
             if (statusManager) {
                 await statusManager.setCompleted(completionMessage, endTrigger);
             }
-            log.info(
+            log.always(
                 completionMessage
                     ? `LMA Virtual Participant completed: ${completionMessage}`
                     : 'LMA Virtual Participant completed successfully',
@@ -980,10 +982,10 @@ const main = async (): Promise<void> => {
             if (statusManager) {
                 await statusManager.setFailed(failMessage, endTrigger);
             }
-            log.info(`LMA Virtual Participant did not join: ${failMessage}`);
+            log.always(`LMA Virtual Participant did not join: ${failMessage}`);
             process.exit(1);
         } else {
-            log.info('LMA Virtual Participant failed');
+            log.always('LMA Virtual Participant failed');
             process.exit(1);
         }
         
@@ -994,7 +996,7 @@ const main = async (): Promise<void> => {
 
 // Handle process signals for graceful shutdown 
 const signalHandler = async (signal: string) => {
-    log.info(`Received ${signal}, initiating graceful shutdown...`);
+    log.always(`Received ${signal}, initiating graceful shutdown...`);
     shutdownRequested = true;
     // From here on the setup or join code still running reports no further
     // progress; only the terminal status below is written.
@@ -1012,7 +1014,7 @@ const signalHandler = async (signal: string) => {
     
     // Send END event to Kinesis when externally terminated
     try {
-        log.info('Sending END meeting event due to external termination...');
+        log.always('Sending END meeting event due to external termination...');
         await sendEndMeeting();
         log.info('END meeting event sent successfully');
     } catch (error) {
@@ -1023,7 +1025,7 @@ const signalHandler = async (signal: string) => {
     if (statusManager && vpId) {
         try {
             await statusManager.setCompleted(); // Use COMPLETED for external termination
-            log.info(`VP ${vpId} status updated to COMPLETED due to external termination`);
+            log.always(`VP ${vpId} status updated to COMPLETED due to external termination`);
         } catch (error) {
             log.error(`Failed to update status during shutdown: ${error}`);
         }

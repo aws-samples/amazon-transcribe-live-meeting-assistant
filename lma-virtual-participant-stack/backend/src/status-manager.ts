@@ -475,7 +475,7 @@ export class VirtualParticipantStatusManager {
       }
 
       if (result) {
-        log.info(`Successfully updated VP ${this.participantId} status to ${status} with preserved fields`);
+        log.always(`Successfully updated VP ${this.participantId} status to ${status} with preserved fields`);
         return true;
       } else {
         log.error('Failed to update VP status via GraphQL');

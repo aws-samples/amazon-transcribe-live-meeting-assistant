@@ -324,7 +324,7 @@ def test_the_trigger_example_reads_a_plain_line_and_a_json_record_alike() -> Non
     pattern = re.search(r"parse @message /(.+?)/\n", text).group(1).replace("(?<", "(?P<")
     plain = "VP exit: reason=left trigger=chat:leave-command"
     record = (
-        '{"ts":"2026-11-02T10:00:00.000Z","level":"INFO","component":"index",'
+        '{"ts":"2026-11-02T10:00:00.000Z","level":"INFO","component":"main",'
         '"msg":"VP exit: reason=left trigger=chat:leave-command","vpId":"vp-1"}'
     )
 

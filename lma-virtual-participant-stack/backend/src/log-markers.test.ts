@@ -73,6 +73,24 @@ test('every marker a reader relies on is still written by the VP', () => {
     }
 });
 
+test('the lifecycle lines are written whatever the LOG_LEVEL threshold', () => {
+    // The troubleshooting agent finds how a participant ended from these;
+    // a deployment whose LogLevel is WARN or ERROR must still write them.
+    const lifecycle = [
+        'VP exit: ${',
+        'Received ${signal}',
+        'status updated to COMPLETED due to external termination',
+        'Successfully updated VP ${this.participantId} status to',
+    ];
+    const lines = productionSource().split('\n');
+    for (const marker of lifecycle) {
+        const at = lines.findIndex((line) => line.includes(marker));
+        assert.ok(at >= 0, `${marker} is no longer in src/`);
+        const call = lines.slice(Math.max(0, at - 2), at + 1).join('\n');
+        assert.match(call, /\blog\.always\(/, `${marker} is not written with log.always`);
+    }
+});
+
 test('every marker is a literal substring of the JSON record, so @message like still matches it', () => {
     const lines: string[] = [];
     setLogSink((line) => lines.push(line));
@@ -95,8 +113,8 @@ test('the trigger= parse the troubleshooting agent is taught reads the plain lin
     const lines: string[] = [];
     setLogSink((line) => lines.push(line));
     try {
-        createLogger('index').info('VP exit: reason=left trigger=chat:leave-command');
-        createLogger('index').info('VP exit: reason=left trigger=chat:leave-command requestedBy="Alice"');
+        createLogger('main').info('VP exit: reason=left trigger=chat:leave-command');
+        createLogger('main').info('VP exit: reason=left trigger=chat:leave-command requestedBy="Alice"');
     } finally {
         setLogSink(null);
     }
