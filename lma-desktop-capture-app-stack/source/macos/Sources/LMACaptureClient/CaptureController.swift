@@ -125,6 +125,74 @@ final class CaptureController {
     /// True while a video stream is running for the active call (UI badge).
     private(set) var isVideoActive: Bool = false
 
+    // Meeting consent (see Consent.swift). Set by the GUI (or the CLI) before
+    // start(); nil when the deployment needs no consent step.
+    /// The `consent` field of START.
+    var consentPayload: [String: Any]?
+    /// An evidence screenshot taken before Start, sent once after START.
+    var consentEvidenceJPEG: Data?
+    /// A CONSENT_STATE frame for the active meeting (main queue).
+    var onConsentState: ((Consent.State) -> Void)?
+    /// An opt-in meeting's video lane waits for its consent: the transcriber
+    /// refuses a video stream until the meeting may be captured.
+    private var videoAwaitsConsent = false
+    private var consentAllowsCapture = false
+
+    /// The deployment's consent settings, read from the transcriber (see
+    /// ConsentSettingsFetcher). nil when it did not answer.
+    func fetchConsentSettings() async -> Consent.Settings? {
+        guard !config.accessToken.isEmpty else { return nil }
+        return await ConsentSettingsFetcher.fetch(config: config, tokens: tokenStore)
+    }
+
+    /// The user reported that a participant objected. The transcriber stops
+    /// transcribing and recording at once, ends the meeting and records the
+    /// objection, so this stops capture without an END of its own.
+    func reportObjection(participantName: String) {
+        guard let sock = socket else { return }
+        sock.sendConsentFrame(Consent.objectionFrame(participantName: participantName))
+        log(sock.isConnected
+            ? "Objection reported — recording stopped."
+            : "Recording stopped. The connection was down, so the objection may not have been "
+              + "recorded on the meeting.")
+        // A moment for the frame to go out before the socket closes.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            // Unless the transcriber's answer to the objection already stopped it.
+            guard let self = self, self.socket === sock, self.state == .streaming else { return }
+            self.stop(sendEnd: false)
+        }
+    }
+
+    /// An evidence screenshot taken while streaming: sent for this meeting now.
+    func sendConsentEvidence(_ jpeg: Data, note: String) {
+        guard let frame = Consent.evidenceFrame(jpeg: jpeg, capturedAt: Date(), note: note) else {
+            log("The evidence screenshot is too large to send.")
+            return
+        }
+        socket?.sendConsentFrame(frame)
+    }
+
+    /// The transcriber's word on this meeting's consent. captureAllowed false
+    /// means it has ended the meeting: stop here too, with no END.
+    private func handleConsentState(_ state: Consent.State, from sock: TranscriberSocket) {
+        onConsentState?(state)
+        guard socket === sock else { return }
+        if state.captureAllowed == true {
+            consentAllowsCapture = true
+            if videoAwaitsConsent, self.state == .streaming {
+                videoAwaitsConsent = false
+                startVideoIfEnabled()
+            }
+        }
+        guard state.stopsCapture else { return }
+        let text = Consent.describe(state)
+        log(text)
+        // An objection ends a meeting that was recorded until then; anything
+        // else (refused, consent not recorded) means nothing was captured.
+        let objected = state.status == "objected" || state.code == "OBJECTION_RECEIVED"
+        stop(then: objected ? nil : .error(text), sendEnd: false)
+    }
+
     init(config: Config) {
         self.config = config
         // A token supplied up front (LMA_ACCESS_TOKEN / --token, plus an optional
@@ -262,6 +330,20 @@ final class CaptureController {
         let cap = AudioCapture(mixer: mix, targetRate: config.sampleRate, micDeviceUID: micDeviceUID)
 
         sock.onStateChange = { connected in mix.setConnected(connected) }
+        sock.consent = consentPayload
+        consentAllowsCapture = false
+        videoAwaitsConsent = (consentPayload?["mode"] as? String) == Consent.Mode.optIn.rawValue
+        if let jpeg = consentEvidenceJPEG,
+           let frame = Consent.evidenceFrame(jpeg: jpeg, capturedAt: Date(),
+                                             note: "Captured in the Desktop Capture App before recording started") {
+            sock.sendConsentFrame(frame)
+        }
+        sock.onConsentState = { [weak self, weak sock] state in
+            DispatchQueue.main.async {
+                guard let self = self, let sock = sock else { return }
+                self.handleConsentState(state, from: sock)
+            }
+        }
         sock.onFatalAuth = { [weak self] msg in
             DispatchQueue.main.async { self?.handleFatalAuth(msg) }
         }
@@ -285,12 +367,24 @@ final class CaptureController {
                 guard !Task.isCancelled else { return }
                 self?.log("Streaming \(self?.activeCallId ?? "")")
                 self?.setState(.streaming)
-                self?.startVideoIfEnabled()
+                self?.startVideoWhenConsentAllows()
             } catch {
                 guard !Task.isCancelled else { return }
                 self?.log("Capture failed: \(error)")
                 self?.setState(.error("\(error)"))
             }
+        }
+    }
+
+    /// Start the video lane now, or, for an opt-in meeting whose consent has not
+    /// yet allowed capture, when it does (handleConsentState). On the main queue,
+    /// where the consent state is kept.
+    private func startVideoWhenConsentAllows() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.state == .streaming else { return }
+            if self.videoAwaitsConsent && !self.consentAllowsCapture { return }
+            self.videoAwaitsConsent = false
+            self.startVideoIfEnabled()
         }
     }
 
@@ -364,15 +458,19 @@ final class CaptureController {
     /// `finalState` overrides where we land. The fatal-auth path needs it: this
     /// teardown finishes asynchronously and would otherwise overwrite the error
     /// state with `.idle`, swallowing the reason the stream stopped.
-    func stop(then finalState: State? = nil) {
+    ///
+    /// `sendEnd` is false when the transcriber already ended the meeting for its
+    /// consent; the video lane is then closed without END_VIDEO too, since the
+    /// server finalized it.
+    func stop(then finalState: State? = nil, sendEnd: Bool = true) {
         setState(.stopping)
         startTask?.cancel()      // don't let a late capture bring-up undo this
         startTask = nil
-        stopVideo(sendEnd: true)
+        stopVideo(sendEnd: sendEnd)
         capture?.stop()
         mixer?.stop()
         socket?.beginClose()   // mark intentional first so teardown stays quiet
-        socket?.sendEnd()
+        if sendEnd { socket?.sendEnd() }
         let sock = socket
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
             sock?.close()

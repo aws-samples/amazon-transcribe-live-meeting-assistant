@@ -74,6 +74,16 @@ alongside the browser and the Node CLI.
 `float→int16` clamp matches the browser/macOS: clamp to [-1,1], then
 `s < 0 ? s*32768 : s*32767`.
 
+**Meeting consent:** when the deployment's consent mode is Notify or Opt-in, the
+client asks the transcriber for the settings (`CONSENT_SETTINGS`, on a
+short-lived socket of its own), shows the consent step, sends what the user
+confirmed in a `consent` field of START, and can send `CONSENT_OBJECTION` and
+`CONSENT_EVIDENCE` (a JPEG of the selected screen-video source). The server
+answers with `CONSENT_STATE`; one with `captureAllowed: false` means it ended the
+meeting, and the client stops without END and does not reconnect. See
+`docs/websocket-streaming-api.md` (Meeting Consent Frames) and
+`docs/meeting-consent.md`.
+
 **Reconnect:** the server has no session resume. On any drop we reopen a new
 socket and send a **fresh START** (same callId), with capped exponential backoff
 (0.5 s → 10 s). PCM produced while down is buffered (bounded to ~3 s of stereo)
@@ -109,6 +119,8 @@ logic is pinned by `--selftest`.
 | `Engine/LinearResampler.cs` | Continuous-phase mono resampler (device rate → 48 kHz) |
 | `Engine/AudioCapture.cs` | **WASAPI**: loopback on default render (system/ch0) + capture on default capture (mic/ch1), resample, mono downmix, device-change handling via `IMMNotificationClient` |
 | `Engine/CaptureController.cs` | UI-agnostic engine controller: login/start/stop/pause/mute + state machine + callbacks |
+| `Engine/Consent.cs` | Meeting consent step: settings and state frames, notice rendering, the START payload, objection/evidence frames, and its `--selftest` cases |
+| `Engine/ConsentSettingsFetcher.cs` | Reads the consent settings from the transcriber on a short-lived socket before Start |
 | `App/Program.cs` | Entry point; dual-mode dispatch (GUI vs headless CLI) + `--selftest` / `--login-only` / `--capture-test` + taskbar `--lma-*` verb relay |
 | `App/TrayApp.cs`, `App/PanelView.cs` | System-tray UI (WPF + Hardcodet.NotifyIcon) and the recording-time taskbar button |
 | `App/TaskbarStatus.cs` | Taskbar button images (icon / overlay badges / thumb-button glyphs) + the named-pipe channel that carries JumpList verbs to the running instance |
@@ -411,6 +423,8 @@ bakes the deployment's real values into it; the checked-in copy is a placeholder
 | — | `--debug-wav` | `LMA_DEBUG_WAV` | tee streamed PCM to a WAV |
 | — | `--username` | `LMA_USERNAME` | for in-app SRP login |
 | — | `--password` | `LMA_PASSWORD` | (prompted without echo if omitted) |
+| — | `--consent-method` | `LMA_CONSENT_METHOD` | CLI: in a Notify or Opt-in deployment, confirms that the printed notice was shared and how everyone agreed: `verbal`, `chat` or `invite_terms`. Required for Opt-in (exit 2 without it); a meeting the transcriber stops for consent exits 3 |
+| — | `--consent-note` | `LMA_CONSENT_NOTE` | CLI: optional note recorded with that confirmation |
 
 ---
 

@@ -280,6 +280,9 @@ enum SelfTest {
               Config.sessionCallId(requested: nil, configured: "Fixed", now: later),
               "Fixed")
 
+        print("\nMeeting consent step:")
+        for (name, got, want) in ConsentSelfTest.cases() { check(name, got, want) }
+
         print(failures == 0 ? "\nAll self-tests PASSED ✓" : "\n\(failures) self-test(s) FAILED ✗")
         return failures == 0 ? 0 : 1
     }

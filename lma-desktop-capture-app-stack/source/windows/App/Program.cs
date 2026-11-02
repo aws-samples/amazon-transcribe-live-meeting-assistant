@@ -228,6 +228,44 @@ public static class Program
         tokenStore.ArmProactiveRefresh();
 
         var socket = new TranscriberSocket(config, tokenStore);
+
+        // Meeting consent (docs/meeting-consent.md): read the deployment's settings
+        // and, when it asks for a consent step, print the notice and send what
+        // --consent-method confirms with START. A transcriber that does not
+        // answer needs no step.
+        var consentSettings = ConsentSettingsFetcher.FetchAsync(config, tokenStore).GetAwaiter().GetResult();
+        if (consentSettings is { Required: true })
+        {
+            var notice = Consent.RenderNotice(consentSettings.NoticeTemplate, config.AgentId, config.CallId,
+                consentSettings.ConsentPhrase, consentSettings.ObjectionPhrase);
+            Console.WriteLine($"  consent  : {Consent.Wire(consentSettings.Mode)} — share this notice in the meeting:");
+            Console.WriteLine($"             {notice}");
+            var step = new Consent.Step();
+            if (!string.IsNullOrEmpty(config.ConsentMethod))
+            {
+                if (Consent.ParseMethod(config.ConsentMethod) is not { } method)
+                {
+                    Console.Error.WriteLine("--consent-method must be verbal, chat or invite_terms.");
+                    return 2;
+                }
+                step = new Consent.Step(true, method, config.ConsentNote);
+            }
+            if (Consent.StartBlockedReason(consentSettings, step) is { } why)
+            {
+                Console.Error.WriteLine($"Not starting: {why}\n  Share the notice above, then pass "
+                    + "--consent-method verbal|chat|invite_terms to confirm how everyone agreed.");
+                return 2;
+            }
+            socket.ConsentPayload = Consent.Payload(consentSettings, step, config.AgentId, config.CallId, notice);
+        }
+        else
+        {
+            // No step needed or none could be read: say so, rather than send nothing
+            // (see Consent.Settings.NotShown).
+            socket.ConsentPayload = Consent.Payload(Consent.Settings.NotShown, new Consent.Step(), config.AgentId,
+                config.CallId, "");
+        }
+
         var mixer = new StereoMixer(config.SampleRate, chunk => socket.SendPcm(chunk));
         var capture = new AudioCapture(mixer, config.SampleRate);
 
@@ -241,6 +279,15 @@ public static class Program
         var done = new ManualResetEventSlim(false);
         bool fatalAuth = false;
         socket.OnFatalAuth = _ => { fatalAuth = true; done.Set(); };
+        // The transcriber ends a meeting its consent does not allow; so does the CLI.
+        bool consentStopped = false;
+        socket.OnConsentState = state =>
+        {
+            if (!state.StopsCapture) return;
+            Console.Error.WriteLine($"Recording stopped: {Consent.Describe(state)}");
+            consentStopped = true;
+            done.Set();
+        };
 
         // Optional: tee the exact streamed PCM to a local stereo WAV for offline
         // verification (per-channel RMS proves ch0=system / ch1=mic, not swapped).
@@ -262,7 +309,8 @@ public static class Program
             mixer.Stop();
             debugTee?.Finish();
             socket.BeginClose();   // mark intentional first so teardown stays quiet
-            socket.SendEnd();
+            // A meeting the transcriber ended for its consent has nothing to END.
+            if (!consentStopped) socket.SendEnd();
             Thread.Sleep(500);
             socket.Close();
             done.Set();
@@ -310,7 +358,7 @@ public static class Program
 
         done.Wait();
         Shutdown();
-        return fatalAuth ? 1 : 0;
+        return fatalAuth ? 1 : consentStopped ? 3 : 0;
     }
 
     private static string PromptPassword(string prompt)

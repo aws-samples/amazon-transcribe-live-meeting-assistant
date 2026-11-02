@@ -25,13 +25,13 @@ on this page is legal advice.
 
 **Current state:** the consent settings, the consent record and its API, the
 evidence check and the meeting page's Consent section are in place, and
-**Stream Audio** runs the consent flow: it shows the notice, asks the user to
-confirm, and the WebSocket transcriber records that on the meeting and
-withholds or stops recording and transcription accordingly (see
-[Stream Audio and the Desktop Capture App](#stream-audio-and-the-desktop-capture-app)).
-The Virtual Participant, the Desktop Capture App and the browser extension do
-not run it yet; how the transcriber treats a client that shows no consent step
-is a setting. See [Flows by capture method](#flows-by-capture-method).
+**Stream Audio** and the **Desktop Capture App** run the consent flow: they show
+the notice, ask the user to confirm, and the WebSocket transcriber records that
+on the meeting and withholds or stops recording and transcription accordingly
+(see [Stream Audio and the Desktop Capture App](#stream-audio-and-the-desktop-capture-app)).
+The Virtual Participant and the browser extension do not run it yet; how the
+transcriber treats a client that shows no consent step is a setting. See
+[Flows by capture method](#flows-by-capture-method).
 
 ## The three modes
 
@@ -200,7 +200,7 @@ replies are read.
 |---|---|---|---|
 | **Virtual Participant** | Posted in the meeting chat when the Virtual Participant is admitted | Read from the meeting chat, and from what is said, by display name; screenshots of the chat kept as evidence | Not available yet: the Virtual Participant does not run the consent flow. Planned next. |
 | **Stream Audio** | Shown to the LMA user, with a copy button, to read out or post in their meeting | Attested by the LMA user, who owns the meeting (opt-in is met by the rule **The meeting owner attests**); an objection is reported with **Participant objected** | Available. See [Stream Audio and the Desktop Capture App](#stream-audio-and-the-desktop-capture-app). |
-| **Desktop Capture App** | As for Stream Audio | As for Stream Audio | Not available yet: the app shows no consent step, so its meetings are treated as [clients without a consent step](#clients-without-a-consent-step). Planned next. |
+| **Desktop Capture App** (macOS and Windows) | As for Stream Audio, with a copy button | As for Stream Audio; evidence is a frame of the screen-video source selected in the app | Available in builds that include it. Earlier builds show no consent step and are treated as [clients without a consent step](#clients-without-a-consent-step). See [The Desktop Capture App](#the-desktop-capture-app). |
 | **Browser extension** | As for Stream Audio | As for Stream Audio | Not available yet; treated as a client without a consent step. |
 | **Upload Audio** | None: the recording already exists | — | Not applicable. A recording should only be uploaded with the consent its participants gave when it was made. |
 
@@ -240,8 +240,10 @@ meeting's participants or its chat, so the consent step is the LMA user's own:
 they share the notice, and confirm that it was shared or, in opt-in, that
 everyone agreed. The transcriber records that confirmation on the meeting, as a
 backend role, and is the component that decides whether audio is transcribed
-and recorded. The protocol, which other streaming clients can use too, is
-described in [the WebSocket streaming API](websocket-streaming-api.md#615-meeting-consent-frames).
+and recorded. The Desktop Capture App uses the same protocol, described in
+[the WebSocket streaming API](websocket-streaming-api.md#615-meeting-consent-frames),
+and the same rules; [The Desktop Capture App](#the-desktop-capture-app) below
+says where it differs.
 
 ### The consent step
 
@@ -331,7 +333,8 @@ exists and only a backend role may add evidence.
 
 An opt-in deployment whose rule is **Each participant consents** and that does
 not **allow a different choice per meeting** cannot be satisfied from Stream
-Audio, which has no participant list: the page says so and Start is refused.
+Audio or the Desktop Capture App, which have no participant list: the page or
+the app says so and Start is refused.
 Use a Virtual Participant for such meetings, or allow a per-meeting choice.
 
 If the transcriber cannot read the consent settings when a meeting starts, it
@@ -341,11 +344,43 @@ transcribed or recorded until the record answers that the meeting may be
 captured, and if the record refuses the step the meeting is ended. A client
 without a step is then captured, since nothing says that a step is needed.
 
+### The Desktop Capture App
+
+The macOS and Windows apps show the same step in their panel (see
+[Meeting consent in the Desktop Capture App](desktop-capture-app.md#meeting-consent-notify-and-opt-in-deployments)),
+and the transcriber records and gates it exactly as for Stream Audio. The
+differences:
+
+- **Reading the settings.** The app connects to the transcriber only when a
+  recording starts, so it asks for the settings on a short-lived connection of
+  its own when the user signs in, when the panel opens, and at Start if it has
+  no answer yet. A transcriber that does not answer within six seconds is
+  treated as one that predates the consent frames: no step is shown. The app
+  still sends its step with `START`, as mode Off, as Stream Audio does, so in an
+  opt-in deployment the transcriber refuses the meeting and the app reads the
+  settings again rather than being treated as a client without a consent step.
+- **Evidence** is one frame of the screen or window selected as the
+  screen-video source in the app's Settings, taken with the capture permission
+  the app already holds (on macOS, ScreenCaptureKit, macOS 14 or later). It can
+  be taken before Start, when it is sent once the meeting starts, or while
+  recording, when it is sent at once.
+- **Reconnects.** The app sends a fresh `START`, with the same consent step, each
+  time its connection drops and reconnects. The transcriber finds the meeting's
+  record already started and does not record the notice or the attestation a
+  second time; in an opt-in meeting the first second or so of audio after each
+  reconnect is discarded until the record answers again. A meeting somebody
+  objected to is not resumed: the transcriber refuses it and the app stops.
+- **Screen video** of an opt-in meeting starts once the meeting's consent allows
+  capture, since the transcriber refuses a video stream before that.
+- **The command line** (`--cli`) prints the notice and takes the confirmation as
+  `--consent-method verbal|chat|invite_terms`, with an optional `--consent-note`.
+
 ### Clients without a consent step
 
 Clients that show no consent step — the browser extension, the Stream Audio
-embed (`#/embed?component=stream-audio`), the Desktop Capture App, and scripts
-written against the streaming API — send `START` without a
+embed (`#/embed?component=stream-audio`), Desktop Capture App builds from
+before the consent step, and scripts written against the streaming API — send
+`START` without a
 `consent` field. In Notify or Opt-in the transcriber treats such a meeting by
 the setting **Streaming clients without a consent step**:
 
@@ -668,9 +703,9 @@ also holds the reply classifier described above.
 - **What LMA records is evidence, not a determination.** The record shows what
   was posted and what was replied, when; whether that amounts to consent where
   the meeting took place is for your organisation to decide.
-- **A streamed meeting's consent is the user's word.** Stream Audio cannot see
-  the participants or the meeting chat, so an opt-in meeting streamed from it
-  is granted on the LMA user's attestation alone. An evidence screenshot is the
+- **A streamed meeting's consent is the user's word.** Stream Audio and the
+  Desktop Capture App cannot see the participants or the meeting chat, so an
+  opt-in meeting from either is granted on the LMA user's attestation alone. An evidence screenshot is the
   only part of the record that shows what the participants saw or replied.
 - **Not every capture method runs the flow yet.** See
   [Flows by capture method](#flows-by-capture-method).

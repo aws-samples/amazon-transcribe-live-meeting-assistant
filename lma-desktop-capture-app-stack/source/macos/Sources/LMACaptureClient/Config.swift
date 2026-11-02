@@ -80,6 +80,14 @@ struct Config {
     /// select an engine — this is the only way a client picks one.
     var asrEngine: String
 
+    /// CLI: the meeting consent step, for a deployment whose consent mode is
+    /// Notify or Opt-in. Passing --consent-method (verbal, chat or invite_terms)
+    /// confirms that the notice the CLI prints was shared and, in opt-in, that
+    /// everyone agreed that way. The GUI asks instead.
+    var consentMethod: String
+    /// CLI: an optional note recorded with that confirmation (--consent-note).
+    var consentNote: String
+
     /// Name of the LMA CloudFormation stack this download came from. Shown in
     /// the UI and — critically — used to namespace all per-machine identifiers
     /// (bundle id, preferences, install path) so the apps for two different LMA
@@ -206,6 +214,8 @@ struct Config {
             diarizeMicChannel: ["1", "true", "yes"].contains(
                 value("diarize-mic", "LMA_DIARIZE_MIC").lowercased()),
             asrEngine: value("asr-engine", "LMA_ASR_ENGINE", "asrEngine").lowercased(),
+            consentMethod: value("consent-method", "LMA_CONSENT_METHOD").lowercased(),
+            consentNote: value("consent-note", "LMA_CONSENT_NOTE"),
             stackName: value("stack-name", "LMA_STACK_NAME", "stackName"),
             appVersion: value("app-version", "LMA_APP_VERSION", "appVersion")
         )
