@@ -28,6 +28,9 @@ import { WebSocketServer, WebSocket } from 'ws';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { createLogger } from './logger.js';
+
+const log = createLogger('simli-avatar');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -101,24 +104,24 @@ export class SimliAvatar {
     this.enabled = !!(this.apiKey && this.faceId);
 
     if (this.enabled) {
-      console.log('✓ Simli Avatar enabled');
-      console.log(`  Face ID: ${this.faceId}`);
-      console.log(`  Transport mode: ${this.transportMode}`);
-      console.log(`  Max session length: ${this.maxSessionLength}s`);
-      console.log(`  Max idle time: ${this.maxIdleTime}s`);
+      log.info('✓ Simli Avatar enabled');
+      log.info(`  Face ID: ${this.faceId}`);
+      log.info(`  Transport mode: ${this.transportMode}`);
+      log.info(`  Max session length: ${this.maxSessionLength}s`);
+      log.info(`  Max idle time: ${this.maxIdleTime}s`);
     } else {
-      console.log('Simli Avatar disabled - no API key or Face ID provided');
+      log.info('Simli Avatar disabled - no API key or Face ID provided');
     }
   }
 
   async initialize(context: BrowserContext): Promise<void> {
     if (!this.enabled) {
-      console.log('Simli Avatar disabled - skipping initialization');
+      log.info('Simli Avatar disabled - skipping initialization');
       return;
     }
 
     try {
-      console.log('Initializing Simli Avatar...');
+      log.info('Initializing Simli Avatar...');
 
       this.simliPage = await context.newPage();
 
@@ -132,10 +135,10 @@ export class SimliAvatar {
           text.includes('[LMA-Simli]') ||
           text.includes('[Simli-AudioBlock]')
         ) {
-          console.log(`SimliPage ${msg.type()}: ${text}`);
+          log.info(`SimliPage ${msg.type()}: ${text}`);
         }
       });
-      this.simliPage.on('pageerror', (err) => console.warn('SimliPage error:', err?.message || err));
+      this.simliPage.on('pageerror', (err) => log.warn('SimliPage error:', err?.message || err));
 
       const simliPageHtml = this.buildSimliPageHtml();
       
@@ -180,7 +183,7 @@ export class SimliAvatar {
             });
           }
         } catch (e: any) {
-          console.error('[Simli] route fulfill failed:', e?.message || e);
+          log.error('[Simli] route fulfill failed:', e?.message || e);
           route.abort();
         }
       });
@@ -203,9 +206,9 @@ export class SimliAvatar {
       await cdpSession.send('Page.setWebLifecycleState', { state: 'active' });
       // Disable timer throttling for background tabs
       await cdpSession.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-      console.log('✓ Simli page loaded with audio isolation patch (background throttling disabled)');
+      log.info('✓ Simli page loaded with audio isolation patch (background throttling disabled)');
       
-      console.log('Waiting for Simli avatar to connect...');
+      log.info('Waiting for Simli avatar to connect...');
       
       // Define a re-runnable connect routine on the page so the Node watchdog
       // can rebuild the Simli session if it drops mid-meeting. The SimliClient's
@@ -314,9 +317,9 @@ export class SimliAvatar {
       }
 
       if (readyAttempts >= maxReadyAttempts) {
-        console.warn('⚠️  Simli avatar did not become ready within timeout - continuing anyway');
+        log.warn('⚠️  Simli avatar did not become ready within timeout - continuing anyway');
       } else {
-        console.log('✓ Simli avatar is ready and visible');
+        log.info('✓ Simli avatar is ready and visible');
       }
 
       // Additional audio track disabling after connection (belt and suspenders)
@@ -375,7 +378,7 @@ export class SimliAvatar {
             console.error('[Simli-WS] Audio bridge error');
           };
         }, this.wsPort);
-        console.log('✓ Simli page connected to WebSocket audio bridge');
+        log.info('✓ Simli page connected to WebSocket audio bridge');
       }
 
       // Set up the avatar capture source on the Simli page. We draw the
@@ -436,17 +439,17 @@ export class SimliAvatar {
         window.__simliCanvasStream = canvasStream;
         console.log(`[Simli] Canvas capture stream created: ${canvasStream.getVideoTracks().length} video track(s)`);
       });
-      console.log('✓ Simli page canvas capture ready for WebRTC bridge');
+      log.info('✓ Simli page canvas capture ready for WebRTC bridge');
 
       this._isConnected = true;
       this._isReady = true;
       this.lastAudioSentAt = Date.now();
       this.startKeepAlive();
       this.startReconnectWatchdog();
-      console.log('✓ Simli Avatar initialized successfully (audio isolated, WebSocket audio bridge + WebRTC video bridge active)');
+      log.info('✓ Simli Avatar initialized successfully (audio isolated, WebSocket audio bridge + WebRTC video bridge active)');
 
     } catch (error) {
-      console.error('Failed to initialize Simli Avatar:', error);
+      log.error('Failed to initialize Simli Avatar:', error);
       this._isConnected = false;
       this._isReady = false;
     }
@@ -454,12 +457,12 @@ export class SimliAvatar {
 
   async injectGetUserMediaOverride(meetingPage: Page): Promise<void> {
     if (!this.enabled || !this._isReady || !this.simliPage) {
-      console.log('Simli Avatar not ready - skipping getUserMedia override');
+      log.info('Simli Avatar not ready - skipping getUserMedia override');
       return;
     }
 
     try {
-      console.log('Injecting getUserMedia override for Simli avatar...');
+      log.info('Injecting getUserMedia override for Simli avatar...');
 
       // Install the getUserMedia override in EVERY frame (main doc + Zoom's
       // about:blank / reCAPTCHA iframes, Teams/Webex/Chime subframes). The
@@ -727,9 +730,9 @@ export class SimliAvatar {
       // Drive the per-frame WebRTC handshake from Node (no exposeFunction).
       this.startBridgePollLoop(meetingPage);
 
-      console.log('✓ getUserMedia override injected into meeting page');
+      log.info('✓ getUserMedia override injected into meeting page');
     } catch (error) {
-      console.error('Failed to inject getUserMedia override:', error);
+      log.error('Failed to inject getUserMedia override:', error);
       throw error;
     }
   }
@@ -819,7 +822,7 @@ export class SimliAvatar {
             // Avatar source not ready yet (Simli still connecting) — retry next poll.
             continue;
           }
-          console.log(`[simli-bridge] building bridge for frame=${url || '(unknown)'} id=${id}`);
+          log.info(`[simli-bridge] building bridge for frame=${url || '(unknown)'} id=${id}`);
           const answer = await frame.evaluate(
             async (sdp: string) => {
               const w = window as any;
@@ -837,7 +840,7 @@ export class SimliAvatar {
           await this.applyBridgeAnswer(simliPage, id, answer);
           anyLiveBridge = true;
         } catch (e: any) {
-          console.log(`[simli-bridge] handshake failed (id=${id}): ${e?.message || e}`);
+          log.warn(`[simli-bridge] handshake failed (id=${id}): ${e?.message || e}`);
         } finally {
           this.bridgeInFlight.delete(frame);
         }
@@ -890,7 +893,7 @@ export class SimliAvatar {
         return JSON.stringify(pc.localDescription);
       }, id);
     } catch (error: any) {
-      console.error('[simli-bridge] offer failed:', error?.message || error);
+      log.error('[simli-bridge] offer failed:', error?.message || error);
       return null;
     }
   }
@@ -919,7 +922,7 @@ export class SimliAvatar {
         { bridgeId: id, answer: answerSdp },
       );
     } catch (error: any) {
-      console.error('[simli-bridge] answer failed:', error?.message || error);
+      log.error('[simli-bridge] answer failed:', error?.message || error);
     }
   }
 
@@ -931,27 +934,27 @@ export class SimliAvatar {
       this.wsServer.on('listening', () => {
         const addr = this.wsServer.address();
         this.wsPort = typeof addr === 'object' ? addr.port : 0;
-        console.log(`✓ Simli audio WebSocket server listening on ws://127.0.0.1:${this.wsPort}`);
+        log.info(`✓ Simli audio WebSocket server listening on ws://127.0.0.1:${this.wsPort}`);
         resolve();
       });
 
       this.wsServer.on('connection', (ws: WebSocket) => {
-        console.log('✓ Simli page connected to audio WebSocket bridge');
+        log.info('✓ Simli page connected to audio WebSocket bridge');
         this.wsClient = ws;
         
         ws.on('close', () => {
-          console.log('🔊 Simli audio WebSocket client disconnected');
+          log.info('🔊 Simli audio WebSocket client disconnected');
           this.wsClient = null;
         });
         
         ws.on('error', (err: Error) => {
-          console.error('❌ Simli audio WebSocket error:', err.message);
+          log.error('❌ Simli audio WebSocket error:', err.message);
           this.wsClient = null;
         });
       });
 
       this.wsServer.on('error', (err: Error) => {
-        console.error('❌ Simli audio WebSocket server error:', err);
+        log.error('❌ Simli audio WebSocket server error:', err);
         resolve(); // Don't block initialization
       });
     });
@@ -968,7 +971,7 @@ export class SimliAvatar {
     if (this.wsServer) {
       try { this.wsServer.close(); } catch (e) { /* ignore */ }
       this.wsServer = null;
-      console.log('✓ Simli audio WebSocket server stopped');
+      log.info('✓ Simli audio WebSocket server stopped');
     }
   }
 
@@ -979,7 +982,7 @@ export class SimliAvatar {
   async clearAudioBuffer(): Promise<void> {
     if (!this.enabled || !this._isConnected || !this.simliPage) return;
 
-    console.log('🎭 Calling Simli ClearBuffer() to stop avatar lip-sync');
+    log.info('🎭 Calling Simli ClearBuffer() to stop avatar lip-sync');
     try {
       await this.simliPage.evaluate(() => {
         // @ts-ignore
@@ -1005,7 +1008,7 @@ export class SimliAvatar {
     this.lastAudioSentAt = Date.now();
     this.audioChunkCount++;
     if (this.audioChunkCount % 100 === 0) {
-      console.log(`🎭 Sent ${this.audioChunkCount} audio chunks to Simli avatar via ${this.wsClient ? 'WebSocket' : 'CDP fallback'}`);
+      log.info(`🎭 Sent ${this.audioChunkCount} audio chunks to Simli avatar via ${this.wsClient ? 'WebSocket' : 'CDP fallback'}`);
     }
 
     // Primary path: WebSocket bridge (near-zero latency)
@@ -1039,7 +1042,7 @@ export class SimliAvatar {
       });
     } catch (error) {
       if (this.audioChunkCount % 100 === 0) {
-        console.error('Error sending audio to Simli:', error);
+        log.error('Error sending audio to Simli:', error);
       }
     }
   }
@@ -1063,7 +1066,7 @@ export class SimliAvatar {
         try { this.wsClient.send(silence); } catch (e) { /* ignore */ }
       }
     }, 3000);
-    console.log('🫀 Simli keepalive started (silent audio when idle to avoid maxIdleTime disconnect)');
+    log.info('🫀 Simli keepalive started (silent audio when idle to avoid maxIdleTime disconnect)');
   }
 
   /**
@@ -1086,7 +1089,7 @@ export class SimliAvatar {
       if (ready) return;
 
       this.reconnectInFlight = true;
-      console.warn('⚠️  Simli session down (__simliReady=false) — reconnecting...');
+      log.warn('⚠️  Simli session down (__simliReady=false) — reconnecting...');
       try {
         const res = await this.simliPage.evaluate(async () => {
           // @ts-ignore
@@ -1094,22 +1097,22 @@ export class SimliAvatar {
         });
         if (res?.success) {
           this.lastAudioSentAt = Date.now();
-          console.log('✓ Simli session reconnected');
+          log.info('✓ Simli session reconnected');
         } else if (res?.error !== 'already-connecting') {
-          console.warn(`⚠️  Simli reconnect failed: ${res?.error} — will retry`);
+          log.warn(`⚠️  Simli reconnect failed: ${res?.error} — will retry`);
         }
       } catch (e: any) {
-        console.warn('⚠️  Simli reconnect threw:', e?.message || e);
+        log.warn('⚠️  Simli reconnect threw:', e?.message || e);
       } finally {
         this.reconnectInFlight = false;
       }
     }, 4000);
-    console.log('🐕 Simli reconnect watchdog started');
+    log.info('🐕 Simli reconnect watchdog started');
   }
 
   async stop(): Promise<void> {
     if (!this.enabled) return;
-    console.log('Stopping Simli Avatar...');
+    log.info('Stopping Simli Avatar...');
     
     // Stop WebSocket audio bridge + the WebRTC bridge poll loop + keepalive first
     this.stopAudioWebSocket();
@@ -1154,11 +1157,11 @@ export class SimliAvatar {
         this.simliPage = null;
       }
     } catch (error) {
-      console.error('Error stopping Simli Avatar:', error);
+      log.error('Error stopping Simli Avatar:', error);
     }
     this._isConnected = false;
     this._isReady = false;
-    console.log('✓ Simli Avatar stopped');
+    log.info('✓ Simli Avatar stopped');
   }
 
   isConnected(): boolean {

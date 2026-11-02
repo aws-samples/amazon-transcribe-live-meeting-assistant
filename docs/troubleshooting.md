@@ -72,15 +72,11 @@ Use the following paths to access logs for each LMA component:
 
 ### Log Format
 
-The Virtual Participant writes its start-up, status, exit and shutdown lines,
-and those of its meeting-platform handlers (Chime, Zoom, Teams and Webex), its
-transcription, recording and Kinesis paths and a first set of its other
-modules, to CloudWatch as JSON objects, one per line. CloudWatch Logs Insights
-discovers the fields of a JSON line by itself, so a query can filter on them
-without a `parse` step. These still write plain text: the voice assistants and
-their activation window, the MCP command handler, the `[SETTINGS]` line that
-reports which settings the participant started with, and the container's
-start-up script and Chromium.
+The Virtual Participant writes its log lines to CloudWatch as JSON objects, one
+per line. CloudWatch Logs Insights discovers the fields of a JSON line by
+itself, so a query can filter on them without a `parse` step. A few lines are
+plain text: the output of the container's start-up script and of Chromium, and
+lines written before the participant used this format.
 
 | Field | What it holds |
 |-------|---------------|

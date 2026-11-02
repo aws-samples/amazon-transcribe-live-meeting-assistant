@@ -69,8 +69,8 @@
  *
  * `page.on('console')` works, but plain `console.log` from the page never arrives
  * under cloakbrowser. So the page side only ACCUMULATES onto `window.__lmaAudio`
- * and Node drains it with its own console.log, which demonstrably reaches
- * CloudWatch.
+ * and Node drains it and writes it through its own logger, whose stdout
+ * demonstrably reaches CloudWatch.
  */
 import { exec } from 'node:child_process';
 import type { Page } from 'playwright-core';
@@ -592,7 +592,7 @@ export function startSenderTrackBypass(page: Page, intervalMs = 5000): () => voi
 }
 
 /**
- * Start Node-side draining. Logs with Node's console.log, which reaches
+ * Start Node-side draining. Writes through the Node logger, which reaches
  * CloudWatch — unlike page console.log (see the module docstring).
  *
  * Returns a stop function so the caller can clear the timer on teardown.

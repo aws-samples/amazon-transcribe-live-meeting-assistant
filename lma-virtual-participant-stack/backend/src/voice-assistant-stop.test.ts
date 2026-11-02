@@ -24,6 +24,11 @@ import { NovaAgent, hasStopTalkingTool, STOP_REQUEST_TOOL_GRACE_MS } from './nov
 import { ElevenLabsAgent } from './elevenlabs-agent.js';
 import { NoOpAgent } from './noop-agent.js';
 import { MeetingMode } from './nova-sonic-config-loader.js';
+import { routeLogsToConsole } from './logger.js';
+
+// Modules on the structured logger write through console here too, so this
+// file's console capture sees their records as it sees console output.
+routeLogsToConsole();
 
 /**
  * Wait out the window the transcript route gives Nova to answer the request out

@@ -29,6 +29,11 @@ import { strict as assert } from 'node:assert';
 import { afterEach, beforeEach, mock, test } from 'node:test';
 import { NovaAgent, STOP_REQUEST_TOOL_GRACE_MS } from './nova-agent.js';
 import { ACTIVATION_RECHECK_MS, ACTIVATION_USER_TURN_GRACE_MS } from './voice-activation-window.js';
+import { routeLogsToConsole } from './logger.js';
+
+// Modules on the structured logger write through console here too, so this
+// file's console capture sees their records as it sees console output.
+routeLogsToConsole();
 
 const WINDOW_S = 30;
 const WINDOW_MS = WINDOW_S * 1000;

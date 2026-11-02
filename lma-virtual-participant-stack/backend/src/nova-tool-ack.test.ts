@@ -30,6 +30,11 @@ import {
     TOOL_ACK_FALLBACK_MS,
     TOOL_ACK_LATE_PREAMBLE_MS,
 } from './nova-agent.js';
+import { routeLogsToConsole } from './logger.js';
+
+// Modules on the structured logger write through console here too, so this
+// file's console capture sees their records as it sees console output.
+routeLogsToConsole();
 
 /** A stand-in clip: 1.5 s of PCM at 32 bytes/ms, filled so it is recognisable. */
 const CLIP = Buffer.alloc(1500 * 32, 7);

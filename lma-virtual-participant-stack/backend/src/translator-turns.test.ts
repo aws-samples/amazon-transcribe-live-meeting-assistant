@@ -21,6 +21,11 @@ import { afterEach, beforeEach, mock, test } from 'node:test';
 import { MeetingMode } from './nova-sonic-config-loader.js';
 import { NovaAgent } from './nova-agent.js';
 import { pcmMs, RecentAudio } from './translator-turns.js';
+import { routeLogsToConsole } from './logger.js';
+
+// Modules on the structured logger write through console here too, so this
+// file's console capture sees their records as it sees console output.
+routeLogsToConsole();
 
 // ---------------------------------------------------------------------------
 // The recent-audio buffer

@@ -35,6 +35,11 @@ import {
 } from './nova-agent.js';
 import { MeetingMode } from './nova-sonic-config-loader.js';
 import { simliAvatar } from './simli-avatar.js';
+import { routeLogsToConsole } from './logger.js';
+
+// Modules on the structured logger write through console here too, so this
+// file's console capture sees their records as it sees console output.
+routeLogsToConsole();
 
 /** A Nova agent with no session and no Bedrock client, with playback stubbed
  *  out so nothing tries to spawn pacat. */
