@@ -17,6 +17,8 @@ No AWS: the module's clients are built at import time and replaced here.
 from __future__ import annotations
 
 import importlib.util
+import io
+import json
 import os
 import sys
 from pathlib import Path
@@ -520,3 +522,146 @@ def test_a_restart_is_judged_alike_with_or_without_the_settings(dynamo, monkeypa
     monkeypatch.setattr(index, "_STORE", FakeStore(fail=True))
     assert call("startMeetingConsent", BACKEND, Mode="notify", Rule="owner_attests")
     assert dynamo.updates == writes
+
+
+# ── checking evidence ──────────────────────────────────────────────────────
+
+FOLDER = "lma-consent-evidence/Weekly_sync_2026_11_02/"
+
+
+class FakeLambda:
+    def __init__(self, answer=None, function_error=False):
+        self.answer = answer
+        self.function_error = function_error
+        self.payloads = []
+
+    def invoke(self, FunctionName, Payload):  # noqa: N803
+        self.payloads.append(json.loads(Payload))
+        response = {"Payload": io.BytesIO(json.dumps(self.answer).encode())}
+        if self.function_error:
+            response["FunctionError"] = "Unhandled"
+        return response
+
+
+class DeletingS3(FakeS3):
+    def __init__(self, fail=False):
+        self.deleted = []
+        self.fail = fail
+
+    def delete_object(self, Bucket, Key):  # noqa: N803
+        if self.fail:
+            raise ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}}, "DeleteObject")
+        self.deleted.append(Key)
+
+
+VERIFIED = {
+    "Ok": True,
+    "Verification": {
+        "Verdict": "objection_found",
+        "MissingParticipants": [],
+        "Readable": True,
+        "NoticeVisible": True,
+        "NoticeMatches": True,
+        "Replies": [{"Name": "Bo", "Text": "I object", "Decision": "objection"}],
+        "AnyObjection": True,
+        "Confidence": 0.9,
+        "Summary": "Bo objects.",
+        "ModelId": "amazon.nova-lite-v1:0",
+        "VerifiedAt": "2026-11-02T10:02:00.000Z",
+        "InputTokens": 800,
+        "OutputTokens": 120,
+    },
+}
+
+
+def evidence_meeting(monkeypatch, verifier, **settings_values):
+    settings(monkeypatch, **settings_values)
+    monkeypatch.setattr(index, "LAMBDA", verifier)
+    monkeypatch.setattr(index, "VERIFIER_FUNCTION", "verifier")
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    call("setMeetingConsentParticipants", BACKEND, Participants=["Bo"])
+    result = call("addMeetingConsentEvidence", BACKEND, S3Key=f"{FOLDER}chat.jpg")
+    return result["Consent"]["Evidence"][0]["EvidenceId"]
+
+
+def test_a_check_is_stored_on_the_evidence_and_leaves_the_status(dynamo, monkeypatch) -> None:
+    verifier = FakeLambda(VERIFIED)
+    evidence_id = evidence_meeting(monkeypatch, verifier)
+    result = call("verifyMeetingConsentEvidence", user(SHARED), EvidenceId=evidence_id)
+    entry = result["Consent"]["Evidence"][0]
+    assert entry["Verification"]["Verdict"] == "objection_found"
+    assert entry["Verification"]["Confidence"] == 0.9
+    assert entry["Verification"]["VerifiedBy"] == SHARED
+    # Supporting evidence only: the replies recorded decide the status.
+    assert result["Consent"]["Status"] == "pending"
+    sent = verifier.payloads[0]
+    assert sent["S3Key"] == f"{FOLDER}chat.jpg"
+    assert sent["Participants"] == ["Bo"]
+    assert sent["ModelId"] == "amazon.nova-lite-v1:0"
+    assert sent["ObjectionPhrases"][0] == "I object"
+
+
+@pytest.mark.parametrize(
+    "verifier",
+    [
+        FakeLambda({"Ok": False, "Message": "the evidence image could not be read"}),
+        FakeLambda({"errorMessage": "boom"}, function_error=True),
+    ],
+)
+def test_a_failed_check_is_reported_and_nothing_is_written(dynamo, monkeypatch, verifier) -> None:
+    evidence_id = evidence_meeting(monkeypatch, verifier)
+    version = dynamo.consent()["Version"]
+    with pytest.raises(index.VerificationFailedError):
+        call("verifyMeetingConsentEvidence", user(OWNER), EvidenceId=evidence_id)
+    assert dynamo.consent()["Version"] == version
+
+
+def test_somebody_without_access_cannot_run_a_check(dynamo, monkeypatch) -> None:
+    verifier = FakeLambda(VERIFIED)
+    evidence_id = evidence_meeting(monkeypatch, verifier)
+    with pytest.raises(index.ForbiddenError):
+        call("verifyMeetingConsentEvidence", user(OTHER), EvidenceId=evidence_id)
+    assert verifier.payloads == []
+
+
+def test_an_unknown_evidence_id_is_refused(dynamo, monkeypatch) -> None:
+    evidence_meeting(monkeypatch, FakeLambda(VERIFIED))
+    with pytest.raises(index.BadRequestError, match="no evidence"):
+        call("verifyMeetingConsentEvidence", user(OWNER), EvidenceId="nope")
+
+
+def test_without_keeping_screenshots_the_image_is_deleted_after_its_check(
+    dynamo, monkeypatch
+) -> None:
+    s3 = DeletingS3()
+    monkeypatch.setattr(index, "S3", s3)
+    evidence_id = evidence_meeting(monkeypatch, FakeLambda(VERIFIED), keepEvidenceScreenshots=False)
+    result = call("verifyMeetingConsentEvidence", BACKEND, EvidenceId=evidence_id)
+    assert s3.deleted == [f"{FOLDER}chat.jpg"]
+    entry = result["Consent"]["Evidence"][0]
+    assert entry["ImageDeletedAt"] and entry["Verification"]["Verdict"] == "objection_found"
+    assert call("getMeetingConsent", user(OWNER))["Consent"]["Evidence"][0]["SignedUrl"] is None
+    with pytest.raises(index.BadRequestError, match="deleted"):
+        call("verifyMeetingConsentEvidence", BACKEND, EvidenceId=evidence_id)
+
+
+def test_a_failed_deletion_keeps_the_stored_check(dynamo, monkeypatch) -> None:
+    monkeypatch.setattr(index, "S3", DeletingS3(fail=True))
+    evidence_id = evidence_meeting(monkeypatch, FakeLambda(VERIFIED), keepEvidenceScreenshots=False)
+    result = call("verifyMeetingConsentEvidence", BACKEND, EvidenceId=evidence_id)
+    entry = result["Consent"]["Evidence"][0]
+    assert entry["Verification"]["Verdict"] == "objection_found"
+    assert not entry.get("ImageDeletedAt")
+
+
+def test_the_settings_name_the_verifier_model(dynamo) -> None:
+    out = call("getMeetingConsent", user(OWNER))["Settings"]
+    assert out["VerifierModelId"] == "amazon.nova-lite-v1:0"
+    assert out["KeepEvidenceScreenshots"] is True
+
+
+def test_an_invalid_mode_is_refused_alike_without_the_settings(dynamo, monkeypatch) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    monkeypatch.setattr(index, "_STORE", FakeStore(fail=True))
+    with pytest.raises(index.BadRequestError, match="Mode must be one of"):
+        call("startMeetingConsent", BACKEND, Mode="foo")

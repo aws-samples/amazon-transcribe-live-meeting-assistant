@@ -28,6 +28,8 @@ Who may do what:
                                 the owner's attestation, recorded as the owner's.
 ``addMeetingConsentEvidence``   A backend role, for an image it stored under the
                                 meeting's own evidence folder.
+``verifyMeetingConsentEvidence`` The ``getCall`` rule. Runs the evidence verifier
+                                Lambda on one image and stores its result.
 =============================== ==================================================
 
 Every write is a read of the meeting row followed by an update conditional on
@@ -38,6 +40,7 @@ replies arriving together are both kept.
 from __future__ import annotations
 
 import copy
+import json
 import logging
 import os
 import re
@@ -74,6 +77,7 @@ RECORDINGS_BUCKET = os.environ.get("RECORDINGS_BUCKET", "")
 EVIDENCE_PREFIX = os.environ.get("CONSENT_EVIDENCE_PREFIX", "lma-consent-evidence/")
 ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
 LINK_SECONDS = int(os.environ.get("LINK_SECONDS", "3600"))
+VERIFIER_FUNCTION = os.environ.get("VERIFIER_FUNCTION_NAME", "")
 
 #: Who a backend role's writes are attributed to when it names nobody.
 BACKEND_ATTRIBUTION = "LMA"
@@ -83,6 +87,12 @@ EVIDENCE_KINDS = ("screenshot", "invitation")
 MAX_KEY_LENGTH = 256
 
 DYNAMODB = boto3.client("dynamodb", config=CLIENT_CONFIG)
+# The verifier makes one model call; wait for it a little longer than AppSync
+# waits for this function, so a slow check still stores its result.
+LAMBDA = boto3.client(
+    "lambda",
+    config=BotoCoreConfig(read_timeout=70, retries={"mode": "standard", "max_attempts": 1}),
+)
 SERIALIZER = TypeSerializer()
 DESERIALIZER = TypeDeserializer()
 
@@ -121,6 +131,10 @@ class ConflictError(Exception):
 
 class ConfigurationUnavailableError(Exception):
     """The deployment's consent settings could not be read."""
+
+
+class VerificationFailedError(Exception):
+    """The evidence could not be checked; the message says why."""
 
 
 def now_iso() -> str:
@@ -177,6 +191,8 @@ def settings_out(settings: Mapping[str, Any]) -> Dict[str, Any]:
         "ConsentPhrases": list(settings["consentPhrases"]),
         "ObjectionPhrases": list(settings["objectionPhrases"]),
         "AllowPerMeetingOverride": bool(settings["allowPerMeetingOverride"]),
+        "KeepEvidenceScreenshots": bool(settings["keepEvidenceScreenshots"]),
+        "VerifierModelId": settings["verifierModelId"],
     }
 
 
@@ -338,7 +354,8 @@ def consent_out(record: Optional[Mapping[str, Any]], call_id: str, signed: bool)
         return None
     shaped = copy.deepcopy(dict(record))
     for item in shaped.get("Evidence") or []:
-        item["SignedUrl"] = sign(item.get("S3Key"), call_id) if signed else None
+        kept = signed and not item.get("ImageDeletedAt")
+        item["SignedUrl"] = sign(item.get("S3Key"), call_id) if kept else None
     return shaped
 
 
@@ -506,7 +523,9 @@ def start_meeting_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) ->
         # settings could be read never changes what counts as a restart.
         started = current if current and current.get("Mode") in consent.MODES else None
         if started:
-            mode = data.get("Mode") or started["Mode"]
+            mode = one_of(data.get("Mode"), consent.MODES, "Mode", default=started["Mode"])
+            if mode == consent.MODE_OPT_IN and data.get("Rule") is not None:
+                one_of(data.get("Rule"), consent.RULES, "Rule")
             rule = (
                 (data.get("Rule") or started.get("Rule")) if mode == consent.MODE_OPT_IN else None
             )
@@ -760,6 +779,82 @@ def add_meeting_consent_evidence(caller: Mapping[str, Any], data: Mapping[str, A
     return write_consent(caller, call_id, change)
 
 
+def find_evidence(record: Mapping[str, Any], evidence_id: str) -> Dict[str, Any]:
+    for entry in record.get("Evidence") or []:
+        if entry.get("EvidenceId") == evidence_id:
+            return entry
+    raise BadRequestError(f"the meeting has no evidence {evidence_id}")
+
+
+def run_verifier(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """The verifier's result for one image, or VerificationFailedError."""
+    if not VERIFIER_FUNCTION:
+        raise VerificationFailedError("the evidence verifier is not configured")
+    response = LAMBDA.invoke(FunctionName=VERIFIER_FUNCTION, Payload=json.dumps(payload).encode())
+    answer = json.loads(response["Payload"].read() or b"{}")
+    if response.get("FunctionError") or not isinstance(answer, dict):
+        LOGGER.error("the evidence verifier failed for %s", payload.get("CallId"))
+        raise VerificationFailedError("the evidence could not be checked just now; try again")
+    if not answer.get("Ok"):
+        raise VerificationFailedError(str(answer.get("Message") or "the evidence was not checked"))
+    return dict(answer.get("Verification") or {})
+
+
+def verify_meeting_consent_evidence(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
+    """Check one evidence image with the vision model, and store the result on it.
+
+    The check is supporting evidence: it is stored on the evidence entry and
+    never changes the record's status. When the deployment does not keep
+    evidence screenshots, the image is deleted once the result is stored.
+    """
+    call_id = data["CallId"]
+    evidence_id = required_text(data.get("EvidenceId"), "EvidenceId", 64)
+    meeting, _access = load(caller, call_id)
+    record = require_started(meeting.get("Consent") or None)
+    entry = find_evidence(record, evidence_id)
+    if entry.get("ImageDeletedAt"):
+        raise BadRequestError(
+            "the image of this evidence has been deleted, so it cannot be checked"
+        )
+    settings = consent_settings()
+    verification = run_verifier(
+        {
+            "CallId": call_id,
+            "S3Key": entry.get("S3Key"),
+            "NoticeText": record.get("NoticeText"),
+            "Mode": record.get("Mode"),
+            "Rule": record.get("Rule"),
+            "Participants": record.get("Participants") or [],
+            "ConsentPhrases": settings["consentPhrases"],
+            "ObjectionPhrases": settings["objectionPhrases"],
+            "ModelId": settings["verifierModelId"],
+        }
+    )
+    verification["VerifiedBy"] = actor(caller)
+
+    def store(record, _meeting, _access, _now):
+        record = require_started(record)
+        find_evidence(record, evidence_id)["Verification"] = verification
+        return record
+
+    answer = write_consent(caller, call_id, store)
+    if settings["keepEvidenceScreenshots"]:
+        return answer
+    try:
+        S3.delete_object(Bucket=RECORDINGS_BUCKET, Key=entry["S3Key"])
+    except ClientError:
+        # The result is stored; the image stays until the meeting is deleted.
+        LOGGER.exception("could not delete a checked evidence image of %s", call_id)
+        return answer
+
+    def mark_deleted(record, _meeting, _access, now):
+        record = require_started(record)
+        find_evidence(record, evidence_id)["ImageDeletedAt"] = now
+        return record
+
+    return write_consent(caller, call_id, mark_deleted)
+
+
 MUTATIONS = {
     "startMeetingConsent": start_meeting_consent,
     "recordMeetingConsentNotice": record_meeting_consent_notice,
@@ -767,6 +862,7 @@ MUTATIONS = {
     "recordMeetingConsentEvent": record_meeting_consent_event,
     "attestMeetingConsent": attest_meeting_consent,
     "addMeetingConsentEvidence": add_meeting_consent_evidence,
+    "verifyMeetingConsentEvidence": verify_meeting_consent_evidence,
 }
 
 

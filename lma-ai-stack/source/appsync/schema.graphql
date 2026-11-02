@@ -237,6 +237,7 @@ type Mutation @aws_iam {
 	recordMeetingConsentEvent(input: RecordMeetingConsentEventInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
 	attestMeetingConsent(input: AttestMeetingConsentInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
 	addMeetingConsentEvidence(input: AddMeetingConsentEvidenceInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
+	verifyMeetingConsentEvidence(input: VerifyMeetingConsentEvidenceInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
 	regenerateCallSummary(input: RegenerateCallSummaryInput!): RegenerateCallSummaryOutput @aws_cognito_user_pools @aws_iam
 	grantVoiceConsent: VoiceEnrollmentResult @aws_cognito_user_pools
 	enrolMyVoice(input: EnrolMyVoiceInput!): VoiceEnrollmentResult @aws_cognito_user_pools
@@ -645,7 +646,7 @@ type Subscription {
 	# Every change to a meeting's consent record. A subscriber that needs the
 	# evidence links reads getMeetingConsent again on each message.
 	onUpdateMeetingConsent(CallId: ID): MeetingConsentUpdate
-		@aws_subscribe(mutations: ["startMeetingConsent", "recordMeetingConsentNotice", "setMeetingConsentParticipants", "recordMeetingConsentEvent", "attestMeetingConsent", "addMeetingConsentEvidence"])
+		@aws_subscribe(mutations: ["startMeetingConsent", "recordMeetingConsentNotice", "setMeetingConsentParticipants", "recordMeetingConsentEvent", "attestMeetingConsent", "addMeetingConsentEvidence", "verifyMeetingConsentEvidence"])
 	onSendChatMessage(CallId: ID): SendChatMessageOutput
 		@aws_subscribe(mutations: ["sendChatMessage"])
 	onAddChatToken(CallId: ID!, MessageId: ID!): ChatToken
@@ -1047,8 +1048,47 @@ type MeetingConsentEvidence @aws_cognito_user_pools
 	CapturedAt: AWSDateTime
 	AddedAt: AWSDateTime
 	Note: String
-	# An hour-long link to the image, filled in by getMeetingConsent only.
+	# An hour-long link to the image, filled in by getMeetingConsent only, and
+	# not once the image has been deleted.
 	SignedUrl: String
+	# The vision model's check of the image, when one was run.
+	Verification: MeetingConsentVerification
+	# When the image was deleted after its check, in a deployment that does not
+	# keep evidence screenshots. The entry and its check are kept.
+	ImageDeletedAt: AWSDateTime
+}
+
+# A vision model's reading of one evidence image: supporting evidence, which
+# never changes the record's Status.
+type MeetingConsentVerification @aws_cognito_user_pools
+@aws_iam {
+	# "supports_consent", "objection_found" or "inconclusive".
+	Verdict: String
+	# The participants listed as present with no visible reply reading as consent.
+	MissingParticipants: [String]
+	# Whether the model's answer could be read at all.
+	Readable: Boolean
+	NoticeVisible: Boolean
+	NoticeMatches: Boolean
+	Replies: [MeetingConsentVerifiedReply]
+	AnyObjection: Boolean
+	# From 0 to 1, as the model reported it.
+	Confidence: Float
+	Summary: String
+	ModelId: String
+	VerifiedAt: AWSDateTime
+	VerifiedBy: String
+	InputTokens: Int
+	OutputTokens: Int
+}
+
+type MeetingConsentVerifiedReply @aws_cognito_user_pools
+@aws_iam {
+	# The sender's name as shown in the image.
+	Name: String
+	Text: String
+	# "consent", "objection" or "unclear".
+	Decision: String
 }
 
 type MeetingConsentStatusChange @aws_cognito_user_pools
@@ -1081,6 +1121,8 @@ type MeetingConsentSettings @aws_cognito_user_pools
 	ConsentPhrases: [String]
 	ObjectionPhrases: [String]
 	AllowPerMeetingOverride: Boolean
+	KeepEvidenceScreenshots: Boolean
+	VerifierModelId: String
 }
 
 type MeetingConsentState @aws_cognito_user_pools
@@ -1168,6 +1210,12 @@ input AddMeetingConsentEvidenceInput {
 	Kind: String
 	CapturedAt: AWSDateTime
 	Note: String
+}
+
+input VerifyMeetingConsentEvidenceInput {
+	CallId: ID!
+	# An EvidenceId from the meeting's consent record.
+	EvidenceId: ID!
 }
 
 # The outcome of reading a meeting's transcript for a stated agenda. A found

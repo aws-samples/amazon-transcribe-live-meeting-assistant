@@ -241,6 +241,7 @@ OTHER_FIELDS = [
     ("Mutation", "recordMeetingConsentEvent"),
     ("Mutation", "attestMeetingConsent"),
     ("Mutation", "addMeetingConsentEvidence"),
+    ("Mutation", "verifyMeetingConsentEvidence"),
     ("Mutation", "deleteCall"),
     ("Mutation", "shareCall"),
     ("Mutation", "unshareCall"),

@@ -102,6 +102,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         "do not record, don't record, stop recording"
     ),
     "allowPerMeetingOverride": True,
+    "keepEvidenceScreenshots": True,
+    "verifierModelId": "amazon.nova-lite-v1:0",
 }
 
 # Bounds on each part of one meeting's record. They bound each list; the record
@@ -349,8 +351,9 @@ def fit_to_budget(record: Dict[str, Any], limit: int = MAX_RECORD_BYTES) -> Dict
     3. the oldest status history entries, keeping the latest ten;
     4. the notices posted between the first and the latest;
     5. the names once listed but not present now;
-    6. every reply's other fields (its id, who recorded it and when), and each
-       evidence image's note.
+    6. the replies the evidence check read in each image, keeping its verdict;
+    7. every reply's other fields (its id, who recorded it and when), and each
+       evidence image's note and check summary.
 
     Raises:
         RecordFull: the record is still over ``limit`` after all of that.
@@ -395,12 +398,21 @@ def fit_to_budget(record: Dict[str, Any], limit: int = MAX_RECORD_BYTES) -> Dict
     ]
     if record_size(record) <= limit:
         return record
-    # 6. The replies kept, down to who, how, where and when.
+    # 6. What the evidence check read in each image; its verdict stays.
+    for entry in record.get("Evidence") or []:
+        verification = entry.get("Verification")
+        if isinstance(verification, dict) and verification.get("Replies"):
+            verification["Replies"] = []
+    if record_size(record) <= limit:
+        return record
+    # 7. The replies kept, down to who, how, where and when.
     record["Events"] = [
         {key: event.get(key) for key in _ESSENTIAL_EVENT_FIELDS} for event in record["Events"]
     ]
     for entry in record.get("Evidence") or []:
         entry["Note"] = None
+        if isinstance(entry.get("Verification"), dict):
+            entry["Verification"]["Summary"] = None
     if record_size(record) <= limit:
         return record
     raise RecordFull(
