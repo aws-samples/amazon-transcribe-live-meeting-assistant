@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/meeting_agenda",
+  "title": "Meeting agenda",
+  "description": "When a meeting that has no agenda is read for one somebody stated. The default is the value the stack was deployed with; a value set here is used instead until it is reset.",
+  "sectionLabel": "Meeting Agenda",
+  "appliesText": "A saved change applies within about five minutes, to meetings that reach the threshold after that.",
+  "order": 13,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "type": "object",
+  "properties": {
+    "autoDeriveAfterSeconds": {
+      "order": 0,
+      "type": "integer",
+      "title": "Seconds into a meeting to look for a stated agenda",
+      "description": "How far into a meeting with no agenda its transcript is read, once, for an agenda somebody stated; one found is saved to the meeting. 0 turns the automatic pass off. The Agenda panel's Derive agenda button works either way. Default: the AgendaDerivationAfterSeconds stack parameter.",
+      "minimum": 0,
+      "maximum": 3600
+    }
+  },
+  "additionalProperties": false
+}

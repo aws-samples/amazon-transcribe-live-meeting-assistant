@@ -48,6 +48,7 @@ default; see [Retention: settings the stack limits](#retention-settings-the-stac
 | Virtual Participant | The Virtual Participant's voice assistant provider, activation mode, wake phrases and activation duration, the ElevenLabs agent and Simli face, and how a Teams Virtual Participant decides its meeting has ended | To the next Virtual Participant to start |
 | Retention | How many days meeting records and transcript segments are kept, up to the limit the stack sets | To records written about five minutes after the save or later; a record already written keeps its expiry |
 | Meeting Consent | Whether participants are told a meeting is recorded and transcribed and whether their consent is needed first (off, notify or opt-in, and the opt-in rule), the notice texts, the phrases a reply is read by, and whether a meeting may be started with another choice. See [Meeting Consent](meeting-consent.md) | To meetings whose consent starts after the save |
+| Meeting Agenda | How far into a meeting with no agenda its transcript is read for one somebody stated, or whether it is read at all | To meetings that reach the threshold about five minutes after the save or later |
 
 Every section is on **Configuration ▸ Configuration**. The pages that each edited
 one section — Transcript Summary, Nova Sonic Config and Transcription Engine — are
@@ -110,6 +111,7 @@ is the default of.
 | Virtual Participant › Teams: milliseconds between meeting checks | `VPAttendeePollMs` |
 | Virtual Participant › Teams: checks alone before leaving | `VPPollsBeforeEnd` |
 | Virtual Participant › Teams: checks without a meeting before leaving | `VPPollsBeforeEndMissing` |
+| Meeting Agenda › Seconds into a meeting to look for a stated agenda | `AgendaDerivationAfterSeconds` |
 
 The Amazon Transcribe and Meeting Recording settings apply to meetings streamed
 to LMA from the Stream Audio page, the browser extension and the desktop app,

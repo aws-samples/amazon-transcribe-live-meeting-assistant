@@ -330,6 +330,7 @@ so a release cannot ship a default its own save would refuse.
 | `recording` | `recordAudio`, `true` or `false`, nothing else |
 | `meeting_assist` | `wakePhraseRegex`, text of 1 to 256 characters |
 | `meeting_processing` | `transcriptHookNonPartialOnly`, `true` or `false`; `inactiveMeetingLookbackDays`, a whole number from 1 to 90, and `inactiveMeetingTimeoutMinutes`, a whole number from 0 to 10080, their parameters' ranges |
+| `meeting_agenda` | `autoDeriveAfterSeconds`, a whole number from 0 to 3600, the parameter's range |
 | `retention` | `meetingRecordExpirationInDays` and `transcriptionExpirationInDays`, numbers of days of at least 0.1, each at most the baseline's value (`maximumIsDefault`, below) |
 | `meeting_consent` | `mode` and `consentRule` from their fixed lists; the two notice texts of 1 to 2,000 characters; the two phrase lists of 1 to 1,000 characters; `allowPerMeetingOverride`, `true` or `false`; nothing else |
 | `virtual_participant` | The provider from its parameter's list; wake phrases as text; the activation duration, poll interval and poll counts as whole numbers in their parameters' ranges; the ElevenLabs agent and Simli face ids in the characters their services use, empty for none |
@@ -1194,6 +1195,13 @@ per batch, and the reaper the third per run. The wake phrase's fallback is the
 pattern in the deployment settings parameter, which the processor has always
 compiled at start; a pattern saved on the page that does not compile is logged
 and that one is used.
+
+`meeting_agenda` holds `AgendaDerivationAfterSeconds`. The call event processor
+reads it on the standard tier for each finished segment of a meeting it has not
+yet queued the automatic agenda pass for, and falls back to the
+`AGENDA_DERIVATION_AFTER_SECONDS` variable, which the parameter sets; whether
+the meeting already has an agenda is the deriver's check. `0` turns the
+automatic pass off.
 
 `meeting_processing` also holds `MeetingInactivityTimeoutInMinutes`, which the
 reaper reads per run. The parameter still decides whether the reaper and its
