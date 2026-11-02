@@ -16,6 +16,9 @@ import { findElementWithFallback } from './ai-dom-resolver.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { clickWithDomFallback, humanClick, POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('webex');
 
 /**
  * The pre-join display-name field, in both markups Webex serves.
@@ -223,9 +226,9 @@ export default class Webex {
                         await this.xdotool(['key', '--clearmodifiers', 'Escape']);
                     }
                 }
-                console.log(`[webex] Sent X11 Escape (xdotool) to dismiss native dialog (attempt ${i + 1}/${attempts}, win=${winId || 'n/a'}).`);
+                log.info(`[webex] Sent X11 Escape (xdotool) to dismiss native dialog (attempt ${i + 1}/${attempts}, win=${winId || 'n/a'}).`);
             } catch (e) {
-                console.log('[webex] dismissNativeDialog xdotool failed (non-fatal):', e);
+                log.warn('[webex] dismissNativeDialog xdotool failed (non-fatal):', e);
             }
             await new Promise((r) => setTimeout(r, 800));
         }
@@ -246,7 +249,7 @@ export default class Webex {
             await messageElement?.type(message);
             await messageElement?.press('Enter');
         }
-        console.log('Sent messages:', messages);
+        log.info('Sent messages:', messages);
     }
 
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {
@@ -278,15 +281,15 @@ export default class Webex {
             cdp.on('Page.javascriptDialogOpening', async () => {
                 try {
                     await cdp.send('Page.handleJavaScriptDialog', { accept: false });
-                    console.log('Auto-cancelled native dialog via CDP.');
+                    log.info('Auto-cancelled native dialog via CDP.');
                 } catch { /* already handled */ }
             });
         } catch (err) {
-            console.log('CDP dialog handler setup failed (non-fatal):', err);
+            log.warn('CDP dialog handler setup failed (non-fatal):', err);
         }
         page.on('dialog', async (dialog: any) => {
             try {
-                console.log(`Auto-dismissing ${dialog.type()} dialog: ${dialog.message()}`);
+                log.info(`Auto-dismissing ${dialog.type()} dialog: ${dialog.message()}`);
                 await dialog.dismiss();
             } catch {
                 /* dialog already handled / page closed */
@@ -302,14 +305,14 @@ export default class Webex {
         const isJoinUrl = /^https?:\/\//i.test(meetingIdValue);
 
         if (isJoinUrl) {
-            console.log('Navigating directly to Webex join URL.');
+            log.info('Navigating directly to Webex join URL.');
             await gotoMeetingPage(page, meetingIdValue, MEETING_HOST_PATTERNS.webex, 'webex-join');
             // Give the launch link time to redirect to the meeting join page.
             await new Promise(resolve => setTimeout(resolve, 3000));
         } else {
-            console.log('Getting Webex meeting link.');
+            log.info('Getting Webex meeting link.');
             await gotoMeetingPage(page, 'https://signin.webex.com/join', MEETING_HOST_PATTERNS.webex, 'webex-join');
-            console.log('Entering meeting ID.');
+            log.info('Entering meeting ID.');
             const meetingIdRes = await findElementWithFallback(
                 page,
                 ['#join-meeting-form'],
@@ -366,13 +369,13 @@ export default class Webex {
                 return false;
             }
         };
-        console.log('Checking for "Join from this browser" button...');
+        log.info('Checking for "Join from this browser" button...');
         try {
             // Up to 4 rounds of click + native-dialog dismiss. Each round: if the
             // chooser is still showing, click it and clear the resulting dialog.
             for (let round = 1; round <= 4; round++) {
                 if (!(await chooserStillPresent())) {
-                    console.log(`Chooser gone after ${round - 1} round(s) — page advanced past "Join from this browser".`);
+                    log.info(`Chooser gone after ${round - 1} round(s) — page advanced past "Join from this browser".`);
                     break;
                 }
                 const res = await findElementWithFallback(
@@ -382,10 +385,10 @@ export default class Webex {
                     { maxRetries: 4, delayMs: 500 },
                 );
                 if (!res) {
-                    console.log(`Round ${round}: "Join from this browser" not found — assuming page advanced or auto-browser mode.`);
+                    log.info(`Round ${round}: "Join from this browser" not found — assuming page advanced or auto-browser mode.`);
                     break;
                 }
-                console.log(`Round ${round}: clicking "Join from this browser" (${res.source}).`);
+                log.info(`Round ${round}: clicking "Join from this browser" (${res.source}).`);
                 await humanClick(page, res.element);
                 // The native "Open Webex.app?" dialog appears shortly after the
                 // click; give it a beat, then clear it with a real X11 Escape.
@@ -394,12 +397,12 @@ export default class Webex {
                 await new Promise(resolve => setTimeout(resolve, 1500));
             }
         } catch (error) {
-            console.log('"Join from this browser" click loop failed (non-fatal), continuing:', error);
+            log.warn('"Join from this browser" click loop failed (non-fatal), continuing:', error);
         }
 
         // Wait for the web client to load.
         await new Promise(resolve => setTimeout(resolve, 3000));
-        console.log('Launching app.');
+        log.info('Launching app.');
         // The web client renders in one of three places depending on the join
         // flow and Webex build:
         //   - 'default'    : classic web client inside #unified-webclient-iframe
@@ -429,10 +432,10 @@ export default class Webex {
         if (!frame) {
             // Known frame selectors didn't match — fall back to the main frame so
             // the flow can still proceed (best-effort) rather than hard-failing.
-            console.log('Known Webex frame selectors did not match — falling back to main frame.');
+            log.info('Known Webex frame selectors did not match — falling back to main frame.');
             frame = page.mainFrame();
         }
-        console.log(`Webex web client located in: ${frameElement?.source ?? 'mainframe-fallback'}`);
+        log.info(`Webex web client located in: ${frameElement?.source ?? 'mainframe-fallback'}`);
         await page.evaluate(() => {
             const checkAndClosePopup = () => {
                 const dialog = document.querySelector('.el-dialog__wrapper');
@@ -470,19 +473,19 @@ export default class Webex {
             
             // Check if password is required and available
             if (details.invite.meetingPassword) {
-                console.log('Auto-filling meeting password...');
+                log.info('Auto-filling meeting password...');
                 if (passwordInput) {
                     await passwordInput.type(details.invite.meetingPassword);
                 }
             } else {
-                console.log('ERROR: Meeting requires password but none was provided.');
+                log.error('ERROR: Meeting requires password but none was provided.');
                 throw new Error('Meeting requires password but none was provided in invite details');
             }
             
             // Check for CAPTCHA
             const captchaImage = await frame.$('img[alt="Captcha image"]');
             if (captchaImage) {
-                console.log('CAPTCHA detected! Triggering human-in-the-loop...');
+                log.info('CAPTCHA detected! Triggering human-in-the-loop...');
                 
                 // Notify frontend that manual action is required
                 if (details.invite.virtualParticipantId) {
@@ -495,7 +498,7 @@ export default class Webex {
                 }
                 
                 // Wait for CAPTCHA to be solved (Next button to be enabled and clicked, or name input to appear)
-                console.log('Waiting for CAPTCHA to be solved (up to 2 minutes)...');
+                log.info('Waiting for CAPTCHA to be solved (up to 2 minutes)...');
                 await Promise.race([
                     // Wait for name input to appear (successful CAPTCHA solve + Next click)
                     frame.waitForSelector(NAME_INPUT, {
@@ -513,7 +516,7 @@ export default class Webex {
                     )
                 ]);
                 
-                console.log('CAPTCHA appears to be resolved, continuing...');
+                log.info('CAPTCHA appears to be resolved, continuing...');
                 await new Promise((resolve) => setTimeout(resolve, 2000));
                 
                 // Clear manual action notification after CAPTCHA is resolved
@@ -523,21 +526,21 @@ export default class Webex {
                 }
             } else {
                 // No CAPTCHA, just password - click Next button
-                console.log('No CAPTCHA detected, clicking Next button...');
+                log.info('No CAPTCHA detected, clicking Next button...');
                 const nextButton = await frame.waitForSelector('mdc-button[type="submit"]', { timeout: 5000 });
                 if (nextButton) await clickWithDomFallback(nextButton, 'password Next');
                 await new Promise((resolve) => setTimeout(resolve, 2000));
             }
         }
 
-        console.log('Entering name (and email on enterprise)');
+        log.info('Entering name (and email on enterprise)');
         if (frameElement && frameElement.source === 'enterprise' && passwordCheckEl.source === 'enterprise-name') {
             // Check for guest form (name/email)
             const nameInput = await frame.$('input[aria-labelledby="nameLabel"]');
-            console.log(`Guest form name input found: ${nameInput !== null}`);
+            log.info(`Guest form name input found: ${nameInput !== null}`);
             
             if (nameInput) {
-                console.log('Enterprise Webex guest form detected, auto-filling name and email...');
+                log.info('Enterprise Webex guest form detected, auto-filling name and email...');
                 const emailInput = await frame.$('input[aria-labelledby="emailLabel"]');
                 
                 await nameInput.type(details.scribeIdentity);
@@ -556,12 +559,12 @@ export default class Webex {
                 }
                 
                 await emailInput?.type(userEmail);
-                console.log(`Filled name: "${details.scribeIdentity}", email: "${userEmail}"`);
+                log.info(`Filled name: "${details.scribeIdentity}", email: "${userEmail}"`);
                 
                 // Wait for form validation to complete
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 
-                console.log('Clicking Next button...');
+                log.info('Clicking Next button...');
                 const nextButton = await frame.$('#guest_next-btn');
                 if (nextButton) await clickWithDomFallback(nextButton, 'guest Next');
                 
@@ -569,13 +572,13 @@ export default class Webex {
                 await new Promise(resolve => setTimeout(resolve, 5000));
                 
                 // Handle meeting password if present
-                console.log('Checking for meeting password field...');
+                log.info('Checking for meeting password field...');
                 const passwordInput = await frame.$('input[type="password"]');
                 if (passwordInput && details.invite.meetingPassword) {
-                    console.log('Password field detected, auto-filling meeting password...');
+                    log.info('Password field detected, auto-filling meeting password...');
                     await passwordInput.type(details.invite.meetingPassword);
                     
-                    console.log('Clicking Next button after password...');
+                    log.info('Clicking Next button after password...');
                     const passwordNextButton = await frame.$('#password_validate_btn');
                     if (passwordNextButton) await clickWithDomFallback(passwordNextButton, 'password Next');
                 }
@@ -608,35 +611,35 @@ export default class Webex {
                         // Use evaluate-click for reliability inside the iframe (some
                         // Webex controls ignore positional clicks under automation).
                         await frame.evaluate((node: any) => node.click(), el);
-                        console.log(`[webex] Clicked ${label} via "${sel}".`);
+                        log.info(`[webex] Clicked ${label} via "${sel}".`);
                         return true;
                     }
                 } catch { /* try next selector */ }
             }
-            console.log(`[webex] ${label} not found (non-fatal) — tried: ${selectors.join(' | ')}`);
+            log.info(`[webex] ${label} not found (non-fatal) — tried: ${selectors.join(' | ')}`);
             return false;
         };
 
-        console.log('Handling cookie banner.');
+        log.info('Handling cookie banner.');
         try {
             const rejectButton = await page.waitForSelector(
                 isEnterprise ? '#cookie-banner-text > div.cookie-manage-option > div.cookie-banner-btnContainer > button:nth-child(1)' : '.cookie-banner-body .a32ueaoVYHwRrsRMl0ci mdc-button:first-child',
                 { timeout: 3000 }
             );
             await rejectButton?.click({ timeout: POSITIONAL_CLICK_TIMEOUT_MS });
-            console.log('Successfully clicked Reject cookie button');
+            log.info('Successfully clicked Reject cookie button');
         } catch (error) {
-            console.log('Cookie banner not found (non-fatal).');
+            log.info('Cookie banner not found (non-fatal).');
         }
 
         // Mute (only if the voice assistant isn't driving audio). Non-fatal.
         if (!voiceAssistant.isEnabled()) {
-            console.log('Clicking mute button.');
+            log.info('Clicking mute button.');
             await tryClickInFrame('mute button', isEnterprise
                 ? ['#audioControlButton', 'button[data-doi*="MUTE"]', 'button[aria-label*="Mute" i]', 'button[title*="Mute" i]']
                 : ['mdc-button[data-test="microphone-button"]', 'button[aria-label*="Mute" i]']);
         } else {
-            console.log('Voice assistant enabled - skipping mute button for agent audio');
+            log.info('Voice assistant enabled - skipping mute button for agent audio');
         }
 
         // Video: only turn it OFF if it's currently ON. On a headless VP with no
@@ -647,7 +650,7 @@ export default class Webex {
         // control ONLY when it's the STOP_VIDEO variant, and never the START_VIDEO
         // one. Then dismiss any "No camera found" popup as a safety net.
         if (simliAvatar.isConnected()) {
-            console.log('Simli avatar active - keeping video ON for avatar camera.');
+            log.info('Simli avatar active - keeping video ON for avatar camera.');
         } else if (isEnterprise) {
             // Inspect the video control in-frame and only click STOP_VIDEO.
             try {
@@ -656,11 +659,11 @@ export default class Webex {
                     if (stop) { stop.click(); return true; }
                     return false;
                 });
-                console.log(clickedStop
+                log.info(clickedStop
                     ? '[webex] Turned video off (clicked STOP_VIDEO).'
                     : '[webex] Video already off (no enabled STOP_VIDEO control) — leaving as-is.');
             } catch {
-                console.log('[webex] Video state check failed (non-fatal) — leaving video as-is.');
+                log.warn('[webex] Video state check failed (non-fatal) — leaving video as-is.');
             }
         } else {
             // Non-enterprise web client: best-effort camera-off, non-fatal.
@@ -679,31 +682,31 @@ export default class Webex {
                 }
                 return false;
             });
-            if (dismissed) console.log('[webex] Dismissed "No camera found" popup (clicked OK).');
+            if (dismissed) log.info('[webex] Dismissed "No camera found" popup (clicked OK).');
         } catch { /* non-fatal */ }
 
         // Join — this one DOES matter; if it misses, we can't enter. Try the known
         // selectors plus text/title fallbacks ("Join meeting"). Still non-throwing
         // so we fall through to the admission check below either way.
-        console.log('Clicking join button.');
+        log.info('Clicking join button.');
         const joined = await tryClickInFrame('join button', isEnterprise
             ? ['#interstitial_join_btn', 'button[data-doi*="JOIN"]', 'button[title*="Join" i]', 'button[aria-label*="Join meeting" i]']
             : ['mdc-button[data-test="join-button"]', 'button[title*="Join" i]'], 8000);
         if (!joined) {
-            console.log('[webex] WARNING: Join button not matched by any selector on the interstitial.');
+            log.warn('[webex] WARNING: Join button not matched by any selector on the interstitial.');
         }
 
-        console.log("Opening chat panel.");
+        log.info("Opening chat panel.");
         try {
             const chatToggleButton = (frameElement && frameElement.source === 'enterprise') ? 'button[data-doi="CHAT:OPEN_CHAT_PANEL:MENU_CONTROL_BAR"]' : 'mdc-button[data-test="in-meeting-chat-toggle-button"]';
             await frame.waitForSelector(chatToggleButton, {
                 timeout: details.waitingTimeout,
             });
             await frame.click(chatToggleButton);
-            console.log("Chat panel button clicked successfully");
+            log.info("Chat panel button clicked successfully");
         } catch(error: any) {
-            console.log("Chat panel button error:", error.message);
-            console.log("Your scribe was not admitted into the meeting.");
+            log.warn("Chat panel button error:", error.message);
+            log.info("Your scribe was not admitted into the meeting.");
             // Reaching here means the in-meeting UI never appeared, so the VP
             // is still outside the meeting: 'never-joined', the same code the
             // Zoom and Teams handlers return from their equivalent branch.
@@ -717,16 +720,16 @@ export default class Webex {
             const statusManager = createStatusManager(details.invite.virtualParticipantId);
             await statusManager.setJoined();
         }
-        console.log('Successfully joined Webex meeting');
+        log.info('Successfully joined Webex meeting');
 
-        console.log('Sending introduction messages.');
+        log.info('Sending introduction messages.');
         await this.sendMessages(frame, details.introMessages, frameElement && frameElement.source === 'enterprise');
 
         // Set up speaker change monitoring
         await page.exposeFunction('speakerChange', async (speaker: string) => {
             await transcriptionService.speakerChange(speaker);
         });
-        console.log("Listening for speaker changes.");
+        log.info("Listening for speaker changes.");
         await frame.evaluate(() => {
               const doc = document;
 
@@ -882,7 +885,7 @@ export default class Webex {
                 // (it can emit duplicate add events) — only act on the first.
                 if (this.endHandled) return;
                 this.endHandled = true;
-                console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(message)}`);
+                log.info(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(message)}`);
                 details.start = false;
                 // Post the goodbye BEFORE signalling exit — requestEnd triggers
                 // teardown which closes the page, and a goodbye sent after that
@@ -894,7 +897,7 @@ export default class Webex {
                 await Promise.race([
                     this.sendMessages(frame, exitMessagesFor(sender)),
                     new Promise((r) => setTimeout(r, 6000)),
-                ]).catch((e) => console.log('Goodbye message send failed (non-fatal):', e));
+                ]).catch((e) => log.warn('Goodbye message send failed (non-fatal):', e));
                 this.requestEnd({
                     reason: 'end-command',
                     trigger: 'chat',
@@ -912,15 +915,15 @@ export default class Webex {
                 if (!this.freshToggle(message, sender)) return;
                 // Answered whether or not transcription is paused: the list is how
                 // someone finds out how to resume it.
-                console.log('[chat-help] posting the chat command list');
+                log.info('[chat-help] posting the chat command list');
                 await this.sendMessages(frame, chatHelpMessages(voiceAssistant));
             } else if (details.start && matchesChatCommand(message, details.pauseCommand)) {
                 details.start = false;
-                console.log(details.pauseMessages[0]);
+                log.info(details.pauseMessages[0]);
                 await this.sendMessages(frame, details.pauseMessages);
             } else if (!details.start && matchesChatCommand(message, details.startCommand)) {
                 details.start = true;
-                console.log(details.startMessages[0]);
+                log.info(details.startMessages[0]);
                 await this.sendMessages(frame, details.startMessages);
                 // Restart transcription if needed
                 transcriptionService.startTranscription();
@@ -933,11 +936,11 @@ export default class Webex {
                 });
                 const formattedMessage = `[${timestamp}] ${message}`;
                 details.messages.push(formattedMessage);
-                console.log('New message:', formattedMessage);
+                log.info('New message:', formattedMessage);
             }
         });
 
-        console.log('Listening for message changes.');
+        log.info('Listening for message changes.');
         // The page's own console.log does NOT reach CloudWatch under CloakBrowser
         // (only warnings and errors do — see the note in audio-diagnostics.ts), and
         // webex.ts installs no console listener of its own, so anything the
@@ -1087,7 +1090,7 @@ export default class Webex {
             },
             WEBEX_CHAT_SELECTORS,
         );
-        console.log(
+        log.info(
             chatObserverAttached
                 ? 'Webex chat observer attached.'
                 : 'Webex chat container not found — in-meeting chat commands will not work.',
@@ -1095,12 +1098,12 @@ export default class Webex {
 
         // Start transcription if enabled
         if (details.start) {
-            console.log(details.startMessages[0]);
+            log.info(details.startMessages[0]);
             await this.sendMessages(frame, details.startMessages, frameElement && frameElement.source === 'enterprise');
             transcriptionService.startTranscription();
         }
 
-        console.log('Waiting for meeting end.');
+        log.info('Waiting for meeting end.');
         let exitInfo: ExitInfo = { reason: 'unknown' };
         try {
             // Detect Webex's own meeting-end UI by watching the iframe text.
@@ -1147,12 +1150,12 @@ export default class Webex {
 
             exitInfo = await Promise.race([this.endRequested, meetingEndDetected, meetingTimeout]);
         } catch (error) {
-            console.log('Meeting ended with error:', error);
+            log.error('Meeting ended with error:', error);
             exitInfo = { reason: 'unknown', trigger: `error:${error instanceof Error ? error.message : String(error)}` };
         } finally {
             details.start = false;
         }
-        console.log(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
+        log.info(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
         return exitInfo;
     }
 }

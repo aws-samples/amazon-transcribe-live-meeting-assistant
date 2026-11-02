@@ -182,7 +182,9 @@ class KinesisStreamManager {
       // Handle permission errors gracefully (like Python version)
       if (error.name === 'AccessDeniedException') {
         log.error(`Error sending ${record.EventType} event to Kinesis: ${error.message}`);
-        log.info('Note: This is expected during local testing without proper IAM permissions');
+        if (isLocalTest) {
+          log.info('Note: This is expected during local testing without proper IAM permissions');
+        }
       } else {
       // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- ECMAScript template literals do not interpret util.format specifiers
         log.error(`Error sending ${record.EventType} event to Kinesis:`, error);

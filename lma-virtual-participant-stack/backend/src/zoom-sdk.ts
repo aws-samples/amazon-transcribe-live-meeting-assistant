@@ -10,6 +10,9 @@ import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startZoomSdkServer, ZoomSdkServerHandle } from './zoom-sdk-server.js';
 import { POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('zoom-sdk');
 
 const STATUS_CONNECTED = 2;
 const STATUS_DISCONNECTED = 3;
@@ -55,7 +58,7 @@ export default class ZoomSdk {
                 await page.evaluate((m: string) => (window as any).__lmaSendChat(m), message);
                 await new Promise((r) => setTimeout(r, 200));
             } catch (err) {
-                console.warn('[zoom-sdk] sendChat failed (non-fatal):', err);
+                log.warn('[zoom-sdk] sendChat failed (non-fatal):', err);
             }
         }
     }
@@ -88,7 +91,7 @@ export default class ZoomSdk {
             await el.click({ force: true, timeout: POSITIONAL_CLICK_TIMEOUT_MS });
             return true;
         } catch (err) {
-            console.warn('[zoom-sdk] click failed:', err);
+            log.warn('[zoom-sdk] click failed:', err);
             return false;
         } finally {
             await handle.dispose();
@@ -120,7 +123,7 @@ export default class ZoomSdk {
 
             if (!audioDone && state.needJoinAudio && !state.audioJoined) {
                 if (await this.clickBySvg(page, [], 'join audio|connect audio|computer audio')) {
-                    console.log('[zoom-sdk] joined computer audio');
+                    log.info('[zoom-sdk] joined computer audio');
                 }
                 await new Promise((r) => setTimeout(r, 1500));
                 continue;
@@ -130,11 +133,11 @@ export default class ZoomSdk {
             if (!micDone && audioDone) {
                 if (wantMic && state.muted) {
                     if (await this.clickBySvg(page, ['svg.SvgAudioUnmute'], 'unmute')) {
-                        console.log('[zoom-sdk] unmuted microphone (voice assistant / avatar audio)');
+                        log.info('[zoom-sdk] unmuted microphone (voice assistant / avatar audio)');
                     }
                 } else if (!wantMic && !state.muted) {
                     if (await this.clickBySvg(page, ['svg.SvgAudioMute'], 'mute my|^mute$')) {
-                        console.log('[zoom-sdk] muted microphone (no voice assistant)');
+                        log.info('[zoom-sdk] muted microphone (no voice assistant)');
                     }
                 }
                 micDone = true;
@@ -143,7 +146,7 @@ export default class ZoomSdk {
             if (!videoDone && state.videoOff) {
                 videoClicks += 1;
                 if (await this.clickBySvg(page, ['svg.SvgVideoOff', 'svg.SvgVideoOffDisallowed'], 'start video|start my video')) {
-                    console.log(`[zoom-sdk] started video (avatar camera) attempt ${videoClicks}`);
+                    log.info(`[zoom-sdk] started video (avatar camera) attempt ${videoClicks}`);
                 }
                 await new Promise((r) => setTimeout(r, 2000));
                 if (videoClicks >= 3) videoDone = true;
@@ -152,12 +155,12 @@ export default class ZoomSdk {
             if (!state.videoOff) videoDone = true;
 
             if (audioDone && micDone && videoDone) {
-                console.log(`[zoom-sdk] media setup complete (audio=${audioDone} mic=${micDone} video=${!wantVideo ? 'n/a' : 'on'})`);
+                log.info(`[zoom-sdk] media setup complete (audio=${audioDone} mic=${micDone} video=${!wantVideo ? 'n/a' : 'on'})`);
                 return;
             }
             await new Promise((r) => setTimeout(r, 1000));
         }
-        console.log(`[zoom-sdk] media setup finished (audio=${audioDone} mic=${micDone} videoDone=${videoDone})`);
+        log.info(`[zoom-sdk] media setup finished (audio=${audioDone} mic=${micDone} videoDone=${videoDone})`);
     }
 
     // Zoom can flip the camera off mid-meeting; re-start it when the avatar is
@@ -175,7 +178,7 @@ export default class ZoomSdk {
             if (state && state.videoOff) {
                 consecutiveOff += 1;
                 if (consecutiveOff >= 2) {
-                    console.warn('[zoom-sdk] camera OFF (x2) with avatar connected — re-starting video');
+                    log.warn('[zoom-sdk] camera OFF (x2) with avatar connected — re-starting video');
                     await this.clickBySvg(page, ['svg.SvgVideoOff', 'svg.SvgVideoOffDisallowed'], 'start video|start my video');
                     consecutiveOff = 0;
                 }
@@ -190,11 +193,11 @@ export default class ZoomSdk {
 
         page.on('console', (message: ConsoleMessage) => {
             const text = message.text();
-            if (text.includes('[LMA-ZoomSDK]')) console.log(`ZoomSDK page: ${text}`);
+            if (text.includes('[LMA-ZoomSDK]')) log.info(`ZoomSDK page: ${text}`);
         });
-        page.on('pageerror', (error: unknown) => console.warn('[zoom-sdk] page error:', error));
+        page.on('pageerror', (error: unknown) => log.warn('[zoom-sdk] page error:', error));
         page.on('crash', () => {
-            console.error('[zoom-sdk] page crashed (renderer crash) — ending meeting');
+            log.error('[zoom-sdk] page crashed (renderer crash) — ending meeting');
             this.requestEnd({ reason: 'page-closed', trigger: 'renderer-crash' });
         });
 
@@ -240,7 +243,7 @@ export default class ZoomSdk {
 
         const isolated = await page.evaluate(() => (window as any).crossOriginIsolated === true).catch(() => false);
         if (!isolated) {
-            console.warn('[zoom-sdk] crossOriginIsolated=false — gallery/SAB view may be degraded');
+            log.warn('[zoom-sdk] crossOriginIsolated=false — gallery/SAB view may be degraded');
         }
 
         await substep('Joining the meeting…');
@@ -258,9 +261,9 @@ export default class ZoomSdk {
                     try {
                         await btn.click({ timeout: POSITIONAL_CLICK_TIMEOUT_MS });
                         previewClicked = true;
-                        console.log('[zoom-sdk] clicked preview Join');
+                        log.info('[zoom-sdk] clicked preview Join');
                     } catch (err) {
-                        console.warn('[zoom-sdk] preview Join click failed (will retry):', err);
+                        log.warn('[zoom-sdk] preview Join click failed (will retry):', err);
                     }
                 }
             }
@@ -286,10 +289,10 @@ export default class ZoomSdk {
         }
 
         if (!joined) {
-            console.log('[zoom-sdk] never admitted before waitingTimeout');
+            log.info('[zoom-sdk] never admitted before waitingTimeout');
             return { reason: 'never-joined', trigger: 'sdk-not-admitted' };
         }
-        console.log('[zoom-sdk] joined meeting');
+        log.info('[zoom-sdk] joined meeting');
 
         await page.evaluate(() => (window as any).__lmaStartPopupDismiss()).catch(() => {});
 
@@ -300,7 +303,7 @@ export default class ZoomSdk {
         await substep('In the meeting — posting introduction…');
         await this.sendMessages(page, details.introMessages);
         if (details.start) {
-            console.log(details.startMessages[0]);
+            log.info(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
             transcriptionService.startTranscription();
         }
@@ -351,7 +354,7 @@ export default class ZoomSdk {
                 const sender = chat.senderName || null;
                 const body = chat.text || '';
                 if (matchesEndCommand(body)) {
-                    console.log(`[zoom-sdk] asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
+                    log.info(`[zoom-sdk] asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
                     await this.sendMessages(page, exitMessagesFor(sender));
                     details.start = false;
                     this.requestEnd({ reason: 'end-command', trigger: 'chat', requestedBy: sender, matchedMessage: body });
@@ -376,22 +379,22 @@ export default class ZoomSdk {
                 } else if (matchesChatCommand(body, details.helpCommand)) {
                     // Answered whether or not transcription is paused: the list is how
                     // someone finds out how to resume it.
-                    console.log('[chat-help] posting the chat command list');
+                    log.info('[chat-help] posting the chat command list');
                     await this.sendMessages(page, chatHelpMessages(voiceAssistant));
                 } else if (details.start && matchesChatCommand(body, details.pauseCommand)) {
                     details.start = false;
-                    console.log(details.pauseMessages[0]);
+                    log.info(details.pauseMessages[0]);
                     await this.sendMessages(page, details.pauseMessages);
                 } else if (!details.start && matchesChatCommand(body, details.startCommand)) {
                     details.start = true;
-                    console.log(details.startMessages[0]);
+                    log.info(details.startMessages[0]);
                     await this.sendMessages(page, details.startMessages);
                     transcriptionService.startTranscription();
                 } else if (details.start) {
                     const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
                     const formatted = `[${timestamp}] ${sender ? `${sender}: ` : ''}${body}`;
                     details.messages.push(formatted);
-                    console.log('New message:', formatted);
+                    log.info('New message:', formatted);
                 }
             }
 
@@ -406,7 +409,7 @@ export default class ZoomSdk {
                 if (effectiveCount <= 1) {
                     consecutiveLonely += 1;
                     if (consecutiveLonely >= POLLS_BEFORE_LONELY) {
-                        console.log(`[zoom-sdk] alone in meeting (count=${effectiveCount}) — leaving`);
+                        log.info(`[zoom-sdk] alone in meeting (count=${effectiveCount}) — leaving`);
                         details.start = false;
                         this.requestEnd({ reason: 'alone-in-meeting', trigger: 'sdk-participants' });
                     }
@@ -416,7 +419,7 @@ export default class ZoomSdk {
             }
         }, 3000);
 
-        console.log('Waiting for meeting end.');
+        log.info('Waiting for meeting end.');
         const timeoutPromise = new Promise<ExitInfo>((resolve) =>
             setTimeout(() => resolve({ reason: 'meeting-timeout', trigger: 'meetingTimeout' }), details.meetingTimeout),
         );
@@ -431,7 +434,7 @@ export default class ZoomSdk {
             await this.server?.close();
         } catch { /* noop */ }
 
-        console.log(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
+        log.info(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
         return exitInfo;
     }
 }

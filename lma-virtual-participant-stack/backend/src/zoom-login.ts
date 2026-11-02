@@ -13,7 +13,9 @@ import {
     scrollIntoViewAndClick,
 } from './ai-dom-resolver.js';
 import { details } from './details.js';
-import { registerSecretValue } from './logger.js';
+import { createLogger, registerSecretValue } from './logger.js';
+
+const log = createLogger('zoom-login');
 
 export interface ZoomCredentials {
     username: string;
@@ -147,7 +149,7 @@ const typeWithDelay = async (
         budget,
         `type(${text.length} chars)`,
     ).catch((err) => {
-        console.warn(`[zoom-login] typeWithDelay slow/failed (verify will retry): ${err?.message || err}`);
+        log.warn(`[zoom-login] typeWithDelay slow/failed (verify will retry): ${err?.message || err}`);
     });
 };
 
@@ -202,7 +204,7 @@ const typeAndVerify = async (
         if (got === text) {
             return { ok: true, handle };
         }
-        console.warn(
+        log.warn(
             `[zoom-login] ${label} value mismatch after attempt ${attempt} ` +
                 `(expected "${text.length}" chars, got "${got.length}" chars) — ` +
                 `${attempt < 2 ? 're-locating and retrying' : 'giving up retry'}`,
@@ -210,7 +212,7 @@ const typeAndVerify = async (
         if (attempt < 2) {
             const fresh = await relocate();
             if (!fresh) {
-                console.warn(`[zoom-login] ${label} could not be re-located for retry`);
+                log.warn(`[zoom-login] ${label} could not be re-located for retry`);
                 return { ok: false, handle };
             }
             handle = fresh;
@@ -250,13 +252,13 @@ const waitForSignInFormReady = async (
         ).catch(() => false);
         polls += 1;
         if (hasInput) {
-            console.log(
+            log.info(
                 `[zoom-login] sign-in email field ready after ${Date.now() - (deadline - timeoutMs)}ms (${polls} polls)`,
             );
             return true;
         }
     }
-    console.warn(
+    log.warn(
         `[zoom-login] waitForSignInFormReady timed out after ${timeoutMs}ms at ${page.url()} (${polls} polls); proceeding anyway`,
     );
     return false;
@@ -308,7 +310,7 @@ export const gotoZoomSignin = async (
         // /signin rendered late, or Zoom redirected us to an authenticated
         // landing page (/myhome, /profile) because the saved session is valid.
         if (/https:\/\/(app\.)?zoom\.us\//.test(current)) {
-            console.warn(
+            log.warn(
                 `[zoom-login] ${url} reported "${String(err).split('\n')[0]}" but the page ` +
                     `settled at ${current} — continuing.`,
             );
@@ -359,7 +361,7 @@ export async function loginToZoom(
     // user landed on /myhome but the meeting prejoin still got a bot-
     // detection block. Going to /signin and letting Zoom decide whether
     // we're authenticated is more reliable.)
-    console.log('[zoom-login] Navigating to Zoom sign-in page');
+    log.info('[zoom-login] Navigating to Zoom sign-in page');
     await gotoZoomSignin(page);
     await sleepJitter(800, 600);
 
@@ -368,14 +370,14 @@ export async function loginToZoom(
     const postLoadUrl = page.url();
     const stillOnSignin = /zoom\.us\/(signin|login)/.test(postLoadUrl);
     if (!stillOnSignin && (await hasZoomAuthCookie(page))) {
-        console.log(`[zoom-login] Saved session is valid (redirected to ${postLoadUrl}) — skipping sign-in`);
+        log.info(`[zoom-login] Saved session is valid (redirected to ${postLoadUrl}) — skipping sign-in`);
         return { outcome: 'success', detail: 'reused saved session' };
     }
-    console.log(`[zoom-login] At ${postLoadUrl} — proceeding with email/password flow`);
+    log.info(`[zoom-login] At ${postLoadUrl} — proceeding with email/password flow`);
 
-    console.log('[zoom-login] step=waitForSignInFormReady BEGIN');
+    log.info('[zoom-login] step=waitForSignInFormReady BEGIN');
     const formReady = await waitForSignInFormReady(page);
-    console.log(`[zoom-login] step=waitForSignInFormReady END (ready=${formReady}) at ${page.url()}`);
+    log.info(`[zoom-login] step=waitForSignInFormReady END (ready=${formReady}) at ${page.url()}`);
 
     // Step 1: email
     const emailPrimaries = ['#email', 'input[type="email"]', 'input[name="email"]'];
@@ -387,18 +389,18 @@ export async function loginToZoom(
     // When the field is already confirmed present, a short primary lookup
     // hits immediately; skip the AI fallback (3 Bedrock round-trips, ~40s
     // on a slow box). Only give the longer budget + AI when unconfirmed.
-    console.log('[zoom-login] step=findEmail BEGIN');
+    log.info('[zoom-login] step=findEmail BEGIN');
     const emailRes = await findElementWithFallback(
         page,
         emailPrimaries,
         emailIntent,
         formReady ? { maxRetries: 4, delayMs: 400 } : { maxRetries: 8, delayMs: 750 },
     );
-    console.log(`[zoom-login] step=findEmail END (found=${!!emailRes}, source=${emailRes?.source ?? 'none'})`);
+    log.info(`[zoom-login] step=findEmail END (found=${!!emailRes}, source=${emailRes?.source ?? 'none'})`);
     if (!emailRes) {
         return { outcome: 'manual-required', detail: 'Could not locate Zoom sign-in email field' };
     }
-    console.log('[zoom-login] step=typeEmail BEGIN');
+    log.info('[zoom-login] step=typeEmail BEGIN');
     const emailVerify = await typeAndVerify(
         page,
         emailRes.element,
@@ -414,7 +416,7 @@ export async function loginToZoom(
         },
         'email',
     );
-    console.log(`[zoom-login] step=typeEmail END (ok=${emailVerify.ok})`);
+    log.info(`[zoom-login] step=typeEmail END (ok=${emailVerify.ok})`);
     if (!emailVerify.ok) {
         return {
             outcome: 'manual-required',
@@ -441,7 +443,7 @@ export async function loginToZoom(
 
     // First click "Next" to advance from email step. AI handles everything
     // afterwards including potentially filling password.
-    console.log('[zoom-login] step=findNext BEGIN');
+    log.info('[zoom-login] step=findNext BEGIN');
     const nextRes = await findElementWithFallback(
         page,
         [
@@ -457,13 +459,13 @@ export async function loginToZoom(
         },
         { maxRetries: 6, delayMs: 500 },
     );
-    console.log(`[zoom-login] step=findNext END (found=${!!nextRes}, source=${nextRes?.source ?? 'none'})`);
+    log.info(`[zoom-login] step=findNext END (found=${!!nextRes}, source=${nextRes?.source ?? 'none'})`);
     if (nextRes) {
-        console.log('[zoom-login] step=clickNext BEGIN');
+        log.info('[zoom-login] step=clickNext BEGIN');
         await withTimeout(nextRes.element.click(), 5000, 'Next button click').catch((err) => {
-            console.warn(`[zoom-login] Next button click failed/timed out: ${err?.message || err}`);
+            log.warn(`[zoom-login] Next button click failed/timed out: ${err?.message || err}`);
         });
-        console.log('[zoom-login] step=clickNext END');
+        log.info('[zoom-login] step=clickNext END');
         await sleepJitter(800, 800);
     }
     // If there was no Next button, the page might already be showing the
@@ -562,7 +564,7 @@ async function aiDrivenLoginLoop(
         // is blocking (which is what produced the cryptic "action continue on
         // #js_btn_login did not advance" message).
         if (didFillPassword && (await detectCaptcha(page))) {
-            console.warn('[zoom-login] CAPTCHA challenge detected after password — escalating to manual.');
+            log.warn('[zoom-login] CAPTCHA challenge detected after password — escalating to manual.');
             return {
                 outcome: 'manual-required',
                 manualReason: 'captcha',
@@ -580,7 +582,7 @@ async function aiDrivenLoginLoop(
             });
         } catch (e) {
             if (!isNavError(e)) {
-                console.warn('[zoom-login] analyzePageAction error:', e);
+                log.warn('[zoom-login] analyzePageAction error:', e);
             }
             await new Promise((r) => setTimeout(r, ITER_PAUSE_MS));
             continue;
@@ -592,7 +594,7 @@ async function aiDrivenLoginLoop(
             continue;
         }
 
-        console.log(
+        log.info(
             `[zoom-login] AI iter ${i + 1}: ${action.kind} (${action.reason}${
                 action.selector ? `; selector="${action.selector}"` : ''
             })`,
@@ -632,7 +634,7 @@ async function aiDrivenLoginLoop(
             // the Sign-In button — detect it and return a clean, user-facing
             // reason instead of leaking the internal selector/loop detail.
             const captcha = await detectCaptcha(page);
-            console.warn(
+            log.warn(
                 `[zoom-login] Stuck loop detected (action "${actionSignature}" repeated without page change; captcha=${captcha}) — escalating`,
             );
             return captcha
@@ -743,7 +745,7 @@ async function aiDrivenLoginLoop(
                         .waitForNavigation({ timeout: 15_000, waitUntil: 'domcontentloaded' })
                         .catch(() => null);
                 } catch (err) {
-                    console.warn('[zoom-login] fill_password failed:', err);
+                    log.warn('[zoom-login] fill_password failed:', err);
                 }
             }
             await new Promise((r) => setTimeout(r, ITER_PAUSE_MS));
@@ -814,7 +816,7 @@ export async function dismissPostLoginInterstitials(
         // Quick early-out: not a /signin sub-route → nothing to dismiss.
         const onSignin = /zoom\.us\/signin/.test(url) || /zoom\.us\/login/.test(url);
         if (!onSignin) {
-            console.log(`[zoom-login] Post-login navigator: reached non-signin URL ${url}`);
+            log.info(`[zoom-login] Post-login navigator: reached non-signin URL ${url}`);
             return true;
         }
 
@@ -829,7 +831,7 @@ export async function dismissPostLoginInterstitials(
                     useScreenshot: true,
                 });
                 if (action) {
-                    console.log(
+                    log.info(
                         `[zoom-login] AI page-action #${i + 1}: ${action.kind} (${action.reason}${
                             action.selector ? `; selector="${action.selector}"` : ''
                         })`,
@@ -846,7 +848,7 @@ export async function dismissPostLoginInterstitials(
                             await new Promise((r) => setTimeout(r, perIterationMs));
                             continue;
                         }
-                        console.warn(
+                        log.warn(
                             `[zoom-login] AI suggested ${action.kind} via "${action.selector}" but the click failed; trying regex fallback.`,
                         );
                     }
@@ -856,7 +858,7 @@ export async function dismissPostLoginInterstitials(
                     await new Promise((r) => setTimeout(r, perIterationMs));
                     continue;
                 }
-                console.warn('[zoom-login] AI page-action analyzer error (will fall back to regex):', err);
+                log.warn('[zoom-login] AI page-action analyzer error (will fall back to regex):', err);
             }
         }
 
@@ -891,21 +893,21 @@ export async function dismissPostLoginInterstitials(
                 await new Promise((r) => setTimeout(r, perIterationMs));
                 continue;
             }
-            console.warn('[zoom-login] dismissPostLoginInterstitials regex error:', err);
+            log.warn('[zoom-login] dismissPostLoginInterstitials regex error:', err);
             return false;
         }
 
         if (dismissedBy) {
-            console.log(`[zoom-login] Regex fallback dismissed via "${dismissedBy}" (iteration ${i + 1})`);
+            log.info(`[zoom-login] Regex fallback dismissed via "${dismissedBy}" (iteration ${i + 1})`);
             await new Promise((r) => setTimeout(r, perIterationMs));
             continue;
         }
 
         // Nothing matched at either layer.
-        console.log(`[zoom-login] No dismissable interstitial found at ${url} (iteration ${i + 1})`);
+        log.info(`[zoom-login] No dismissable interstitial found at ${url} (iteration ${i + 1})`);
         return false;
     }
-    console.log(`[zoom-login] dismissPostLoginInterstitials: hit max iterations (${maxIterations})`);
+    log.info(`[zoom-login] dismissPostLoginInterstitials: hit max iterations (${maxIterations})`);
     return false;
 }
 
