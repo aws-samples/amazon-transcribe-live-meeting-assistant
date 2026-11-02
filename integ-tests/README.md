@@ -83,6 +83,7 @@ Stack resolution order: `--stack-name` / `STACK=` → `$LMA_STACK_NAME` → `LMA
 | `test_vp_live_join` *(opt-in)* | VP actually joins a real meeting and leaves `INITIALIZING` | **@zoom/meetingsdk 4→6** |
 | `test_desktop_video.py` *(opt-in, `LMA_TEST_DESKTOP_VIDEO=1`)* | a narrated synthetic slideshow streamed as the desktop capture app streams it → one key frame per slide, at the right times, with both images in S3; the meeting assistant reads the last slide | desktop video key frames and the assistant's shared-screen tool |
 | `test_meeting_consent.py` *(opt-in, `LMA_TEST_CONSENT=1`)* | with the Meeting Consent setting changed for the run and put back afterwards: an unconfirmed opt-in stream is refused and captures nothing; an attested one is transcribed, with its attestation, evidence image and evidence check stored; a notify stream stops, and is recorded as objected and ended, on an objection | the transcriber's consent gate on the Stream Audio path |
+| `test_mcp_api_key_logging.py` *(needs a Cognito test user)* | generates an MCP API key as the test user, calls the API-key MCP endpoint with it (`x-api-key` and `Authorization: Bearer`) and with an unknown key, revokes it; the authorizer log names the matched key by its stored prefix and holds neither key, AppSync logging excludes request content, and its log for the `generateMCPApiKey` call holds no key and no resolver context or template | what the MCP API key path writes to CloudWatch Logs |
 
 `test_vp_live_join` is marked `live` and **skipped** unless `--vp-meeting-id`
 (`MEETING_ID=`) is provided.
