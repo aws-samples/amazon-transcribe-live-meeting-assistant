@@ -518,7 +518,8 @@ def start_meeting_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) ->
         and current.get("Rule") == rule
     ):
         # A capture client that restarts starts again: answer with the record
-        # as it is, without a write or a subscription message.
+        # as it is, without a write. Subscribers still receive the unchanged
+        # record, as for any successful mutation.
         return update_out(meeting, call_id)
     return write_consent(caller, call_id, change)
 

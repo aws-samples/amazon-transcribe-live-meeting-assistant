@@ -198,7 +198,7 @@ signs an hour-long link to each image for whoever may read the meeting.
 Deleting a meeting deletes its consent record, which is part of the meeting
 row, and every image in its evidence folder. A lifecycle rule on
 `lma-consent-evidence/` also deletes the images after
-`MeetingRecordExpirationInDays`, the meeting record's own retention.
+`TranscriptionExpirationInDays`, as for the key frames.
 
 ## Who can do what
 

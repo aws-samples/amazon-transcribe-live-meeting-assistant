@@ -313,8 +313,11 @@ def evaluate(record: Optional[Mapping[str, Any]]) -> Tuple[str, bool, str]:
     if not record:
         return STATUS_NOT_REQUIRED, True, "consent is not in use for this meeting"
     mode = record.get("Mode")
-    if mode not in MODES or mode == MODE_OFF:
+    if mode == MODE_OFF:
         return STATUS_NOT_REQUIRED, True, "consent is not required"
+    if mode not in MODES:
+        # Never written by this module; a record it cannot judge is not consent.
+        return STATUS_PENDING, False, f"the consent mode {mode!r} is not recognised"
     decisions = latest_decisions(record.get("Events") or [])
     objectors = sorted(
         name for name, decision in decisions.items() if decision == DECISION_OBJECTION
@@ -353,11 +356,12 @@ def capture_allowed(record: Optional[Mapping[str, Any]], deployment_mode: str = 
 
     A meeting with no consent record is judged by ``deployment_mode``: in an
     ``opt_in`` deployment it may not be captured until its consent has been
-    started and granted, because the absence of a record is not consent. So is
-    a record whose mode is not one of :data:`MODES`, which this module cannot
-    judge.
+    started and granted, because the absence of a record is not consent. A
+    record whose mode is not one of :data:`MODES` is never captured, as
+    :func:`evaluate` says, so the gate and the record's own ``CaptureAllowed``
+    agree.
     """
-    if not record or record.get("Mode") not in MODES:
+    if not record or not record.get("Mode"):
         return deployment_mode != MODE_OPT_IN
     _status, allowed, _reason = evaluate(record)
     return allowed

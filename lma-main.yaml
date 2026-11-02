@@ -2927,13 +2927,14 @@ Resources:
             Status: Enabled
             Prefix: "lma-video-keyframes/"
             ExpirationInDays: !Ref TranscriptionExpirationInDays
-          # Consent evidence images (docs/meeting-consent.md). The consent record
-          # is on the meeting row, so its images are kept as long as the meeting
-          # record is.
+          # Consent evidence images (docs/meeting-consent.md), kept for as many
+          # days as the key frames. The transcript's retention rather than the
+          # meeting record's because a lifecycle rule takes whole days, which the
+          # key-frame rule above already requires of this parameter.
           - Id: ConsentEvidenceRetention
             Status: Enabled
             Prefix: "lma-consent-evidence/"
-            ExpirationInDays: !Ref MeetingRecordExpirationInDays
+            ExpirationInDays: !Ref TranscriptionExpirationInDays
           - Id: PendingUploadCleanup
             Status: Enabled
             Prefix: "lma-uploads-pending/"

@@ -121,12 +121,13 @@ def test_an_attestation_entry_is_not_a_participants_reply() -> None:
     assert rules.evaluate(meeting)[:2] == ("pending", False)
 
 
-def test_an_unknown_mode_follows_the_deployment_mode() -> None:
+def test_an_unknown_mode_is_never_captured() -> None:
     # A record with a mode this module does not know (the resolver never
-    # writes one) is judged like a missing record.
+    # writes one) is not consent, and the gate and the record agree on that.
     unknown = record("something_new")
-    assert rules.capture_allowed(unknown, "opt_in") is False
-    assert rules.capture_allowed(unknown, "notify") is True
+    assert rules.evaluate(unknown)[:2] == ("pending", False)
+    for deployment_mode in ("off", "notify", "opt_in"):
+        assert rules.capture_allowed(unknown, deployment_mode) is False
 
 
 # ── status history ─────────────────────────────────────────────────────────
