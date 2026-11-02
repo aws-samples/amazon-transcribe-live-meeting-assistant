@@ -137,6 +137,8 @@ export const ConfigurationContent = () => {
   const [view, setView] = useState('form');
   const [configText, setConfigText] = useState('');
   const [textError, setTextError] = useState(null);
+  // Settings named in the text that this deployment does not offer, so not used.
+  const [textWithheld, setTextWithheld] = useState([]);
   const [compareOpen, setCompareOpen] = useState(false);
   const [compareWith, setCompareWith] = useState(null);
   const [comparison, setComparison] = useState(null);
@@ -224,18 +226,20 @@ export const ConfigurationContent = () => {
   // import, a preset -- but not the one it made itself.
   useEffect(() => {
     if (view === 'form' || edits === fromText.current) return;
-    setConfigText(configurationText(sections, edits, view));
+    setConfigText(configurationText(sections, edits, view, settings));
     setTextError(null);
-  }, [view, edits, sections]);
+    setTextWithheld([]);
+  }, [view, edits, sections, settings]);
 
   const editText = (value) => {
     setConfigText(value);
     try {
-      const parsed = readConfigurationText(value, view, sections);
+      const parsed = readConfigurationText(value, view, sections, doc.defaults, settings, edits);
       const next = { ...edits, ...parsed.values };
       fromText.current = next;
       setEdits(next);
       setTextError(null);
+      setTextWithheld(parsed.withheld);
     } catch (err) {
       setTextError(err.message);
     }
@@ -246,7 +250,8 @@ export const ConfigurationContent = () => {
     fromText.current = null;
     setTextError(null);
     setEdits(loaded);
-    if (view !== 'form') setConfigText(configurationText(sections, loaded, view));
+    setTextWithheld([]);
+    if (view !== 'form') setConfigText(configurationText(sections, loaded, view, settings));
   };
 
   const chooseView = (next) => {
@@ -823,6 +828,17 @@ export const ConfigurationContent = () => {
         </FormField>
       )}
 
+      {view !== 'form' && textWithheld.length > 0 && (
+        <Alert type="warning">
+          {`Not used, because this deployment does not offer them: ${textWithheld
+            .map(([name, key]) => {
+              const section = sections.find((candidate) => candidate.name === name);
+              return `${sectionLabel(section)} › ${section.schema.properties?.[key]?.title || key}`;
+            })
+            .join(', ')}.`}
+        </Alert>
+      )}
+
       {view !== 'form' && problemCount > 0 && (
         <Alert
           type="error"
@@ -912,7 +928,7 @@ export const ConfigurationContent = () => {
         visible={compareOpen}
         size="large"
         onDismiss={() => setCompareOpen(false)}
-        header={`Compare ${profile} with another profile`}
+        header={`Compare ${selected ? profileText(selected) : profile} with another profile`}
         footer={
           <Box float="right">
             <Button variant="primary" onClick={() => setCompareOpen(false)}>
@@ -929,7 +945,14 @@ export const ConfigurationContent = () => {
             <Select
               ariaLabel="Profile to compare with"
               placeholder="Choose a profile"
-              selectedOption={compareWith ? { value: compareWith, label: compareWith } : null}
+              selectedOption={
+                compareWith
+                  ? {
+                      value: compareWith,
+                      label: profileText(profiles.find((entry) => entry.name === compareWith) || { name: compareWith }),
+                    }
+                  : null
+              }
               options={profiles
                 .filter((entry) => entry.name !== profile)
                 .map((entry) => ({ value: entry.name, label: profileText(entry), tags: profileTags(entry) }))}
@@ -965,8 +988,16 @@ export const ConfigurationContent = () => {
                     return `${section ? sectionLabel(section) : item.section} › ${title || formatPath(item.path)}`;
                   },
                 },
-                { id: 'left', header: profile, cell: (item) => comparedText(item.left) },
-                { id: 'right', header: compareWith, cell: (item) => comparedText(item.right) },
+                {
+                  id: 'left',
+                  header: selected ? profileText(selected) : profile,
+                  cell: (item) => comparedText(item.left),
+                },
+                {
+                  id: 'right',
+                  header: profileText(profiles.find((entry) => entry.name === compareWith) || { name: compareWith }),
+                  cell: (item) => comparedText(item.right),
+                },
               ]}
             />
           )}

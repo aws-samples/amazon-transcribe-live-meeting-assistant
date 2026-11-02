@@ -297,7 +297,7 @@ export const rebaseSection = (schema, base, mine, theirs) => {
 
 // Top-level settings a deployment does not offer are left out of what a
 // preset sets, as the form leaves them out of what it shows.
-const offered = (schema, values, settings) =>
+export const offered = (schema, values, settings) =>
   Object.fromEntries(Object.entries(values || {}).filter(([key]) => isAvailable(schema?.properties?.[key], settings)));
 
 /**

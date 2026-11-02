@@ -250,7 +250,11 @@ name, each section holding every one of its settings. Edit it there to change
 several settings at once or to paste a section from another deployment: what you
 type is checked as you type against the same schemas as the form, the problems
 are listed under the text, and **Save changes** saves it as one revision as it
-would a form edit. A section you leave out of the text keeps its values. While
+would a form edit. A section you leave out of the text keeps its values, and a
+setting you remove from a section returns to its default, as **Reset to
+default** would; to turn a shipped summary section off, set its prompt to
+`NONE`. Settings this deployment does not offer are left out of the text, as the
+form leaves them out, and are not taken from it if you add them. While
 the text does not parse, the page neither saves nor switches view; correct it,
 or choose **Discard changes**. The text of the default and Managed profiles is
 read-only, as their form is.

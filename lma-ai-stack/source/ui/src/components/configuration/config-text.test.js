@@ -84,11 +84,61 @@ describe('readConfigurationText', () => {
   });
 
   it('names a section this deployment does not have', () => {
-    expect(() => readConfigurationText('{"no_such_section": {}}', 'json', sections)).toThrow(/no_such_section/);
+    expect(() => readConfigurationText('{"no_such_section": {}}', 'json', sections)).toThrow(
+      /no section named no_such_section, or does not offer it/,
+    );
   });
 
   it('refuses a section that is not an object of settings', () => {
     expect(() => readConfigurationText('{"language_models": "x"}', 'json', sections)).toThrow(/language_models is not/);
+  });
+});
+
+describe('reading the text the way an import is read', () => {
+  const engine = {
+    name: 'asr_engine',
+    schema: {
+      properties: {
+        diarizeVirtualParticipant: { type: 'boolean' },
+        streamingEngineMicrovm: { type: 'boolean', availableWhen: { setting: 'AsrEngineAvailable', value: 'true' } },
+      },
+    },
+  };
+  const defaults = { asr_engine: { diarizeVirtualParticipant: false, streamingEngineMicrovm: false } };
+
+  it('leaves a setting the deployment does not offer out of the text', () => {
+    const text = configurationText([engine], defaults, 'json', {});
+    expect(JSON.parse(text)).toEqual({ asr_engine: { diarizeVirtualParticipant: false } });
+    expect(JSON.parse(configurationText([engine], defaults, 'json', { AsrEngineAvailable: 'true' }))).toEqual(defaults);
+  });
+
+  it('does not take a setting the deployment does not offer from the text, and says so', () => {
+    const current = { asr_engine: { diarizeVirtualParticipant: false, streamingEngineMicrovm: false } };
+    const result = readConfigurationText(
+      '{"asr_engine": {"diarizeVirtualParticipant": true, "streamingEngineMicrovm": true}}',
+      'json',
+      [engine],
+      defaults,
+      {},
+      current,
+    );
+    expect(result.values.asr_engine).toEqual({ diarizeVirtualParticipant: true, streamingEngineMicrovm: false });
+    expect(result.withheld).toEqual([['asr_engine', 'streamingEngineMicrovm']]);
+  });
+
+  it('keeps the page value of a setting the text cannot hold', () => {
+    const current = { asr_engine: { diarizeVirtualParticipant: false, streamingEngineMicrovm: true } };
+    const result = readConfigurationText('{"asr_engine": {}}', 'json', [engine], defaults, {}, current);
+    expect(result.values.asr_engine.streamingEngineMicrovm).toBe(true);
+    expect(result.withheld).toEqual([]);
+  });
+
+  it('reads a setting removed from a merge section back as its default', () => {
+    const models = { name: 'language_models', schema: { properties: { a: {}, b: {} } } };
+    const result = readConfigurationText('{"language_models": {"a": "mine"}}', 'json', [models], {
+      language_models: { a: 'shipped', b: 'shipped-b' },
+    });
+    expect(result.values.language_models).toEqual({ a: 'mine', b: 'shipped-b' });
   });
 });
 
