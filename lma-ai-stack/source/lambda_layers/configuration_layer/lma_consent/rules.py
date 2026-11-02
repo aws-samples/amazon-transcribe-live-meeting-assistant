@@ -351,7 +351,8 @@ def fit_to_budget(record: Dict[str, Any], limit: int = MAX_RECORD_BYTES) -> Dict
     3. the oldest status history entries, keeping the latest ten;
     4. the notices posted between the first and the latest;
     5. the names once listed but not present now;
-    6. the replies the evidence check read in each image, keeping its verdict;
+    6. the replies the evidence check read in each image, and the participants it
+       found no consent from, keeping its verdict;
     7. every reply's other fields (its id, who recorded it and when), and each
        evidence image's note and check summary.
 
@@ -401,8 +402,9 @@ def fit_to_budget(record: Dict[str, Any], limit: int = MAX_RECORD_BYTES) -> Dict
     # 6. What the evidence check read in each image; its verdict stays.
     for entry in record.get("Evidence") or []:
         verification = entry.get("Verification")
-        if isinstance(verification, dict) and verification.get("Replies"):
+        if isinstance(verification, dict):
             verification["Replies"] = []
+            verification["MissingParticipants"] = []
     if record_size(record) <= limit:
         return record
     # 7. The replies kept, down to who, how, where and when.

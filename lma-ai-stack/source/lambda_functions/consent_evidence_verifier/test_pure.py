@@ -119,6 +119,12 @@ def test_the_participants_without_visible_consent_are_named() -> None:
     ] == ["Bo Chen"]
 
 
+def test_the_missing_participants_are_listed_only_for_each_participant() -> None:
+    parsed = pure.parse_answer(answer(replies=[]))
+    for mode, rule in (("notify", None), ("opt_in", "owner_attests")):
+        assert pure.verdict(parsed, mode, rule, PARTICIPANTS)["MissingParticipants"] == []
+
+
 def test_each_participant_with_nobody_listed_is_inconclusive() -> None:
     parsed = pure.parse_answer(answer())
     assert pure.verdict(parsed, "opt_in", "each_participant", [])["Verdict"] == "inconclusive"

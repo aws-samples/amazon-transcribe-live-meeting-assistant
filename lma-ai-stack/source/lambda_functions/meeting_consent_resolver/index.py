@@ -842,11 +842,17 @@ def verify_meeting_consent_evidence(caller: Mapping[str, Any], data: Mapping[str
         return record
 
     answer = write_consent(caller, call_id, store)
+    key = entry.get("S3Key")
     if settings["keepEvidenceScreenshots"]:
         return answer
+    if not isinstance(key, str) or not key.startswith(evidence_folder(call_id)) or ".." in key:
+        LOGGER.error(
+            "evidence %s of %s is not in the meeting's folder; not deleted", evidence_id, call_id
+        )
+        return answer
     try:
-        S3.delete_object(Bucket=RECORDINGS_BUCKET, Key=entry["S3Key"])
-    except ClientError:
+        S3.delete_object(Bucket=RECORDINGS_BUCKET, Key=key)
+    except (ClientError, BotoCoreError):
         # The result is stored; the image stays until the meeting is deleted.
         LOGGER.exception("could not delete a checked evidence image of %s", call_id)
         return answer
@@ -858,7 +864,7 @@ def verify_meeting_consent_evidence(caller: Mapping[str, Any], data: Mapping[str
 
     try:
         return write_consent(caller, call_id, mark_deleted)
-    except (ConflictError, BadRequestError, ClientError):
+    except (ConflictError, BadRequestError, ClientError, BotoCoreError):
         # The image is gone and its check is stored; only the mark is missing.
         LOGGER.exception(
             "deleted evidence image %s of %s but could not record that it was", evidence_id, call_id

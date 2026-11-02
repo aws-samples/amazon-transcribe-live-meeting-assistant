@@ -203,10 +203,15 @@ def verdict(
         for r in replies
         if r.get("Decision") == rules.DECISION_CONSENT
     }
+    each_participant = mode == rules.MODE_OPT_IN and rule == rules.RULE_EACH_PARTICIPANT
+    # Listed only where the rule asks for every participant's consent; under any
+    # other rule the list would say nothing and only take room in the record.
     missing = [
         name
         for name in participants
-        if rules.normalize_name(name) and rules.normalize_name(name) not in consented
+        if each_participant
+        and rules.normalize_name(name)
+        and rules.normalize_name(name) not in consented
     ]
     if parsed.get("AnyObjection") or any(
         r.get("Decision") == rules.DECISION_OBJECTION for r in replies
@@ -214,11 +219,7 @@ def verdict(
         result = VERDICT_OBJECTION
     elif not parsed.get("NoticeVisible") or parsed.get("Confidence", 0) < MIN_SUPPORTING_CONFIDENCE:
         result = VERDICT_INCONCLUSIVE
-    elif (
-        mode == rules.MODE_OPT_IN
-        and rule == rules.RULE_EACH_PARTICIPANT
-        and (missing or not participants)
-    ):
+    elif each_participant and (missing or not participants):
         result = VERDICT_INCONCLUSIVE
     else:
         result = VERDICT_SUPPORTS
