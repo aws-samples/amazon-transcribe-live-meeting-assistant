@@ -15,6 +15,7 @@ import {
   Header,
   Input,
   Modal,
+  Select,
   SpaceBetween,
   Spinner,
   Textarea,
@@ -39,11 +40,18 @@ import {
   storedSection,
 } from './config-model';
 import {
-  PROFILE,
+  DEFAULT_PROFILE,
+  activateProfileMutation,
+  createProfileMutation,
+  deleteProfileMutation,
   errorText,
   getConfigurationQuery,
   invalidMessage,
+  listProfilesQuery,
   parseConfiguration,
+  parseProfiles,
+  profileNameProblem,
+  refusedMessage,
   updateConfigurationMutation,
 } from './configuration-api';
 import ConfigurationSection, { sectionElementId } from './ConfigurationSection';
@@ -66,6 +74,11 @@ const effectiveOf = (doc) =>
     ]),
   );
 
+// What a profile is called in the selector.
+const profileText = (entry) => (entry.name === DEFAULT_PROFILE ? 'default (deployment default)' : entry.name);
+
+const profileTags = (entry) => [entry.active ? 'Active' : null, entry.managed ? 'Managed' : 'Custom'].filter(Boolean);
+
 const whenText = (iso) => {
   const parsed = iso ? new Date(iso) : null;
   return parsed && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleString() : iso || '';
@@ -74,7 +87,9 @@ const whenText = (iso) => {
 export const ConfigurationContent = () => {
   const { settings } = useSettingsContext() || {};
   const location = useLocation();
-  const focus = new URLSearchParams(location.search).get('section');
+  const query = new URLSearchParams(location.search);
+  const focus = query.get('section');
+  const requestedProfile = query.get('profile');
 
   const [doc, setDoc] = useState(null);
   // Each section's values as loaded, and as edited since.
@@ -89,18 +104,46 @@ export const ConfigurationContent = () => {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [preset, setPreset] = useState(null);
+  // The profiles, and the one this page shows: the active one unless a link
+  // names another.
+  const [profiles, setProfiles] = useState([]);
+  const [profile, setProfile] = useState(requestedProfile || null);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copyName, setCopyName] = useState('');
+  const [copyDescription, setCopyDescription] = useState('');
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [profileError, setProfileError] = useState(null);
   const scrolled = useRef(false);
   const fileInput = useRef(null);
 
-  const read = useCallback(async () => {
-    const result = await client.graphql({ query: getConfigurationQuery, variables: { Profile: PROFILE } });
-    return parseConfiguration(result.data?.getConfiguration);
+  const loadProfiles = useCallback(async () => {
+    const result = await client.graphql({ query: listProfilesQuery });
+    const listed = parseProfiles(result.data?.listConfigurationProfiles);
+    setProfiles(listed);
+    return listed;
   }, []);
+
+  const read = useCallback(
+    async (name) => {
+      const result = await client.graphql({ query: getConfigurationQuery, variables: { Profile: name || profile } });
+      return parseConfiguration(result.data?.getConfiguration);
+    },
+    [profile],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const parsed = await read();
+      let name = profile;
+      if (!name) {
+        const listed = await loadProfiles();
+        name = (listed.find((entry) => entry.active) || { name: DEFAULT_PROFILE }).name;
+        setProfile(name);
+      } else {
+        loadProfiles().catch(() => null);
+      }
+      const parsed = await read(name);
       const effective = effectiveOf(parsed);
       setDoc(parsed);
       setLoaded(effective);
@@ -112,7 +155,7 @@ export const ConfigurationContent = () => {
     } finally {
       setLoading(false);
     }
-  }, [read]);
+  }, [read, profile, loadProfiles]);
 
   useEffect(() => {
     load();
@@ -146,6 +189,77 @@ export const ConfigurationContent = () => {
     ]),
   );
   const problemCount = Object.values(problems).reduce((total, list) => total + list.length, 0);
+
+  const selected = profiles.find((entry) => entry.name === profile);
+
+  // Choosing another profile discards unsaved edits, so it asks first.
+  const chooseProfile = (name) => {
+    // eslint-disable-next-line no-alert -- the browser's own prompt, as for leaving the page
+    if (dirty && !window.confirm('Open another profile? Your unsaved changes will be lost.')) return;
+    setStatus(null);
+    setProfile(name);
+  };
+
+  const runProfileOperation = async (operation, success) => {
+    setProfileBusy(true);
+    setProfileError(null);
+    try {
+      await operation();
+      await loadProfiles();
+      setStatus({ type: 'success', text: success });
+      return true;
+    } catch (err) {
+      setProfileError(refusedMessage(err) || invalidMessage(err) || errorText(err));
+      return false;
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
+  const activate = () =>
+    runProfileOperation(
+      () => client.graphql({ query: activateProfileMutation, variables: { input: { Name: profile } } }),
+      `The ${profile} profile is now active. Every reader uses it as its cache allows; see each section.`,
+    ).then(() => load());
+
+  const openCopy = () => {
+    setProfileError(null);
+    setCopyName(profile === DEFAULT_PROFILE ? 'custom' : `${profile}-copy`);
+    setCopyDescription('');
+    setCopyOpen(true);
+  };
+
+  const copyProblem = profileNameProblem(copyName, profiles);
+
+  const copy = async () => {
+    const name = copyName;
+    const made = await runProfileOperation(
+      () =>
+        client.graphql({
+          query: createProfileMutation,
+          variables: {
+            input: { Name: name, CopyFrom: profile, Description: copyDescription.trim() || null },
+          },
+        }),
+      `Created the ${name} profile as a copy of ${profile}. Activate it to have meetings use it.`,
+    );
+    if (made) {
+      setCopyOpen(false);
+      setProfile(name);
+    }
+  };
+
+  const remove = async () => {
+    const name = profile;
+    const gone = await runProfileOperation(
+      () => client.graphql({ query: deleteProfileMutation, variables: { input: { Name: name } } }),
+      `Deleted the ${name} profile. Its revisions stay in its history.`,
+    );
+    if (gone) {
+      setDeleteOpen(false);
+      setProfile((profiles.find((entry) => entry.active) || { name: DEFAULT_PROFILE }).name);
+    }
+  };
 
   // Closing or reloading the page with unsaved changes asks first. Following
   // View history asks too; other navigation inside the app does not.
@@ -291,7 +405,7 @@ export const ConfigurationContent = () => {
         query: updateConfigurationMutation,
         variables: {
           input: {
-            Profile: PROFILE,
+            Profile: profile,
             Sections: JSON.stringify(Object.fromEntries(names.map((name) => [name, stored[name]]))),
             ExpectedVersion: doc.version,
             Comment: comment.trim() || null,
@@ -304,7 +418,7 @@ export const ConfigurationContent = () => {
         try {
           await client.graphql({
             query: labelRevisionMutation,
-            variables: { input: { Profile: PROFILE, Revision: outcome.Revision, Label: label.trim() } },
+            variables: { input: { Profile: profile, Revision: outcome.Revision, Label: label.trim() } },
           });
         } catch (err) {
           labelProblem = errorText(err);
@@ -389,7 +503,10 @@ export const ConfigurationContent = () => {
     );
   }
 
-  const readOnly = !doc?.exists;
+  // The default and Managed profiles are rewritten by every stack update, so
+  // they are shown, compared and activated, and copied to be changed.
+  const readOnly = !doc?.exists || doc?.managed;
+  const historyHref = `#${CONFIGURATION_HISTORY_PATH}?profile=${encodeURIComponent(profile || '')}`;
   // A link to a section this deployment does not offer says so, rather than
   // opening a page without it.
   const unavailable = (doc?.sections || []).find(
@@ -405,12 +522,51 @@ export const ConfigurationContent = () => {
       <Header
         variant="h1"
         description={
-          `Every setting LMA reads at run time, in one place. A value that differs from the shipped default is ` +
-          `marked, and only those are stored, so a later release keeps improving the rest. ${provenance}`
+          `Every setting LMA reads at run time, in one place. The active profile is what meetings use; a value ` +
+          `that differs from the deployment default is marked. ${provenance}`
         }
         actions={
           <SpaceBetween direction="horizontal" size="xs">
-            <Button href={`#${CONFIGURATION_HISTORY_PATH}`} onFollow={confirmLeaving}>
+            <Select
+              ariaLabel="Configuration profile"
+              selectedOption={
+                selected
+                  ? { value: selected.name, label: profileText(selected), tags: profileTags(selected) }
+                  : { value: profile || '', label: profile || '' }
+              }
+              options={profiles.map((entry) => ({
+                value: entry.name,
+                label: profileText(entry),
+                description: entry.description || undefined,
+                tags: profileTags(entry),
+              }))}
+              onChange={({ detail }) => chooseProfile(detail.selectedOption.value)}
+              disabled={saving || profileBusy}
+            />
+            <ButtonDropdown
+              disabled={!doc || saving || profileBusy}
+              items={[
+                { id: 'activate', text: 'Activate', disabled: !doc?.exists || doc?.active },
+                { id: 'copy', text: 'Copy to a new profile', disabled: !doc?.exists },
+                {
+                  id: 'delete',
+                  text: 'Delete',
+                  disabled: !doc?.exists || doc?.managed || doc?.active,
+                  disabledReason: doc?.active
+                    ? 'Activate another profile first.'
+                    : 'The deployment manages this profile.',
+                },
+              ]}
+              onItemClick={({ detail }) => {
+                setProfileError(null);
+                if (detail.id === 'activate') activate();
+                else if (detail.id === 'copy') openCopy();
+                else if (detail.id === 'delete') setDeleteOpen(true);
+              }}
+            >
+              Profile
+            </ButtonDropdown>
+            <Button href={historyHref} onFollow={confirmLeaving}>
               View history
             </Button>
             <ButtonDropdown
@@ -456,10 +612,38 @@ export const ConfigurationContent = () => {
         Configuration
       </Header>
 
-      {readOnly && doc && (
-        <Alert type="error" header="There is no configuration profile to save into">
-          The configuration profile is created when the stack is deployed. Deploy or update the stack, then reload this
-          page.
+      {profileError && (
+        <Alert type="error" dismissible onDismiss={() => setProfileError(null)}>
+          {profileError}
+        </Alert>
+      )}
+
+      {doc && !doc.exists && (
+        <Alert type="error" header={`There is no configuration profile named ${profile}`}>
+          Choose another profile.
+        </Alert>
+      )}
+
+      {doc?.exists && doc.managed && (
+        <Alert
+          type="info"
+          header={
+            profile === DEFAULT_PROFILE
+              ? 'The deployment default is read-only'
+              : `The ${profile} profile is managed by the deployment`
+          }
+          action={<Button onClick={openCopy}>Copy to a new profile</Button>}
+        >
+          {`Every stack update rewrites it${
+            profile === DEFAULT_PROFILE ? ' with the release defaults and the stack parameters' : ''
+          }, so it cannot be saved. Copy it to a Custom profile to change a setting, then activate the copy.`}
+        </Alert>
+      )}
+
+      {doc?.exists && !doc.managed && !doc.active && (
+        <Alert type="info" action={<Button onClick={activate}>Activate</Button>}>
+          {`The ${profile} profile is not the active one, so meetings do not use it. Saving changes it; activate it to ` +
+            'have meetings use it.'}
         </Alert>
       )}
 
@@ -492,7 +676,7 @@ export const ConfigurationContent = () => {
           onDismiss={() => setStatus(null)}
           action={
             status.revision ? (
-              <Button href={`#${CONFIGURATION_HISTORY_PATH}`} onFollow={confirmLeaving}>
+              <Button href={historyHref} onFollow={confirmLeaving}>
                 View history
               </Button>
             ) : undefined
@@ -573,6 +757,65 @@ export const ConfigurationContent = () => {
             ))}
           </ul>
           <Box>Nothing is saved until you review the changes and save them.</Box>
+        </SpaceBetween>
+      </Modal>
+
+      <Modal
+        visible={copyOpen}
+        onDismiss={() => !profileBusy && setCopyOpen(false)}
+        header={`Copy ${profile} to a new profile`}
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setCopyOpen(false)} disabled={profileBusy}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={copy} loading={profileBusy} disabled={Boolean(copyProblem)}>
+                Create
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          {profileError && <Alert type="error">{profileError}</Alert>}
+          <Box>
+            The new profile is a Custom copy of every setting, which you can change and save. It is not active until you
+            activate it.
+          </Box>
+          <FormField label="Name" errorText={copyName ? copyProblem : null}>
+            <Input value={copyName} ariaLabel="Profile name" onChange={({ detail }) => setCopyName(detail.value)} />
+          </FormField>
+          <FormField label="Description" description="Optional.">
+            <Input
+              value={copyDescription}
+              ariaLabel="Profile description"
+              onChange={({ detail }) => setCopyDescription(detail.value.slice(0, MAX_COMMENT_LENGTH))}
+            />
+          </FormField>
+        </SpaceBetween>
+      </Modal>
+
+      <Modal
+        visible={deleteOpen}
+        onDismiss={() => !profileBusy && setDeleteOpen(false)}
+        header={`Delete the ${profile} profile?`}
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setDeleteOpen(false)} disabled={profileBusy}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={remove} loading={profileBusy}>
+                Delete
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          {profileError && <Alert type="error">{profileError}</Alert>}
+          <Box>The profile is deleted. Its revisions stay in its history.</Box>
         </SpaceBetween>
       </Modal>
 

@@ -31,10 +31,26 @@ import { ConfigurationContent } from './ConfigurationPage';
 configure({ asyncUtilTimeout: 10000 });
 vi.setConfig({ testTimeout: 30000 });
 
-const { graphqlMock } = vi.hoisted(() => ({ graphqlMock: vi.fn() }));
+const { graphqlMock, profilesMock } = vi.hoisted(() => ({ graphqlMock: vi.fn(), profilesMock: vi.fn() }));
+// The profile list is answered on its own, so each test's queue of answers is
+// the configuration reads and saves it is about.
 vi.mock('aws-amplify/api', () => ({
-  generateClient: () => ({ graphql: graphqlMock }),
+  generateClient: () => ({
+    graphql: (request) =>
+      /query ListConfigurationProfiles/.test(request.query) ? profilesMock(request) : graphqlMock(request),
+  }),
 }));
+
+const PROFILES = {
+  data: {
+    listConfigurationProfiles: {
+      Profiles: [
+        { Name: 'default', Managed: true, Active: false },
+        { Name: 'custom', Managed: false, Active: true },
+      ],
+    },
+  },
+};
 
 const SCHEMA_DIR = join(import.meta.dirname, '../../../../lambda_layers/configuration_layer/lma_config/schemas');
 const CONSENT_DEFAULTS = JSON.parse(
@@ -187,6 +203,8 @@ const pageButton = (name) => screen.getAllByRole('button', { name })[0];
 describe('ConfigurationContent', () => {
   beforeEach(() => {
     graphqlMock.mockReset();
+    profilesMock.mockReset();
+    profilesMock.mockResolvedValue(PROFILES);
   });
 
   it('renders one section per schema, with engine choices only where the on-demand engine is deployed', async () => {
@@ -538,9 +556,82 @@ describe('ConfigurationContent', () => {
   });
 });
 
+describe('configuration profiles', () => {
+  beforeEach(() => {
+    graphqlMock.mockReset();
+    profilesMock.mockReset();
+  });
+
+  const managedAnswer = () => {
+    const response = answer();
+    Object.assign(response.data.getConfiguration, { Profile: 'default', Managed: true, Active: true });
+    return response;
+  };
+
+  it('opens the active profile, and shows the default read-only with Copy to a new profile', async () => {
+    profilesMock.mockResolvedValue({
+      data: {
+        listConfigurationProfiles: { Profiles: [{ Name: 'default', Managed: true, Active: true }] },
+      },
+    });
+    graphqlMock.mockResolvedValue(managedAnswer());
+    renderEditor();
+    expect(await screen.findByText('The deployment default is read-only')).toBeTruthy();
+    expect(callsOf('GetConfiguration')[0][0].variables).toEqual({ Profile: 'default' });
+    expect(screen.getAllByRole('button', { name: 'Copy to a new profile' }).length).toBeGreaterThan(0);
+  });
+
+  it('copies the profile shown to a new Custom profile, and opens the copy', async () => {
+    profilesMock.mockResolvedValue({
+      data: {
+        listConfigurationProfiles: { Profiles: [{ Name: 'default', Managed: true, Active: true }] },
+      },
+    });
+    graphqlMock.mockImplementation(async (request) => {
+      if (/mutation CreateConfigurationProfile/.test(request.query)) {
+        return { data: { createConfigurationProfile: { Success: true, Profile: 'custom', Version: 1 } } };
+      }
+      return managedAnswer();
+    });
+    renderEditor();
+    await screen.findByText('The deployment default is read-only');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Copy to a new profile' })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(callsOf('CreateConfigurationProfile')).toHaveLength(1));
+    expect(callsOf('CreateConfigurationProfile')[0][0].variables.input).toEqual({
+      Name: 'custom',
+      CopyFrom: 'default',
+      Description: null,
+    });
+    await waitFor(() => expect(callsOf('GetConfiguration').at(-1)[0].variables).toEqual({ Profile: 'custom' }));
+  });
+
+  it('saves into the profile it shows', async () => {
+    profilesMock.mockResolvedValue({
+      data: {
+        listConfigurationProfiles: {
+          Profiles: [
+            { Name: 'default', Managed: true, Active: false },
+            { Name: 'trial', Managed: false, Active: true },
+          ],
+        },
+      },
+    });
+    const response = answer();
+    Object.assign(response.data.getConfiguration, { Profile: 'trial', Active: true });
+    graphqlMock.mockResolvedValue(response);
+    renderEditor();
+    await screen.findByText('Transcript Summary');
+    expect(callsOf('GetConfiguration')[0][0].variables).toEqual({ Profile: 'trial' });
+    expect(screen.queryByText('The deployment default is read-only')).toBeNull();
+  });
+});
+
 describe('import, export and presets', () => {
   beforeEach(() => {
     graphqlMock.mockReset();
+    profilesMock.mockReset();
+    profilesMock.mockResolvedValue(PROFILES);
   });
 
   const menuItem = async (text) => {
