@@ -18,3 +18,9 @@
 .awsui-dark-mode .lma-config-field-changed {
   border-left-color: #539fe5;
 }
+
+/* The JSON and YAML views. */
+.lma-config-text textarea {
+  font-family: Monaco, Menlo, Consolas, 'Courier New', monospace;
+  font-size: 13px;
+}

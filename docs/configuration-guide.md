@@ -203,6 +203,11 @@ activates, copies or deletes the profile shown; the active profile and the
 Managed ones cannot be deleted. The configuration history is kept per profile,
 and **View history** opens the history of the profile shown.
 
+**Comparing two profiles.** **Profile › Compare with another profile** lists
+every setting the profile shown and another profile hold differently, with each
+one's value; a setting only one of them holds reads `(not set)` on the other.
+Both are compared as saved, so edits you have not saved are not included.
+
 The pages that edit one setting outside the Configuration page, such as the
 meeting page's chat buttons, save into the active profile, and refuse while the
 default or a Managed profile is active: create and activate a Custom profile
@@ -238,6 +243,21 @@ and while you have saved no list of your own, the shipped buttons apply.
 **Prices.** Prices are listed by region — `default` applies everywhere — then by
 service, then by unit. You can change a shipped price, or add a region, service
 or unit the table does not list. A shipped entry can be reset but not removed.
+
+**Editing as JSON or YAML.** The **Form / JSON / YAML** switch above the
+sections shows the whole profile as one JSON or YAML document, keyed by section
+name, each section holding every one of its settings. Edit it there to change
+several settings at once or to paste a section from another deployment: what you
+type is checked as you type against the same schemas as the form, the problems
+are listed under the text, and **Save changes** saves it as one revision as it
+would a form edit. A section you leave out of the text keeps its values, and a
+setting you remove from a section returns to its default, as **Reset to
+default** would; to turn a shipped summary section off, set its prompt to
+`NONE`. Settings this deployment does not offer are left out of the text, as the
+form leaves them out, and are not taken from it if you add them. While
+the text does not parse, the page neither saves nor switches view; correct it,
+or choose **Discard changes**. The text of the default and Managed profiles is
+read-only, as their form is.
 
 **Mistakes are caught as you type.** A value a save would refuse — a negative
 price, an empty voice id, a region name that is not a region code — is marked

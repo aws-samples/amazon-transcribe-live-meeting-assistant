@@ -20,6 +20,7 @@ import { join } from 'path';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import createWrapper from '@cloudscape-design/components/test-utils/dom';
 
 import { SettingsContext } from '../../contexts/settings';
 import { CONFIGURATION_PATH, MOVED_CONFIGURATION_PAGES } from '../../routes/constants';
@@ -740,6 +741,93 @@ describe('import, export and presets', () => {
     expect(exported.sections.call_pricing).toEqual({});
     click.mockRestore();
     vi.unstubAllGlobals();
+  });
+});
+
+describe('the JSON and YAML views, and comparing profiles', () => {
+  beforeEach(() => {
+    graphqlMock.mockReset();
+    profilesMock.mockReset();
+    profilesMock.mockResolvedValue(PROFILES);
+  });
+
+  const textView = async (name) => {
+    fireEvent.click(screen.getByRole('button', { name }));
+    return screen.findByLabelText(`Configuration ${name}`);
+  };
+
+  it('shows every section as JSON, and saves an edit typed there as the form would', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    renderEditor();
+    await screen.findByText('Transcript Summary');
+    const editor = await textView('JSON');
+    const shown = JSON.parse(editor.value);
+    expect(shown.language_models).toEqual(DEFAULTS.language_models);
+    expect(shown.meeting_processing.inactiveMeetingTimeoutMinutes).toBe(240);
+
+    shown.meeting_processing.inactiveMeetingTimeoutMinutes = 60;
+    fireEvent.change(editor, { target: { value: JSON.stringify(shown, null, 2) } });
+    fireEvent.click(pageButton('Save changes'));
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
+    graphqlMock.mockResolvedValueOnce(saved()).mockResolvedValueOnce(answer({ version: 5 }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await screen.findByText(/Saved as revision/);
+    const { input } = callsOf('UpdateConfiguration')[0][0].variables;
+    expect(Object.keys(JSON.parse(input.Sections))).toEqual(['meeting_processing']);
+    expect(JSON.parse(input.Sections).meeting_processing.inactiveMeetingTimeoutMinutes).toBe(60);
+    expect(input.ExpectedVersion).toBe(4);
+  });
+
+  it('shows YAML, and will not save or switch view while the text does not read', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    renderEditor();
+    await screen.findByText('Transcript Summary');
+    const editor = await textView('YAML');
+    expect(editor.value).toContain('inactiveMeetingTimeoutMinutes: 240');
+
+    fireEvent.change(editor, { target: { value: 'meeting_processing: [unclosed' } });
+    expect(await screen.findByText(/not valid YAML/)).toBeTruthy();
+    expect(pageButton('Save changes').disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'Form' }).disabled).toBe(true);
+
+    fireEvent.click(pageButton('Discard changes'));
+    await waitFor(() => expect(screen.queryByText(/not valid YAML/)).toBeNull());
+    expect(screen.getByLabelText('Configuration YAML').value).toContain('inactiveMeetingTimeoutMinutes: 240');
+  });
+
+  it('lists a value the schema refuses, by section and setting, under the text', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    renderEditor();
+    await screen.findByText('Transcript Summary');
+    const editor = await textView('JSON');
+    const shown = JSON.parse(editor.value);
+    shown.meeting_processing.inactiveMeetingTimeoutMinutes = 'soon';
+    fireEvent.change(editor, { target: { value: JSON.stringify(shown) } });
+    expect(await screen.findByText(/inactiveMeetingTimeoutMinutes: must be/)).toBeTruthy();
+    expect(pageButton('Save changes').disabled).toBe(true);
+  });
+
+  it('compares the profile shown with another, setting by setting, as saved', async () => {
+    const other = answer();
+    Object.assign(other.data.getConfiguration, { Profile: 'default', Managed: true });
+    graphqlMock.mockImplementation(async (request) =>
+      request.variables.Profile === 'default' ? other : answer({ custom: { recording: { recordAudio: false } } }),
+    );
+    renderEditor();
+    await screen.findByText('Transcript Summary');
+    fireEvent.click(screen.getByRole('button', { name: 'Profile' }));
+    fireEvent.click(await screen.findByText('Compare with another profile'));
+    const dialog = await screen.findByRole('dialog', { name: /Compare custom with another profile/ });
+    const picker = createWrapper(dialog).findSelect();
+    picker.openDropdown();
+    picker.selectOptionByValue('default');
+    expect(await within(dialog).findByText('Setting that differs')).toBeTruthy();
+    await waitFor(() => expect(callsOf('GetConfiguration').at(-1)[0].variables).toEqual({ Profile: 'default' }));
+    const row = within(dialog)
+      .getByText(/Meeting Recording ›/)
+      .closest('tr');
+    expect(within(row).getByText('false')).toBeTruthy();
+    expect(within(row).getByText('true')).toBeTruthy();
   });
 });
 
