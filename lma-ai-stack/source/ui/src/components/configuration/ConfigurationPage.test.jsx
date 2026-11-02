@@ -37,6 +37,12 @@ vi.mock('aws-amplify/api', () => ({
 }));
 
 const SCHEMA_DIR = join(import.meta.dirname, '../../../../lambda_layers/configuration_layer/lma_config/schemas');
+const CONSENT_DEFAULTS = JSON.parse(
+  readFileSync(
+    join(import.meta.dirname, '../../../../lambda_functions/configuration_seeder/defaults/MeetingConsent.json'),
+    'utf8',
+  ),
+);
 const TIERS = {
   summary_prompt_templates: 'standard',
   chat_buttons: 'immediate',
@@ -48,6 +54,7 @@ const TIERS = {
   recording: 'immediate',
   meeting_assist: 'standard',
   meeting_processing: 'standard',
+  meeting_consent: 'immediate',
   virtual_participant: 'immediate',
   retention: 'standard',
 };
@@ -108,6 +115,8 @@ const DEFAULTS = {
     inactiveMeetingTimeoutMinutes: 240,
   },
   retention: { meetingRecordExpirationInDays: 90, transcriptionExpirationInDays: 30 },
+  // The shipped defaults, read from the file the seeder ships them in.
+  meeting_consent: CONSENT_DEFAULTS,
   virtual_participant: {
     voiceAssistantProvider: 'none',
     voiceAssistantActivationMode: 'wake_phrase',

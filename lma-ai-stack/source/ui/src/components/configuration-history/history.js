@@ -91,6 +91,7 @@ const SECTION_LABELS = {
   meeting_assist: 'Meeting assistant',
   meeting_processing: 'Meeting processing',
   retention: 'Retention',
+  meeting_consent: 'Meeting consent',
   virtual_participant: 'Virtual Participant',
 };
 

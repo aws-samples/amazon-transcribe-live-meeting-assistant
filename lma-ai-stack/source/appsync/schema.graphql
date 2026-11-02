@@ -82,6 +82,13 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# backend -- and when.
 	AgendaUpdatedBy: String
 	AgendaUpdatedAt: AWSDateTime
+	# The meeting's consent record: the mode and rule it runs in, its status,
+	# whether it may be recorded and transcribed now, and the notices, replies,
+	# attestation and evidence behind that. Absent on a meeting whose consent was
+	# never started. Written only through the meeting consent mutations, and
+	# read with signed evidence links through getMeetingConsent. See
+	# docs/meeting-consent.md.
+	Consent: MeetingConsent
 	Owner: String
 	SharedWith: String
 }
@@ -221,6 +228,15 @@ type Mutation @aws_iam {
 	updateCallSummaryText(input: UpdateCallSummaryTextInput!): Call @aws_cognito_user_pools @aws_iam
 	updateCallAgenda(input: UpdateCallAgendaInput!): Call @aws_cognito_user_pools @aws_iam
 	deriveCallAgenda(input: DeriveCallAgendaInput!): DeriveCallAgendaOutput @aws_cognito_user_pools @aws_iam
+	# The meeting consent record (Call.Consent). One Lambda resolver applies the
+	# access rule of each; see the Meeting consent section below and
+	# docs/meeting-consent.md.
+	startMeetingConsent(input: StartMeetingConsentInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
+	recordMeetingConsentNotice(input: RecordMeetingConsentNoticeInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
+	setMeetingConsentParticipants(input: SetMeetingConsentParticipantsInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
+	recordMeetingConsentEvent(input: RecordMeetingConsentEventInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
+	attestMeetingConsent(input: AttestMeetingConsentInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
+	addMeetingConsentEvidence(input: AddMeetingConsentEvidenceInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
 	regenerateCallSummary(input: RegenerateCallSummaryInput!): RegenerateCallSummaryOutput @aws_cognito_user_pools @aws_iam
 	grantVoiceConsent: VoiceEnrollmentResult @aws_cognito_user_pools
 	enrolMyVoice(input: EnrolMyVoiceInput!): VoiceEnrollmentResult @aws_cognito_user_pools
@@ -313,6 +329,10 @@ type Query @aws_cognito_user_pools
 	# already has the earlier ones; frameId returns just that frame, and with
 	# it limit, nextToken and afterFrameId are not used.
 	getVideoKeyframes(callId: ID!, limit: Int, nextToken: String, afterFrameId: ID, frameId: ID): VideoKeyframeList
+	# The meeting's consent record with hour-long signed links to its evidence
+	# images, whether it may be recorded and transcribed now, and the
+	# deployment's consent settings. Answered to the callers getCall answers.
+	getMeetingConsent(CallId: ID!): MeetingConsentState
 	listCallsDateRange(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!, limit: Int, nextToken: String): CallList
 	getCallCount(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!): CallCount
     queryKnowledgeBase(input: String!, sessionId: String): String
@@ -620,6 +640,10 @@ type Subscription {
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
 	onAddVideoKeyframe(CallId: ID): VideoKeyframe
 		@aws_subscribe(mutations: ["addVideoKeyframe"])
+	# Every change to a meeting's consent record. A subscriber that needs the
+	# evidence links reads getMeetingConsent again on each message.
+	onUpdateMeetingConsent(CallId: ID): MeetingConsentUpdate
+		@aws_subscribe(mutations: ["startMeetingConsent", "recordMeetingConsentNotice", "setMeetingConsentParticipants", "recordMeetingConsentEvent", "attestMeetingConsent", "addMeetingConsentEvidence"])
 	onSendChatMessage(CallId: ID): SendChatMessageOutput
 		@aws_subscribe(mutations: ["sendChatMessage"])
 	onAddChatToken(CallId: ID!, MessageId: ID!): ChatToken
@@ -928,6 +952,220 @@ input UpdateCallAgendaInput {
 
 input DeriveCallAgendaInput {
 	CallId: ID!
+}
+
+# ----------------------------------------------------------------------------
+# Meeting consent
+#
+# Whether a meeting's participants were told it is recorded and transcribed,
+# and whether they agreed. Stored on the meeting row as Call.Consent and
+# written only by the meeting consent resolver Lambda, which applies the access
+# rule of each mutation (see meeting_consent_resolver/index.py) and decides the
+# status with the rules in the configuration layer's lma_consent. Names are the
+# meeting platform's display names, not verified identities. See
+# docs/meeting-consent.md.
+# ----------------------------------------------------------------------------
+
+type MeetingConsent @aws_cognito_user_pools
+@aws_iam {
+	# "off", "notify" or "opt_in".
+	Mode: String
+	# For opt_in: "each_participant" or "owner_attests". Null otherwise.
+	Rule: String
+	# "pending", "granted", "objected" or "not_required".
+	Status: String
+	# Whether the meeting may be recorded and transcribed now: opt_in only while
+	# granted, notify unless objected, off always.
+	CaptureAllowed: Boolean
+	# The notice or consent request for this meeting, its placeholders filled.
+	NoticeText: String
+	# When the notice was first posted.
+	NoticePostedAt: AWSDateTime
+	Notices: [MeetingConsentNotice]
+	# The participants present, as last listed by the capture client.
+	Participants: [String]
+	# Everyone ever listed as present (the first 500).
+	ParticipantsSeen: [String]
+	# Every reply and attestation, in the order recorded.
+	Events: [MeetingConsentEvent]
+	Attestation: MeetingConsentAttestation
+	Evidence: [MeetingConsentEvidence]
+	# Each change of Status or CaptureAllowed, with when and why.
+	StatusHistory: [MeetingConsentStatusChange]
+	StartedAt: AWSDateTime
+	StartedBy: String
+	UpdatedAt: AWSDateTime
+	# Increases by one with every write.
+	Version: Int
+}
+
+type MeetingConsentNotice @aws_cognito_user_pools
+@aws_iam {
+	# "chat", "voice", "banner" or "invite".
+	Channel: String
+	Text: String
+	PostedAt: AWSDateTime
+	PostedBy: String
+}
+
+type MeetingConsentEvent @aws_cognito_user_pools
+@aws_iam {
+	EventId: ID
+	# The display name the reply came from (or, for an attestation, who attested).
+	ParticipantName: String
+	# "consent" or "objection".
+	Decision: String
+	# "chat", "voice", "ui" (entered by a signed-in user) or "attestation".
+	Source: String
+	# What was said or typed, when the capture client sent it.
+	Text: String
+	OccurredAt: AWSDateTime
+	RecordedAt: AWSDateTime
+	# The signed-in user who entered it, or "LMA" for a backend role.
+	RecordedBy: String
+}
+
+type MeetingConsentAttestation @aws_cognito_user_pools
+@aws_iam {
+	AttestedBy: String
+	# "verbal", "chat" or "invite_terms".
+	Method: String
+	Statement: String
+	AttestedAt: AWSDateTime
+	RecordedBy: String
+}
+
+type MeetingConsentEvidence @aws_cognito_user_pools
+@aws_iam {
+	EvidenceId: ID
+	# "screenshot" or "invitation".
+	Kind: String
+	# Under lma-consent-evidence/<meeting>/ in the recordings bucket.
+	S3Key: String
+	CapturedAt: AWSDateTime
+	AddedAt: AWSDateTime
+	Note: String
+	# An hour-long link to the image, filled in by getMeetingConsent only.
+	SignedUrl: String
+}
+
+type MeetingConsentStatusChange @aws_cognito_user_pools
+@aws_iam {
+	Status: String
+	CaptureAllowed: Boolean
+	At: AWSDateTime
+	Reason: String
+}
+
+# What every consent mutation answers with, and what onUpdateMeetingConsent
+# carries. A subscriber receives the Consent fields the writer selected, so
+# writers select the whole record (see docs/meeting-consent.md).
+type MeetingConsentUpdate @aws_cognito_user_pools
+@aws_iam {
+	CallId: ID!
+	Consent: MeetingConsent
+	Owner: String
+	SharedWith: String
+}
+
+# The deployment's consent settings (the Meeting Consent section of the
+# Configuration page), as a capture client needs them.
+type MeetingConsentSettings @aws_cognito_user_pools
+@aws_iam {
+	Mode: String
+	Rule: String
+	NotifyNoticeText: String
+	OptInNoticeText: String
+	ConsentPhrases: [String]
+	ObjectionPhrases: [String]
+	AllowPerMeetingOverride: Boolean
+}
+
+type MeetingConsentState @aws_cognito_user_pools
+@aws_iam {
+	CallId: ID!
+	# Null when the meeting's consent was never started.
+	Consent: MeetingConsent
+	# The capture gate for this meeting now. With no record, false only when the
+	# deployment's mode is opt_in.
+	CaptureAllowed: Boolean!
+	Settings: MeetingConsentSettings
+}
+
+# Starting again with the mode and rule already in force (or with neither
+# named, once consent has started) returns the record as it is: a restarting
+# capture client keeps the meeting's choice, and its notice, even if the
+# deployment's settings changed. NoticeText, LmaUser and MeetingName are read
+# only when consent starts or its mode changes.
+input StartMeetingConsentInput {
+	CallId: ID!
+	# "off", "notify" or "opt_in"; omitted, the meeting's mode once started, or
+	# else the deployment's. A mode or rule less strict than the deployment's is
+	# refused when the deployment does not allow a per-meeting choice.
+	Mode: String
+	# For opt_in: "each_participant" or "owner_attests"; omitted, the meeting's
+	# rule once started in opt_in, or else the deployment's.
+	Rule: String
+	# Fill the notice's {LMA_USER} and {meeting} placeholders.
+	LmaUser: String
+	MeetingName: String
+	# This meeting's own notice instead of the deployment's, placeholders
+	# filled the same way. Refused when the deployment does not allow a
+	# per-meeting choice.
+	NoticeText: String
+}
+
+input RecordMeetingConsentNoticeInput {
+	CallId: ID!
+	# "chat", "voice", "banner" or "invite".
+	Channel: String!
+	# What was posted; omitted, the meeting's NoticeText.
+	Text: String
+	# Omitted, now.
+	PostedAt: AWSDateTime
+}
+
+input SetMeetingConsentParticipantsInput {
+	CallId: ID!
+	# Everyone present now, by display name, leaving out LMA's own participant.
+	# Replaces the previous list.
+	Participants: [String!]!
+}
+
+input RecordMeetingConsentEventInput {
+	CallId: ID!
+	ParticipantName: String!
+	# "consent" or "objection".
+	Decision: String!
+	# Backend roles: "chat" or "voice". A signed-in user's entry is always
+	# recorded as "ui", whatever is sent here.
+	Source: String
+	Text: String
+	OccurredAt: AWSDateTime
+}
+
+input AttestMeetingConsentInput {
+	CallId: ID!
+	# "verbal", "chat" or "invite_terms".
+	Method: String!
+	Statement: String
+	# Backend roles only: the meeting's owner, whose attestation is relayed;
+	# anybody else is refused, and omitted it is the owner. A signed-in user's
+	# attestation is their own, and only the meeting's owner may make one.
+	AttestedBy: String
+}
+
+input AddMeetingConsentEvidenceInput {
+	CallId: ID!
+	# An image the backend stored under lma-consent-evidence/<meeting>/ in the
+	# recordings bucket, where <meeting> is the CallId with every character
+	# other than letters, digits, "_" and "." replaced by "_" and leading and
+	# trailing "_" removed.
+	S3Key: String!
+	# "screenshot" (the default) or "invitation".
+	Kind: String
+	CapturedAt: AWSDateTime
+	Note: String
 }
 
 # The outcome of reading a meeting's transcript for a stated agenda. A found

@@ -1,0 +1,15 @@
+## Forwards getMeetingConsent and the meeting consent mutations to the meeting
+## consent resolver Lambda: the arguments, the verified identity and the field
+## name, which is what the Lambda's access check reads (the payload
+## videoKeyframesLambda.js sends). VTL rather than APPSYNC_JS so the
+## mutations can answer through dDbPutCondition.response.vtl, which writes
+## SharedWith in the form the subscription filter matches.
+{
+  "version": "2018-05-29",
+  "operation": "Invoke",
+  "payload": {
+    "arguments": $util.toJson($ctx.arguments),
+    "identity": $util.toJson($ctx.identity),
+    "info": { "fieldName": $util.toJson($ctx.info.fieldName) }
+  }
+}

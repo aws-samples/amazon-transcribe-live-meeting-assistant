@@ -39,6 +39,7 @@ S3_TRANSCRIPTS_PREFIX = environ["S3_TRANSCRIPTS_PREFIX"]
 # Key frames of the shared screen (docs/meeting-video.md): images under this
 # prefix, one folder per meeting, and items under PK kf#<CallId>.
 S3_KEYFRAMES_PREFIX = environ.get("S3_KEYFRAMES_PREFIX", "lma-video-keyframes/")
+S3_CONSENT_EVIDENCE_PREFIX = environ.get("S3_CONSENT_EVIDENCE_PREFIX", "lma-consent-evidence/")
 # Meeting video recordings (docs/meeting-video.md): the final .mp4 under the
 # first prefix, and the Virtual Participant's in-progress segments under
 # <chunks prefix><CallId>/ until the .mp4 is assembled.
@@ -463,6 +464,21 @@ def delete_keyframes(callid):
     return deleted
 
 
+def delete_consent_evidence(callid):
+    """Delete the meeting's consent evidence images.
+
+    The consent record itself is an attribute of the meeting row and goes with
+    it. The images are found by the meeting's folder, named with the same
+    posixify rule as the key frames' (see docs/meeting-consent.md).
+    """
+    images = _batch_delete_prefix(
+        S3_BUCKET_NAME, f"{S3_CONSENT_EVIDENCE_PREFIX}{posixify_filename(callid)}/"
+    )
+    if images:
+        logger.info("Deleted %d consent evidence image(s) for %s", images, callid)
+    return images
+
+
 def update_transcript_segment(appsync_session, schema, PK, SK, new_recipients):
     input = {"PK": PK, "SK": SK, "SharedWith": new_recipients}
 
@@ -585,7 +601,8 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
         #  4. S3 prefix deletion
         #  5. Deletion of the meeting's metering records (PK mtr#<CallId>)
         #  6. Deletion of the meeting's key frames (PK kf#<CallId>, and images)
-        with ThreadPoolExecutor(max_workers=6) as pool:
+        #  7. Deletion of the meeting's consent evidence images
+        with ThreadPoolExecutor(max_workers=7) as pool:
             vp_future = pool.submit(cleanup_virtual_participants, callid)
             segments_future = pool.submit(
                 _delete_all_transcript_segments, appsync_session, schema, callid
@@ -595,6 +612,7 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
             s3_future = pool.submit(delete_recordings_transcripts, callid)
             metering_future = pool.submit(delete_metering_records, callid)
             keyframes_future = pool.submit(delete_keyframes, callid)
+            evidence_future = pool.submit(delete_consent_evidence, callid)
 
             # Surface any exception from the parallel preparation steps.
             vp_future.result()
@@ -603,6 +621,7 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
             s3_future.result()
             metering_future.result()
             keyframes_future.result()
+            evidence_future.result()
 
         call_details = (details_result or {}).get("getCall") or {}
         shared_with = call_details.get("SharedWith")

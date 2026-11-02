@@ -232,6 +232,15 @@ OTHER_FIELDS = [
     ("Mutation", "updateCallAgenda"),
     # Lambda resolver applying the same rule in `caller_may_edit`.
     ("Mutation", "deriveCallAgenda"),
+    # The consent record of one meeting: one Lambda resolver applies each
+    # operation's rule against the meeting's owner and share list, and the
+    # evidence mutation accepts backend roles only.
+    ("Mutation", "startMeetingConsent"),
+    ("Mutation", "recordMeetingConsentNotice"),
+    ("Mutation", "setMeetingConsentParticipants"),
+    ("Mutation", "recordMeetingConsentEvent"),
+    ("Mutation", "attestMeetingConsent"),
+    ("Mutation", "addMeetingConsentEvidence"),
     ("Mutation", "deleteCall"),
     ("Mutation", "shareCall"),
     ("Mutation", "unshareCall"),
@@ -273,6 +282,8 @@ OTHER_FIELDS = [
     ("Query", "getTranscriptSegmentsWithSentiment"),
     # One meeting's key frames, authorized in the resolver by getCall's rule.
     ("Query", "getVideoKeyframes"),
+    # One meeting's consent record, authorized in the resolver by getCall's rule.
+    ("Query", "getMeetingConsent"),
     ("Query", "listCallsDateRange"),
     ("Query", "getCallCount"),
     ("Query", "queryKnowledgeBase"),
