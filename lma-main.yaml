@@ -263,7 +263,9 @@ Parameters:
       - "true"
       - "false"
     Description: >-
-      Specifies if Amazon Bedrock model access is validated during deployment.
+      Specifies if access to the shipped default Amazon Bedrock models (summaries, meeting
+      assistant and its knowledge bases) and the knowledge base embedding model is validated
+      during deployment.
       Setting this parameter to "false" is useful for automated deployments (e.g. AWS Workshop
       Studio) where Amazon Bedrock model access permissions may not be set up yet.
 

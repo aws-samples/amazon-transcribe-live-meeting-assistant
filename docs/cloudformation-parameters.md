@@ -921,9 +921,9 @@ Console label: *Amazon Bedrock Model Validation*
 
 - **Default:** `true`
 - **Allowed values:** `true`, `false`
-- **Kind:** Deployment check. Decides whether the deployment checks that the chosen Amazon Bedrock models can be invoked.
+- **Kind:** Deployment check. Decides whether the deployment checks that the shipped default Amazon Bedrock models and the embedding model can be invoked.
 
-Specifies if Amazon Bedrock model access is validated during deployment. Setting this parameter to "false" is useful for automated deployments (e.g. AWS Workshop Studio) where Amazon Bedrock model access permissions may not be set up yet.
+Specifies if access to the shipped default Amazon Bedrock models (summaries, meeting assistant and its knowledge bases) and the knowledge base embedding model is validated during deployment. Setting this parameter to "false" is useful for automated deployments (e.g. AWS Workshop Studio) where Amazon Bedrock model access permissions may not be set up yet.
 
 <!-- END GENERATED PARAMETER REFERENCE -->
 
@@ -934,7 +934,9 @@ Specifies if Amazon Bedrock model access is validated during deployment. Setting
 The models are settings of the Configuration page since 0.4.0 (Amazon Bedrock
 Models section); see
 [Choosing Amazon Bedrock models](configuration-guide.md#choosing-amazon-bedrock-models).
-`ModelValidation` checks, while the stack deploys or updates, access to the
+`ModelValidation` checks, when the stack is created and on an update that changes
+`ModelValidation` or the list of models it checks (the update to 0.4.0 is one),
+access to the
 shipped defaults of that section that every deployment calls (the summary model,
 and the meeting assistant and knowledge base model) and to the knowledge base
 embedding model. It does not check the key frame text model or a model chosen
