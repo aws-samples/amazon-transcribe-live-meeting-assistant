@@ -48,7 +48,11 @@ def handler(event, context):
     method_arn = event.get("methodArn", "")
     token = extract_token(event)
 
-    if not token or not TABLE_NAME:
+    if not TABLE_NAME:
+        logger.error("MCP_API_KEYS_TABLE is not set; denying: %s", json.dumps(summary))
+        return deny_policy(method_arn)
+
+    if not token:
         logger.info("Request without an API key: %s", json.dumps(summary))
         return deny_policy(method_arn)
 

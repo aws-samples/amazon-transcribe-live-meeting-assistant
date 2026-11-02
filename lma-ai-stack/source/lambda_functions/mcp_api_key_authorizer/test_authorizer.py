@@ -167,8 +167,11 @@ class TestDenyPolicies(unittest.TestCase):
         index.TABLE_NAME = ""
         try:
             event = {"methodArn": METHOD_ARN, "authorizationToken": "lma_test"}
-            result = index.handler(event, None)
+            with self.assertLogs(index.logger, level="ERROR") as captured:
+                result = index.handler(event, None)
             self.assertEqual(result["policyDocument"]["Statement"][0]["Effect"], "Deny")
+            self.assertIn("MCP_API_KEYS_TABLE is not set", "\n".join(captured.output))
+            self.assertNotIn("lma_test", "\n".join(captured.output))
         finally:
             index.TABLE_NAME = original
 

@@ -11,8 +11,9 @@ and flags only, so no assertion here can show a key.
 
 Runs whenever a Cognito test user is configured (as the scheduled run does),
 like the other credentialed tests in test_lma_integration.py, and skips without
-one. On a stack deployed with ``EnableMCP=false`` it skips, marked
-``optional_feature`` so that ``--no-skips`` does not turn it into a failure.
+one. MCP is on by default; a stack deployed with ``EnableMCP=false`` has
+nothing to check, so there it skips, marked ``optional_feature`` so that
+``--no-skips`` does not turn it into a failure.
 
 Self-cleaning: the key it generates is revoked in a ``finally``. If the test
 user already holds a key it is left alone and the test fails, naming the key's
@@ -38,7 +39,8 @@ def observed(client, request):
 
     result = run_probe(client.stack_name, region=client.region)
     if not result["enabled"]:
-        # Off by default is not a gap, so --no-skips leaves this skip alone.
+        # MCP is on by default, but a stack deployed with EnableMCP=false has
+        # nothing to check, so --no-skips leaves this skip alone.
         request.node.add_marker(pytest.mark.optional_feature)
         pytest.skip(f"{client.stack_name} has no MCP API key endpoint (EnableMCP=false)")
     if result.get("existing_key_prefixes"):
