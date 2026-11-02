@@ -27,6 +27,7 @@ delete process.env.CALL_DATA_STREAM_NAME;
 import { kinesisStreamManager } from './kinesis-stream.js';
 // eslint-disable-next-line import/first
 import { RosterTimeline } from './roster-timeline.js';
+import { captureLogs } from './logger.js';
 
 type Record_ = { EventType: string; SegmentId?: string; Speaker?: string; Transcript?: string; StartTime?: number; EndTime?: number; IsPartial?: boolean };
 
@@ -334,14 +335,13 @@ describe('the separation diagnostic can be switched on in a deployment', () => {
         delete process.env.DEBUG;
         process.env.LOG_LEVEL = 'DEBUG';
         manager.setDiarization(true);
-        const lines: string[] = [];
-        const original = console.log;
-        console.log = (...args: unknown[]) => lines.push(args.join(' '));
+        const captured = captureLogs();
         try {
             await emit('Conference Room', result(turn('0', 6, 0), { resultId: 'R-log' }));
         } finally {
-            console.log = original;
+            captured.restore();
         }
+        const lines = captured.messages();
         assert.ok(
             lines.some((line) => line.includes('[DIARIZATION]')),
             'no [DIARIZATION] line was emitted at LOG_LEVEL=DEBUG',
@@ -352,14 +352,14 @@ describe('the separation diagnostic can be switched on in a deployment', () => {
         delete process.env.DEBUG;
         process.env.LOG_LEVEL = 'INFO';
         manager.setDiarization(true);
-        const lines: string[] = [];
-        const original = console.log;
-        console.log = (...args: unknown[]) => lines.push(args.join(' '));
+        const captured = captureLogs();
         try {
             await emit('Conference Room', result(turn('0', 6, 0), { resultId: 'R-quiet' }));
         } finally {
-            console.log = original;
+            captured.restore();
         }
+        const lines = captured.messages();
+        assert.ok(lines.length > 0, 'the result was processed and logged at INFO');
         assert.ok(!lines.some((line) => line.includes('[DIARIZATION]')));
     });
 });

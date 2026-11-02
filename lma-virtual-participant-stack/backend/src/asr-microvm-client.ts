@@ -15,6 +15,9 @@ import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { meterAsrMicrovm } from './metering.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('asr-microvm-client');
 
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 const ASR_LAUNCHER_FUNCTION_ARN = process.env.ASR_LAUNCHER_FUNCTION_ARN || '';
@@ -105,7 +108,7 @@ export function resolveVpAsrEngine(
         return 'transcribe';
     }
     if (!isMicrovmAsrConfigured()) {
-        console.warn('[ASR] MicroVM ASR requested but this deployment has no ASR launcher configured; using Amazon Transcribe.');
+        log.warn('[ASR] MicroVM ASR requested but this deployment has no ASR launcher configured; using Amazon Transcribe.');
         return 'transcribe';
     }
     return 'microvm';
@@ -136,7 +139,7 @@ export async function fetchAsrRuntimeSwitches(
             body: JSON.stringify({ query: GET_ASR_CONFIG, variables: { AsrConfigId: 'CustomAsrConfig' } }),
         });
         if (!response.ok) {
-            console.warn(`[ASR] getAsrConfig returned HTTP ${response.status}; using defaults`);
+            log.warn(`[ASR] getAsrConfig returned HTTP ${response.status}; using defaults`);
             return { ...DEFAULT_SWITCHES };
         }
         const body = (await response.json()) as {
@@ -149,7 +152,7 @@ export async function fetchAsrRuntimeSwitches(
             errors?: unknown[];
         };
         if (body.errors?.length) {
-            console.warn(`[ASR] getAsrConfig errors: ${JSON.stringify(body.errors)}; using defaults`);
+            log.warn(`[ASR] getAsrConfig errors: ${JSON.stringify(body.errors)}; using defaults`);
             return { ...DEFAULT_SWITCHES };
         }
         const record = body.data?.getAsrConfig;
@@ -158,7 +161,7 @@ export async function fetchAsrRuntimeSwitches(
             diarizeVirtualParticipant: record?.diarizeVirtualParticipant === true,
         };
     } catch (error: any) {
-        console.warn(`[ASR] could not read the ASR config; using defaults: ${error?.message || error}`);
+        log.warn(`[ASR] could not read the ASR config; using defaults: ${error?.message || error}`);
         return { ...DEFAULT_SWITCHES };
     }
 }
@@ -199,7 +202,7 @@ const invokeLauncher = async (payload: Record<string, string>): Promise<Record<s
             }),
         );
         if (response.FunctionError) {
-            console.error(
+            log.error(
                 `[ASR] launcher ${payload.action} failed: ${response.FunctionError} ${
                     response.Payload ? Buffer.from(response.Payload).toString('utf8') : ''
                 }`,
@@ -210,19 +213,19 @@ const invokeLauncher = async (payload: Record<string, string>): Promise<Record<s
             ? (JSON.parse(Buffer.from(response.Payload).toString('utf8')) as Record<string, string>)
             : undefined;
         if (!body || String(body.ok) !== 'true') {
-            console.error(`[ASR] launcher ${payload.action} refused: ${body ? body.reason : 'no response'}`);
+            log.error(`[ASR] launcher ${payload.action} refused: ${body ? body.reason : 'no response'}`);
             return undefined;
         }
         return body;
     } catch (error: any) {
-        console.error(`[ASR] launcher ${payload.action} error: ${error?.message || error}`);
+        log.error(`[ASR] launcher ${payload.action} error: ${error?.message || error}`);
         return undefined;
     }
 };
 
 export const acquireLease = async (callId: string): Promise<AsrLease | undefined> => {
     if (ASR_DIRECT_ENDPOINT) {
-        console.log(`[ASR] using ASR_DIRECT_ENDPOINT ${ASR_DIRECT_ENDPOINT} (no MicroVM launch)`);
+        log.info(`[ASR] using ASR_DIRECT_ENDPOINT ${ASR_DIRECT_ENDPOINT} (no MicroVM launch)`);
         return { endpointUrl: ASR_DIRECT_ENDPOINT };
     }
     const started = Date.now();
@@ -230,7 +233,7 @@ export const acquireLease = async (callId: string): Promise<AsrLease | undefined
     if (!body) {
         return undefined;
     }
-    console.log(`[ASR] acquired ASR MicroVM ${body.microvmId} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+    log.info(`[ASR] acquired ASR MicroVM ${body.microvmId} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
     if (body.microvmId) {
         const memoryMiB = Number((body as Record<string, unknown>).memoryMiB);
         leases.set(body.microvmId, { callId, acquiredAtMs: started, memoryMiB: memoryMiB > 0 ? memoryMiB : 0 });
@@ -407,7 +410,7 @@ export class MicrovmAsrSession {
                 this.ws.send(frame);
                 this.sentBytes += frame.length;
             } catch (error: any) {
-                console.log(`${this.logPrefix} send failed: ${error?.message || error}`);
+                log.warn(`${this.logPrefix} send failed: ${error?.message || error}`);
             }
             return;
         }
@@ -450,13 +453,13 @@ export class MicrovmAsrSession {
                 ]);
                 clearTimeout(timer);
             } catch (error: any) {
-                console.log(`${this.logPrefix} eos failed: ${error?.message || error}`);
+                log.warn(`${this.logPrefix} eos failed: ${error?.message || error}`);
             }
         }
         this.terminationResolve = null;
         this.close();
         if (this.droppedBytes > 0) {
-            console.warn(
+            log.warn(
                 `${this.logPrefix} dropped ${(this.droppedBytes / BYTES_PER_SECOND).toFixed(1)}s of audio while disconnected`,
             );
         }
@@ -495,7 +498,7 @@ export class MicrovmAsrSession {
                 handshakeTimeout: ASR_HANDSHAKE_TIMEOUT_MS,
             });
         } catch (error: any) {
-            console.error(`${this.logPrefix} could not open ${this.lease.endpointUrl}: ${error?.message || error}`);
+            log.error(`${this.logPrefix} could not open ${this.lease.endpointUrl}: ${error?.message || error}`);
             this.settleReady(false);
             void this.scheduleReconnect();
             return;
@@ -526,7 +529,7 @@ export class MicrovmAsrSession {
                     this.sentBytes += frame.length;
                 }
             } catch (error: any) {
-                console.error(`${this.logPrefix} handshake failed: ${error?.message || error}`);
+                log.error(`${this.logPrefix} handshake failed: ${error?.message || error}`);
             }
             this.pending = [];
             this.pendingBytes = 0;
@@ -540,14 +543,14 @@ export class MicrovmAsrSession {
             try {
                 message = JSON.parse(data.toString()) as AsrServerMessage;
             } catch (error: any) {
-                console.warn(`${this.logPrefix} unparseable frame: ${error?.message || error}`);
+                log.warn(`${this.logPrefix} unparseable frame: ${error?.message || error}`);
                 return;
             }
             this.onMessage(message);
         });
 
         socket.on('error', (error: Error) => {
-            console.error(`${this.logPrefix} websocket error: ${error.message}`);
+            log.error(`${this.logPrefix} websocket error: ${error.message}`);
         });
 
         socket.on('close', (code: number, reason: Buffer) => {
@@ -555,7 +558,7 @@ export class MicrovmAsrSession {
             if (this.finished || !this.options.isMeetingLive()) {
                 return;
             }
-            console.warn(`${this.logPrefix} session closed unexpectedly (${code} ${reason?.toString() || ''}); reconnecting`);
+            log.warn(`${this.logPrefix} session closed unexpectedly (${code} ${reason?.toString() || ''}); reconnecting`);
             this.settleReady(false);
             void this.scheduleReconnect();
         });
@@ -571,7 +574,7 @@ export class MicrovmAsrSession {
         this.readyAt = 0;
         this.attempt += 1;
         if (this.attempt > ASR_MAX_RETRIES) {
-            console.error(
+            log.error(
                 `${this.logPrefix} giving up after ${ASR_MAX_RETRIES} consecutive failures; the rest of this meeting will not be transcribed by the MicroVM engine`,
             );
             this.gaveUp = true;
@@ -611,11 +614,11 @@ export class MicrovmAsrSession {
                 this.readyAt = Date.now();
                 this.diarizeEffective = message.effective_config?.diarize === true;
                 if (this.options.diarize && !this.diarizeEffective) {
-                    console.warn(
+                    log.warn(
                         '[ASR] per-voice labels were requested but this ASR image has no speaker model baked in; rows carry the roster name only',
                     );
                 }
-                console.log(
+                log.info(
                     `${this.logPrefix} session ready (generation ${this.generation}, diarize=${this.diarizeEffective}, timeOffset=${this.timeOffsetSeconds.toFixed(2)}s)`,
                 );
                 this.settleReady(true);
@@ -625,14 +628,14 @@ export class MicrovmAsrSession {
                 this.emitSegment(message);
                 break;
             case 'termination':
-                console.log(
+                log.info(
                     `${this.logPrefix} terminated after ${message.audio_seconds?.toFixed(1) ?? '?'}s audio, ${message.segments ?? 0} segment(s)`,
                 );
                 this.terminationResolve?.();
                 this.terminationResolve = null;
                 break;
             case 'error':
-                console.error(`${this.logPrefix} engine error ${message.code}: ${message.message}`);
+                log.error(`${this.logPrefix} engine error ${message.code}: ${message.message}`);
                 this.settleReady(false);
                 break;
             default:

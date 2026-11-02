@@ -39,6 +39,9 @@ import {
     resultChannel,
     writesAssistantChannel,
 } from './transcribe-channels.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('scribe');
 
 const ASR_STOP_RELEASE_TIMEOUT_MS = 10_000;
 
@@ -234,7 +237,7 @@ export class TranscriptionService {
         };
         
         if (isLocalTest) {
-            console.log('Using AWS credentials from environment/file for local testing');
+            log.info('Using AWS credentials from environment/file for local testing');
             // Disable EC2 metadata to force credentials from environment or file
             process.env.AWS_EC2_METADATA_DISABLED = 'true';
             clientConfig.credentials = defaultProvider();
@@ -244,7 +247,7 @@ export class TranscriptionService {
         
         // Initialize voice assistant wake phrases from environment variable
         this.wakePhrases = configuredWakePhrases();
-        console.log('Wake phrases configured:', this.wakePhrases);
+        log.info('Wake phrases configured:', this.wakePhrases);
     }
 
     /**
@@ -286,16 +289,16 @@ export class TranscriptionService {
         this.process.on('error', (error: any) => {
             const msg = `FFmpeg process error: ${error.message}`;
             if (isLocalTest) {
-                console.error(msg + ' (non-fatal in local test)');
+                log.error(msg + ' (non-fatal in local test)');
             } else {
-                console.error(msg + ' (fatal in production)');
+                log.error(msg + ' (fatal in production)');
             }
         });
 
         this.process.stderr?.on('data', (data: any) => {
             const msg = data.toString();
             if (!msg.includes('size=') && !msg.includes('time=')) {
-                console.log('FFmpeg stderr:', msg.trim());
+                log.info('FFmpeg stderr:', msg.trim());
             }
         });
 
@@ -324,7 +327,7 @@ export class TranscriptionService {
             this.startMeetingAudioFanout((chunk) => queue.push(stereoPcm.pushLeft(chunk)));
             this.startAgentAudioCapture((chunk) => queue.push(stereoPcm.pushRight(chunk)));
             source = queue;
-            console.log('Transcribe input: two channels (ch_0 participants, ch_1 voice assistant)');
+            log.info('Transcribe input: two channels (ch_0 participants, ch_1 voice assistant)');
         }
 
         try {
@@ -360,19 +363,19 @@ export class TranscriptionService {
         } catch (error: any) {
             const msg = `Audio stream error: ${error.message}`;
             if (error.code === 'ERR_STREAM_PREMATURE_CLOSE' || !this.isTranscribing) {
-                console.log(msg + ' (expected during transcription teardown, non-fatal)');
+                log.info(msg + ' (expected during transcription teardown, non-fatal)');
                 return;
             }
             if (isLocalTest) {
-                console.log(msg + ' (non-fatal in local test)');
+                log.info(msg + ' (non-fatal in local test)');
             } else {
-                console.error(msg + ' (fatal in production)');
+                log.error(msg + ' (fatal in production)');
                 throw error;
             }
         } finally {
             if (interleaver) {
                 const ms = (samples: number) => Math.round((samples / this.sampleRate) * 1000);
-                console.log(
+                log.info(
                     `Transcribe two-channel input ended: silence inserted participants=${ms(interleaver.paddedLeftSamples)}ms ` +
                         `assistant=${ms(interleaver.paddedRightSamples)}ms`,
                 );
@@ -391,11 +394,11 @@ export class TranscriptionService {
 
     async startTranscription(): Promise<void> {
         if (this.isTranscribing) {
-            console.log('Transcription already running');
+            log.info('Transcription already running');
             return;
         }
 
-        console.log('Starting transcription service');
+        log.info('Starting transcription service');
         this.isTranscribing = true;
         this.subscribeToAssistantTurns();
         
@@ -403,9 +406,9 @@ export class TranscriptionService {
         if (voiceAssistant.isEnabled()) {
             try {
                 await voiceAssistant.start();
-                console.log('✓ Voice assistant started alongside transcription');
+                log.info('✓ Voice assistant started alongside transcription');
             } catch (error) {
-                console.error('Failed to start voice assistant:', error);
+                log.error('Failed to start voice assistant:', error);
                 // Non-critical - continue with transcription
             }
         }
@@ -415,9 +418,9 @@ export class TranscriptionService {
             await sendStartMeeting();
         } catch (error: any) {
             if (error.name === 'AccessDeniedException') {
-                console.log('Note: Kinesis permission error expected during local testing');
+                log.info('Note: Kinesis permission error expected during local testing');
             } else {
-                console.error('Failed to send start meeting event:', error);
+                log.error('Failed to send start meeting event:', error);
             }
         }
 
@@ -455,7 +458,7 @@ export class TranscriptionService {
         // engine's, by each word's span on the meeting timeline.
         kinesisStreamManager.setRosterLookup((start, end) => this.rosterNameFor(start, end));
         if (switches.diarizeVirtualParticipant) {
-            console.log('[DIARIZATION] VP voice separation is on for this meeting');
+            log.info('[DIARIZATION] VP voice separation is on for this meeting');
         }
         if (resolveVpAsrEngine(switches) === 'microvm') {
             const ran = await this.runMicrovmTranscription(recordingStream, switches.diarizeVirtualParticipant);
@@ -463,7 +466,7 @@ export class TranscriptionService {
                 this.finishMeeting(recordingStream);
                 return;
             }
-            console.warn('[ASR] MicroVM ASR unavailable; Amazon Transcribe takes over for the rest of this meeting');
+            log.warn('[ASR] MicroVM ASR unavailable; Amazon Transcribe takes over for the rest of this meeting');
         }
 
         // Loop over Transcribe sessions for the life of the meeting. Each
@@ -472,7 +475,7 @@ export class TranscriptionService {
         // while the meeting is still live.
         for (;;) {
             if (!this.isTranscribing || !details.start) {
-                console.log('Meeting ended - stopping transcription session loop');
+                log.info('Meeting ended - stopping transcription session loop');
                 break;
             }
             this.reconnectRequested = false;
@@ -557,15 +560,15 @@ export class TranscriptionService {
 
                 if (sessionId) {
                     transcriptionParams.SessionId = sessionId;
-                    console.log(`Resuming transcription session: ${sessionId}`);
+                    log.info(`Resuming transcription session: ${sessionId}`);
                 } else if (transcriptionParams.IdentifyMultipleLanguages || transcriptionParams.IdentifyLanguage) {
                     const mode = transcriptionParams.IdentifyMultipleLanguages ? 'multi' : 'single';
-                    console.log(
+                    log.info(
                         `Starting new transcription session with language identification (${mode}) ` +
                         `options=[${langOptions}]${preferredLang ? ` preferred=${preferredLang}` : ''}`,
                     );
                 } else {
-                    console.log(`Starting new transcription session with language: ${langCode}`);
+                    log.info(`Starting new transcription session with language: ${langCode}`);
                 }
 
                 const command = new StartStreamTranscriptionCommand(transcriptionParams);
@@ -574,7 +577,7 @@ export class TranscriptionService {
 
                 if (!sessionId) {
                     sessionId = response.SessionId;
-                    console.log(`New transcription session ID: ${sessionId}`);
+                    log.info(`New transcription session ID: ${sessionId}`);
                     
                     await this.markActive();
                 }
@@ -585,16 +588,16 @@ export class TranscriptionService {
                     try {
                         await Promise.all([
                             this.writeAudio(response, stereo).catch(err => {
-                                console.error('Audio write error (non-fatal in local test):', err.message);
+                                log.error('Audio write error (non-fatal in local test):', err.message);
                                 return Promise.resolve();
                             }),
                             this.handleTranscriptEvents(response, stereo).catch(err => {
-                                console.error('Transcript event error (non-fatal in local test):', err.message);
+                                log.error('Transcript event error (non-fatal in local test):', err.message);
                                 return Promise.resolve();
                             })
                         ]);
                     } catch (streamError: any) {
-                        console.error('Stream processing error (non-fatal in local test):', streamError.message);
+                        log.error('Stream processing error (non-fatal in local test):', streamError.message);
                     }
                 } else {
                     // Production mode - let errors crash the task
@@ -623,11 +626,11 @@ export class TranscriptionService {
                     } else {
                         consecutiveFailures += 1;
                         if (consecutiveFailures >= maxRetries) {
-                            console.error(`Max consecutive reconnects (${maxRetries}) reached on clean close. Transcription stopped.`);
+                            log.error(`Max consecutive reconnects (${maxRetries}) reached on clean close. Transcription stopped.`);
                             break;
                         }
                     }
-                    console.log(
+                    log.info(
                         `Transcribe result stream closed while meeting is live; reconnecting. ` +
                         `timeOffset: ${this.transcribeTimeOffsetSeconds.toFixed(2)}s`,
                     );
@@ -635,12 +638,12 @@ export class TranscriptionService {
                     continue;
                 }
 
-                console.log('Transcription completed successfully');
+                log.info('Transcription completed successfully');
                 break;
 
             } catch (error: any) {
                 // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- ECMAScript template literals do not interpret util.format specifiers
-                console.error(`Transcription error (consecutive failure ${consecutiveFailures + 1}/${maxRetries}):`, error.message);
+                log.error(`Transcription error (consecutive failure ${consecutiveFailures + 1}/${maxRetries}):`, error.message);
                 await meterRequest();
 
                 // A framing/throughput complaint is transient, so it must be
@@ -663,7 +666,7 @@ export class TranscriptionService {
                 // Kept consistent with isStaleSessionError() in the WebSocket
                 // transcriber (transcribe.ts).
                 if (isStaleSessionError(error)) {
-                    console.log(`Transcribe SessionId '${sessionId}' is stale/expired - will start a new session on retry`);
+                    log.info(`Transcribe SessionId '${sessionId}' is stale/expired - will start a new session on retry`);
                     sessionId = undefined;
                 }
                 
@@ -689,7 +692,7 @@ export class TranscriptionService {
                     const looksLanguageRelated = /language|vocabulary|LanguageCode|LanguageOptions/i.test(
                         error.message || '',
                     );
-                    console.error(
+                    log.error(
                         `Non-retryable Transcribe error — aborting without further retries: ${error.message}` +
                             (looksLanguageRelated
                                 ? ' Check TRANSCRIBE_LANGUAGE_CODE / TRANSCRIBE_LANGUAGE_OPTIONS / TRANSCRIBE_PREFERRED_LANGUAGE.'
@@ -701,7 +704,7 @@ export class TranscriptionService {
                 // Stop retrying once the meeting has ended — no point restarting
                 // a session for a call that is over.
                 if (!this.isTranscribing || !details.start) {
-                    console.log('Meeting ended - not retrying transcription session.');
+                    log.info('Meeting ended - not retrying transcription session.');
                     break;
                 }
 
@@ -715,11 +718,11 @@ export class TranscriptionService {
                 consecutiveFailures += 1;
 
                 if (consecutiveFailures >= maxRetries) {
-                    console.error(`Max consecutive retries (${maxRetries}) reached. Transcription stopped.`);
+                    log.error(`Max consecutive retries (${maxRetries}) reached. Transcription stopped.`);
                     break;
                 }
 
-                console.log(`Retrying in ${retryDelay / 1000} seconds (consecutive failure ${consecutiveFailures}/${maxRetries})...`);
+                log.warn(`Retrying in ${retryDelay / 1000} seconds (consecutive failure ${consecutiveFailures}/${maxRetries})...`);
                 await new Promise(resolve => setTimeout(resolve, retryDelay));
             }
         }
@@ -737,9 +740,9 @@ export class TranscriptionService {
             const { VirtualParticipantStatusManager } = await import('./status-manager.js');
             const statusManager = new VirtualParticipantStatusManager(vpId);
             await statusManager.setActive();
-            console.log(`VP ${vpId} status: ACTIVE (transcription started)`);
+            log.info(`VP ${vpId} status: ACTIVE (transcription started)`);
         } catch (error) {
-            console.log(`Failed to update VP status to ACTIVE: ${error}`);
+            log.warn(`Failed to update VP status to ACTIVE: ${error}`);
         }
     }
 
@@ -748,10 +751,10 @@ export class TranscriptionService {
         try {
             recordingStream.end();
         } catch (error: any) {
-            console.error('Failed to close recording stream:', error?.message ?? error);
+            log.error('Failed to close recording stream:', error?.message ?? error);
         }
         this.isTranscribing = false;
-        console.log('Transcription service stopped');
+        log.info('Transcription service stopped');
     }
 
     /**
@@ -823,7 +826,7 @@ export class TranscriptionService {
             return true;
         }
         if (!meetingReady) {
-            console.error('[ASR] MicroVM ASR session never became ready');
+            log.error('[ASR] MicroVM ASR session never became ready');
             // Finish first, or the sessions keep reconnecting against a released MicroVM.
             await this.finishMicrovmSessions();
             await this.releaseMicrovm(meetingSession);
@@ -831,11 +834,11 @@ export class TranscriptionService {
         }
         void agentReady.then((ready) => {
             if (!ready && this.agentSession === agentSession) {
-                console.warn("[ASR AGENT] session not ready at start; the assistant's replies appear once it connects");
+                log.warn("[ASR AGENT] session not ready at start; the assistant's replies appear once it connects");
             }
         });
         const agent = this.agentSession;
-        console.log(
+        log.info(
             `[ASR] MicroVM ASR active for ${callId} (speaker labels: ${meetingSession.speakerLabelsActive}, assistant channel: ${agent ? 'AGENT' : 'none'})`,
         );
         await this.markActive();
@@ -856,17 +859,17 @@ export class TranscriptionService {
                     break;
                 }
                 if (meetingSession.hasGivenUp) {
-                    console.error('[ASR] MicroVM ASR session gave up; Amazon Transcribe takes over for the rest of this meeting');
+                    log.error('[ASR] MicroVM ASR session gave up; Amazon Transcribe takes over for the rest of this meeting');
                     fellBack = true;
                     break;
                 }
                 if (agent?.hasGivenUp && !agentGaveUpLogged) {
-                    console.error("[ASR AGENT] session gave up; the assistant's audio is no longer transcribed (Nova Sonic replies are written from its own text)");
+                    log.error("[ASR AGENT] session gave up; the assistant's audio is no longer transcribed (Nova Sonic replies are written from its own text)");
                     agentGaveUpLogged = true;
                 }
             }
         } catch (error: any) {
-            console.error(`[ASR] audio stream error: ${error?.message || error}`);
+            log.error(`[ASR] audio stream error: ${error?.message || error}`);
         } finally {
             this.teardownSessionProcesses();
             this.engineTimeBase = Math.max(
@@ -895,7 +898,7 @@ export class TranscriptionService {
                 try {
                     await session.finish();
                 } catch (error: any) {
-                    console.error(`[ASR] error finishing MicroVM session: ${error?.message || error}`);
+                    log.error(`[ASR] error finishing MicroVM session: ${error?.message || error}`);
                 }
             }),
         );
@@ -909,9 +912,9 @@ export class TranscriptionService {
         }
         try {
             await releaseLease(session.microvmId);
-            console.log(`[ASR] released ASR MicroVM ${session.microvmId}`);
+            log.info(`[ASR] released ASR MicroVM ${session.microvmId}`);
         } catch (error: any) {
-            console.error(`[ASR] error releasing MicroVM ${session.microvmId}: ${error?.message || error}`);
+            log.error(`[ASR] error releasing MicroVM ${session.microvmId}: ${error?.message || error}`);
         }
     }
 
@@ -928,7 +931,7 @@ export class TranscriptionService {
             isPartial: segment.isPartial,
             speaker,
         }).catch((error) => {
-            console.error('Failed to send transcript to Kinesis:', error);
+            log.error('Failed to send transcript to Kinesis:', error);
         });
 
         // Wake-phrase detection works on the text alone; the engine sends no word
@@ -950,7 +953,7 @@ export class TranscriptionService {
             isPartial: segment.isPartial,
             speaker: this.vpName(),
         }).catch((error) => {
-            console.error('Failed to send transcript to Kinesis:', error);
+            log.error('Failed to send transcript to Kinesis:', error);
         });
     }
 
@@ -968,7 +971,7 @@ export class TranscriptionService {
         capture.stderr?.on('data', (data: any) => {
             const msg = data.toString();
             if (!msg.includes('size=') && !msg.includes('time=')) {
-                console.log('FFmpeg (%s): %s', label, msg.trim());
+                log.info('FFmpeg (%s): %s', label, msg.trim());
             }
         });
         return capture;
@@ -978,7 +981,7 @@ export class TranscriptionService {
     private startAgentAudioCapture(onPcm: (chunk: Buffer) => void): void {
         this.agentAudioProcess = this.spawnPcmCapture('agent_output.monitor', 'assistant audio');
         this.agentAudioProcess.on('error', (error: any) => {
-            console.error(`FFmpeg (assistant audio) process error: ${error.message}`);
+            log.error(`FFmpeg (assistant audio) process error: ${error.message}`);
         });
         this.agentAudioProcess.stdout?.on('data', (chunk: Buffer) => {
             if (!this.isTranscribing) {
@@ -1004,12 +1007,12 @@ export class TranscriptionService {
         ]);
 
         this.meetingToCombinedPipe.on('error', (error: any) => {
-            console.error(`pacat (meeting→combined) error: ${error.message}`);
+            log.error(`pacat (meeting→combined) error: ${error.message}`);
         });
 
         this.meetingToCombinedPipe.stderr?.on('data', (data: any) => {
             const msg = data.toString().trim();
-            if (msg) console.log(`pacat (meeting→combined): ${msg}`);
+            if (msg) log.info(`pacat (meeting→combined): ${msg}`);
         });
 
         this.novaAudioProcess = this.spawnPcmCapture('meeting_audio.monitor', 'meeting audio');
@@ -1018,9 +1021,9 @@ export class TranscriptionService {
         this.novaAudioProcess.on('error', (error: any) => {
             const msg = `FFmpeg (Nova audio) process error: ${error.message}`;
             if (isLocalTest) {
-                console.error(msg + ' (non-fatal in local test)');
+                log.error(msg + ' (non-fatal in local test)');
             } else {
-                console.error(msg + ' (fatal in production)');
+                log.error(msg + ' (fatal in production)');
                 throw error;
             }
         });
@@ -1050,9 +1053,9 @@ export class TranscriptionService {
             } catch (error: any) {
                 const msg = `Audio chunk processing error: ${error.message}`;
                 if (isLocalTest) {
-                    console.log(msg + ' (non-fatal in local test)');
+                    log.info(msg + ' (non-fatal in local test)');
                 } else {
-                    console.error(msg);
+                    log.error(msg);
                     throw error;
                 }
             }
@@ -1065,17 +1068,17 @@ export class TranscriptionService {
         const timestamp = Date.now();
         
         if (transcript) {
-            console.log(`📝 Transcribed: "${transcript}" (IsPartial: ${isPartial})`);
+            log.info(`📝 Transcribed: "${transcript}" (IsPartial: ${isPartial})`);
         }
         
         // Detect wake phrase in partials to pre-warm the voice agent connection
         if (isPartial && transcript && !this.preConnectTriggered) {
             if (this.detectWakePhrase(transcript)) {
-                console.log('⚡ Wake phrase detected in PARTIAL transcript — pre-connecting voice agent');
+                log.info('⚡ Wake phrase detected in PARTIAL transcript — pre-connecting voice agent');
                 this.preConnectTriggered = true;
                 this.wakeDetectionTimestamp = timestamp;
                 voiceAssistant.preConnect().catch(err => {
-                    console.error('Pre-connect error (non-fatal):', err);
+                    log.error('Pre-connect error (non-fatal):', err);
                 });
             }
         }
@@ -1224,7 +1227,7 @@ export class TranscriptionService {
     }
 
     async stopTranscription(): Promise<void> {
-        console.log('Stopping transcription service');
+        log.info('Stopping transcription service');
         this.isTranscribing = false;
 
         this.teardownSessionProcesses();
@@ -1244,9 +1247,9 @@ export class TranscriptionService {
         if (voiceAssistant.isEnabled()) {
             try {
                 await voiceAssistant.stop();
-                console.log('✓ Voice assistant stopped');
+                log.info('✓ Voice assistant stopped');
             } catch (error) {
-                console.error('Error stopping voice assistant:', error);
+                log.error('Error stopping voice assistant:', error);
             }
         }
 
@@ -1255,9 +1258,9 @@ export class TranscriptionService {
             await sendEndMeeting();
         } catch (error: any) {
             if (error.name === 'AccessDeniedException') {
-                console.log('Note: Kinesis permission error expected during local testing');
+                log.info('Note: Kinesis permission error expected during local testing');
             } else {
-                console.error('Failed to send end meeting event:', error);
+                log.error('Failed to send end meeting event:', error);
             }
         }
     }
@@ -1274,7 +1277,7 @@ export class TranscriptionService {
         this.rosterTimeline.record(this.rosterClockSeconds(), speaker);
         
         const formattedTime = this.formatTimestamp(timestamp);
-        console.log(`[${formattedTime}] Speaker changed to: ${speaker}`);
+        log.info(`[${formattedTime}] Speaker changed to: ${speaker}`);
     }
 
     // Wake phrase detection methods
@@ -1303,7 +1306,7 @@ export class TranscriptionService {
             .map(t => t.text)
             .join(' ');
         
-        console.log('🎤 Wake phrase detected — activating immediately with context:', contextTranscript);
+        log.info('🎤 Wake phrase detected — activating immediately with context:', contextTranscript);
         
         // Activate voice assistant with context (connection already pre-warmed).
         // No duration: the provider applies the deployment's configured
@@ -1362,9 +1365,9 @@ export class TranscriptionService {
             } catch (error: any) {
                 const msg = `End stream error: ${error.message}`;
                 if (isLocalTest) {
-                    console.log(msg + ' (non-fatal in local test)');
+                    log.info(msg + ' (non-fatal in local test)');
                 } else {
-                    console.error(msg);
+                    log.error(msg);
                     throw error;
                 }
             }
@@ -1372,9 +1375,9 @@ export class TranscriptionService {
         } catch (error: any) {
             const msg = `Write audio error: ${error.message || error}`;
             if (isLocalTest) {
-                console.log(msg + ' (non-fatal in local test)');
+                log.info(msg + ' (non-fatal in local test)');
             } else {
-                console.error(msg + ' (fatal in production)');
+                log.error(msg + ' (fatal in production)');
                 throw error;
             }
         }
@@ -1390,13 +1393,13 @@ export class TranscriptionService {
             return 0;
         }
         const text = open.result.Alternatives?.[0]?.Transcript || '';
-        console.log(`🌐 Closing in-progress segment before its final arrives: "${text}"`);
+        log.info(`🌐 Closing in-progress segment before its final arrives: "${text}"`);
         try {
             const end = await sendAddTranscriptSegment(open.speaker, open.result, open.timeOffsetSeconds);
             this.processTranscriptResult(open.result);
             return end;
         } catch (error) {
-            console.error('Failed to close in-progress transcript segment:', error);
+            log.error('Failed to close in-progress transcript segment:', error);
             return 0;
         }
     }
@@ -1498,7 +1501,7 @@ export class TranscriptionService {
         this.agentSpeechStartedAt = null;
         this.assistantRows += 1;
         const speaker = this.vpName();
-        console.log(`🌐 Assistant turn written to the transcript (${start.toFixed(2)}-${end.toFixed(2)}s): "${text}"`);
+        log.info(`🌐 Assistant turn written to the transcript (${start.toFixed(2)}-${end.toFixed(2)}s): "${text}"`);
         sendAsrTranscriptSegment({
             channel: 'AGENT',
             segmentId: `assistant-${this.assistantRows}-${start.toFixed(3)}`,
@@ -1508,7 +1511,7 @@ export class TranscriptionService {
             isPartial: false,
             speaker,
         }).catch((error) => {
-            console.error('Failed to send assistant turn to Kinesis:', error);
+            log.error('Failed to send assistant turn to Kinesis:', error);
         });
     }
 
@@ -1541,7 +1544,7 @@ export class TranscriptionService {
             return 0;
         }
         sendAsrTranscriptSegment(segment).catch((error) => {
-            console.error('Failed to send assistant transcript to Kinesis:', error);
+            log.error('Failed to send assistant transcript to Kinesis:', error);
         });
         return segment.endTime;
     }
@@ -1598,7 +1601,7 @@ export class TranscriptionService {
                         }
                         this.openPartials.noteSent(result, speaker, sessionOffsetSeconds);
                     } catch (error) {
-                        console.error('Failed to send transcript to Kinesis:', error);
+                        log.error('Failed to send transcript to Kinesis:', error);
                     }
 
                     // Process all results (partial + final) for wake phrase pre-connect and activation
@@ -1614,7 +1617,7 @@ export class TranscriptionService {
             // (GitHub #292). Mirrors the WebSocket transcriber's clean-close
             // reconnect.
             if (this.isTranscribing && details.start) {
-                console.log('Transcribe result stream closed server-side while meeting is live - requesting reconnect');
+                log.info('Transcribe result stream closed server-side while meeting is live - requesting reconnect');
                 this.reconnectRequested = true;
             }
         } catch (error: any) {
@@ -1629,20 +1632,20 @@ export class TranscriptionService {
 
             if (isLocalTest) {
                 if (error.code === 'ERR_STREAM_PREMATURE_CLOSE') {
-                    console.log('Transcribe stream closed prematurely (non-fatal in local test) - meeting will continue');
+                    log.info('Transcribe stream closed prematurely (non-fatal in local test) - meeting will continue');
                 } else if (error.name === 'AccessDeniedException') {
-                    console.log('Transcribe permission denied (non-fatal in local test) - meeting will continue without transcription');
+                    log.info('Transcribe permission denied (non-fatal in local test) - meeting will continue without transcription');
                 } else {
-                    console.log('Handle transcript events error (non-fatal in local test):', error.message || error);
+                    log.info('Handle transcript events error (non-fatal in local test):', error.message || error);
                 }
             } else if (isRetryableError) {
                 // Retryable errors - throw to trigger retry loop in startTranscription()
                 // but don't let them become uncaught exceptions
-                console.error(`Handle transcript events error (retryable): ${error.message || error}`);
+                log.error(`Handle transcript events error (retryable): ${error.message || error}`);
                 throw error;
             } else {
                 // Non-retryable errors - throw to trigger retry/exit
-                console.error('Handle transcript events error (fatal in production):', error.message || error);
+                log.error('Handle transcript events error (fatal in production):', error.message || error);
                 throw error;
             }
         } finally {

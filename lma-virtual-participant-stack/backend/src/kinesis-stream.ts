@@ -3,6 +3,9 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { details } from './details.js';
 import { VoiceLabelNames, buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
 import { agendaStartFields, type VpAgenda } from './meeting-agenda.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('kinesis-stream');
 
 export interface TranscriptSegment {
   channel: string;
@@ -138,7 +141,7 @@ class KinesisStreamManager {
     };
     
     if (isLocalTest) {
-      console.log('Using AWS credentials from ~/.aws/credentials for Kinesis');
+      log.info('Using AWS credentials from ~/.aws/credentials for Kinesis');
       // Default provider checks credentials file, then environment variables, then instance metadata
       clientConfig.credentials = defaultProvider();
     }
@@ -151,7 +154,7 @@ class KinesisStreamManager {
     this.streamName = details.callDataStreamName;
     
     if (!this.streamName) {
-      console.warn('CALL_DATA_STREAM_NAME not configured - Kinesis streaming disabled');
+      log.warn('CALL_DATA_STREAM_NAME not configured - Kinesis streaming disabled');
     }
   }
 
@@ -162,7 +165,7 @@ class KinesisStreamManager {
    */
   private async sendRecord(record: any, { rethrow = false }: { rethrow?: boolean } = {}): Promise<void> {
     if (!this.streamName) {
-      console.log('Kinesis streaming disabled - would send:', record.EventType);
+      log.info('Kinesis streaming disabled - would send:', record.EventType);
       return;
     }
 
@@ -174,15 +177,15 @@ class KinesisStreamManager {
       });
 
       const result = await this.kinesisClient.send(command);
-      console.log(`Kinesis record sent: ${record.EventType}, SequenceNumber: ${result.SequenceNumber}`);
+      log.info(`Kinesis record sent: ${record.EventType}, SequenceNumber: ${result.SequenceNumber}`);
     } catch (error: any) {
       // Handle permission errors gracefully (like Python version)
       if (error.name === 'AccessDeniedException') {
-        console.log(`Error sending ${record.EventType} event to Kinesis: ${error.message}`);
-        console.log('Note: This is expected during local testing without proper IAM permissions');
+        log.error(`Error sending ${record.EventType} event to Kinesis: ${error.message}`);
+        log.info('Note: This is expected during local testing without proper IAM permissions');
       } else {
       // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- ECMAScript template literals do not interpret util.format specifiers
-        console.error(`Error sending ${record.EventType} event to Kinesis:`, error);
+        log.error(`Error sending ${record.EventType} event to Kinesis:`, error);
       }
       if (rethrow) throw error;
       // Don't throw error - continue execution like Python version
@@ -213,9 +216,9 @@ class KinesisStreamManager {
     if (vpId) {
         try {
             await this.linkCallToVP(vpId, this.callId);
-            console.log(`Linked CallId ${this.callId} to VP ${vpId}`);
+            log.info(`Linked CallId ${this.callId} to VP ${vpId}`);
         } catch (error) {
-            console.log(`Failed to link CallId to VP: ${error}`);
+            log.warn(`Failed to link CallId to VP: ${error}`);
         }
     }
   }
@@ -237,7 +240,7 @@ class KinesisStreamManager {
    */
   private async linkCallToVP(vpId: string, callId: string): Promise<void> {
     if (!details.graphqlEndpoint) {
-        console.log('Warning: GRAPHQL_ENDPOINT not set, cannot link CallId');
+        log.warn('Warning: GRAPHQL_ENDPOINT not set, cannot link CallId');
         return;
     }
     const { createStatusManager } = await import('./status-manager.js');
@@ -275,7 +278,7 @@ class KinesisStreamManager {
     };
 
     await this.sendRecord(record);
-    console.log(`Sent call recording event to Kinesis.`);
+    log.info(`Sent call recording event to Kinesis.`);
   }
 
   async sendCallVideoRecording(url: string): Promise<void> {
@@ -293,7 +296,7 @@ class KinesisStreamManager {
     };
 
     await this.sendRecord(record);
-    console.log(`Sent call video recording event to Kinesis.`);
+    log.info(`Sent call video recording event to Kinesis.`);
   }
 
   /**
@@ -319,7 +322,7 @@ class KinesisStreamManager {
   // so the caller can advance the cumulative reconnect offset. Returns
   // timeOffsetSeconds unchanged when nothing was written.
   async sendTranscriptSegment(speaker: string, transcriptResult: any, timeOffsetSeconds = 0): Promise<number> {
-    console.log("Process speaker changes to identify segments within result");
+    log.info("Process speaker changes to identify segments within result");
     const segments = this.processTranscriptionResults(speaker, transcriptResult, timeOffsetSeconds);
     let maxEndTime = timeOffsetSeconds;
 
@@ -329,7 +332,7 @@ class KinesisStreamManager {
         maxEndTime = segEnd;
       }
       if (process.env.DEBUG) {
-        console.log(`Sending ADD_TRANSCRIPT_SEGMENT event to Kinesis. Segment:`, segment);
+        log.info(`Sending ADD_TRANSCRIPT_SEGMENT event to Kinesis. Segment:`, segment);
       }
 
       try {
@@ -354,9 +357,9 @@ class KinesisStreamManager {
         };
 
         await this.sendRecord(record);
-        console.log(`Sent ADD_TRANSCRIPT_SEGMENT event to Kinesis.`);
+        log.info(`Sent ADD_TRANSCRIPT_SEGMENT event to Kinesis.`);
       } catch (error) {
-        console.log(`Error sending ADD_TRANSCRIPT_SEGMENT event to Kinesis: ${error}`);
+        log.error(`Error sending ADD_TRANSCRIPT_SEGMENT event to Kinesis: ${error}`);
       }
     }
     return maxEndTime;
@@ -514,7 +517,7 @@ class KinesisStreamManager {
 
     if (diagnosticsOn()) {
       const names = Object.values(segments).map((segment) => segment.Speaker);
-      console.log(
+      log.info(
         `[DIARIZATION] result=${resultId} partial=${KinesisStreamManager.isPartialResult(result)} ` +
           `items=${items.length} segments=${names.length} speakers=${names.join(',')}`,
       );
@@ -567,13 +570,13 @@ class KinesisStreamManager {
       });
 
       const result = await this.kinesisClient.send(command);
-      console.log(`Kinesis batch sent: ${records.length} records, ${result.FailedRecordCount || 0} failed`);
+      log.info(`Kinesis batch sent: ${records.length} records, ${result.FailedRecordCount || 0} failed`);
       
       if (result.FailedRecordCount && result.FailedRecordCount > 0) {
-        console.error('Some Kinesis records failed:', result.Records?.filter(r => r.ErrorCode));
+        log.error('Some Kinesis records failed:', result.Records?.filter(r => r.ErrorCode));
       }
     } catch (error) {
-      console.error('Failed to send Kinesis batch:', error);
+      log.error('Failed to send Kinesis batch:', error);
       throw error;
     }
   }

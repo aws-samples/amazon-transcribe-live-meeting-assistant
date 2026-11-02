@@ -23,6 +23,7 @@ import {
     redactText,
     registerSecretValue,
     registerSecretValuesFromEnv,
+    routeLogsToConsole,
     setLogLevel,
     setLogSink,
     type LogRecord,
@@ -304,4 +305,51 @@ test('always writes an INFO record at any threshold', () => {
     const record = JSON.parse(lines[0]) as LogRecord;
     assert.equal(record.level, 'INFO');
     assert.equal(record.msg, 'VP exit: reason=left trigger=chat:leave-command');
+});
+
+test('a registered value is found inside a URL, URL-encoded or after an encoded separator', () => {
+    registerSecretValue('2026');
+    registerSecretValue('p@ss word!');
+    const text = redactText(
+        'GET /join?p%3D2026%26x=1 and ?p=2026&y and ?p=p%40ss%20word! and ?q=p@ss word! on 2026-11-02',
+    );
+
+    assert.equal(
+        text,
+        `GET /join?p%3D${REDACTED}%26x=1 and ?p=${REDACTED}&y and ?p=${REDACTED} and ?q=${REDACTED} on 2026-11-02`,
+    );
+});
+
+test('a numeric value is replaced only as a number of its own; any other value wherever it occurs', () => {
+    registerSecretValue('2026');
+    registerSecretValue('s3cret-pw');
+    const text = redactText(
+        'passcode 2026, typed 2026. on 2026-11-02T10:20:26Z, VP vp-2026a, 12026 ms, v1.2026; pw=s3cret-pw&x as3cret-pwd',
+    );
+
+    assert.equal(
+        text,
+        `passcode ${REDACTED}, typed ${REDACTED}. on 2026-11-02T10:20:26Z, VP vp-2026a, 12026 ms, v1.2026; pw=${REDACTED}&x a${REDACTED}d`,
+    );
+});
+
+test('routeLogsToConsole sends each record to the console method of its level', () => {
+    const seen: string[] = [];
+    const real = { log: console.log, warn: console.warn, error: console.error };
+    console.log = (m: unknown) => seen.push(`log:${String(m)}`);
+    console.warn = (m: unknown) => seen.push(`warn:${String(m)}`);
+    console.error = (m: unknown) => seen.push(`error:${String(m)}`);
+    try {
+        routeLogsToConsole();
+        setLogLevel('debug');
+        const log = createLogger('unit');
+        log.debug('d');
+        log.info('i');
+        log.warn('w');
+        log.error('e');
+    } finally {
+        Object.assign(console, real);
+        setLogSink(null);
+    }
+    assert.deepEqual(seen, ['log:d', 'log:i', 'warn:w', 'error:e']);
 });

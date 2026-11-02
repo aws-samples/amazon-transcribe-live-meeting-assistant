@@ -265,7 +265,7 @@ const main = async (): Promise<void> => {
             try {
                 await statusManager.storeTaskArnInRegistry();
             } catch (arnError) {
-                log.info(`Failed to store task ARN : ${arnError}`);
+                log.warn(`Failed to store task ARN : ${arnError}`);
             }
         } catch (error) {
             log.error(`Failed to initialize status manager: ${error}`);
@@ -718,7 +718,7 @@ const main = async (): Promise<void> => {
 
         // Initialize the appropriate meeting platform handler
         log.info(`Initializing ${details.invite.meetingPlatform} handler...`);
-        log.debug(`DEBUG: Meeting platform value: "${details.invite.meetingPlatform}" (type: ${typeof details.invite.meetingPlatform})`);
+        log.debug(`Meeting platform value: "${details.invite.meetingPlatform}" (type: ${typeof details.invite.meetingPlatform})`);
 
         switch (details.invite.meetingPlatform) {
             case 'CHIME':
@@ -1102,9 +1102,9 @@ const emergencyCleanup = async (errorMessage: string): Promise<void> => {
     // Update VP status to FAILED so it doesn't show as in-progress
     if (statusManager) {
         try {
-            log.info('Emergency: Updating VP status to FAILED...');
+            log.warn('Emergency: Updating VP status to FAILED...');
             await statusManager.setFailed(errorMessage);
-            log.info('Emergency: VP status updated to FAILED');
+            log.warn('Emergency: VP status updated to FAILED');
         } catch (statusError) {
             log.error('Emergency: Failed to update VP status:', statusError);
         }
