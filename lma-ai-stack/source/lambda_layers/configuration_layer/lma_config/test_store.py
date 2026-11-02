@@ -1162,9 +1162,17 @@ def test_a_write_cannot_take_a_name_the_store_owns(name: str) -> None:
         store.write_profile(name, {}, updated_by="admin@example.com", expected_version=0)
     with pytest.raises(ReservedProfileName):
         store.seed_profile(name, {})
-    with pytest.raises(ReservedProfileName):
-        store.set_active_profile(name)
+    if name != "default":
+        with pytest.raises(ReservedProfileName):
+            store.set_active_profile(name)
     assert not dynamo.puts(), "a refused name still reached DynamoDB"
+
+
+def test_the_pointer_may_name_the_baseline() -> None:
+    """Activating the default profile: nothing is merged over the baseline."""
+    store, _dynamo, _ = build()
+    assert store.set_active_profile("default") is True
+    assert store.active_profile_name() is None
 
 
 # ── the merge ──────────────────────────────────────────────────────────────

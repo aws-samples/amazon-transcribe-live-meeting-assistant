@@ -328,8 +328,10 @@ def test_the_read_is_strongly_consistent(table: FakeConfigurationTable) -> None:
     """The page has to show what is stored, straight after a save."""
     read("CustomNovaSonicConfig")
 
-    (get,) = [request for request in table.requests if request["op"] == "get_item"]
-    assert get["ConsistentRead"] is True
+    # The active-profile pointer, then the profile it names.
+    gets = [request for request in table.requests if request["op"] == "get_item"]
+    assert len(gets) == 2
+    assert all(request["ConsistentRead"] is True for request in gets)
 
 
 def test_an_unrecognised_id_is_refused_rather_than_answered_with_the_baseline(

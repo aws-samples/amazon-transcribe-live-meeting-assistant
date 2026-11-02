@@ -129,13 +129,30 @@ case nothing is merged over the baseline.
 - **The active profile is not deleted.** Activate another first. A deleted
   profile's revisions stay in its history, and a profile created again under the
   same name continues its numbering.
-- **Upgrading to 0.4.0:** the `custom` profile an earlier release stored as a
-  delta is converted to a full copy by the seeder, after anything it adopts:
-  every setting it held is kept, and the rest are filled from the new baseline.
-  The delta it was stays in its history as the revision before. The seeder
-  reports `ProfileFormat` as `converted` on that run, `full` afterwards, and
-  `deferred` if the conversion could not be recorded in history, in which case
-  readers keep using the delta and the next deployment tries again.
+- **A deployment runs on its default profile until an Admin changes
+  something**, as IDP's do: the baseline is rewritten by every release, so an
+  unchanged deployment gets each release's defaults. To change a setting, an
+  Admin creates a Custom profile (a copy of the default, or of a Managed preset
+  profile) and activates it.
+- **The pages that edit one section** (the summary prompts, the Nova Sonic
+  voice assistant, the chat buttons and the ASR engine switches) show the
+  active profile and save into it. While the default or a Managed profile is
+  active they refuse to save, with a message to create or activate a Custom
+  profile.
+- **Upgrading from a release with one `custom` profile.** The seeder settles
+  it after its other writes: a `custom` profile holding settings (an Admin's
+  edits, or ones adopted from a previous table) is converted to a full copy and
+  stays active, every setting it held kept and the rest filled from the new
+  baseline, with the delta it was kept in its history as the revision before;
+  one holding none is deleted and the default activated. The seeder reports
+  this as `ProfileFormat`: `converted`, `removed-empty`, `full` or `absent` on
+  later runs, and `deferred` when it has to wait -- a section adoption is to be
+  retried, or the profile's state could not be recorded in its history -- in
+  which case readers keep using the delta and the next deployment tries again.
+- **Deleting and activating at once.** A delete checks that the profile is not
+  the active one and then deletes it; an activation of the same profile landing
+  between the two leaves the pointer naming a profile that is not there, and
+  readers then use the default, as for any pointer naming a missing profile.
 
 The `listConfigurationProfiles` query and the `createConfigurationProfile`,
 `deleteConfigurationProfile` and `activateConfigurationProfile` mutations, all
@@ -463,7 +480,7 @@ again in the resolver Lambda behind them, which is the configuration history's:
 
 | Operation | What it does |
 |---|---|
-| `Query.getConfiguration(Profile)` | Everything an editor needs in one read: `Sections`, a JSON list of each section's `Name`, `CacheTier` and `Schema`; `Default`, the shipped baseline; `Custom`, the profile's stored delta; and the profile's `Version`, `UpdatedBy`, `UpdatedAt` and `PublishedRevision`. Read consistently from the stored records, never from a cache. Only registered sections are returned |
+| `Query.getConfiguration(Profile)` | Everything an editor needs in one read: `Sections`, a JSON list of each section's `Name`, `CacheTier` and `Schema`; `Default`, the baseline; `Custom`, what the profile stores (`{}` for `Profile: "default"`); the profile's `Version`, `UpdatedBy`, `UpdatedAt` and `PublishedRevision`; and whether it is `Managed` (the baseline, and the preset profiles), `Active` and a `FullCopy`, with its `Description`. Read consistently from the stored records, never from a cache. Only registered sections are returned |
 | `Mutation.updateConfiguration(input: {Profile, Sections, ExpectedVersion, Comment})` | Saves every section named in `Sections`, a JSON object of section name to that section's complete stored values, in **one** write and one revision. Sections not named keep what the profile holds. `ExpectedVersion` is required, and a save against a profile someone has saved since is refused with `Conflict: `. Saves only into a profile that exists. Answers with the new `Version`, the `Revision` it recorded, and `Unchanged` when the save changed nothing |
 
 `Profile` defaults to `custom` for both.

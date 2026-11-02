@@ -33,6 +33,13 @@ Three writes, each with different rules about what it may overwrite:
     The pointer naming the profile in force. Also written only if absent, so an
     operator who selects a different profile keeps their choice.
 
+Then, after those writes (``settle_profiles``), the deployment is left running
+as IDP's do: on the default profile, which every release rewrites, unless an
+Admin changed something. A ``custom`` profile holding settings is stored as a
+full copy and stays active; one holding none is deleted and the default is
+activated. And each shipped preset the deployment can run is written as a
+read-only Managed profile (``write_managed_profiles``).
+
 Whenever ``Config#custom`` is absent and a deployment already has prompt
 templates in the old per-store table, this adopts them into the profile so the
 upgrade is not experienced as a reset. Absent rather than "on create" for the
@@ -789,25 +796,64 @@ def start_revision_history(store: ConfigurationStore) -> str:
         return "not-started"
 
 
-def convert_profiles(store: ConfigurationStore) -> str:
-    """Store the operator's profile as a full copy, as every profile is from 0.4.0.
+#: Section adoption outcomes that leave a section unset on purpose, so that the
+#: next deployment retries. Converting the profile meanwhile would fill the
+#: section from the baseline and stop the retry.
+PENDING_ADOPTION = frozenset({"previous-table-unreadable", "revision-history-unavailable"})
 
-    After :func:`seed`, so anything adopted from a previous table is already in
-    it. A delta from an earlier release keeps every setting it held and is
-    filled from this release's baseline for the rest; the delta stays in its
-    history as the revision before. Reported as the ``ProfileFormat``
-    attribute: "converted" on the run that converted it, "full" once it is
-    one, and "deferred" when it could not be converted now -- its current state
-    could not be recorded first, or an administrator saved it meanwhile -- in
-    which case readers keep using the delta, and the next deployment tries again.
+
+def _holds_settings(body: Mapping[str, Any]) -> bool:
+    """Whether a delta profile changes anything: a section with no values changes nothing."""
+    return any(values for values in body.values())
+
+
+def _adoption_outcomes(outcome: Mapping[str, str]) -> Dict[str, str]:
+    """The ``SectionAdoption`` pairs of a :func:`seed` outcome, by section."""
+    pairs = (outcome.get("SectionAdoption") or "").split(",")
+    return dict(pair.split("=", 1) for pair in pairs if "=" in pair)
+
+
+def settle_profiles(store: ConfigurationStore, adoption: Mapping[str, str]) -> str:
+    """Leave the deployment running as IDP's do: on the default profile unless an Admin changed it.
+
+    After :func:`seed`. The operator's ``custom`` profile, which an earlier
+    release created on every deployment as a delta over the baseline:
+
+    - holding settings (an Admin's edits, or ones adopted from a previous
+      table) -- stored as a full copy, as every Custom profile is now, and left
+      active if it was. The delta stays in its history as the revision before.
+      Reported as "converted", then "full" on later runs.
+    - holding none -- deleted, and the deployment default activated if it was
+      the active profile, so the deployment follows each release's defaults
+      until an Admin creates a Custom profile. Reported as "removed-empty".
+    - absent -- the active-profile pointer is set to the default if it is
+      unset. Reported as "absent".
+
+    "deferred" when this cannot be done now: a section adoption is to be
+    retried by the next deployment, the profile's current state could not be
+    recorded in its history, or an Admin saved it meanwhile. Readers keep using
+    the delta, and the next deployment tries again.
     """
+    current = store.read_profile(OPERATOR_PROFILE, consistent_read=True)
+    if not current.exists:
+        store.set_active_profile("default", only_if_absent=True)
+        return "absent"
+    if current.metadata.get("ProfileFormat") == "full":
+        return "full"
+    if any(outcome in PENDING_ADOPTION for outcome in adoption.values()):
+        return "deferred"
     try:
+        if not _holds_settings(current.body):
+            if store.active_profile_name(consistent_read=True) == OPERATOR_PROFILE:
+                store.activate_profile("default")
+            store.delete_profile(OPERATOR_PROFILE)
+            return "removed-empty"
         converted = store.convert_to_full_copy(
-            OPERATOR_PROFILE, comment="stored as a full copy of the configuration (0.4.0)"
+            OPERATOR_PROFILE, comment="stored as a full copy of the configuration"
         )
     except (RevisionHistoryUnavailable, ConcurrentModification):
         LOGGER.warning(
-            "could not store the %s profile as a full copy now; the next deployment retries",
+            "could not settle the %s profile now; the next deployment retries",
             OPERATOR_PROFILE,
             exc_info=True,
         )
@@ -860,7 +906,7 @@ def handler(event: Dict[str, Any], context: Any) -> None:
                 else None
             ),
         )
-        outcome["ProfileFormat"] = convert_profiles(store)
+        outcome["ProfileFormat"] = settle_profiles(store, _adoption_outcomes(outcome))
         try:
             outcome["ManagedProfiles"] = write_managed_profiles(
                 store,

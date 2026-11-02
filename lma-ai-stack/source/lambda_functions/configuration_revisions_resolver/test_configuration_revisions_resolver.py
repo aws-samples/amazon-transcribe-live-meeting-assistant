@@ -393,7 +393,7 @@ def test_the_baseline_can_be_read_and_activated_but_not_saved(profiles) -> None:
     assert json.loads(document["Custom"]) == {}
     call("activateConfigurationProfile", input={"Name": "default"})
     assert call("getConfiguration", Profile="default")["Active"] is True
-    with pytest.raises(Exception):
+    with pytest.raises(Exception, match="reserved by the configuration store"):
         call(
             "updateConfiguration",
             input={

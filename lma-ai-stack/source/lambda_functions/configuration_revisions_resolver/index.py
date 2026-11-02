@@ -256,9 +256,10 @@ def get_configuration(arguments: Mapping[str, Any]) -> Dict[str, Any]:
         "FullCopy": head.metadata.get("ProfileFormat") == "full",
         "Sections": json.dumps(sections, sort_keys=True),
         "Default": json.dumps(_registered_only(baseline.body), sort_keys=True),
-        "Custom": json.dumps(_registered_only(head.body), sort_keys=True),
         # For the baseline itself, the profile is empty: nothing is laid over it.
-        **({"Custom": "{}"} if profile == BASELINE else {}),
+        "Custom": json.dumps(
+            {} if profile == BASELINE else _registered_only(head.body), sort_keys=True
+        ),
         # The configuration library: named presets the editor can apply to the
         # page as unsaved changes. See lma_config/presets.py.
         "Presets": json.dumps(shipped_presets(), sort_keys=True),

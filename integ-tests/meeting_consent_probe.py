@@ -172,13 +172,24 @@ class ConsentSettingsOverride:
         self.saved: dict | None = None
         self.applied = False
 
+    #: The Custom profile a test creates and activates on a deployment running
+    #: on its default profile, which is read-only; removed again by restore().
+    TEMPORARY_PROFILE = "integ-tests"
+
     def save(self) -> None:
         active = self.store.active_profile_name(consistent_read=True)
+        self.created_profile = False
         if not active:
-            raise RuntimeError(
-                "the deployment has no active configuration profile, so a setting saved by "
-                "this test would not take effect; the configuration seeder sets one"
+            # The deployment runs on its default profile, which is read-only:
+            # test in a Custom copy of it, activated for the length of the test.
+            self.store.create_profile(
+                self.TEMPORARY_PROFILE,
+                updated_by=self.updated_by,
+                description="created and removed by the integration tests",
             )
+            self.store.activate_profile(self.TEMPORARY_PROFILE)
+            self.created_profile = True
+            active = self.TEMPORARY_PROFILE
         record = self.store.read_profile(active, consistent_read=True)
         if not record.exists:
             raise RuntimeError(f"the active configuration profile {active!r} is not stored")
@@ -202,6 +213,12 @@ class ConsentSettingsOverride:
         return dict(self.store.get_section(self.section).values)
 
     def restore(self, attempts: int = 5) -> None:
+        if getattr(self, "created_profile", False):
+            self.store.activate_profile("default")
+            self.store.delete_profile(self.TEMPORARY_PROFILE)
+            self.created_profile = False
+            self.applied = False
+            return
         if self.profile is None or not self.applied:
             return
         for attempt in range(attempts):

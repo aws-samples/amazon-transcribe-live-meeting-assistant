@@ -1073,7 +1073,8 @@ class ConfigurationStore:
         Returns:
             Whether the pointer was written.
         """
-        validate_profile_name(name)
+        if name != DEFAULT_PROFILE_NAME:
+            validate_profile_name(name)
         return self._write_pointer(name, only_if_absent=only_if_absent)
 
     def _write_pointer(self, name: str, *, only_if_absent: bool = False) -> bool:
@@ -1240,6 +1241,27 @@ class ConfigurationStore:
                 ) from error
             raise
         self.invalidate()
+
+    def editable_active_profile(self) -> str:
+        """The active profile's name, when an edit may be saved into it.
+
+        What a page that edits one section saves into, as IDP's configuration
+        page does: the profile in force. The baseline and Managed profiles are
+        read-only, so while one of them is active the save is refused, and an
+        Admin creates or activates a Custom profile first.
+
+        Raises:
+            ProfileReadOnly: the active profile is the baseline or Managed.
+        """
+        active = self.active_profile_name(consistent_read=True)
+        if active is None:
+            raise ProfileReadOnly(
+                "the active configuration profile is the deployment default, which is "
+                "managed by the deployment; create or activate a Custom profile on the "
+                "Configuration page to change a setting"
+            )
+        _refuse_managed(active, self.read_record(profile_key(active), consistent_read=True))
+        return active
 
     def activate_profile(self, name: str) -> None:
         """Make ``name`` the profile in force: a stored profile, or ``default``.

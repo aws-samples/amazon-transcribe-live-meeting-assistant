@@ -1586,12 +1586,10 @@ def test_the_baseline_ships_transcript_deletion_off_beside_the_retention_paramet
     }
 
 
-# ── 0.4.0: the operator's profile becomes a full copy ───────────────────────
+# ── the operator's profile, settled as IDP's deployments run ────────────────
 
 
-def test_a_delta_profile_from_an_earlier_release_becomes_a_full_copy(seeder) -> None:
-    store, dynamo = build_store()
-    seeder.seed(store, domain="default")  # a release that stored the profile as a delta
+def _edit(store: ConfigurationStore) -> None:
     store.write_section(
         "custom",
         "language_models",
@@ -1599,32 +1597,65 @@ def test_a_delta_profile_from_an_earlier_release_becomes_a_full_copy(seeder) -> 
         updated_by="admin@example.com",
         expected_version=None,
     )
-    assert seeder.convert_profiles(store) == "converted"
+
+
+def test_a_profile_an_admin_changed_becomes_a_full_copy_and_stays_active(seeder) -> None:
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default")  # a release that stored the profile as a delta
+    _edit(store)
+    assert seeder.settle_profiles(store, {}) == "converted"
     body = dynamo.body("Config#custom")
-    baseline = dynamo.body("Config#default")
-    # The administrator's setting is kept...
     assert body["language_models"]["summaryModelId"] == "amazon.nova-pro-v1:0"
-    # ...and every section the baseline holds is now stored in the profile too.
-    assert set(baseline) <= set(body)
+    assert set(dynamo.body("Config#default")) <= set(body)
     assert dynamo.metadata("Config#custom")["ProfileFormat"] == "full"
+    assert store.active_profile_name(consistent_read=True) == "custom"
 
 
-def test_the_conversion_happens_once(seeder) -> None:
+def test_a_profile_nobody_changed_is_removed_and_the_default_activated(seeder) -> None:
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default")
+    assert seeder.settle_profiles(store, {}) == "removed-empty"
+    assert "Config#custom" not in dynamo.items
+    assert store.active_profile_name(consistent_read=True) is None
+    assert [p.name for p in store.list_profiles() if p.active] == ["default"]
+
+
+def test_a_new_deployment_runs_on_the_default_profile(seeder) -> None:
+    store, dynamo = build_store()
+    outcome = seeder.seed(store, domain="default")
+    assert seeder.settle_profiles(store, seeder._adoption_outcomes(outcome)) == "removed-empty"
+    assert seeder.settle_profiles(store, {}) == "absent"
+    assert "Config#custom" not in dynamo.items
+
+
+def test_the_profile_is_settled_once(seeder) -> None:
     store, _dynamo = build_store()
     seeder.seed(store, domain="default")
-    assert seeder.convert_profiles(store) == "converted"
-    assert seeder.convert_profiles(store) == "full"
+    _edit(store)
+    assert seeder.settle_profiles(store, {}) == "converted"
+    assert seeder.settle_profiles(store, {}) == "full"
+
+
+def test_a_section_adoption_to_be_retried_defers_the_conversion(seeder) -> None:
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default")
+    _edit(store)
+    pending = {"nova_sonic_config": "previous-table-unreadable"}
+    assert seeder.settle_profiles(store, pending) == "deferred"
+    # The section is still absent, so the next deployment's adoption can add it.
+    assert "nova_sonic_config" not in dynamo.body("Config#custom")
 
 
 def test_a_conversion_that_cannot_record_history_is_deferred(seeder, monkeypatch) -> None:
     store, _dynamo = build_store()
     seeder.seed(store, domain="default")
+    _edit(store)
 
     def unavailable(*_args, **_kwargs):
         raise seeder.RevisionHistoryUnavailable("down")
 
     monkeypatch.setattr(store, "convert_to_full_copy", unavailable)
-    assert seeder.convert_profiles(store) == "deferred"
+    assert seeder.settle_profiles(store, {}) == "deferred"
 
 
 # ── Managed profiles, ConfigurationPreset and CustomConfigPath ──────────────
