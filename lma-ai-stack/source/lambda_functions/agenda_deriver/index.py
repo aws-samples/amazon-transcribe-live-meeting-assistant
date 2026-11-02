@@ -244,7 +244,6 @@ def call_bedrock(prompt, call_id):
     model_id = read_setting(
         LANGUAGE_MODELS.name,
         "summaryModelId",
-        env_var="BEDROCK_MODEL_ID",
         default=FALLBACK_MODEL_ID,
     )
     response = bedrock.converse(

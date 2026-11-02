@@ -540,7 +540,11 @@ def render_reference(template: Mapping[str, Any]) -> str:
         "| Kind | Parameters | What changing one does |",
         "|---|---|---|",
     ]
-    lines += [f"| {kind.label} | {counts[kind.label]} | {kind.meaning} |" for kind in KINDS]
+    lines += [
+        f"| {kind.label} | {counts[kind.label]} | {kind.meaning} |"
+        for kind in KINDS
+        if counts[kind.label]
+    ]
     lines.append("")
 
     for title, names in groups:

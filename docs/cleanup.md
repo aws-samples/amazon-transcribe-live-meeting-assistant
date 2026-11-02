@@ -46,7 +46,7 @@ To fully remove all LMA resources after stack deletion, complete the following s
 2. **Delete DynamoDB tables**: Remove any DynamoDB tables associated with the LMA deployment.
 3. **Delete CloudWatch Log groups**: Remove log groups with the `/<stack-name>/`, `/aws/lambda/LMA-`, `/ecs/LMA-`, `/aws/lambda-microvms/<stack-name>-` or `/aws/vendedlogs/states/<stack-name>` prefixes.
 
-   Three of these outlive the stack whether or not you set `EnableDataRetentionOnDelete`, so they need sweeping on every deployment that has ever been upgraded past v0.4.0:
+   Three of these outlive the stack whether or not you set `EnableDataRetentionOnDelete`, so they need sweeping on every deployment that has ever been upgraded to v0.4.0 or later:
 
    - The implicit `/aws/lambda/<function-name>` groups that Lambda created for the functions which had no declared log group before v0.4.0. Those functions now log elsewhere, nothing was migrated, and these groups have no expiry, so whatever they hold is kept indefinitely with no stack to delete it.
    - `/aws/lambda-microvms/<stack-name>-vp` and `-asr`, the MicroVM log groups used before v0.4.0. The stack now writes to `-vp-logs` and `-asr-logs` and does not own the originals. See [Stack Updates & Upgrades](stack-updates-and-upgrades.md#v040).

@@ -1141,10 +1141,12 @@ configuration pages' saves.
 
 ## Settings that were stack parameters until 0.4.0
 
-Until 0.4.0, 27 stack parameters only ever reached application code -- a model
+Until 0.4.0, 24 released stack parameters only ever reached application code -- a model
 id, a number, a switch passed to a function as an environment variable -- and
 were also the defaults of Configuration page settings. 0.4.0 removes them as a
-clean break: each is now only a setting, with a shipped default.
+clean break: each is now only a setting, with a shipped default. Three settings
+new in this release (the knowledge-base and key frame text models, and the agenda
+timing) are listed there too, though no release had them as parameters.
 
 - `lma_config/setting_defaults.json` holds each setting's shipped default and
   type, by section and setting, and the parameter it replaced

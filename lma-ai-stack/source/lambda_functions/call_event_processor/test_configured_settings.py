@@ -3,11 +3,10 @@
 # See the LICENSE file in the project root for full license information.
 """The wake phrase and the transcript-hook mode are read from the configuration.
 
-Each prefers its Configuration page setting (whose default is the stack
-parameter) and falls back to what the processor read before: the deployment
-settings' compiled wake phrase, and the hook-mode environment variable. A wake
-phrase saved on the page that is not a regular expression gives way to the
-deployment's own rather than waking the assistant on nothing.
+Each prefers its Configuration page setting and falls back to the setting's
+shipped default in setting_defaults.json. A wake phrase saved on the page that is
+not a regular expression gives way to the shipped one rather than waking the
+assistant on nothing.
 """
 
 from __future__ import annotations
@@ -43,12 +42,6 @@ class _Store:
 
 @pytest.fixture()
 def configured(monkeypatch):
-    for name in (
-        "ASSISTANT_WAKE_PHRASE_REGEX",
-        "TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY",
-        "AGENDA_DERIVATION_AFTER_SECONDS",
-    ):
-        monkeypatch.delenv(name, raising=False)
     cep._compiled_wake_phrase.cache_clear()
 
     def install(sections):

@@ -33,7 +33,7 @@ def model_arn():
     Read per request, so a change reaches this function within the section's
     cache tier rather than at its next cold start.
     """
-    model_id = read_setting(LANGUAGE_MODELS.name, "summaryModelId", env_var="MODEL_ID")
+    model_id = read_setting(LANGUAGE_MODELS.name, "summaryModelId")
     # if model id starts with Anthropic it is the legacy 3.0 models - use the model Id for the ARN
     # else it is an Inference Profile and use the profile's ARN
     if model_id.startswith("anthropic"):

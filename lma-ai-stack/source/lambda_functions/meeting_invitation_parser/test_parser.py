@@ -243,7 +243,7 @@ class TestBedrockRequestShape(unittest.TestCase):
         self.blocks = [{"text": '{"meetingPlatform": "ZOOM"}'}]
         self.stop_reason = "end_turn"
         self._real_bedrock = index.bedrock
-        self._real_model = os.environ.get("BEDROCK_MODEL_ID")
+        self._real_read_setting = index.read_setting
 
         test_case = self
 
@@ -259,20 +259,21 @@ class TestBedrockRequestShape(unittest.TestCase):
 
     def tearDown(self):
         index.bedrock = self._real_bedrock
-        if self._real_model is None:
-            os.environ.pop("BEDROCK_MODEL_ID", None)
-        else:
-            os.environ["BEDROCK_MODEL_ID"] = self._real_model
+        index.read_setting = self._real_read_setting
+
+    def _configure_summary_model(self, model_id):
+        """Stand in for an administrator's choice in the Amazon Bedrock Models section."""
+        index.read_setting = lambda _section, _setting, **_kwargs: model_id
 
     def test_a_temperature_is_sent_to_a_model_that_accepts_one(self):
         """Parsing an invitation is extraction, so the same text should parse alike."""
-        os.environ["BEDROCK_MODEL_ID"] = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        self._configure_summary_model("us.anthropic.claude-haiku-4-5-20251001-v1:0")
         index.call_bedrock("a prompt")
         self.assertEqual(self.requests[0]["inferenceConfig"]["temperature"], 0)
 
     def test_no_temperature_is_sent_to_a_model_that_rejects_one(self):
         """Claude 5 and later refuse the request rather than ignoring the setting."""
-        os.environ["BEDROCK_MODEL_ID"] = "global.anthropic.claude-haiku-5-5"
+        self._configure_summary_model("global.anthropic.claude-haiku-5-5")
         index.call_bedrock("a prompt")
         self.assertNotIn("temperature", self.requests[0]["inferenceConfig"])
 

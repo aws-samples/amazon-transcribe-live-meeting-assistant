@@ -84,76 +84,47 @@ class TestBuildModelArn(unittest.TestCase):
 
 
 class TestExecuteResolvesArn(unittest.TestCase):
-    """Verify execute() uses BEDROCK_MODEL_ID to build the right ARN."""
+    """Verify execute() builds the right ARN for the configured model."""
 
-    def _run(self, env_overrides):
+    ENV = {"AWS_REGION": "us-west-2", "AWS_ACCOUNT_ID": "123456789012", "MODEL_ARN": ""}
+
+    def _run(self, model_id, env_overrides=None):
         """Helper: run execute with mocked boto3 and return the modelArn sent to KB."""
-        with patch.dict(os.environ, env_overrides, clear=False):
-            with patch.object(search_meetings, "boto3") as mock_boto3:
-                mock_kb = MagicMock()
-                mock_kb.retrieve_and_generate.return_value = {
-                    "output": {"text": "ok"},
-                    "citations": [],
-                }
-                mock_boto3.client.return_value = mock_kb
-                search_meetings.execute(
-                    query="test query", max_results=5, user_id="u1", is_admin=True
-                )
-                call_kwargs = mock_kb.retrieve_and_generate.call_args[1]
-                return call_kwargs["retrieveAndGenerateConfiguration"][
-                    "knowledgeBaseConfiguration"
-                ]["modelArn"]
+        env = {**self.ENV, **(env_overrides or {})}
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch.object(search_meetings, "_configured_model_id", return_value=model_id),
+            patch.object(search_meetings, "boto3") as mock_boto3,
+        ):
+            mock_kb = MagicMock()
+            mock_kb.retrieve_and_generate.return_value = {
+                "output": {"text": "ok"},
+                "citations": [],
+            }
+            mock_boto3.client.return_value = mock_kb
+            search_meetings.execute(query="test query", max_results=5, user_id="u1", is_admin=True)
+            call_kwargs = mock_kb.retrieve_and_generate.call_args[1]
+            return call_kwargs["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"][
+                "modelArn"
+            ]
 
     def test_inference_profile_model_resolves_correctly(self):
-        """The original bug — global.* model now produces correct ARN."""
-        model_arn = self._run(
-            {
-                "BEDROCK_MODEL_ID": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-                "AWS_REGION": "us-west-2",
-                "AWS_ACCOUNT_ID": "123456789012",
-            }
-        )
+        """A global.* model produces an inference-profile ARN."""
+        model_arn = self._run("global.anthropic.claude-haiku-4-5-20251001-v1:0")
         self.assertIn(":inference-profile/", model_arn)
         self.assertNotIn("foundation-model", model_arn)
 
     def test_foundation_model_resolves_correctly(self):
         """Plain foundation model still works."""
-        model_arn = self._run(
-            {
-                "BEDROCK_MODEL_ID": "anthropic.claude-3-haiku-20240307-v1:0",
-                "AWS_REGION": "us-west-2",
-                "AWS_ACCOUNT_ID": "123456789012",
-                # Clear legacy env var so it falls through to the new logic
-                "MODEL_ARN": "",
-            }
-        )
+        model_arn = self._run("anthropic.claude-3-haiku-20240307-v1:0")
         self.assertIn("::foundation-model/", model_arn)
 
     def test_legacy_model_arn_fallback(self):
-        """Backward compat: MODEL_ARN env var still works if BEDROCK_MODEL_ID missing."""
+        """A pre-built MODEL_ARN is used when no model is configured."""
         legacy_arn = "arn:aws:bedrock:us-west-2::foundation-model/amazon.nova-lite-v1:0"
-        with patch.dict(
-            os.environ,
-            {"BEDROCK_MODEL_ID": "", "MODEL_ARN": legacy_arn},
-            clear=False,
-        ):
-            with patch.object(search_meetings, "boto3") as mock_boto3:
-                mock_kb = MagicMock()
-                mock_kb.retrieve_and_generate.return_value = {
-                    "output": {"text": "ok"},
-                    "citations": [],
-                }
-                mock_boto3.client.return_value = mock_kb
-                search_meetings.execute(query="q", user_id="u", is_admin=True)
-                call_kwargs = mock_kb.retrieve_and_generate.call_args[1]
-                self.assertEqual(
-                    call_kwargs["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"][
-                        "modelArn"
-                    ],
-                    legacy_arn,
-                )
+        self.assertEqual(self._run("", {"MODEL_ARN": legacy_arn}), legacy_arn)
 
-    def test_the_configured_model_wins_over_the_environment_variable(self):
+    def test_the_configured_model_is_read_from_the_section(self):
         """The Amazon Bedrock Models section, when it names a model, is used."""
 
         class _Store:
@@ -161,21 +132,24 @@ class TestExecuteResolvesArn(unittest.TestCase):
                 return SimpleNamespace(values={"summaryModelId": "us.amazon.nova-pro-v1:0"})
 
         with patch.object(parameters, "_SHARED_STORE", _Store()):
-            model_arn = self._run(
-                {
-                    "BEDROCK_MODEL_ID": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-                    "AWS_REGION": "us-west-2",
-                    "AWS_ACCOUNT_ID": "123456789012",
-                }
-            )
-        self.assertTrue(model_arn.endswith(":inference-profile/us.amazon.nova-pro-v1:0"))
+            model_id = search_meetings._configured_model_id()
+        self.assertEqual(model_id, "us.amazon.nova-pro-v1:0")
+
+    def test_without_a_configured_model_the_shipped_default_is_used(self):
+        class _Store:
+            def get_section(self, _name):
+                return SimpleNamespace(values={})
+
+        with patch.object(parameters, "_SHARED_STORE", _Store()):
+            model_id = search_meetings._configured_model_id()
+        shipped = parameters.shipped_setting_defaults()["language_models"]["summaryModelId"]
+        self.assertEqual(model_id, shipped)
 
     def test_missing_model_raises(self):
-        """When neither BEDROCK_MODEL_ID nor MODEL_ARN is set, raise a clear error."""
-        with patch.dict(
-            os.environ,
-            {"BEDROCK_MODEL_ID": "", "MODEL_ARN": ""},
-            clear=False,
+        """With no model and no MODEL_ARN, execute raises a clear error."""
+        with (
+            patch.dict(os.environ, {"MODEL_ARN": ""}, clear=False),
+            patch.object(search_meetings, "_configured_model_id", return_value=""),
         ):
             with self.assertRaises(ValueError) as ctx:
                 search_meetings.execute(query="q", user_id="u", is_admin=True)

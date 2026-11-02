@@ -252,7 +252,6 @@ def summary_model_id():
     return read_setting(
         LANGUAGE_MODELS.name,
         "summaryModelId",
-        env_var="BEDROCK_MODEL_ID",
         default=FALLBACK_MODEL_ID,
         store=CONFIG_STORE,
     )

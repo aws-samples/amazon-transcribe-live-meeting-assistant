@@ -85,7 +85,6 @@ def model_id() -> str:
     return read_setting(
         LANGUAGE_MODELS.name,
         "keyframeTextModelId",
-        env_var="KEYFRAME_TEXT_MODEL_ID",
         default=FALLBACK_MODEL_ID,
     )
 

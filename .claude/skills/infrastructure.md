@@ -35,7 +35,9 @@ assistant settings, the meeting inactivity timeout and similar) are not stack
 parameters: they are settings on the web UI's Configuration page.
 `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/setting_defaults.json`
 maps each former parameter to its section and setting. Do not add a stack
-parameter for a value an Admin can change on that page.
+parameter for a value an Admin can change on that page. The exception is the
+two retention periods (`lma_config/parameter_defaults.json`), which stay stack
+parameters because they are upper limits as well as defaults.
 
 ## CRITICAL: GovCloud Compatibility Rules
 

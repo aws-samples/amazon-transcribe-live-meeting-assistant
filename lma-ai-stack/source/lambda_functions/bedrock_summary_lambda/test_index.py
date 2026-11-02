@@ -40,7 +40,6 @@ PREFIX = "kb/"
 # resolves an endpoint, which needs a region even though no call is ever made.
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_REGION", "us-east-1")
-os.environ.setdefault("BEDROCK_MODEL_ID", MODEL_ID)
 os.environ.setdefault("FETCH_TRANSCRIPT_LAMBDA_ARN", FETCH_ARN)
 os.environ.setdefault("S3_BUCKET_NAME", BUCKET)
 os.environ.setdefault("S3_PREFIX", PREFIX)
@@ -54,7 +53,7 @@ LAYER = HERE.parents[1] / "lambda_layers" / "configuration_layer"
 if str(LAYER) not in sys.path:
     sys.path.insert(0, str(LAYER))
 
-from lma_config import codec  # noqa: E402
+from lma_config import codec, parameters  # noqa: E402
 from lma_config.keys import ACTIVE_POINTER_KEY, DEFAULT_KEY  # noqa: E402
 from lma_config.store import ConfigurationStore  # noqa: E402
 
@@ -182,11 +181,18 @@ def ddb_item(**pairs):
     return dict(pairs)
 
 
-def install(monkeypatch, bedrock=None, templates=None, custom=None, lambda_client=None):
-    """Replace every AWS client the module built at import time."""
+def install(
+    monkeypatch, bedrock=None, templates=None, custom=None, lambda_client=None, model=MODEL_ID
+):
+    """Replace every AWS client the module built at import time.
+
+    The fake table holds no language_models section, so ``model`` stands in for
+    the one an administrator chose there.
+    """
     bedrock = bedrock if bedrock is not None else FakeBedrock()
     s3 = FakeS3Client()
     monkeypatch.setattr(index, "bedrock", bedrock)
+    monkeypatch.setattr(index, "summary_model_id", lambda: model)
     table = FakeConfigurationTable(templates, custom)
     monkeypatch.setattr(index, "CONFIG_STORE", ConfigurationStore(TABLE_NAME, client=table))
     monkeypatch.setattr(
@@ -606,11 +612,12 @@ def test_an_administrators_model_wins_over_the_parameters(monkeypatch) -> None:
     assert bedrock.requests[0]["modelId"] == "amazon.nova-pro-v1:0"
 
 
-def test_without_a_configured_model_the_environment_variable_is_used(monkeypatch) -> None:
+def test_without_a_configured_model_the_shipped_default_is_used(monkeypatch) -> None:
     """A table seeded by a template that predates the section, or not yet seeded."""
     bedrock = _install_table(monkeypatch, _table_with_models(None))
     index.generate_summary("T", None)
-    assert bedrock.requests[0]["modelId"] == MODEL_ID
+    shipped = parameters.shipped_setting_defaults()["language_models"]["summaryModelId"]
+    assert bedrock.requests[0]["modelId"] == shipped == index.FALLBACK_MODEL_ID
 
 
 def test_regenerate_uses_a_model_saved_moments_before(monkeypatch) -> None:
@@ -641,8 +648,7 @@ def test_no_temperature_is_sent_to_a_model_that_rejects_one(
     Not a quality setting but a hard failure: every summary on a stack configured
     with one of those models would come back as the error string.
     """
-    monkeypatch.setenv("BEDROCK_MODEL_ID", "global.anthropic.claude-haiku-5-5")
-    bedrock, _ = install(monkeypatch)
+    bedrock, _ = install(monkeypatch, model="global.anthropic.claude-haiku-5-5")
     index.call_bedrock("a prompt")
     assert bedrock.requests[0]["inferenceConfig"] == {"maxTokens": 4096}
 

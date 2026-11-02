@@ -566,8 +566,8 @@ def test_the_handler_gives_the_knowledge_base_tools_the_knowledge_base_model(
     answers without Bedrock, and `BedrockModel` records the model it was asked
     for.
     """
-    monkeypatch.setenv("MODEL_ID", AGENT_MODEL_UNDER_TEST)
-    monkeypatch.setenv("KB_MODEL_ID", KB_MODEL_UNDER_TEST)
+    monkeypatch.setattr(strands_module, "configured_agent_model_id", lambda: AGENT_MODEL_UNDER_TEST)
+    monkeypatch.setattr(strands_module, "configured_kb_model_id", lambda: KB_MODEL_UNDER_TEST)
     monkeypatch.setenv("KB_ID", "JIHGFEDCBA")
     monkeypatch.setenv("TRANSCRIPT_KB_ID", "ABCDEFGHIJ")
     monkeypatch.setenv("KB_REGION", "us-west-2")

@@ -32,7 +32,7 @@ def _configured_model_id() -> str:
     # pylint: disable-next=import-error,import-outside-toplevel
     from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
 
-    value = read_setting(LANGUAGE_MODELS.name, "summaryModelId", env_var="BEDROCK_MODEL_ID")
+    value = read_setting(LANGUAGE_MODELS.name, "summaryModelId")
     return (value or "").strip()
 
 

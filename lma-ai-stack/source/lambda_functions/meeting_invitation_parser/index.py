@@ -53,7 +53,6 @@ def call_bedrock(prompt_data):
     modelId = read_setting(
         LANGUAGE_MODELS.name,
         "summaryModelId",
-        env_var="BEDROCK_MODEL_ID",
         default=FALLBACK_MODEL_ID,
     )
     logger.info(f"Bedrock request - ModelId: {modelId}")

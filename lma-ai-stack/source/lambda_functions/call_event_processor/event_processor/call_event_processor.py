@@ -66,7 +66,6 @@ from pure import (  # noqa: E402
     SentimentByPeriodEntry,
     SentimentEntry,
     SentimentPerChannel,
-    agenda_derivation_after_seconds,
     agenda_derivation_due,
     convert_keys_to_uppercamelcase,
     get_sentiment_per_quarter,
@@ -118,9 +117,7 @@ AGENDA_DERIVER_ARN = getenv("AGENDA_DERIVER_ARN", "")
 KEYFRAME_TEXT_EXTRACTOR_ARN = getenv("KEYFRAME_TEXT_EXTRACTOR_ARN", "")
 #: The threshold used when the Meeting Agenda section cannot be read: 300
 #: seconds, the setting's shipped default in setting_defaults.json.
-AGENDA_DERIVATION_AFTER_SECONDS = agenda_derivation_after_seconds(
-    getenv("AGENDA_DERIVATION_AFTER_SECONDS", "300")
-)
+AGENDA_DERIVATION_AFTER_SECONDS = 300.0
 # Meetings this execution environment has already queued the pass for; see
 # agenda_derivation_due for why this is not what makes the pass run once.
 AGENDA_PASS_QUEUED: set = set()
@@ -138,7 +135,6 @@ def transcript_hook_nonpartial_only() -> bool:
     return read_setting(
         MEETING_PROCESSING.name,
         "transcriptHookNonPartialOnly",
-        env_var="TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY",
         default=True,
     )
 
@@ -154,7 +150,6 @@ def agenda_derivation_threshold() -> float:
         read_setting(
             MEETING_AGENDA.name,
             "autoDeriveAfterSeconds",
-            env_var="AGENDA_DERIVATION_AFTER_SECONDS",
             default=AGENDA_DERIVATION_AFTER_SECONDS,
         )
     )

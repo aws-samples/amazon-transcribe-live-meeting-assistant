@@ -1059,7 +1059,6 @@ def configured_model_id() -> str:
     return read_setting(
         "language_models",
         "meetingAssistModelId",
-        env_var="TROUBLESHOOTING_MODEL_ID",
         default=FALLBACK_MODEL_ID,
     )
 

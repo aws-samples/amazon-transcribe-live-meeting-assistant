@@ -93,7 +93,6 @@ def configured_agent_model_id() -> str:
     return read_setting(
         'language_models',
         'meetingAssistModelId',
-        env_var='MODEL_ID',
         default=DEFAULT_AGENT_MODEL_ID,
     )
 
@@ -107,7 +106,6 @@ def configured_kb_model_id() -> str:
     return read_setting(
         'language_models',
         'knowledgeBaseModelId',
-        env_var='KB_MODEL_ID',
         default=DEFAULT_KB_MODEL_ID,
     )
 

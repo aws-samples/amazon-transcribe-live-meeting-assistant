@@ -157,7 +157,7 @@ update that carries it has completed.
 ### v0.4.0
 
 **Stack parameters that were defaults of runtime settings are removed.** 0.4.0
-drops 27 parameters, among them the Amazon Bedrock model ids, the Amazon Transcribe
+drops the 24 such parameters v0.3.10 had, among them the Amazon Bedrock model ids, the Amazon Transcribe
 language and redaction options, `EnableAudioRecording`, the wake phrase, the voice
 assistant settings and `MeetingInactivityTimeoutInMinutes`. Each is now only a
 setting on the Configuration page, with a shipped default; the full list is in
@@ -166,7 +166,11 @@ This is a clean break:
 
 - **The values those parameters held are not carried across.** After the update,
   the deployment uses each setting's shipped default, or the value an Admin had
-  saved on the Configuration page. To keep values you had set with the
+  saved on the Configuration page. Check these four first, because they change
+  what is captured: `IsContentRedactionEnabled=true` becomes redaction **off**,
+  `EnableAudioRecording=false` becomes recording **on**,
+  `MeetingInactivityTimeoutInMinutes=0` becomes a reaper that ends meetings after
+  240 minutes without speech, and a voice assistant provider becomes `none`. To keep values you had set with the
   parameters, note them before you update (the stack's **Parameters** tab in the
   CloudFormation console), then either create a Custom profile with them and
   activate it, or write them into a configuration file and deploy with the new
