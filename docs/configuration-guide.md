@@ -24,14 +24,14 @@ are what this page is about: they are stored in the stack's configuration table,
 an Admin changes them from the web UI, and the change takes effect without a
 deployment.
 
-The runtime settings are grouped into sections. Each section has a default and
-your changes over it. Only what you change is stored, so a setting you never
-touched keeps following its default. For most settings the default ships with
-LMA and is updated by later releases. For some, the default is the value of a
-stack parameter; see
-[Settings whose default is a stack parameter](#settings-whose-default-is-a-stack-parameter).
-For the retention settings, the stack parameter is a limit as well as the
-default; see [Retention: settings the stack limits](#retention-settings-the-stack-limits).
+The runtime settings are grouped into sections, and held in configuration
+profiles (see [Configuration profiles](#configuration-profiles)). The deployment
+default profile holds every setting's default, which ships with LMA and is
+updated by later releases; a Custom profile holds a full copy you change. Settings
+that were stack parameters before 0.4.0 are listed in
+[Settings that were stack parameters before 0.4.0](#settings-that-were-stack-parameters-before-040).
+For the retention settings, a stack parameter is still the default and a limit;
+see [Retention: settings the stack limits](#retention-settings-the-stack-limits).
 
 | Section | What it controls | A saved change applies |
 |---|---|---|
@@ -59,36 +59,20 @@ the same configuration.
 Only members of the **Admin** Cognito group can change any of these. Add someone
 to the group on [User Management](user-management.md) if they need to.
 
-## Settings whose default is a stack parameter
+## Settings that were stack parameters before 0.4.0
 
-Some settings used to be chosen only with a stack parameter. They are now on the
-Configuration page, and the stack parameter is kept as the setting's
-**default**:
+Until 0.4.0 these settings were also stack parameters, and the parameter was the
+setting's default. From 0.4.0 they are only settings: the parameters are gone, and
+each setting ships with a default in the deployment's default profile.
 
-- A new deployment shows the values you gave the parameters, marked as
-  defaults, and uses them until you change them on the page.
-- An existing deployment that is updated keeps the values its parameters had:
-  the stack update writes them into the configuration as the defaults. Nothing
-  needs to be done on upgrade.
-- A value you save on the page takes precedence over the parameter. **Reset to
-  default** puts the parameter's value back.
-- A later stack update that changes the parameter changes the default. That
-  applies wherever the setting has not been changed on the page; where it has,
-  the saved value stays in force until you reset it. If a stack update seems to
-  have had no effect on one of these settings, look for a **Changed** mark on
-  the page.
+The table lists the parameters a released version had; three settings new in
+0.4.0 (the knowledge-base model, the key frame text model and the agenda timing)
+were never released as parameters.
 
-The parameters are not removed, so existing deploy commands and pipelines that
-pass them keep working. Each one's entry in
-[CloudFormation Parameters](cloudformation-parameters.md) names the setting it
-is the default of.
-
-| Section › setting | Default from |
+| Section › setting | Stack parameter before 0.4.0 |
 |---|---|
 | Amazon Bedrock Models › Summaries and meeting insights | `BedrockModelId` |
 | Amazon Bedrock Models › Meeting assistant | `MeetingAssistServiceBedrockModelID` |
-| Amazon Bedrock Models › Meeting assistant knowledge bases | `MeetingAssistKnowledgeBaseModelID` |
-| Amazon Bedrock Models › Key frame text | `KeyframeTextModelId` |
 | Amazon Transcribe › Language | `TranscribeLanguageCode` |
 | Amazon Transcribe › Language options | `TranscribeLanguageOptions` |
 | Amazon Transcribe › Preferred language | `TranscribePreferredLanguage` |
@@ -111,55 +95,51 @@ is the default of.
 | Virtual Participant › Teams: milliseconds between meeting checks | `VPAttendeePollMs` |
 | Virtual Participant › Teams: checks alone before leaving | `VPPollsBeforeEnd` |
 | Virtual Participant › Teams: checks without a meeting before leaving | `VPPollsBeforeEndMissing` |
-| Meeting Agenda › Seconds into a meeting to look for a stated agenda | `AgendaDerivationAfterSeconds` |
 
-The Amazon Transcribe and Meeting Recording settings apply to meetings streamed
-to LMA from the Stream Audio page, the browser extension and the desktop app,
-and to Virtual Participants. A Virtual Participant uses the language, language
-options, preferred language, redaction and custom vocabulary; the custom
-language model, the redacted entity types and the speaker-identification default
-apply to streaming meetings only. The integration API keys stay stack
-parameters, and a provider or avatar chosen on the page without its key on the
-stack does not start. The Nova Sonic Voice Assistant section says whether its
-Group meeting and Translator meeting modes apply, from the activation mode as
-saved in the Virtual Participant section: they need **Always listening**.
+**Upgrading a deployment that set any of these parameters.** The values the
+parameters held are not carried across. After the update, a deployment upgraded
+from v0.3.10 uses the shipped default for every one of these settings. To keep a value you had set with a parameter:
 
-`MeetingInactivityTimeoutInMinutes` also decides whether the inactive-meeting
-reaper is deployed at all: at `0` there is no reaper, and the setting has no
-effect until a stack update sets the parameter above `0`. On a deployment that
-has the reaper, setting the timeout to `0` on the page stops it ending meetings
-until the setting is changed again.
+- create a Custom profile (**Profile › Copy to a new profile**), set the values
+  there, save and **Activate** it; or
+- write the values into a configuration file and deploy with the
+  `CustomConfigPath` stack parameter, which makes them the deployment default; see
+  [Choosing the default configuration at deploy time](configuration-store.md#choosing-the-default-configuration-at-deploy-time).
 
-Some things differ from setting these with the parameters:
+Remove the parameters from deploy commands and pipelines: CloudFormation refuses
+an update that names a parameter the template does not declare. `lma deploy`
+leaves them out on its own.
 
-- While the stack deploys, it checks that the parameters' Bedrock models can be
-  invoked (unless `ModelValidation` is `false`). A model chosen on the page is
-  not checked, so enable access to it in the Amazon Bedrock console first.
-- While the stack deploys, it also checks that the parameters' Amazon Transcribe
-  options fit together: language identification needs language options, at most
-  one dialect per language, a preferred language among them, and no custom
-  vocabulary or language model. The page cannot check that across settings, so
-  the WebSocket transcriber does as each meeting starts: options saved on the
-  page that do not fit together are logged, and the meeting is transcribed with
-  the deployment's parameter values for the language, language options,
-  preferred language, custom vocabulary and custom language model until they are
-  corrected. Redaction and recording keep the values saved on the page. A
-  Virtual Participant makes the same check as it starts, with the same result.
+The integration API keys stay stack parameters, and a provider or avatar chosen on
+the page without its key on the stack does not start. The Nova Sonic Voice
+Assistant section says whether its Group meeting and Translator meeting modes
+apply, from the activation mode as saved in the Virtual Participant section: they
+need **Always listening**.
+
+A few things to know about these settings:
+
+- A model chosen on the page is not checked before it is used, so enable access to
+  it in the Amazon Bedrock console first.
+- The WebSocket transcriber checks, as each meeting starts, that the Amazon
+  Transcribe options fit together: language identification needs language
+  options, at most one dialect per language, a preferred language among them, and
+  no custom vocabulary or language model. Options that do not fit together are
+  logged, and the meeting is transcribed with the shipped defaults for those
+  options until they are corrected. A Virtual Participant makes the same check as
+  it starts.
 - If the WebSocket transcriber cannot read the configuration when a meeting
-  starts, that meeting uses the stack parameters' values for all of these
-  settings, redaction and recording included, and the next meeting reads the
+  starts, that meeting uses the shipped defaults, and the next meeting reads the
   configuration again.
 - Nothing checks that a custom vocabulary or language model exists. Amazon
   Transcribe checks when a meeting starts, and a meeting whose vocabulary or
-  model it does not recognise is not transcribed, so make sure the name exists
-  in this account and region, and matches the language, before saving it.
-- Two optional transcriber features outside the default deployment, Call
-  Analytics' post-call output and the PCA integration, follow the
-  `IsContentRedactionEnabled` parameter rather than the page, because they have
-  to agree with each other about where redacted output goes.
-- The page offers the same choices the parameter does. A model a later release
-  stops offering stays in force where it was saved, and the next save of the
-  section asks for another.
+  model it does not recognise is not transcribed.
+- Call Analytics' post-call output, where deployed, is redacted exactly when the
+  meeting is.
+- The page offers only the choices the schema lists. A model a later release stops
+  offering stays in force where it was saved, and the next save of the section
+  asks for another.
+- **Meeting Processing › Minutes without speech before a meeting is ended** set to
+  0 makes the inactive-meeting reaper end nothing; the reaper is always deployed.
 
 ## Retention: settings the stack limits
 
@@ -355,6 +335,78 @@ operations are described in the
 [Unified Configuration Store](configuration-store.md) reference. Editing the
 configuration table in the DynamoDB console does not work: the records are
 stored compressed, and an attribute added beside a compressed record is ignored.
+
+## Notes on specific settings
+
+### Choosing Amazon Bedrock models
+
+**Summaries and meeting insights** (summaries, pasted meeting invitations, the speaker-naming pass,
+agenda derivation and the transcript knowledge-base query) and
+**Meeting assistant** (the meeting assistant and the
+troubleshooting agent) offer the same list but have different defaults, because
+they are chosen for different jobs. The first defaults to
+`global.anthropic.claude-sonnet-5-5`: summarisation is batch work where the
+quality of the answer is what matters. The second
+defaults to `global.anthropic.claude-haiku-4-5-20251001-v1:0`, because the
+assistant answers mid-meeting and is sometimes spoken aloud, so its time to first
+token matters most; measured against a real transcript it begins replying in about
+0.9 s, against 1.2 s for Sonnet 5.5 and 2.7 s for Haiku 5.5, both of which reason
+before answering.
+
+Summaries cost more on Sonnet 5.5 than on Haiku 4.5 — roughly 27% more input
+tokens, and two to three times the output tokens, for a noticeably longer
+summary. The Claude 5 generation reasons before it answers and the reasoning is
+billed as output, so one summary of the same meeting consumes roughly three to
+four times the output tokens it does on Claude 4.5 at the same size, and its
+tokenizer counts a given transcript as roughly a quarter more input tokens. If
+cost matters more than the last increment of quality, use
+`global.anthropic.claude-haiku-4-5-20251001-v1:0`.
+
+**Meeting assistant knowledge bases** offers a shorter list. It names the model the
+meeting assistant's knowledge bases generate an answer with, and a Bedrock
+Knowledge Base can be driven with fewer models than the agent itself runs on —
+per individual model, not by family or version — so the list is a record of what
+has been verified rather than a rule. See
+[The knowledge-base model](meeting-assistant.md#the-knowledge-base-model).
+
+**Key frame text** offers only image-capable models, because the model reads a
+picture of the shared screen. See [Meeting Video and Key Frames](meeting-video.md).
+
+A `global.` profile routes to whichever region has capacity; a `us.` profile keeps
+inference within the United States. Pick the one your data-residency position
+allows. Whichever you choose, enable access to that model in the Amazon Bedrock
+console for the region you deploy into first — see
+[Amazon Bedrock Model Access](prerequisites-and-deployment.md#amazon-bedrock-model-access).
+The Configuration page offers only the models listed here.
+
+### Teams meeting-end detection
+
+The Virtual Participant section's three **Teams** settings (milliseconds between meeting checks, and the two counts of checks before leaving) apply to the
+Teams browser join path only, and no deployment should normally need to change
+them — see
+[How the VP decides a meeting has ended](virtual-participant.md#how-the-vp-decides-a-meeting-has-ended)
+for what each signal measures and why the two thresholds differ so much.
+
+### Closing meetings that were never ended
+
+**Meeting Processing › Minutes without speech before a meeting is ended** backs the scheduled reaper that ends meetings
+whose client disconnected without sending its end-of-meeting event; otherwise
+those meetings show as "In Progress" for as long as their record is retained. The
+reaper runs every 15 minutes, so a meeting can remain in progress for the timeout
+plus one interval. Its liveness signal is the meeting record's last update, which
+a transcript segment refreshes, so a meeting that is still connected but has
+produced no finalized speech for longer than the timeout is also ended; keep the
+value comfortably longer than the longest quiet stretch your meetings have.
+Meetings still being processed by the upload pipeline are left to the upload
+finalizer. The reaper is always deployed; a timeout of 0 makes it end nothing.
+
+**Days to look back for meetings that were never ended** bounds how much history each run examines. A
+meeting that started before the window is never closed automatically, so if you
+are updating a deployment that has accumulated older meetings stuck in progress,
+raise it once on the Configuration page, let a run
+complete, and put it back; no stack update is needed. Each run also stops after
+reading 500 candidate meetings, newest first. See
+[Troubleshooting → Meeting Stuck In Progress](troubleshooting.md#meeting-stuck-in-progress).
 
 ## Related
 

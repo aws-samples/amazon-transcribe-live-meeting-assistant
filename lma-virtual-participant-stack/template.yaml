@@ -6,6 +6,12 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: Amazon Transcribe Live Meeting Assistant - Virtual Participant
 
 Parameters:
+  # Since 0.4.0 the voice assistant, avatar face, Teams meeting-end polling,
+  # Amazon Transcribe and audio-recording parameters below are Configuration
+  # page settings. lma-main.yaml no longer passes these parameters, so each
+  # stays at its default, which is the setting's shipped default, and is the
+  # task's fallback when the configuration cannot be read. The task reads the
+  # configuration first (backend/src/stack-settings.ts).
   LMAStackName:
     Type: String
     Description: LMA Stack Name
@@ -277,8 +283,9 @@ Parameters:
       Consecutive polls on which a Teams meeting must show neither a readable
       attendee count nor any in-meeting controls before the Virtual Participant
       leaves. 15 polls at the default cadence is about 5 minutes. Raise
-      this if participants report the Virtual Participant leaving meetings
-      that are still in progress. A value producing a tolerance outside 4 to
+      it on the Configuration page (Virtual Participant section) if
+      participants report the Virtual Participant leaving meetings that are
+      still in progress. A value producing a tolerance outside 4 to
       30 minutes at the chosen cadence is adjusted into that range, so at the
       default cadence anything below 12 is raised.
 

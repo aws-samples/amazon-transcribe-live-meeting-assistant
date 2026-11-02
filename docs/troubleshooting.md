@@ -183,8 +183,8 @@ its shutdown never runs:
   meeting can show as in progress for up to that long plus one schedule
   interval before it closes on its own. The timeout is **Minutes without speech
   before a meeting is ended** in the Meeting Processing section of the
-  [Configuration page](configuration-guide.md), whose default is the
-  `MeetingInactivityTimeoutInMinutes` stack parameter.
+  [Configuration page](configuration-guide.md), which an Admin can change
+  with no stack update.
 
 To see what the reaper is doing, look at the
 `/<AISTACK-name>/lambda/StaleMeetingReaperFunction` log group: each run logs a
@@ -195,20 +195,17 @@ inside the timeout, already `ENDED`, or still owned by the upload pipeline (an
 in-flight Transcribe job on a long recording can easily outlast the timeout, so
 those meetings are skipped and closed by the finalizer instead).
 
-Two bounds decide which meetings a run can reach. `MeetingInactivityLookbackInDays`
-(default 2) is how far back it looks: **a meeting that started earlier than that is
+Two bounds decide which meetings a run can reach. **Meeting Processing › Days to
+look back for meetings that were never ended** (default 2) is how far back it looks: **a meeting that started earlier than that is
 never closed automatically**, so if you have a backlog of older meetings stuck in
 progress — for example on the update that first introduces the reaper — raise it,
-let one run complete, and set it back. It is **Days to look back for meetings that
-were never ended** in the Meeting Processing section of the
-[Configuration page](configuration-guide.md), so this needs no stack update: the
-parameter is its default. Each run also stops after reading
+let one run complete, and set it back. It is a setting on the
+[Configuration page](configuration-guide.md), so this needs no stack update. Each run also stops after reading
 500 candidate meetings; they are examined newest-first, so meetings that have just
 become eligible are always covered, and a run that hits the cap says so in its log.
 
-Setting the `MeetingInactivityTimeoutInMinutes` stack parameter to `0` removes the
-reaper and its schedule; setting the timeout to `0` on the Configuration page
-keeps the reaper running but ending nothing. With it disabled, or to end a
+The reaper is always deployed. Setting the timeout to `0` on the Configuration
+page keeps the reaper running but ending nothing. With it disabled, or to end a
 meeting sooner than the timeout, you can still end a
 meeting by hand by updating its record (`PK` = `SK` = `c#<CallId>`) in the event
 sourcing DynamoDB table.

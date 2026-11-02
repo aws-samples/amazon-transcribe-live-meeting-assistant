@@ -504,7 +504,7 @@ def test_a_guessed_log_group_name_is_refused_rather_than_queried() -> None:
 
 
 def test_the_legacy_microvm_group_is_refused_where_it_does_not_exist() -> None:
-    """A deployment created at v0.3.11 or later never had the -vp group, so a
+    """A deployment created at v0.4.0 or later never had the -vp group, so a
     name the model carries from elsewhere is not queried."""
     with pytest.raises(ToolError, match="none of the named log groups exist"):
         make_tools().search_logs(LEGACY_VP_GROUP)

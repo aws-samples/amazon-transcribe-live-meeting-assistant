@@ -181,7 +181,7 @@ Where the virtual participant's evidence lives depends entirely on VPLaunchType:
   permanently EMPTY, no ECS task-stopped event is ever emitted, and there is no
   network-registration phase. "The ECS task has no stopped reason" is not a
   finding on this deployment; it is a property of it.
-  After an upgrade from a release before v0.3.11, MicroVM output may be in
+  After an upgrade from a release before v0.4.0, MicroVM output may be in
   either the current group or the legacy one (/aws/lambda-microvms/<stack>-vp,
   labelled microvmLogGeneration "legacy" by discover_log_groups): where a VP's
   output went was fixed when its MicroVM was launched, so a VP launched before

@@ -53,6 +53,7 @@ from lma_config import (  # noqa: E402
     MEETING_ASSIST,
     MEETING_PROCESSING,
     read_setting,
+    shipped_setting_defaults,
 )
 from metrics_utils import catalogue as metric_names
 from metrics_utils.emf import METRICS
@@ -65,7 +66,6 @@ from pure import (  # noqa: E402
     SentimentByPeriodEntry,
     SentimentEntry,
     SentimentPerChannel,
-    agenda_derivation_after_seconds,
     agenda_derivation_due,
     convert_keys_to_uppercamelcase,
     get_sentiment_per_quarter,
@@ -115,11 +115,9 @@ AGENDA_DERIVER_ARN = getenv("AGENDA_DERIVER_ARN", "")
 # Reads the text of each key frame, once, after it is stored. See
 # keyframe_text_extractor.
 KEYFRAME_TEXT_EXTRACTOR_ARN = getenv("KEYFRAME_TEXT_EXTRACTOR_ARN", "")
-#: The AgendaDerivationAfterSeconds parameter's value, from its environment
-#: variable; what the Meeting Agenda section falls back to.
-AGENDA_DERIVATION_AFTER_SECONDS = agenda_derivation_after_seconds(
-    getenv("AGENDA_DERIVATION_AFTER_SECONDS", "300")
-)
+#: The threshold used when the Meeting Agenda section cannot be read: 300
+#: seconds, the setting's shipped default in setting_defaults.json.
+AGENDA_DERIVATION_AFTER_SECONDS = 300.0
 # Meetings this execution environment has already queued the pass for; see
 # agenda_derivation_due for why this is not what makes the pass run once.
 AGENDA_PASS_QUEUED: set = set()
@@ -131,14 +129,12 @@ ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN = getenv("ASYNC_AGENT_ASSIST_ORCHESTRATOR_AR
 def transcript_hook_nonpartial_only() -> bool:
     """Whether the transcript Lambda hook is sent finished segments only.
 
-    The Meeting Processing section of the Configuration page, whose default is
-    the TranscriptLambdaHookFunctionNonPartialOnly stack parameter; that
-    parameter's environment variable when the section cannot be read.
+    The Meeting Processing section's value on the Configuration page, else the
+    shipped default in setting_defaults.json.
     """
     return read_setting(
         MEETING_PROCESSING.name,
         "transcriptHookNonPartialOnly",
-        env_var="TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY",
         default=True,
     )
 
@@ -146,16 +142,14 @@ def transcript_hook_nonpartial_only() -> bool:
 def agenda_derivation_threshold() -> float:
     """Seconds into a meeting with no agenda at which it is read for one; 0 is off.
 
-    The Meeting Agenda section of the Configuration page, whose default is the
-    AgendaDerivationAfterSeconds stack parameter; that parameter's environment
-    variable when the section cannot be read. Read on the section's standard
+    The Meeting Agenda section's value on the Configuration page, else the
+    shipped default in setting_defaults.json. Read on the section's standard
     tier, so a saved change reaches meetings about five minutes later.
     """
     return float(
         read_setting(
             MEETING_AGENDA.name,
             "autoDeriveAfterSeconds",
-            env_var="AGENDA_DERIVATION_AFTER_SECONDS",
             default=AGENDA_DERIVATION_AFTER_SECONDS,
         )
     )
@@ -169,7 +163,7 @@ def _compiled_wake_phrase(pattern: str) -> Optional[Pattern[str]]:
     except re.error as error:
         LOGGER.warning(
             "the configured wake phrase is not a regular expression (%s); using the "
-            "pattern in the deployment settings until it is corrected",
+            "shipped pattern until it is corrected",
             error,
         )
         return None
@@ -178,16 +172,15 @@ def _compiled_wake_phrase(pattern: str) -> Optional[Pattern[str]]:
 def wake_phrase_pattern() -> Optional[Pattern[str]]:
     """The regular expression that wakes the meeting assistant.
 
-    The Meeting Assistant section of the Configuration page, whose default is the
-    AssistantWakePhraseRegEx stack parameter. When that cannot be read, or holds
-    a pattern that does not compile, the deployment's own pattern, from its
-    settings parameter, is used, as it always was.
+    The Meeting Assistant section of the Configuration page, with its shipped
+    default. When the saved pattern does not compile, the shipped one is used
+    until it is corrected.
     """
-    configured = read_setting(
-        MEETING_ASSIST.name, "wakePhraseRegex", env_var="ASSISTANT_WAKE_PHRASE_REGEX"
-    )
+    configured = read_setting(MEETING_ASSIST.name, "wakePhraseRegex")
     compiled = _compiled_wake_phrase(configured) if configured else None
-    return compiled if compiled is not None else SETTINGS.get("AssistantWakePhraseRegEx")
+    if compiled is not None:
+        return compiled
+    return _compiled_wake_phrase(shipped_setting_defaults()[MEETING_ASSIST.name]["wakePhraseRegex"])
 
 
 if (

@@ -206,7 +206,8 @@ def _reads(path: Path) -> Iterator[Tuple[str, str, str]]:
         yield (
             _section_name(node.args[0]),
             node.args[1].value,
-            keywords["env_var"].value,
+            # Optional: a setting no stack parameter backs needs none.
+            keywords["env_var"].value if "env_var" in keywords else "",
         )
 
 
@@ -266,14 +267,19 @@ def test_the_readers_are_found() -> None:
 
 
 def _by_setting():
-    return {(e.section, e.setting): e for e in ENTRIES}
+    """Every setting a reader may name: the two parameter-backed ones and the shipped ones."""
+    return parameters._by_setting()  # pylint: disable=protected-access
+
+
+def _parameter_backed(section: str, setting: str) -> bool:
+    return any((e.section, e.setting) == (section, setting) for e in ENTRIES)
 
 
 @pytest.mark.parametrize("function, resource, read", AI_READERS + MEETING_ASSIST_READERS)
 def test_every_read_names_a_mapped_setting(function, resource, read) -> None:
     section, setting, _env_var = read
     assert (section, setting) in _by_setting(), (
-        f"{function} reads {section} › {setting}, which no parameter backs"
+        f"{function} reads {section} › {setting}, which neither settings file lists"
     )
 
 
@@ -282,6 +288,13 @@ def test_the_fallback_variable_is_the_same_parameter(function, resource, read) -
     section, setting, env_var = read
     entry = _by_setting()[(section, setting)]
     variables = resource["Properties"].get("Environment", {}).get("Variables", {})
+    if not _parameter_backed(section, setting):
+        # No parameter backs it any more: the reader's last resort is the
+        # shipped default, and no variable may pretend to be one.
+        assert env_var not in variables, (
+            f"{function} still sets {env_var}, but {section} › {setting} has no stack parameter"
+        )
+        return
     assert variables.get(env_var) == {"Ref": entry.parameter}, (
         f"{function} falls back to {env_var}, which must be set from {entry.parameter}"
     )
@@ -409,7 +422,12 @@ def test_the_transcriber_task_carries_the_fallback_variable(section, setting, en
     if env_var not in CONDITIONED_VARIABLES:
         assert environment[env_var] == {"Ref": entry.parameter}
     passed = MAIN["Resources"]["WEBSOCKETTRANSCRIBERSTACK"]["Properties"]["Parameters"]
-    assert passed.get(entry.parameter) == {"Ref": entry.parameter}
+    if _parameter_backed(section, setting):
+        assert passed.get(entry.parameter) == {"Ref": entry.parameter}
+    else:
+        # The nested stack's own parameter, at its default: the deployment's
+        # value is the configuration's, which the task reads first.
+        assert entry.parameter not in passed
 
 
 def test_the_transcriber_task_can_read_the_configuration_table() -> None:
@@ -461,10 +479,16 @@ def _named_defaults() -> List[Any]:
             default = keywords.get("default")
             if name != "read_setting" or not isinstance(default, ast.Name) or default.id not in strings:
                 continue
-            entry = _by_setting()[(_section_name(node.args[0]), node.args[1].value)]
+            section, setting = _section_name(node.args[0]), node.args[1].value
+            entry = _by_setting()[(section, setting)]
+            expected = (
+                MAIN["Parameters"][entry.parameter]["Default"]
+                if _parameter_backed(section, setting)
+                else parameters.shipped_setting_defaults()[section][setting]
+            )
             found.append(
                 pytest.param(
-                    entry.parameter,
+                    expected,
                     strings[default.id],
                     id=f"{path.parent.name}/{path.name}:{default.id}",
                 )
@@ -479,15 +503,16 @@ def test_the_named_fallbacks_are_found() -> None:
     assert len(NAMED_DEFAULTS) >= 6
 
 
-@pytest.mark.parametrize("parameter, fallback", NAMED_DEFAULTS)
-def test_a_readers_last_resort_is_the_parameters_own_default(parameter, fallback) -> None:
-    """A reader that finds neither the page's value nor its variable uses this.
+@pytest.mark.parametrize("expected, fallback", NAMED_DEFAULTS)
+def test_a_readers_last_resort_is_the_settings_default(expected, fallback) -> None:
+    """A reader that cannot read the configuration uses this.
 
-    It is a copy of the template's default, so it is pinned to it: a release that
+    It is a copy of the setting's default -- the shipped one, or the parameter's
+    for the two retention periods -- so it is pinned to it: a release that
     changes the default and not the copy would leave a reader on the old one.
     """
     # Compared as text: a Number parameter's default is read from YAML as a number.
-    assert str(fallback) == str(MAIN["Parameters"][parameter]["Default"])
+    assert str(fallback) == str(expected)
 
 
 # ── the Virtual Participant ─────────────────────────────────────────────────
@@ -553,7 +578,11 @@ def test_the_virtual_participant_task_sets_the_variable_from_the_same_parameter(
     # Either form passes the parameter's own value through.
     assert environment[env_var] in ({"Ref": entry.parameter}, {"Fn::Sub": f"${{{entry.parameter}}}"})
     passed = MAIN["Resources"]["VIRTUALPARTICIPANTSTACK"]["Properties"]["Parameters"]
-    assert passed.get(entry.parameter) == {"Ref": entry.parameter}
+    if _parameter_backed(section, setting):
+        assert passed.get(entry.parameter) == {"Ref": entry.parameter}
+    else:
+        # The nested stack's own parameter, at its default; see the transcriber's.
+        assert entry.parameter not in passed
 
 
 def test_every_virtual_participant_section_setting_is_applied() -> None:

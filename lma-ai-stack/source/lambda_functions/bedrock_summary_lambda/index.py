@@ -32,8 +32,8 @@ from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # confi
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-# The model when neither the configuration nor BEDROCK_MODEL_ID names one; the
-# BedrockModelId parameter's default.
+# The model when the configuration cannot be read; the same value as the
+# setting's shipped default in setting_defaults.json.
 FALLBACK_MODEL_ID = "global.anthropic.claude-sonnet-5-5"
 
 # grab environment variables
@@ -244,15 +244,14 @@ def get_generated_text(response):
 def summary_model_id():
     """The model summaries are written with.
 
-    The Amazon Bedrock Models section of the Configuration page, whose default is
-    the BedrockModelId stack parameter; that parameter's environment variable
-    when the section cannot be read. Read through the summariser's own store, so
-    it shares the prompt templates' cached document rather than adding a read.
+    The Amazon Bedrock Models section's value on the Configuration page, else the
+    shipped default in setting_defaults.json. Read through the summariser's own
+    store, so it shares the prompt templates' cached document rather than adding
+    a read.
     """
     return read_setting(
         LANGUAGE_MODELS.name,
         "summaryModelId",
-        env_var="BEDROCK_MODEL_ID",
         default=FALLBACK_MODEL_ID,
         store=CONFIG_STORE,
     )

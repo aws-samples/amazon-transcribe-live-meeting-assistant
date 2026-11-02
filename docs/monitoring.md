@@ -64,7 +64,7 @@ problem.
 | `transcriber-service-no-tasks` | The transcriber ECS service is running no tasks, for two consecutive 5-minute windows (`Minimum`, `< 1`). Also notifies on recovery. | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `appsync-5xx-errors` | The GraphQL API returned five or more server errors (`Sum` over 5 min, `>= 5`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `transcribe-concurrent-streams-near-quota` | Concurrent Amazon Transcribe `StartStreamTranscription` sessions in this region reach the configured level (`Maximum` over 5 min, `>= threshold`). | `AlertsTopic` | `TranscribeConcurrentStreamAlarmThreshold` (`20`) |
-| `stale-meeting-reaper-not-invoked` | The stale-meeting reaper recorded no invocations in each of two consecutive hours (`Sum`, `<= 0`). Also notifies on recovery. Not created at all when the reaper is switched off. | `AlertsTopic` | `MeetingInactivityTimeoutInMinutes` (`240`; `0` removes the alarm) |
+| `stale-meeting-reaper-not-invoked` | The stale-meeting reaper recorded no invocations in each of two consecutive hours (`Sum`, `<= 0`). Also notifies on recovery. | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `bedrock-throttling` | Amazon Bedrock throttled five or more invocations (`Sum` over 5 min, `>= 5`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `vp-launch-failures` | The Virtual Participant launch state machine failed or timed out an execution in any of the last three 5-minute windows (`Sum`, `>= 1`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `transcript-segment-write-failures` | One or more transcript segments failed to be written in any of the last three 5-minute windows (`Sum` of `TranscriptSegmentWriteFailed`, `>= 1`). Reads a metric LMA publishes. | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
@@ -114,10 +114,12 @@ alarm watches for the *absence* of invocations, so it treats missing data as
 breaching. CloudWatch treats an evaluation range with no data at all as
 breaching regardless of how many evaluation periods are configured, so a stack
 that has just been created notifies once and then clears as soon as the reaper's
-first scheduled run lands. This is expected and needs no action. When
-`MeetingInactivityTimeoutInMinutes` is `0`, the reaper's schedule rule is left
-in place but disabled on purpose, and the alarm is not created at all — so
-turning the reaper off does not leave an alarm permanently red.
+first scheduled run lands. This is expected and needs no action. The reaper is
+always scheduled, so the alarm is created whenever operational alarms are on.
+Setting **Meeting Processing › Minutes without speech before a meeting is
+ended** to `0` on the [Configuration page](configuration-guide.md) makes each
+run end nothing, but the reaper still runs on schedule, so the alarm does not
+stay red.
 
 **Healthy-target count and task count are a pair.** An ALB target group
 publishes `HealthyHostCount` only while it has registered targets, so when the

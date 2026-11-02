@@ -27,7 +27,6 @@ os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ["EVENT_SOURCING_TABLE"] = "calls"
 os.environ["RECORDINGS_BUCKET"] = "rec-bucket"
-os.environ["KEYFRAME_TEXT_MODEL_ID"] = "amazon.nova-lite-v1:0"
 
 HERE = Path(__file__).resolve().parent
 

@@ -30,7 +30,6 @@ os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("EVENT_SOURCING_TABLE", TABLE)
 os.environ.setdefault("APPSYNC_GRAPHQL_URL", APPSYNC_URL)
-os.environ.setdefault("BEDROCK_MODEL_ID", "test.model")
 
 HERE = Path(__file__).resolve().parent
 

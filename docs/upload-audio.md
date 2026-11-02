@@ -138,8 +138,7 @@ API instead of the streaming API.
   re-running.
 - **Language:** the language chosen for the upload, or `en-US` when none is
   chosen. An upload does not follow the language set for streaming meetings in
-  the Amazon Transcribe section of the Configuration page, or the
-  `TranscribeLanguageCode` stack parameter.
+  **Amazon Transcribe › Language** on the Configuration page.
 - **Pending uploads expire after 7 days.** Files left in
   `lma-uploads-pending/` are auto-cleaned by an S3 lifecycle rule, so a
   failed or abandoned upload will not accumulate storage cost.

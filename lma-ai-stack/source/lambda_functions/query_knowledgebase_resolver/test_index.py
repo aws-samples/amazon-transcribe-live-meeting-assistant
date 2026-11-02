@@ -3,9 +3,8 @@
 # See the LICENSE file in the project root for full license information.
 """Tests for the transcript knowledge-base query resolver's choice of model.
 
-The model is read per request from the Amazon Bedrock Models section, whose
-default is the BedrockModelId stack parameter, and falls back to that parameter's
-environment variable (MODEL_ID) when the section does not name one.
+The model is read per request from the Amazon Bedrock Models section, and is the
+shipped default in ``setting_defaults.json`` when the section does not name one.
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ import pytest
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("KB_ACCOUNT_ID", "123456789012")
-os.environ.setdefault("MODEL_ID", "us.anthropic.claude-sonnet-4-6")
 
 HERE = Path(__file__).resolve().parent
 LAYER = HERE.parents[1] / "lambda_layers" / "configuration_layer"
@@ -66,9 +64,10 @@ def test_the_configured_model_is_used(store) -> None:
     )
 
 
-def test_without_a_configured_model_the_environment_variable_is_used(store) -> None:
+def test_without_a_configured_model_the_shipped_default_is_used(store) -> None:
     store({})
-    assert index.model_arn().endswith("inference-profile/us.anthropic.claude-sonnet-4-6")
+    shipped = parameters.shipped_setting_defaults()["language_models"]["summaryModelId"]
+    assert index.model_arn().endswith(f"inference-profile/{shipped}")
 
 
 def test_the_model_is_read_for_each_request(store) -> None:

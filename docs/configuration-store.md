@@ -19,9 +19,9 @@ its own, for the reason under [Still to come](#still-to-come).
 place, and the **summary prompt templates**, the **Nova Sonic voice assistant
 settings**, the **Meeting Assist chat buttons** and the **ASR engine switches** are
 served from them, alongside the meeting cost estimate's price table, which had no
-earlier store, and the Amazon Bedrock model choices, whose defaults are the stack
-parameters that used to be the only way to set them; see
-[Stack parameters as defaults](#stack-parameters-as-defaults). Every save into the store records a revision — who saved it,
+earlier store, and the settings that were stack parameters until 0.4.0, such as
+the Amazon Bedrock model choices; see
+[Settings that were stack parameters until 0.4.0](#settings-that-were-stack-parameters-until-040). Every save into the store records a revision — who saved it,
 when, which sections it changed, and an optional comment — and an Admin can list,
 compare and restore revisions; see [Revisions and audit](#revisions-and-audit).
 Each section has a JSON Schema document, and every administrator's save is
@@ -1139,164 +1139,47 @@ earlier store for prices, so nothing is adopted on upgrade, and the shared-profi
 version check above applies to an `updateCallPricing` save as it does to the
 configuration pages' saves.
 
-## Stack parameters as defaults
+## Settings that were stack parameters until 0.4.0
 
-Some stack parameters only ever reached application code: a model id passed to a
-function as an environment variable and read there. Such a setting moves into a
-section of this store, and its parameter stays, as the setting's **default**.
-Removing the parameter would break every deploy command and pipeline that
-passes it, so it is kept; what changes is what it means.
+Until 0.4.0, 24 released stack parameters only ever reached application code -- a model
+id, a number, a switch passed to a function as an environment variable. 0.4.0
+removes them as a clean break and makes each a Configuration page setting with a
+shipped default. Three settings
+new in this release (the knowledge-base and key frame text models, and the agenda
+timing) are listed there too, though no release had them as parameters.
 
-- `lma_config/parameter_defaults.json` names, for each such parameter, the
-  section and setting it is the default of, and the setting's type (`string`,
-  `integer` or `boolean`). `lma_config/parameters.py` reads it.
-- The AI stack passes the parameters' values to the seeder as the
-  `ParameterDefaults` property of `SeedConfiguration`, keyed by the
-  `lma-main.yaml` parameter name. The seeder writes each into `Config#default`,
-  after reading it back into its type and checking it against the section's
-  schema; a value that fails either is left out and logged. Because the values
-  are properties of the custom resource, a stack update that changes one re-runs
-  the seeder, which is what makes the baseline follow the parameter. The
-  custom resource reports which it wrote as its `ParameterDefaults` attribute.
-- The values go into the **baseline**, never into a profile. The baseline is
-  what the deployment was deployed with; the profile is what an administrator
-  changed. So an administrator's value wins until it is reset, and a later
-  change to the parameter reaches every deployment where nobody has changed the
-  setting.
-- A reader calls `read_setting(section, setting, env_var=...)` where it uses the
-  value, not at import, so the section's tier decides how soon a change is
-  seen. It prefers the resolved section; falls back to the parameter's
-  environment variable, which the function keeps, when the section does not
-  hold the setting or the table cannot be read; and then to its own default. A
-  function that already holds a store passes it, so the read shares that
-  store's cache. `read_setting` refuses a setting that no parameter backs.
-- The section's schema lists, for a setting with a fixed set of choices, exactly
-  the parameter's `AllowedValues`, so the page offers what a stack update could
-  set.
+- `lma_config/setting_defaults.json` holds each setting's shipped default and
+  type, by section and setting, and the parameter it replaced
+  (`formerParameter`). The seeder writes the defaults into `Config#default`,
+  under the content of the other default files and the `ConfigurationPreset` and
+  `CustomConfigPath` stack parameters.
+- `read_setting(section, setting)` is how a Python reader gets a value: the
+  active configuration; then, for the two settings a stack parameter still backs
+  (retention), the parameter's environment variable; then the caller's `default`;
+  then the shipped default. So a reader that cannot reach the table still has a
+  value. `lma-ai-stack/test/test_parameter_backed_settings.py` holds every call
+  to a listed setting, every reader's own fallback to the shipped default, and
+  the readers' table access.
+- The Virtual Participant (`stack-settings.ts`, which applies the
+  `virtual_participant`, `transcription` and `recording` sections to its process
+  environment as it starts) and the WebSocket transcriber
+  (`calleventdata/session-settings.ts`, which reads them as each meeting starts)
+  read the configuration first. Their nested templates keep their own
+  parameters of the same names, which the main stack no longer passes, so each
+  task's environment holds the nested template's default as its fallback.
+- The reaper is always deployed and scheduled; **Meeting Processing › Minutes
+  without speech before a meeting is ended** set to 0 makes each run end nothing.
+- The meeting assistant's wake phrase falls back to the shipped pattern when the
+  one saved on the page does not compile.
+- Call Analytics' post-call output is redacted exactly when the meeting's stream
+  is, and the PCA integration finds it in whichever folder it was written to.
 
-On upgrade there is nothing to do and nothing to adopt: the parameters' values
-are the deployment's current settings, and the first deployment that includes a
-moved parameter writes its value into the baseline. Until that deployment's
-seeder has run, the readers use their environment variable, which holds the same
-value.
-
-`lma-ai-stack/test/test_parameter_backed_settings.py` holds the three halves
-together: every listed parameter is passed from `lma-main.yaml` to the AI stack
-and from there to the seeder; its default and every allowed value are values
-the section accepts, and a listed choice is exactly its allowed values; and
-every `read_setting` call names a listed setting, on a function whose fallback
-environment variable is set from the same parameter and which has the table,
-the layer and read access to it.
-
-### The Amazon Bedrock models
-
-The `language_models` section holds the four Bedrock model ids that were each a
-stack parameter: `summaryModelId` (`BedrockModelId`), read by the summariser and
-the functions that read invitations, name speakers, derive agendas, query the
-transcript knowledge base and serve the MCP search tool; `meetingAssistModelId`
-(`MeetingAssistServiceBedrockModelID`), read by the meeting assistant and the
-troubleshooting agent; `knowledgeBaseModelId`
-(`MeetingAssistKnowledgeBaseModelID`), read by the meeting assistant's
-knowledge-base tools; and `keyframeTextModelId` (`KeyframeTextModelId`). Every
-one of those readers' Bedrock permissions covers all foundation models and
-inference profiles, so a model chosen here never needs a permission the stack
-lacks. The meeting assistant and the troubleshooting agent are in the
-meeting-assist stack, which is given the table's name and the layer's ARN as the
-AI stack's `ConfigurationTableName` and `ConfigurationPythonLayerArn` outputs. That
-template can still be deployed on its own, given neither: its functions then read
-the model parameters' environment variables, as they did before
-(`lma-meetingassist-setup-stack/src/configuration_settings.py`).
-
-The summariser reads the model once per summary, after its prompt templates, so
-every section of one summary is written by the same model. The troubleshooting
-agent reads it as each run starts.
-
-### The Amazon Transcribe options and the recording default
-
-The `transcription` section holds the nine Amazon Transcribe parameters, and the
-`recording` section `EnableAudioRecording`, for meetings streamed to the
-WebSocket transcriber. The transcriber reads both sections once as each meeting
-starts (`calleventdata/session-settings.ts`), through the TypeScript half's
-`parameterBackedSetting`, which applies the Python half's precedence and type
-rules; each setting falls back to the task's environment variable of the same
-parameter. `lma-ai-stack/test/test_parameter_backed_settings.py` reads the
-transcriber's table of settings and environment variables and holds it to the
-parameter list and to the task definition.
-
-A meeting keeps the options it started with across every reconnect to Amazon
-Transcribe. The schema checks each option alone; the transcriber also makes the
-cross-setting checks the stack makes of the parameters at deploy time (language
-identification with language options, one dialect per language, a preferred
-language among them, no custom vocabulary or language model), and when saved
-options fail one, it logs which and takes the options those checks cover from
-the task's own values, which passed them when the stack deployed; redaction and
-recording keep the saved values. When the table cannot be read, the meeting uses
-the task's values for everything, and the next meeting reads again. Whether a
-named custom vocabulary or language model exists is not checked.
-
-### The Virtual Participant
-
-The `virtual_participant` section holds `VoiceAssistantProvider`,
-`VoiceAssistantActivationMode`, `VoiceAssistantWakePhrases`,
-`VoiceAssistantActivationDuration`, `ElevenLabsAgentId`, `SimliFaceId`,
-`VPAttendeePollMs`, `VPPollsBeforeEnd` and `VPPollsBeforeEndMissing`. A Virtual Participant also reads the `transcription`
-and `recording` sections.
-
-Every one of these reached the Virtual Participant as an environment variable
-of its task, and many places read them. So rather than change those places,
-`stack-settings.ts` in the Virtual Participant reads the three sections once as
-it starts and sets each variable the configuration holds a value for, leaving
-the others as the task was started. Some of the readers run when their module
-is imported (`details.ts`, `voice-assistant.ts`, `simli-avatar.ts`, `scribe.ts`); each imports
-`stack-settings.ts` first, and that module's top-level `await` makes the ES module
-loader finish the read before their own evaluation starts. On both launch paths
-the process starts when the meeting does, so what is applied is what is saved at
-that moment. Its table of settings and variables is held to the parameter list
-and to the task definition by `test_parameter_backed_settings.py`, which also
-checks that each of those three modules imports it first.
-
-Options that fail the deploy-time combination checks (in the shared accessor,
-`transcribeOptionsProblem`, which the transcriber uses too) are logged, and the
-options those checks cover keep the task's values while the page's redaction
-choices still apply, as in the transcriber. Redaction is derived as the template
-derives it, from the flag and the language. The three sections, all on the
-immediate tier, are taken from one consistent read of the resolved document.
-
-`VoiceAssistantActivationMode` was also built into the web app when the stack
-deployed it, for one purpose: the Nova Sonic Voice Assistant section says that its
-Group meeting and Translator meeting modes are ignored unless the voice assistant
-is always listening. That notice now reads the activation mode from the
-configuration the page has loaded, as saved, which is what the next Virtual
-Participant uses; an unsaved change to it does not change the notice. The web
-app is no longer given the parameter, so changing it no longer rebuilds the web
-app. A participant can still switch one running meeting's mode with a chat
-command ([Changing Mode During a Meeting](voice-assistant.md#changing-mode-during-a-meeting)),
-and that is not written back to the configuration.
-
-### The wake phrase, the transcript hook mode and the reaper's timeout and lookback
-
-`meeting_assist` holds `AssistantWakePhraseRegEx`, and `meeting_processing`
-`TranscriptLambdaHookFunctionNonPartialOnly` and
-`MeetingInactivityLookbackInDays`. The call event processor reads the first two
-per batch, and the reaper the third per run. The wake phrase's fallback is the
-pattern in the deployment settings parameter, which the processor has always
-compiled at start; a pattern saved on the page that does not compile is logged
-and that one is used.
-
-`meeting_agenda` holds `AgendaDerivationAfterSeconds`. The call event processor
-reads it on the standard tier for each finished segment of a meeting it has not
-yet queued the automatic agenda pass for, and falls back to the
-`AGENDA_DERIVATION_AFTER_SECONDS` variable, which the parameter sets; whether
-the meeting already has an agenda is the deriver's check. `0` turns the
-automatic pass off.
-
-`meeting_processing` also holds `MeetingInactivityTimeoutInMinutes`, which the
-reaper reads per run. The parameter still decides whether the reaper and its
-schedule exist (the template's condition is that it is above `0`), so only its
-value moved: on a deployment created with `0` there is nothing to read the
-setting, and on one with a reaper, `0` saved on the page makes each run end
-nothing. The reaper falls back to the parameter's variable as it has always read
-it, truncating a fractional value.
+**On upgrade**, the values a deployment's parameters held are not carried
+across: the deployment uses the shipped defaults, or what an Admin saved on the
+page. See
+[Settings that were stack parameters before 0.4.0](configuration-guide.md#settings-that-were-stack-parameters-before-040)
+for what to do instead. `lma deploy` drops the removed parameters from an update
+on its own; a pipeline that passes them has to stop.
 
 ## Stack parameters as upper limits: retention
 

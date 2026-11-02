@@ -14,7 +14,7 @@ title: "Stack Updates & Upgrades"
 - [What May Change](#what-may-change)
 - [Data Retention On Stack Deletion](#data-retention-on-stack-deletion)
 - [Version Migration Notes](#version-migration-notes)
-  - [v0.3.11](#v0311)
+  - [v0.4.0](#v040)
   - [v0.3.0](#v030)
   - [v0.2.0](#v020)
 - [Related Documentation](#related-documentation)
@@ -154,7 +154,44 @@ update that carries it has completed.
 
 ## Version Migration Notes
 
-### v0.3.11
+### v0.4.0
+
+**Stack parameters that were defaults of runtime settings are removed.** 0.4.0
+drops the 24 such parameters v0.3.10 had, among them the Amazon Bedrock model ids, the Amazon Transcribe
+language and redaction options, `EnableAudioRecording`, the wake phrase, the voice
+assistant settings and `MeetingInactivityTimeoutInMinutes`. Each is now only a
+setting on the Configuration page, with a shipped default; the full list is in
+[Settings that were stack parameters before 0.4.0](configuration-guide.md#settings-that-were-stack-parameters-before-040).
+This is a clean break:
+
+- **The values those parameters held are not carried across.** After the update,
+  a deployment upgraded from v0.3.10 uses the shipped default for every one of
+  these settings, since no released version had them on a Configuration page. Check these four first, because they change
+  what is captured: `IsContentRedactionEnabled=true` becomes redaction **off**,
+  `EnableAudioRecording=false` becomes recording **on**,
+  `MeetingInactivityTimeoutInMinutes=0` becomes a reaper that ends meetings after
+  240 minutes without speech, and a voice assistant provider becomes `none`. To keep values you had set with the
+  parameters, note them before you update (the stack's **Parameters** tab in the
+  CloudFormation console), then either create a Custom profile with them and
+  activate it, or write them into a configuration file and deploy with the new
+  `CustomConfigPath` parameter, which makes them the deployment default; see
+  [Choosing the default configuration at deploy time](configuration-store.md#choosing-the-default-configuration-at-deploy-time).
+- **Remove the parameters from deploy commands and pipelines.** CloudFormation
+  refuses an update that names a parameter the template does not declare.
+  `lma deploy` leaves them out on its own.
+- **The inactive-meeting reaper is always deployed.** A timeout of 0 on the
+  Configuration page makes it end nothing.
+
+**Configuration profiles work like IDP's.** The Configuration page lists the
+deployment's profiles, one of them active. A deployment runs on its Managed
+`default` profile, which every update rewrites with the release's defaults,
+until an Admin creates and activates a Custom profile. On upgrade from v0.3.10,
+the settings carried across from the previous tables (summary prompts, Nova
+Sonic settings, chat buttons, Transcription Engine switches) form a Custom
+profile, which stays active; a deployment with nothing to carry across runs on
+the default profile. The pages that edit one setting outside the Configuration
+page save into the active profile, and refuse while a Managed one is active. See
+[Configuration profiles](configuration-guide.md#configuration-profiles).
 
 Every Lambda function, MicroVM and CodeBuild project in the deployment now logs
 to a log group the stack declares, with the retention set by
@@ -233,57 +270,35 @@ deployment changes unless you raise it.
 
 #### The Meeting Assistant's knowledge-base model
 
-A separate change in this release splits one Bedrock model parameter into two,
-and a deployment that changed the Meeting Assistant's model should set the new
-one **before** updating.
-
 The Meeting Assistant's two knowledge-base tools — `document_search` over your
-documents and `meeting_history` over past meeting transcripts — do not call
-Bedrock the way the agent does. They ask a Bedrock Knowledge Base to generate an
-answer from what it retrieves, and a knowledge base drives that with
-orchestration and generation prompt templates it supplies itself. Those templates
-cover fewer models than the agent's own API does, and which models they cover is
-a property of the individual model rather than of its family or version — Claude
-Opus 4.1 is refused where Claude Opus 4.6 is accepted. Until now both jobs read
-one parameter, so the model you picked for the agent was also the model the
-knowledge bases tried to generate with. The new
-`MeetingAssistKnowledgeBaseModelID` names the second job separately and offers
-only the seven ids verified against a live knowledge base, defaulting to
-`global.anthropic.claude-haiku-4-5-20251001-v1:0`.
+documents and `meeting_history` over past meeting transcripts — now generate with
+a model of their own: **Amazon Bedrock Models › Meeting assistant knowledge
+bases** on the Configuration page. Until now they used the agent's model. A Bedrock
+Knowledge Base generates through orchestration and generation prompt templates it
+supplies itself, which cover fewer models than the agent's own API, and which
+models they cover is a property of the individual model rather than of its family
+or version — Claude Opus 4.1 is refused where Claude Opus 4.6 is accepted. So the
+setting offers only the seven ids verified against a live knowledge base, and
+defaults to `global.anthropic.claude-haiku-4-5-20251001-v1:0`.
 
-What to set depends on what your agent is running on now. Every row below is a
-value v0.3.10 offered, so one of them is the deployment you are upgrading:
+**After updating**, a deployment that had changed `MeetingAssistServiceBedrockModelID`
+should set this one in a Custom profile, depending on what the agent was running
+on, and enable access to it in the Amazon Bedrock console first:
 
-| Your current `MeetingAssistServiceBedrockModelID` | What the knowledge-base tools were doing | What to set |
+| The agent's model before the update | What the knowledge-base tools were doing | What to choose |
 |---|---|---|
-| `global.anthropic.claude-haiku-4-5-20251001-v1:0` (the default) | Generating on Claude Haiku 4.5 | Nothing — the new parameter's default is the same model |
-| Claude Sonnet 4.5, Sonnet 4.6 or Opus 4.6, in either profile form | Generating on that model | The same id, which the new parameter offers |
+| `global.anthropic.claude-haiku-4-5-20251001-v1:0` (the default) | Generating on Claude Haiku 4.5 | Nothing — the default is the same model |
+| Claude Sonnet 4.5, Sonnet 4.6 or Opus 4.6, in either profile form | Generating on that model | The same id |
 | Claude Opus 4.1 | Being refused on every call | Any offered id; the default is the safe pick |
 | Any Nova model, or Claude Opus 4 | Never established | Any offered id; the default is the safe pick |
 
-The Claude 5.5 models are not in that table because v0.3.10 did not offer them
-for the agent either — they and this parameter arrive in the same release. They
-are selectable for the agent only; retrieval always uses
-`MeetingAssistKnowledgeBaseModelID`, so choosing one for the agent leaves the
-knowledge-base tools alone.
-
-**Enable access to the value you choose before updating.** Deploy-time parameter
-validation now converses with the knowledge-base model as well as the agent's, so
-a stack whose account has never had access to the id in the new parameter is
-rejected at parameter validation instead of part-way through the update. A
-deployment that kept the agent default already has access to Haiku 4.5 and is
-unaffected. This check depends on `ModelValidation`, which defaults to `true`;
-an automated deployment that sets it to `false` gets no up-front check, and a
-model it cannot reach shows up as a failing knowledge-base tool during a meeting
-instead.
-
-If a knowledge base is ever given a model it cannot generate with — reachable
-only by deploying `lma-meetingassist-setup-stack/template.yaml` on its own, since
-the top-level parameter does not offer one — the tool it backs is not offered to
-the agent at all, and the function's log names the model and the parameter to
-change. Listing past meetings chronologically still works in that state, because
-the `recent_meetings_list` tool reads DynamoDB and involves no knowledge base.
-See [The knowledge-base model](meeting-assistant.md#the-knowledge-base-model).
+The Claude 5.5 models are selectable for the agent only; retrieval always uses
+this setting, so choosing one for the agent leaves the knowledge-base tools alone.
+A model chosen on the Configuration page is not checked before it is used: a model
+the account cannot invoke makes the tool fail when it next runs, with the Bedrock
+error in its log. Listing past meetings chronologically still works either way,
+because the `recent_meetings_list` tool involves no knowledge base. See
+[The knowledge-base model](meeting-assistant.md#the-knowledge-base-model).
 
 ### v0.3.0
 

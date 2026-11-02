@@ -1274,19 +1274,11 @@ class TroubleshootingTools:
             "with this on may still be using Amazon Transcribe for every "
             "meeting."
         ),
-        "VoiceAssistantProvider": "Which in-meeting voice assistant is running, if any.",
         "MeetingAssistService": (
             "Which assistant backend is deployed. Decides whether the "
             "meeting-assistant log group exists."
         ),
-        "EnableAudioRecording": "Whether meeting audio is retained.",
         "EnableVideoRecording": "Whether meeting screen capture is retained.",
-        "TranscribeLanguageCode": "Affects both engines' behaviour.",
-        "MeetingInactivityTimeoutInMinutes": (
-            "Zero removes the stale-meeting reaper's schedule entirely rather "
-            "than changing a number, so a meeting stuck In Progress has no "
-            "backstop."
-        ),
     }
 
     #: Parameter names matching any of these are reported by name only.

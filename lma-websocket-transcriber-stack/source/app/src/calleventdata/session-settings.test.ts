@@ -214,11 +214,9 @@ test('identifying several languages sends its own flag with the options and the 
     });
 });
 
-test('post-call output is redacted only when the parameter and the meeting both redact', () => {
-    assert.equal(postCallRedactionOutput(true, true), true);
-    assert.equal(postCallRedactionOutput(true, false), false);
-    assert.equal(postCallRedactionOutput(false, true), false);
-    assert.equal(postCallRedactionOutput(false, false), false);
+test('post-call output is redacted exactly when the meeting is', () => {
+    assert.equal(postCallRedactionOutput(true), true);
+    assert.equal(postCallRedactionOutput(false), false);
 });
 
 test('the speaker-partitioning default applies only when the client chose nothing', () => {

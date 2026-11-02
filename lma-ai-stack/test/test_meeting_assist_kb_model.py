@@ -24,19 +24,21 @@ rather than a measurement.
 There is therefore no rule to derive the list from, which is why the
 list is a record of measurements -- see KB_MODELS_VERIFIED_WORKING below -- and
 why `test_the_knowledge_base_choices_are_exactly_the_verified_set` asserts the
-CloudFormation parameter matches that record exactly. Adding a model to the
-agent's list does not make it usable here: somebody has to check it first, record
-it below, and only then can the parameter offer it.
+choices the configuration schema offers match that record exactly. Adding a model
+to the agent's list does not make it usable here: somebody has to check it first,
+record it below, and only then can the setting offer it.
 
-So the two models are configured separately -- `MeetingAssistServiceBedrockModelID`
-for the agent, `MeetingAssistKnowledgeBaseModelID` for the knowledge bases -- and
-this file asserts:
+So the two models are configured separately, as two settings of the
+`language_models` configuration section -- `meetingAssistModelId` for the agent,
+`knowledgeBaseModelId` for the knowledge bases -- and this file asserts:
 
-* the knowledge-base parameter offers exactly the ids verified against a live
+* the knowledge-base setting offers exactly the ids verified against a live
   knowledge base, all of which LMA also supports for the agent, and none that the
   function's own guard would refuse at runtime;
-* the value reaches the function as `KB_MODEL_ID`, and the agent's reaches it as
-  `MODEL_ID`, without the two being crossed;
+* its shipped default is one of those ids and is the same as the function's own
+  fallback;
+* the function reads the knowledge-base model from `knowledgeBaseModelId` and the
+  agent's from `meetingAssistModelId`, without the two being crossed;
 * the two knowledge-base tools build their `modelArn` from the knowledge-base
   model, are not offered to the agent at all when that model cannot generate, and
   return something the agent cannot read as retrieved material when a call fails.
@@ -51,6 +53,7 @@ a tool body directly.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 import types
@@ -58,24 +61,27 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-import yaml
 
 REPO = Path(__file__).resolve().parents[2]
-MAIN_TEMPLATE = REPO / "lma-main.yaml"
-MEETINGASSIST_TEMPLATE = REPO / "lma-meetingassist-setup-stack" / "template.yaml"
 FUNCTION_SRC = REPO / "lma-meetingassist-setup-stack" / "src"
 # The AI stack's configuration layer, which the function is deployed with and
 # imports lma_config from.
 CONFIGURATION_LAYER = REPO / "lma-ai-stack" / "source" / "lambda_layers" / "configuration_layer"
+LANGUAGE_MODELS_SCHEMA = CONFIGURATION_LAYER / "lma_config" / "schemas" / "language_models.json"
+SETTING_DEFAULTS = CONFIGURATION_LAYER / "lma_config" / "setting_defaults.json"
 
-AGENT_MODEL_PARAMETER = "MeetingAssistServiceBedrockModelID"
+LANGUAGE_MODELS = "language_models"
+AGENT_MODEL_SETTING = "meetingAssistModelId"
+KB_MODEL_SETTING = "knowledgeBaseModelId"
+# The name the function's own log message gives the knowledge-base model, asserted
+# by test_the_unusable_model_is_named_in_the_log_when_a_tool_is_withheld.
 KB_MODEL_PARAMETER = "MeetingAssistKnowledgeBaseModelID"
 
 # ── the measurement record ──────────────────────────────────────────────────
 #
 # Every id here was checked by issuing a RetrieveAndGenerate call against a live
 # transcript knowledge base in us-west-2 on 2026-10-21. This record is the reason
-# the CloudFormation parameter offers what it offers;
+# the knowledge-base setting offers what it offers;
 # test_the_knowledge_base_choices_are_exactly_the_verified_set ties the two
 # together, so a model cannot be offered without being added here, and cannot be
 # added here without somebody having made the call.
@@ -110,60 +116,43 @@ KB_MODELS_VERIFIED_REFUSED = (
 # measured in has no inference profile for this model at all, so whether a
 # knowledge base would accept it is unknown. Unknown is treated as not offered,
 # for the same reason the Nova models are not offered: an unverified value in
-# this parameter is the failure it exists to prevent. It remains selectable for
+# this setting is the failure it exists to prevent. It remains selectable for
 # the agent, where it is reached through Converse and is unaffected by any of
 # this.
 KB_MODELS_UNVERIFIABLE = ("us.anthropic.claude-opus-4-20250514-v1:0",)
 
 
-# ── templates ───────────────────────────────────────────────────────────────
-
-
-class _CfnLoader(yaml.SafeLoader):
-    """YAML loader that tolerates CloudFormation short-form intrinsics."""
-
-
-def _intrinsic(loader: yaml.Loader, tag_suffix: str, node: yaml.Node):
-    name = f"Fn::{tag_suffix}" if tag_suffix != "Ref" else "Ref"
-    if isinstance(node, yaml.ScalarNode):
-        return {name: loader.construct_scalar(node)}
-    if isinstance(node, yaml.SequenceNode):
-        return {name: loader.construct_sequence(node, deep=True)}
-    return {name: loader.construct_mapping(node, deep=True)}
-
-
-_CfnLoader.add_multi_constructor("!", _intrinsic)
+# ── the configuration section ───────────────────────────────────────────────
 
 
 @pytest.fixture(scope="module")
-def main_template() -> dict:
-    return yaml.load(MAIN_TEMPLATE.read_text(), Loader=_CfnLoader)
+def model_settings() -> dict:
+    return json.loads(LANGUAGE_MODELS_SCHEMA.read_text())["properties"]
 
 
 @pytest.fixture(scope="module")
-def meetingassist_template() -> dict:
-    return yaml.load(MEETINGASSIST_TEMPLATE.read_text(), Loader=_CfnLoader)
+def kb_model_choices(model_settings: dict) -> list:
+    return model_settings[KB_MODEL_SETTING]["enum"]
 
 
 @pytest.fixture(scope="module")
-def strands_function_env(meetingassist_template: dict) -> dict:
-    return meetingassist_template["Resources"]["StrandsMeetingAssistFunction"]["Properties"][
-        "Environment"
-    ]["Variables"]
+def kb_model_default() -> str:
+    return json.loads(SETTING_DEFAULTS.read_text())[LANGUAGE_MODELS][KB_MODEL_SETTING]["default"]
 
 
-def test_the_knowledge_base_model_is_a_parameter_of_its_own(main_template: dict):
+def test_the_knowledge_base_model_is_a_setting_of_its_own(model_settings: dict):
     """Guards the rest of this file against passing by collecting nothing."""
-    parameters = main_template["Parameters"]
-    assert KB_MODEL_PARAMETER in parameters, (
-        f"lma-main.yaml no longer declares {KB_MODEL_PARAMETER}; the knowledge bases "
+    assert KB_MODEL_SETTING in model_settings, (
+        f"language_models.json no longer declares {KB_MODEL_SETTING}; the knowledge bases "
         "would be back on the agent's model"
     )
-    assert len(parameters[KB_MODEL_PARAMETER]["AllowedValues"]) >= 5
+    assert KB_MODEL_SETTING != AGENT_MODEL_SETTING
+    assert AGENT_MODEL_SETTING in model_settings
+    assert len(model_settings[KB_MODEL_SETTING]["enum"]) >= 5
 
 
-def test_the_knowledge_base_choices_are_exactly_the_verified_set(main_template: dict):
-    """The parameter offers the verified ids and nothing else.
+def test_the_knowledge_base_choices_are_exactly_the_verified_set(kb_model_choices: list):
+    """The setting offers the verified ids and nothing else.
 
     This is the test that stops a model being offered for retrieval because it was
     added to the agent's list. There is no rule it could be derived from -- the
@@ -171,9 +160,9 @@ def test_the_knowledge_base_choices_are_exactly_the_verified_set(main_template: 
     accepted -- so the only honest gate is "somebody made the call and wrote down
     what happened". Equality in both directions is deliberate: a new offered value
     fails until it is recorded as verified above, and a value dropped from the
-    record fails until it is also dropped from the parameter.
+    record fails until it is also dropped from the setting.
     """
-    offered = set(main_template["Parameters"][KB_MODEL_PARAMETER]["AllowedValues"])
+    offered = set(kb_model_choices)
     verified = set(KB_MODELS_VERIFIED_WORKING)
     assert offered == verified, (
         f"offered without a recorded RetrieveAndGenerate check: {sorted(offered - verified)}; "
@@ -182,20 +171,19 @@ def test_the_knowledge_base_choices_are_exactly_the_verified_set(main_template: 
 
 
 def test_every_verified_refused_model_is_absent_from_the_knowledge_base_choices(
-    main_template: dict,
+    kb_model_choices: list,
 ):
     """Stated separately from the equality above, because it is the specific harm.
 
     An id in this list is one a live knowledge base answered with a
     ValidationException, so offering it would reproduce exactly the failure this
-    parameter exists to prevent.
+    setting exists to prevent.
     """
-    offered = set(main_template["Parameters"][KB_MODEL_PARAMETER]["AllowedValues"])
-    refused = sorted(offered & set(KB_MODELS_VERIFIED_REFUSED))
-    assert not refused, f"{KB_MODEL_PARAMETER} offers models a knowledge base refuses: {refused}"
+    refused = sorted(set(kb_model_choices) & set(KB_MODELS_VERIFIED_REFUSED))
+    assert not refused, f"{KB_MODEL_SETTING} offers models a knowledge base refuses: {refused}"
 
 
-def test_a_model_with_no_inference_profile_measured_is_not_offered(main_template: dict):
+def test_a_model_with_no_inference_profile_measured_is_not_offered(kb_model_choices: list):
     """Unknown is not the same as working.
 
     These returned ResourceNotFoundException because the account measured in has
@@ -203,34 +191,32 @@ def test_a_model_with_no_inference_profile_measured_is_not_offered(main_template
     base would accept them. They stay out until that is known, on the same footing
     as the Nova models.
     """
-    offered = set(main_template["Parameters"][KB_MODEL_PARAMETER]["AllowedValues"])
-    unverifiable = sorted(offered & set(KB_MODELS_UNVERIFIABLE))
+    unverifiable = sorted(set(kb_model_choices) & set(KB_MODELS_UNVERIFIABLE))
     assert not unverifiable, (
-        f"{KB_MODEL_PARAMETER} offers models whose knowledge-base behaviour is "
+        f"{KB_MODEL_SETTING} offers models whose knowledge-base behaviour is "
         f"unmeasured: {unverifiable}"
     )
 
 
 def test_no_offered_model_would_be_refused_by_the_functions_own_guard(
-    main_template: dict, strands_module
+    kb_model_choices: list, strands_module
 ):
-    """The template and the function have to agree on what is usable.
+    """The schema and the function have to agree on what is usable.
 
     The function withholds a knowledge-base tool whose model it believes cannot
-    generate. If that belief disagreed with the parameter, a deployment could
-    select a model the parameter advertises and silently get no tool.
+    generate. If that belief disagreed with the setting, an administrator could
+    select a model the Configuration page offers and silently get no tool.
     """
-    offered = main_template["Parameters"][KB_MODEL_PARAMETER]["AllowedValues"]
     refused = [
         value
-        for value in offered
+        for value in kb_model_choices
         if not strands_module.kb_model_supports_retrieve_and_generate(value)
     ]
-    assert not refused, f"offered by the parameter but withheld by the function: {refused}"
+    assert not refused, f"offered by the setting but withheld by the function: {refused}"
 
 
 def test_knowledge_base_model_choices_are_a_subset_of_the_agent_model_choices(
-    main_template: dict,
+    model_settings: dict,
 ):
     """A knowledge-base choice LMA does not support for the agent is untested ground.
 
@@ -238,81 +224,66 @@ def test_knowledge_base_model_choices_are_a_subset_of_the_agent_model_choices(
     which is what makes the shorter list a restriction rather than a separate,
     unvalidated model list.
     """
-    parameters = main_template["Parameters"]
-    kb_choices = set(parameters[KB_MODEL_PARAMETER]["AllowedValues"])
-    agent_choices = set(parameters[AGENT_MODEL_PARAMETER]["AllowedValues"])
+    kb_choices = set(model_settings[KB_MODEL_SETTING]["enum"])
+    agent_choices = set(model_settings[AGENT_MODEL_SETTING]["enum"])
     extra = sorted(kb_choices - agent_choices)
     assert not extra, f"offered for the knowledge base but not for the agent: {extra}"
 
 
-def test_the_knowledge_base_model_defaults_to_a_verified_model(main_template: dict):
-    default = main_template["Parameters"][KB_MODEL_PARAMETER]["Default"]
-    assert default in KB_MODELS_VERIFIED_WORKING, (
-        f"{KB_MODEL_PARAMETER} defaults to {default!r}, which has not been verified "
+def test_the_knowledge_base_model_defaults_to_a_verified_model(kb_model_default: str):
+    assert kb_model_default in KB_MODELS_VERIFIED_WORKING, (
+        f"{KB_MODEL_SETTING} defaults to {kb_model_default!r}, which has not been verified "
         "against a live knowledge base"
     )
 
 
-def test_the_knowledge_base_model_default_is_the_same_in_all_three_places(
-    main_template: dict, meetingassist_template: dict, strands_module
+def test_the_knowledge_base_model_default_matches_the_functions_fallback(
+    kb_model_default: str, kb_model_choices: list, strands_module
 ):
-    """One default, written down three times, pinned so the copies cannot drift.
+    """One default, written down twice, pinned so the copies cannot drift.
 
-    `lma-main.yaml` is the only one an ordinary deployment reads. The nested
-    template's default is reached by deploying it on its own, and the function's
-    `DEFAULT_KB_MODEL_ID` by an environment that sets no `KB_MODEL_ID` at all.
-    Those two are fallbacks, which is exactly why a disagreement between them
-    would go unnoticed: it would surface only in the deployment shape nobody
-    exercises.
+    setting_defaults.json is the default an ordinary deployment starts with. The
+    function's `DEFAULT_KB_MODEL_ID` is reached only when the configuration
+    section cannot be read, which is exactly why a disagreement would go
+    unnoticed: it would surface only in the case nobody exercises. The fallback
+    must also be a value the schema accepts, or the function could generate with
+    a model the Configuration page would refuse to save.
     """
-    main_default = main_template["Parameters"][KB_MODEL_PARAMETER]["Default"]
-    nested_default = meetingassist_template["Parameters"][KB_MODEL_PARAMETER]["Default"]
-    assert nested_default == main_default, (
-        f"{KB_MODEL_PARAMETER} defaults to {nested_default!r} in the meeting-assist "
-        f"template and {main_default!r} in lma-main.yaml"
-    )
-    assert strands_module.DEFAULT_KB_MODEL_ID == main_default, (
+    assert strands_module.DEFAULT_KB_MODEL_ID == kb_model_default, (
         f"DEFAULT_KB_MODEL_ID is {strands_module.DEFAULT_KB_MODEL_ID!r} but "
-        f"{KB_MODEL_PARAMETER} defaults to {main_default!r}"
+        f"setting_defaults.json defaults {KB_MODEL_SETTING} to {kb_model_default!r}"
     )
+    assert strands_module.DEFAULT_KB_MODEL_ID in kb_model_choices
 
 
-def test_the_knowledge_base_model_is_validated_at_deploy_time(main_template: dict):
-    """It is a second model to enable in the Bedrock console, so it joins the check.
+def _settings_read(strands_module, monkeypatch, reader) -> list:
+    """The (section, setting) pairs `reader` asks the configuration for."""
+    read: list = []
 
-    ValidateParameters converses with every model in this list before the nested
-    stacks deploy; a model the account has no access to is reported there instead
-    of as a failing tool mid-meeting.
-    """
-    model_ids = main_template["Resources"]["ValidateParameters"]["Properties"]["BedrockModelIds"]
-    assert {"Ref": KB_MODEL_PARAMETER} in model_ids
+    def fake_read_setting(section, setting, **_kwargs):
+        read.append((section, setting))
+        return f"{section}/{setting}"
 
-
-def test_the_knowledge_base_model_reaches_the_meeting_assist_stack(main_template: dict):
-    passed = main_template["Resources"]["MEETINGASSISTSETUP"]["Properties"]["Parameters"]
-    assert passed[KB_MODEL_PARAMETER] == {"Ref": KB_MODEL_PARAMETER}
+    monkeypatch.setattr(strands_module, "read_setting", fake_read_setting)
+    reader()
+    return read
 
 
-def test_the_function_reads_the_knowledge_base_model_from_its_own_variable(
-    strands_function_env: dict,
+def test_the_function_reads_the_knowledge_base_model_from_its_own_setting(
+    strands_module, monkeypatch
 ):
-    assert strands_function_env["KB_MODEL_ID"] == {"Ref": KB_MODEL_PARAMETER}
+    read = _settings_read(strands_module, monkeypatch, strands_module.configured_kb_model_id)
+    assert read == [(LANGUAGE_MODELS, KB_MODEL_SETTING)]
 
 
-def test_the_agent_model_variable_still_carries_the_agent_model(strands_function_env: dict):
-    """The two must not be crossed: MODEL_ID runs the agent, KB_MODEL_ID the retrieval.
+def test_the_function_reads_the_agent_model_from_the_agent_setting(strands_module, monkeypatch):
+    """The two must not be crossed: one setting runs the agent, the other the retrieval.
 
     Swapping them would leave the knowledge bases working and cap the agent at the
     knowledge base's narrower model list, which is the opposite of the point.
     """
-    assert strands_function_env["MODEL_ID"] == {"Ref": AGENT_MODEL_PARAMETER}
-
-
-def test_the_nested_template_declares_the_knowledge_base_model_parameter(
-    meetingassist_template: dict,
-):
-    """A parameter passed in but not declared is rejected when the nested stack deploys."""
-    assert KB_MODEL_PARAMETER in meetingassist_template["Parameters"]
+    read = _settings_read(strands_module, monkeypatch, strands_module.configured_agent_model_id)
+    assert read == [(LANGUAGE_MODELS, AGENT_MODEL_SETTING)]
 
 
 # ── the function itself ─────────────────────────────────────────────────────
@@ -411,9 +382,9 @@ def test_the_unmeasured_claude_5_5_id_is_withheld_by_the_generation_rule(strands
 def test_a_non_claude_model_keeps_the_knowledge_bases_default_prompts(strands_module):
     """Only the Claude generations are known to carry the requirement.
 
-    A Nova id is not offered by the parameter, but a standalone deployment of the
-    nested template can still set one, and reporting it unusable would remove a
-    tool for a model nothing has measured as failing.
+    A Nova id is not offered by the knowledge-base setting, but the guard is a
+    statement about models, not about the list, and reporting it unusable would
+    remove a tool for a model nothing has measured as failing.
     """
     assert strands_module.kb_model_supports_retrieve_and_generate("amazon.nova-pro-v1:0") is True
 
@@ -527,7 +498,7 @@ def test_the_unusable_model_is_named_in_the_log_when_a_tool_is_withheld(
         )
     logged = caplog.text
     assert "global.anthropic.claude-sonnet-5-5" in logged
-    assert KB_MODEL_PARAMETER in logged
+    assert "Meeting assistant knowledge bases" in logged
 
 
 def test_a_failed_meeting_history_search_does_not_read_as_a_search_result(
@@ -588,15 +559,15 @@ def test_the_handler_gives_the_knowledge_base_tools_the_knowledge_base_model(
 ):
     """The agent on a Claude 5.5 model, retrieval on Claude 4.5, in one invocation.
 
-    This is the arrangement the separate parameter exists to allow, and the
+    This is the arrangement the separate setting exists to allow, and the
     handler is the only place the two are told apart, so it is asserted here
     rather than inferred from the factories accepting a `kb_model_id` argument.
     The Strands agent is stood in for: `Agent` records the tools it was given and
     answers without Bedrock, and `BedrockModel` records the model it was asked
     for.
     """
-    monkeypatch.setenv("MODEL_ID", AGENT_MODEL_UNDER_TEST)
-    monkeypatch.setenv("KB_MODEL_ID", KB_MODEL_UNDER_TEST)
+    monkeypatch.setattr(strands_module, "configured_agent_model_id", lambda: AGENT_MODEL_UNDER_TEST)
+    monkeypatch.setattr(strands_module, "configured_kb_model_id", lambda: KB_MODEL_UNDER_TEST)
     monkeypatch.setenv("KB_ID", "JIHGFEDCBA")
     monkeypatch.setenv("TRANSCRIPT_KB_ID", "ABCDEFGHIJ")
     monkeypatch.setenv("KB_REGION", "us-west-2")
@@ -661,7 +632,7 @@ def test_the_handler_gives_the_knowledge_base_tools_the_knowledge_base_model(
     assert bedrock_model_kwargs["model_id"] == AGENT_MODEL_UNDER_TEST
     # Both knowledge-base tools are offered, and both generate with the
     # knowledge-base model, even though the agent runs on a model a knowledge base
-    # refuses. That is the whole point of the two parameters being independent.
+    # refuses. That is the whole point of the two settings being independent.
     #
     # Asserted by name rather than by count so that the absence of web_search is a
     # stated condition of this test -- this deployment configures no Tavily secret

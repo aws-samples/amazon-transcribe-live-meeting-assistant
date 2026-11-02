@@ -105,6 +105,7 @@ from lma_config import (  # from the configuration layer
     preset_offered,
     registered_sections,
     shipped_presets,
+    shipped_setting_defaults,
     validate_section,
 )
 
@@ -225,9 +226,13 @@ def shipped_default_body(domain: str) -> Dict[str, Any]:
         MEETING_CONSENT.name: consent,
         RETENTION.name: retention,
     }
-    # The sections whose defaults are stack parameters ship no content of their
-    # own: `seed` fills them from the parameters' values. Present and empty
-    # here, so the baseline holds every section whatever the template passed.
+    # The settings that used to be stack parameters, at their shipped defaults
+    # (lma_config/setting_defaults.json).
+    for section, values in shipped_setting_defaults().items():
+        body.setdefault(section, {}).update(values)
+    # The two retention periods are still stack parameters: `seed` fills them
+    # from the parameters' values. Present here, so the baseline holds every
+    # section whatever the template passed.
     for entry in parameter_defaults():
         body.setdefault(entry.section, {})
     return body

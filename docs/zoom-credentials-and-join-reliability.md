@@ -17,9 +17,9 @@ LMA's Virtual Participant (VP) joins Zoom meetings via headless Chromium. A gues
 
 ## Simli and join reliability
 
-Enabling the **Simli avatar** (both `SimliApiKey` and `SimliFaceId` set) requires browser settings that bridge the avatar's video into the meeting. Those settings change the browser's WebRTC behaviour in a way that meeting platforms are more likely to flag, so **with Simli enabled a Zoom join is more likely to require a login or trigger a CAPTCHA** before it lets the participant in.
+Enabling the **Simli avatar** (both the `SimliApiKey` stack parameter and **Virtual Participant › Simli face ID** on the Configuration page set) requires browser settings that bridge the avatar's video into the meeting. Those settings change the browser's WebRTC behaviour in a way that meeting platforms are more likely to flag, so **with Simli enabled a Zoom join is more likely to require a login or trigger a CAPTCHA** before it lets the participant in.
 
-> **If you are hitting login prompts or CAPTCHA challenges on join and don't need the on-camera avatar, disable Simli** by leaving `SimliApiKey` and `SimliFaceId` unset. Without Simli the VP joins with the most reliable profile. If you do want the avatar, signing in with [per-user Zoom credentials](#per-user-zoom-credentials) makes joins far more reliable.
+> **If you are hitting login prompts or CAPTCHA challenges on join and don't need the on-camera avatar, disable Simli** by leaving `SimliApiKey` and **Virtual Participant › Simli face ID** unset. Without Simli the VP joins with the most reliable profile. If you do want the avatar, signing in with [per-user Zoom credentials](#per-user-zoom-credentials) makes joins far more reliable.
 
 ## Per-user Zoom credentials
 

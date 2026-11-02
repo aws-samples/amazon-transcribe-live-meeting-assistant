@@ -67,8 +67,8 @@ Enable it in the client's own settings, independently for each channel:
 
 Both are off by default. For clients that do not send their own choice, the
 deployment-wide default is **Identify speakers within a channel by default** in
-the Amazon Transcribe section of the [Configuration page](configuration-guide.md),
-whose own default is the `ShowSpeakerLabel` CloudFormation parameter.
+the Amazon Transcribe section of the [Configuration page](configuration-guide.md)
+(off unless an Admin changes it).
 
 **Limitations:**
 
@@ -337,18 +337,23 @@ For meetings streamed from the Stream Audio page, the browser extension and the
 desktop app, the language, redaction, custom vocabulary, custom language model and
 speaker-identification default are set in the **Amazon Transcribe** section of the
 [Configuration page](configuration-guide.md), and whether audio is recorded in its
-**Meeting Recording** section, while the stack runs. The CloudFormation parameters
-below are those settings' defaults, and what a Virtual Participant uses. See
-[CloudFormation Parameters](cloudformation-parameters.md) for each one.
+**Meeting Recording** section, while the stack runs, with no stack update. A
+Virtual Participant reads the same sections when it starts. These are not stack
+parameters; to change one, an Admin makes and activates a Custom configuration
+profile (see [Configuration profiles](configuration-guide.md#configuration-profiles))
+and saves the setting there.
 
-| Parameter Name | Description | Default Value |
+| Setting on the Configuration page | Description | Default Value |
 |---|---|---|
-| Language for Transcription | Language or language identification mode for Amazon Transcribe | `en-US` |
-| Enable Content Redaction for Transcripts | Enable PII redaction in transcripts (supported languages only) | `false` |
-| Default for Speaker Identification on Streaming Sessions (`ShowSpeakerLabel`) | Deployment-wide default for per-channel speaker partitioning on WebSocket streaming sessions. Clients that send their own per-channel choice take precedence. | `false` |
-| Transcription Custom Vocabulary Name | Name of a custom vocabulary created in Amazon Transcribe | (empty) |
-| Transcription Custom Language Model Name | Name of a custom language model created in Amazon Transcribe | (empty) |
-| Record Expiration In Days | Number of days to retain audio recordings in S3 | `90` |
+| **Amazon Transcribe › Language** | Language or language identification mode for Amazon Transcribe | `en-US` |
+| **Amazon Transcribe › Redact personal information** | Enable PII redaction in transcripts (supported languages only) | `false` |
+| **Amazon Transcribe › Identify speakers within a channel by default** | Deployment-wide default for per-channel speaker partitioning on WebSocket streaming sessions. Clients that send their own per-channel choice take precedence. | `false` |
+| **Amazon Transcribe › Custom vocabulary** | Name of a custom vocabulary created in Amazon Transcribe | (empty) |
+| **Amazon Transcribe › Custom language model** | Name of a custom language model created in Amazon Transcribe | (empty) |
+
+How long audio recordings are kept in S3 (90 days by default) is still a stack
+parameter, `AudioRecordingExpirationInDays`; see
+[CloudFormation Parameters](cloudformation-parameters.md#audiorecordingexpirationindays).
 
 ## Related Documentation
 

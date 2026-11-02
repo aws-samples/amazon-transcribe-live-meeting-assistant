@@ -30,7 +30,6 @@ os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("EVENT_SOURCING_TABLE", TABLE)
 os.environ.setdefault("APPSYNC_GRAPHQL_URL", APPSYNC_URL)
-os.environ.setdefault("BEDROCK_MODEL_ID", "test.model")
 
 HERE = Path(__file__).resolve().parent
 
@@ -252,11 +251,21 @@ def test_segments_are_read_from_every_page(monkeypatch: pytest.MonkeyPatch) -> N
 # --------------------------------------------------------------------------
 
 
+def _configure_summary_model(monkeypatch: pytest.MonkeyPatch, model_id: str) -> None:
+    """Stand in for an administrator's choice in the Amazon Bedrock Models section."""
+    real = index.read_setting
+
+    def read_setting(section, setting, **kwargs):
+        return model_id if setting == "summaryModelId" else real(section, setting, **kwargs)
+
+    monkeypatch.setattr(index, "read_setting", read_setting)
+
+
 def test_a_temperature_is_sent_to_a_model_that_accepts_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Naming is extraction, so two passes over one meeting should agree."""
-    monkeypatch.setenv("BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
+    _configure_summary_model(monkeypatch, "us.anthropic.claude-haiku-4-5-20251001-v1:0")
     _, bedrock, _ = install(monkeypatch)
     index.handler({"CallId": CALL_ID}, None)
     assert bedrock.requests[0]["inferenceConfig"]["temperature"] == 0
@@ -266,7 +275,7 @@ def test_no_temperature_is_sent_to_a_model_that_rejects_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Claude 5 and later refuse the request rather than ignoring the setting."""
-    monkeypatch.setenv("BEDROCK_MODEL_ID", "global.anthropic.claude-haiku-5-5")
+    _configure_summary_model(monkeypatch, "global.anthropic.claude-haiku-5-5")
     _, bedrock, _ = install(monkeypatch)
     index.handler({"CallId": CALL_ID}, None)
     assert "temperature" not in bedrock.requests[0]["inferenceConfig"]

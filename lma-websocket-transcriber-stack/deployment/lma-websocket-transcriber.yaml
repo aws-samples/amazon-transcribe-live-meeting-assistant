@@ -8,6 +8,13 @@ Transform: AWS::Serverless-2016-10-31
 Description: Amazon Transcribe Live Meeting Assist - Websocket Server
 
 Parameters:
+  # Since 0.4.0 the Amazon Transcribe options (redaction, language, entity
+  # types, custom vocabulary and language model), ShowSpeakerLabel and
+  # EnableAudioRecording are Configuration page settings. lma-main.yaml no
+  # longer passes these parameters, so each stays at its default, which is the
+  # setting's shipped default, and is the task's fallback when the
+  # configuration cannot be read. The task reads the configuration first
+  # (source/app/src/calleventdata/session-settings.ts).
   LMAStackName:
     Description: >-
       Name of the top-level LMA stack. Used as the CloudWatch namespace for the
@@ -1993,7 +2000,6 @@ Resources:
           PCA_AUDIO_PLAYBACK_FILE_PREFIX: !Ref PcaPlaybackAudioFilePrefix
           PCA_WEB_APP_URL: !Ref PcaWebAppURL
           PCA_WEB_APP_CALL_PATH_PREFIX: !Ref PcaWebAppCallPathPrefix
-          IS_CONTENT_REDACTION_ENABLED: !Ref IsContentRedactionEnabled
           LOG_LEVEL: !Ref LogLevel
       CodeUri: ../source/lambda_functions/pca_integration
       LoggingConfig:

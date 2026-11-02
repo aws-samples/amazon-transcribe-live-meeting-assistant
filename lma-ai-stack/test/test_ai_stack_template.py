@@ -25,6 +25,7 @@ Run via `make test-ai-template` or pytest directly.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -228,86 +229,159 @@ def test_both_prompt_template_stacks_are_given_the_same_domain(main_template: di
     assert len(set(domains.values())) == 1, f"the two stacks are given different domains: {domains}"
 
 
-def test_the_bedrock_model_choices_match_the_main_templates(template: dict, main_template: dict):
-    """The other cross-template contract: both templates list the selectable models.
+# ── model choices ───────────────────────────────────────────────────────────
+#
+# The Bedrock model each feature uses is a setting of the `language_models`
+# configuration section, not a stack parameter. The schema's `enum` is the list
+# the Configuration page offers and the configuration API accepts, and
+# setting_defaults.json holds the value a deployment starts with.
 
-    lma-main.yaml passes its own `BedrockModelId` straight through to this stack
-    (`BedrockModelId: !Ref BedrockModelId` on the AISTACK resource), so this
-    template's `AllowedValues` has to admit everything lma-main offers. A value
-    offered there and missing here fails the nested stack's update on parameter
-    validation — in the parent's eyes, 35-40 minutes into a deploy, followed by a
-    rollback.
+LMA_CONFIG = (
+    Path(__file__).resolve().parents[1]
+    / "source"
+    / "lambda_layers"
+    / "configuration_layer"
+    / "lma_config"
+)
+LANGUAGE_MODELS_SCHEMA = LMA_CONFIG / "schemas" / "language_models.json"
+SETTING_DEFAULTS = LMA_CONFIG / "setting_defaults.json"
+LAMBDA_FUNCTIONS = Path(__file__).resolve().parents[1] / "source" / "lambda_functions"
+MEETINGASSIST_SRC = Path(__file__).resolve().parents[2] / "lma-meetingassist-setup-stack" / "src"
 
-    Asserted as equality rather than containment because the two lists are meant
-    to be the same list. They have drifted before: this template kept offering
-    Claude 3.x models for several releases after lma-main.yaml stopped, which was
-    invisible precisely because the direction of the drift was the harmless one.
-    If a model should genuinely be selectable in one template only, this is the
-    test to change deliberately.
-    """
-    here = template["Parameters"]["BedrockModelId"]["AllowedValues"]
-    there = main_template["Parameters"]["BedrockModelId"]["AllowedValues"]
-    assert len(here) >= 15, f"only {len(here)} model choices — did the list move?"
-    assert set(here) == set(there), (
-        "BedrockModelId AllowedValues differ between this template and "
-        f"lma-main.yaml. Only here: {sorted(set(here) - set(there))}. "
-        f"Only in lma-main.yaml: {sorted(set(there) - set(here))}"
-    )
+# Every model setting in the section, so the parametrized tests below cannot pass
+# by collecting nothing if one is renamed.
+MODEL_SETTINGS = (
+    "summaryModelId",
+    "meetingAssistModelId",
+    "knowledgeBaseModelId",
+    "keyframeTextModelId",
+)
+
+# The settings a user picks a general-purpose model for. The knowledge-base and
+# key-frame settings offer deliberately narrower lists.
+GENERAL_MODEL_SETTINGS = ("summaryModelId", "meetingAssistModelId")
 
 
-def test_the_summary_model_default_matches_across_the_templates(
-    template: dict, main_template: dict
+@pytest.fixture(scope="module")
+def model_settings() -> dict:
+    return json.loads(LANGUAGE_MODELS_SCHEMA.read_text())["properties"]
+
+
+@pytest.fixture(scope="module")
+def model_defaults() -> dict:
+    return json.loads(SETTING_DEFAULTS.read_text())["language_models"]
+
+
+def test_every_model_setting_is_declared_with_choices_and_a_default(
+    model_settings: dict, model_defaults: dict
 ):
-    """The two `BedrockModelId` defaults are the same parameter and must agree.
+    """Guards the tests below against passing by collecting nothing."""
+    for setting in MODEL_SETTINGS:
+        choices = model_settings.get(setting, {}).get("enum")
+        assert choices, f"language_models.json no longer offers a list of choices for {setting}"
+        assert setting in model_defaults, f"setting_defaults.json has no default for {setting}"
 
-    `lma-main.yaml` passes its value straight into the nested AI stack, so the
-    nested default is reached only by deploying that template standalone. If the
-    two drift, a standalone deployment summarises with a different model from
-    the one the documented path uses, and no deploy-time check would catch it.
 
-    The Meeting Assistant's default is deliberately NOT included. It is chosen
-    for a different job: summarisation is batch work where answer quality
-    dominates, while the assistant answers mid-meeting and is sometimes spoken
-    aloud, so its time to first token is what matters. The two are free to
-    differ, and `test_every_model_parameter_defaults_to_one_of_its_own_choices`
-    is what keeps each of them valid.
+def test_the_summary_and_meeting_assistant_settings_offer_the_same_models(model_settings: dict):
+    """Both are general-purpose model choices and are meant to be the same list.
+
+    They were the same list as stack parameters, and the defaults differ by
+    design (see `test_each_model_default_matches_the_functions_fallback`), but
+    what can be chosen does not. A model offered for one and not the other is
+    drift, not a decision; if a model should genuinely be selectable for one
+    feature only, this is the test to change deliberately.
     """
-    nested = template["Parameters"]["BedrockModelId"]["Default"]
-    main = main_template["Parameters"]["BedrockModelId"]["Default"]
-    assert nested == main, (
-        f"BedrockModelId defaults have drifted: lma-ai-stack.yaml has {nested!r}, "
-        f"lma-main.yaml has {main!r}"
+    summary = model_settings["summaryModelId"]["enum"]
+    assist = model_settings["meetingAssistModelId"]["enum"]
+    assert len(summary) >= 15, f"only {len(summary)} model choices — did the list move?"
+    assert set(summary) == set(assist), (
+        f"summaryModelId and meetingAssistModelId offer different models. "
+        f"Only for summaries: {sorted(set(summary) - set(assist))}. "
+        f"Only for the meeting assistant: {sorted(set(assist) - set(summary))}"
     )
+
+
+def _string_constant(path: Path, name: str) -> str:
+    """A module-level string constant, read from the source without importing it.
+
+    `path` is a module, or a function directory whose handler is `index.py`.
+    """
+    if path.is_dir():
+        path = path / "index.py"
+    match = re.search(rf"^{name}\s*=\s*['\"]([^'\"]+)['\"]", path.read_text(), re.MULTILINE)
+    assert match, f"{path.name} no longer declares {name}"
+    return match.group(1)
+
+
+# Where each model setting's default is written down again, as the fallback a
+# function uses when the configuration section cannot be read.
+MODEL_FALLBACKS = [
+    ("summaryModelId", LAMBDA_FUNCTIONS / "bedrock_summary_lambda", "FALLBACK_MODEL_ID"),
+    ("summaryModelId", LAMBDA_FUNCTIONS / "agenda_deriver", "FALLBACK_MODEL_ID"),
+    ("summaryModelId", LAMBDA_FUNCTIONS / "meeting_invitation_parser", "FALLBACK_MODEL_ID"),
+    ("summaryModelId", LAMBDA_FUNCTIONS / "speaker_name_resolver", "FALLBACK_MODEL_ID"),
+    ("keyframeTextModelId", LAMBDA_FUNCTIONS / "keyframe_text_extractor", "FALLBACK_MODEL_ID"),
+    (
+        "meetingAssistModelId",
+        MEETINGASSIST_SRC / "strands_meeting_assist_function.py",
+        "DEFAULT_AGENT_MODEL_ID",
+    ),
+    (
+        "meetingAssistModelId",
+        MEETINGASSIST_SRC / "troubleshooting_agent_function.py",
+        "FALLBACK_MODEL_ID",
+    ),
+]
 
 
 @pytest.mark.parametrize(
-    "template_name, parameter",
-    [
-        ("lma-ai-stack.yaml", "BedrockModelId"),
-        ("lma-main.yaml", "BedrockModelId"),
-        ("lma-main.yaml", "MeetingAssistServiceBedrockModelID"),
-        ("lma-main.yaml", "MeetingAssistKnowledgeBaseModelID"),
-    ],
+    "setting, source, constant",
+    MODEL_FALLBACKS,
+    ids=[f"{setting}-{source.stem}" for setting, source, _ in MODEL_FALLBACKS],
 )
-def test_every_model_parameter_defaults_to_one_of_its_own_choices(
-    template: dict, main_template: dict, template_name: str, parameter: str
+def test_each_model_default_matches_the_functions_fallback(
+    model_defaults: dict, setting: str, source: Path, constant: str
 ):
-    """A default outside its own AllowedValues fails validation on every deploy.
+    """One default per setting, written down in several places, pinned so they cannot drift.
 
-    It cannot be caught by deploying with the parameter set, which is how these
-    are normally exercised, so it would only surface for somebody accepting the
-    defaults.
+    setting_defaults.json is what an ordinary deployment starts with. Each
+    function's fallback is reached only when the section cannot be read, which
+    is exactly why a disagreement would go unnoticed: a function would quietly
+    use a different model from the one the Configuration page shows as the
+    default.
+
+    The meeting assistant's default is deliberately not compared with the
+    summary default. Summarisation is batch work where answer quality dominates,
+    while the assistant answers mid-meeting and is sometimes spoken aloud, so its
+    time to first token is what matters. The knowledge-base default is pinned in
+    test_meeting_assist_kb_model.py.
     """
-    source = template if template_name == "lma-ai-stack.yaml" else main_template
-    spec = source["Parameters"][parameter]
-    assert spec["Default"] in spec["AllowedValues"], (
-        f"{template_name} {parameter} defaults to {spec['Default']!r}, "
-        f"which is not one of its AllowedValues"
+    default = model_defaults[setting]["default"]
+    fallback = _string_constant(source, constant)
+    assert fallback == default, (
+        f"{source.stem} {constant} is {fallback!r} but setting_defaults.json "
+        f"defaults {setting} to {default!r}"
     )
 
 
-def test_the_claude_5_models_are_selectable(template: dict, main_template: dict):
-    """Both the `us.` and `global.` form of each, in both templates.
+@pytest.mark.parametrize("setting", MODEL_SETTINGS)
+def test_every_model_setting_defaults_to_one_of_its_own_choices(
+    model_settings: dict, model_defaults: dict, setting: str
+):
+    """A default the schema does not accept is one the Configuration page cannot save back.
+
+    It would only surface for somebody accepting the defaults, which is how most
+    deployments run.
+    """
+    default = model_defaults[setting]["default"]
+    assert default in model_settings[setting]["enum"], (
+        f"setting_defaults.json defaults {setting} to {default!r}, "
+        "which is not one of its choices in language_models.json"
+    )
+
+
+def test_the_claude_5_models_are_selectable(model_settings: dict):
+    """Both the `us.` and `global.` form of each, for each general-purpose setting.
 
     A model offered in only one of the two regional forms is a trap for a
     deployment in a region the other form does not cover, and the pair is cheap
@@ -318,35 +392,18 @@ def test_the_claude_5_models_are_selectable(template: dict, main_template: dict)
         for prefix in ("us", "global")
         for size in ("haiku", "sonnet", "opus")
     }
-    for name, source, parameters in (
-        ("lma-ai-stack.yaml", template, ("BedrockModelId",)),
-        ("lma-main.yaml", main_template, ("BedrockModelId", "MeetingAssistServiceBedrockModelID")),
-    ):
-        for parameter in parameters:
-            allowed = set(source["Parameters"][parameter]["AllowedValues"])
-            assert expected <= allowed, (
-                f"{name} {parameter} is missing {sorted(expected - allowed)}"
-            )
+    for setting in GENERAL_MODEL_SETTINGS:
+        allowed = set(model_settings[setting]["enum"])
+        assert expected <= allowed, f"{setting} is missing {sorted(expected - allowed)}"
 
 
-def test_no_claude_3_models_remain_selectable(template: dict, main_template: dict):
-    """Claude 3.x was withdrawn from the model selectors in v0.3.0.
-
-    lma-main.yaml dropped them then; this template did not, and went on offering
-    eight of them. Nothing could reach them — lma-main supplies this stack's value
-    — so the list was simply stale. This keeps it that way.
-    """
-    for name, source, parameters in (
-        ("lma-ai-stack.yaml", template, ("BedrockModelId",)),
-        ("lma-main.yaml", main_template, ("BedrockModelId", "MeetingAssistServiceBedrockModelID")),
-    ):
-        for parameter in parameters:
-            stale = sorted(
-                value
-                for value in source["Parameters"][parameter]["AllowedValues"]
-                if re.search(r"claude-3[-.]", value)
-            )
-            assert not stale, f"{name} {parameter} still offers withdrawn models: {stale}"
+def test_no_claude_3_models_remain_selectable(model_settings: dict):
+    """Claude 3.x was withdrawn from the model selectors in v0.3.0; this keeps it that way."""
+    for setting in MODEL_SETTINGS:
+        stale = sorted(
+            value for value in model_settings[setting]["enum"] if re.search(r"claude-3[-.]", value)
+        )
+        assert not stale, f"{setting} still offers withdrawn models: {stale}"
 
 
 def test_every_function_code_uri_exists_on_disk(resources: dict):

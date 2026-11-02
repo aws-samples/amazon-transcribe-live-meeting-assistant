@@ -76,25 +76,23 @@ ENABLE_STREAMING = os.environ.get('ENABLE_STREAMING', 'false').lower() == 'true'
 # Above zero because this path is conversational rather than extractive.
 AGENT_TEMPERATURE = 0.3
 
-# Fallback for KB_MODEL_ID, reached only by a deployment whose environment does not
-# set it. Tracks the default of the MeetingAssistKnowledgeBaseModelID parameter.
+# The models used when the configuration cannot be read (or this template is
+# deployed without the configuration layer); each is the same value as its
+# setting's shipped default in setting_defaults.json.
 DEFAULT_KB_MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
-# Likewise for MODEL_ID and the MeetingAssistServiceBedrockModelID parameter.
 DEFAULT_AGENT_MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
 
 
 def configured_agent_model_id() -> str:
     """The model the assistant answers with.
 
-    The Amazon Bedrock Models section of the Configuration page, whose default is
-    the MeetingAssistServiceBedrockModelID stack parameter; that parameter's
-    environment variable (MODEL_ID) when the section cannot be read. Read per
-    request, so a change reaches the assistant within the section's cache tier.
+    The Amazon Bedrock Models section's value on the Configuration page, else
+    the shipped default in setting_defaults.json. Read per request, so a change
+    reaches the assistant within the section's cache tier.
     """
     return read_setting(
         'language_models',
         'meetingAssistModelId',
-        env_var='MODEL_ID',
         default=DEFAULT_AGENT_MODEL_ID,
     )
 
@@ -102,13 +100,12 @@ def configured_agent_model_id() -> str:
 def configured_kb_model_id() -> str:
     """The model the knowledge-base tools generate with.
 
-    As configured_agent_model_id(), with the MeetingAssistKnowledgeBaseModelID
-    stack parameter as its default and KB_MODEL_ID as its environment variable.
+    As configured_agent_model_id(), for the section's knowledge-base model
+    setting.
     """
     return read_setting(
         'language_models',
         'knowledgeBaseModelId',
-        env_var='KB_MODEL_ID',
         default=DEFAULT_KB_MODEL_ID,
     )
 
@@ -206,12 +203,11 @@ def kb_model_supports_retrieve_and_generate(model_id: str) -> bool:
 
     The agent's own model is unaffected and may be any of them: it reaches Bedrock
     through Converse, which carries no such requirement. That difference is why
-    the knowledge-base model is a CloudFormation parameter of its own
-    (MeetingAssistKnowledgeBaseModelID) rather than the agent's, and that
-    parameter -- whose AllowedValues are the ids verified against a live knowledge
-    base -- is what normally decides this. This function is the backstop for a
-    value that did not come through it, such as a standalone deployment of the
-    nested template.
+    the knowledge-base model is a Configuration page setting of its own rather
+    than the agent's, and that setting -- whose allowed values in the section
+    schema are the ids verified against a live knowledge base -- is what normally
+    decides this. This function is the backstop for a value that did not come
+    through it, such as a standalone deployment of the nested template.
 
     Two rules, in order: an id known to be refused is refused, and otherwise a
     Claude generation at or above ``KB_CUSTOM_PROMPTS_ASSUMED_FROM_MAJOR`` is
@@ -523,8 +519,7 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
             "requires custom Orchestration and Generation prompt templates, which LMA does "
             "not supply. Choose a model a knowledge base can generate with as Meeting "
             "assistant knowledge bases in the Amazon Bedrock Models section of the "
-            "Configuration page, or as the MeetingAssistKnowledgeBaseModelID CloudFormation "
-            "parameter, which is its default.",
+            "Configuration page.",
             kb_model_id,
         )
         return None
@@ -776,8 +771,7 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
             "requires custom Orchestration and Generation prompt templates, which LMA does "
             "not supply. Choose a model a knowledge base can generate with as Meeting "
             "assistant knowledge bases in the Amazon Bedrock Models section of the "
-            "Configuration page, or as the MeetingAssistKnowledgeBaseModelID CloudFormation "
-            "parameter, which is its default. The recent_meetings_list tool "
+            "Configuration page. The recent_meetings_list tool "
             "is unaffected, so chronological listing of past meetings still works.",
             kb_model_id,
         )
@@ -2285,9 +2279,8 @@ def handler(event, context):
             # temperature is passed only to models that accept it. Strands puts it
             # straight into the Converse API's inferenceConfig, and the
             # reasoning-capable Claude generations reject a request that carries it,
-            # so a model selected from the newer end of the
-            # MeetingAssistServiceBedrockModelID list would otherwise fail every
-            # turn. See bedrock_compat.accepts_temperature.
+            # so a model selected from the newer end of the Configuration page's
+            # meeting assistant model list would otherwise fail every turn. See bedrock_compat.accepts_temperature.
             guardrail_config = get_guardrail_config()
             model_kwargs = {
                 'model_id': model_id,

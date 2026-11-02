@@ -116,6 +116,12 @@ def test_a_value_of_the_wrong_type_is_refused(value_type, raw):
 
 
 def _entry():
+    """A text setting, as the reader tests need: the summaries' model."""
+    return parameters._by_setting()[("language_models", "summaryModelId")]
+
+
+def _parameter_entry():
+    """A setting a stack parameter still backs, as the seeder-write tests need."""
     return parameters.parameter_defaults()[0]
 
 
@@ -138,7 +144,7 @@ def _valid_value(entry):
 
 
 def test_the_seeder_write_lays_each_parameter_over_the_baseline():
-    entry = _entry()
+    entry = _parameter_entry()
     value = _valid_value(entry)
     baseline = {entry.section: {"untouched": "kept"}, "other": {"x": 1}}
     applied = parameters.apply_parameter_defaults(baseline, {entry.parameter: str(value)})
@@ -159,9 +165,9 @@ def test_every_setting_takes_a_value_its_schema_accepts(entry):
 
 def test_a_value_the_schema_refuses_is_left_out():
     """A nested stack deployed on its own passes an empty model id."""
-    entry = _entry()
+    entry = _parameter_entry()
     baseline: dict = {}
-    assert parameters.apply_parameter_defaults(baseline, {entry.parameter: ""}) == []
+    assert parameters.apply_parameter_defaults(baseline, {entry.parameter: "-1"}) == []
     assert baseline == {}
 
 
@@ -320,3 +326,28 @@ def test_a_limited_setting_whose_table_cannot_be_read_is_the_parameter(monkeypat
         parameters.read_setting(RETENTION, MEETINGS, env_var="LIMIT_ENV", store=_Store(error=error))
         == 14
     )
+
+
+def test_a_reader_with_no_configuration_and_no_variable_gets_the_shipped_default(monkeypatch):
+    """A setting no stack parameter backs any more still has a value without the table."""
+    monkeypatch.delenv("CONFIGURATION_TABLE_NAME", raising=False)
+    monkeypatch.setattr(parameters, "_SHARED_STORE", None)
+    shipped = parameters.shipped_setting_defaults()["language_models"]["summaryModelId"]
+    assert (
+        parameters.read_setting("language_models", "summaryModelId", env_var="UNSET_ENV") == shipped
+    )
+
+
+def test_every_shipped_default_is_valid_against_its_schema():
+    for section, values in parameters.shipped_setting_defaults().items():
+        schema.validate_section(section, values)
+
+
+def test_a_setting_is_either_shipped_or_parameter_backed_never_both():
+    shipped = {
+        (section, setting)
+        for section, settings in parameters.shipped_setting_defaults().items()
+        for setting in settings
+    }
+    backed = {(entry.section, entry.setting) for entry in parameters.parameter_defaults()}
+    assert not shipped & backed

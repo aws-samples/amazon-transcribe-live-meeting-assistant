@@ -49,20 +49,26 @@ This guide walks you through setting up the AWS Nova Sonic 2 voice assistant wit
 
 ## Step 2: Deploy LMA with AWS Nova Sonic 2 Configuration
 
-### 2.1 Required CloudFormation Parameters
+### 2.1 Required Settings
 
-When deploying or updating your LMA stack, set these parameters:
+The voice assistant is chosen in the **Virtual Participant** section of the
+[Configuration page](configuration-guide.md), not with stack parameters. The
+provider, the activation mode, the wake phrases and the activation duration can
+be changed there while the stack runs, with no stack update, and apply to the
+next Virtual Participant to start. To change them, an Admin opens the
+Configuration page, makes and activates a Custom configuration profile if one is
+not already active (**Profile** › **Copy to a new profile**, then **Activate**;
+see [Configuration profiles](configuration-guide.md#configuration-profiles)),
+and saves:
 
-> These are also settings in the **Virtual Participant** section of the
-> [Configuration page](configuration-guide.md): the provider, the activation mode, the wake phrases and the activation duration can be changed there while
-> the stack runs, and apply to the next Virtual Participant to start. The stack
-> parameters are their defaults, and a value saved on the page takes precedence
-> until it is reset. The API keys are stack parameters only.
+| Setting | Value | Description |
+|---------|-------|-------------|
+| **Virtual Participant › Voice assistant** | Amazon Nova Sonic (`amazon_nova_sonic`) | Enable AWS Nova Sonic 2 voice assistant |
+| **Virtual Participant › Voice assistant activation mode** | Wake phrase (`wake_phrase`) or Always listening (`always_active`) | Choose activation mode |
 
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `VoiceAssistantProvider` | `amazon_nova_sonic` | Enable AWS Nova Sonic 2 voice assistant |
-| `VoiceAssistantActivationMode` | `wake_phrase` or `always_active` | Choose activation mode |
+To start a new deployment with these values already set, point the
+`CustomConfigPath` stack parameter at a configuration file that holds them; see
+[Choosing the default configuration at deploy time](configuration-store.md#choosing-the-default-configuration-at-deploy-time).
 
 That's it! AWS Nova Sonic 2 requires no API keys or external configuration.
 
@@ -72,31 +78,34 @@ That's it! AWS Nova Sonic 2 requires no API keys or external configuration.
 - Agent activates when user says "Hey Alex"
 - Saves costs by only connecting when needed
 - Automatically disconnects after configurable timeout (default: 30 seconds)
-- Set: `VoiceAssistantActivationMode=wake_phrase`
+- Set: **Virtual Participant › Voice assistant activation mode** to **Wake phrase** (`wake_phrase`)
 
 **Always Active Mode**
 - Agent is always listening
 - Responds immediately without wake phrase
 - Higher costs (continuous connection)
-- Set: `VoiceAssistantActivationMode=always_active`
+- Set: **Virtual Participant › Voice assistant activation mode** to **Always listening** (`always_active`)
 
-### 2.3 Optional Parameters
+### 2.3 Optional Settings
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `VoiceAssistantActivationDuration` | `30` | Seconds the assistant stays active once idle after a wake phrase; a lookup or an answer still playing does not count against it |
-| `VoiceAssistantWakePhrases` | `hey alex` | Comma-separated wake phrases |
+These are also in the **Virtual Participant** section of the Configuration page.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| **Virtual Participant › Seconds the voice assistant stays active** | `30` | Seconds the assistant stays active once idle after a wake phrase; a lookup or an answer still playing does not count against it |
+| **Virtual Participant › Wake phrases** | `hey alex,ok alex,hi alex,hello alex` | Comma-separated wake phrases |
 
 ## Step 3: Verify Installation
 
-### 3.1 Check CloudFormation Outputs
+### 3.1 Check the Configuration and CloudFormation Outputs
 
-1. Go to AWS CloudFormation console
-2. Find your LMA stack
-3. Go to the **Outputs** tab
-4. Verify these outputs exist:
-   - `VoiceAssistantProvider`: Should show `amazon_nova_sonic`
-   - `StrandsLambdaArn`: Should show the Lambda ARN
+1. Open the LMA web UI as an Admin, go to the Configuration page, and verify
+   that **Virtual Participant › Voice assistant** in the active profile shows
+   **Amazon Nova Sonic**
+2. Go to AWS CloudFormation console
+3. Find your LMA stack
+4. Go to the **Outputs** tab
+5. Verify this output exists:
    - `DefaultNovaSonicConfig`: Link to view the record holding the shipped configuration
    - `CustomNovaSonicConfig`: Link to view the record holding your custom configuration
 
@@ -184,7 +193,7 @@ The `meetingMode` field controls how the voice assistant behaves in a meeting. T
 | **Group Meeting** | `group` | Passive listening; only speaks when "Alex" is mentioned |
 | **Translator** | `translator` | Real-time bidirectional interpreter between two languages |
 
-> **Requires the voice assistant activation mode to be Always listening** (`always_active`) for `group` and `translator` modes to take effect. The mode is set in the Virtual Participant section of the Configuration page, whose default is the `VoiceAssistantActivationMode` stack parameter; while it is saved as `wake_phrase`, the Nova Sonic Voice Assistant section says those modes are ignored.
+> **Requires the voice assistant activation mode to be Always listening** (`always_active`) for `group` and `translator` modes to take effect. The mode is **Virtual Participant › Voice assistant activation mode** on the Configuration page; while it is saved as `wake_phrase`, the Nova Sonic Voice Assistant section says those modes are ignored.
 
 ---
 
@@ -400,7 +409,7 @@ View logs in CloudWatch:
 - Speak clearly: "Hey Alex" (pause) "your question"
 - Check microphone is working in the meeting
 - Try: "Hey Alex, are you there?" as a simple test
-- Verify `VoiceAssistantActivationMode=wake_phrase` is set
+- Verify **Virtual Participant › Voice assistant activation mode** is **Wake phrase** on the Configuration page
 - Check CloudWatch logs for wake phrase detection
 
 ### Issue: "Model Access Denied"
@@ -572,19 +581,15 @@ Once configured, the voice assistant can:
 
 ### Custom Wake Phrases
 
-Set multiple wake phrases:
-
-```bash
-VoiceAssistantWakePhrases="hey alex,ok alex,hi alex,hello alex"
-```
+Set multiple wake phrases, separated by commas, in **Virtual Participant ›
+Wake phrases** on the Configuration page, for example
+`hey alex,ok alex,hi alex,hello alex`.
 
 ### Custom Activation Duration
 
-Set longer activation for complex queries:
-
-```bash
-VoiceAssistantActivationDuration=60  # 60 seconds
-```
+Set longer activation for complex queries by changing **Virtual Participant ›
+Seconds the voice assistant stays active** on the Configuration page, for
+example to `60`.
 
 ## What's New in v0.2.27
 

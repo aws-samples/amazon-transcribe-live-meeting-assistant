@@ -172,8 +172,8 @@ def test_the_baseline_document_holds_the_shipped_prompts_under_its_section(seede
         "call_pricing",
         "asr_engine",
         "meeting_consent",
-        # Filled from the stack parameters by `seed`; see the tests under
-        # "the stack parameters that are defaults".
+        # The settings that used to be stack parameters, and the retention
+        # periods, which still are.
         "language_models",
         "transcription",
         "recording",
@@ -183,7 +183,8 @@ def test_the_baseline_document_holds_the_shipped_prompts_under_its_section(seede
         "retention",
         "meeting_agenda",
     }
-    assert body["language_models"] == {}
+    # The settings that used to be stack parameters ship at their defaults.
+    assert body["language_models"]["summaryModelId"] == "global.anthropic.claude-sonnet-5-5"
     assert set(body["summary_prompt_templates"]) == {
         "1#SUMMARY",
         "2#DETAILS",
@@ -209,14 +210,20 @@ def test_the_baseline_carries_a_dated_price_table_in_one_currency(seeder) -> Non
 
 
 def test_every_model_a_deployment_can_choose_has_a_price(seeder) -> None:
-    """A model offered in lma-main.yaml with no price shows as unpriced on every meeting."""
-    import re
-
-    main = (Path(__file__).resolve().parents[4] / "lma-main.yaml").read_text(encoding="utf-8")
-    offered = set(
-        re.findall(r'"((?:global|us)\.(?:amazon|anthropic)\.[^"]+|amazon\.nova-[^"]+)"', main)
+    """A model the Configuration page offers with no price shows as unpriced on every meeting."""
+    schema = json.loads(
+        (
+            Path(__file__).resolve().parents[2]
+            / "lambda_layers/configuration_layer/lma_config/schemas/language_models.json"
+        ).read_text(encoding="utf-8")
     )
-    assert offered, "found no model ids in lma-main.yaml, so this test checks nothing"
+    offered = {
+        model
+        for setting in schema["properties"].values()
+        for model in setting.get("enum", [])
+        if model
+    }
+    assert offered, "found no model ids in the schema, so this test checks nothing"
     base = seeder.shipped_default_body("default")["call_pricing"]["regions"]["default"]
     missing = sorted(m for m in offered if f"bedrock/{m}" not in base)
     assert not missing, f"no price for: {missing}"
@@ -1183,83 +1190,59 @@ def test_adoption_is_skipped_once_a_profile_exists(seeder) -> None:
 
 # ── the stack parameters that are defaults ─────────────────────────────────
 
-MODEL_PARAMETERS = {
-    "BedrockModelId": "global.anthropic.claude-sonnet-5-5",
-    "MeetingAssistServiceBedrockModelID": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-    "MeetingAssistKnowledgeBaseModelID": "global.anthropic.claude-sonnet-4-6",
-    "KeyframeTextModelId": "amazon.nova-lite-v1:0",
-}
+RETENTION_PARAMETERS = {"MeetingRecordExpirationInDays": "30", "TranscriptionExpirationInDays": "7"}
 
 
-def test_the_stack_parameters_are_written_into_the_baseline(seeder) -> None:
+def test_the_retention_parameters_are_written_into_the_baseline(seeder) -> None:
     store, dynamo = build_store()
-    outcome = seeder.seed(store, domain="default", parameter_values=MODEL_PARAMETERS)
-    assert dynamo.body("Config#default")["language_models"] == {
-        "summaryModelId": "global.anthropic.claude-sonnet-5-5",
-        "meetingAssistModelId": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-        "knowledgeBaseModelId": "global.anthropic.claude-sonnet-4-6",
-        "keyframeTextModelId": "amazon.nova-lite-v1:0",
-    }
-    assert outcome["ParameterDefaults"].split(",") == list(MODEL_PARAMETERS)
-    # The profile is an administrator's. A parameter value is the deployment's
-    # default, so it never lands there.
-    assert "language_models" not in dynamo.body("Config#custom")
+    outcome = seeder.seed(store, domain="default", parameter_values=RETENTION_PARAMETERS)
+    retention = dynamo.body("Config#default")["retention"]
+    assert (
+        retention["meetingRecordExpirationInDays"],
+        retention["transcriptionExpirationInDays"],
+    ) == (30, 7)
+    assert outcome["ParameterDefaults"].split(",") == list(RETENTION_PARAMETERS)
 
 
-def test_an_existing_deployment_keeps_its_parameter_values_on_upgrade(seeder) -> None:
-    """The upgrade path: a stack that set the parameters reads the same values after."""
-    store, _dynamo = build_store()
-    seeder.seed(store, domain="default")  # a release before the parameters moved
+def test_a_retention_parameter_change_reaches_the_baseline(seeder) -> None:
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default", parameter_values=RETENTION_PARAMETERS)
     seeder.seed(
-        store, domain="default", parameter_values={"BedrockModelId": "amazon.nova-pro-v1:0"}
+        store,
+        domain="default",
+        parameter_values={**RETENTION_PARAMETERS, "TranscriptionExpirationInDays": "2"},
     )
-    store.invalidate()
-    assert store.get_section("language_models").values == {"summaryModelId": "amazon.nova-pro-v1:0"}
+    assert dynamo.body("Config#default")["retention"]["transcriptionExpirationInDays"] == 2
+
+
+def test_the_settings_that_were_stack_parameters_ship_at_their_defaults(seeder) -> None:
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default")
+    baseline = dynamo.body("Config#default")
+    assert baseline["transcription"]["languageCode"] == "en-US"
+    assert baseline["meeting_processing"]["inactiveMeetingTimeoutMinutes"] == 240
+    assert baseline["virtual_participant"]["voiceAssistantProvider"] == "none"
 
 
 def test_an_administrators_choice_wins_over_the_parameter(seeder) -> None:
     store, _dynamo = build_store()
-    seeder.seed(store, domain="default", parameter_values=MODEL_PARAMETERS)
+    seeder.seed(store, domain="default", parameter_values=RETENTION_PARAMETERS)
     store.write_section(
         "custom",
-        "language_models",
-        {"summaryModelId": "amazon.nova-pro-v1:0"},
+        "retention",
+        {"transcriptionExpirationInDays": 1},
         updated_by="admin@example.com",
         expected_version=None,
     )
     # A later stack update that changes the parameter changes the baseline, and
-    # the administrator's choice still wins over it.
+    # the administrator's shorter period still wins over it.
     seeder.seed(
         store,
         domain="default",
-        parameter_values={**MODEL_PARAMETERS, "BedrockModelId": "us.anthropic.claude-sonnet-4-6"},
+        parameter_values={**RETENTION_PARAMETERS, "TranscriptionExpirationInDays": "5"},
     )
     store.invalidate()
-    resolved = store.get_section("language_models").values
-    assert resolved["summaryModelId"] == "amazon.nova-pro-v1:0"
-    assert resolved["keyframeTextModelId"] == "amazon.nova-lite-v1:0"
-
-
-def test_a_parameter_change_reaches_every_setting_nobody_changed(seeder) -> None:
-    store, dynamo = build_store()
-    seeder.seed(store, domain="default", parameter_values=MODEL_PARAMETERS)
-    seeder.seed(
-        store,
-        domain="default",
-        parameter_values={**MODEL_PARAMETERS, "KeyframeTextModelId": "amazon.nova-pro-v1:0"},
-    )
-    assert dynamo.body("Config#default")["language_models"]["keyframeTextModelId"] == (
-        "amazon.nova-pro-v1:0"
-    )
-
-
-def test_without_the_property_the_section_is_empty_and_readers_use_their_environment(
-    seeder,
-) -> None:
-    store, dynamo = build_store()
-    outcome = seeder.seed(store, domain="default")
-    assert dynamo.body("Config#default")["language_models"] == {}
-    assert outcome["ParameterDefaults"] == "none"
+    assert store.get_section("retention").values["transcriptionExpirationInDays"] == 1
 
 
 def test_the_handler_passes_the_parameter_defaults_through(seeder, monkeypatch) -> None:
@@ -1268,13 +1251,10 @@ def test_the_handler_passes_the_parameter_defaults_through(seeder, monkeypatch) 
         seeder, "ConfigurationStore", lambda name, **_: ConfigurationStore(name, client=dynamo)
     )
     event = _event("Update")
-    event["ResourceProperties"]["ParameterDefaults"] = dict(MODEL_PARAMETERS)
+    event["ResourceProperties"]["ParameterDefaults"] = dict(RETENTION_PARAMETERS)
     seeder.handler(event, _Context())
     assert seeder.recorder.sent[-1]["status"] == "SUCCESS"
-    assert (
-        dynamo.body("Config#default")["language_models"]["summaryModelId"]
-        == (MODEL_PARAMETERS["BedrockModelId"])
-    )
+    assert dynamo.body("Config#default")["retention"]["meetingRecordExpirationInDays"] == 30
 
 
 # ── the CloudFormation contract ────────────────────────────────────────────

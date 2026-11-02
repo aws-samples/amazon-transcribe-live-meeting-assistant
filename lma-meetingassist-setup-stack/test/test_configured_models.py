@@ -4,10 +4,9 @@
 # See the LICENSE file in the project root for full license information.
 """The meeting assistant and the troubleshooting agent read their models per request.
 
-Each prefers the Amazon Bedrock Models section of the Configuration page, whose
-defaults are the MeetingAssistServiceBedrockModelID and
-MeetingAssistKnowledgeBaseModelID stack parameters, and falls back to those
-parameters' environment variables when the section does not name a model.
+Each prefers the Amazon Bedrock Models section of the Configuration page, and
+uses the setting's shipped default (setting_defaults.json) when the section does
+not name a model.
 """
 
 from __future__ import annotations
@@ -38,10 +37,10 @@ def configured(monkeypatch):
     def install(values):
         monkeypatch.setattr(parameters, "_SHARED_STORE", _Store(values))
 
-    monkeypatch.setenv("MODEL_ID", "env.agent-model")
-    monkeypatch.setenv("KB_MODEL_ID", "env.kb-model")
-    monkeypatch.setenv("TROUBLESHOOTING_MODEL_ID", "env.troubleshooting-model")
     return install
+
+
+SHIPPED = parameters.shipped_setting_defaults()["language_models"]
 
 
 def test_the_assistant_prefers_the_configured_models(configured) -> None:
@@ -55,10 +54,10 @@ def test_the_assistant_prefers_the_configured_models(configured) -> None:
     assert assistant.configured_kb_model_id() == "global.anthropic.claude-sonnet-4-6"
 
 
-def test_the_assistant_falls_back_to_its_environment(configured) -> None:
+def test_without_a_saved_model_the_assistant_uses_the_shipped_defaults(configured) -> None:
     configured({})
-    assert assistant.configured_agent_model_id() == "env.agent-model"
-    assert assistant.configured_kb_model_id() == "env.kb-model"
+    assert assistant.configured_agent_model_id() == SHIPPED["meetingAssistModelId"]
+    assert assistant.configured_kb_model_id() == SHIPPED["knowledgeBaseModelId"]
 
 
 def test_the_troubleshooting_agent_runs_on_the_assistants_configured_model(configured) -> None:
@@ -66,16 +65,16 @@ def test_the_troubleshooting_agent_runs_on_the_assistants_configured_model(confi
     assert troubleshooting.configured_model_id() == "us.anthropic.claude-sonnet-4-6"
 
 
-def test_the_troubleshooting_agent_falls_back_to_its_environment(configured) -> None:
+def test_without_a_saved_model_the_troubleshooting_agent_uses_the_shipped_default(
+    configured,
+) -> None:
     configured({})
-    assert troubleshooting.configured_model_id() == "env.troubleshooting-model"
+    assert troubleshooting.configured_model_id() == SHIPPED["meetingAssistModelId"]
 
 
 def test_with_neither_the_shipped_default_applies(monkeypatch) -> None:
     monkeypatch.setattr(parameters, "_SHARED_STORE", None)
     monkeypatch.delenv("CONFIGURATION_TABLE_NAME", raising=False)
-    monkeypatch.delenv("MODEL_ID", raising=False)
-    monkeypatch.delenv("TROUBLESHOOTING_MODEL_ID", raising=False)
     assert assistant.configured_agent_model_id() == assistant.DEFAULT_AGENT_MODEL_ID
     assert troubleshooting.configured_model_id() == troubleshooting.FALLBACK_MODEL_ID
 

@@ -55,6 +55,7 @@ from .parameters import (
     apply_parameter_defaults,
     parameter_defaults,
     read_setting,
+    shipped_setting_defaults,
 )
 from .presets import InvalidPreset, apply_preset, preset_by_id, preset_offered, shipped_presets
 from .revisions import (
@@ -184,6 +185,7 @@ __all__ = [
     "parameter_defaults",
     "profile_key",
     "read_setting",
+    "shipped_setting_defaults",
     "register",
     "registered_sections",
     "section_schema",

@@ -7,15 +7,14 @@
 
 Deployed by lma-main.yaml, the meeting assistant and the troubleshooting agent
 carry the AI stack's configuration layer and read their Amazon Bedrock models
-with its ``read_setting``: the Configuration page's value first, then the stack
-parameter's environment variable, then a default.
+with its ``read_setting``: the Configuration page's value first, then the
+setting's shipped default.
 
 This template can also be deployed on its own, with no AI stack and so no
-layer. Then ``read_setting`` here is the environment variable or the default,
-which is exactly what these functions read before the models were on the
-Configuration page. lma-ai-stack/test/test_parameter_backed_settings.py holds the
-integrated deployment to carrying the layer, so the fallback below is reached
-only by a standalone one.
+layer. Then ``read_setting`` here is the caller's ``default``, which each caller
+keeps equal to the shipped default. lma-ai-stack/test/test_parameter_backed_settings.py
+holds the integrated deployment to carrying the layer, so the fallback below is
+reached only by a standalone one.
 """
 
 from __future__ import annotations
@@ -32,10 +31,10 @@ except ImportError:  # deployed on its own, without the AI stack's configuration
         section: str,
         setting: str,
         *,
-        env_var: str,
+        env_var: str = "",
         default: Any = None,
         store: Any = None,
     ) -> Any:
-        """The environment variable, or ``default`` when it is unset or empty."""
+        """The environment variable when one is named and set, else ``default``."""
         del section, setting, store
-        return os.environ.get(env_var) or default
+        return (os.environ.get(env_var) if env_var else None) or default
