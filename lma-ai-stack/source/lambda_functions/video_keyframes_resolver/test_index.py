@@ -76,6 +76,8 @@ class FakeDynamo:
             }
         )
         self.queries: List[Dict[str, Any]] = []
+        self.batches: List[Dict[str, Any]] = []
+        self.unprocessed_rounds = 0
 
     def get_item(self, **kwargs):
         key = kwargs["Key"]
@@ -83,6 +85,23 @@ class FakeDynamo:
             found = [i for i in self.items if i["PK"] == key["PK"] and i["SK"] == key["SK"]]
             return {"Item": found[0]} if found else {}
         return {"Item": self.call} if self.call else {}
+
+    def batch_get_item(self, RequestItems):  # noqa: N803
+        self.batches.append(RequestItems)
+        ((table, request),) = RequestItems.items()
+        keys = request["Keys"]
+        # The first round leaves the last key unprocessed when asked to, as
+        # DynamoDB does under load.
+        held = keys[-1:] if self.unprocessed_rounds > 0 and len(keys) > 1 else []
+        self.unprocessed_rounds -= 1
+        answered = [k for k in keys if k not in held]
+        found = [
+            i for i in self.items for k in answered if i["PK"] == k["PK"] and i["SK"] == k["SK"]
+        ]
+        out: Dict[str, Any] = {"Responses": {table: found}}
+        if held:
+            out["UnprocessedKeys"] = {table: {"Keys": held}}
+        return out
 
     def query(self, **kwargs):
         self.queries.append(kwargs)
@@ -274,3 +293,71 @@ def test_a_frame_id_is_still_refused_to_anyone_else(fakes):
     fakes([item(1000)])
     with pytest.raises(index.ForbiddenError):
         call(STRANGER, frameId="0000001000-ab12cd")
+
+
+def test_the_frames_a_summary_names_are_read_in_one_request_in_the_order_named(fakes):
+    dynamo, _ = fakes([item(ms) for ms in (1000, 2000, 3000)])
+    result = call(
+        OWNER,
+        frameIds=[
+            "0000003000-ab12cd",
+            "0000009999-ab12cd",
+            "0000001000-ab12cd",
+            "0000003000-ab12cd",
+        ],
+    )
+    assert [f["FrameId"] for f in result["VideoKeyframes"]] == [
+        "0000003000-ab12cd",
+        "0000001000-ab12cd",
+    ]
+    assert all(f["ThumbnailSignedUrl"] and f["ImageSignedUrl"] for f in result["VideoKeyframes"])
+    assert result["nextToken"] is None
+    assert len(dynamo.batches) == 1
+    # Each frame asked for once, under this meeting only.
+    keys = dynamo.batches[0]["calls"]["Keys"]
+    assert len(keys) == 3
+    assert {k["PK"]["S"] for k in keys} == {f"kf#{CALL}"}
+    assert dynamo.queries == []
+
+
+def test_keys_left_unprocessed_are_asked_for_again(fakes, monkeypatch):
+    waits = []
+    monkeypatch.setattr(index.time, "sleep", waits.append)
+    dynamo, _ = fakes([item(ms) for ms in (1000, 2000)])
+    dynamo.unprocessed_rounds = 1
+    result = call(OWNER, frameIds=["0000001000-ab12cd", "0000002000-ab12cd"])
+    assert [f["FrameId"] for f in result["VideoKeyframes"]] == [
+        "0000001000-ab12cd",
+        "0000002000-ab12cd",
+    ]
+    assert len(dynamo.batches) == 2
+    # Waited once, before the second round.
+    assert waits == [index.RETRY_BASE_SECONDS]
+
+
+def test_an_empty_list_reads_nothing(fakes):
+    dynamo, _ = fakes([item(1000)])
+    assert call(OWNER, frameIds=[])["VideoKeyframes"] == []
+    assert dynamo.batches == []
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"frameIds": ["f#0000001000-ab12cd"]},
+        {"frameIds": "0000001000-ab12cd"},
+        {"frameIds": [f"{n:010d}-ab12cd" for n in range(101)]},
+        {"frameIds": ["0000001000-ab12cd"], "frameId": "0000001000-ab12cd"},
+    ],
+)
+def test_a_malformed_or_oversized_list_is_refused(fakes, arguments):
+    fakes([item(1000)])
+    with pytest.raises(index.BadRequestError):
+        call(OWNER, **arguments)
+
+
+def test_the_frames_a_summary_names_are_still_refused_to_anyone_else(fakes):
+    dynamo, _ = fakes([item(1000)])
+    with pytest.raises(index.ForbiddenError):
+        call(STRANGER, frameIds=["0000001000-ab12cd"])
+    assert dynamo.batches == []

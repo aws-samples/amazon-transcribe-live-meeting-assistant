@@ -20,20 +20,30 @@ const frame = (id) => ({
   ThumbnailSignedUrl: `https://signed/${id}_t.jpg`,
 });
 
+/** A batch loader answering the ids it is given, less 'gone'. */
+const framesLoader = () =>
+  vi.fn(async (_callId, ids) => Object.fromEntries(ids.filter((id) => id !== 'gone').map((id) => [id, frame(id)])));
+
 describe('resolveChatKeyframes', () => {
-  it('signs the well-formed ids of the meeting, at most ten, and leaves out the ones it cannot read', async () => {
-    const loadFrame = vi.fn(async (callId, id) => {
-      if (id === 'gone') return null;
-      if (id === 'boom') throw new Error('Unauthorized');
-      return frame(id);
-    });
-    const ids = ['a-1', 'gone', 'boom', 'bad id', 'f#x', ...Array.from({ length: 12 }, (_, i) => `n-${i}`)];
-    const frames = await resolveChatKeyframes('m-1', ids, loadFrame);
+  it('signs the well-formed ids of the meeting, at most ten, in one read, leaving out unreadable ones', async () => {
+    const loadFrames = framesLoader();
+    const ids = ['a-1', 'gone', 'bad id', 'f#x', ...Array.from({ length: 12 }, (_, i) => `n-${i}`)];
+    const frames = await resolveChatKeyframes('m-1', ids, loadFrames);
     expect(frames['a-1']).toEqual({ image: 'https://signed/a-1.jpg', thumbnail: 'https://signed/a-1_t.jpg' });
     expect(Object.keys(frames)).not.toContain('gone');
-    expect(loadFrame).toHaveBeenCalledTimes(10);
-    expect(loadFrame.mock.calls.every(([callId]) => callId === 'm-1')).toBe(true);
-    expect(loadFrame.mock.calls.map(([, id]) => id)).not.toContain('bad id');
+    expect(loadFrames).toHaveBeenCalledTimes(1);
+    const [callId, asked] = loadFrames.mock.calls[0];
+    expect(callId).toBe('m-1');
+    expect(asked).toHaveLength(10);
+    expect(asked).not.toContain('bad id');
+    expect(asked).not.toContain('f#x');
+  });
+
+  it('answers with no frames when the read fails', async () => {
+    const loadFrames = vi.fn(async () => {
+      throw new Error('Unauthorized');
+    });
+    expect(await resolveChatKeyframes('m-1', ['a-1'], loadFrames)).toEqual({});
   });
 });
 
@@ -48,15 +58,15 @@ describe('useChatKeyframeLinks', () => {
     );
 
   it('answers the chat for the meeting the page shows now', async () => {
-    const loadFrame = vi.fn(async (_callId, id) => frame(id));
+    const loadFrames = framesLoader();
     const source = { postMessage: vi.fn() };
-    const { rerender } = renderHook(({ callId }) => useChatKeyframeLinks(callId, loadFrame), {
+    const { rerender } = renderHook(({ callId }) => useChatKeyframeLinks(callId, loadFrames), {
       initialProps: { callId: 'm-1' },
     });
     rerender({ callId: 'm-2' });
     ask(source);
     await waitFor(() => expect(source.postMessage).toHaveBeenCalled());
-    expect(loadFrame).toHaveBeenCalledWith('m-2', 'a-1');
+    expect(loadFrames).toHaveBeenCalledWith('m-2', ['a-1']);
     expect(source.postMessage.mock.calls[0][0]).toEqual({
       type: 'STRANDS_KEYFRAMES',
       requestId: 'r-1',
@@ -65,14 +75,14 @@ describe('useChatKeyframeLinks', () => {
   });
 
   it('ignores a request from another origin', async () => {
-    const loadFrame = vi.fn();
+    const loadFrames = vi.fn();
     const source = { postMessage: vi.fn() };
-    renderHook(() => useChatKeyframeLinks('m-1', loadFrame));
+    renderHook(() => useChatKeyframeLinks('m-1', loadFrames));
     ask(source, 'https://elsewhere.example');
     await new Promise((r) => {
       setTimeout(r, 10);
     });
-    expect(loadFrame).not.toHaveBeenCalled();
+    expect(loadFrames).not.toHaveBeenCalled();
     expect(source.postMessage).not.toHaveBeenCalled();
   });
 });

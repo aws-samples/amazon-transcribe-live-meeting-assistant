@@ -14,8 +14,10 @@ them signs a GET for each image, so the people who can read the transcript can
 see the pictures without the browser's identity being given read access to the
 bucket. See docs/meeting-video.md.
 
-``frameId`` returns that one frame: the meeting page's chat uses it to show a
-frame the assistant referred to.
+``frameId`` returns that one frame, and ``frameIds`` the frames it names, up to
+:data:`MAX_FRAME_IDS`, in the order named and leaving out any that do not
+exist: the meeting summary reads every slide it shows in one request, and the
+meeting page's chat every frame an answer refers to.
 
 A link is signed only for an object in this deployment's recordings bucket under
 the meeting's own key-frame folder, the folder meeting deletion removes; a
@@ -30,7 +32,8 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, Literal, Mapping, Optional
+import time
+from typing import Any, Dict, List, Literal, Mapping, Optional
 from urllib.parse import unquote, urlparse
 
 import boto3
@@ -52,6 +55,12 @@ LINK_SECONDS = int(os.environ.get("LINK_SECONDS", "3600"))
 
 DEFAULT_LIMIT = 100
 MAX_LIMIT = 500
+#: The most frames one ``frameIds`` request reads: one BatchGetItem's limit.
+MAX_FRAME_IDS = 100
+#: Rounds of BatchGetItem for the keys DynamoDB leaves unprocessed under load,
+#: and the wait before the second, doubling for each one after.
+BATCH_ATTEMPTS = 4
+RETRY_BASE_SECONDS = 0.05
 FRAME_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
@@ -269,6 +278,51 @@ def decode_token(token: Optional[str], call_id: str) -> Optional[Dict[str, Any]]
     return {"PK": key["PK"], "SK": {"S": sort_key["S"]}}
 
 
+def frames_by_id(call_id: str, frame_ids: Any) -> List[Dict[str, Any]]:
+    """The named frames of the meeting, in the order named, each once.
+
+    A frame that does not exist is left out. Keys DynamoDB leaves unprocessed are
+    asked for again, a few times; any still left are logged and left out, which
+    the summary shows as the slide's text, as for a frame that is gone.
+    """
+    if not isinstance(frame_ids, list) or not all(
+        isinstance(frame_id, str) and FRAME_ID.match(frame_id) for frame_id in frame_ids
+    ):
+        raise BadRequestError("frameIds must be a list of frame ids")
+    wanted = list(dict.fromkeys(frame_ids))
+    if len(wanted) > MAX_FRAME_IDS:
+        raise BadRequestError(f"frameIds names more than {MAX_FRAME_IDS} frames")
+    if not wanted:
+        return []
+    found: Dict[str, Mapping[str, Any]] = {}
+    request: Dict[str, Any] = {
+        EVENT_SOURCING_TABLE: {
+            "Keys": [
+                {"PK": {"S": f"kf#{call_id}"}, "SK": {"S": f"f#{frame_id}"}} for frame_id in wanted
+            ]
+        }
+    }
+    for attempt in range(BATCH_ATTEMPTS):
+        if attempt:
+            # Keys are left unprocessed mostly under throttling, so wait a little
+            # longer each round before asking again: 50, 100, 200 ms.
+            time.sleep(RETRY_BASE_SECONDS * 2 ** (attempt - 1))
+        response = DYNAMODB.batch_get_item(RequestItems=request)
+        for found_item in response.get("Responses", {}).get(EVENT_SOURCING_TABLE, []):
+            found[found_item["SK"]["S"][len("f#") :]] = found_item
+        request = response.get("UnprocessedKeys") or {}
+        if not request:
+            break
+    if request:
+        LOGGER.warning(
+            "%d key frames of %s were not read after %d attempts",
+            len(request.get(EVENT_SOURCING_TABLE, {}).get("Keys", [])),
+            call_id,
+            BATCH_ATTEMPTS,
+        )
+    return [to_keyframe(found[frame_id], call_id) for frame_id in wanted if frame_id in found]
+
+
 def get_video_keyframes(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     """A page of the meeting's key frames in time order."""
     call_id = arguments.get("callId")
@@ -284,6 +338,11 @@ def get_video_keyframes(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     if after is not None and (not isinstance(after, str) or not FRAME_ID.match(after)):
         raise BadRequestError("afterFrameId is not a frame id")
     frame_id = arguments.get("frameId")
+    frame_ids = arguments.get("frameIds")
+    if frame_ids is not None:
+        if frame_id is not None:
+            raise BadRequestError("give frameId or frameIds, not both")
+        return {"VideoKeyframes": frames_by_id(call_id, frame_ids), "nextToken": None}
     if frame_id is not None:
         if not isinstance(frame_id, str) or not FRAME_ID.match(frame_id):
             raise BadRequestError("frameId is not a frame id")

@@ -111,9 +111,11 @@ How it is built:
   3,000 (the fetch-transcript function sends no more than that).
 - The meeting page and the embeddable summary panel show each picture
   reference as the frame's thumbnail, read through `getVideoKeyframes` for that
-  meeting with the same access check as the strip; selecting it opens the full
-  picture. A frame that cannot be read, because the meeting's retention has
-  removed it, shows as its alt text. Copy, download, Word, email, the meetings
+  meeting with the same access check as the strip, in one request for every
+  frame the summary names; selecting it opens the full picture. A picture whose
+  signed link has lapsed (links last an hour) is read again by itself. A frame
+  that cannot be read, because the meeting's retention has removed it, shows as
+  its alt text. Copy, download, Word, email, the meetings
   list's summary preview and the MCP `get_meeting_summary` tool show the alt
   text too, and so does the summary document for the meeting-history knowledge
   base.
@@ -430,7 +432,7 @@ The AppSync API has a query and a subscription:
 
 ```graphql
 query {
-  getVideoKeyframes(callId: "<CallId>", limit: 100, nextToken: null, afterFrameId: null, frameId: null) {
+  getVideoKeyframes(callId: "<CallId>", limit: 100, nextToken: null, afterFrameId: null, frameId: null, frameIds: null) {
     VideoKeyframes { FrameId Timestamp VideoOffset ShareDetected ThumbnailSignedUrl ImageSignedUrl }
     nextToken
   }
@@ -447,10 +449,13 @@ The query returns frames in time order, up to 500 at a time (100 by default),
 with `ThumbnailSignedUrl` and `ImageSignedUrl` filled in; `afterFrameId` returns
 only the frames after the one given, which is how the meeting page fetches a
 frame the subscription announced. `frameId` returns just that frame, and with it
-`limit`, `nextToken` and `afterFrameId` are not used; it is how a chat answer's
-picture is resolved. The subscription carries no signed links. As
-with `onAddTranscriptSegment`, its selection must include `Owner` and
-`SharedWith`.
+`limit`, `nextToken` and `afterFrameId` are not used. `frameIds` returns the
+frames it names, up to 100, in the order named, each once, leaving out any that
+do not exist, also without `limit`, `nextToken` or `afterFrameId`; it is how the
+summary's pictures, and a chat answer's, are resolved, in one request rather than
+one per frame. Giving both `frameId` and `frameIds` is refused. The subscription
+carries no signed links. As with `onAddTranscriptSegment`, its selection must
+include `Owner` and `SharedWith`.
 
 ### The `ADD_VIDEO_KEYFRAME` event
 

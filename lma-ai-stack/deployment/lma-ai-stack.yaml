@@ -6122,9 +6122,11 @@ Resources:
             Statement:
               # Reads only: a meeting's key frame items, and the Owner and
               # SharedWith of its call row, which decide who may see them.
+              # BatchGetItem reads the frames a summary or a chat answer names.
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
+                  - dynamodb:BatchGetItem
                   - dynamodb:Query
                 Resource: !GetAtt EventSourcingTable.Arn
                 Condition:
