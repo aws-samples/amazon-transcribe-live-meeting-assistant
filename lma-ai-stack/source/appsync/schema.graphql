@@ -327,8 +327,10 @@ type Query @aws_cognito_user_pools
 	# meeting's owner, the people it is shared with, admins and backend roles.
 	# afterFrameId returns only the frames after that one, for a page that
 	# already has the earlier ones; frameId returns just that frame, and with
-	# it limit, nextToken and afterFrameId are not used.
-	getVideoKeyframes(callId: ID!, limit: Int, nextToken: String, afterFrameId: ID, frameId: ID): VideoKeyframeList
+	# it limit, nextToken and afterFrameId are not used. frameIds returns up to
+	# 100 frames, in the order named, each once, leaving out any that do not
+	# exist, likewise without the paging arguments.
+	getVideoKeyframes(callId: ID!, limit: Int, nextToken: String, afterFrameId: ID, frameId: ID, frameIds: [ID]): VideoKeyframeList
 	# The meeting's consent record with hour-long signed links to its evidence
 	# images, whether it may be recorded and transcribed now, and the
 	# deployment's consent settings. Answered to the callers getCall answers.
