@@ -179,6 +179,13 @@ This is a clean break:
 - **Remove the parameters from deploy commands and pipelines.** CloudFormation
   refuses an update that names a parameter the template does not declare.
   `lma deploy` leaves them out on its own.
+- **Enable the shipped default models first, or turn model validation off.**
+  With the default `ModelValidation=true`, the update to 0.4.0 checks access to
+  `global.anthropic.claude-sonnet-5-5` and
+  `global.anthropic.claude-haiku-4-5-20251001-v1:0`, the shipped defaults of the
+  Amazon Bedrock Models section, and fails if the account cannot invoke them.
+  Enable both in the Amazon Bedrock console before updating, or set
+  `ModelValidation=false` for a deployment that uses other models.
 - **The inactive-meeting reaper is always deployed.** A timeout of 0 on the
   Configuration page makes it end nothing.
 
