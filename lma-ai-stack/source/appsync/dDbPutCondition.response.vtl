@@ -5,9 +5,10 @@
     $util.error($ctx.error.message, $ctx.error.type)
   #end
 #end
-## The meeting and transcript-segment mutations answered here are published to
-## the onUpdateCall and onAddTranscriptSegment subscriptions, filtered on
-## SharedWith in subscription.js.
+## The meeting, transcript-segment and meeting-consent mutations answered here
+## are published to the onUpdateCall, onAddTranscriptSegment and
+## onUpdateMeetingConsent subscriptions, filtered on SharedWith in
+## subscription.js.
 #if( $context.result )
   #set( $sharedWithRaw = $util.defaultIfNull($context.result.SharedWith, "") )
 ## BEGIN SharedWith entries -- one text in every template that reads SharedWith;

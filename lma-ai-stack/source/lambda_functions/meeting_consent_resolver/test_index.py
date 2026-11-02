@@ -62,7 +62,12 @@ def user(name: str, *, admin: bool = False) -> Dict[str, Any]:
     return {"username": name, "claims": {"sub": f"sub-{name}", "cognito:groups": groups}}
 
 
-BACKEND = {"userArn": "arn:aws:sts::123456789012:assumed-role/VPTaskRole/session", "accountId": "1"}
+# As AppSync passes an IAM identity: the username is the role id and session.
+BACKEND = {
+    "userArn": "arn:aws:sts::123456789012:assumed-role/VPTaskRole/session",
+    "accountId": "1",
+    "username": "AROAEXAMPLE:session",
+}
 
 
 class FakeDynamo:
@@ -108,8 +113,9 @@ class FakeDynamo:
                 {"Error": {"Code": "ConditionalCheckFailedException", "Message": "no"}},
                 "UpdateItem",
             )
+        assert "ReturnValues" not in kwargs  # the answer is built from the row as read
         item["Consent"] = kwargs["ExpressionAttributeValues"][":c"]
-        return {"Attributes": dict(item)}
+        return {}
 
 
 class FakeStore:
@@ -469,3 +475,20 @@ def test_changing_the_mode_before_anything_was_posted_keeps_the_history(dynamo) 
         f"the mode was changed to opt_in (each_participant) by {OWNER}"
     )
     assert [h["Status"] for h in record["StatusHistory"]] == ["pending", "pending"]
+
+
+def test_a_started_record_is_read_without_the_settings(dynamo, monkeypatch) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    monkeypatch.setattr(index, "_STORE", FakeStore(fail=True))
+    result = call("getMeetingConsent", user(OWNER))
+    assert result["CaptureAllowed"] is True and result["Settings"] is None
+    dynamo.put_meeting(SharedWith=[SHARED])
+    with pytest.raises(index.ConfigurationUnavailableError):
+        call("getMeetingConsent", user(OWNER))
+
+
+def test_a_backend_write_is_attributed_to_lma_not_its_session(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    result = call("recordMeetingConsentNotice", BACKEND, Channel="chat")
+    assert result["Consent"]["StartedBy"] == "LMA"
+    assert result["Consent"]["Notices"][0]["PostedBy"] == "LMA"

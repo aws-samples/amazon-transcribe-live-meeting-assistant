@@ -196,11 +196,15 @@ def caller_of(event: Mapping[str, Any]) -> Dict[str, Any]:
     if isinstance(groups, str):
         groups = [g.strip() for g in groups.split(",") if g.strip()]
     user_arn = str(identity.get("userArn") or "")
+    is_backend = not claims and ":assumed-role/" in user_arn
     return {
-        "username": str(identity.get("username") or ""),
+        # An IAM identity's username is its role id and session name: not a
+        # person, so never matched against the meeting's Owner or SharedWith and
+        # never written as who recorded something.
+        "username": "" if is_backend else str(identity.get("username") or ""),
         "subject": claims.get("sub") or identity.get("sub") or "",
         "is_admin": ADMIN_GROUP in groups,
-        "is_backend": not claims and ":assumed-role/" in user_arn,
+        "is_backend": is_backend,
     }
 
 
@@ -386,21 +390,19 @@ def write_consent(
         else:
             condition = "attribute_exists(PK) AND attribute_not_exists(#c)"
         try:
-            response = DYNAMODB.update_item(
+            DYNAMODB.update_item(
                 TableName=EVENT_SOURCING_TABLE,
                 Key=_meeting_key(call_id),
                 UpdateExpression="SET #c = :c",
                 ConditionExpression=condition,
                 ExpressionAttributeNames=names,
                 ExpressionAttributeValues=values,
-                ReturnValues="ALL_NEW",
             )
         except ClientError as error:
             if error.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
                 LOGGER.info("consent of %s changed while writing; reading it again", call_id)
                 continue
             raise
-        item = {k: _plain(DESERIALIZER.deserialize(v)) for k, v in response["Attributes"].items()}
         LOGGER.info(
             "consent of %s: version %d, status %s, capture allowed %s",
             call_id,
@@ -408,7 +410,9 @@ def write_consent(
             updated["Status"],
             updated["CaptureAllowed"],
         )
-        return update_out(item, call_id)
+        # Owner and SharedWith as read: the write was conditional on the version
+        # read with them, so they are the row's as of this write.
+        return update_out({**meeting, "Consent": updated}, call_id)
     raise ConflictError("the meeting's consent kept changing; try again")
 
 
@@ -439,13 +443,22 @@ def one_of(value: Any, allowed: tuple, name: str, default: Optional[str] = None)
 def get_meeting_consent(caller: Mapping[str, Any], arguments: Mapping[str, Any]) -> Dict:
     call_id = str(arguments["CallId"])
     meeting, _access = load(caller, call_id)
-    settings = consent_settings()
     record = meeting.get("Consent") or None
+    try:
+        settings: Optional[Dict[str, Any]] = consent_settings()
+    except ConfigurationUnavailableError:
+        # A started record decides its own gate; only a meeting without one
+        # needs the deployment's mode to be judged.
+        if not record:
+            raise
+        settings = None
     return {
         "CallId": call_id,
         "Consent": consent_out(record, call_id, signed=True),
-        "CaptureAllowed": consent.capture_allowed(record, settings["mode"]),
-        "Settings": settings_out(settings),
+        "CaptureAllowed": consent.capture_allowed(
+            record, settings["mode"] if settings else consent.MODE_OFF
+        ),
+        "Settings": settings_out(settings) if settings else None,
     }
 
 

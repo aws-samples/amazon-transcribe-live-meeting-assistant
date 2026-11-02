@@ -123,7 +123,9 @@ strict one, and not with its own notice text.
 
 The settings are read when they are needed, with no cache, because they decide
 whether a meeting may be captured. If they cannot be read, starting a meeting's
-consent fails rather than falling back to off.
+consent fails rather than falling back to off, and so does reading a meeting
+that has no consent record; a meeting with a record is read without the
+settings, since its record decides its own gate.
 
 ## Flows by capture method
 

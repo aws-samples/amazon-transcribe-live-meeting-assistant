@@ -6270,8 +6270,9 @@ Resources:
           PolicyDocument:
             Version: 2012-10-17
             Statement:
-              # The meeting row only: its Owner and SharedWith, which decide
-              # who may act, and its Consent attribute, the one this writes.
+              # The meeting rows (c# partitions): read for their Owner,
+              # SharedWith and Consent, which decide who may act and what the
+              # record holds. The function's only update sets Consent.
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
