@@ -158,7 +158,10 @@ COMPONENT_NOTES: Dict[str, str] = {
         "Audio ingestion and the speech-to-text session. Lines are "
         "bracket-tagged: [AUTH] for the WebSocket upgrade, [TRANSCRIBING] for "
         "the Amazon Transcribe session lifecycle, [ASR] for the MicroVM "
-        "engine, [DIARIZATION] for speaker labelling."
+        "engine, [DIARIZATION] for speaker labelling. Lines are JSON records; "
+        "those written for a connection carry sessionId (one WebSocket "
+        "connection) and callId fields that Logs Insights can filter on. The "
+        "message text is in msg."
     ),
     ASR_MICROVM: (
         "The on-demand ASR server, when EnableMicrovmAsr is on and a source "

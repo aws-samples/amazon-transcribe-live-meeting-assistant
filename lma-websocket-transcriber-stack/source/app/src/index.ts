@@ -41,8 +41,9 @@ import {
     describeRequest,
     stringifyCallMetaData,
     redactTokenLike,
-    PINO_REDACT_OPTIONS,
 } from './utils';
+import { buildLoggerOptions } from './utils/logger-options';
+import { bindLogContext, runWithLogContext, LogContext } from './utils/log-context';
 
 import { jwtVerifier, getAuthenticatedCaller } from './utils/jwt-verifier';
 
@@ -75,6 +76,7 @@ const CPU_HEALTH_THRESHOLD = parseInt(
 );
 const LOCAL_TEMP_DIR = process.env['LOCAL_TEMP_DIR'] || '/tmp/';
 const WS_LOG_LEVEL = (process.env['WS_LOG_LEVEL'] || 'debug').toLowerCase();
+const LOG_FORMAT = process.env['LOG_FORMAT'] || 'json';
 const WS_LOG_INTERVAL = parseInt(process.env['WS_LOG_INTERVAL'] || '120', 10);
 // Whether a meeting is recorded when its client says nothing is the Meeting
 // Recording section's setting, read per meeting with this task's
@@ -109,25 +111,7 @@ const findAudioSessionByCallId = (
 
 // create fastify server (with logging enabled for non-PROD environments)
 const server = fastify({
-    logger: {
-        level: WS_LOG_LEVEL,
-        // Backstop for object-style log records only: pino's redact rewrites
-        // properties of the logged object and never inspects the rendered
-        // message. Every log line in this package is an interpolated string, so
-        // each one is redacted at its call site via describeRequest() /
-        // stringifyCallMetaData(); this config covers anything logged as an
-        // object, now or later.
-        redact: PINO_REDACT_OPTIONS,
-        transport: {
-            target: 'pino-pretty',
-            options: {
-                ignore: 'pid,hostname',
-                translateTime: 'SYS:HH:MM:ss.l',
-                colorize: false,
-                levelFirst: true,
-            },
-        },
-    },
+    logger: buildLoggerOptions({ level: WS_LOG_LEVEL, format: LOG_FORMAT }),
     disableRequestLogging: true,
 });
 // register the @fastify/websocket plugin with the fastify server
@@ -168,14 +152,20 @@ server.after(() => {
         '/api/v1/ws',
         { websocket: true, logLevel: 'debug' },
         (socket, request) => {
-            const clientIP = getClientIP(request.headers);
-            server.log.debug(
-                `[NEW CONNECTION]: [${clientIP}] - Received new connection request @ /api/v1/ws. ${describeRequest(
-                    request
-                )}`
-            );
+            // This connection's log context: every record written while one of
+            // its handlers runs carries the session id, and the call id once
+            // the START frame names it.
+            const logContext = { sessionId: randomUUID() };
+            runWithLogContext(logContext, () => {
+                const clientIP = getClientIP(request.headers);
+                server.log.debug(
+                    `[NEW CONNECTION]: [${clientIP}] - Received new connection request @ /api/v1/ws. ${describeRequest(
+                        request
+                    )}`
+                );
 
-            registerHandlers(clientIP, socket, request); // setup the handler functions for websocket events
+                registerHandlers(clientIP, socket, request, logContext); // setup the handler functions for websocket events
+            });
         }
     );
 });
@@ -237,9 +227,16 @@ server.get('/health/check', { logLevel: 'warn' }, (request, response) => {
 const registerHandlers = (
     clientIP: string,
     ws: WebSocket,
-    request: FastifyRequest
+    request: FastifyRequest,
+    logContext: LogContext
 ): void => {
-    ws.on('message', async (data, isBinary): Promise<void> => {
+    // A listener runs in the context of whatever emitted the event, not of the
+    // code that registered it, so each one enters the connection's context.
+    ws.on('message', (data, isBinary) => runWithLogContext(logContext, () => onWsMessage(data, isBinary)));
+    ws.on('close', (code: number) => runWithLogContext(logContext, () => onWsCloseEvent(code)));
+    ws.on('error', (error: Error) => runWithLogContext(logContext, () => onWsErrorEvent(error)));
+
+    async function onWsMessage(data: WebSocket.RawData, isBinary: boolean): Promise<void> {
         try {
             if (isBinary) {
                 const audioinput = Buffer.from(data as Uint8Array);
@@ -270,9 +267,9 @@ const registerHandlers = (
                 );
             }
         }
-    });
+    }
 
-    ws.on('close', (code: number) => {
+    function onWsCloseEvent(code: number): void {
         server.log.debug(
             `[ON WSCLOSE]: [${clientIP}] Received Websocket close message from the client. Closing the connection.`
         );
@@ -286,16 +283,16 @@ const registerHandlers = (
                 )}`
             );
         }
-    });
+    }
 
-    ws.on('error', (error: Error) => {
+    function onWsErrorEvent(error: Error): void {
         server.log.error(
             `[ON WSERROR]: [${clientIP}] - Websocket error, forcing close: ${normalizeErrorForLogging(
                 error
             )}`
         );
         ws.close();
-    });
+    }
 };
 
 const onBinaryMessage = async (
@@ -438,6 +435,7 @@ const onTextMessage = async (
     if (callMetaData.callEvent === 'START') {
         // generate random metadata if none is provided
         callMetaData.callId = callMetaData.callId || randomUUID();
+        bindLogContext({ callId: callMetaData.callId });
         callMetaData.fromNumber = callMetaData.fromNumber || 'Customer Phone';
         callMetaData.toNumber = callMetaData.toNumber || 'System Phone';
         callMetaData.activeSpeaker =
@@ -573,6 +571,7 @@ const onTextMessage = async (
             ws.close(1008, 'not authorized for callId');
             return;
         }
+        bindLogContext({ callId: callMetaData.callId });
         const session = startVideoSession(
             callMetaData,
             server,

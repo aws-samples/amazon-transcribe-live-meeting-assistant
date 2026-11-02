@@ -335,7 +335,7 @@ def test_the_trigger_example_reads_a_plain_line_and_a_json_record_alike() -> Non
 def test_the_prompt_describes_the_json_line_fields() -> None:
     text = prompt_text()
 
-    for field in ("vpId", "callId", "meetingPlatform", "level", "msg", "component"):
+    for field in ("vpId", "callId", "meetingPlatform", "sessionId", "level", "msg", "component"):
         assert field in text
 
 

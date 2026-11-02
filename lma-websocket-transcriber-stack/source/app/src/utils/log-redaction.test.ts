@@ -20,7 +20,7 @@
  *   logger and searches the captured message strings. It covers the call-site
  *   helpers, which is where the message strings are built.
  * - `the pino redact configuration censors ...` builds a Fastify logger from the
- *   exact `PINO_REDACT_OPTIONS` object index.ts installs and writes through real
+ *   exact `PINO_REDACT_OPTIONS` object logger-options.ts installs and writes through real
  *   pino, so the object-style backstop is covered too.
  */
 import { strict as assert } from 'node:assert';
@@ -268,7 +268,7 @@ test('the log line jwtVerifier emits for a real request contains no token substr
 });
 
 test('the pino redact configuration censors token fields on object-style records', async () => {
-    // Covers index.ts's `redact: PINO_REDACT_OPTIONS` through real pino, using the
+    // Covers logger-options.ts's `redact: PINO_REDACT_OPTIONS` through real pino, using the
     // same exported object the server installs. A Fastify logger is built rather
     // than importing pino directly, because that is how the option reaches pino in
     // production and fastify is a declared dependency here.

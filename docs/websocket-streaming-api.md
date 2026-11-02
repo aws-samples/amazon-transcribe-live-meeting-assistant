@@ -851,7 +851,8 @@ These environment variables configure the server and are provided here for refer
 | `DIARIZATION_MAX_SEGMENT_SECONDS` | `20` | Longest stretch of audio allowed in one in-progress segment. Bounds how long the live transcript can hold an unlabelled block, since Transcribe caps results near 30s and never labels a partial. `0` disables chunking. |
 | `CPU_HEALTH_THRESHOLD` | `50` | CPU usage % threshold for health check |
 | `LOCAL_TEMP_DIR` | `/tmp/` | Temporary directory for recording files |
-| `WS_LOG_LEVEL` | `debug` | Server log level |
+| `WS_LOG_LEVEL` | `debug` | Server log level. Set from the stack's `LogLevel` parameter |
+| `LOG_FORMAT` | `json` | `json` writes one JSON record per line (see [Log Format](troubleshooting.md#log-format)); `text` writes readable `pino-pretty` lines, for a local run |
 | `WS_LOG_INTERVAL` | `120` | Seconds between periodic health check log entries |
 
 ---

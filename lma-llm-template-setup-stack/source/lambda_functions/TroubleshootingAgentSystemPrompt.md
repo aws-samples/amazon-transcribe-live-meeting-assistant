@@ -111,17 +111,20 @@ Supply search_terms for reading lines; supply query_string for everything else:
 LINE FORMAT: each virtual participant line is one JSON object: ts, level
 (DEBUG, INFO, WARN or ERROR), component, msg (the human-readable text, where
 the markers below appear), and the meeting's identity — vpId, callId and
-meetingPlatform. Logs Insights discovers these fields, so filter vpId = "<id>"
-or filter level = "ERROR" selects exactly, and stats count() by component shows
-where the lines come from. Lines without these fields are plain text: older
-lines, output from the container's start-up script and the browser process, and
-every other component's. A field filter skips those, so to cover both, match
-the text with @message like as well. The participant's start-up, status, exit
-and shutdown lines are written whatever the stack's LogLevel is; its other INFO
-lines are not written when LogLevel is WARN or ERROR, so check that parameter
-before reading their absence as evidence. Inside a JSON line a double quote in
-the message is written \", so search for the part of a message that has no
-quotes in it.
+meetingPlatform. The WebSocket transcriber writes the same ts, level, component
+and msg, with sessionId (one WebSocket connection) and callId (from the
+connection's START frame). Logs Insights discovers these fields, so filter vpId
+= "<id>" or filter level = "ERROR" selects exactly, filter callId = "<id>" over
+both log groups reads one meeting across the two, and stats count() by
+component shows where the lines come from. Lines without these fields are plain
+text: older lines, output from the container's start-up script and the browser
+process, and every other component's. A field filter skips those, so to cover
+both, match the text with @message like as well. The participant's start-up,
+status, exit and shutdown lines are written whatever the stack's LogLevel is;
+its other INFO lines are not written when LogLevel is WARN or ERROR, so check
+that parameter before reading their absence as evidence. Inside a JSON line a
+double quote in the message is written \", so search for the part of a message
+that has no quotes in it.
 
 Use at least two independent sources before naming a cause. If a search returns
 nothing, change the search before changing your conclusion.
