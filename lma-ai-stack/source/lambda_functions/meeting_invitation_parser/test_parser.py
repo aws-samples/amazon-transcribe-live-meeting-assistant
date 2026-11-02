@@ -329,3 +329,18 @@ class TestAgenda(unittest.TestCase):
     def test_the_agenda_is_bounded_to_what_the_form_can_submit(self):
         out = index.validate_parsed_data({"agenda": "x" * (index.MAX_AGENDA_CHARS + 10)})
         self.assertEqual(len(out["agenda"]), index.MAX_AGENDA_CHARS)
+
+
+class TestHandlerLogging(unittest.TestCase):
+    def test_invitation_text_is_not_logged(self):
+        from unittest.mock import patch
+
+        text = "Join Zoom https://zoom.us/j/123 Passcode: 987654xyz"
+        with (
+            patch.object(index, "parse_meeting_invitation", return_value={}),
+            self.assertLogs(index.logger, level="DEBUG") as captured,
+        ):
+            index.handler({"arguments": {"invitationText": text}}, None)
+        output = "\n".join(captured.output)
+        self.assertNotIn("987654xyz", output)
+        self.assertIn(f"{len(text)} characters", output)

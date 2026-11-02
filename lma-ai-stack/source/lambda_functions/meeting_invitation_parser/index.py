@@ -383,7 +383,9 @@ UNSUPPORTED_PLATFORM_MESSAGES = {
 
 def handler(event, context):
     """Lambda handler for parsing meeting invitations"""
-    logger.info(f"Received event: {json.dumps(event)}")
+    # The invitation text can carry meeting passcodes, so only its size is logged.
+    invitation_size = len(event.get("arguments", {}).get("invitationText", "") or "")
+    logger.info("Received invitation to parse: %d characters", invitation_size)
 
     try:
         # Extract meeting invitation text from the event
