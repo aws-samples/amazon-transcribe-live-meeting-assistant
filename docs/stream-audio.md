@@ -9,6 +9,7 @@ title: "Stream Audio"
 - [Overview](#overview)
 - [Use Cases](#use-cases)
 - [Step-by-Step Walkthrough](#step-by-step-walkthrough)
+- [Meeting Consent](#meeting-consent)
 - [Speaker Identification](#speaker-identification)
 - [Browser Compatibility](#browser-compatibility)
 - [Technical Details](#technical-details)
@@ -70,6 +71,19 @@ Use Stream Audio with any browser-based audio application when you want to stay 
 13. A link to the recorded meeting appears at the bottom of the Stream Audio page.
 
 ![Open Recorded Meeting](../images/readme-stream-audio-open-recorded.png)
+
+## Meeting Consent
+
+When the deployment's [meeting consent](meeting-consent.md) mode is Notify or
+Opt-in, a **Meeting consent** panel appears above the Start button. It shows
+the notice to read out or paste into the meeting chat (**Copy notice**), asks
+you to confirm that you shared it or, in Opt-in, that everyone agreed, and how;
+offers **Capture evidence** to keep a screenshot of the meeting on its consent
+record; and, while streaming, **Participant objected**, which stops the stream
+and records the objection. In Opt-in, Start is refused until you confirm, and
+nothing is recorded or transcribed until the transcriber has recorded your
+confirmation on the meeting. See
+[Stream Audio and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
 
 ## Speaker Identification
 

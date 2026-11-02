@@ -7,5 +7,6 @@
   "objectionPhrases": "I object, I do not consent, I don't consent, I do not agree, I don't agree, do not record, don't record, stop recording",
   "allowPerMeetingOverride": true,
   "keepEvidenceScreenshots": true,
-  "verifierModelId": "amazon.nova-lite-v1:0"
+  "verifierModelId": "amazon.nova-lite-v1:0",
+  "clientsWithoutConsent": "accept_with_warning"
 }

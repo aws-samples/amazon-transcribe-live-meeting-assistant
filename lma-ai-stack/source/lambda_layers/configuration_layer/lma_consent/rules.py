@@ -104,6 +104,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "allowPerMeetingOverride": True,
     "keepEvidenceScreenshots": True,
     "verifierModelId": "amazon.nova-lite-v1:0",
+    # What the WebSocket transcriber does with a streaming client that sends no
+    # consent step while the mode is notify or opt_in: "accept_with_warning" or
+    # "reject". Read by the transcriber only.
+    "clientsWithoutConsent": "accept_with_warning",
 }
 
 # Bounds on each part of one meeting's record. They bound each list; the record

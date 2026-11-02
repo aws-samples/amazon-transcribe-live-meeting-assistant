@@ -12,6 +12,7 @@ import stream from 'stream';
 import { WriteStream } from 'fs';
 import type { AsrSessionSet } from './asr-microvm';
 import type { SessionSettings } from './session-settings';
+import type { ConsentSession } from '../consent/session';
 
 export type Uuid = string;             // UUID as defined by RFC#4122
 
@@ -194,6 +195,11 @@ export type CallMetaData = {
             };
         };
     };
+    /**
+     * START only: the client's consent step (see consent/rules.ts and
+     * docs/meeting-consent.md). Absent from clients without one.
+     */
+    consent?: unknown,
     accessToken?: string,
     idToken?: string,
     refreshToken?: string,
@@ -227,4 +233,12 @@ export type SocketCallData = {
      * every engine path and every reconnect uses the same values.
      */
     sessionSettings?: SessionSettings
+    /**
+     * The meeting's consent, when its client sent a consent step and the
+     * deployment requires one. While its gate is closed no audio is transcribed
+     * or recorded.
+     */
+    consent?: ConsentSession
+    /** Whether transcription was started, which an opt-in meeting defers until its consent allows it. */
+    transcriptionStarted?: boolean
 };
