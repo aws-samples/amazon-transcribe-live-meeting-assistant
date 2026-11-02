@@ -108,6 +108,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     # consent step while the mode is notify or opt_in: "accept_with_warning" or
     # "reject". Read by the transcriber only.
     "clientsWithoutConsent": "accept_with_warning",
+    # Read by the Virtual Participant only: whether it leaves the meeting after
+    # a participant objects, rather than staying in it without capturing.
+    "leaveOnObjection": False,
 }
 
 # Bounds on each part of one meeting's record. They bound each list; the record

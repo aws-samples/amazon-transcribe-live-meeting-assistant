@@ -10,6 +10,8 @@ import {
     parseAssistantChatCommand,
 } from './assistant-toggles.js';
 import { allChatHelpMessages, chatHelpMessages } from './chat-help.js';
+import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
+import { toolbarPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { simliAvatar } from './simli-avatar.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
@@ -125,7 +127,7 @@ export function isOwnWebexMessage(message: string): boolean {
         ...details.pauseMessages,
         ...details.exitMessages,
         ...allChatHelpMessages(),
-    ].some((own) => own && own.trim() === text);
+    ].some((own) => own && own.trim() === text) || meetingConsent.isOwnMessage(text);
 }
 
 /**
@@ -865,6 +867,8 @@ export default class Webex {
             ) {
                 return;
             }
+            // A consent reply, or "LMA start" while consent is withheld.
+            if (await meetingConsent.handleChat(sender, message)) return;
             // Checked ahead of pause/resume so an assistant-mode toggle lands
             // whether or not transcription is paused; the two vocabularies are
             // disjoint. `freshToggle` drops the observer's duplicate add event:
@@ -1095,6 +1099,23 @@ export default class Webex {
                 ? 'Webex chat observer attached.'
                 : 'Webex chat container not found — in-meeting chat commands will not work.',
         );
+
+        // The meeting consent flow, when the meeting runs one (meeting-consent.ts).
+        // Webex gives no attendee count, which the each-participant rule needs;
+        // see docs/meeting-consent.md.
+        const enterprise = frameElement && frameElement.source === 'enterprise';
+        attachMeetingConsent(page, {
+            send: (messages) => this.sendMessages(frame, messages, enterprise),
+            panels: toolbarPanels(frame, {
+                listVisible: ['[data-test="participant-name"]', '.participants-list-item'],
+                open: ['button[data-test="participants-toggle-button"]', 'button[aria-label^="Participants" i]', 'button[aria-label*="Show participants" i]'],
+                close: ['button[data-test="participants-toggle-button"]', 'button[aria-label*="Hide participants" i]'],
+            }),
+            leave: (objector) => {
+                details.start = false;
+                this.requestEnd({ reason: 'consent-objection', trigger: 'consent-objection', requestedBy: objector });
+            },
+        });
 
         // Start transcription if enabled
         if (details.start) {

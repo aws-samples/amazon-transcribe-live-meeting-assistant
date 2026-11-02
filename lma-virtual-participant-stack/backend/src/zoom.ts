@@ -4,6 +4,8 @@ import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { chatHelpMessages } from './chat-help.js';
+import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
+import { toolbarPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { simliAvatar } from './simli-avatar.js';
 import {
@@ -1394,6 +1396,7 @@ export default class Zoom {
 
         // Set up attendee change monitoring
         await page.exposeFunction('attendeeChange', async (number: number) => {
+            meetingConsent.noteAttendeeCount(number);
             if (number <= 1) {
                 log.info('LMA Virtual Participant got lonely and left.');
                 details.start = false;
@@ -1501,6 +1504,7 @@ export default class Zoom {
                         });
                     }
                 } else if ((result.count ?? 0) <= 1) {
+                    meetingConsent.noteAttendeeCount(result.count ?? 0);
                     consecutiveLonely += 1;
                     consecutiveMissingCounter = 0;
                     if (consecutiveLonely >= POLLS_BEFORE_END) {
@@ -1515,6 +1519,7 @@ export default class Zoom {
                         });
                     }
                 } else {
+                    meetingConsent.noteAttendeeCount(result.count ?? 0);
                     consecutiveMissingCounter = 0;
                     consecutiveLonely = 0;
                 }
@@ -1718,6 +1723,8 @@ export default class Zoom {
             // `message` is the row's aria-label, sender and recipient included.
             // Every command below is matched against the body alone.
             const { sender, body } = splitZoomChatLabel(message);
+            // A consent reply, or "LMA start" while consent is withheld.
+            if (await meetingConsent.handleChat(sender, body)) return;
             // Checked ahead of pause/resume so an assistant-mode toggle lands
             // whether or not transcription is paused; the two vocabularies are
             // disjoint. Parsed from the body rather than the raw row, so the
@@ -1808,6 +1815,23 @@ export default class Zoom {
         } else {
             log.info('No chat list selector available — skipping chat monitoring');
         }
+
+        // The meeting consent flow, when the meeting runs one (meeting-consent.ts).
+        // The participants pane opens beside the chat; it is closed again
+        // after the screenshot, and the chat reopened if Zoom closed it.
+        attachMeetingConsent(page, {
+            send: (messages) => this.sendMessages(page, messages),
+            panels: toolbarPanels(page, {
+                listVisible: ['.participants-section-container', '.participants-ul'],
+                open: ['button[aria-label^="open the participants list pane" i]', 'button[aria-label*="participants" i][aria-label^="open" i]'],
+                close: ['button[aria-label^="close the participants list pane" i]', 'button[aria-label*="participants" i][aria-label^="close" i]'],
+                reopenChat: () => this.openChatPanel(page),
+            }),
+            leave: (objector) => {
+                details.start = false;
+                this.requestEnd({ reason: 'consent-objection', trigger: 'consent-objection', requestedBy: objector });
+            },
+        });
 
         // Start transcription if enabled (LMA behavior)
         if (details.start) {

@@ -28,6 +28,7 @@ import {
 import { voiceAssistant } from './voice-assistant.js';
 import { meterTranscribeRequest, pcmSeconds } from './metering.js';
 import { RosterTimeline } from './roster-timeline.js';
+import { noteParticipantSeen } from './consent-roster.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
 import { OpenPartialTracker, assistantRowSpan, onAssistantTurn } from './translator-transcript.js';
@@ -1275,6 +1276,8 @@ export class TranscriptionService {
         const timestamp = Date.now();
         details.speakers.push({ name: speaker, timestamp });
         this.rosterTimeline.record(this.rosterClockSeconds(), speaker);
+        // Who is present, for the meeting consent flow's participant list.
+        noteParticipantSeen(speaker);
         
         const formattedTime = this.formatTimestamp(timestamp);
         log.info(`[${formattedTime}] Speaker changed to: ${speaker}`);

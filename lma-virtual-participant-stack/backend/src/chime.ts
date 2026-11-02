@@ -9,6 +9,7 @@ import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { clickWithDomFallback, POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
+import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('chime');
@@ -161,6 +162,7 @@ export default class Chime {
 
         // Set up attendee change monitoring
         await page.exposeFunction('attendeeChange', async (number: number) => {
+            meetingConsent.noteAttendeeCount(number);
             if (number <= 1) {
                 log.info('LMA Virtual Participant got lonely and left.');
                 details.start = false;
@@ -232,6 +234,13 @@ export default class Chime {
                     sender = this.prevSender;
                 }
                 this.prevSender = sender;
+
+                // A consent reply, or "LMA start" while consent is withheld. Chime's
+                // own system messages go through too, without a sender, so a
+                // start command never gets past a withheld meeting unread.
+                if (text && (await meetingConsent.handleChat(sender === 'Amazon Chime' ? null : sender, text))) {
+                    return;
+                }
 
                 // Handle LMA commands. The assistant-mode toggles are checked
                 // ahead of pause/resume so that they land whether or not
@@ -334,6 +343,18 @@ export default class Chime {
 
             const observer = new MutationObserver(callback);
             if (targetNode) observer.observe(targetNode, config);
+        });
+
+        // The meeting consent flow, when the meeting runs one: the notice, the
+        // replies and the gate on capture (meeting-consent.ts). Chime shows the
+        // chat and the attendee list side by side, so one screenshot has both.
+        attachMeetingConsent(page, {
+            send: (messages) => this.sendMessages(page, messages),
+            panels: { bothVisible: true },
+            leave: (objector) => {
+                details.start = false;
+                this.requestEnd({ reason: 'consent-objection', trigger: 'consent-objection', requestedBy: objector });
+            },
         });
 
         // Start transcription if enabled (LMA behavior)

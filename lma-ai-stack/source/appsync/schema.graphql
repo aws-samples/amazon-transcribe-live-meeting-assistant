@@ -427,6 +427,12 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	# neither launch path has to carry it.
 	agenda: String
 	agendaSource: String
+	# The meeting consent mode and opt-in rule chosen for this meeting when the
+	# VP was started or scheduled; absent means the deployment's (see
+	# docs/meeting-consent.md). Read by the VP container when it starts, like
+	# the agenda.
+	consentMode: String
+	consentRule: String
 	createdAt: AWSDateTime
 	updatedAt: AWSDateTime
 	CallId: ID
@@ -497,6 +503,13 @@ input CreateVirtualParticipantInput {
 	# resolver records its source as "mcp" for an IAM caller and "scheduled"
 	# for a signed-in user.
 	agenda: String
+	# Optional meeting consent choice for this meeting: "off", "notify" or
+	# "opt_in", and for opt_in "each_participant" or "owner_attests". Omitted,
+	# the deployment's. The deployment's rule on a per-meeting choice is
+	# applied by the VP before it joins, and again by the meeting consent
+	# resolver when the VP starts the meeting's consent.
+	consentMode: String
+	consentRule: String
 }
 
 input UpdateVirtualParticipantInput {

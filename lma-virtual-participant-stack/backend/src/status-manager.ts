@@ -794,6 +794,30 @@ export class VirtualParticipantStatusManager {
     }
   }
 
+  /**
+   * Write the detail line alone, or clear it with null: the meeting consent
+   * flow's "Waiting for consent…" while capture is withheld in the meeting.
+   * Like a join sub-step it writes no status, so it never moves the
+   * participant's lifecycle. Best-effort.
+   */
+  async setStatusDetail(message: string | null): Promise<void> {
+    if (this.skipProgressWrite('a status detail')) return;
+    try {
+      const mutation = `
+        mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
+          }
+        }
+      `;
+      const input: Record<string, unknown> = { id: this.participantId };
+      if (message) input.errorMessage = message;
+      else input.clearErrorMessage = true;
+      await this.signAndSendGraphQLRequest(mutation, { input });
+    } catch {
+      /* the detail line is best-effort */
+    }
+  }
+
   // Admission. Clears the join sub-step detail with it (no message is
   // supplied), so the UI stops showing "Waiting to be admitted…" next to a
   // participant that is by then in the meeting.
