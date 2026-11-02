@@ -21,6 +21,7 @@ import {
     parseLogLevel,
     redactText,
     registerSecretValue,
+    registerSecretValuesFromEnv,
     setLogLevel,
     setLogSink,
     type LogRecord,
@@ -268,4 +269,24 @@ test('a record whose bound field cannot be serialised still writes the message',
 
     const record = JSON.parse(lines[0]) as LogRecord;
     assert.equal(record.msg, 'still here');
+});
+
+test('bound and child fields cannot replace the record\'s own fields', () => {
+    const { lines } = captureLines();
+    bindLogContext({ msg: 'bound', level: 'bound' });
+    createLogger('unit', { component: 'other', ts: 'then' }).child({ msg: 'child' }).warn('the message');
+
+    const record = JSON.parse(lines[0]) as LogRecord;
+    assert.equal(record.msg, 'the message');
+    assert.equal(record.level, 'WARN');
+    assert.equal(record.component, 'unit');
+    assert.notEqual(record.ts, 'then');
+});
+
+test('the credential environment variables are registered as secret values', () => {
+    const { lines } = captureLines();
+    registerSecretValuesFromEnv({ MEETING_PASSWORD: 'env-pass-123', SIMLI_API_KEY: 'simli-key-456' });
+    createLogger('unit').info('filled env-pass-123 and sent simli-key-456');
+
+    assert.equal((JSON.parse(lines[0]) as LogRecord).msg, `filled ${REDACTED} and sent ${REDACTED}`);
 });

@@ -45,7 +45,9 @@ import {
     fingerprintSeedForUser,
     stableFingerprintSeed,
 } from './lib/profile.js';
-import { bindLogContext, registerSecretValuesFromEnv } from './logger.js';
+import { bindLogContext, createLogger } from './logger.js';
+
+const log = createLogger('main');
 
 // Match the Xvfb screen size; fluxbox toolbar is suppressed in entrypoint.sh.
 const WINDOW_WIDTH = 1920;
@@ -148,7 +150,7 @@ const meterRuntime = async (): Promise<void> => {
             size: launchType === 'EC2' ? undefined : size.sizeSource,
         });
     } catch (error) {
-        console.warn(`[METERING] could not record the Virtual Participant's runtime: ${error}`);
+        log.warn(`[METERING] could not record the Virtual Participant's runtime: ${error}`);
     }
 };
 
@@ -162,18 +164,18 @@ const closeAndPersistProfile = async (): Promise<void> => {
     try {
         if (browserContext) await browserContext.close();
     } catch (error) {
-        console.error('Error closing browser:', error);
+        log.error('Error closing browser:', error);
     }
     if (activeProfileHandle) {
         try {
             await persistProfile(activeProfileHandle);
         } catch (error) {
-            console.error('Error persisting Chromium profile:', error);
+            log.error('Error persisting Chromium profile:', error);
         }
         try {
             await releaseProfile(activeProfileHandle);
         } catch (error) {
-            console.error('Error releasing Chromium profile:', error);
+            log.error('Error releasing Chromium profile:', error);
         }
     }
 };
@@ -211,18 +213,17 @@ const main = async (): Promise<void> => {
         vpId: details.invite.virtualParticipantId,
         meetingPlatform: details.invite.meetingPlatform,
     });
-    registerSecretValuesFromEnv();
     const buildInfo = readBuildInfo();
-    console.log(
+    log.info(
         `LMA Virtual Participant starting... [build ${buildInfo.buildDate} commit ${buildInfo.gitCommit} via ${buildInfo.buildSource}]`,
     );
     if (isLocalTest) {
-        console.log('*** LOCAL TEST MODE - Skipping ALB registration and AppSync updates ***');
+        log.info('*** LOCAL TEST MODE - Skipping ALB registration and AppSync updates ***');
     }
-    console.log(`Meeting Platform: ${details.invite.meetingPlatform}`);
-    console.log(`Meeting ID: ${details.invite.meetingId}`);
-    console.log(`Meeting Name: ${details.invite.meetingName}`);
-    console.log(`LMA User: ${details.lmaUser}`);
+    log.info(`Meeting Platform: ${details.invite.meetingPlatform}`);
+    log.info(`Meeting ID: ${details.invite.meetingId}`);
+    log.info(`Meeting Name: ${details.invite.meetingName}`);
+    log.info(`LMA User: ${details.lmaUser}`);
     
 
 
@@ -239,7 +240,7 @@ const main = async (): Promise<void> => {
                 // Use existing CallId from VP record
                 process.env.VP_CALL_ID = existingCallId;
                 bindLogContext({ callId: existingCallId });
-                console.log(`Using existing VP CallId: ${existingCallId}`);
+                log.info(`Using existing VP CallId: ${existingCallId}`);
             } else {
                 // Generate new CallId and set it in VP record
                 const { kinesisStreamManager } = await import('./kinesis-stream.js');
@@ -247,7 +248,7 @@ const main = async (): Promise<void> => {
                 await statusManager.setCallId(callId);
                 process.env.VP_CALL_ID = callId;
                 bindLogContext({ callId: callId });
-                console.log(`Generated and set new VP CallId: ${callId}`);
+                log.info(`Generated and set new VP CallId: ${callId}`);
             }
             
             // The agenda the VP was started or scheduled with goes onto the
@@ -258,29 +259,29 @@ const main = async (): Promise<void> => {
 
             // Start with INITIALIZING status
             await statusManager.setInitializing();
-            console.log(`VP ${vpId} status: INITIALIZING`);
+            log.info(`VP ${vpId} status: INITIALIZING`);
             
             // Store task ARN for efficient termination
             try {
                 await statusManager.storeTaskArnInRegistry();
             } catch (arnError) {
-                console.log(`Failed to store task ARN : ${arnError}`);
+                log.info(`Failed to store task ARN : ${arnError}`);
             }
         } catch (error) {
-            console.error(`Failed to initialize status manager: ${error}`);
+            log.error(`Failed to initialize status manager: ${error}`);
         }
     } else if (isLocalTest) {
-        console.log('✓ Skipping status manager initialization (local test mode)');
+        log.info('✓ Skipping status manager initialization (local test mode)');
         // Generate a local CallId for testing
         const { kinesisStreamManager } = await import('./kinesis-stream.js');
         const callId = kinesisStreamManager.getCallId();
         process.env.VP_CALL_ID = callId;
         bindLogContext({ callId: callId });
-        console.log(`Generated local test CallId: ${callId}`);
+        log.info(`Generated local test CallId: ${callId}`);
     }
 
     // Wait for VNC server to be ready before proceeding
-    console.log('Waiting for VNC server to be ready...');
+    log.info('Waiting for VNC server to be ready...');
     let vncReady = false;
     let attempts = 0;
     const maxAttempts = 30; // 30 seconds timeout
@@ -289,7 +290,7 @@ const main = async (): Promise<void> => {
         try {
             await fs.access('/tmp/vnc_ready');
             vncReady = true;
-            console.log('✓ VNC server is ready');
+            log.info('✓ VNC server is ready');
             break;
         } catch {
             // File doesn't exist yet
@@ -299,7 +300,7 @@ const main = async (): Promise<void> => {
     }
 
     if (!vncReady) {
-        console.error('VNC server failed to start within timeout');
+        log.error('VNC server failed to start within timeout');
         if (statusManager) {
             await statusManager.setFailed('VNC server initialization failed');
         }
@@ -311,23 +312,23 @@ const main = async (): Promise<void> => {
     if (statusManager && !isLocalTest && needsAlbRegistration) {
         try {
             await statusManager.setRegisteringNetwork();
-            console.log('Registering task with ALB target group...');
+            log.info('Registering task with ALB target group...');
             const registered = await statusManager.registerWithTargetGroup();
             if (!registered) {
-                console.error('Failed to register with target group');
+                log.error('Failed to register with target group');
                 await statusManager.setFailed('ALB registration failed');
                 throw new Error('ALB registration failed');
             }
-            console.log('✓ Task registered with ALB and healthy');
+            log.info('✓ Task registered with ALB and healthy');
         } catch (error) {
-            console.error('Error during ALB registration:', error);
+            log.error('Error during ALB registration:', error);
             await statusManager.setFailed('ALB registration error');
             throw new Error('ALB registration failed');
         }
     } else if (isLocalTest) {
-        console.log('✓ Skipping ALB registration (local test mode)');
+        log.info('✓ Skipping ALB registration (local test mode)');
     } else if (!needsAlbRegistration) {
-        console.log('✓ Skipping ALB registration (MICROVM launch: endpoint published by launcher)');
+        log.info('✓ Skipping ALB registration (MICROVM launch: endpoint published by launcher)');
     }
 
     // VNC ready signal is deferred until AFTER fresh-profile warmup so the
@@ -339,14 +340,14 @@ const main = async (): Promise<void> => {
     const timestampDiff = Math.max(0, (details.invite.meetingTime - currentTimestamp - 10) * 1000);
     
     if (timestampDiff > 0) {
-        console.log(`Sleeping ${timestampDiff / 1000} seconds until meeting time.`);
+        log.info(`Sleeping ${timestampDiff / 1000} seconds until meeting time.`);
         await new Promise(resolve => setTimeout(resolve, timestampDiff));
     }
 
     // Set CONNECTING status when starting browser
     if (statusManager) {
         await statusManager.setConnecting();
-        console.log(`VP ${vpId} status: CONNECTING`);
+        log.info(`VP ${vpId} status: CONNECTING`);
     }
 
     // Start the platform-agnostic agent-speaking detector (listens to
@@ -355,7 +356,7 @@ const main = async (): Promise<void> => {
         try {
             agentSpeakingDetector.start();
         } catch (error) {
-            console.error('Failed to start AgentSpeakingDetector (non-critical):', error);
+            log.error('Failed to start AgentSpeakingDetector (non-critical):', error);
         }
     }
 
@@ -390,7 +391,7 @@ const main = async (): Promise<void> => {
             } catch { /* may not exist */ }
         }
     } catch (lockErr) {
-        console.warn('[profile-store] Stale Chrome lock cleanup failed (continuing):', lockErr);
+        log.warn('[profile-store] Stale Chrome lock cleanup failed (continuing):', lockErr);
     }
 
     // Snapshot freshness before our own writes flip the signal.
@@ -398,13 +399,13 @@ const main = async (): Promise<void> => {
 
     initProfileDefaults(userDataDir);
     const cookiePatchedCount = patchPreferencesFor3pCookies(userDataDir);
-    console.log(`[profile-store] Wrote 3p-cookie allow exceptions for ${cookiePatchedCount} meeting platforms`);
+    log.info(`[profile-store] Wrote 3p-cookie allow exceptions for ${cookiePatchedCount} meeting platforms`);
     // Suppress the native "Open <app>?" external-protocol chooser that meeting
     // landing pages (e.g. Webex j.php) raise when they try to launch a desktop
     // client. Headless containers have no such app; the dialog only blocks the
     // web join flow. Must run before launch (Chromium clobbers in-session edits).
     const protoExcludedCount = patchPreferencesForExternalProtocols(userDataDir);
-    console.log(`[profile-store] Excluded ${protoExcludedCount} external-protocol schemes (suppresses native app-launch dialog)`);
+    log.info(`[profile-store] Excluded ${protoExcludedCount} external-protocol schemes (suppresses native app-launch dialog)`);
 
     // Authenticated joins get a per-user fingerprint (stable across that user's
     // joins). Anonymous / CLI launches have no sub, so fall back to a seed
@@ -418,10 +419,10 @@ const main = async (): Promise<void> => {
             process.env.VP_PROFILES_BUCKET || process.env.AWS_REGION || '',
         );
 
-    console.log(`[browser] Launching CloakBrowser persistent context`);
-    console.log(`[browser]   userDataDir       = ${userDataDir}`);
-    console.log(`[browser]   fingerprint seed  = ${fingerprintSeed}`);
-    console.log(`[browser]   profile freshness = ${isFresh ? 'FRESH (warmup will run)' : 'EXISTING (skipping warmup)'}`);
+    log.info(`[browser] Launching CloakBrowser persistent context`);
+    log.info(`[browser]   userDataDir       = ${userDataDir}`);
+    log.info(`[browser]   fingerprint seed  = ${fingerprintSeed}`);
+    log.info(`[browser]   profile freshness = ${isFresh ? 'FRESH (warmup will run)' : 'EXISTING (skipping warmup)'}`);
 
     // Timing instrumentation: browser launch dominated VP startup on MicroVMs
     // (~142s vs ~1-3s for the identical image and args locally), and the launch
@@ -436,14 +437,14 @@ const main = async (): Promise<void> => {
         viewport: { width: WINDOW_WIDTH, height: WINDOW_HEIGHT },
         args: (() => {
             const needWebrtc = simliAvatar.isSimliEnabled() || isTeamsSdkJoin();
-            console.log(`[browser] WebRTC host-candidate flags: ${needWebrtc ? 'ENABLED' : 'disabled'}`);
+            log.info(`[browser] WebRTC host-candidate flags: ${needWebrtc ? 'ENABLED' : 'disabled'}`);
             return getCloakLaunchArgs(fingerprintSeed, needWebrtc);
         })(),
         launchOptions: {
             ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
         },
     } as any);
-    console.log(
+    log.info(
         `[browser] launchPersistentContext took ${((Date.now() - browserLaunchStart) / 1000).toFixed(1)}s`,
     );
     browserContext = context;
@@ -453,7 +454,7 @@ const main = async (): Promise<void> => {
     context.setDefaultTimeout(30_000);
 
     await new Promise(resolve => setTimeout(resolve, 2000));
-    console.log('✓ Chrome launched with remote debugging on port 9222');
+    log.info('✓ Chrome launched with remote debugging on port 9222');
 
     const platform = details.invite.meetingPlatform;
     const sdkPath = (platform === 'ZOOM' && details.zoomMethod === 'sdk') || isTeamsSdkJoin();
@@ -462,16 +463,16 @@ const main = async (): Promise<void> => {
             await statusManager.setWarmingProfile();
         }
         try {
-            console.log('[warmup] Profile is fresh — running 3-phase warmup before joining meeting');
+            log.info('[warmup] Profile is fresh — running 3-phase warmup before joining meeting');
             await warmupNavigation(() => context.newPage() as any, {
                 runMeetingPlatforms: true,
-                log: (m) => console.log(`[browser] ${m}`),
+                log: (m) => log.info(`[browser] ${m}`),
             });
         } catch (err) {
-            console.warn('[warmup] Warmup error (non-fatal, continuing to meeting):', err);
+            log.warn('[warmup] Warmup error (non-fatal, continuing to meeting):', err);
         }
     } else if (sdkPath) {
-        console.log('[warmup] Skipping warmup (SDK join path does not visit the meeting platform site)');
+        log.info('[warmup] Skipping warmup (SDK join path does not visit the meeting platform site)');
     }
 
     // Now that warmup (if any) is done, publish the VNC endpoint so the user's
@@ -479,12 +480,12 @@ const main = async (): Promise<void> => {
     if (statusManager && !isLocalTest) {
         try {
             await statusManager.setVncReady();
-            console.log('✓ VNC endpoint published via AppSync');
+            log.info('✓ VNC endpoint published via AppSync');
         } catch (error) {
-            console.error('Failed to publish VNC endpoint:', error);
+            log.error('Failed to publish VNC endpoint:', error);
         }
     } else if (isLocalTest) {
-        console.log('✓ Skipping AppSync VNC ready update (local test mode)');
+        log.info('✓ Skipping AppSync VNC ready update (local test mode)');
     }
 
     // NOTE: Simli Avatar is NOT initialized here anymore. Its background
@@ -560,20 +561,20 @@ const main = async (): Promise<void> => {
             type === 'error' ||
             type === 'warning'
         ) {
-            console.log(`Browser ${type}: ${text}`);
+            log.info(`Browser ${type}: ${text}`);
         }
     });
-    page.on('pageerror', (err) => console.warn('MeetingPage error:', err?.message || err));
+    page.on('pageerror', (err) => log.warn('MeetingPage error:', err?.message || err));
     page.on('framenavigated', (frame) => {
         if (frame === page.mainFrame()) {
-            console.log(`[meeting-page] navigated → ${frame.url()}`);
+            log.info(`[meeting-page] navigated → ${frame.url()}`);
         } else {
-            console.log(`[meeting-page] subframe navigated → ${frame.url()}`);
+            log.info(`[meeting-page] subframe navigated → ${frame.url()}`);
         }
     });
     // Page-lifecycle diagnostics.
     page.on('close', () => {
-        console.warn('[page-lifecycle] page CLOSED event fired');
+        log.warn('[page-lifecycle] page CLOSED event fired');
     });
     page.on('crash', () => {
         // A renderer crash (most commonly an OOM kill — "Aw, Snap! Error
@@ -582,15 +583,15 @@ const main = async (): Promise<void> => {
         // sequence stalls forever and the UI stays stuck on JOINING. Reject
         // the crash latch so the meeting init loses the race below and the
         // catch path drives a clean FAILED + task exit.
-        console.error('[page-lifecycle] page CRASHED (renderer crash) — aborting join');
+        log.error('[page-lifecycle] page CRASHED (renderer crash) — aborting join');
         rejectOnPageCrash(new Error('Renderer crashed (likely out of memory) — the meeting page died mid-join'));
     });
     page.on('framedetached', (frame) => {
         const isMain = frame === page.mainFrame();
-        console.log(`[meeting-page] frame detached (mainFrame=${isMain}) url=${frame.url()}`);
+        log.info(`[meeting-page] frame detached (mainFrame=${isMain}) url=${frame.url()}`);
     });
     context.on('close', () => {
-        console.warn('[browser-lifecycle] browser context CLOSED');
+        log.warn('[browser-lifecycle] browser context CLOSED');
     });
 
     // Initialize MCP command handler AFTER browser is launched and the
@@ -601,12 +602,12 @@ const main = async (): Promise<void> => {
             if (callId) {
                 mcpHandler = new MCPCommandHandler(vpId, callId);
                 await mcpHandler.start();
-                console.log('✓ MCP command handler started');
+                log.info('✓ MCP command handler started');
             } else {
-                console.log('VP_CALL_ID not set - skipping MCP handler');
+                log.info('VP_CALL_ID not set - skipping MCP handler');
             }
         } catch (error) {
-            console.error('Failed to start MCP command handler:', error);
+            log.error('Failed to start MCP command handler:', error);
             // Non-critical - continue with meeting join
         }
     }
@@ -630,9 +631,9 @@ const main = async (): Promise<void> => {
                     });
                     const response = await lambdaClient.send(command);
                     const payload = JSON.parse(new TextDecoder().decode(response.Payload));
-                    console.log(`🔥 Strands warmup ping: ${payload.mcp_clients} MCP clients, from_cache=${payload.from_cache}, ${payload.warmup_time_ms}ms`);
+                    log.info(`🔥 Strands warmup ping: ${payload.mcp_clients} MCP clients, from_cache=${payload.from_cache}, ${payload.warmup_time_ms}ms`);
                 } catch (err) {
-                    console.warn('Strands warmup ping failed (non-critical):', err);
+                    log.warn('Strands warmup ping failed (non-critical):', err);
                 }
             };
 
@@ -641,9 +642,9 @@ const main = async (): Promise<void> => {
 
             // Then send every 3 minutes to keep Lambda container and MCP connections alive
             strandsWarmupTimer = setInterval(sendWarmupPing, WARMUP_INTERVAL);
-            console.log(`✓ Strands Lambda warmup timer started (every ${WARMUP_INTERVAL / 1000}s)`);
+            log.info(`✓ Strands Lambda warmup timer started (every ${WARMUP_INTERVAL / 1000}s)`);
         } catch (error) {
-            console.warn('Failed to start Strands warmup timer (non-critical):', error);
+            log.warn('Failed to start Strands warmup timer (non-critical):', error);
         }
     }
 
@@ -661,11 +662,11 @@ const main = async (): Promise<void> => {
         if (avatarPrepared) return avatarPrepared;
         avatarPrepared = (async () => {
             try {
-                console.log('Initializing Simli Avatar...');
+                log.info('Initializing Simli Avatar...');
                 await simliAvatar.initialize(context);
-                console.log('✓ Simli Avatar initialized');
+                log.info('✓ Simli Avatar initialized');
             } catch (error) {
-                console.error('Failed to initialize Simli Avatar (non-critical):', error);
+                log.error('Failed to initialize Simli Avatar (non-critical):', error);
                 return; // No avatar — meeting proceeds without it.
             }
             // Initializing the Simli avatar opened a second tab (local.simli),
@@ -683,7 +684,7 @@ const main = async (): Promise<void> => {
                 for (const origin of ['https://zoom.us', 'https://app.zoom.us', 'https://app.chime.aws', 'https://teams.microsoft.com', 'https://web.webex.com']) {
                     await context.grantPermissions(['camera', 'microphone'], { origin }).catch(() => {});
                 }
-                console.log('✓ Camera and microphone permissions granted for meeting platforms');
+                log.info('✓ Camera and microphone permissions granted for meeting platforms');
 
                 // 2. Inject the getUserMedia override AND start the Node-side
                 // WebRTC bridge poll loop (both live inside
@@ -696,9 +697,9 @@ const main = async (): Promise<void> => {
                 // the bridge so Zoom's video encoder stays cheap enough for a
                 // 2-vCPU host (t3.medium).
                 await simliAvatar.injectGetUserMediaOverride(page);
-                console.log('✓ Simli getUserMedia override + WebRTC bridge installed');
+                log.info('✓ Simli getUserMedia override + WebRTC bridge installed');
             } catch (error) {
-                console.error('Failed to set up Simli avatar for meeting (non-critical):', error);
+                log.error('Failed to set up Simli avatar for meeting (non-critical):', error);
             }
         })();
         return avatarPrepared;
@@ -712,12 +713,12 @@ const main = async (): Promise<void> => {
         // Set JOINING status before attempting to join meeting
         if (statusManager) {
             await statusManager.setJoining();
-            console.log(`VP ${vpId} status: JOINING`);
+            log.info(`VP ${vpId} status: JOINING`);
         }
 
         // Initialize the appropriate meeting platform handler
-        console.log(`Initializing ${details.invite.meetingPlatform} handler...`);
-        console.log(`DEBUG: Meeting platform value: "${details.invite.meetingPlatform}" (type: ${typeof details.invite.meetingPlatform})`);
+        log.info(`Initializing ${details.invite.meetingPlatform} handler...`);
+        log.info(`DEBUG: Meeting platform value: "${details.invite.meetingPlatform}" (type: ${typeof details.invite.meetingPlatform})`);
 
         switch (details.invite.meetingPlatform) {
             case 'CHIME':
@@ -725,12 +726,12 @@ const main = async (): Promise<void> => {
                 break;
             case 'ZOOM':
                 meeting = details.zoomMethod === 'sdk' ? new ZoomSdk() : new Zoom();
-                console.log(`Zoom join method: ${details.zoomMethod}`);
+                log.info(`Zoom join method: ${details.zoomMethod}`);
                 break;
             case 'TEAMS':
             case 'Teams':
                 meeting = details.teamsMethod === 'sdk' ? new TeamsSdk() : new Teams();
-                console.log(`Teams join method: ${details.teamsMethod}`);
+                log.info(`Teams join method: ${details.teamsMethod}`);
                 break;
             case 'WEBEX':
                 meeting = new Webex();
@@ -747,7 +748,7 @@ const main = async (): Promise<void> => {
         try {
             await videoRecorder.start(process.env.VP_CALL_ID || '');
         } catch (error) {
-            console.error('Error starting video recording:', error);
+            log.error('Error starting video recording:', error);
         }
 
         // Key frames of the shared screen, stored on the meeting. Same switch
@@ -767,7 +768,7 @@ const main = async (): Promise<void> => {
                     emit: (frame) => kinesisStreamManager.sendVideoKeyframe(frame),
                 });
             } catch (error) {
-                console.error('Error starting key frame sampling:', error);
+                log.error('Error starting key frame sampling:', error);
             }
         }
 
@@ -789,13 +790,13 @@ const main = async (): Promise<void> => {
             exitInfo.requestedBy ? `requestedBy=${JSON.stringify(exitInfo.requestedBy)}` : null,
             exitInfo.matchedMessage ? `message=${JSON.stringify(exitInfo.matchedMessage)}` : null,
         ].filter(Boolean);
-        console.log(`VP exit: ${exitDetailParts.join(' ')}`);
-        console.log('Meeting session completed successfully');
+        log.info(`VP exit: ${exitDetailParts.join(' ')}`);
+        log.info('Meeting session completed successfully');
         success = true;
 
 
     } catch (error: any) {
-        console.error('Meeting failed:', error.message);
+        log.error('Meeting failed:', error.message);
         
         if (statusManager) {
             // A thrown error carries no ExitInfo, so the prose shown to the
@@ -821,7 +822,7 @@ const main = async (): Promise<void> => {
     } finally {
         // Cleanup - set flag to prevent uncaughtException from killing process mid-cleanup
         cleanupInProgress = true;
-        console.log('Cleaning up...');
+        log.info('Cleaning up...');
 
         // Stop the diagnostics timer first: an un-cleared interval holding a page
         // reference would keep the Node process alive past teardown.
@@ -838,21 +839,21 @@ const main = async (): Promise<void> => {
         try {
             await keyframeSampler.stop();
         } catch (keyframeError) {
-            console.error('Error stopping key frame sampling:', keyframeError);
+            log.error('Error stopping key frame sampling:', keyframeError);
         }
 
         try {
             // Stop transcription service
             await transcriptionService.stopTranscription();
         } catch (error) {
-            console.error('Error stopping transcription:', error);
+            log.error('Error stopping transcription:', error);
         }
 
         try {
             // Stop recording and upload to S3
             const recordingUrl = await recordingService.cleanup();
             if (recordingUrl) {
-                console.log(`Recording uploaded: ${recordingUrl}`);
+                log.info(`Recording uploaded: ${recordingUrl}`);
                 // Send separate recording URL event (matching Python)
                 const { kinesisStreamManager } = await import('./kinesis-stream.js');
                 await kinesisStreamManager.sendCallRecording(recordingUrl);
@@ -863,18 +864,18 @@ const main = async (): Promise<void> => {
             try {
                 const videoRecordingUrl = await videoRecorder.stop();
                 if (videoRecordingUrl) {
-                    console.log(`Video recording uploaded: ${videoRecordingUrl}`);
+                    log.info(`Video recording uploaded: ${videoRecordingUrl}`);
                     const { kinesisStreamManager } = await import('./kinesis-stream.js');
                     await kinesisStreamManager.sendCallVideoRecording(videoRecordingUrl);
                 }
             } catch (videoError) {
-                console.error('Error handling video recording cleanup:', videoError);
+                log.error('Error handling video recording cleanup:', videoError);
             }
 
             // Always send END event
             await sendEndMeeting();
         } catch (error) {
-            console.error('Error handling recording cleanup:', error);
+            log.error('Error handling recording cleanup:', error);
         }
 
         // On the FAILED path, wait for the user to click "Got it" on the
@@ -887,16 +888,16 @@ const main = async (): Promise<void> => {
             const HARD_CAP_MS = 600_000;
             const POLL_MS = 3_000;
             const deadline = Date.now() + HARD_CAP_MS;
-            console.log(`Waiting up to ${HARD_CAP_MS / 1000}s for user to acknowledge failure before tearing down VNC...`);
+            log.info(`Waiting up to ${HARD_CAP_MS / 1000}s for user to acknowledge failure before tearing down VNC...`);
             while (Date.now() < deadline) {
                 if (await statusManager.getUserAcknowledgedFailure()) {
-                    console.log('✓ User acknowledged failure — proceeding with tear-down');
+                    log.info('✓ User acknowledged failure — proceeding with tear-down');
                     break;
                 }
                 await new Promise((r) => setTimeout(r, POLL_MS));
             }
             if (Date.now() >= deadline) {
-                console.log('Failure-ack hard cap reached — proceeding with tear-down');
+                log.info('Failure-ack hard cap reached — proceeding with tear-down');
             }
         }
 
@@ -904,9 +905,9 @@ const main = async (): Promise<void> => {
         if (statusManager) {
             try {
                 await statusManager.deregisterFromTargetGroup();
-                console.log('✓ Deregistered from ALB target group');
+                log.info('✓ Deregistered from ALB target group');
             } catch (error) {
-                console.error('Error deregistering from ALB:', error);
+                log.error('Error deregistering from ALB:', error);
             }
         }
 
@@ -914,32 +915,32 @@ const main = async (): Promise<void> => {
         if (strandsWarmupTimer) {
             clearInterval(strandsWarmupTimer);
             strandsWarmupTimer = null;
-            console.log('✓ Strands warmup timer stopped');
+            log.info('✓ Strands warmup timer stopped');
         }
 
         // Stop MCP handler
         if (mcpHandler) {
             try {
                 await mcpHandler.stop();
-                console.log('✓ MCP handler stopped');
+                log.info('✓ MCP handler stopped');
             } catch (error) {
-                console.error('Error stopping MCP handler:', error);
+                log.error('Error stopping MCP handler:', error);
             }
         }
 
         // Stop Simli Avatar
         try {
             await simliAvatar.stop();
-            console.log('✓ Simli Avatar stopped');
+            log.info('✓ Simli Avatar stopped');
         } catch (error) {
-            console.error('Error stopping Simli Avatar:', error);
+            log.error('Error stopping Simli Avatar:', error);
         }
 
         // Stop agent speaking detector
         try {
             agentSpeakingDetector.stop();
         } catch (error) {
-            console.error('Error stopping AgentSpeakingDetector:', error);
+            log.error('Error stopping AgentSpeakingDetector:', error);
         }
 
         // Close the browser context (persistent context owns the browser) and
@@ -967,7 +968,7 @@ const main = async (): Promise<void> => {
             if (statusManager) {
                 await statusManager.setCompleted(completionMessage, endTrigger);
             }
-            console.log(
+            log.info(
                 completionMessage
                     ? `LMA Virtual Participant completed: ${completionMessage}`
                     : 'LMA Virtual Participant completed successfully',
@@ -979,21 +980,21 @@ const main = async (): Promise<void> => {
             if (statusManager) {
                 await statusManager.setFailed(failMessage, endTrigger);
             }
-            console.log(`LMA Virtual Participant did not join: ${failMessage}`);
+            log.info(`LMA Virtual Participant did not join: ${failMessage}`);
             process.exit(1);
         } else {
-            console.log('LMA Virtual Participant failed');
+            log.info('LMA Virtual Participant failed');
             process.exit(1);
         }
         
-        console.log('Ending Task. Bye.');
+        log.info('Ending Task. Bye.');
         process.exit(1);
     }
 };
 
 // Handle process signals for graceful shutdown 
 const signalHandler = async (signal: string) => {
-    console.log(`Received ${signal}, initiating graceful shutdown...`);
+    log.info(`Received ${signal}, initiating graceful shutdown...`);
     shutdownRequested = true;
     // From here on the setup or join code still running reports no further
     // progress; only the terminal status below is written.
@@ -1003,28 +1004,28 @@ const signalHandler = async (signal: string) => {
     if (statusManager) {
         try {
             await statusManager.deregisterFromTargetGroup();
-            console.log('✓ Deregistered from ALB target group');
+            log.info('✓ Deregistered from ALB target group');
         } catch (error) {
-            console.error('Error deregistering from ALB:', error);
+            log.error('Error deregistering from ALB:', error);
         }
     }
     
     // Send END event to Kinesis when externally terminated
     try {
-        console.log('Sending END meeting event due to external termination...');
+        log.info('Sending END meeting event due to external termination...');
         await sendEndMeeting();
-        console.log('END meeting event sent successfully');
+        log.info('END meeting event sent successfully');
     } catch (error) {
-        console.error(`Failed to send END meeting event: ${error}`);
+        log.error(`Failed to send END meeting event: ${error}`);
     }
     
     // Update status to COMPLETED when externally terminated
     if (statusManager && vpId) {
         try {
             await statusManager.setCompleted(); // Use COMPLETED for external termination
-            console.log(`VP ${vpId} status updated to COMPLETED due to external termination`);
+            log.info(`VP ${vpId} status updated to COMPLETED due to external termination`);
         } catch (error) {
-            console.error(`Failed to update status during shutdown: ${error}`);
+            log.error(`Failed to update status during shutdown: ${error}`);
         }
     }
     
@@ -1039,7 +1040,7 @@ const signalHandler = async (signal: string) => {
         try {
             await mcpHandler.stop();
         } catch (error) {
-            console.error('Error stopping MCP handler:', error);
+            log.error('Error stopping MCP handler:', error);
         }
     }
     
@@ -1047,7 +1048,7 @@ const signalHandler = async (signal: string) => {
     try {
         await simliAvatar.stop();
     } catch (error) {
-        console.error('Error stopping Simli Avatar:', error);
+        log.error('Error stopping Simli Avatar:', error);
     }
 
     // Stop services
@@ -1055,10 +1056,10 @@ const signalHandler = async (signal: string) => {
         await transcriptionService.stopTranscription();
         const recordingUrl = await recordingService.cleanup();
         if (recordingUrl) {
-            console.log(`Final recording uploaded: ${recordingUrl}`);
+            log.info(`Final recording uploaded: ${recordingUrl}`);
         }
     } catch (error) {
-        console.error('Error during service cleanup:', error);
+        log.error('Error during service cleanup:', error);
     }
 
     // Close the browser and flush the profile to S3 so the session is
@@ -1067,7 +1068,7 @@ const signalHandler = async (signal: string) => {
     await closeAndPersistProfile();
     await meterRuntime();
 
-    console.log('Graceful shutdown complete. Exiting...');
+    log.info('Graceful shutdown complete. Exiting...');
     process.exit(0);
 };
 
@@ -1087,33 +1088,33 @@ const emergencyCleanup = async (errorMessage: string): Promise<void> => {
     // Set flag to prevent recursive cleanup if another exception fires during this
     cleanupInProgress = true;
     beginShutdown();
-    console.log('Performing emergency cleanup before exit...');
+    log.info('Performing emergency cleanup before exit...');
 
     // Send END event to Kinesis so the meeting is marked as ended
     try {
-        console.log('Emergency: Sending END meeting event to Kinesis...');
+        log.info('Emergency: Sending END meeting event to Kinesis...');
         await sendEndMeeting();
-        console.log('Emergency: END meeting event sent successfully');
+        log.info('Emergency: END meeting event sent successfully');
     } catch (endError) {
-        console.error('Emergency: Failed to send END meeting event:', endError);
+        log.error('Emergency: Failed to send END meeting event:', endError);
     }
 
     // Update VP status to FAILED so it doesn't show as in-progress
     if (statusManager) {
         try {
-            console.log('Emergency: Updating VP status to FAILED...');
+            log.info('Emergency: Updating VP status to FAILED...');
             await statusManager.setFailed(errorMessage);
-            console.log('Emergency: VP status updated to FAILED');
+            log.info('Emergency: VP status updated to FAILED');
         } catch (statusError) {
-            console.error('Emergency: Failed to update VP status:', statusError);
+            log.error('Emergency: Failed to update VP status:', statusError);
         }
 
         // Deregister from ALB target group
         try {
             await statusManager.deregisterFromTargetGroup();
-            console.log('Emergency: Deregistered from ALB target group');
+            log.info('Emergency: Deregistered from ALB target group');
         } catch (albError) {
-            console.error('Emergency: Failed to deregister from ALB:', albError);
+            log.error('Emergency: Failed to deregister from ALB:', albError);
         }
     }
 
@@ -1127,16 +1128,16 @@ const emergencyCleanup = async (errorMessage: string): Promise<void> => {
     // established session isn't lost.
     await closeAndPersistProfile();
 
-    console.log('Emergency cleanup complete');
+    log.info('Emergency cleanup complete');
 };
 
 // Handle uncaught exceptions - always attempt cleanup before exiting
 process.on('uncaughtException', async (error: any) => {
     if (cleanupInProgress) {
         // During cleanup, log but don't exit - let the finally block complete
-        console.error('Uncaught Exception during cleanup (non-fatal):', error.message || error);
+        log.error('Uncaught Exception during cleanup (non-fatal):', error.message || error);
     } else {
-        console.error('Uncaught Exception:', error);
+        log.error('Uncaught Exception:', error);
         // Perform emergency cleanup before exiting to ensure meeting status is updated
         // and the meeting doesn't stay stuck as "in progress" in LMA
         await emergencyCleanup('Uncaught exception: ' + (error.message || error));
@@ -1147,9 +1148,9 @@ process.on('uncaughtException', async (error: any) => {
 process.on('unhandledRejection', async (reason: any, promise: any) => {
     if (cleanupInProgress) {
         // During cleanup, log but don't exit - let the finally block complete
-        console.error('Unhandled Rejection during cleanup (non-fatal):', reason);
+        log.error('Unhandled Rejection during cleanup (non-fatal):', reason);
     } else {
-        console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+        log.error('Unhandled Rejection at:', promise, 'reason:', reason);
         // Perform emergency cleanup before exiting to ensure meeting status is updated
         await emergencyCleanup('Unhandled rejection: ' + (reason?.message || reason));
         process.exit(1);
@@ -1158,7 +1159,7 @@ process.on('unhandledRejection', async (reason: any, promise: any) => {
 
 // Start the application
 main().catch(async (error) => {
-    console.error('Application failed to start:', error);
+    log.error('Application failed to start:', error);
     await emergencyCleanup('Application startup failed: ' + (error.message || error));
     process.exit(1);
 });

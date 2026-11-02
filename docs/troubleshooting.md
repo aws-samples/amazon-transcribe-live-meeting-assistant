@@ -72,18 +72,19 @@ Use the following paths to access logs for each LMA component:
 
 ### Log Format
 
-The Virtual Participant writes its log lines to CloudWatch as JSON objects, one
-per line. CloudWatch Logs Insights discovers the fields of a JSON line by
-itself, so a query can filter on them without a `parse` step. Some of the
-Virtual Participant's lines are still plain text: the output of the container's
-start-up script and of Chromium, and the parts of the participant that do not
-yet write through its logger.
+The Virtual Participant writes its start-up, status, exit and shutdown lines,
+and those of a first set of its modules, to CloudWatch as JSON objects, one per
+line. CloudWatch Logs Insights discovers the fields of a JSON line by itself, so
+a query can filter on them without a `parse` step. The meeting-platform
+handlers (Chime, Zoom, Teams and Webex), the voice assistants and the
+transcription path still write plain text, as do the container's start-up
+script and Chromium.
 
 | Field | What it holds |
 |-------|---------------|
 | `ts` | When the line was written, as an ISO 8601 UTC timestamp. |
 | `level` | `DEBUG`, `INFO`, `WARN` or `ERROR`. |
-| `component` | The part of the participant that wrote it, such as `nova-agent`, `zoom` or `status-manager`. |
+| `component` | The part of the participant that wrote it, such as `main` (start-up, joining and exit), `status-manager` or `keyframe-sampler`. |
 | `msg` | The human-readable message. The bracket markers this guide and the feature guides refer to, such as `[stop-request]` or `VP exit:`, are in this text. |
 | `vpId` | The Virtual Participant's id, from the moment the participant starts. |
 | `callId` | The meeting's call id, from the point the participant has one. |
@@ -98,14 +99,26 @@ including the `VP exit:` line that records why a participant left, so keep
 `LOG_FORMAT=text` writes `<ts> <LEVEL> [<component>] <msg>` lines instead of
 JSON.
 
-The values of credential-named fields (passwords, tokens, secrets, API keys),
-JSON Web Tokens and bearer tokens in a message, and the meeting password are
-written as `[REDACTED]`.
+In the JSON records, the values of credential-named fields (passwords, tokens,
+secrets, API keys), JSON Web Tokens and bearer tokens in a message, and the
+meeting password are written as `[REDACTED]`.
 
 Example Logs Insights queries over the Virtual Participant's log group:
 
 ```
-# Everything one participant wrote, in order
+# Everything one participant wrote, JSON records and plain-text lines alike.
+# Each participant writes to a log stream of its own: find it from a status
+# line, which spells the id as "VP <id>" in either format...
+fields @logStream
+| filter @message like "VP <virtual-participant-id>"
+| limit 1
+
+# ...then read that stream in order.
+fields @timestamp, level, component, msg, @message
+| filter @logStream = "<log-stream>"
+| sort @timestamp asc
+
+# Only its JSON records
 fields @timestamp, level, component, msg
 | filter vpId = "<virtual-participant-id>"
 | sort @timestamp asc

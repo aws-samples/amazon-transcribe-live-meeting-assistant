@@ -24,11 +24,11 @@
  *   assistant speaks.
  */
 
-/** A Transcribe result as forwarded to Kinesis, with what it was sent with. */
 import { createLogger } from './logger.js';
 
 const log = createLogger('translator-transcript');
 
+/** A Transcribe result as forwarded to Kinesis, with what it was sent with. */
 export interface OpenPartial {
     result: any;
     speaker: string;

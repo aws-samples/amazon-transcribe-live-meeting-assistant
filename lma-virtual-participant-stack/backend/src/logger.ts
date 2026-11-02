@@ -12,9 +12,9 @@
  * line on its own, so a record written here can be filtered by `level`,
  * `vpId` or `callId` without a `parse` step. A record looks like:
  *
- *   {"ts":"2026-11-02T10:15:00.123Z","level":"INFO","component":"nova-agent",
- *    "msg":"[tool-ack] source=model latency_ms=840","vpId":"...","callId":"...",
- *    "meetingPlatform":"Zoom"}
+ *   {"ts":"2026-11-02T10:15:00.123Z","level":"INFO","component":"status-manager",
+ *    "msg":"Successfully updated VP <id> status to JOINED with preserved fields",
+ *    "vpId":"<id>","callId":"...","meetingPlatform":"Zoom"}
  *
  * - `msg` is the same human-readable text `console.log` would have printed
  *   for the same arguments, so the bracket markers and prefixes that the docs,
@@ -249,10 +249,16 @@ export const SECRET_ENV_VARS: readonly string[] = [
     'USER_REFRESH_TOKEN',
 ];
 
-/** {@link registerSecretValue} for each of {@link SECRET_ENV_VARS} that is set. */
+/**
+ * {@link registerSecretValue} for each of {@link SECRET_ENV_VARS} that is set.
+ * Called when this module loads, so it covers every line a module writes, at
+ * import time or later; the VP's environment is complete before its process
+ * starts on every launch type.
+ */
 export function registerSecretValuesFromEnv(env: NodeJS.ProcessEnv = process.env): void {
     for (const name of SECRET_ENV_VARS) registerSecretValue(env[name]);
 }
+registerSecretValuesFromEnv();
 
 const JWT = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g;
 const BEARER = /\b(Bearer\s+)[A-Za-z0-9._~+/=-]{20,}/gi;
@@ -271,10 +277,13 @@ export function redactText(text: string): string {
     return out;
 }
 
+/** The fields every record has, which bound and child fields cannot replace. */
+const RESERVED_FIELDS = new Set(['ts', 'level', 'component', 'msg']);
+
 function redactFields(fields: LogFields): LogFields {
     const out: LogFields = {};
     for (const [k, v] of Object.entries(fields)) {
-        if (v === undefined) continue;
+        if (v === undefined || RESERVED_FIELDS.has(k)) continue;
         out[k] = isSecretKey(k) ? REDACTED : redact(v);
     }
     return out;
@@ -287,10 +296,12 @@ const processContext: LogFields = {};
 /**
  * Add fields to every record this process writes from now on — the meeting's
  * `vpId`, `callId` and `meetingPlatform`. A field set to `undefined`, `null`
- * or `''` is removed.
+ * or `''` is removed. `ts`, `level`, `component` and `msg` are the record's
+ * own and are ignored here.
  */
 export function bindLogContext(fields: LogFields): void {
     for (const [k, v] of Object.entries(fields)) {
+        if (RESERVED_FIELDS.has(k)) continue;
         if (v === undefined || v === null || v === '') delete processContext[k];
         else processContext[k] = v;
     }

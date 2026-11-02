@@ -13,7 +13,9 @@
  * bracket tags to search for. Those searches keep working on JSON records only
  * while the marker is still written and is still a literal substring of the
  * serialised line. These tests pin both, and pin the one parse expression the
- * agent is taught, on the old plain line and the JSON record alike.
+ * agent is taught, on a JSON record and on a plain-text line alike: lines
+ * written before the participant wrote JSON records are plain text, and stay
+ * in the log group for its retention period.
  *
  * The behaviour behind each marker (that a stop request writes `[stop-request]`,
  * that a tool lookup writes `[tool-ack]` …) is asserted by that module's own

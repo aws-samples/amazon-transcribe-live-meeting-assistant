@@ -17,6 +17,9 @@ import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { details } from './details.js';
 import { isMicrovmLaunch, microvmVncEndpoint } from './launch-mode.js';
 import { agendaFromVpRow, type VpAgenda } from './meeting-agenda.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('status-manager');
 
 /**
  * Conditions for this participant's ALB listener rule.
@@ -265,7 +268,7 @@ export class VirtualParticipantStatusManager {
     this.awsRegion = process.env.AWS_REGION || process.env.VP_AWS_REGION || 'us-east-1';
     
     if (!this.graphqlEndpoint) {
-      console.warn('GRAPHQL_ENDPOINT not configured - GraphQL status updates disabled');
+      log.warn('GRAPHQL_ENDPOINT not configured - GraphQL status updates disabled');
     }
 
     this.dynamoClient = new DynamoDBClient({
@@ -283,7 +286,7 @@ export class VirtualParticipantStatusManager {
 
   private async signAndSendGraphQLRequest(query: string, variables: any): Promise<any> {
     if (!this.graphqlEndpoint) {
-      console.log('GraphQL endpoint not configured - skipping GraphQL update');
+      log.info('GraphQL endpoint not configured - skipping GraphQL update');
       return null;
     }
 
@@ -305,20 +308,20 @@ export class VirtualParticipantStatusManager {
       });
 
       if (!response.ok) {
-        console.error(`Failed to send GraphQL request: HTTP ${response.status}`);
+        log.error(`Failed to send GraphQL request: HTTP ${response.status}`);
         return null;
       }
 
       const responseData = await response.json();
       
       if (responseData.errors) {
-        console.error('GraphQL errors:', responseData.errors);
+        log.error('GraphQL errors:', responseData.errors);
         throw new Error(`GraphQL errors: ${JSON.stringify(responseData.errors)}`);
       }
 
       return responseData.data;
     } catch (error) {
-      console.error('Failed to send GraphQL request:', error);
+      log.error('Failed to send GraphQL request:', error);
       throw error;
     }
   }
@@ -326,7 +329,7 @@ export class VirtualParticipantStatusManager {
   /** Whether a progress write should be skipped because shutdown has begun. */
   private skipProgressWrite(what: string): boolean {
     if (!processShuttingDown) return false;
-    console.log(`VP ${this.participantId} is shutting down — not writing ${what}`);
+    log.info(`VP ${this.participantId} is shutting down — not writing ${what}`);
     return true;
   }
 
@@ -366,13 +369,13 @@ export class VirtualParticipantStatusManager {
       });
 
       if (!currentVP?.getVirtualParticipant) {
-        console.error(`VP ${this.participantId} not found`);
+        log.error(`VP ${this.participantId} not found`);
         return false;
       }
 
       const current = currentVP.getVirtualParticipant;
-      console.log(`Current VP state from query:`, JSON.stringify(current, null, 2));
-      console.log(`Preserving CallId: ${current.CallId}, VNC fields while updating status to ${status}`);
+      log.info(`Current VP state from query:`, JSON.stringify(current, null, 2));
+      log.info(`Preserving CallId: ${current.CallId}, VNC fields while updating status to ${status}`);
 
       // Reported, not refused. A VP's own container is the authority on its
       // progress, and a terminal status can arrive from elsewhere — the
@@ -382,7 +385,7 @@ export class VirtualParticipantStatusManager {
       // own steam, so seeing one here means two writers disagreed about this
       // participant, and that is worth a line in the log.
       if (isTerminalVpStatus(current.status) && !isTerminalVpStatus(status)) {
-        console.warn(
+        log.warn(
           `VP ${this.participantId} is ${current.status} and is being set to ${status}`,
         );
       }
@@ -416,7 +419,7 @@ export class VirtualParticipantStatusManager {
       // Preserve CallId if it exists
       if (current.CallId) {
         variables.input.CallId = current.CallId;
-        console.log(`Including CallId in update: ${current.CallId}`);
+        log.info(`Including CallId in update: ${current.CallId}`);
       }
 
       // Preserve VNC fields if they exist
@@ -424,7 +427,7 @@ export class VirtualParticipantStatusManager {
         variables.input.vncEndpoint = current.vncEndpoint;
         variables.input.vncPort = current.vncPort;
         variables.input.vncReady = current.vncReady;
-        console.log(`Preserving VNC fields: ${current.vncEndpoint}:${current.vncPort}, ready: ${current.vncReady}`);
+        log.info(`Preserving VNC fields: ${current.vncEndpoint}:${current.vncPort}, ready: ${current.vncReady}`);
       }
 
       // The schema's `errorMessage` field is the generic status detail —
@@ -444,7 +447,7 @@ export class VirtualParticipantStatusManager {
         variables.input.errorMessage = errorMessage;
       } else if (shouldClearStatusDetail(status)) {
         variables.input.clearErrorMessage = true;
-        console.log(`Clearing stale status detail on transition to ${status}`);
+        log.info(`Clearing stale status detail on transition to ${status}`);
       }
 
       if (endTrigger) {
@@ -452,7 +455,7 @@ export class VirtualParticipantStatusManager {
       }
 
       if (status === VP_STATUS.FAILED && errorMessage) {
-        console.error(`VP ${this.participantId} failed: ${errorMessage}`);
+        log.error(`VP ${this.participantId} failed: ${errorMessage}`);
       }
 
       let result;
@@ -463,7 +466,7 @@ export class VirtualParticipantStatusManager {
           // The resolver declines a progress status on a row whose end has
           // been recorded: the user asked for this participant to end, and
           // that outcome stands over any progress it reports afterwards.
-          console.log(
+          log.info(
             `VP ${this.participantId} has been ended — not setting its status to ${status}`,
           );
           return false;
@@ -472,33 +475,33 @@ export class VirtualParticipantStatusManager {
       }
 
       if (result) {
-        console.log(`Successfully updated VP ${this.participantId} status to ${status} with preserved fields`);
+        log.info(`Successfully updated VP ${this.participantId} status to ${status} with preserved fields`);
         return true;
       } else {
-        console.error('Failed to update VP status via GraphQL');
+        log.error('Failed to update VP status via GraphQL');
         return false;
       }
 
     } catch (error) {
-      console.error('Unexpected error updating VP status:', error);
+      log.error('Unexpected error updating VP status:', error);
       return false;
     }
   }
 
   async storeTaskArnInRegistry(): Promise<void> {
     try {
-      console.log(`Storing task ARN and VNC endpoint for VP ${this.participantId} in registry...`);
+      log.info(`Storing task ARN and VNC endpoint for VP ${this.participantId} in registry...`);
 
       // Get task ARN and private IP from ECS metadata endpoint
       const metadataUri = process.env.ECS_CONTAINER_METADATA_URI_V4;
       if (!metadataUri) {
-        console.log('ECS_CONTAINER_METADATA_URI_V4 not found - not running in ECS');
+        log.info('ECS_CONTAINER_METADATA_URI_V4 not found - not running in ECS');
         return;
       }
 
       // Get task metadata
       const taskMetadataUrl = `${metadataUri}/task`;
-      console.log(`Fetching task metadata from: ${taskMetadataUrl}`);
+      log.info(`Fetching task metadata from: ${taskMetadataUrl}`);
 
       const response = await fetch(taskMetadataUrl);
       if (!response.ok) {
@@ -509,11 +512,11 @@ export class VirtualParticipantStatusManager {
       const taskArn = metadata.TaskARN;
       const clusterArn = metadata.Cluster;
 
-      console.log(`Retrieved task ARN: ${taskArn}`);
-      console.log(`Retrieved cluster ARN: ${clusterArn}`);
+      log.info(`Retrieved task ARN: ${taskArn}`);
+      log.info(`Retrieved cluster ARN: ${clusterArn}`);
 
       if (!taskArn || !clusterArn) {
-        console.log('Could not get task ARN or cluster ARN from metadata');
+        log.info('Could not get task ARN or cluster ARN from metadata');
         return;
       }
 
@@ -525,7 +528,7 @@ export class VirtualParticipantStatusManager {
           const network = container.Networks[0];
           if (network.IPv4Addresses && network.IPv4Addresses.length > 0) {
             taskPrivateIp = network.IPv4Addresses[0];
-            console.log(`Task private IP: ${taskPrivateIp}`);
+            log.info(`Task private IP: ${taskPrivateIp}`);
           }
         }
       }
@@ -533,11 +536,11 @@ export class VirtualParticipantStatusManager {
       // Store in VPTaskRegistry table
       const registryTableName = details.vpTaskRegistryTableName;
       if (!registryTableName) {
-        console.log('VP_TASK_REGISTRY_TABLE_NAME environment variable not set');
+        log.info('VP_TASK_REGISTRY_TABLE_NAME environment variable not set');
         return;
       }
 
-      console.log(`Using VPTaskRegistry table: ${registryTableName}`);
+      log.info(`Using VPTaskRegistry table: ${registryTableName}`);
 
       // Calculate expiry time (24 hours from now)
       const expiryTime = Math.floor(Date.now() / 1000) + 86400;
@@ -566,10 +569,10 @@ export class VirtualParticipantStatusManager {
       });
 
       await this.dynamoClient.send(putCommand);
-      console.log(`✓ Successfully stored task ARN and VNC endpoint in registry for VP ${this.participantId}`);
+      log.info(`✓ Successfully stored task ARN and VNC endpoint in registry for VP ${this.participantId}`);
 
     } catch (error) {
-      console.error('Error storing task ARN in registry:', error);
+      log.error('Error storing task ARN in registry:', error);
       // This is non-critical - don't fail the container startup
     }
   }
@@ -590,7 +593,7 @@ export class VirtualParticipantStatusManager {
       });
       return result?.getVirtualParticipant?.status || null;
     } catch (error) {
-      console.error('Error reading VP status:', error);
+      log.error('Error reading VP status:', error);
       return null;
     }
   }
@@ -613,7 +616,7 @@ export class VirtualParticipantStatusManager {
       });
       return !!result?.getVirtualParticipant?.userAcknowledgedFailure;
     } catch (error) {
-      console.error('Error reading userAcknowledgedFailure:', error);
+      log.error('Error reading userAcknowledgedFailure:', error);
       return false;
     }
   }
@@ -635,15 +638,15 @@ export class VirtualParticipantStatusManager {
       });
       
       if (result?.getVirtualParticipant?.CallId) {
-        console.log(`Retrieved CallId ${result.getVirtualParticipant.CallId} for VP ${this.participantId}`);
+        log.info(`Retrieved CallId ${result.getVirtualParticipant.CallId} for VP ${this.participantId}`);
         return result.getVirtualParticipant.CallId;
       } else {
-        console.log(`No CallId found for VP ${this.participantId}`);
+        log.info(`No CallId found for VP ${this.participantId}`);
         return null;
       }
 
     } catch (error) {
-      console.error('Error getting CallId:', error);
+      log.error('Error getting CallId:', error);
       return null;
     }
   }
@@ -667,14 +670,14 @@ export class VirtualParticipantStatusManager {
       `;
       const result = await this.signAndSendGraphQLRequest(query, { id: this.participantId });
       const agenda = agendaFromVpRow(result?.getVirtualParticipant);
-      console.log(
+      log.info(
         agenda
           ? `VP ${this.participantId} has an agenda (${agenda.agenda.length} characters, source ${agenda.agendaSource})`
           : `VP ${this.participantId} has no agenda`,
       );
       return agenda;
     } catch (error) {
-      console.error('Error getting the agenda:', error);
+      log.error('Error getting the agenda:', error);
       return null;
     }
   }
@@ -707,15 +710,15 @@ export class VirtualParticipantStatusManager {
       const result = await this.signAndSendGraphQLRequest(mutation, variables);
       
       if (result) {
-        console.log(`Successfully set CallId ${callId} for VP ${this.participantId}`);
+        log.info(`Successfully set CallId ${callId} for VP ${this.participantId}`);
         return true;
       } else {
-        console.error('Failed to set CallId via GraphQL');
+        log.error('Failed to set CallId via GraphQL');
         return false;
       }
 
     } catch (error) {
-      console.error('Error setting CallId:', error);
+      log.error('Error setting CallId:', error);
       return false;
     }
   }
@@ -799,7 +802,7 @@ export class VirtualParticipantStatusManager {
     if (!updated) {
       // Reported, not thrown: the VP is in the meeting and recording either
       // way, so a status write that did not land must not end the meeting.
-      console.error('Failed to update VP status to JOINED via GraphQL');
+      log.error('Failed to update VP status to JOINED via GraphQL');
     }
     return updated;
   }
@@ -852,13 +855,13 @@ export class VirtualParticipantStatusManager {
       });
 
       if (!currentVP?.getVirtualParticipant) {
-        console.error(`VP ${this.participantId} not found`);
+        log.error(`VP ${this.participantId} not found`);
         return false;
       }
 
       const current = currentVP.getVirtualParticipant;
       if (this.skipProgressWrite(`a ${actionType} prompt`)) return false;
-      console.log(`Setting manual action required: ${actionType} - ${message}`);
+      log.info(`Setting manual action required: ${actionType} - ${message}`);
 
       // Update with MANUAL_ACTION_REQUIRED status and metadata.
       const mutation = `
@@ -911,22 +914,22 @@ export class VirtualParticipantStatusManager {
         if (isConditionalCheckFailure(error)) {
           // MANUAL_ACTION_REQUIRED is a progress status, so the resolver
           // declines it on a row whose end has been recorded.
-          console.log(`VP ${this.participantId} has been ended — not raising a ${actionType} prompt`);
+          log.info(`VP ${this.participantId} has been ended — not raising a ${actionType} prompt`);
           return false;
         }
         throw error;
       }
 
       if (result) {
-        console.log(`Successfully set manual action required for VP ${this.participantId}`);
+        log.info(`Successfully set manual action required for VP ${this.participantId}`);
         return true;
       } else {
-        console.error('Failed to set manual action required via GraphQL');
+        log.error('Failed to set manual action required via GraphQL');
         return false;
       }
 
     } catch (error) {
-      console.error('Error setting manual action required:', error);
+      log.error('Error setting manual action required:', error);
       return false;
     }
   }
@@ -964,7 +967,7 @@ export class VirtualParticipantStatusManager {
     // the UI shows a prompt only while the status is MANUAL_ACTION_REQUIRED.
     if (this.skipProgressWrite('the clearing of a prompt')) return false;
     try {
-      console.log(`Clearing manual action for VP ${this.participantId}`);
+      log.info(`Clearing manual action for VP ${this.participantId}`);
 
       const getQuery = `
         query GetVirtualParticipant($id: ID!) {
@@ -981,7 +984,7 @@ export class VirtualParticipantStatusManager {
       });
 
       if (!currentVP?.getVirtualParticipant) {
-        console.error(`VP ${this.participantId} not found`);
+        log.error(`VP ${this.participantId} not found`);
         return false;
       }
 
@@ -1012,7 +1015,7 @@ export class VirtualParticipantStatusManager {
       // from being able to undo a status written since.
       if (current.status === VP_STATUS.MANUAL_ACTION_REQUIRED) {
         variables.input.status = resumedStatus(current.statusBeforeManualAction);
-        console.log(`Resuming VP ${this.participantId} at ${variables.input.status}`);
+        log.info(`Resuming VP ${this.participantId} at ${variables.input.status}`);
       }
 
       let result;
@@ -1023,7 +1026,7 @@ export class VirtualParticipantStatusManager {
           // Not a failure. The row stopped matching what the read above saw,
           // so another writer acted on more current information than this call
           // has, and the condition in the resolver let that writer win.
-          console.log(
+          log.info(
             variables.input.status
               ? // Was restoring a prompt's interrupted status; the VP has since
                 // left MANUAL_ACTION_REQUIRED, and the status that took it
@@ -1042,15 +1045,15 @@ export class VirtualParticipantStatusManager {
       }
 
       if (result) {
-        console.log(`Successfully cleared manual action for VP ${this.participantId}`);
+        log.info(`Successfully cleared manual action for VP ${this.participantId}`);
         return true;
       } else {
-        console.error('Failed to clear manual action via GraphQL');
+        log.error('Failed to clear manual action via GraphQL');
         return false;
       }
 
     } catch (error) {
-      console.error('Error clearing manual action:', error);
+      log.error('Error clearing manual action:', error);
       return false;
     }
   }
@@ -1062,12 +1065,12 @@ export class VirtualParticipantStatusManager {
     try {
       const metadataUri = process.env.ECS_CONTAINER_METADATA_URI_V4;
       if (!metadataUri) {
-        console.log('ECS_CONTAINER_METADATA_URI_V4 not found - not running in ECS');
+        log.info('ECS_CONTAINER_METADATA_URI_V4 not found - not running in ECS');
         return null;
       }
 
       const taskMetadataUrl = `${metadataUri}/task`;
-      console.log(`Fetching task metadata for IP from: ${taskMetadataUrl}`);
+      log.info(`Fetching task metadata for IP from: ${taskMetadataUrl}`);
 
       const response = await fetch(taskMetadataUrl);
       if (!response.ok) {
@@ -1084,16 +1087,16 @@ export class VirtualParticipantStatusManager {
           const network = container.Networks[0];
           if (network.IPv4Addresses && network.IPv4Addresses.length > 0) {
             const privateIp = network.IPv4Addresses[0];
-            console.log(`Task private IP: ${privateIp}`);
+            log.info(`Task private IP: ${privateIp}`);
             return privateIp;
           }
         }
       }
 
-      console.log('Could not extract private IP from task metadata');
+      log.info('Could not extract private IP from task metadata');
       return null;
     } catch (error) {
-      console.error('Failed to get task private IP:', error);
+      log.error('Failed to get task private IP:', error);
       return null;
     }
   }
@@ -1121,14 +1124,14 @@ export class VirtualParticipantStatusManager {
     try {
       const vpcId = process.env.VPC_ID;
       if (!vpcId) {
-        console.error('VPC_ID environment variable not set');
+        log.error('VPC_ID environment variable not set');
         return null;
       }
 
       // Target group name max 32 chars, must be unique
       const tgName = `vnc-${this.participantId.substring(0, 27)}`;
       
-      console.log(`Creating target group: ${tgName}`);
+      log.info(`Creating target group: ${tgName}`);
 
       const createTGCommand = new CreateTargetGroupCommand({
         Name: tgName,
@@ -1153,16 +1156,16 @@ export class VirtualParticipantStatusManager {
       
       if (response.TargetGroups && response.TargetGroups.length > 0) {
         const tgArn = response.TargetGroups[0].TargetGroupArn!;
-        console.log(`✓ Created target group: ${tgArn}`);
+        log.info(`✓ Created target group: ${tgArn}`);
         return tgArn;
       }
 
-      console.error('Failed to create target group - no ARN returned');
+      log.error('Failed to create target group - no ARN returned');
       return null;
 
     } catch (error: any) {
       if (error.name === 'DuplicateTargetGroupName') {
-        console.log('Target group already exists, attempting to find it...');
+        log.info('Target group already exists, attempting to find it...');
         try {
           const tgName = `vnc-${this.participantId.substring(0, 27)}`;
           const describeCommand = new DescribeTargetGroupsCommand({
@@ -1171,14 +1174,14 @@ export class VirtualParticipantStatusManager {
           const response = await this.elbClient.send(describeCommand);
           if (response.TargetGroups && response.TargetGroups.length > 0) {
             const tgArn = response.TargetGroups[0].TargetGroupArn!;
-            console.log(`✓ Found existing target group: ${tgArn}`);
+            log.info(`✓ Found existing target group: ${tgArn}`);
             return tgArn;
           }
         } catch (describeError) {
-          console.error('Failed to find existing target group:', describeError);
+          log.error('Failed to find existing target group:', describeError);
         }
       }
-      console.error('Failed to create target group:', error);
+      log.error('Failed to create target group:', error);
       return null;
     }
   }
@@ -1200,7 +1203,7 @@ export class VirtualParticipantStatusManager {
 
     const secretArn = process.env.VNC_ORIGIN_VERIFY_SECRET_ARN;
     if (!secretArn) {
-      console.error('VNC_ORIGIN_VERIFY_SECRET_ARN not set - cannot build the listener rule');
+      log.error('VNC_ORIGIN_VERIFY_SECRET_ARN not set - cannot build the listener rule');
       return null;
     }
 
@@ -1209,7 +1212,7 @@ export class VirtualParticipantStatusManager {
         new GetSecretValueCommand({ SecretId: secretArn })
       );
       if (!response.SecretString) {
-        console.error('Origin-verify secret has no string value');
+        log.error('Origin-verify secret has no string value');
         return null;
       }
       // Generated by CloudFormation as JSON with the value under `headersecret`
@@ -1217,14 +1220,14 @@ export class VirtualParticipantStatusManager {
       // template's own listener rule resolves.
       const value = JSON.parse(response.SecretString).headersecret;
       if (!value) {
-        console.error('Origin-verify secret does not contain a headersecret value');
+        log.error('Origin-verify secret does not contain a headersecret value');
         return null;
       }
       this.originVerifyHeaderValue = value;
       return value;
     } catch (error) {
       // Deliberately does not log the secret or the response.
-      console.error('Could not read the origin-verify header value:', error);
+      log.error('Could not read the origin-verify header value:', error);
       return null;
     }
   }
@@ -1264,13 +1267,13 @@ export class VirtualParticipantStatusManager {
         if (!matchesPath || !rule.RuleArn || rule.IsDefault) {
           continue;
         }
-        console.log(`Removing an existing listener rule for ${pathPattern}`);
+        log.info(`Removing an existing listener rule for ${pathPattern}`);
         await this.elbClient.send(new DeleteRuleCommand({ RuleArn: rule.RuleArn }));
       }
     } catch (error) {
       // Not fatal on its own: if a rule really is in the way, the create below
       // fails and that is the error worth reporting.
-      console.error('Could not check for an existing listener rule:', error);
+      log.error('Could not check for an existing listener rule:', error);
     }
   }
 
@@ -1281,13 +1284,13 @@ export class VirtualParticipantStatusManager {
     try {
       const listenerArn = process.env.ALB_LISTENER_ARN;
       if (!listenerArn) {
-        console.error('ALB_LISTENER_ARN environment variable not set');
+        log.error('ALB_LISTENER_ARN environment variable not set');
         return null;
       }
 
       const headerName = process.env.VNC_ORIGIN_VERIFY_HEADER_NAME;
       if (!headerName) {
-        console.error('VNC_ORIGIN_VERIFY_HEADER_NAME not set - cannot build the listener rule');
+        log.error('VNC_ORIGIN_VERIFY_HEADER_NAME not set - cannot build the listener rule');
         return null;
       }
 
@@ -1295,7 +1298,7 @@ export class VirtualParticipantStatusManager {
       // rule gets created carrying only the path condition.
       const headerValue = await this.getOriginVerifyHeaderValue();
       if (!headerValue) {
-        console.error('Origin-verify header value unavailable - not creating a listener rule');
+        log.error('Origin-verify header value unavailable - not creating a listener rule');
         return null;
       }
 
@@ -1306,7 +1309,7 @@ export class VirtualParticipantStatusManager {
 
       await this.removeStaleListenerRule(listenerArn, pathPattern);
 
-      console.log(`Creating listener rule with priority ${priority} for path ${pathPattern}`);
+      log.info(`Creating listener rule with priority ${priority} for path ${pathPattern}`);
 
       const createRuleCommand = new CreateRuleCommand({
         ListenerArn: listenerArn,
@@ -1328,19 +1331,19 @@ export class VirtualParticipantStatusManager {
 
       if (response.Rules && response.Rules.length > 0) {
         const ruleArn = response.Rules[0].RuleArn!;
-        console.log(`✓ Created listener rule: ${ruleArn}`);
+        log.info(`✓ Created listener rule: ${ruleArn}`);
         return ruleArn;
       }
 
-      console.error('Failed to create listener rule - no ARN returned');
+      log.error('Failed to create listener rule - no ARN returned');
       return null;
 
     } catch (error: any) {
       if (error.name === 'PriorityInUse') {
-        console.error(`Priority conflict - trying alternate priority`);
+        log.error(`Priority conflict - trying alternate priority`);
         // Could implement retry with different priority here
       }
-      console.error('Failed to create listener rule:', error);
+      log.error('Failed to create listener rule:', error);
       return null;
     }
   }
@@ -1354,34 +1357,34 @@ export class VirtualParticipantStatusManager {
     // the launcher publishes, and there is no ECS task metadata endpoint to
     // read a private IP from. Report success so callers proceed.
     if (isMicrovmLaunch(process.env.VP_LAUNCH_TYPE)) {
-      console.log('MICROVM launch: skipping ALB target-group registration');
+      log.info('MICROVM launch: skipping ALB target-group registration');
       return true;
     }
     try {
       // Get task private IP
       const privateIp = await this.getTaskPrivateIp();
       if (!privateIp) {
-        console.error('Could not get task private IP');
+        log.error('Could not get task private IP');
         return false;
       }
 
       this.taskPrivateIp = privateIp;
-      console.log(`Task private IP: ${privateIp}`);
+      log.info(`Task private IP: ${privateIp}`);
 
       // Step 1: Create dedicated target group for this VP
-      console.log('Step 1: Creating dedicated target group...');
+      log.info('Step 1: Creating dedicated target group...');
       const targetGroupArn = await this.createVPTargetGroup();
       if (!targetGroupArn) {
-        console.error('Failed to create target group');
+        log.error('Failed to create target group');
         return false;
       }
       this.targetGroupArn = targetGroupArn;
 
       // Step 2: Create listener rule to route /vnc/{vpId}/* to this target group
-      console.log('Step 2: Creating listener rule...');
+      log.info('Step 2: Creating listener rule...');
       const ruleArn = await this.createListenerRule(targetGroupArn);
       if (!ruleArn) {
-        console.error('Failed to create listener rule');
+        log.error('Failed to create listener rule');
         // Clean up target group
         await this.deleteVPTargetGroup();
         return false;
@@ -1389,7 +1392,7 @@ export class VirtualParticipantStatusManager {
       this.listenerRuleArn = ruleArn;
 
       // Step 3: Register this task's IP with the target group
-      console.log(`Step 3: Registering task IP ${privateIp} with target group...`);
+      log.info(`Step 3: Registering task IP ${privateIp} with target group...`);
       const registerCommand = new RegisterTargetsCommand({
         TargetGroupArn: targetGroupArn,
         Targets: [
@@ -1401,29 +1404,29 @@ export class VirtualParticipantStatusManager {
       });
 
       await this.elbClient.send(registerCommand);
-      console.log(`✓ Successfully registered ${privateIp} with target group`);
+      log.info(`✓ Successfully registered ${privateIp} with target group`);
 
       // Step 4: Wait for target to become healthy
-      console.log('Step 4: Waiting for target to become healthy...');
+      log.info('Step 4: Waiting for target to become healthy...');
       const isHealthy = await this.waitForTargetHealthy(targetGroupArn, privateIp);
       
       if (!isHealthy) {
-        console.error('Target did not become healthy within timeout');
+        log.error('Target did not become healthy within timeout');
         return false;
       }
 
-      console.log('✓ Target is healthy and ready to receive traffic');
+      log.info('✓ Target is healthy and ready to receive traffic');
       
       // Additional delay to ensure ALB is fully ready to route WebSocket traffic
-      console.log('Waiting additional 5 seconds for ALB routing to stabilize...');
+      log.info('Waiting additional 5 seconds for ALB routing to stabilize...');
       await new Promise(resolve => setTimeout(resolve, 5000));
-      console.log('✓ ALB routing stabilization complete');
+      log.info('✓ ALB routing stabilization complete');
       
-      console.log(`✓ VP ${this.participantId} fully registered with dedicated routing`);
+      log.info(`✓ VP ${this.participantId} fully registered with dedicated routing`);
       return true;
 
     } catch (error) {
-      console.error('Failed to register with target group:', error);
+      log.error('Failed to register with target group:', error);
       // Attempt cleanup
       await this.cleanupALBResources();
       return false;
@@ -1455,14 +1458,14 @@ export class VirtualParticipantStatusManager {
           const targetHealth = healthResponse.TargetHealthDescriptions[0];
           const state = targetHealth.TargetHealth?.State;
           
-          console.log(`Target health state: ${state}`);
+          log.info(`Target health state: ${state}`);
           
           if (state === 'healthy') {
             return true;
           }
           
           if (state === 'unhealthy') {
-            console.error(`Target is unhealthy: ${targetHealth.TargetHealth?.Reason}`);
+            log.error(`Target is unhealthy: ${targetHealth.TargetHealth?.Reason}`);
             return false;
           }
         }
@@ -1471,12 +1474,12 @@ export class VirtualParticipantStatusManager {
         await new Promise(resolve => setTimeout(resolve, 2000));
 
       } catch (error) {
-        console.error('Error checking target health:', error);
+        log.error('Error checking target health:', error);
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
 
-    console.error('Timeout waiting for target to become healthy');
+    log.error('Timeout waiting for target to become healthy');
     return false;
   }
 
@@ -1486,27 +1489,27 @@ export class VirtualParticipantStatusManager {
   private async deleteListenerRule(): Promise<boolean> {
     try {
       if (!this.listenerRuleArn) {
-        console.log('No listener rule ARN to delete');
+        log.info('No listener rule ARN to delete');
         return true;
       }
 
-      console.log(`Deleting listener rule: ${this.listenerRuleArn}`);
+      log.info(`Deleting listener rule: ${this.listenerRuleArn}`);
 
       const deleteRuleCommand = new DeleteRuleCommand({
         RuleArn: this.listenerRuleArn
       });
 
       await this.elbClient.send(deleteRuleCommand);
-      console.log(`✓ Deleted listener rule`);
+      log.info(`✓ Deleted listener rule`);
       this.listenerRuleArn = null;
       return true;
 
     } catch (error: any) {
       if (error.name === 'RuleNotFound') {
-        console.log('Listener rule already deleted');
+        log.info('Listener rule already deleted');
         return true;
       }
-      console.error('Failed to delete listener rule:', error);
+      log.error('Failed to delete listener rule:', error);
       return false;
     }
   }
@@ -1517,11 +1520,11 @@ export class VirtualParticipantStatusManager {
   private async deleteVPTargetGroup(): Promise<boolean> {
     try {
       if (!this.targetGroupArn) {
-        console.log('No target group ARN to delete');
+        log.info('No target group ARN to delete');
         return true;
       }
 
-      console.log(`Deleting target group: ${this.targetGroupArn}`);
+      log.info(`Deleting target group: ${this.targetGroupArn}`);
 
       // First deregister all targets
       if (this.taskPrivateIp) {
@@ -1531,12 +1534,12 @@ export class VirtualParticipantStatusManager {
             Targets: [{ Id: this.taskPrivateIp, Port: 5901 }]
           });
           await this.elbClient.send(deregisterCommand);
-          console.log('✓ Deregistered targets from target group');
+          log.info('✓ Deregistered targets from target group');
           
           // Wait a bit for deregistration to complete
           await new Promise(resolve => setTimeout(resolve, 2000));
         } catch (deregError) {
-          console.log('Error deregistering targets (may already be deregistered):', deregError);
+          log.info('Error deregistering targets (may already be deregistered):', deregError);
         }
       }
 
@@ -1545,16 +1548,16 @@ export class VirtualParticipantStatusManager {
       });
 
       await this.elbClient.send(deleteTGCommand);
-      console.log(`✓ Deleted target group`);
+      log.info(`✓ Deleted target group`);
       this.targetGroupArn = null;
       return true;
 
     } catch (error: any) {
       if (error.name === 'TargetGroupNotFound') {
-        console.log('Target group already deleted');
+        log.info('Target group already deleted');
         return true;
       }
-      console.error('Failed to delete target group:', error);
+      log.error('Failed to delete target group:', error);
       return false;
     }
   }
@@ -1563,13 +1566,13 @@ export class VirtualParticipantStatusManager {
    * Clean up all ALB resources (listener rule and target group)
    */
   private async cleanupALBResources(): Promise<void> {
-    console.log('Cleaning up ALB resources...');
+    log.info('Cleaning up ALB resources...');
     
     // Delete in correct order: rule first, then target group
     await this.deleteListenerRule();
     await this.deleteVPTargetGroup();
     
-    console.log('✓ ALB resource cleanup complete');
+    log.info('✓ ALB resource cleanup complete');
   }
 
   /**
@@ -1583,16 +1586,16 @@ export class VirtualParticipantStatusManager {
       return true;
     }
     try {
-      console.log(`Deregistering VP ${this.participantId} from ALB`);
+      log.info(`Deregistering VP ${this.participantId} from ALB`);
       
       // Clean up all ALB resources
       await this.cleanupALBResources();
       
-      console.log(`✓ Successfully deregistered VP ${this.participantId}`);
+      log.info(`✓ Successfully deregistered VP ${this.participantId}`);
       return true;
 
     } catch (error) {
-      console.error('Failed to deregister from target group:', error);
+      log.error('Failed to deregister from target group:', error);
       return false;
     }
   }
@@ -1612,7 +1615,7 @@ export class VirtualParticipantStatusManager {
   async getMicrovmEndpointFromRegistry(attempts = 10, delayMs = 1000): Promise<string> {
     const tableName = process.env.VP_TASK_REGISTRY_TABLE_NAME;
     if (!tableName) {
-      console.error('VP_TASK_REGISTRY_TABLE_NAME not set - cannot look up MicroVM endpoint');
+      log.error('VP_TASK_REGISTRY_TABLE_NAME not set - cannot look up MicroVM endpoint');
       return '';
     }
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -1625,23 +1628,23 @@ export class VirtualParticipantStatusManager {
         );
         const endpoint = result.Item?.vncEndpoint?.S || '';
         if (endpoint) {
-          console.log(`Resolved MicroVM endpoint from registry: ${endpoint}`);
+          log.info(`Resolved MicroVM endpoint from registry: ${endpoint}`);
           return endpoint;
         }
       } catch (error) {
-        console.error('Error reading MicroVM endpoint from registry:', error);
+        log.error('Error reading MicroVM endpoint from registry:', error);
       }
       if (attempt < attempts) {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
     }
-    console.error(`MicroVM endpoint not in registry after ${attempts} attempts`);
+    log.error(`MicroVM endpoint not in registry after ${attempts} attempts`);
     return '';
   }
 
   async setVncReady(): Promise<boolean> {
     try {
-      console.log(`Signaling VNC ready for VP ${this.participantId}`);
+      log.info(`Signaling VNC ready for VP ${this.participantId}`);
       
       // Under MICROVM the browser connects straight to this MicroVM's own
       // endpoint (no CloudFront/ALB, no /vnc/<vpId> path routing). The launcher
@@ -1658,7 +1661,7 @@ export class VirtualParticipantStatusManager {
           process.env.MICROVM_ENDPOINT || (await this.getMicrovmEndpointFromRegistry()),
         );
         if (!vncEndpoint) {
-          console.error('No MicroVM endpoint available - cannot publish VNC endpoint');
+          log.error('No MicroVM endpoint available - cannot publish VNC endpoint');
           return false;
         }
       } else {
@@ -1666,7 +1669,7 @@ export class VirtualParticipantStatusManager {
         const cloudFrontDomain = process.env.CLOUDFRONT_DOMAIN;
 
         if (!cloudFrontDomain) {
-          console.error('CLOUDFRONT_DOMAIN environment variable not set');
+          log.error('CLOUDFRONT_DOMAIN environment variable not set');
           return false;
         }
 
@@ -1674,7 +1677,7 @@ export class VirtualParticipantStatusManager {
         vncEndpoint = `wss://${cloudFrontDomain}/vnc/${this.participantId}`;
       }
 
-      console.log(`VNC WebSocket URL with path: ${vncEndpoint}`);
+      log.info(`VNC WebSocket URL with path: ${vncEndpoint}`);
       
       // Get current VP to preserve CallId
       const getQuery = `
@@ -1692,7 +1695,7 @@ export class VirtualParticipantStatusManager {
       });
 
       if (!currentVP?.getVirtualParticipant) {
-        console.error(`VP ${this.participantId} not found`);
+        log.error(`VP ${this.participantId} not found`);
         return false;
       }
 
@@ -1731,15 +1734,15 @@ export class VirtualParticipantStatusManager {
       const result = await this.signAndSendGraphQLRequest(mutation, variables);
       
       if (result) {
-        console.log(`✓ VNC ready with URL: ${vncEndpoint}`);
+        log.info(`✓ VNC ready with URL: ${vncEndpoint}`);
         return true;
       } else {
-        console.error('Failed to publish VNC ready signal');
+        log.error('Failed to publish VNC ready signal');
         return false;
       }
 
     } catch (error) {
-      console.error('Failed to signal VNC ready:', error);
+      log.error('Failed to signal VNC ready:', error);
       return false;
     }
   }
@@ -1757,7 +1760,7 @@ export class VirtualParticipantStatusManager {
     };
     
     // Log to CloudWatch (will be picked up by container logs)
-    console.log('VNC_AUDIT:', JSON.stringify(logEntry));
+    log.info('VNC_AUDIT:', JSON.stringify(logEntry));
   }
 }
 
