@@ -331,7 +331,7 @@ so a release cannot ship a default its own save would refuse.
 | `meeting_assist` | `wakePhraseRegex`, text of 1 to 256 characters |
 | `meeting_processing` | `transcriptHookNonPartialOnly`, `true` or `false`; `inactiveMeetingLookbackDays`, a whole number from 1 to 90, and `inactiveMeetingTimeoutMinutes`, a whole number from 0 to 10080, their parameters' ranges |
 | `retention` | `meetingRecordExpirationInDays` and `transcriptionExpirationInDays`, numbers of days of at least 0.1, each at most the baseline's value (`maximumIsDefault`, below) |
-| `meeting_consent` | `mode` and `consentRule` from their fixed lists; the two notice texts of 1 to 2,000 characters; the two phrase lists of 1 to 1,000 characters; `allowPerMeetingOverride`, `true` or `false`; nothing else |
+| `meeting_consent` | `mode` and `consentRule` from their fixed lists; the two notice texts of 1 to 2,000 characters; the two phrase lists of 1 to 1,000 characters; `allowPerMeetingOverride` and `keepEvidenceScreenshots`, `true` or `false`; `verifierModelId`, one of the image-capable models the Key frame text setting offers; nothing else |
 | `virtual_participant` | The provider from its parameter's list; wake phrases as text; the activation duration, poll interval and poll counts as whole numbers in their parameters' ranges; the ElevenLabs agent and Simli face ids in the characters their services use, empty for none |
 | `call_pricing` | Prices that are finite and not negative, under `regions › <region or default> › <service>/<api-or-model> › <unit>`; region codes in the form `us-east-1`; the lists and notes as lists and objects of text; `currency` `USD`; no keys the estimator does not read |
 

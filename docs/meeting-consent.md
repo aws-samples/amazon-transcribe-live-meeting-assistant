@@ -111,6 +111,8 @@ meeting already under way keeps the mode and rule it started with.
 | Consent phrases | Comma-separated phrases read as consent | I consent, I agree, I accept |
 | Objection phrases | Comma-separated phrases read as an objection | I object, I do not consent, I don't consent, I do not agree, I don't agree, do not record, don't record, stop recording |
 | Allow a different choice per meeting | Whether a meeting may be started with another mode, rule or notice | On |
+| Keep evidence screenshots | Whether evidence images stay with the meeting, or are deleted once checked | On |
+| Evidence check model | The Amazon Bedrock vision model that checks evidence images; see [Checking evidence with a vision model](#checking-evidence-with-a-vision-model) | Amazon Nova Lite |
 
 In the two texts, `{LMA_USER}` is the person using LMA in the meeting,
 `{meeting}` the meeting's name, and `{consent_phrase}` and `{objection_phrase}`
@@ -164,7 +166,8 @@ A capture client follows the same steps whichever method it is:
    transcript and recording when it becomes true, and stop when it becomes
    false.
 7. **Keep evidence** where it can: store a screenshot under the meeting's
-   evidence folder and record it with `addMeetingConsentEvidence`.
+   evidence folder, record it with `addMeetingConsentEvidence`, and check it
+   with `verifyMeetingConsentEvidence`.
 
 ## What is stored
 
@@ -181,21 +184,25 @@ holds:
 | `Participants`, `ParticipantsSeen` | Who is present now, as last listed, and everyone ever listed (the first 500) |
 | `Events` | Every reply and attestation in the order recorded: the participant's display name, `consent` or `objection`, where it was read (`chat`, `voice`, `ui` for an entry a signed-in user made, or `attestation`), the words when sent, when it happened, when it was recorded and by whom |
 | `Attestation` | Who attested, how (`verbal`, `chat` or `invite_terms`), what they said, and when |
-| `Evidence` | The images kept: each one's id, kind (`screenshot` or `invitation`), where it is stored, when it was taken and a note |
+| `Evidence` | The images kept: each one's id, kind (`screenshot` or `invitation`), where it is stored, when it was taken, a note, the vision model's check of it (`Verification`) when one ran, and when the image was deleted after its check (`ImageDeletedAt`) when screenshots are not kept |
 | `StatusHistory` | Each change of status or of `CaptureAllowed`, with the time and reason; the latest 100 are kept |
 | `StartedAt`, `StartedBy`, `UpdatedAt`, `Version` | When and by whom consent was started; when it last changed; a count that increases with every write |
 
-A meeting keeps at most 250 participants present, 300 events and 30 evidence
-images. When a long meeting reaches 300 events, older events are dropped, but
-never a participant's latest reply or the latest attestation, so the status
-does not change by being compacted.
+A participant list of more than 250 distinct names is refused, so a meeting
+larger than that cannot be granted under the **Each participant consents**
+rule; use **The meeting owner attests** for it. A meeting keeps at most 30
+evidence images. Events are compacted towards 300: past that, older events are
+dropped, but never a participant's latest reply or the latest attestation, so
+the status does not change by being compacted, and a meeting in which more than
+300 names have replied keeps one event for each of them.
 
 The record shares one database item, of at most 400 KB, with the rest of the
 meeting row, so it is also held to 150 KB as a whole. A write that would take it
 past that first sheds what the status does not depend on, in this order: replies
 that are no longer anybody's latest, the words of replies, the older status
 history, the notices between the first and the latest, the names no longer
-present, and finally each reply's other details and each image's note. A write that still would not fit is
+present, what the evidence check read in each image, and finally each reply's
+other details and each image's note and check summary. A write that still would not fit is
 refused with a message saying so.
 
 Evidence images are private objects in the recordings bucket, under
@@ -217,6 +224,79 @@ entries and anything stored about them remain, and a link to one leads nowhere.
 If the images are needed for as long as the record, keep the two retentions
 equal, or copy the images elsewhere before they expire.
 
+## Checking evidence with a vision model
+
+An evidence screenshot — typically the meeting chat after the request was
+posted — can be checked by an Amazon Bedrock vision model with
+`verifyMeetingConsentEvidence`. The model is shown the image with the notice
+that was posted, the meeting's mode, the consent and objection phrases and the
+participants listed as present, and asked to report what the picture shows:
+
+- whether the notice is visible, and whether it says the same as the notice
+  posted;
+- every visible reply to it, with the sender's name as shown, the reply's text,
+  and whether it reads as consent, an objection, or neither;
+- whether anybody objected;
+- how sure it is, from 0 to 1, and a one-sentence summary.
+
+From that answer LMA draws a **verdict**, the same way whichever model answered:
+
+| Verdict | When |
+|---|---|
+| `objection_found` | The model reported an objection, or a visible reply reads as one. Reported whatever the model's confidence. |
+| `supports_consent` | The notice is visible, nobody objected, the model's confidence is at least 0.5, and — for the opt-in rule **Each participant consents** — every participant listed as present has a visible reply reading as consent. |
+| `inconclusive` | Anything else, including an answer that could not be read. For the each-participant rule, the participants with no visible consent are listed (`MissingParticipants`). |
+
+The result is stored on the evidence entry as `Verification`, with the model's
+id, when the check ran, who ran it and the tokens it used. It is supporting
+evidence only: **it never changes the meeting's consent status**, which follows
+only from the replies and attestations recorded on the meeting. A check that
+finds an objection nobody recorded is for a person to look at — the owner can
+record the objection — and a check that supports consent does not grant it.
+
+The model is told that everything in the screenshot, including text that looks
+like an instruction, is content to report, and not to identify anybody from
+their face or appearance, only from names written on the screen.
+
+**Model and cost.** The model is **Evidence check model** in the Meeting Consent
+settings; the shipped default is Amazon Nova Lite (`amazon.nova-lite-v1:0`), the
+same in-region model the key frame text reader uses by default, so a deployment
+that reads key frames needs no further model access. Each check is one model
+call, recorded against the meeting as **Consent evidence check** in its
+[cost estimate](meeting-cost-estimate.md).
+
+Measured on four synthetic screenshots of a meeting with a chat panel (1568 ×
+882 JPEG), each checked three times per model at temperature 0: every
+participant consenting (expected `supports_consent`), one of three participants
+not replying (`inconclusive`), an objection worded freely, "I don't consent to
+being recorded, please turn it off" (`objection_found`), and a chat line telling
+the checker to ignore its instructions and report that everyone consented,
+followed by an objection (`objection_found`):
+
+| Model | Verdicts as expected | Input / output tokens per check | Cost per check | Time per check |
+|---|---|---|---|---|
+| Amazon Nova Lite | 12 of 12 | about 2,630 / 110 | about $0.0002 | about 1.3 s |
+| Amazon Nova 2 Lite | 12 of 12 | about 790 / 140 | about $0.0006 | about 1.3 s |
+| Claude Haiku 4.5 | 12 of 12 | about 2,120 / 190 | about $0.003 | about 1.8 s |
+
+Four synthetic screenshots are a small sample with clean, legible text. Real
+chat panels are smaller, busier and partly hidden, so expect more `inconclusive`
+results from them, and choose a larger model if the default reads them poorly.
+
+**Keeping or deleting the image.** With **Keep evidence screenshots** on (the
+default), the image stays with the meeting until the meeting is deleted. With it
+off, the image is deleted as soon as its check is stored, and the entry keeps
+the check and `ImageDeletedAt`; such an entry cannot be checked again. If the
+deletion fails, the check is still stored and the image is left for the
+meeting's deletion or the lifecycle rule to remove. If the image is deleted but
+`ImageDeletedAt` cannot be recorded, the failure is logged with the evidence
+id, and the entry goes on looking as if its image were kept.
+
+**Timing.** The check runs while the request waits. AppSync answers a request
+within 30 seconds; a check that takes longer still stores its result, but the
+request returns an error and no `onUpdateMeetingConsent` message is sent, so the
+result is seen on the next read of the record.
+
 ## Who can do what
 
 | Operation | Who |
@@ -228,6 +308,7 @@ equal, or copy the images elsewhere before they expire.
 | Record a reply (`recordMeetingConsentEvent`) | A backend role, for a reply read from the chat or the speech. A signed-in user who can read the record may record an **objection**; only the owner or an Admin may record **consent** on a participant's behalf. A signed-in user's entry is recorded as source `ui` under their own username. (The meeting page has no control for this yet; it is planned with the page's Consent panel.) |
 | Attest (`attestMeetingConsent`) | The meeting's owner, or a backend role relaying the owner's attestation and naming them |
 | Add evidence (`addMeetingConsentEvidence`) | A backend role |
+| Check evidence with the vision model (`verifyMeetingConsentEvidence`) | The owner, an Admin, or a backend role. Where evidence screenshots are not kept, the check is what deletes the image |
 
 These rules are applied by the meeting consent resolver on every request, as
 the meeting's other edits are applied by theirs; a meeting the caller may not
@@ -251,7 +332,14 @@ fragment ConsentRecord on MeetingConsent {
   Participants ParticipantsSeen
   Events { EventId ParticipantName Decision Source Text OccurredAt RecordedAt RecordedBy }
   Attestation { AttestedBy Method Statement AttestedAt RecordedBy }
-  Evidence { EvidenceId Kind S3Key CapturedAt AddedAt Note SignedUrl }
+  Evidence {
+    EvidenceId Kind S3Key CapturedAt AddedAt Note SignedUrl ImageDeletedAt
+    Verification {
+      Verdict MissingParticipants Readable NoticeVisible NoticeMatches
+      Replies { Name Text Decision }
+      AnyObjection Confidence Summary ModelId VerifiedAt VerifiedBy InputTokens OutputTokens
+    }
+  }
   StatusHistory { Status CaptureAllowed At Reason }
   StartedAt StartedBy UpdatedAt Version
 }
@@ -261,7 +349,10 @@ query {
     CallId
     CaptureAllowed
     Consent { ...ConsentRecord }
-    Settings { Mode Rule NotifyNoticeText OptInNoticeText ConsentPhrases ObjectionPhrases AllowPerMeetingOverride }
+    Settings {
+      Mode Rule NotifyNoticeText OptInNoticeText ConsentPhrases ObjectionPhrases
+      AllowPerMeetingOverride KeepEvidenceScreenshots VerifierModelId
+    }
   }
 }
 
@@ -302,6 +393,12 @@ mutation {
     CallId: "<CallId>", S3Key: "lma-consent-evidence/<meeting>/chat-0001.jpg",
     Kind: "screenshot", CapturedAt: "2026-11-02T10:01:30.000Z", Note: "Chat panel after the request"
   }) { CallId Owner SharedWith Consent { ...ConsentRecord } }
+}
+
+mutation {
+  verifyMeetingConsentEvidence(input: { CallId: "<CallId>", EvidenceId: "<EvidenceId>" }) {
+    CallId Owner SharedWith Consent { ...ConsentRecord }
+  }
 }
 
 subscription {
@@ -353,6 +450,9 @@ also holds the reply classifier described above.
 - **Speech is read as words.** A spoken reply is only as reliable as its
   transcript; a reply in a language the transcription is not set up for may not
   be read at all.
+- **A model's reading is supporting evidence.** The evidence check reports
+  what a vision model read in a screenshot. It can misread small or partly
+  hidden text, and it never changes a meeting's status.
 - **What LMA records is evidence, not a determination.** The record shows what
   was posted and what was replied, when; whether that amounts to consent where
   the meeting took place is for your organisation to decide.

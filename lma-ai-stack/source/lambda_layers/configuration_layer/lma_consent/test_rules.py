@@ -311,6 +311,12 @@ def _full_record():
                 "EvidenceId": "0123456789abcdef",
                 "S3Key": "k" * 256,
                 "Note": text,
+                "Verification": {
+                    "Verdict": "inconclusive",
+                    "Summary": "s" * 500,
+                    "Replies": [{"Name": long_name, "Text": text, "Decision": "consent"}] * 100,
+                    "MissingParticipants": names,
+                },
             }
         ]
         * rules.MAX_EVIDENCE,
@@ -350,3 +356,17 @@ def test_a_record_that_cannot_fit_is_refused() -> None:
     record = {"Mode": "notify", "NoticeText": "n" * 2000, "Events": []}
     with pytest.raises(rules.RecordFull):
         rules.fit_to_budget(record, limit=100)
+
+
+def test_the_evidence_check_offers_the_key_frame_reader_models() -> None:
+    schemas = Path(__file__).resolve().parents[1] / "lma_config" / "schemas"
+    consent_schema = json.loads((schemas / "meeting_consent.json").read_text(encoding="utf-8"))
+    models = json.loads((schemas / "language_models.json").read_text(encoding="utf-8"))
+    assert (
+        consent_schema["properties"]["verifierModelId"]["enum"]
+        == models["properties"]["keyframeTextModelId"]["enum"]
+    )
+    assert (
+        rules.DEFAULT_SETTINGS["verifierModelId"]
+        in models["properties"]["keyframeTextModelId"]["enum"]
+    )
