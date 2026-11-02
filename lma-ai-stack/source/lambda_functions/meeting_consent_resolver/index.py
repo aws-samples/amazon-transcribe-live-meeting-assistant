@@ -28,7 +28,7 @@ Who may do what:
                                 the owner's attestation, recorded as the owner's.
 ``addMeetingConsentEvidence``   A backend role, for an image it stored under the
                                 meeting's own evidence folder.
-``verifyMeetingConsentEvidence`` The ``getCall`` rule. Runs the evidence verifier
+``verifyMeetingConsentEvidence`` The owner, an Admin or a backend role. Runs the evidence verifier
                                 Lambda on one image and stores its result.
 =============================== ==================================================
 
@@ -809,7 +809,11 @@ def verify_meeting_consent_evidence(caller: Mapping[str, Any], data: Mapping[str
     """
     call_id = data["CallId"]
     evidence_id = required_text(data.get("EvidenceId"), "EvidenceId", 64)
-    meeting, _access = load(caller, call_id)
+    meeting, access = load(caller, call_id)
+    # The owner's, an Admin's or the backend's: a check costs a model call, and
+    # where screenshots are not kept it is what deletes the image.
+    if not (access["owner"] or access["admin"] or access["backend"]):
+        raise refuse(caller, call_id, "check evidence")
     record = require_started(meeting.get("Consent") or None)
     entry = find_evidence(record, evidence_id)
     if entry.get("ImageDeletedAt"):
@@ -852,7 +856,14 @@ def verify_meeting_consent_evidence(caller: Mapping[str, Any], data: Mapping[str
         find_evidence(record, evidence_id)["ImageDeletedAt"] = now
         return record
 
-    return write_consent(caller, call_id, mark_deleted)
+    try:
+        return write_consent(caller, call_id, mark_deleted)
+    except (ConflictError, BadRequestError, ClientError):
+        # The image is gone and its check is stored; only the mark is missing.
+        LOGGER.exception(
+            "deleted evidence image %s of %s but could not record that it was", evidence_id, call_id
+        )
+        return answer
 
 
 MUTATIONS = {

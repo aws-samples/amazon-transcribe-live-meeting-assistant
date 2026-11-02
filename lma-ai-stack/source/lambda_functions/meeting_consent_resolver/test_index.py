@@ -587,11 +587,11 @@ def evidence_meeting(monkeypatch, verifier, **settings_values):
 def test_a_check_is_stored_on_the_evidence_and_leaves_the_status(dynamo, monkeypatch) -> None:
     verifier = FakeLambda(VERIFIED)
     evidence_id = evidence_meeting(monkeypatch, verifier)
-    result = call("verifyMeetingConsentEvidence", user(SHARED), EvidenceId=evidence_id)
+    result = call("verifyMeetingConsentEvidence", user(OWNER), EvidenceId=evidence_id)
     entry = result["Consent"]["Evidence"][0]
     assert entry["Verification"]["Verdict"] == "objection_found"
     assert entry["Verification"]["Confidence"] == 0.9
-    assert entry["Verification"]["VerifiedBy"] == SHARED
+    assert entry["Verification"]["VerifiedBy"] == OWNER
     # Supporting evidence only: the replies recorded decide the status.
     assert result["Consent"]["Status"] == "pending"
     sent = verifier.payloads[0]
@@ -619,8 +619,9 @@ def test_a_failed_check_is_reported_and_nothing_is_written(dynamo, monkeypatch, 
 def test_somebody_without_access_cannot_run_a_check(dynamo, monkeypatch) -> None:
     verifier = FakeLambda(VERIFIED)
     evidence_id = evidence_meeting(monkeypatch, verifier)
-    with pytest.raises(index.ForbiddenError):
-        call("verifyMeetingConsentEvidence", user(OTHER), EvidenceId=evidence_id)
+    for identity in (user(OTHER), user(SHARED)):
+        with pytest.raises(index.ForbiddenError):
+            call("verifyMeetingConsentEvidence", identity, EvidenceId=evidence_id)
     assert verifier.payloads == []
 
 
@@ -665,3 +666,22 @@ def test_an_invalid_mode_is_refused_alike_without_the_settings(dynamo, monkeypat
     monkeypatch.setattr(index, "_STORE", FakeStore(fail=True))
     with pytest.raises(index.BadRequestError, match="Mode must be one of"):
         call("startMeetingConsent", BACKEND, Mode="foo")
+
+
+def test_a_deleted_image_whose_mark_cannot_be_written_still_answers(dynamo, monkeypatch) -> None:
+    s3 = DeletingS3()
+    monkeypatch.setattr(index, "S3", s3)
+    evidence_id = evidence_meeting(monkeypatch, FakeLambda(VERIFIED), keepEvidenceScreenshots=False)
+    real = index.write_consent
+    calls = []
+
+    def flaky(caller, call_id, change):
+        calls.append(change.__name__)
+        if change.__name__ == "mark_deleted":
+            raise index.ConflictError("busy")
+        return real(caller, call_id, change)
+
+    monkeypatch.setattr(index, "write_consent", flaky)
+    result = call("verifyMeetingConsentEvidence", BACKEND, EvidenceId=evidence_id)
+    assert calls == ["store", "mark_deleted"] and s3.deleted
+    assert result["Consent"]["Evidence"][0]["Verification"]["Verdict"] == "objection_found"

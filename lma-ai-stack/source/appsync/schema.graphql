@@ -1212,6 +1212,8 @@ input AddMeetingConsentEvidenceInput {
 	Note: String
 }
 
+# The owner, an Admin or a backend role. Where evidence screenshots are not
+# kept, the check deletes the image once its result is stored.
 input VerifyMeetingConsentEvidenceInput {
 	CallId: ID!
 	# An EvidenceId from the meeting's consent record.

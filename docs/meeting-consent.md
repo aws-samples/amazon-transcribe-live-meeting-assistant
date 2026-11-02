@@ -288,7 +288,9 @@ default), the image stays with the meeting until the meeting is deleted. With it
 off, the image is deleted as soon as its check is stored, and the entry keeps
 the check and `ImageDeletedAt`; such an entry cannot be checked again. If the
 deletion fails, the check is still stored and the image is left for the
-meeting's deletion or the lifecycle rule to remove.
+meeting's deletion or the lifecycle rule to remove. If the image is deleted but
+`ImageDeletedAt` cannot be recorded, the failure is logged with the evidence
+id, and the entry goes on looking as if its image were kept.
 
 **Timing.** The check runs while the request waits. AppSync answers a request
 within 30 seconds; a check that takes longer still stores its result, but the
@@ -306,7 +308,7 @@ result is seen on the next read of the record.
 | Record a reply (`recordMeetingConsentEvent`) | A backend role, for a reply read from the chat or the speech. A signed-in user who can read the record may record an **objection**; only the owner or an Admin may record **consent** on a participant's behalf. A signed-in user's entry is recorded as source `ui` under their own username. (The meeting page has no control for this yet; it is planned with the page's Consent panel.) |
 | Attest (`attestMeetingConsent`) | The meeting's owner, or a backend role relaying the owner's attestation and naming them |
 | Add evidence (`addMeetingConsentEvidence`) | A backend role |
-| Check evidence with the vision model (`verifyMeetingConsentEvidence`) | Anyone who can read the record |
+| Check evidence with the vision model (`verifyMeetingConsentEvidence`) | The owner, an Admin, or a backend role. Where evidence screenshots are not kept, the check is what deletes the image |
 
 These rules are applied by the meeting consent resolver on every request, as
 the meeting's other edits are applied by theirs; a meeting the caller may not

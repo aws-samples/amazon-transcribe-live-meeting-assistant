@@ -117,6 +117,9 @@ def verify(event: Dict[str, Any]) -> Dict[str, Any]:
         "ConsentVerification",
         bedrock_service(model_id),
         bedrock_usage(usage),
+        # Recorded against the region the model ran in when that is not the
+        # stack's own. The stack sets the override to its own region today; the
+        # comparison keeps metering right if it is ever pointed elsewhere.
         region=BEDROCK_REGION if BEDROCK_REGION != os.environ.get("AWS_REGION") else None,
     )
     text = "".join(
