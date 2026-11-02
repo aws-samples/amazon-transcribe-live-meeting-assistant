@@ -321,8 +321,10 @@ def test_every_signed_in_reader_is_served(
 def test_the_read_is_strongly_consistent(table: FakeConfigurationTable) -> None:
     read("CustomChatButtonConfig")
 
-    (get,) = [request for request in table.requests if request["op"] == "get_item"]
-    assert get["ConsistentRead"] is True
+    # The active-profile pointer, then the profile it names.
+    gets = [request for request in table.requests if request["op"] == "get_item"]
+    assert len(gets) == 2
+    assert all(request["ConsistentRead"] is True for request in gets)
 
 
 def test_an_unrecognised_id_is_refused_rather_than_answered_with_the_defaults(
@@ -566,3 +568,28 @@ def test_a_comment_on_the_save_is_passed_to_the_revision_it_records(
     )
 
     assert seen["comment"] == "why"
+
+
+# ── saves go into the profile in force ──────────────────────────────────────
+
+
+def test_a_save_goes_into_the_active_custom_profile(table: FakeConfigurationTable) -> None:
+    table.seed("Config#trial", {})
+    table.items[ACTIVE_POINTER_KEY]["ActiveProfile"] = {"S": "trial"}
+    save(BUTTONS)
+    assert SECTION in table.body("Config#trial")
+    assert SECTION not in table.body(CUSTOM_KEY)
+
+
+def test_a_save_is_refused_while_the_default_profile_is_active(
+    table: FakeConfigurationTable,
+) -> None:
+    table.items[ACTIVE_POINTER_KEY]["ActiveProfile"] = {"S": "default"}
+    with pytest.raises(Exception, match="create or activate a Custom profile"):
+        save(BUTTONS)
+
+
+def test_the_page_shows_the_active_profiles_buttons(table: FakeConfigurationTable) -> None:
+    table.items[ACTIVE_POINTER_KEY]["ActiveProfile"] = {"S": "default"}
+    answer = read("CustomChatButtonConfig")
+    assert answer == read("DefaultChatButtonConfig")

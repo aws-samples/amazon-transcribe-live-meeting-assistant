@@ -37,8 +37,16 @@ from lma_config import (  # from the configuration layer
 
 # pylint: enable=import-error
 
-#: The profile an operator's edits live in.
-OPERATOR_PROFILE = "custom"
+
+def _reading_profile() -> str:
+    """The profile in force: what this page shows, the baseline when that is active."""
+    return CONFIG_STORE.active_profile_name(consistent_read=True) or "default"
+
+
+def _writing_profile() -> str:
+    """The profile in force, which a save goes into; refused while a Managed one is."""
+    return CONFIG_STORE.editable_active_profile()
+
 
 #: The identifiers the GraphQL fields have always used, kept so the chat panel
 #: and any existing client keep working: one names the shipped buttons, the
@@ -159,7 +167,7 @@ def _read(config_id: str) -> Dict[str, Any]:
     # than falling back to the shipped buttons, which would answer a typo with a
     # plausible-looking record.
     if config_id == CONFIG_ID:
-        profile = OPERATOR_PROFILE
+        profile = _reading_profile()
     elif config_id == DEFAULT_CONFIG_ID:
         profile = "default"
     else:
@@ -208,7 +216,7 @@ def _write(input_data: Dict[str, Any], caller: Dict[str, Any]) -> Dict[str, Any]
     # One section, not the whole record: the profile holds every configuration
     # page's settings, and replacing the body would delete the others.
     version = CONFIG_STORE.write_section(
-        OPERATOR_PROFILE,
+        _writing_profile(),
         CHAT_BUTTONS.name,
         buttons,
         updated_by=caller["actor"],

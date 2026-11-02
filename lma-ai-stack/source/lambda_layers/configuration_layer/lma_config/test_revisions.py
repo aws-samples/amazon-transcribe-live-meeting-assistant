@@ -95,6 +95,20 @@ class FakeDynamo:
         # not change what is stored.
         return {"Item": {name: dict(value) for name, value in item.items()}} if item else {}
 
+    def scan(self, **request: Any) -> Dict[str, Any]:
+        prefix = request["ExpressionAttributeValues"][":prefix"]["S"]
+        return {
+            "Items": [
+                {k: v for k, v in item.items() if k != "Body"}
+                for key, item in self.items.items()
+                if key.startswith(prefix)
+            ]
+        }
+
+    def delete_item(self, **request: Any) -> Dict[str, Any]:
+        self.items.pop(request["Key"]["Configuration"]["S"], None)
+        return {}
+
     def put_item(self, **request: Any) -> Dict[str, Any]:
         self.requests.append({"op": "put_item", **request})
         item = request["Item"]

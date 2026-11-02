@@ -99,3 +99,38 @@ def test_a_preset_id_must_be_hyphenated_lower_case_words():
 def test_a_copy_is_served_so_a_caller_cannot_change_the_library():
     library.shipped_presets()[0]["Sections"].clear()
     assert library.shipped_presets()[0]["Sections"]
+
+
+# ── applying a preset at deploy time ────────────────────────────────────────
+
+from lma_config.presets import apply_preset, preset_by_id, preset_offered  # noqa: E402
+
+
+def test_a_merge_preset_changes_only_the_settings_it_names():
+    body = {"nova_sonic_config": {"meetingMode": "normal", "voiceId": "tiffany"}}
+    applied = apply_preset(body, preset_by_id("translator-voice-assistant"))
+    assert applied["nova_sonic_config"]["meetingMode"] == "translator"
+    assert applied["nova_sonic_config"]["voiceId"] == "tiffany"
+    assert body["nova_sonic_config"]["meetingMode"] == "normal"  # not changed in place
+
+
+def test_a_replace_preset_turns_off_the_shipped_entries_it_does_not_name():
+    preset = preset_by_id("healthcare-summary")
+    change = preset["Sections"]["summary_prompt_templates"]
+    assert change["mode"] == "replace"
+    body = {"summary_prompt_templates": {"99#NOT IN THE PRESET": "a shipped prompt"}}
+    applied = apply_preset(body, preset)["summary_prompt_templates"]
+    assert applied["99#NOT IN THE PRESET"] == "NONE"
+    assert set(change["values"]) <= set(applied)
+
+
+def test_a_preset_needing_the_asr_engine_is_offered_only_with_it():
+    preset = preset_by_id("on-demand-asr-with-voice-separation")
+    assert preset_offered(preset, {"AsrEngineAvailable": "true"}) is True
+    assert preset_offered(preset, {}) is False
+    assert preset_offered(preset_by_id("translator-voice-assistant"), {}) is True
+
+
+def test_an_unknown_preset_id_is_refused():
+    with pytest.raises(library.InvalidPreset):
+        preset_by_id("no-such-preset")

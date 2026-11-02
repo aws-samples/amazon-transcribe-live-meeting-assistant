@@ -199,6 +199,35 @@ for more:
   Shortening transcript retention on the page does not delete those files
   sooner.
 
+## Configuration profiles
+
+A deployment holds several **profiles**, each a complete configuration, and one
+of them is **active**: the one every meeting uses. They work as IDP's do.
+
+- **default** is the deployment default: the release's shipped settings, the
+  preset and file the `ConfigurationPreset` and `CustomConfigPath` stack
+  parameters name, and the stack parameters that are defaults of settings. Every
+  stack update rewrites it, so it is read-only. A new deployment runs on it.
+- **Managed** profiles are the shipped presets (for example
+  `translator-voice-assistant`), each the default with the preset applied. They
+  are read-only and rewritten by every stack update too. Activate one to use it
+  as it is.
+- **Custom** profiles are yours. Choose **Copy to a new profile** on any profile
+  to make one, change its settings and save them, then **Activate** it. A Custom
+  profile is a full copy: a later release's new defaults do not change a setting
+  it holds, and a setting the release adds comes from the default.
+
+The selector at the top of the Configuration page lists the profiles, marking the
+active one, and opens the active profile by default. The **Profile** menu
+activates, copies or deletes the profile shown; the active profile and the
+Managed ones cannot be deleted. The configuration history is kept per profile,
+and **View history** opens the history of the profile shown.
+
+The pages that edit one setting outside the Configuration page, such as the
+meeting page's chat buttons, save into the active profile, and refuse while the
+default or a Managed profile is active: create and activate a Custom profile
+first.
+
 ## Using the Configuration page
 
 Open **Configuration ▸ Configuration** in the navigation. Each section is a panel
@@ -310,6 +339,13 @@ select **Save changes**.
 
   The dialog says which sections a preset changes, and whether it replaces a
   section or changes only the settings it names.
+
+Each preset is also stored as a read-only **Managed** profile of the same name,
+which the deployment rewrites on every stack update; activate it as it is, or
+copy it to a Custom profile to change it. To start a new deployment from a preset,
+or from a configuration file of your own, set the `ConfigurationPreset` and
+`CustomConfigPath` stack parameters; see
+[Choosing the default configuration at deploy time](configuration-store.md#choosing-the-default-configuration-at-deploy-time).
 
 ## Changing a setting outside the web UI
 

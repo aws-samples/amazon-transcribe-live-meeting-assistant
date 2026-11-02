@@ -46,8 +46,16 @@ from lma_config import (  # from the configuration layer
 
 # pylint: enable=import-error
 
-#: The profile an operator's edits live in.
-OPERATOR_PROFILE = "custom"
+
+def _reading_profile() -> str:
+    """The profile in force: what this page shows, the baseline when that is active."""
+    return CONFIG_STORE.active_profile_name(consistent_read=True) or "default"
+
+
+def _writing_profile() -> str:
+    """The profile in force, which a save goes into; refused while a Managed one is."""
+    return CONFIG_STORE.editable_active_profile()
+
 
 CONFIG_ID = "CustomAsrConfig"
 
@@ -171,7 +179,7 @@ def _read(config_id: str) -> Dict[str, Any]:
     if config_id != CONFIG_ID:
         raise ValueError(f"Unknown AsrConfigId {config_id!r}; expected {CONFIG_ID}")
     baseline = CONFIG_STORE.read_profile("default", consistent_read=True)
-    profile = CONFIG_STORE.read_profile(OPERATOR_PROFILE, consistent_read=True)
+    profile = CONFIG_STORE.read_profile(_reading_profile(), consistent_read=True)
     effective = deep_merge(_section(baseline.body), _section(profile.body))
     switches = {
         key: effective[key]
@@ -213,7 +221,7 @@ def _write(input_data: Dict[str, Any], caller: Dict[str, Any]) -> Dict[str, Any]
     # One section, not the whole record: the profile holds every configuration
     # page's settings, and replacing the body would delete the others.
     version = CONFIG_STORE.write_section(
-        OPERATOR_PROFILE,
+        _writing_profile(),
         ASR_ENGINE.name,
         switches,
         updated_by=caller["actor"],

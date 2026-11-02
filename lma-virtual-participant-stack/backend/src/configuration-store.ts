@@ -111,6 +111,8 @@ export const METADATA_ATTRIBUTES: ReadonlySet<string> = new Set([
     // How a profile came to exist, written once when it is created and carried
     // forward by every later write; see the Python half for why it is durable.
     'ProfileOrigin',
+    // "full" on a profile stored as a complete copy; see the Python half.
+    'ProfileFormat',
     'LatestRevision',
     'PublishedRevision',
 ]);

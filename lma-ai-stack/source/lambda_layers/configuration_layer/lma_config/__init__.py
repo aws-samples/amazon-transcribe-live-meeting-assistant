@@ -29,6 +29,10 @@ from .errors import (
     ConfigurationTooLarge,
     InvalidConfiguration,
     InvalidProfileName,
+    ProfileExists,
+    ProfileInUse,
+    ProfileNotFound,
+    ProfileReadOnly,
     ReservedProfileName,
     RevisionHistoryUnavailable,
     RevisionNotFound,
@@ -52,7 +56,7 @@ from .parameters import (
     parameter_defaults,
     read_setting,
 )
-from .presets import InvalidPreset, shipped_presets
+from .presets import InvalidPreset, apply_preset, preset_by_id, preset_offered, shipped_presets
 from .revisions import (
     DEFAULT_RETAINED_REVISIONS,
     MAX_COMMENT_LENGTH,
@@ -87,15 +91,18 @@ from .sections import (
     section_spec,
 )
 from .store import (
+    FULL_COPY,
     TABLE_NAME_ENV_VAR,
     ConfigurationRecord,
     ConfigurationStore,
+    ProfileSummary,
     ResolvedDocument,
     ResolvedSection,
     RevisionListing,
     RevisionRecord,
     SaveOutcome,
     deep_merge,
+    full_section,
 )
 from .transcript_deletion import (
     SEGMENT_EXPIRY_LIMIT_DAYS,
@@ -104,6 +111,13 @@ from .transcript_deletion import (
 )
 
 __all__ = [
+    "FULL_COPY",
+    "full_section",
+    "ProfileExists",
+    "ProfileInUse",
+    "ProfileNotFound",
+    "ProfileReadOnly",
+    "ProfileSummary",
     "ACTIVE_POINTER_KEY",
     "ASR_ENGINE",
     "BODY_ATTRIBUTE",
@@ -176,6 +190,9 @@ __all__ = [
     "section_schemas",
     "section_spec",
     "shipped_presets",
+    "apply_preset",
+    "preset_by_id",
+    "preset_offered",
     "validate_profile_name",
     "validate_section",
 ]

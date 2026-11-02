@@ -1138,7 +1138,9 @@ class _FakeConfigurationStore:
         from types import SimpleNamespace
 
         assert name == self.active
-        return SimpleNamespace(exists=True, body=json.loads(json.dumps(self.body)), version=self.version)
+        return SimpleNamespace(
+            exists=True, body=json.loads(json.dumps(self.body)), version=self.version, metadata={}
+        )
 
     def _write(self, kind: str, expected_version) -> None:
         if self.before_next_write:
@@ -1238,7 +1240,23 @@ def test_consent_override_restore_is_a_no_op_unless_something_was_applied() -> N
     assert store.body == {"meeting_consent": {"mode": "off"}}
 
 
-def test_consent_override_refuses_a_deployment_with_no_active_profile() -> None:
-    override = _override(_FakeConfigurationStore({}, active=None))
-    with pytest.raises(RuntimeError, match="no active configuration profile"):
-        override.save()
+def test_an_override_on_a_deployment_running_on_its_default_uses_a_temporary_profile() -> None:
+    """The default profile is read-only, so the test works in a Custom copy of it."""
+    store = _FakeConfigurationStore({}, active=None)
+    from types import SimpleNamespace
+
+    created: set = set()
+    store.read_profile = lambda name, consistent_read=False: SimpleNamespace(
+        exists=name in created, body={}, version=1 if name in created else 0, metadata={}
+    )
+    calls: list = []
+    store.create_profile = lambda name, **_: calls.append(("create", name)) or created.add(name)
+    store.activate_profile = lambda name: calls.append(("activate", name)) or setattr(store, "active", name)
+    store.delete_profile = lambda name: calls.append(("delete", name))
+    override = _override(store)
+    override.save()
+    assert calls == [("create", "integ-tests"), ("activate", "integ-tests")]
+    assert override.profile == "integ-tests"
+    override.apply(mode="opt_in")
+    override.restore()
+    assert calls[-2:] == [("activate", "default"), ("delete", "integ-tests")]

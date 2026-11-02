@@ -291,6 +291,13 @@ type Mutation @aws_iam {
 	# saves an earlier revision's body as a new one, so it is forward-only.
 	restoreConfigurationRevision(input: RestoreConfigurationRevisionInput!): RestoreConfigurationRevisionOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	labelConfigurationRevision(input: LabelConfigurationRevisionInput!): LabelConfigurationRevisionOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# Named configuration profiles. A new profile is a Custom full copy of
+	# another (the baseline by default) or of an imported configuration. The
+	# baseline and Managed profiles are refused every write. See
+	# docs/configuration-store.md.
+	createConfigurationProfile(input: CreateConfigurationProfileInput!): ConfigurationProfileOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	deleteConfigurationProfile(input: ConfigurationProfileNameInput!): ConfigurationProfileOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	activateConfigurationProfile(input: ConfigurationProfileNameInput!): ConfigurationProfileOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	toggleVNCPreview(input: ToggleVNCPreviewInput!): VNCPreviewControl @aws_cognito_user_pools @aws_iam
 	createMicrovmVncToken(vpId: ID!): MicrovmVncToken @aws_cognito_user_pools
 	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
@@ -374,10 +381,12 @@ type Query @aws_cognito_user_pools
 	# What the configuration editor renders: every section's schema, the shipped
 	# baseline and a profile's changes over it. Profile defaults to "custom".
 	getConfiguration(Profile: String): ConfigurationDocument @aws_cognito_user_pools(cognito_groups: ["Admin"])
-	# The configuration history, for the Admin group. Profile defaults to
-	# "custom", the profile every configuration page saves into.
+	# The configuration history, for the Admin group, per profile. Profile
+	# defaults to "custom", which a deployment may no longer have.
 	listConfigurationRevisions(Profile: String): ConfigurationRevisionList @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	getConfigurationRevision(Profile: String, Revision: Int!): ConfigurationRevisionDetail @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# Every profile and the baseline, without their bodies.
+	listConfigurationProfiles: ConfigurationProfileList @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	diffConfigurationRevisions(Profile: String, FromRevision: Int!, ToRevision: Int!): ConfigurationRevisionDiff @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
 	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
@@ -1526,6 +1535,13 @@ type ConfigurationDocument @aws_cognito_user_pools {
 	UpdatedAt: String
 	# The revision the profile's current state is.
 	PublishedRevision: Int
+	# The baseline ("default") and Managed profiles are read-only.
+	Managed: Boolean
+	Description: String
+	# Whether this is the profile in force.
+	Active: Boolean
+	# Whether the profile is stored as a full copy rather than a delta.
+	FullCopy: Boolean
 	# A JSON list of {"Name", "CacheTier", "Schema"}, one per section, where
 	# CacheTier is immediate, short or standard and decides how soon a saved
 	# change is read.
@@ -1655,6 +1671,50 @@ type LabelConfigurationRevisionOutput @aws_cognito_user_pools {
 	Success: Boolean!
 	Profile: String
 	Revision: Int
+}
+
+input CreateConfigurationProfileInput {
+	# Letters, digits, ".", "_" and "-", at most 64 characters.
+	Name: String!
+	# The profile to copy; the baseline ("default") when absent.
+	CopyFrom: String
+	# Or an imported configuration: a JSON object of section name -> values,
+	# laid over the baseline. Not with CopyFrom.
+	Body: String
+	Description: String
+	# Recorded on the profile's first revision.
+	Comment: String
+}
+
+input ConfigurationProfileNameInput {
+	Name: String!
+}
+
+type ConfigurationProfileOutput @aws_cognito_user_pools {
+	Success: Boolean!
+	Profile: String
+	Version: Int
+	Revision: Int
+}
+
+type ConfigurationProfileSummary @aws_cognito_user_pools {
+	Name: String!
+	# The baseline and the profiles the deployment writes from the shipped
+	# presets: read-only, rewritten by every stack update.
+	Managed: Boolean
+	Active: Boolean
+	Description: String
+	Version: Int
+	UpdatedAt: String
+	UpdatedBy: String
+	# How the profile came to exist, e.g. "copied-from-default" or "imported".
+	Origin: String
+	PublishedRevision: Int
+	FullCopy: Boolean
+}
+
+type ConfigurationProfileList @aws_cognito_user_pools {
+	Profiles: [ConfigurationProfileSummary]
 }
 
 # An estimate of what one meeting cost, built from metering records written

@@ -381,6 +381,14 @@ CLASSIFICATION: Dict[str, Classification] = {
         RESOURCE,
         "Sizes the transcriber's task for video, and limits the transcriber to one task through a template rule.",
     ),
+    "ConfigurationPreset": _c(
+        RESOURCE,
+        "Decides what the configuration seeder writes as the deployment's default configuration, which is re-written when it changes.",
+    ),
+    "CustomConfigPath": _c(
+        RESOURCE,
+        "Decides what the configuration seeder lays over the default configuration, and grants the seeder read access to the file.",
+    ),
     "MeetingRecordExpirationInDays": _c(
         RUNTIME,
         "Read by every function and task that writes meeting, summary or usage records, to set when each record expires.",

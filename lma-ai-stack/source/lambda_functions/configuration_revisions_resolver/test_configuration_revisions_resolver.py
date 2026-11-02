@@ -301,3 +301,124 @@ def test_the_editor_does_not_create_a_profile(store) -> None:
             input={"Profile": "elsewhere", "Sections": {SECTION: {}}, "ExpectedVersion": 0},
         )
     assert not store.read_profile("elsewhere").exists
+
+
+# ── named profiles ──────────────────────────────────────────────────────────
+
+
+class ProfileDynamo(FakeDynamo):
+    """The history fake, with the scan and the delete the profile fields use."""
+
+    def scan(self, **request: Any) -> Dict[str, Any]:
+        prefix = request["ExpressionAttributeValues"][":prefix"]["S"]
+        return {
+            "Items": [
+                {k: v for k, v in item.items() if k != "Body"}
+                for key, item in self.items.items()
+                if key.startswith(prefix)
+            ]
+        }
+
+    def delete_item(self, **request: Any) -> Dict[str, Any]:
+        self.items.pop(request["Key"]["Configuration"]["S"], None)
+        return {}
+
+
+@pytest.fixture(name="profiles")
+def _profiles(monkeypatch: pytest.MonkeyPatch) -> ConfigurationStore:
+    store = ConfigurationStore(
+        TABLE, client=ProfileDynamo(), revision_bucket=BUCKET, s3_client=FakeS3()
+    )
+    store.write_default({SECTION: {"voiceId": "tiffany", "endpointingSensitivity": "MEDIUM"}})
+    store.seed_profile("custom", {SECTION: {"voiceId": "matthew"}})
+    store.set_active_profile("custom")
+    monkeypatch.setattr(index, "CONFIG_STORE", store)
+    return store
+
+
+def test_the_profiles_are_listed_with_the_baseline_first(profiles) -> None:
+    call("createConfigurationProfile", input={"Name": "trial", "Description": "A trial"})
+    listed = call("listConfigurationProfiles")["Profiles"]
+    assert [p["Name"] for p in listed] == ["default", "custom", "trial"]
+    assert listed[0]["Managed"] is True
+    assert listed[1]["Active"] is True
+    assert listed[2]["Description"] == "A trial"
+    assert listed[2]["FullCopy"] is True
+
+
+def test_a_copy_is_attributed_to_the_verified_caller(profiles) -> None:
+    call("createConfigurationProfile", input={"Name": "trial", "CopyFrom": "custom"})
+    head = profiles.read_profile("trial")
+    assert head.updated_by == "admin@example.com"
+    assert head.body[SECTION] == {"voiceId": "matthew", "endpointingSensitivity": "MEDIUM"}
+
+
+def test_an_import_is_laid_over_the_baseline(profiles) -> None:
+    call(
+        "createConfigurationProfile",
+        input={"Name": "imported", "Body": json.dumps({SECTION: {"voiceId": "amy"}})},
+    )
+    assert profiles.read_profile("imported").body[SECTION]["endpointingSensitivity"] == "MEDIUM"
+
+
+def test_an_import_naming_an_unknown_section_is_invalid(profiles) -> None:
+    with pytest.raises(Exception, match="^Invalid: "):
+        call(
+            "createConfigurationProfile",
+            input={"Name": "imported", "Body": json.dumps({"no_such_section": {}})},
+        )
+
+
+def test_a_name_in_use_is_refused(profiles) -> None:
+    with pytest.raises(Exception, match="^Refused: "):
+        call("createConfigurationProfile", input={"Name": "custom"})
+
+
+def test_the_active_profile_is_refused_deletion(profiles) -> None:
+    with pytest.raises(Exception, match="^Refused: "):
+        call("deleteConfigurationProfile", input={"Name": "custom"})
+
+
+def test_a_profile_is_activated_and_another_deleted(profiles) -> None:
+    call("createConfigurationProfile", input={"Name": "trial"})
+    call("activateConfigurationProfile", input={"Name": "trial"})
+    assert profiles.active_profile_name(consistent_read=True) == "trial"
+    call("deleteConfigurationProfile", input={"Name": "custom"})
+    assert not profiles.read_profile("custom").exists
+
+
+def test_the_baseline_can_be_read_and_activated_but_not_saved(profiles) -> None:
+    document = call("getConfiguration", Profile="default")
+    assert document["Managed"] is True
+    assert json.loads(document["Custom"]) == {}
+    call("activateConfigurationProfile", input={"Name": "default"})
+    assert call("getConfiguration", Profile="default")["Active"] is True
+    with pytest.raises(Exception, match="reserved by the configuration store"):
+        call(
+            "updateConfiguration",
+            input={
+                "Profile": "default",
+                "ExpectedVersion": 1,
+                "Sections": json.dumps({SECTION: {"voiceId": "amy"}}),
+            },
+        )
+
+
+def test_a_managed_profile_is_refused_a_save(profiles) -> None:
+    profiles.seed_profile("healthcare", {SECTION: {"voiceId": "tiffany"}})
+    item = profiles._client.items["Config#healthcare"]  # pylint: disable=protected-access
+    item["Managed"] = {"BOOL": True}
+    with pytest.raises(Exception, match="^Refused: "):
+        call(
+            "updateConfiguration",
+            input={
+                "Profile": "healthcare",
+                "ExpectedVersion": 1,
+                "Sections": json.dumps({SECTION: {"voiceId": "amy"}}),
+            },
+        )
+
+
+def test_activating_a_profile_that_is_not_there_is_not_found(profiles) -> None:
+    with pytest.raises(Exception, match="^Not found: "):
+        call("activateConfigurationProfile", input={"Name": "missing"})

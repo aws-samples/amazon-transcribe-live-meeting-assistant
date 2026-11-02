@@ -43,7 +43,7 @@ store holds is distinguished by a prefix on that one key:
 | Key | Contents |
 |---|---|
 | `Config#default` | The deployment baseline. CloudFormation writes it on create and rewrites it whenever the shipped content or the code that writes it changes, so it holds the content the installed release ships. |
-| `Config#<name>` | A profile: an administrator's edits, stored as a *delta* over the baseline. Today there is one, `Config#custom`. |
+| `Config#<name>` | A profile. A **Custom** profile is an administrator's configuration, stored as a full copy (`ProfileFormat: full`); `Config#custom` is the one a deployment creates. A **Managed** profile is written by the deployment and is read-only. See [Named profiles](#named-profiles). |
 | `Config#__active` | A pointer naming the profile in force. |
 | `Schema` | Reserved, and not written. The section schemas ship inside the configuration layer instead, so a save is always checked against the schema its readers were released with; see [Section schemas and validation](#section-schemas-and-validation). |
 | `ConfigRevIndex#<name>` | The revision index of a profile: one small entry per retained revision. See [Revisions and audit](#revisions-and-audit). |
@@ -72,7 +72,7 @@ provenance can be read without decompressing anything:
 ```
 Configuration  CreatedAt  UpdatedAt  UpdatedBy  Version
 IsActive  ActiveProfile  Description  Managed  ProfileOrigin
-LatestRevision  PublishedRevision
+ProfileFormat  LatestRevision  PublishedRevision
 ```
 
 `ProfileOrigin` is the one of those that does something an operator may act on:
@@ -109,6 +109,56 @@ Size is checked, not trimmed. DynamoDB's limit is 400 KB per item; a record
 over 350 KB logs a warning, and one over the limit raises. A
 configuration silently missing its tail is much harder to diagnose than a save
 that refuses.
+
+## Named profiles
+
+The table holds any number of profiles. One is active, named by the
+`Config#__active` pointer, and every reader resolves the baseline with the
+active profile merged over it. The pointer may also name `default`, in which
+case nothing is merged over the baseline.
+
+- **Custom profiles** are full copies of the configuration. A new one is a copy
+  of another profile, the baseline by default, or an imported configuration
+  laid over the baseline, and every save stores each section in full: a section
+  sent with only some of its settings is completed from the baseline. The
+  profile is still merged over the baseline when it is read, so a setting a
+  later release adds has a value in every profile.
+- **The baseline and Managed profiles are read-only.** The deployment rewrites
+  them on every stack update, so the store refuses to save, restore or delete
+  them; copy one to change it.
+- **The active profile is not deleted.** Activate another first. A deleted
+  profile's revisions stay in its history, and a profile created again under the
+  same name continues its numbering.
+- **A deployment runs on its default profile until an Admin changes
+  something**, as IDP's do: the baseline is rewritten by every release, so an
+  unchanged deployment gets each release's defaults. To change a setting, an
+  Admin creates a Custom profile (a copy of the default, or of a Managed preset
+  profile) and activates it.
+- **The pages that edit one section** (the summary prompts, the Nova Sonic
+  voice assistant, the chat buttons and the ASR engine switches) show the
+  active profile and save into it. While the default or a Managed profile is
+  active they refuse to save, with a message to create or activate a Custom
+  profile.
+- **Upgrading from a release with one `custom` profile.** The seeder settles
+  it after its other writes: a `custom` profile holding settings (an Admin's
+  edits, or ones adopted from a previous table) is converted to a full copy and
+  stays active, every setting it held kept and the rest filled from the new
+  baseline, with the delta it was kept in its history as the revision before;
+  one holding none is deleted and the default activated. The seeder reports
+  this as `ProfileFormat`: `converted`, `removed-empty`, `full` or `absent` on
+  later runs, and `deferred` when it has to wait -- a section adoption is to be
+  retried, or the profile's state could not be recorded in its history -- in
+  which case readers keep using the delta and the next deployment tries again.
+- **Deleting and activating at once.** A delete checks that the profile is not
+  the active one and then deletes it; an activation of the same profile landing
+  between the two leaves the pointer naming a profile that is not there, and
+  readers then use the default, as for any pointer naming a missing profile.
+
+The `listConfigurationProfiles` query and the `createConfigurationProfile`,
+`deleteConfigurationProfile` and `activateConfigurationProfile` mutations, all
+for the Admin group, serve them; `getConfiguration(Profile)` reads any of them,
+the baseline included, and reports whether it is Managed and whether it is
+active.
 
 ## The accessor, and the caching policy
 
@@ -430,7 +480,7 @@ again in the resolver Lambda behind them, which is the configuration history's:
 
 | Operation | What it does |
 |---|---|
-| `Query.getConfiguration(Profile)` | Everything an editor needs in one read: `Sections`, a JSON list of each section's `Name`, `CacheTier` and `Schema`; `Default`, the shipped baseline; `Custom`, the profile's stored delta; and the profile's `Version`, `UpdatedBy`, `UpdatedAt` and `PublishedRevision`. Read consistently from the stored records, never from a cache. Only registered sections are returned |
+| `Query.getConfiguration(Profile)` | Everything an editor needs in one read: `Sections`, a JSON list of each section's `Name`, `CacheTier` and `Schema`; `Default`, the baseline; `Custom`, what the profile stores (`{}` for `Profile: "default"`); the profile's `Version`, `UpdatedBy`, `UpdatedAt` and `PublishedRevision`; and whether it is `Managed` (the baseline, and the preset profiles), `Active` and a `FullCopy`, with its `Description`. Read consistently from the stored records, never from a cache. Only registered sections are returned |
 | `Mutation.updateConfiguration(input: {Profile, Sections, ExpectedVersion, Comment})` | Saves every section named in `Sections`, a JSON object of section name to that section's complete stored values, in **one** write and one revision. Sections not named keep what the profile holds. `ExpectedVersion` is required, and a save against a profile someone has saved since is refused with `Conflict: `. Saves only into a profile that exists. Answers with the new `Version`, the `Revision` it recorded, and `Unchanged` when the save changed nothing |
 
 `Profile` defaults to `custom` for both.
@@ -676,8 +726,9 @@ the save.
 
 Underneath, these are GraphQL operations for the **Admin** group, pinned on the
 AppSync field and checked again in the resolver Lambda behind it. Each takes a
-`Profile`, which defaults to `custom`, the profile every configuration page
-saves into.
+`Profile`, which defaults to `custom` (the profile earlier releases created on
+every deployment, which a deployment may no longer have); the Configuration
+page passes the profile it shows.
 
 | Operation | What it does |
 |---|---|
@@ -753,13 +804,26 @@ across the sections of stores that moved in after the profile existed:
 
 - **`Config#default`** — written on create, and rewritten on every update on
   which the custom resource runs at all, which is every update that changes the
-  shipped content or the code that writes it (see the content hash below). It is
-  this deployment's own content.
-- **`Config#custom`** — written **only if it is not already there**, so a stack
-  update never discards an edit made from the web UI. The condition is on the
-  record, not on `RequestType == 'Create'`: keying off the request type would
-  also skip the case where the record is genuinely absent on an update, which is
-  what happens after a table restore or a hand deletion.
+  shipped content or the code that writes it (see the content hash below), or
+  one of its properties. It is this deployment's own content: the shipped
+  defaults, then the preset the `ConfigurationPreset` stack parameter names,
+  then the file `CustomConfigPath` names, if any. See
+  [Choosing the default configuration at deploy time](#choosing-the-default-configuration-at-deploy-time).
+- **One Managed profile per shipped preset** — `Config#<preset id>`, the preset
+  applied over the baseline, rewritten on every run and recorded as a revision
+  when its content changes. A preset is written only where the deployment can run
+  it (the on-demand ASR preset needs the ASR engine). A Managed profile for a
+  preset a release no longer ships is deleted, unless it is the active profile.
+  A Custom profile already holding a preset's name is left alone, and reported
+  as `name-in-use`. Reported as the `ManagedProfiles` attribute.
+- **`Config#custom`** — written only on a table that has never been seeded
+  (no `Config#__active`): a new deployment, an upgrade from a release with no
+  configuration store, or a table restored empty, so a stack update never
+  discards an edit made from the web UI. The condition is on the records, not
+  on `RequestType == 'Create'`, which would miss the restored table. A new
+  deployment's profile holds nothing and is removed again (see
+  [Named profiles](#named-profiles)), so the deployment runs on its default; a
+  deployment that has run without it is not given it back.
 - **`Config#__active`** — also written only if absent, so an administrator who
   selects a different profile keeps their choice.
 - **One section of `Config#custom` per later store** — added only while the
@@ -770,6 +834,29 @@ across the sections of stores that moved in after the profile existed:
   as the `ConfigurationBucketName` property, and reports what it found as
   `ConfigurationRevisionHistory`. See
   [Upgrading an existing deployment](#upgrading-an-existing-deployment-history-starts-at-revision-1).
+
+### Choosing the default configuration at deploy time
+
+Two stack parameters decide what `Config#default` holds, as IDP's
+`ConfigurationPreset` and `CustomConfigPath` do:
+
+- **`ConfigurationPreset`** — `none` (the shipped defaults) or the id of a
+  shipped preset, which is applied over them.
+- **`CustomConfigPath`** — an `s3://bucket/key` of a JSON or YAML file laid over
+  the result: an object of section name to settings, or a file exported from the
+  Configuration page (`"format": "lma-configuration-profile"`), whose `sections`
+  are used. Each section is checked against its schema, and a file that does not
+  match, names a section the store does not have, or cannot be read fails the
+  stack update, with the problems in the status reason. The seeder is granted
+  `s3:GetObject` on that one object; a file encrypted with a customer-managed key
+  also needs that key to allow the seeder's role. The file is read again on every
+  stack update the seeder runs on, so it has to stay readable for the life of the
+  stack, and an edit to it applies on the next update. To change it without an
+  update, edit a Custom profile instead.
+
+Both change only the baseline. A Custom profile keeps what it stores, and the
+active profile stays active. The seeder reports what it applied as the
+`ConfigurationPreset` and `CustomConfiguration` attributes.
 
 ### Why the content hash exists
 
@@ -1277,7 +1364,7 @@ the consent terms each enrollment agrees to.
 
 | Stage | What it adds |
 |---|---|
-| Named profiles | More than one profile, a way to choose the one in force, and an import that can create one. Export, import and presets work today on the one `custom` profile; see [Export, import and the configuration library](#export-import-and-the-configuration-library) |
+| The configuration editor's JSON and YAML views, and comparing profiles | The page edits one profile at a time, through its form |
 | Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired. It waited for the configuration editor: the custom prompt is edited in the DynamoDB console today, which is exactly the route a compressed body closes, so moving it before there was an editor would have left it with no way to edit it. With the editor in place, it needs a schema and a seeder adoption |
 | Replacing the SSM settings blob | The `<stack>-LMASettings` parameter is written only by CloudFormation, at deploy time, and read by the web app for every signed-in user. It is a deployment's wiring rather than something an administrator edits. The Configuration page reads the configuration at run time, but every other page reads only this blob, so a setting another page needs moves when that page reads the configuration too |
 

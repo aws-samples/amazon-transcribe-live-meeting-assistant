@@ -98,3 +98,27 @@ class RevisionHistoryUnavailable(ConfigurationError):
     in which case the save is not made, because a configuration that has been
     replaced without being recorded is one nobody can get back.
     """
+
+
+class ProfileExists(ConfigurationError):
+    """A profile is already stored under the name a new one was asked for."""
+
+
+class ProfileNotFound(ConfigurationError):
+    """No profile is stored under the name given."""
+
+
+class ProfileReadOnly(ConfigurationError):
+    """The profile is managed by the deployment, so it is not saved, restored or deleted.
+
+    The deployment baseline and the Managed profiles the seeder writes from the
+    shipped presets are rewritten by every stack update; an edit to one would be
+    replaced by the next. Copy the profile to change it.
+    """
+
+
+class ProfileInUse(ConfigurationError):
+    """The profile is the active one, so it is not deleted.
+
+    Activate another profile first.
+    """

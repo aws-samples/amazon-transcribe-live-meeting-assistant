@@ -340,7 +340,8 @@ def test_the_read_is_strongly_consistent_and_uncached(table: FakeConfigurationTa
     read()
 
     gets = [request for request in table.requests if request["op"] == "get_item"]
-    assert len(gets) == 4
+    # Each read: the baseline, the active-profile pointer and the profile it names.
+    assert len(gets) == 6
     assert all(request["ConsistentRead"] for request in gets)
 
 

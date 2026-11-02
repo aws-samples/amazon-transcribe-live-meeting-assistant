@@ -10,7 +10,10 @@ import { util } from '@aws-appsync/utils';
  * updateConfiguration -- and the five configuration history fields --
  * listConfigurationRevisions, getConfigurationRevision,
  * diffConfigurationRevisions, restoreConfigurationRevision and
- * labelConfigurationRevision -- to the configuration resolver Lambda: the
+ * labelConfigurationRevision -- and the four profile fields --
+ * listConfigurationProfiles, createConfigurationProfile,
+ * deleteConfigurationProfile and activateConfigurationProfile -- to the
+ * configuration resolver Lambda: the
  * arguments, the verified identity and the field name, which is what the
  * Lambda dispatches on and what its Admin check reads.
  * @param {import('@aws-appsync/utils').Context} ctx the context

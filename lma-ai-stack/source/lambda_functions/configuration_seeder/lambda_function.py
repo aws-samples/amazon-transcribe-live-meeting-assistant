@@ -18,12 +18,13 @@ Three writes, each with different rules about what it may overwrite:
     function.
 
 ``Config#custom``
-    The operator's profile. Written **only if it is not there**, so a stack
-    update never discards an edit made from the web UI. The condition lives in
-    the store's ``seed_profile``, not in a branch on the CloudFormation request
-    type: conditioning on ``RequestType == 'Create'`` would also skip the case
-    where the record is genuinely absent on an update, which is what happens
-    after the table is restored or the record is deleted by hand.
+    The operator's profile. Written only on a table that has never been seeded
+    (no ``Config#__active``): a new deployment, an upgrade from a release with
+    no configuration store, or a table restored empty. The condition is on the
+    records, not on the CloudFormation request type, which would miss the
+    restored table. A new deployment's profile holds nothing, and
+    ``settle_profiles`` removes it again so the deployment runs on its default;
+    a deployment that has run without it is not given it back.
 
     How it came to exist is stamped on the record as ``ProfileOrigin`` and
     reported by every later run, which is what keeps a failed adoption visible
@@ -32,6 +33,13 @@ Three writes, each with different rules about what it may overwrite:
 ``Config#__active``
     The pointer naming the profile in force. Also written only if absent, so an
     operator who selects a different profile keeps their choice.
+
+Then, after those writes (``settle_profiles``), the deployment is left running
+as IDP's do: on the default profile, which every release rewrites, unless an
+Admin changed something. A ``custom`` profile holding settings is stored as a
+full copy and stays active; one holding none is deleted and the default is
+activated. And each shipped preset the deployment can run is written as a
+read-only Managed profile (``write_managed_profiles``).
 
 Whenever ``Config#custom`` is absent and a deployment already has prompt
 templates in the old per-store table, this adopts them into the profile so the
@@ -70,9 +78,11 @@ from typing import Any, Callable, Dict, Mapping, NamedTuple, Optional, Tuple
 
 import boto3
 import cfnresponse  # vendored beside this handler; see cfnresponse.py
+from botocore.exceptions import ClientError
 
 # pylint: disable=import-error
 from lma_config import (  # from the configuration layer
+    ACTIVE_POINTER_KEY,
     ASR_ENGINE,
     CALL_PRICING,
     CHAT_BUTTONS,
@@ -82,11 +92,20 @@ from lma_config import (  # from the configuration layer
     SUMMARY_PROMPT_TEMPLATES,
     ConcurrentModification,
     ConfigurationStore,
+    InvalidConfiguration,
+    ProfileExists,
     RevisionHistoryUnavailable,
     SectionSpec,
     apply_parameter_defaults,
+    apply_preset,
     codec,
+    full_section,
     parameter_defaults,
+    preset_by_id,
+    preset_offered,
+    registered_sections,
+    shipped_presets,
+    validate_section,
 )
 
 # pylint: enable=import-error
@@ -523,6 +542,90 @@ def adopt_legacy_section(
     )
 
 
+def custom_configuration(document: Any, source: str) -> Dict[str, Any]:
+    """The sections of a custom configuration file, checked against their schemas.
+
+    Either a plain JSON or YAML object of section name to values, or a
+    Configuration page export (``"format": "lma-configuration-profile"``), whose
+    ``sections`` are used.
+
+    Raises:
+        InvalidConfiguration: the file is not an object of known sections, or a
+            section does not match its schema. The stack update then fails, with
+            the problems in its status reason, rather than deploying a
+            configuration nobody asked for.
+    """
+    if isinstance(document, dict) and document.get("format") == "lma-configuration-profile":
+        document = document.get("sections")
+    if not isinstance(document, dict):
+        raise InvalidConfiguration([f"{source}: must hold an object of configuration sections"])
+    known = registered_sections()
+    problems = [f"{name}: is not a configuration section" for name in document if name not in known]
+    for name, values in document.items():
+        if name in known:
+            try:
+                validate_section(name, values)
+            except InvalidConfiguration as error:
+                problems.extend(error.problems)
+    if problems:
+        raise InvalidConfiguration(problems)
+    return document
+
+
+def read_custom_configuration(uri: str, *, client: Any = None) -> Dict[str, Any]:
+    """Read and check the CustomConfigPath file: ``s3://bucket/key``, JSON or YAML."""
+    match = re.fullmatch(r"s3://([^/]+)/(.+)", uri.strip())
+    if not match:
+        raise InvalidConfiguration([f"CustomConfigPath: {uri!r} is not an s3://bucket/key URI"])
+    s3 = client or boto3.client("s3")
+    raw = s3.get_object(Bucket=match.group(1), Key=match.group(2))["Body"].read().decode("utf-8")
+    try:
+        document = json.loads(raw)
+    except json.JSONDecodeError:
+        import yaml  # pylint: disable=import-outside-toplevel -- only for a YAML file
+
+        try:
+            document = yaml.safe_load(raw)
+        except yaml.YAMLError as error:
+            raise InvalidConfiguration([f"{uri}: is neither JSON nor YAML: {error}"]) from error
+    return custom_configuration(document, uri)
+
+
+def write_managed_profiles(
+    store: ConfigurationStore, baseline: Mapping[str, Any], settings: Mapping[str, Any]
+) -> str:
+    """Write each shipped preset this deployment offers as a Managed profile.
+
+    The preset applied over the baseline. A preset needing something the
+    deployment lacks (see ``preset_offered``) is not written, and a Managed
+    profile for a preset no longer shipped or offered is retired unless it is
+    active. Reported as ``id=outcome`` pairs.
+    """
+    outcomes: Dict[str, str] = {}
+    written = set()
+    for preset in shipped_presets():
+        if not preset_offered(preset, dict(settings)):
+            outcomes[preset["Id"]] = "not-offered"
+            continue
+        try:
+            outcomes[preset["Id"]] = store.write_managed_profile(
+                preset["Id"], apply_preset(dict(baseline), preset), description=preset["Title"]
+            )
+            written.add(preset["Id"])
+        except ProfileExists:
+            LOGGER.warning(
+                "a Custom profile named %s exists; its Managed profile was not written",
+                preset["Id"],
+            )
+            outcomes[preset["Id"]] = "name-in-use"
+    for profile in store.list_profiles():
+        if profile.managed and profile.name not in written and profile.name != "default":
+            outcomes[profile.name] = (
+                "retired" if store.retire_managed_profile(profile.name) else "kept-active"
+            )
+    return ",".join(f"{name}={outcome}" for name, outcome in sorted(outcomes.items()))
+
+
 def seed(
     store: ConfigurationStore,
     *,
@@ -531,6 +634,9 @@ def seed(
     legacy_client: Any = None,
     legacy_section_tables: Optional[Mapping[str, str]] = None,
     parameter_values: Optional[Mapping[str, Any]] = None,
+    configuration_preset: str = "",
+    custom_sections: Optional[Mapping[str, Any]] = None,
+    deployment_settings: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, str]:
     """Apply the writes and report what each one did.
 
@@ -548,6 +654,25 @@ def seed(
     # parameter reaches every setting an administrator has not changed, while
     # one they have changed, which lives in the profile, keeps winning.
     applied = apply_parameter_defaults(baseline, parameter_values or {})
+    # Then the ConfigurationPreset stack parameter's preset, and the
+    # CustomConfigPath file over that, as IDP's deployments choose their
+    # default configuration. Both are part of what the deployment was deployed
+    # with, so both belong in the baseline.
+    preset_applied = "none"
+    if configuration_preset and configuration_preset != "none":
+        chosen = preset_by_id(configuration_preset)
+        if not preset_offered(chosen, dict(deployment_settings or {})):
+            raise InvalidConfiguration(
+                [
+                    f"ConfigurationPreset: {configuration_preset} sets something this deployment "
+                    "does not include (the on-demand ASR preset needs EnableMicrovmAsr)"
+                ]
+            )
+        baseline = apply_preset(baseline, chosen)
+        preset_applied = configuration_preset
+    if custom_sections:
+        for name, values in custom_sections.items():
+            baseline[name] = full_section(name, values, baseline.get(name))
     store.write_default(baseline, description=DEFAULT_DESCRIPTION)
 
     # The guard that actually protects an operator's edits is the condition on
@@ -559,7 +684,16 @@ def seed(
     # The later stores' outcomes, when this run creates the profile with their
     # sections already in it; see below.
     carried: Dict[str, str] = {}
-    if existing.exists:
+    # The operator's profile is created only on a table that has never been
+    # seeded -- a new deployment, or an upgrade from a release with no
+    # configuration store -- which is when there is anything to carry into it.
+    # A deployment that has run without it since, because it was removed as
+    # empty or an Admin deleted it, is not given it back.
+    first_seeding = not store.read_record(ACTIVE_POINTER_KEY, consistent_read=True).exists
+    if not existing.exists and not first_seeding:
+        profile_action = "not-needed"
+        profile_origin = UNKNOWN_ORIGIN
+    elif existing.exists:
         profile_action = "kept"
         # Read back rather than recomputed. This run cannot tell what an upgrade
         # did months ago, and the one thing somebody may still have to act on --
@@ -637,6 +771,10 @@ def seed(
         # section unset, so every later run reports it again until it lands.
         "SectionAdoption": ",".join(f"{name}={outcome}" for name, outcome in adoption.items()),
         "Baseline": "written",
+        # The preset the baseline was built from (ConfigurationPreset), and
+        # whether a CustomConfigPath file was laid over it.
+        "ConfigurationPreset": preset_applied,
+        "CustomConfiguration": "applied" if custom_sections else "none",
         # Which stack parameters the baseline carries as the defaults of runtime
         # settings. One missing here is one whose readers fall back to their
         # environment variable.
@@ -678,6 +816,79 @@ def start_revision_history(store: ConfigurationStore) -> str:
         return "not-started"
 
 
+#: Section adoption outcomes that leave a section unset on purpose, so that the
+#: next deployment retries. Converting the profile meanwhile would fill the
+#: section from the baseline and stop the retry.
+PENDING_ADOPTION = frozenset({"previous-table-unreadable", "revision-history-unavailable"})
+
+
+def _holds_settings(body: Mapping[str, Any]) -> bool:
+    """Whether a delta profile changes anything: a section with no values changes nothing."""
+    return any(values for values in body.values())
+
+
+def _adoption_outcomes(outcome: Mapping[str, str]) -> Dict[str, str]:
+    """The ``SectionAdoption`` pairs of a :func:`seed` outcome, by section."""
+    pairs = (outcome.get("SectionAdoption") or "").split(",")
+    return dict(pair.split("=", 1) for pair in pairs if "=" in pair)
+
+
+def settle_profiles(store: ConfigurationStore, adoption: Mapping[str, str]) -> str:
+    """Leave the deployment running as IDP's do: on the default profile unless an Admin changed it.
+
+    After :func:`seed`. The operator's ``custom`` profile, which an earlier
+    release created on every deployment as a delta over the baseline:
+
+    - holding settings (an Admin's edits, or ones adopted from a previous
+      table) -- stored as a full copy, as every Custom profile is now, and left
+      active if it was. The delta stays in its history as the revision before.
+      Reported as "converted", then "full" on later runs.
+    - holding none -- deleted, and the deployment default activated if it was
+      the active profile, so the deployment follows each release's defaults
+      until an Admin creates a Custom profile. Reported as "removed-empty".
+    - absent -- the active-profile pointer is set to the default if it is
+      unset. Reported as "absent".
+
+    "deferred" when this cannot be done now: a section adoption is to be
+    retried by the next deployment, the profile's current state could not be
+    recorded in its history, or an Admin saved it meanwhile. Readers keep using
+    the delta, and the next deployment tries again.
+    """
+    current = store.read_profile(OPERATOR_PROFILE, consistent_read=True)
+    if not current.exists:
+        store.set_active_profile("default", only_if_absent=True)
+        return "absent"
+    if current.metadata.get("ProfileFormat") == "full":
+        return "full"
+    if any(outcome in PENDING_ADOPTION for outcome in adoption.values()):
+        return "deferred"
+    try:
+        if not _holds_settings(current.body):
+            was_active = store.active_profile_name(consistent_read=True) == OPERATOR_PROFILE
+            if was_active:
+                store.activate_profile("default")
+            try:
+                store.delete_profile(OPERATOR_PROFILE)
+            except ConcurrentModification:
+                # An Admin saved into it meanwhile: it is theirs now, so it goes
+                # back in force, and the next deployment converts it.
+                if was_active:
+                    store.activate_profile(OPERATOR_PROFILE)
+                raise
+            return "removed-empty"
+        converted = store.convert_to_full_copy(
+            OPERATOR_PROFILE, comment="stored as a full copy of the configuration"
+        )
+    except (RevisionHistoryUnavailable, ConcurrentModification, ClientError):
+        LOGGER.warning(
+            "could not settle the %s profile now; the next deployment retries",
+            OPERATOR_PROFILE,
+            exc_info=True,
+        )
+        return "deferred"
+    return "converted" if converted else "full"
+
+
 def handler(event: Dict[str, Any], context: Any) -> None:
     """CloudFormation custom resource entry point."""
     LOGGER.info("seeding the configuration table: %s", json.dumps(event, default=str))
@@ -716,7 +927,26 @@ def handler(event: Dict[str, Any], context: Any) -> None:
                 for legacy in LEGACY_SECTIONS
             },
             parameter_values=properties.get("ParameterDefaults") or {},
+            configuration_preset=properties.get("ConfigurationPreset", ""),
+            deployment_settings=properties.get("DeploymentSettings") or {},
+            custom_sections=(
+                read_custom_configuration(properties["CustomConfigPath"])
+                if properties.get("CustomConfigPath")
+                else None
+            ),
         )
+        outcome["ProfileFormat"] = settle_profiles(store, _adoption_outcomes(outcome))
+        try:
+            outcome["ManagedProfiles"] = write_managed_profiles(
+                store,
+                store.read_profile("default", consistent_read=True).body,
+                properties.get("DeploymentSettings") or {},
+            )
+        except (RevisionHistoryUnavailable, ConcurrentModification, ClientError):
+            # Like the conversion: the deployment goes ahead, and the next one
+            # writes them. Nothing reads a Managed profile until it is activated.
+            LOGGER.warning("could not write the Managed profiles now", exc_info=True)
+            outcome["ManagedProfiles"] = "deferred"
         LOGGER.info("seeded the configuration table: %s", outcome)
         cfnresponse.send(event, context, cfnresponse.SUCCESS, outcome, physical_id)
     except Exception as error:  # noqa: BLE001 -- must answer CloudFormation either way

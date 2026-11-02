@@ -13,8 +13,10 @@ key:
 ``Config#default``     The deployment baseline. CloudFormation writes it on
                        create and rewrites it whenever the content a release
                        ships changes, so an operator edit does not belong here.
-``Config#<name>``      A profile holding the operator's edits as a delta over
-                       the baseline.
+``Config#<name>``      A profile: a full copy of the configuration, merged
+                       over the baseline when read (an earlier release's
+                       profile may still be a delta until the seeder converts
+                       it). Managed profiles are written by the deployment.
 ``Config#__active``    The pointer naming the profile in force.
 ``Schema``             The form schema the UI renders. Reserved here; written
                        by the schema-driven editor.

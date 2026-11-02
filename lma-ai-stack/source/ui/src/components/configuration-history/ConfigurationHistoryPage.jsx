@@ -5,6 +5,7 @@
  */
 import { generateClient } from 'aws-amplify/api';
 import React, { useCallback, useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Alert,
   Badge,
@@ -24,7 +25,7 @@ import AdminOnly from '../common/AdminOnly';
 import { isConflict } from '../common/config-conflict';
 import {
   MAX_LABEL_LENGTH,
-  PROFILE,
+  PROFILE as DEFAULT_HISTORY_PROFILE,
   comparisonPair,
   diffRevisionsQuery,
   getRevisionQuery,
@@ -79,6 +80,9 @@ const CHANGE_COLUMNS = [
 ];
 
 export const ConfigurationHistoryContent = () => {
+  // The profile whose history this is: the one the Configuration page linked
+  // from, else the profile an earlier release created on every deployment.
+  const profileName = new URLSearchParams(useLocation().search).get('profile') || DEFAULT_HISTORY_PROFILE;
   const [listing, setListing] = useState(null);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(null);
@@ -95,7 +99,7 @@ export const ConfigurationHistoryContent = () => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await client.graphql({ query: listRevisionsQuery, variables: { Profile: PROFILE } });
+      const result = await client.graphql({ query: listRevisionsQuery, variables: { Profile: profileName } });
       setListing(result.data?.listConfigurationRevisions || null);
       setSelected([]);
       // A load that worked supersedes the error of one that did not.
@@ -105,7 +109,7 @@ export const ConfigurationHistoryContent = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [profileName]);
 
   useEffect(() => {
     load();
@@ -117,7 +121,7 @@ export const ConfigurationHistoryContent = () => {
     try {
       const result = await client.graphql({
         query: getRevisionQuery,
-        variables: { Profile: PROFILE, Revision: entry.Revision },
+        variables: { Profile: profileName, Revision: entry.Revision },
       });
       const body = JSON.parse(result.data?.getConfigurationRevision?.Body || '{}');
       setDialog({ kind: 'view', revision: entry.Revision, text: JSON.stringify(body, null, 2) });
@@ -132,7 +136,7 @@ export const ConfigurationHistoryContent = () => {
     const pair = comparisonPair(selected);
     setBusy(true);
     try {
-      const result = await client.graphql({ query: diffRevisionsQuery, variables: { Profile: PROFILE, ...pair } });
+      const result = await client.graphql({ query: diffRevisionsQuery, variables: { Profile: profileName, ...pair } });
       setDialog({ kind: 'compare', ...pair, changes: parseChanges(result.data?.diffConfigurationRevisions?.Changes) });
     } catch (err) {
       setStatus({ type: 'error', text: `Could not compare the revisions: ${errorText(err)}` });
@@ -155,7 +159,7 @@ export const ConfigurationHistoryContent = () => {
         query: restoreRevisionMutation,
         variables: {
           input: {
-            Profile: PROFILE,
+            Profile: profileName,
             Revision: revision,
             ExpectedVersion: listing?.Version ?? 0,
             Comment: comment.trim() || null,
@@ -202,7 +206,7 @@ export const ConfigurationHistoryContent = () => {
     try {
       await client.graphql({
         query: labelRevisionMutation,
-        variables: { input: { Profile: PROFILE, Revision: revision, Label: text || null } },
+        variables: { input: { Profile: profileName, Revision: revision, Label: text || null } },
       });
       setStatus({
         type: 'success',

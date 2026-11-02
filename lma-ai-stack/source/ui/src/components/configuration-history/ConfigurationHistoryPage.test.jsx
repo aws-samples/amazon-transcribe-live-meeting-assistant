@@ -13,6 +13,7 @@
  * refresh rather than to try again.
  */
 import React from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -80,10 +81,25 @@ describe('ConfigurationHistoryContent', () => {
     graphqlMock.mockReset();
   });
 
+  it('shows the history of the profile its link names', async () => {
+    graphqlMock.mockResolvedValue(LISTING);
+    render(
+      <MemoryRouter initialEntries={['/configuration/history?profile=trial']}>
+        <ConfigurationHistoryContent />
+      </MemoryRouter>,
+    );
+    await screen.findByText('first@example.com');
+    expect(graphqlMock.mock.calls[0][0].variables).toEqual({ Profile: 'trial' });
+  });
+
   it('lists who changed what, and marks the current revision', async () => {
     graphqlMock.mockResolvedValue(LISTING);
 
-    render(<ConfigurationHistoryContent />);
+    render(
+      <MemoryRouter>
+        <ConfigurationHistoryContent />
+      </MemoryRouter>,
+    );
 
     expect(await screen.findByText('first@example.com')).toBeTruthy();
     expect(screen.getByText('deeper voice')).toBeTruthy();
@@ -93,7 +109,11 @@ describe('ConfigurationHistoryContent', () => {
 
   it('does not offer to restore the revision that is already current', async () => {
     graphqlMock.mockResolvedValue(LISTING);
-    render(<ConfigurationHistoryContent />);
+    render(
+      <MemoryRouter>
+        <ConfigurationHistoryContent />
+      </MemoryRouter>,
+    );
     await screen.findByText('second@example.com');
 
     selectRow('second@example.com');
@@ -107,7 +127,11 @@ describe('ConfigurationHistoryContent', () => {
         ? { data: { restoreConfigurationRevision: { Success: true, Version: 8, Revision: 4, Unchanged: false } } }
         : LISTING,
     );
-    render(<ConfigurationHistoryContent />);
+    render(
+      <MemoryRouter>
+        <ConfigurationHistoryContent />
+      </MemoryRouter>,
+    );
     await screen.findByText('first@example.com');
 
     selectRow('first@example.com');
@@ -135,7 +159,11 @@ describe('ConfigurationHistoryContent', () => {
       }
       return LISTING;
     });
-    render(<ConfigurationHistoryContent />);
+    render(
+      <MemoryRouter>
+        <ConfigurationHistoryContent />
+      </MemoryRouter>,
+    );
     await screen.findByText('first@example.com');
 
     selectRow('first@example.com');
@@ -153,7 +181,11 @@ describe('ConfigurationHistoryContent', () => {
       }
       return LISTING;
     });
-    render(<ConfigurationHistoryContent />);
+    render(
+      <MemoryRouter>
+        <ConfigurationHistoryContent />
+      </MemoryRouter>,
+    );
     await screen.findByText('first@example.com');
 
     selectRow('first@example.com');
@@ -172,7 +204,11 @@ describe('ConfigurationHistoryContent', () => {
         ? { data: { labelConfigurationRevision: { Success: true, Revision: 2 } } }
         : LISTING,
     );
-    render(<ConfigurationHistoryContent />);
+    render(
+      <MemoryRouter>
+        <ConfigurationHistoryContent />
+      </MemoryRouter>,
+    );
     await screen.findByText('first@example.com');
 
     selectRow('first@example.com');
@@ -212,7 +248,11 @@ describe('ConfigurationHistoryContent', () => {
           }
         : LISTING,
     );
-    render(<ConfigurationHistoryContent />);
+    render(
+      <MemoryRouter>
+        <ConfigurationHistoryContent />
+      </MemoryRouter>,
+    );
     await screen.findByText('first@example.com');
 
     selectRow('second@example.com');
