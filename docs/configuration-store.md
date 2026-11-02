@@ -1149,7 +1149,8 @@ new in this release (the knowledge-base and key frame text models, and the agend
 timing) are listed there too, though no release had them as parameters.
 
 - `lma_config/setting_defaults.json` holds each setting's shipped default and
-  type, by section and setting, and the parameter it replaced
+  type, by section and setting, and, for the 24 that were released stack
+  parameters, the parameter it replaced
   (`formerParameter`). The seeder writes the defaults into `Config#default`,
   under the content of the other default files and the `ConfigurationPreset` and
   `CustomConfigPath` stack parameters.

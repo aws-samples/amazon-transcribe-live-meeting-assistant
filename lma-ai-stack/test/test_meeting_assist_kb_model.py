@@ -73,9 +73,6 @@ SETTING_DEFAULTS = CONFIGURATION_LAYER / "lma_config" / "setting_defaults.json"
 LANGUAGE_MODELS = "language_models"
 AGENT_MODEL_SETTING = "meetingAssistModelId"
 KB_MODEL_SETTING = "knowledgeBaseModelId"
-# The name the function's own log message gives the knowledge-base model, asserted
-# by test_the_unusable_model_is_named_in_the_log_when_a_tool_is_withheld.
-KB_MODEL_PARAMETER = "MeetingAssistKnowledgeBaseModelID"
 
 # ── the measurement record ──────────────────────────────────────────────────
 #

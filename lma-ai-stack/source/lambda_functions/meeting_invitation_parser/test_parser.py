@@ -234,8 +234,8 @@ class TestBedrockRequestShape(unittest.TestCase):
     deployment selects the other kind. The reasoning-capable Claude models reject
     an inferenceConfig that carries a temperature, and they may answer with a
     reasoning block ahead of the text block, so reading the answer by position
-    stops working. The model is whichever BedrockModelId the stack was deployed
-    with, so both kinds reach this function.
+    stops working. The model is whichever one the Amazon Bedrock Models section
+    names, so both kinds reach this function.
     """
 
     def setUp(self):
