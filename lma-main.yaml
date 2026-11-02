@@ -885,6 +885,37 @@ Parameters:
       This is the default and the upper limit; an Admin can set a shorter period at run time on
       the Configuration page (Retention section), never a longer one.
 
+  ConfigurationPreset:
+    Type: String
+    Default: none
+    AllowedValues:
+      - none
+      - healthcare-summary
+      - on-demand-asr-with-voice-separation
+      - translator-voice-assistant
+    Description: >-
+      The shipped configuration preset the deployment's default configuration is
+      built from: none (the shipped defaults), healthcare-summary (summary prompts
+      for clinical conversations), on-demand-asr-with-voice-separation (meetings
+      transcribed by the on-demand ASR engine with each voice labelled; needs
+      EnableMicrovmAsr) or translator-voice-assistant (the Nova Sonic voice
+      assistant as an English-Spanish translator). Every preset is also offered on
+      the Configuration page as a read-only Managed profile. CustomConfigPath is
+      applied over this when provided.
+
+  CustomConfigPath:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|s3://[^/]+/.+)$"
+    Description: >-
+      Optional s3://bucket/key of a configuration file, JSON or YAML, laid over
+      ConfigurationPreset to make the deployment's default configuration: an
+      object of configuration section name to settings, or a file exported from
+      the Configuration page. It is checked against the configuration schemas,
+      and the deployment fails if it does not match. The stack reads it only
+      when this value changes, so give an edited file a new key. Leave blank to
+      use the preset alone.
+
   TranscriptionExpirationInDays:
     Type: Number
     Default: 90
@@ -1412,6 +1443,11 @@ Metadata:
           - CloudFrontPriceClass
           - CloudFrontAllowedGeos
       - Label:
+          default: Configuration
+        Parameters:
+          - ConfigurationPreset
+          - CustomConfigPath
+      - Label:
           default: Retention Settings
         Parameters:
           - EnableAudioRecording
@@ -1586,6 +1622,10 @@ Metadata:
         default: Meeting Record Expiration In Days
       TranscriptionExpirationInDays:
         default: Transcription Expiration In Days
+      ConfigurationPreset:
+        default: Configuration Preset
+      CustomConfigPath:
+        default: Custom Configuration Path
       AudioRecordingExpirationInDays:
         default: Audio Recording Expiration In Days
       CloudWatchLogsExpirationInDays:
@@ -3331,6 +3371,8 @@ Resources:
         AgentAssistExistingLambdaFunctionArn: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
+        ConfigurationPreset: !Ref ConfigurationPreset
+        CustomConfigPath: !Ref CustomConfigPath
         MeetingInactivityTimeoutInMinutes: !Ref MeetingInactivityTimeoutInMinutes
         MeetingInactivityLookbackInDays: !Ref MeetingInactivityLookbackInDays
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn

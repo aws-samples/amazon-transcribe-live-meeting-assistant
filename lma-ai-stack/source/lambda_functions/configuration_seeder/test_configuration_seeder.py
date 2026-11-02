@@ -90,6 +90,20 @@ class FakeDynamo:
         self.items[key] = item
         return {}
 
+    def scan(self, **request: Any) -> Dict[str, Any]:
+        prefix = request["ExpressionAttributeValues"][":prefix"]["S"]
+        return {
+            "Items": [
+                {k: v for k, v in item.items() if k != codec.BODY_ATTRIBUTE}
+                for key, item in self.items.items()
+                if key.startswith(prefix)
+            ]
+        }
+
+    def delete_item(self, **request: Any) -> Dict[str, Any]:
+        self.items.pop(request["Key"][codec.KEY_ATTRIBUTE]["S"], None)
+        return {}
+
     def body(self, key: str) -> Dict[str, Any]:
         return codec.decode_body(self.items[key][codec.BODY_ATTRIBUTE]["B"])
 
@@ -1611,3 +1625,141 @@ def test_a_conversion_that_cannot_record_history_is_deferred(seeder, monkeypatch
 
     monkeypatch.setattr(store, "convert_to_full_copy", unavailable)
     assert seeder.convert_profiles(store) == "deferred"
+
+
+# ── Managed profiles, ConfigurationPreset and CustomConfigPath ──────────────
+
+
+def _managed(dynamo: FakeDynamo) -> Dict[str, Dict[str, Any]]:
+    return {
+        key[len("Config#") :]: dynamo.metadata(key)
+        for key in dynamo.items
+        if key.startswith("Config#") and dynamo.metadata(key).get("Managed")
+    }
+
+
+def test_each_offered_preset_is_written_as_a_managed_profile(seeder) -> None:
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default")
+    outcome = seeder.write_managed_profiles(
+        store, store.read_profile("default").body, {"AsrEngineAvailable": "true"}
+    )
+    managed = _managed(dynamo)
+    assert {
+        "healthcare-summary",
+        "translator-voice-assistant",
+        "on-demand-asr-with-voice-separation",
+    } <= set(managed)
+    assert "healthcare-summary=created" in outcome
+    translator = dynamo.body("Config#translator-voice-assistant")
+    assert translator["nova_sonic_config"]["meetingMode"] == "translator"
+    # A full copy: every section of the baseline, with the preset over it.
+    assert set(dynamo.body("Config#default")) <= set(translator)
+    assert managed["translator-voice-assistant"]["Description"] == "Translator voice assistant"
+
+
+def test_a_preset_the_deployment_cannot_run_is_not_written(seeder) -> None:
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default")
+    outcome = seeder.write_managed_profiles(store, store.read_profile("default").body, {})
+    assert "on-demand-asr-with-voice-separation=not-offered" in outcome
+    assert "Config#on-demand-asr-with-voice-separation" not in dynamo.items
+
+
+def test_a_second_run_leaves_unchanged_managed_profiles_alone(seeder) -> None:
+    store, _dynamo = build_store()
+    seeder.seed(store, domain="default")
+    baseline = store.read_profile("default").body
+    seeder.write_managed_profiles(store, baseline, {})
+    assert "translator-voice-assistant=unchanged" in seeder.write_managed_profiles(
+        store, baseline, {}
+    )
+
+
+def test_a_managed_profile_no_longer_shipped_is_retired_unless_active(seeder, monkeypatch) -> None:
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default")
+    baseline = store.read_profile("default").body
+    seeder.write_managed_profiles(store, baseline, {})
+    store.activate_profile("translator-voice-assistant")
+    monkeypatch.setattr(seeder, "shipped_presets", lambda: [])
+    outcome = seeder.write_managed_profiles(store, baseline, {})
+    assert "healthcare-summary=retired" in outcome
+    assert "translator-voice-assistant=kept-active" in outcome
+    assert "Config#healthcare-summary" not in dynamo.items
+
+
+def test_a_custom_profile_holding_a_presets_name_is_left_alone(seeder) -> None:
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default")
+    store.create_profile("healthcare-summary", updated_by="admin@example.com")
+    outcome = seeder.write_managed_profiles(store, store.read_profile("default").body, {})
+    assert "healthcare-summary=name-in-use" in outcome
+    assert not dynamo.metadata("Config#healthcare-summary").get("Managed")
+
+
+def test_the_configuration_preset_builds_the_baseline(seeder) -> None:
+    store, dynamo = build_store()
+    outcome = seeder.seed(
+        store, domain="default", configuration_preset="translator-voice-assistant"
+    )
+    assert dynamo.body("Config#default")["nova_sonic_config"]["meetingMode"] == "translator"
+    assert outcome["ConfigurationPreset"] == "translator-voice-assistant"
+
+
+def test_a_custom_configuration_is_laid_over_the_preset(seeder) -> None:
+    store, dynamo = build_store()
+    outcome = seeder.seed(
+        store,
+        domain="default",
+        configuration_preset="translator-voice-assistant",
+        custom_sections={"nova_sonic_config": {"translatorLanguageB": "French"}},
+    )
+    nova = dynamo.body("Config#default")["nova_sonic_config"]
+    assert (nova["meetingMode"], nova["translatorLanguageB"]) == ("translator", "French")
+    assert outcome["CustomConfiguration"] == "applied"
+
+
+class _S3Object:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def get_object(self, Bucket: str, Key: str) -> Dict[str, Any]:  # noqa: N803
+        assert (Bucket, Key) == ("my-bucket", "lma/config.yaml")
+        return {"Body": type("B", (), {"read": lambda _self: self.text.encode()})()}
+
+
+def test_a_custom_configuration_may_be_yaml(seeder) -> None:
+    text = "retention:\n  transcriptDeletionAfterSummary: immediately\n"
+    sections = seeder.read_custom_configuration(
+        "s3://my-bucket/lma/config.yaml", client=_S3Object(text)
+    )
+    assert sections == {"retention": {"transcriptDeletionAfterSummary": "immediately"}}
+
+
+def test_a_configuration_page_export_may_be_used(seeder) -> None:
+    exported = json.dumps(
+        {"format": "lma-configuration-profile", "formatVersion": 1, "sections": {"retention": {}}}
+    )
+    sections = seeder.read_custom_configuration(
+        "s3://my-bucket/lma/config.yaml", client=_S3Object(exported)
+    )
+    assert sections == {"retention": {}}
+
+
+@pytest.mark.parametrize(
+    "text, problem",
+    [
+        ("retention:\n  transcriptDeletionAfterSummary: soon\n", "transcriptDeletionAfterSummary"),
+        ("no_such_section: {}\n", "no_such_section: is not a configuration section"),
+        ("- a list\n", "must hold an object of configuration sections"),
+    ],
+)
+def test_an_invalid_custom_configuration_fails_the_deployment(seeder, text, problem) -> None:
+    with pytest.raises(seeder.InvalidConfiguration, match=problem):
+        seeder.read_custom_configuration("s3://my-bucket/lma/config.yaml", client=_S3Object(text))
+
+
+def test_a_custom_configuration_path_must_be_an_s3_uri(seeder) -> None:
+    with pytest.raises(seeder.InvalidConfiguration, match="is not an s3://bucket/key URI"):
+        seeder.read_custom_configuration("https://example.com/config.yaml", client=_S3Object(""))

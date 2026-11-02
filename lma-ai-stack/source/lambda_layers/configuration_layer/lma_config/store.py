@@ -1253,6 +1253,71 @@ class ConfigurationStore:
             raise ProfileNotFound(f"there is no configuration profile named {name!r}")
         self._write_pointer(name)
 
+    def write_managed_profile(self, name: str, body: Mapping[str, Any], *, description: str) -> str:
+        """Write a profile the deployment manages, as the seeder does for each shipped preset.
+
+        Rewritten by every seeder run, like the baseline, so an Admin activates
+        it as it is or copies it to change it. Recorded as a revision whenever
+        its content changes, so a release's change to it can be compared.
+
+        Returns:
+            "created", "updated" or "unchanged".
+
+        Raises:
+            ProfileExists: a Custom profile is stored under ``name``, which the
+                deployment leaves alone.
+        """
+        validate_profile_name(name)
+        metadata = {"Managed": True, "ProfileFormat": FULL_COPY, "Description": description}
+        current = self.read_record(profile_key(name), consistent_read=True)
+        if not current.exists:
+            self._create(
+                name,
+                body,
+                created_by=_SEEDER,
+                source=SOURCE_DEPLOY,
+                metadata={**metadata, "ProfileOrigin": "managed"},
+            )
+            return "created"
+        if not current.metadata.get("Managed"):
+            raise ProfileExists(
+                f"a Custom configuration profile named {name!r} exists, so the Managed "
+                "profile of that name was not written; rename the Custom profile to get it"
+            )
+        if current.body == dict(body) and current.metadata.get("Description") == description:
+            return "unchanged"
+        self._commit(
+            name,
+            current,
+            dict(body),
+            updated_by=_SEEDER,
+            condition=self._condition_for(current),
+            source=SOURCE_DEPLOY,
+            extra_metadata=metadata,
+        )
+        return "updated"
+
+    def retire_managed_profile(self, name: str) -> bool:
+        """Delete a Managed profile a release no longer ships, unless it is active.
+
+        Returns:
+            Whether it was deleted. An active one is kept, so the configuration
+            in force does not change under the deployment; it goes once another
+            profile is activated and the seeder runs again.
+        """
+        current = self.read_record(profile_key(name), consistent_read=True)
+        if not current.exists or not current.metadata.get("Managed"):
+            return False
+        if self.active_profile_name(consistent_read=True) == name:
+            return False
+        self._client.delete_item(
+            TableName=self._table_name,
+            Key={codec.KEY_ATTRIBUTE: {"S": profile_key(name)}},
+            **self._condition_for(current),
+        )
+        self.invalidate()
+        return True
+
     def _as_stored(self, current: ConfigurationRecord, body: Mapping[str, Any]) -> Dict[str, Any]:
         """``body`` as ``current`` stores it: completed from the baseline for a full copy.
 

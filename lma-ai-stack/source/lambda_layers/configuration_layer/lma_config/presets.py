@@ -90,3 +90,89 @@ def shipped_presets() -> List[Dict[str, Any]]:
         InvalidPreset: a shipped preset is malformed.
     """
     return json.loads(_load())
+
+
+# ── applying a preset ──────────────────────────────────────────────────────
+#
+# The same rules the configuration editor applies (config-model.js:
+# isPresetOffered, replacedSection and applyPresetSection), for the deploy-time
+# seeder, which writes each preset as a Managed profile and may build the
+# baseline itself from one (the ConfigurationPreset stack parameter).
+
+
+def _available(schema: Any, settings: Dict[str, Any]) -> bool:
+    condition = schema.get("availableWhen") if isinstance(schema, dict) else None
+    if not condition:
+        return True
+    return str(settings.get(condition["setting"])) == str(condition["value"])
+
+
+def preset_offered(preset: Dict[str, Any], settings: Dict[str, Any]) -> bool:
+    """Whether a deployment offers every section and top-level setting a preset sets.
+
+    ``settings`` are the deployment settings an ``availableWhen`` names, such as
+    ``AsrEngineAvailable``. A preset is applied whole or not at all.
+    """
+    from .schema import section_schema  # pylint: disable=import-outside-toplevel
+
+    for name, change in preset["Sections"].items():
+        schema = section_schema(name)
+        if not _available(schema, settings):
+            return False
+        properties = schema.get("properties") or {}
+        if not all(_available(properties.get(key), settings) for key in change["values"]):
+            return False
+    return True
+
+
+def _deep_merge(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(base)
+    for key, value in overlay.items():
+        if isinstance(merged.get(key), dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def apply_preset(body: Dict[str, Any], preset: Dict[str, Any]) -> Dict[str, Any]:
+    """``body`` with a preset applied to each section it names.
+
+    "merge" lays the preset's values over the section. "replace", or a section
+    whose schema's mergeStrategy is "replace", makes the section exactly the
+    values: for a merge-strategy section, the shipped section with the values
+    over it and every shipped entry they do not name turned off with the
+    schema's ``disabledValue``, where it has one.
+    """
+    from .schema import section_schema  # pylint: disable=import-outside-toplevel
+
+    result = json.loads(json.dumps(body))
+    for name, change in preset["Sections"].items():
+        schema = section_schema(name)
+        current = result.get(name) or {}
+        values = json.loads(json.dumps(change["values"]))
+        if schema.get("mergeStrategy") == "replace":
+            result[name] = values
+        elif change["mode"] == "replace":
+            section = _deep_merge(current, values)
+            disabled = schema.get("disabledValue")
+            if disabled is not None:
+                for key in current:
+                    if key not in values:
+                        section[key] = disabled
+            result[name] = section
+        else:
+            result[name] = _deep_merge(current, values)
+    return result
+
+
+def preset_by_id(preset_id: str) -> Dict[str, Any]:
+    """One shipped preset.
+
+    Raises:
+        InvalidPreset: no preset ships with that id.
+    """
+    for preset in shipped_presets():
+        if preset["Id"] == preset_id:
+            return preset
+    raise InvalidPreset(f"no configuration preset ships with the id {preset_id!r}")

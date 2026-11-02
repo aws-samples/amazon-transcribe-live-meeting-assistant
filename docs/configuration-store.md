@@ -786,8 +786,18 @@ across the sections of stores that moved in after the profile existed:
 
 - **`Config#default`** — written on create, and rewritten on every update on
   which the custom resource runs at all, which is every update that changes the
-  shipped content or the code that writes it (see the content hash below). It is
-  this deployment's own content.
+  shipped content or the code that writes it (see the content hash below), or
+  one of its properties. It is this deployment's own content: the shipped
+  defaults, then the preset the `ConfigurationPreset` stack parameter names,
+  then the file `CustomConfigPath` names, if any. See
+  [Choosing the default configuration at deploy time](#choosing-the-default-configuration-at-deploy-time).
+- **One Managed profile per shipped preset** — `Config#<preset id>`, the preset
+  applied over the baseline, rewritten on every run and recorded as a revision
+  when its content changes. A preset is written only where the deployment can run
+  it (the on-demand ASR preset needs the ASR engine). A Managed profile for a
+  preset a release no longer ships is deleted, unless it is the active profile.
+  A Custom profile already holding a preset's name is left alone, and reported
+  as `name-in-use`. Reported as the `ManagedProfiles` attribute.
 - **`Config#custom`** — written **only if it is not already there**, so a stack
   update never discards an edit made from the web UI. The condition is on the
   record, not on `RequestType == 'Create'`: keying off the request type would
@@ -803,6 +813,28 @@ across the sections of stores that moved in after the profile existed:
   as the `ConfigurationBucketName` property, and reports what it found as
   `ConfigurationRevisionHistory`. See
   [Upgrading an existing deployment](#upgrading-an-existing-deployment-history-starts-at-revision-1).
+
+### Choosing the default configuration at deploy time
+
+Two stack parameters decide what `Config#default` holds, as IDP's
+`ConfigurationPreset` and `CustomConfigPath` do:
+
+- **`ConfigurationPreset`** — `none` (the shipped defaults) or the id of a
+  shipped preset, which is applied over them.
+- **`CustomConfigPath`** — an `s3://bucket/key` of a JSON or YAML file laid over
+  the result: an object of section name to settings, or a file exported from the
+  Configuration page (`"format": "lma-configuration-profile"`), whose `sections`
+  are used. Each section is checked against its schema, and a file that does not
+  match, names a section the store does not have, or cannot be read fails the
+  stack update, with the problems in the status reason. The seeder is granted
+  `s3:GetObject` on that one object; a file encrypted with a customer-managed key
+  also needs that key to allow the seeder's role. The file is read when the
+  parameter's value changes, not when the file does, so give an edited file a new
+  key.
+
+Both change only the baseline. A Custom profile keeps what it stores, and the
+active profile stays active. The seeder reports what it applied as the
+`ConfigurationPreset` and `CustomConfiguration` attributes.
 
 ### Why the content hash exists
 

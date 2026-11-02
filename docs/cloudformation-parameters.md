@@ -61,11 +61,11 @@ disagree. The description under each parameter is the one the console shows.
 
 <!-- BEGIN GENERATED PARAMETER REFERENCE: edit lma-main.yaml or scripts/cloudformation_parameters_doc.py, then run that script -->
 
-The template declares 93 parameters.
+The template declares 95 parameters.
 
 | Kind | Parameters | What changing one does |
 |---|---|---|
-| Resource | 48 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
+| Resource | 50 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
 | Configuration page default | 26 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
 | Configuration page limit | 1 | The default and the upper limit of a setting an Admin can lower, and not raise, on the web UI's Configuration page while the stack runs; see [Retention: settings the stack limits](configuration-guide.md#retention-settings-the-stack-limits). Every reader uses the smaller of the saved value and the parameter's, so a stack update that lowers the parameter applies at once. |
 | Read at run time | 5 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
@@ -906,6 +906,33 @@ Console label: *CloudFront Allowed Geographies*
 - **Kind:** Resource. Sets the geographic restriction of the web app's CloudFront distribution.
 
 Specify a comma separated list of two letter country codes (uppercase ISO 3166-1) that are allowed to access the web user interface via CloudFront. For example: US,CA. Leave empty if you do not want geo restrictions to be applied.
+
+## Configuration
+
+| Parameter | Default | Kind |
+|---|---|---|
+| [`ConfigurationPreset`](#configurationpreset) | `none` | Resource |
+| [`CustomConfigPath`](#customconfigpath) | (empty) | Resource |
+
+### `ConfigurationPreset`
+
+Console label: *Configuration Preset*
+
+- **Default:** `none`
+- **Allowed values:** `none`, `healthcare-summary`, `on-demand-asr-with-voice-separation`, `translator-voice-assistant`
+- **Kind:** Resource. Decides what the configuration seeder writes as the deployment's default configuration, which is re-written when it changes.
+
+The shipped configuration preset the deployment's default configuration is built from: none (the shipped defaults), healthcare-summary (summary prompts for clinical conversations), on-demand-asr-with-voice-separation (meetings transcribed by the on-demand ASR engine with each voice labelled; needs EnableMicrovmAsr) or translator-voice-assistant (the Nova Sonic voice assistant as an English-Spanish translator). Every preset is also offered on the Configuration page as a read-only Managed profile. CustomConfigPath is applied over this when provided.
+
+### `CustomConfigPath`
+
+Console label: *Custom Configuration Path*
+
+- **Default:** (empty)
+- **Allowed values:** Matches `^(|s3://[^/]+/.+)$`
+- **Kind:** Resource. Decides what the configuration seeder lays over the default configuration, and grants the seeder read access to the file.
+
+Optional s3://bucket/key of a configuration file, JSON or YAML, laid over ConfigurationPreset to make the deployment's default configuration: an object of configuration section name to settings, or a file exported from the Configuration page. It is checked against the configuration schemas, and the deployment fails if it does not match. The stack reads it only when this value changes, so give an edited file a new key. Leave blank to use the preset alone.
 
 ## Retention Settings
 

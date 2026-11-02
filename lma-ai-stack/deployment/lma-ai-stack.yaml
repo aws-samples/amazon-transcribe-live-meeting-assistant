@@ -548,6 +548,26 @@ Parameters:
       the table a rollback reads, and the two disagreeing would leave one
       holding the general prompts and the other the healthcare ones.
 
+  ConfigurationPreset:
+    Type: String
+    Default: none
+    AllowedValues:
+      - none
+      - healthcare-summary
+      - on-demand-asr-with-voice-separation
+      - translator-voice-assistant
+    Description: >-
+      The shipped preset the deployment's default configuration is built from;
+      see lma-main.yaml.
+
+  CustomConfigPath:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|s3://[^/]+/.+)$"
+    Description: >-
+      An s3:// URI of a configuration file laid over the default configuration;
+      see lma-main.yaml.
+
   ConfigurationSeedHash:
     Type: String
     Default: ""
@@ -872,6 +892,7 @@ Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   ShouldDeleteDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "false"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  HasCustomConfigPath: !Not [!Equals [!Ref CustomConfigPath, ""]]
   # The transcript knowledge base, whose entries a transcript deletion removes.
   HasTranscriptKnowledgeBase: !Not [!Equals [!Ref BedrockKnowledgeBaseID, ""]]
   # Request content (verbose) in the GraphQL API's logs, at the two levels that
@@ -3502,11 +3523,25 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
+              # Scan lists the profiles, to retire a Managed profile a release
+              # no longer ships; DeleteItem retires it.
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
+                  - dynamodb:Scan
+                  - dynamodb:DeleteItem
                 Resource: !GetAtt ConfigurationTable.Arn
+              # The CustomConfigPath file, when one is named.
+              - !If
+                - HasCustomConfigPath
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                  Resource: !Sub
+                    - "arn:${AWS::Partition}:s3:::${Path}"
+                    - Path: !Select [1, !Split ["s3://", !Ref CustomConfigPath]]
+                - !Ref AWS::NoValue
               # Read-only on the tables the prompt templates, the Nova Sonic
               # settings, the chat buttons and the ASR switches used to live in:
               # the seeder carries an existing deployment's edits across once
@@ -3547,6 +3582,16 @@ Resources:
       # it, the profile as it stands is recorded as revision 1.
       ConfigurationBucketName: !Ref ConfigurationBucket
       Domain: !Ref Domain
+      # The preset the baseline is built from, and a file laid over it; see
+      # docs/configuration-store.md. A change to either re-runs the seeder. A
+      # change to the file's content alone does not: give the edited file a
+      # new key.
+      ConfigurationPreset: !Ref ConfigurationPreset
+      CustomConfigPath: !Ref CustomConfigPath
+      # Deployment settings a schema's availableWhen names, so a Managed
+      # profile is written only for a preset this deployment can run.
+      DeploymentSettings:
+        AsrEngineAvailable: !If [HasAsrConfigTable, "true", "false"]
       LegacyPromptTemplateTableName: !Ref LLMPromptTemplateTableName
       # Read once, while the operator's profile holds no Nova Sonic section, to
       # carry the settings saved before the upgrade across.

@@ -311,6 +311,13 @@ select **Save changes**.
   The dialog says which sections a preset changes, and whether it replaces a
   section or changes only the settings it names.
 
+Each preset is also stored as a read-only **Managed** profile of the same name,
+which the deployment rewrites on every stack update; activate it as it is, or
+copy it to a Custom profile to change it. To start a new deployment from a preset,
+or from a configuration file of your own, set the `ConfigurationPreset` and
+`CustomConfigPath` stack parameters; see
+[Choosing the default configuration at deploy time](configuration-store.md#choosing-the-default-configuration-at-deploy-time).
+
 ## Changing a setting outside the web UI
 
 The page saves through the `updateConfiguration` GraphQL operation, which an

@@ -70,6 +70,7 @@ from typing import Any, Callable, Dict, Mapping, NamedTuple, Optional, Tuple
 
 import boto3
 import cfnresponse  # vendored beside this handler; see cfnresponse.py
+from botocore.exceptions import ClientError
 
 # pylint: disable=import-error
 from lma_config import (  # from the configuration layer
@@ -82,11 +83,20 @@ from lma_config import (  # from the configuration layer
     SUMMARY_PROMPT_TEMPLATES,
     ConcurrentModification,
     ConfigurationStore,
+    InvalidConfiguration,
+    ProfileExists,
     RevisionHistoryUnavailable,
     SectionSpec,
     apply_parameter_defaults,
+    apply_preset,
     codec,
+    full_section,
     parameter_defaults,
+    preset_by_id,
+    preset_offered,
+    registered_sections,
+    shipped_presets,
+    validate_section,
 )
 
 # pylint: enable=import-error
@@ -523,6 +533,90 @@ def adopt_legacy_section(
     )
 
 
+def custom_configuration(document: Any, source: str) -> Dict[str, Any]:
+    """The sections of a custom configuration file, checked against their schemas.
+
+    Either a plain JSON or YAML object of section name to values, or a
+    Configuration page export (``"format": "lma-configuration-profile"``), whose
+    ``sections`` are used.
+
+    Raises:
+        InvalidConfiguration: the file is not an object of known sections, or a
+            section does not match its schema. The stack update then fails, with
+            the problems in its status reason, rather than deploying a
+            configuration nobody asked for.
+    """
+    if isinstance(document, dict) and document.get("format") == "lma-configuration-profile":
+        document = document.get("sections")
+    if not isinstance(document, dict):
+        raise InvalidConfiguration([f"{source}: must hold an object of configuration sections"])
+    known = registered_sections()
+    problems = [f"{name}: is not a configuration section" for name in document if name not in known]
+    for name, values in document.items():
+        if name in known:
+            try:
+                validate_section(name, values)
+            except InvalidConfiguration as error:
+                problems.extend(error.problems)
+    if problems:
+        raise InvalidConfiguration(problems)
+    return document
+
+
+def read_custom_configuration(uri: str, *, client: Any = None) -> Dict[str, Any]:
+    """Read and check the CustomConfigPath file: ``s3://bucket/key``, JSON or YAML."""
+    match = re.fullmatch(r"s3://([^/]+)/(.+)", uri.strip())
+    if not match:
+        raise InvalidConfiguration([f"CustomConfigPath: {uri!r} is not an s3://bucket/key URI"])
+    s3 = client or boto3.client("s3")
+    raw = s3.get_object(Bucket=match.group(1), Key=match.group(2))["Body"].read().decode("utf-8")
+    try:
+        document = json.loads(raw)
+    except json.JSONDecodeError:
+        import yaml  # pylint: disable=import-outside-toplevel -- only for a YAML file
+
+        try:
+            document = yaml.safe_load(raw)
+        except yaml.YAMLError as error:
+            raise InvalidConfiguration([f"{uri}: is neither JSON nor YAML: {error}"]) from error
+    return custom_configuration(document, uri)
+
+
+def write_managed_profiles(
+    store: ConfigurationStore, baseline: Mapping[str, Any], settings: Mapping[str, Any]
+) -> str:
+    """Write each shipped preset this deployment offers as a Managed profile.
+
+    The preset applied over the baseline. A preset needing something the
+    deployment lacks (see ``preset_offered``) is not written, and a Managed
+    profile for a preset no longer shipped or offered is retired unless it is
+    active. Reported as ``id=outcome`` pairs.
+    """
+    outcomes: Dict[str, str] = {}
+    written = set()
+    for preset in shipped_presets():
+        if not preset_offered(preset, dict(settings)):
+            outcomes[preset["Id"]] = "not-offered"
+            continue
+        try:
+            outcomes[preset["Id"]] = store.write_managed_profile(
+                preset["Id"], apply_preset(dict(baseline), preset), description=preset["Title"]
+            )
+            written.add(preset["Id"])
+        except ProfileExists:
+            LOGGER.warning(
+                "a Custom profile named %s exists; its Managed profile was not written",
+                preset["Id"],
+            )
+            outcomes[preset["Id"]] = "name-in-use"
+    for profile in store.list_profiles():
+        if profile.managed and profile.name not in written and profile.name != "default":
+            outcomes[profile.name] = (
+                "retired" if store.retire_managed_profile(profile.name) else "kept-active"
+            )
+    return ",".join(f"{name}={outcome}" for name, outcome in sorted(outcomes.items()))
+
+
 def seed(
     store: ConfigurationStore,
     *,
@@ -531,6 +625,8 @@ def seed(
     legacy_client: Any = None,
     legacy_section_tables: Optional[Mapping[str, str]] = None,
     parameter_values: Optional[Mapping[str, Any]] = None,
+    configuration_preset: str = "",
+    custom_sections: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, str]:
     """Apply the writes and report what each one did.
 
@@ -548,6 +644,17 @@ def seed(
     # parameter reaches every setting an administrator has not changed, while
     # one they have changed, which lives in the profile, keeps winning.
     applied = apply_parameter_defaults(baseline, parameter_values or {})
+    # Then the ConfigurationPreset stack parameter's preset, and the
+    # CustomConfigPath file over that, as IDP's deployments choose their
+    # default configuration. Both are part of what the deployment was deployed
+    # with, so both belong in the baseline.
+    preset_applied = "none"
+    if configuration_preset and configuration_preset != "none":
+        baseline = apply_preset(baseline, preset_by_id(configuration_preset))
+        preset_applied = configuration_preset
+    if custom_sections:
+        for name, values in custom_sections.items():
+            baseline[name] = full_section(name, values, baseline.get(name))
     store.write_default(baseline, description=DEFAULT_DESCRIPTION)
 
     # The guard that actually protects an operator's edits is the condition on
@@ -637,6 +744,10 @@ def seed(
         # section unset, so every later run reports it again until it lands.
         "SectionAdoption": ",".join(f"{name}={outcome}" for name, outcome in adoption.items()),
         "Baseline": "written",
+        # The preset the baseline was built from (ConfigurationPreset), and
+        # whether a CustomConfigPath file was laid over it.
+        "ConfigurationPreset": preset_applied,
+        "CustomConfiguration": "applied" if custom_sections else "none",
         # Which stack parameters the baseline carries as the defaults of runtime
         # settings. One missing here is one whose readers fall back to their
         # environment variable.
@@ -742,8 +853,25 @@ def handler(event: Dict[str, Any], context: Any) -> None:
                 for legacy in LEGACY_SECTIONS
             },
             parameter_values=properties.get("ParameterDefaults") or {},
+            configuration_preset=properties.get("ConfigurationPreset", ""),
+            custom_sections=(
+                read_custom_configuration(properties["CustomConfigPath"])
+                if properties.get("CustomConfigPath")
+                else None
+            ),
         )
         outcome["ProfileFormat"] = convert_profiles(store)
+        try:
+            outcome["ManagedProfiles"] = write_managed_profiles(
+                store,
+                store.read_profile("default", consistent_read=True).body,
+                properties.get("DeploymentSettings") or {},
+            )
+        except (RevisionHistoryUnavailable, ConcurrentModification, ClientError):
+            # Like the conversion: the deployment goes ahead, and the next one
+            # writes them. Nothing reads a Managed profile until it is activated.
+            LOGGER.warning("could not write the Managed profiles now", exc_info=True)
+            outcome["ManagedProfiles"] = "deferred"
         LOGGER.info("seeded the configuration table: %s", outcome)
         cfnresponse.send(event, context, cfnresponse.SUCCESS, outcome, physical_id)
     except Exception as error:  # noqa: BLE001 -- must answer CloudFormation either way
