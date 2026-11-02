@@ -117,6 +117,12 @@
         "accept_with_warning": "Accept with a warning (no consent record)",
         "reject": "Refuse the meeting"
       }
+    },
+    "leaveOnObjection": {
+      "order": 10,
+      "type": "boolean",
+      "title": "Virtual Participant leaves after an objection",
+      "description": "On: when a participant objects in the meeting chat, the Virtual Participant stops recording and transcribing, says so, and leaves the meeting. Off: it stops and stays, so recording can resume if the participant later consents. Either way the objection is recorded."
     }
   },
   "additionalProperties": false

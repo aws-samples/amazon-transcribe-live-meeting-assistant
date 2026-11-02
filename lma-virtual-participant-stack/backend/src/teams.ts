@@ -7,6 +7,8 @@ import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { chatHelpMessages } from './chat-help.js';
+import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
+import { toolbarPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { simliAvatar } from './simli-avatar.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
@@ -793,6 +795,9 @@ export default class Teams {
     // lenient matcher and a generic farewell.
     private async handleIncomingMessage(page: Page, message: string): Promise<void> {
         if (!message) return;
+        // A consent reply, or "LMA start" while consent is withheld. No sender,
+        // for the reason above.
+        if (await meetingConsent.handleChat(null, message)) return;
         // Checked ahead of pause/resume so an assistant-mode toggle lands
         // whether or not transcription is paused; the two vocabularies are
         // disjoint.
@@ -1408,6 +1413,7 @@ export default class Teams {
 
                 const decision = decideAttendeeAction(reading, watchdogState, watchdogConfig);
                 if (reading.state === 'OK') {
+                    meetingConsent.noteAttendeeCount(reading.count);
                     log.info(
                         `DEBUG: Teams attendee count: ${reading.count}, ` +
                             `hasOthers: ${reading.count > 1}, ` +
@@ -1695,6 +1701,25 @@ export default class Teams {
             // but the meeting still works.
             log.warn('In-meeting monitoring setup failed (non-fatal — VP remains in meeting):', e);
         }
+
+        // The meeting consent flow, when the meeting runs one (meeting-consent.ts).
+        // The People pane takes the chat's place in the side rail, so the chat
+        // is reopened after the screenshot of it.
+        attachMeetingConsent(page, {
+            send: (messages) => this.sendMessages(page, messages),
+            // The chat rows this handler reads carry no sender (see handleIncomingMessage).
+            sendersHidden: true,
+            panels: toolbarPanels(page, {
+                listVisible: ['[data-tid="roster-list"]', '[data-tid^="participantsInCall"]', '[data-cid="roster-participant"]'],
+                open: ['#roster-button', 'button[data-inp="roster-button"]', '[data-tid="roster-button"]'],
+                close: [],
+                reopenChat: () => this.openChatPanel(page),
+            }),
+            leave: (objector) => {
+                details.start = false;
+                this.requestEnd({ reason: 'consent-objection', trigger: 'consent-objection', requestedBy: objector });
+            },
+        });
 
         // Start transcription if enabled (LMA behavior). This is the actual
         // point of the VP, so it runs regardless of any best-effort chat /

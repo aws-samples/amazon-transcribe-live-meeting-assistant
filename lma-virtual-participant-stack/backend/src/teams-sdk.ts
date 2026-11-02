@@ -6,6 +6,7 @@ import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { chatHelpMessages } from './chat-help.js';
+import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { simliAvatar } from './simli-avatar.js';
@@ -352,6 +353,17 @@ export default class TeamsSdk {
 
             await substep('In the meeting — posting introduction…');
             await this.sendMessages(page, details.introMessages);
+            // The meeting consent flow, when the meeting runs one
+            // (meeting-consent.ts). The call's own participant list is the
+            // roster; the page is LMA's own, so one screenshot is all there is.
+            attachMeetingConsent(page, {
+                send: (messages) => this.sendMessages(page, messages),
+                readRoster: () => page.evaluate(() => (window as any).__lmaParticipantNames?.() ?? null).catch(() => null),
+                leave: (objector) => {
+                    details.start = false;
+                    this.requestEnd({ reason: 'consent-objection', trigger: 'consent-objection', requestedBy: objector });
+                },
+            });
             if (details.start) {
                 log.info(details.startMessages[0]);
                 await this.sendMessages(page, details.startMessages);
@@ -417,9 +429,13 @@ export default class TeamsSdk {
                     }
                 }
 
+                if (snap.count >= 1) meetingConsent.noteAttendeeCount(snap.count);
+
                 for (const chat of snap.chats) {
                     const sender = chat.senderName || null;
                     const body = chat.text || '';
+                    // A consent reply, or "LMA start" while consent is withheld.
+                    if (await meetingConsent.handleChat(sender, body)) continue;
                     if (matchesEndCommand(body)) {
                         log.info(`[teams-sdk] asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
                         await this.sendMessages(page, exitMessagesFor(sender));

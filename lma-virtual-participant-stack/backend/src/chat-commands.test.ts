@@ -31,6 +31,8 @@ import {
 import { ASSISTANT_CHAT_COMMANDS, parseAssistantChatCommand } from './assistant-toggles.js';
 import { allChatHelpMessages, chatHelpMessages } from './chat-help.js';
 import { parseChatQuestion } from './chat-ask.js';
+import { classifyChatReply } from './consent-matcher.js';
+import { DEFAULT_CONSENT_SETTINGS } from './meeting-consent.js';
 import { splitZoomChatLabel } from './zoom.js';
 
 const NOVA_LIKE = { isEnabled: () => true, supportsModeChanges: () => true };
@@ -123,6 +125,11 @@ function commandsTriggeredBy(message: string): string[] {
     if (matchesChatCommand(message, details.startCommand)) triggered.push('start');
     if (matchesChatCommand(message, details.helpCommand)) triggered.push('help');
     if (parseChatQuestion(message, true)) triggered.push('ask');
+    // A reply to the meeting consent notice, which is read ahead of every
+    // command above (meeting-consent.ts).
+    if (classifyChatReply(message, DEFAULT_CONSENT_SETTINGS.consentPhrases, DEFAULT_CONSENT_SETTINGS.objectionPhrases)) {
+        triggered.push('consent-reply');
+    }
     return triggered;
 }
 
@@ -160,8 +167,9 @@ test('every command the help reply lists is accepted by its matcher', () => {
         .join(' ')
         .match(/"LMA [^"]+"/g)!
         .map((quoted) => quoted.slice(1, -1)))];
-    // leave, pause, start, ask and help, plus one canonical form per mode command.
-    assert.equal(listed.length, 5 + ASSISTANT_CHAT_COMMANDS.length);
+    // leave, pause, start, ask and help, one canonical form per mode command,
+    // and the two consent replies.
+    assert.equal(listed.length, 5 + ASSISTANT_CHAT_COMMANDS.length + 2);
     for (const command of listed) {
         assert.ok(
             commandsTriggeredBy(command).length === 1,
@@ -214,6 +222,13 @@ test('the help reply leaves out the mode commands when no assistant can change m
     }
     assert.equal(chatHelpMessages(NO_ASSISTANT).length, 1);
     assert.equal(chatHelpMessages(NOVA_LIKE).length, 3);
+});
+
+test('the help reply lists the consent replies only while the meeting runs a consent flow', () => {
+    assert.ok(!chatHelpMessages(NO_ASSISTANT, false, false).join(' ').includes('LMA consent'));
+    const withConsent = chatHelpMessages(NO_ASSISTANT, false, true);
+    assert.equal(withConsent.length, 2);
+    assert.ok(withConsent[1].includes('"LMA consent"') && withConsent[1].includes('"LMA no consent"'));
 });
 
 test('every help message is one short line', () => {

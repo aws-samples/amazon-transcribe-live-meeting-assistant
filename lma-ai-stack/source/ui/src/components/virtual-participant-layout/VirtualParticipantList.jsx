@@ -51,6 +51,12 @@ import {
 import ZoomCredentialsManager from './ZoomCredentialsManager';
 import ChromeProfileManager from './ChromeProfileManager';
 import { MAX_AGENDA_CHARS } from '../common/agenda';
+import {
+  MEETING_CONSENT_OPTIONS,
+  meetingConsentChoiceAvailable,
+  meetingConsentInput,
+  meetingConsentOptionsFor,
+} from './meeting-consent-options';
 
 import '@cloudscape-design/global-styles/index.css';
 
@@ -122,6 +128,13 @@ const VirtualParticipantList = () => {
   // task-definition default); users untick to launch a VP that records audio +
   // transcript only.
   const [enableVideoRecording, setEnableVideoRecording] = useState(true);
+  const [meetingConsentChoice, setMeetingConsentChoice] = useState('default');
+  // A choice the selected platform cannot support goes back to the default.
+  useEffect(() => {
+    if (!meetingConsentChoiceAvailable(meetingConsentChoice, createForm.meetingPlatform)) {
+      setMeetingConsentChoice('default');
+    }
+  }, [createForm.meetingPlatform, meetingConsentChoice]);
   const [notification, setNotification] = useState(null);
   const [isCreating, setIsCreating] = useState(false);
   const [creatingType, setCreatingType] = useState(null);
@@ -551,6 +564,9 @@ const VirtualParticipantList = () => {
       const agendaText = (createForm.agenda || '').trim();
       if (agendaText) vpInput.agenda = agendaText;
 
+      // Stored on the VP row too, and read by the VP when it starts.
+      Object.assign(vpInput, meetingConsentInput(meetingConsentChoice));
+
       // Add scheduling fields if this is a scheduled VP
       if (isScheduled && meetingTimestamp) {
         vpInput.meetingTime = meetingTimestamp;
@@ -642,6 +658,7 @@ const VirtualParticipantList = () => {
       setMeetingTimeError('');
       setConsentChecked(false);
       setEnableVideoRecording(true);
+      setMeetingConsentChoice('default');
 
       loadParticipants();
 
@@ -961,6 +978,29 @@ const VirtualParticipantList = () => {
                 rows={4}
                 ariaLabel="Agenda, one item per line"
                 invalid={agendaTooLong}
+              />
+            </FormField>
+
+            <FormField
+              label="Meeting consent"
+              description={
+                'Whether participants are told the meeting is recorded and transcribed, and whether the Virtual ' +
+                'Participant waits for their consent first. The deployment may not allow a less strict choice than ' +
+                'its own, in which case its own applies. Once recording has been withheld after it started (an ' +
+                'objection, or a newcomer who has not consented yet), the screen recording stays off for the rest ' +
+                'of the meeting; the transcript and audio recording resume.'
+              }
+              stretch
+            >
+              <Select
+                selectedOption={
+                  meetingConsentOptionsFor(createForm.meetingPlatform).find(
+                    (option) => option.value === meetingConsentChoice,
+                  ) || MEETING_CONSENT_OPTIONS[0]
+                }
+                onChange={({ detail }) => setMeetingConsentChoice(detail.selectedOption.value)}
+                options={meetingConsentOptionsFor(createForm.meetingPlatform)}
+                ariaLabel="Meeting consent"
               />
             </FormField>
 

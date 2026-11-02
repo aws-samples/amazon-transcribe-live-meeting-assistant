@@ -39,6 +39,7 @@ import {
  */
 const REASONS: ReadonlyArray<readonly [ExitReasonCode, boolean]> = [
     ['end-command', true],
+    ['consent-objection', true],
     ['alone-in-meeting', true],
     ['removed-from-meeting', true],
     ['host-ended', true],
@@ -76,6 +77,11 @@ test('every reason code has prose of its own', () => {
     for (const message of messages) {
         assert.ok(message.endsWith('.'), `not a sentence: ${message}`);
     }
+});
+
+test('the consent-objection message names the objector when the platform showed one', () => {
+    assert.equal(formatExitMessage({ reason: 'consent-objection', requestedBy: 'Bo Chen' }), 'Left after Bo Chen objected to recording.');
+    assert.equal(formatExitMessage({ reason: 'consent-objection' }), 'Left after a participant objected to recording.');
 });
 
 test('the never-joined message does not read as a successful meeting', () => {

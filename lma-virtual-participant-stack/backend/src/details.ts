@@ -353,6 +353,8 @@ export function matchesChatCommand(message: string, command: string): boolean {
  */
 export type ExitReasonCode =
   | 'end-command'         // attendee typed "LMA leave"/"LMA end"/etc. in chat
+  | 'consent-objection'   // a participant objected to recording, and the
+                          // deployment's consent settings say to leave then
   | 'alone-in-meeting'    // VP is the only attendee left
   | 'removed-from-meeting'// host kicked the VP, or VP removed by platform
   | 'host-ended'          // host ended the meeting for everyone
@@ -396,6 +398,7 @@ export function didJoinMeeting(info: ExitInfo): boolean {
     case 'never-joined':
       return false;
     case 'end-command':
+    case 'consent-objection':
     case 'alone-in-meeting':
     case 'removed-from-meeting':
     case 'host-ended':
@@ -469,7 +472,7 @@ export interface ExitInfo {
   /** Platform-specific identifier of the exact branch (e.g. 'ZOOM_END_DIALOG',
    *  'HANGUP_BUTTON_HIDDEN', 'attendees-left'). Logged but not displayed. */
   trigger?: string;
-  /** When reason==='end-command', the parsed sender name (when available). */
+  /** When reason==='end-command' or 'consent-objection', the parsed sender name (when available). */
   requestedBy?: string | null;
   /** When reason==='end-command', the chat-message body that matched. */
   matchedMessage?: string;
@@ -486,6 +489,10 @@ export function formatExitMessage(info: ExitInfo): string {
       return info.requestedBy
         ? `Asked to leave by ${info.requestedBy}.`
         : 'Asked to leave by a participant.';
+    case 'consent-objection':
+      return info.requestedBy
+        ? `Left after ${info.requestedBy} objected to recording.`
+        : 'Left after a participant objected to recording.';
     case 'alone-in-meeting':
       return 'Everyone else left the meeting.';
     case 'removed-from-meeting':

@@ -30,6 +30,7 @@ title: "Virtual Participant"
 - [Transcription Engine](#transcription-engine)
 - [Chat Introduction Message](#chat-introduction-message)
 - [In-meeting Chat Commands](#in-meeting-chat-commands)
+- [Meeting Consent](#meeting-consent)
 - [Troubleshooting](#troubleshooting)
 - [Developer Testing](#developer-testing)
 - [See Also](#see-also)
@@ -247,6 +248,7 @@ Most values are one of these fixed strings:
 | --- | --- |
 | Never got in | `pre-join:not-admitted`, `pre-join:no-join-button`, `pre-join:no-name-input`, `pre-join:goto-failed`, `pre-join:ai-error-screen`, `acs-not-admitted`, `sdk-not-admitted`, `enterprise-login-timeout` |
 | Asked to leave in chat | `chat` |
+| Left after a participant objected to recording ([Meeting Consent](meeting-consent.md#objections)) | `consent-objection` |
 | The meeting ended | `post-meeting-screen`, `meeting-ended-text`, `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |
 | Everyone else left, or the VP was removed | `attendees-left`, `acs-participants`, `sdk-participants`, `participants-watchdog`, `participants-ui:counter-gone`, `participants-ui:page-dead`, `attendee-badge-missing` |
 | Ran out of time, or lost the page | `meetingTimeout`, `renderer-crash`, `navigated-away`, `URL_CHANGE_BLANK`, `ZOOM_END_DIALOG_ABORTED` |
@@ -648,6 +650,7 @@ Anyone in the meeting can control the VP by typing one of these commands in the 
 | `LMA start` | Resumes a paused session. |
 | `LMA help` | The VP posts the list of chat commands in the meeting chat. |
 | `LMA ask <question>`, `@LMA <question>` | The meeting assistant answers the question in the meeting chat, using the meeting's transcript. See [Asking the Meeting Assistant from Chat](#asking-the-meeting-assistant-from-chat). |
+| `I consent`, `LMA consent` / `I object`, `LMA no consent` | In a meeting whose consent mode is Notify or Opt-in, a reply to the consent notice. See [Meeting Consent](#meeting-consent). |
 
 When a Nova Sonic voice assistant is configured, the assistant-mode commands (`LMA translate`, `LMA translate <language>`, `LMA assist`, `LMA listen`, `LMA always`, `LMA wake`) also work, and `LMA help` lists them, along with the spoken forms: the wake phrase plus a mode ("Hey Alex, switch to translator mode") and "stop translating", which leaves translator mode and needs no wake phrase; see [Changing Mode During a Meeting](voice-assistant.md#changing-mode-during-a-meeting). With no voice assistant, or with ElevenLabs, which cannot change mode during a meeting, `LMA help` leaves them out.
 
@@ -669,6 +672,32 @@ Notes:
 - **Limits.** Each participant may ask once every 20 seconds (told once if they ask sooner), questions over 500 characters are declined, and one question is answered at a time. On the Teams web client the sender is not visible, so everyone there shares one 20-second limit. Answers usually take a few seconds and can take longer when the agent searches; other commands are not held up meanwhile. If no answer arrives within 90 seconds the VP says so and takes the next question. While `LMA pause` is in effect questions are not sent to the meeting assistant; an explicit `LMA ask` is told to wait for `LMA start`. An answer that becomes ready while the VP is posting another message (a help or mode reply, say) can interleave with it on any platform; it is most likely on Webex and Chime, which post by typing.
 - **The VP never answers itself.** Its answers begin `Live Meeting Assistant`, which cannot be read as a question; its configured introduction, recording-start, recording-stop and exit messages are recognised and ignored; and messages from the VP's own display name are ignored.
 - The Virtual Participant logs each question and answer as `[chat-ask] question ...` and `[chat-ask] answered platform=<platform> chars=<n> messages=<n> ms=<n>`, without the question text. The meeting-assistant function's own log records the request it receives, question included, as it does for every meeting-assistant request.
+
+## Meeting Consent
+
+When the deployment's consent mode (the Meeting Consent section of the
+Configuration page), or the **Meeting consent** choice made on the Create Virtual
+Participant form, is Notify or Opt-in, the VP posts a notice in the meeting chat
+once it is admitted and reads the replies. In Notify it records and transcribes
+from the start, and stops at once when a participant objects. In Opt-in it joins
+with capture withheld (no transcript, audio or screen recording, voice assistant
+or stored chat) and starts only when every participant present has consented in
+the chat, or when the meeting's owner has confirmed in LMA that everyone agreed;
+until then its detail line reads **Waiting for consent: …** and `LMA start` is
+refused. It keeps screenshots of the chat and the participant list as evidence
+when consent is granted and on every objection, and can be set to leave the
+meeting after an objection. With mode Off it behaves as before, apart from a
+short read of its own row before joining, where a per-meeting choice is stored;
+see [Choosing the mode for one meeting](meeting-consent.md#choosing-the-mode-for-one-meeting).
+
+A reply is the whole chat message, as for the commands above: the configured
+consent and objection phrases (by default *"I consent"*, *"I agree"*, *"I
+accept"*, and *"I object"*, *"I do not consent"*, *"stop recording"* and
+others), or `LMA consent`, `LMA no consent` and `LMA object`. Which platforms
+support which rule, how the participants present are counted, and what is
+stored are in [Meeting Consent › Virtual Participant](meeting-consent.md#virtual-participant).
+While the meeting runs a consent flow, `LMA help` adds a line naming
+`LMA consent` and `LMA no consent`.
 
 ## Troubleshooting
 

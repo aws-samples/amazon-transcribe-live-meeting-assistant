@@ -26,6 +26,7 @@ import { configuredWakePhrases } from './stop-request.js';
 import { ASSISTANT_CHAT_COMMANDS } from './assistant-toggles.js';
 import type { VoiceAssistantProvider } from './voice-assistant-interface.js';
 import { chatAskAvailable } from './chat-ask.js';
+import { CONSENT_HELP_LINE, consentHelpActive } from './consent-help.js';
 
 /** What the help reply needs to know about the voice assistant. */
 export type ChatHelpAssistant = Pick<VoiceAssistantProvider, 'isEnabled' | 'supportsModeChanges'>;
@@ -51,7 +52,11 @@ function spokenWakePhrase(): string {
  * with a refusal, so listing them would be advertising something that does not
  * work in this meeting.
  */
-export function chatHelpMessages(assistant: ChatHelpAssistant, canAsk: boolean = chatAskAvailable()): string[] {
+export function chatHelpMessages(
+    assistant: ChatHelpAssistant,
+    canAsk: boolean = chatAskAvailable(),
+    consent: boolean = consentHelpActive(),
+): string[] {
     // `LMA ask` is listed only when a Strands meeting assistant is there to
     // answer it, for the same reason as the mode commands below.
     const ask = canAsk ? `${typed('ask <question>')} to ask the meeting assistant, ` : '';
@@ -74,6 +79,10 @@ export function chatHelpMessages(assistant: ChatHelpAssistant, canAsk: boolean =
         );
     }
 
+    // The consent replies, while the meeting runs a consent flow
+    // (meeting-consent.ts); a meeting without one has nothing to reply to.
+    if (consent) messages.push(CONSENT_HELP_LINE);
+
     return messages;
 }
 
@@ -84,8 +93,10 @@ export function chatHelpMessages(assistant: ChatHelpAssistant, canAsk: boolean =
 export function allChatHelpMessages(): string[] {
     const all: string[] = [];
     for (const canAsk of [true, false]) {
-        all.push(...chatHelpMessages({ isEnabled: () => true, supportsModeChanges: () => true }, canAsk));
-        all.push(...chatHelpMessages({ isEnabled: () => false, supportsModeChanges: () => false }, canAsk));
+        for (const consent of [true, false]) {
+            all.push(...chatHelpMessages({ isEnabled: () => true, supportsModeChanges: () => true }, canAsk, consent));
+            all.push(...chatHelpMessages({ isEnabled: () => false, supportsModeChanges: () => false }, canAsk, consent));
+        }
     }
     return [...new Set(all)];
 }

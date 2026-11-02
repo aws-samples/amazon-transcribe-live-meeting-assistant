@@ -6,6 +6,7 @@ import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { chatHelpMessages } from './chat-help.js';
+import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startZoomSdkServer, ZoomSdkServerHandle } from './zoom-sdk-server.js';
@@ -302,6 +303,15 @@ export default class ZoomSdk {
 
         await substep('In the meeting — posting introduction…');
         await this.sendMessages(page, details.introMessages);
+        // The meeting consent flow, when the meeting runs one (meeting-consent.ts).
+        // The page is LMA's own embed of the Meeting SDK, so one screenshot of it.
+        attachMeetingConsent(page, {
+            send: (messages) => this.sendMessages(page, messages),
+            leave: (objector) => {
+                details.start = false;
+                this.requestEnd({ reason: 'consent-objection', trigger: 'consent-objection', requestedBy: objector });
+            },
+        });
         if (details.start) {
             log.info(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
@@ -350,9 +360,15 @@ export default class ZoomSdk {
                 }
             }
 
+            // The same count the alone-in-meeting check below prefers.
+            const consentCount = snap.domCount >= 0 ? snap.domCount : snap.count;
+            if (consentCount >= 1) meetingConsent.noteAttendeeCount(consentCount);
+
             for (const chat of snap.chats) {
                 const sender = chat.senderName || null;
                 const body = chat.text || '';
+                // A consent reply, or "LMA start" while consent is withheld.
+                if (await meetingConsent.handleChat(sender, body)) continue;
                 if (matchesEndCommand(body)) {
                     log.info(`[zoom-sdk] asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
                     await this.sendMessages(page, exitMessagesFor(sender));

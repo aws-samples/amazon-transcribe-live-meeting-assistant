@@ -8,5 +8,6 @@
   "allowPerMeetingOverride": true,
   "keepEvidenceScreenshots": true,
   "verifierModelId": "amazon.nova-lite-v1:0",
-  "clientsWithoutConsent": "accept_with_warning"
+  "clientsWithoutConsent": "accept_with_warning",
+  "leaveOnObjection": false
 }

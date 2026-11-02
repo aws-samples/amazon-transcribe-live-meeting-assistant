@@ -46,6 +46,7 @@ import {
     stableFingerprintSeed,
 } from './lib/profile.js';
 import { bindLogContext, createLogger, logMeetingPlatform } from './logger.js';
+import { meetingConsent, prepareMeetingConsent } from './consent-runtime.js';
 
 const log = createLogger('main');
 
@@ -740,15 +741,24 @@ const main = async (): Promise<void> => {
                 throw new Error(`Unsupported meeting platform: ${details.invite.meetingPlatform}`);
         }
 
+        // The meeting's consent mode (docs/meeting-consent.md). An opt-in
+        // meeting starts with capture withheld (details.start off) and its
+        // screen recording waits for consent; the platform handler starts the
+        // rest of the flow once it is in the meeting.
+        const consentPlan = await prepareMeetingConsent();
+
         // Start recording service
         recordingService.startRecording();
 
         // Start screen (video) recording in parallel with audio. No-op unless
         // ENABLE_VIDEO_RECORDING is set; runs independently of audio recording.
-        try {
-            await videoRecorder.start(process.env.VP_CALL_ID || '');
-        } catch (error) {
-            log.error('Error starting video recording:', error);
+        // Started by the consent flow instead when it waits for consent.
+        if (!consentPlan.deferVideo) {
+            try {
+                await videoRecorder.start(process.env.VP_CALL_ID || '');
+            } catch (error) {
+                log.error('Error starting video recording:', error);
+            }
         }
 
         // Key frames of the shared screen, stored on the meeting. Same switch
@@ -831,6 +841,19 @@ const main = async (): Promise<void> => {
             stopSenderBypass();
             stopDeviceSpecs();
         } catch { /* never block cleanup */ }
+
+        // The consent flow's timers stop, and the evidence it is still storing
+        // is given a moment to land before the page closes.
+        try {
+            meetingConsent.stop();
+            await Promise.race([meetingConsent.evidenceSettled(), new Promise((r) => setTimeout(r, 15_000))]);
+            // Waited for in full: a stop the flow began (after an objection)
+            // must finish before the stop below, which would otherwise run
+            // over the same recording at the same time.
+            await meetingConsent.videoSettled();
+        } catch (consentError) {
+            log.error('Error stopping the consent flow:', consentError);
+        }
 
         // Stop key frame sampling before transcription, which sends the END
         // event, so a frame being captured is announced while the meeting is

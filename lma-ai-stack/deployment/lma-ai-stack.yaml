@@ -9092,6 +9092,27 @@ Resources:
           #end
         #end
 
+        ## Optional meeting consent choice for this meeting. Only the names the
+        ## consent API knows are stored; whether the deployment allows the
+        ## choice is decided when the VP starts, by the VP before it joins and
+        ## again by the meeting consent resolver when the VP starts the
+        ## meeting's consent. See docs/meeting-consent.md.
+        #if(!$util.isNullOrBlank($ctx.args.input.consentMode))
+          #if(!["off", "notify", "opt_in"].contains($ctx.args.input.consentMode))
+            $util.error("consentMode must be off, notify or opt_in", "BadRequest")
+          #end
+          $util.qr($input.put("consentMode", $ctx.args.input.consentMode))
+        #end
+        #if(!$util.isNullOrBlank($ctx.args.input.consentRule))
+          #if(!["each_participant", "owner_attests"].contains($ctx.args.input.consentRule))
+            $util.error("consentRule must be each_participant or owner_attests", "BadRequest")
+          #end
+          #if($ctx.args.input.consentMode != "opt_in")
+            $util.error("consentRule is only used with consentMode opt_in", "BadRequest")
+          #end
+          $util.qr($input.put("consentRule", $ctx.args.input.consentRule))
+        #end
+
         {
           "version": "2018-05-29",
           "operation": "PutItem",

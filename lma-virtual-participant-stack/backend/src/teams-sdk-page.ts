@@ -117,6 +117,17 @@ w.__lmaParticipantCount = () => {
     return Object.keys(state.call.remoteParticipants).length + 1;
 };
 
+// The display names of the call's other participants, for the meeting consent
+// flow's participant list. One without a name is left out, so the list is
+// shorter than the count and the flow treats it as incomplete.
+w.__lmaParticipantNames = (): string[] | null => {
+    const state = getState();
+    if (!state || !state.call || !state.call.remoteParticipants) return null;
+    return (Object.values(state.call.remoteParticipants) as any[])
+        .map((p) => (p && typeof p.displayName === 'string' ? p.displayName.trim() : ''))
+        .filter((name) => name.length > 0);
+};
+
 w.__lmaSendChat = (message: string) => {
     if (!adapter || !w.__lmaChatReady) {
         pendingOutgoingChat.push(message);

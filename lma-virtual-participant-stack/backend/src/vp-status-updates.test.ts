@@ -422,7 +422,7 @@ test('every mutation selects at least the fields the UI subscribes to', () => {
   assert.deepEqual(missing, [], 'SUBSCRIBED_FIELDS does not cover the subscription');
 
   const mutations = source.split('mutation UpdateVirtualParticipant').slice(1);
-  assert.equal(mutations.length, 6, 'the mutation count in this test needs updating');
+  assert.equal(mutations.length, 7, 'the mutation count in this test needs updating');
   for (const [index, mutation] of mutations.entries()) {
     const selection = mutation.slice(0, mutation.indexOf('`;'));
     assert.ok(
