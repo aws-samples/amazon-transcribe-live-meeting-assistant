@@ -8,8 +8,7 @@ SPDX-License-Identifier: MIT-0
 # Monitoring & Alerting
 
 LMA deploys an SNS topic for operational alerts, 15 alarms that notify it, and
-one CloudWatch dashboard per deployment. (One fewer alarm where the
-stale-meeting reaper is switched off, which removes the alarm that watches it.) Everything described here is created by
+one CloudWatch dashboard per deployment. Everything described here is created by
 `lma-main.yaml` as part of the normal stack deployment — there is nothing extra
 to install — but **one manual step is required before any alert is delivered**:
 the email subscription SNS creates for your `AdminEmail` address starts in

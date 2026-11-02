@@ -593,7 +593,7 @@ def _install_table(monkeypatch, table):
 
 
 def test_the_model_comes_from_the_configuration_when_it_names_one(monkeypatch) -> None:
-    """The parameter's value, as the seeder wrote it into the baseline, is used."""
+    """The value the seeder wrote into the baseline is used."""
     table = _table_with_models({"summaryModelId": "global.anthropic.claude-sonnet-4-6"})
     bedrock = _install_table(monkeypatch, table)
     index.generate_summary("T", None)
@@ -602,7 +602,7 @@ def test_the_model_comes_from_the_configuration_when_it_names_one(monkeypatch) -
     }
 
 
-def test_an_administrators_model_wins_over_the_parameters(monkeypatch) -> None:
+def test_an_administrators_model_wins_over_the_baseline(monkeypatch) -> None:
     table = _table_with_models(
         {"summaryModelId": "global.anthropic.claude-sonnet-4-6"},
         {"summaryModelId": "amazon.nova-pro-v1:0"},

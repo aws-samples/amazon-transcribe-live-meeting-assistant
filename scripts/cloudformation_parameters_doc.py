@@ -366,7 +366,7 @@ CLASSIFICATION: Dict[str, Classification] = {
     # Workshop options
     "ModelValidation": _c(
         DEPLOY_CHECK,
-        "Decides whether the deployment checks that the chosen Amazon Bedrock models can be invoked.",
+        "Decides whether the deployment checks that the shipped default Amazon Bedrock models and the embedding model can be invoked.",
     ),
 }
 

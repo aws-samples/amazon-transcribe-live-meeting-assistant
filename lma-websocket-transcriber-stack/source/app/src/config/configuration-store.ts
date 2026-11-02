@@ -345,8 +345,8 @@ export const transcribeOptionsProblem = (options: TranscribeOptionCombination): 
 };
 
 /**
- * The type of a setting whose default is a stack parameter, as the Python
- * half's `parameter_defaults.json` names it.
+ * The type of a setting read with an environment fallback, as the Python
+ * half's `setting_defaults.json` and `parameter_defaults.json` name it.
  */
 export type SettingType = 'string' | 'integer' | 'number' | 'boolean';
 
@@ -400,11 +400,11 @@ export const coerceSetting = <K extends SettingType>(type: K, raw: unknown): Set
 };
 
 /**
- * The value of a setting whose default is a stack parameter.
+ * The value of a setting, with the task's environment as its fallback.
  *
- * In order of preference, as the Python half's `read_setting`: the resolved
- * section's value (an administrator's change, or else the baseline the seeder
- * wrote from the parameter); the parameter's environment variable; `fallback`.
+ * In order of preference: the resolved section's value (an administrator's
+ * change, or else the baseline the seeder wrote); the environment variable,
+ * which the nested template sets to the shipped default; `fallback`.
  * A value of the wrong type is passed over. An empty environment variable is a
  * value for a text setting and not for the others.
  */

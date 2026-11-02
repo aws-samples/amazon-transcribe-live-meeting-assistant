@@ -263,7 +263,9 @@ Parameters:
       - "true"
       - "false"
     Description: >-
-      Specifies if Amazon Bedrock model access is validated during deployment.
+      Specifies if access to the shipped default Amazon Bedrock models (summaries, meeting
+      assistant and its knowledge bases) and the knowledge base embedding model is validated
+      during deployment.
       Setting this parameter to "false" is useful for automated deployments (e.g. AWS Workshop
       Studio) where Amazon Bedrock model access permissions may not be set up yet.
 
@@ -1869,10 +1871,14 @@ Resources:
     Properties:
       ServiceToken: !GetAtt ValidateParametersFunction.Arn
       ModelValidation: !Ref ModelValidation
-      # The models the summaries, the meeting assistant and the key frames use
-      # are chosen on the Configuration page, which offers only model ids it
-      # knows; the knowledge base embedding model is a deployment's own.
+      # The shipped defaults of the Amazon Bedrock Models section that every
+      # deployment calls (setting_defaults.json, held equal to these by
+      # test_model_validation.py), and the knowledge base embedding model. The
+      # key frame text model is left out: it is called only for meeting video.
+      # A model chosen later on the Configuration page is not checked here.
       BedrockModelIds:
+        - "global.anthropic.claude-sonnet-5-5" # Summaries and meeting insights
+        - "global.anthropic.claude-haiku-4-5-20251001-v1:0" # Meeting assistant and its knowledge bases
         - "amazon.titan-embed-text-v2:0" # Meeting Assistant Bedrock KB embeddings
 
   ##########################################################################

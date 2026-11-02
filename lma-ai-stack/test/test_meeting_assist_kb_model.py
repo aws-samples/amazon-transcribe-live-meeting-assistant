@@ -73,9 +73,6 @@ SETTING_DEFAULTS = CONFIGURATION_LAYER / "lma_config" / "setting_defaults.json"
 LANGUAGE_MODELS = "language_models"
 AGENT_MODEL_SETTING = "meetingAssistModelId"
 KB_MODEL_SETTING = "knowledgeBaseModelId"
-# The name the function's own log message gives the knowledge-base model, asserted
-# by test_the_unusable_model_is_named_in_the_log_when_a_tool_is_withheld.
-KB_MODEL_PARAMETER = "MeetingAssistKnowledgeBaseModelID"
 
 # ── the measurement record ──────────────────────────────────────────────────
 #
@@ -486,7 +483,7 @@ def test_document_search_is_not_offered_when_the_knowledge_base_cannot_generate(
 def test_the_unusable_model_is_named_in_the_log_when_a_tool_is_withheld(
     strands_module, monkeypatch, caplog
 ):
-    """Whoever reads the log needs the id and the parameter, not just the absence."""
+    """Whoever reads the log needs the id and the setting, not just the absence."""
     _kb_call(strands_module, monkeypatch)
     with caplog.at_level("ERROR"):
         strands_module.create_meeting_history_tool(

@@ -12,13 +12,11 @@
     },
     "knowledgeBaseModelId": {
       "type": "string",
-      "default": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-      "formerParameter": "MeetingAssistKnowledgeBaseModelID"
+      "default": "global.anthropic.claude-haiku-4-5-20251001-v1:0"
     },
     "keyframeTextModelId": {
       "type": "string",
-      "default": "amazon.nova-lite-v1:0",
-      "formerParameter": "KeyframeTextModelId"
+      "default": "amazon.nova-lite-v1:0"
     }
   },
   "transcription": {
@@ -144,8 +142,7 @@
   "meeting_agenda": {
     "autoDeriveAfterSeconds": {
       "type": "integer",
-      "default": 300,
-      "formerParameter": "AgendaDerivationAfterSeconds"
+      "default": 300
     }
   }
 }
