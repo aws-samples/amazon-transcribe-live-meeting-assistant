@@ -1108,6 +1108,15 @@ def test_the_meeting_consent_tests_are_opt_in_optional_features() -> None:
     assert "skipif" in names, names
 
 
+def test_the_transcript_deletion_tests_are_opt_in_optional_features() -> None:
+    """They need LMA_TEST_TRANSCRIPT_DELETION=1, and change a deployment-wide setting."""
+    import test_transcript_deletion
+
+    names = [m.name for m in test_transcript_deletion.pytestmark]
+    assert "optional_feature" in names, names
+    assert "skipif" in names, names
+
+
 class _FakeConfigurationStore:
     """The parts of lma_config.ConfigurationStore the consent override uses."""
 
@@ -1179,6 +1188,25 @@ def test_consent_override_puts_back_the_saved_section() -> None:
     assert store.body["meeting_consent"]["notifyNoticeText"] == "Recorded."
     override.restore()
     assert store.body == {"meeting_consent": saved}
+
+
+def test_an_override_of_another_section_changes_only_that_section() -> None:
+    """test_transcript_deletion.py overrides Retention with the same class."""
+    import meeting_consent_probe
+
+    store = _FakeConfigurationStore(
+        {"retention": {"meetingRecordExpirationInDays": 30}, "meeting_consent": {"mode": "notify"}}
+    )
+    override = meeting_consent_probe.ConsentSettingsOverride(store=store, section="retention")
+    override.save()
+    override.apply(transcriptDeletionAfterSummary="immediately")
+    assert store.body["retention"] == {
+        "meetingRecordExpirationInDays": 30,
+        "transcriptDeletionAfterSummary": "immediately",
+    }
+    assert store.body["meeting_consent"] == {"mode": "notify"}
+    override.restore()
+    assert store.body["retention"] == {"meetingRecordExpirationInDays": 30}
 
 
 def test_consent_override_restore_keeps_other_sections_saved_meanwhile_and_retries() -> None:
