@@ -32,7 +32,7 @@
  * Note on pino `redact`: the server's log calls pass a single interpolated
  * message string, and pino's `redact` option only rewrites properties of a
  * logged *object* — it never inspects the rendered `msg`. `PINO_REDACT_OPTIONS`
- * is therefore configured in index.ts as a backstop for object-style logging,
+ * is therefore configured in logger-options.ts as a backstop for object-style logging,
  * but it cannot reach these message strings, which is why the helpers are
  * applied at the call sites too.
  */
@@ -235,7 +235,7 @@ export const PINO_REDACT_PATHS: string[] = [
 
 /**
  * The `redact` option for the Fastify/pino logger, exported as one object so the
- * configuration in index.ts and the test that exercises it cannot drift apart.
+ * configuration in logger-options.ts and the test that exercises it cannot drift apart.
  */
 export const PINO_REDACT_OPTIONS = {
     paths: PINO_REDACT_PATHS,

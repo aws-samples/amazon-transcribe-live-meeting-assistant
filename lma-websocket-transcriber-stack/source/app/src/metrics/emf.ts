@@ -12,17 +12,16 @@
  * CloudWatch documents that EMF needs only the log-writing permission the task
  * already has.
  *
- * **The record must not go through the server's logger.** The Fastify pino
- * instance is configured with a `pino-pretty` transport, so everything written
- * through `server.log` reaches CloudWatch as a human-readable line rather than
- * JSON, and CloudWatch extracts metrics only from JSON. This module therefore
- * writes to stdout directly. A record is a few hundred bytes, comfortably under
- * the 4 KB a single pipe write is atomic for on Linux, so our record is never
- * split in two. That is not quite the same as never being interleaved: a line
- * longer than 4 KB from the pretty transport's own worker -- verbose
- * `[DIARIZATION]` debug output, say -- can itself be split, and a record landing
- * between its halves corrupts that log event and loses this record's metric.
- * Rare, and the alternative is a second log stream to maintain.
+ * **The record must not go through the server's logger.** CloudWatch reads
+ * the metric from a log event that is the EMF record, and the logger wraps
+ * whatever it writes in a record of its own (level, ts, component, the session
+ * fields, msg) and can rewrite properties through its redact paths. This
+ * module therefore writes the record to stdout directly. In its default JSON
+ * format the logger writes to `process.stdout` synchronously as well (see
+ * utils/logger-options.ts), and both run on the main thread, so a log line and
+ * a metric record are written one after the other and never interleave within
+ * one CloudWatch event. `LOG_FORMAT=text` writes from pino-pretty's worker
+ * thread instead, which is for a local run, where no metric is extracted.
  *
  * Unlike the Python emitter, which accumulates for an invocation and flushes
  * once, this one writes immediately. There is no invocation boundary in a
@@ -50,7 +49,7 @@ const defaultSink: MetricSink = (line: string) => {
  *
  * Narrower than `FastifyInstance` on purpose, so the emitter can be constructed
  * in a test with a two-line object, and so nothing here can accidentally route
- * a metric record itself through the pretty-printed logger.
+ * a metric record itself through the server's logger.
  */
 export interface MetricLog {
     error(message: string): void;

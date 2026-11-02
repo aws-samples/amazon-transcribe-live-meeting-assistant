@@ -12,9 +12,11 @@
  * changed, wired exactly as index.ts wires them, and exercises them against the
  * REAL installed fastify@5 / @fastify/websocket@11 / pino-pretty@13 / ws@8:
  *
- *   1. fastify({ logger: { transport: { target: 'pino-pretty', ... } } })
- *      — fastify 5 moved logger config to the transport API; a wrong shape
- *        throws at construction / listen.
+ *   1. fastify({ logger: buildLoggerOptions(...) }) — the logger options
+ *      index.ts builds, in the default JSON format (base, timestamp,
+ *      formatters, mixin, stream) and in the LOG_FORMAT=text format (the
+ *      pino-pretty transport); an option fastify rejects throws at
+ *      construction / ready.
  *   2. server.get(path, { websocket: true }, (socket, request) => ...)
  *      — @fastify/websocket v11 passes the WebSocket as the FIRST arg
  *        (v5 passed a { socket } wrapper as `connection`). Calling
@@ -31,25 +33,24 @@ import fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import WebSocket from 'ws';
 import assert from 'assert';
+import { buildLoggerOptions } from '../src/utils/logger-options';
 
 const PORT = parseInt(process.env['SMOKE_PORT'] ?? '38080', 10);
 const HOST = '127.0.0.1';
 
 async function main(): Promise<void> {
-    // (1) Same logger.transport shape as src/index.ts — must not throw on fastify 5.
+    // (1) The logger options src/index.ts builds — must not throw on fastify 5.
+    // The text format is constructed and closed here; the server below runs
+    // with the default JSON format, as a deployed task does.
+    const textServer = fastify({
+        logger: buildLoggerOptions({ level: 'warn', format: 'text' }),
+        disableRequestLogging: true,
+    });
+    await textServer.ready();
+    await textServer.close();
+
     const server = fastify({
-        logger: {
-            level: 'warn',
-            transport: {
-                target: 'pino-pretty',
-                options: {
-                    ignore: 'pid,hostname',
-                    translateTime: 'SYS:HH:MM:ss.l',
-                    colorize: false,
-                    levelFirst: true,
-                },
-            },
-        },
+        logger: buildLoggerOptions({ level: 'warn' }),
         disableRequestLogging: true,
     });
 
@@ -126,7 +127,7 @@ async function main(): Promise<void> {
 
         assert.ok(handlerGotSocket, 'websocket route handler must have received the socket (upgrade recognized)');
         assert.ok(serverSawMessage, 'server-side message handler (v11 signature) must have fired');
-        console.log('PASS: fastify 5 booted with pino-pretty transport, health route 200, and @fastify/websocket v11 echoed the audio frame.');
+        console.log('PASS: fastify 5 booted with the JSON and text logger options, health route 200, and @fastify/websocket v11 echoed the audio frame.');
     } finally {
         await server.close();
     }

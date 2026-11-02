@@ -94,9 +94,8 @@ The stack's `LogLevel` parameter sets the threshold through the container's
 `LOG_LEVEL` variable. At `WARN` or `ERROR`, `INFO` lines are not written,
 except for the participant's lifecycle lines: start-up, its status changes, the
 `VP exit:` line that records why it left, and the shutdown-signal lines. Those
-are written at every level. For a local run,
-`LOG_FORMAT=text` writes `<ts> <LEVEL> [<component>] <msg>` lines instead of
-JSON.
+are written at every level. For a local run, `LOG_FORMAT=text` writes
+`<ts> <LEVEL> [<component>] <msg>` lines instead of JSON.
 
 In the JSON records, the values of credential-named fields (passwords, tokens,
 secrets, API keys), JSON Web Tokens and bearer tokens in a message, and the
@@ -133,6 +132,23 @@ filter level = "ERROR"
 filter @message like "VP exit:"
 | parse @message /trigger=(?<trigger>[^\s"]+)/
 | stats count() by trigger
+```
+
+The WebSocket transcriber writes JSON records too, with `ts`, `level`,
+`component` (always `websocket-transcriber`) and `msg`. Each record written for
+a connection also has `sessionId`, one per WebSocket connection, and `callId`,
+from the moment the connection's `START` frame names the call; records written
+outside a connection, such as start-up and health-check lines, have neither. Its bracket markers (`[AUTH]`,
+`[TRANSCRIBING]`, `[ASR]`, `[DIARIZATION]`) are in `msg`. The stack's
+`LogLevel` parameter sets its threshold through `WS_LOG_LEVEL`, and
+`LOG_FORMAT=text` gives readable lines for a local run. Because both components
+write `callId`, one query over both log groups reads a meeting end to end:
+
+```
+# One meeting across the Virtual Participant and the transcriber
+fields @timestamp, @log, component, level, msg
+| filter callId = "<call-id>"
+| sort @timestamp asc
 ```
 
 A field filter such as `vpId = "…"` matches only JSON lines. To include
