@@ -10,6 +10,7 @@ title: "Troubleshooting"
 - [CloudFormation Deployment Failures](#cloudformation-deployment-failures)
 - [Service Quotas](#service-quotas)
 - [Runtime Monitoring via CloudWatch](#runtime-monitoring-via-cloudwatch)
+  - [Log Format](#log-format)
 - [Common Issues](#common-issues)
   - [Deployment Fails on Nested Stack](#deployment-fails-on-nested-stack)
   - [Meeting Stuck In Progress](#meeting-stuck-in-progress)
@@ -68,6 +69,76 @@ Use the following paths to access logs for each LMA component:
 - **Call Event Processor Lambda**: Lambda console > AISTACK-CallEventProcessor > Monitor > View logs in CloudWatch
 - **AppSync API**: AppSync console > CallAnalytics-LMA > Monitoring > View logs in CloudWatch
 - **Step Functions**: For VP scheduling issues, check the Step Functions execution history in the Step Functions console
+
+### Log Format
+
+The Virtual Participant writes its start-up, status, exit and shutdown lines,
+and those of a first set of its modules, to CloudWatch as JSON objects, one per
+line. CloudWatch Logs Insights discovers the fields of a JSON line by itself, so
+a query can filter on them without a `parse` step. The meeting-platform
+handlers (Chime, Zoom, Teams and Webex), the voice assistants and the
+transcription path still write plain text, as do the container's start-up
+script and Chromium.
+
+| Field | What it holds |
+|-------|---------------|
+| `ts` | When the line was written, as an ISO 8601 UTC timestamp. |
+| `level` | `DEBUG`, `INFO`, `WARN` or `ERROR`. |
+| `component` | The part of the participant that wrote it, such as `main` (start-up, joining and exit), `status-manager` or `keyframe-sampler`. |
+| `msg` | The human-readable message. The bracket markers this guide and the feature guides refer to, such as `[stop-request]` or `VP exit:`, are in this text. |
+| `vpId` | The Virtual Participant's id, from the moment the participant starts. |
+| `callId` | The meeting's call id, from the point the participant has one. |
+| `meetingPlatform` | `CHIME`, `ZOOM`, `TEAMS` or `WEBEX`. |
+
+A part of the participant may add fields of its own for a narrower scope.
+
+The stack's `LogLevel` parameter sets the threshold through the container's
+`LOG_LEVEL` variable. At `WARN` or `ERROR`, `INFO` lines are not written,
+except for the participant's lifecycle lines: start-up, its status changes, the
+`VP exit:` line that records why it left, and the shutdown-signal lines. Those
+are written at every level. For a local run,
+`LOG_FORMAT=text` writes `<ts> <LEVEL> [<component>] <msg>` lines instead of
+JSON.
+
+In the JSON records, the values of credential-named fields (passwords, tokens,
+secrets, API keys), JSON Web Tokens and bearer tokens in a message, and the
+meeting password are written as `[REDACTED]`.
+
+Example Logs Insights queries over the Virtual Participant's log group:
+
+```
+# Everything one participant wrote, JSON records and plain-text lines alike.
+# Each participant writes to a log stream of its own: find it from a status
+# line, which spells the id as "VP <id>" in either format...
+fields @logStream
+| filter @message like "VP <virtual-participant-id>"
+| limit 1
+
+# ...then read that stream in order.
+fields @timestamp, level, component, msg, @message
+| filter @logStream = "<log-stream>"
+| sort @timestamp asc
+
+# Only its JSON records
+fields @timestamp, level, component, msg
+| filter vpId = "<virtual-participant-id>"
+| sort @timestamp asc
+
+# Where errors are coming from
+filter level = "ERROR"
+| stats count() by component
+
+# Why participants left, counted. The pattern stops at a space or a quote, so
+# it reads both a JSON line and a plain-text line.
+filter @message like "VP exit:"
+| parse @message /trigger=(?<trigger>[^\s"]+)/
+| stats count() by trigger
+```
+
+A field filter such as `vpId = "…"` matches only JSON lines. To include
+plain-text lines too, add `or @message like "…"`. In a JSON line a double quote
+inside the message is written as `\"`, so search for a part of the message
+that has no quotes in it.
 
 ## Common Issues
 

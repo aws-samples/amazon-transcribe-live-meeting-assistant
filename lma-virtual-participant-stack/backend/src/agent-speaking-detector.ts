@@ -20,6 +20,9 @@
 
 import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
+import { createLogger } from './logger.js';
+
+const log = createLogger('agent-speaking-detector');
 
 export interface AgentSpeakingDetectorOptions {
   /** PulseAudio source device to listen to. Default: agent_output.monitor */
@@ -68,11 +71,11 @@ export class AgentSpeakingDetector extends EventEmitter {
   /** Begin recording from PulseAudio and monitoring magnitude. */
   start(): void {
     if (this.proc) {
-      console.log('🎙️  AgentSpeakingDetector already running');
+      log.info('🎙️  AgentSpeakingDetector already running');
       return;
     }
 
-    console.log(
+    log.info(
       `🎙️  AgentSpeakingDetector starting: device=${this.sourceName}, ` +
         `rate=${this.sampleRate}, onRms=${this.onRms}, offMs=${this.offMs}`,
     );
@@ -101,11 +104,11 @@ export class AgentSpeakingDetector extends EventEmitter {
 
     this.proc.stderr?.on('data', (data: Buffer) => {
       const msg = data.toString().trim();
-      if (msg) console.log(`🎙️  agent-detector pacat: ${msg}`);
+      if (msg) log.info(`🎙️  agent-detector pacat: ${msg}`);
     });
 
     this.proc.on('close', (code) => {
-      console.log(`🎙️  AgentSpeakingDetector pacat exited (code=${code})`);
+      log.info(`🎙️  AgentSpeakingDetector pacat exited (code=${code})`);
       this.proc = null;
       if (this._isSpeaking) {
         this._isSpeaking = false;
@@ -114,7 +117,7 @@ export class AgentSpeakingDetector extends EventEmitter {
     });
 
     this.proc.on('error', (err) => {
-      console.error('🎙️  AgentSpeakingDetector pacat error:', err);
+      log.error('🎙️  AgentSpeakingDetector pacat error:', err);
     });
   }
 
@@ -131,7 +134,7 @@ export class AgentSpeakingDetector extends EventEmitter {
       this._isSpeaking = false;
       this.emit('stopped');
     }
-    console.log('🎙️  AgentSpeakingDetector stopped');
+    log.info('🎙️  AgentSpeakingDetector stopped');
   }
 
   /** Silence required before 'stopped' is emitted, so 'stopped' trails the speech by this much. */
@@ -163,7 +166,7 @@ export class AgentSpeakingDetector extends EventEmitter {
     // Optional periodic RMS log for tuning (disabled by default).
     if (this.logEveryMs > 0 && now - this.lastLogTs >= this.logEveryMs) {
       this.lastLogTs = now;
-      console.log(
+      log.info(
         `🎙️  RMS=${rms.toFixed(0)} speaking=${this._isSpeaking} onRms=${this.onRms}`,
       );
     }
@@ -172,14 +175,14 @@ export class AgentSpeakingDetector extends EventEmitter {
       this.lastHighTs = now;
       if (!this._isSpeaking) {
         this._isSpeaking = true;
-        console.log(
+        log.info(
           `🎙️  Agent speaking ON  (RMS=${rms.toFixed(0)}, threshold=${this.onRms})`,
         );
         this.emit('started');
       }
     } else if (this._isSpeaking && now - this.lastHighTs >= this.offMs) {
       this._isSpeaking = false;
-      console.log(
+      log.info(
         `🔇 Agent speaking OFF (RMS=${rms.toFixed(0)}, silence=${now - this.lastHighTs}ms)`,
       );
       this.emit('stopped');

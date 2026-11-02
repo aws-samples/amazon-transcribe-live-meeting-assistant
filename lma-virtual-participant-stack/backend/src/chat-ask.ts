@@ -39,6 +39,9 @@ import { details, matchesChatCommand, matchesEndCommand } from './details.js';
 import { parseAssistantChatCommand } from './assistant-toggles.js';
 import { normalizeChatText } from './chat-text.js';
 import { toSpokenText } from './spoken-text.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('chat-ask');
 
 /** The meeting platforms, as the chat handlers name themselves. */
 export type ChatPlatform = 'zoom' | 'zoom-sdk' | 'teams' | 'teams-sdk' | 'webex' | 'chime';
@@ -332,13 +335,13 @@ export function createChatAnswerer(
             // Read rather than spoken, so links keep their addresses.
             const plain = toSpokenText(raw, { keepUrls: true });
             const messages = splitForChat(plain || 'I have no answer to that.', limit);
-            console.log(
+            log.info(
                 `[chat-ask] answered platform=${platform} chars=${plain.length} messages=${messages.length}`
                     + ` ms=${now() - started}`,
             );
             return messages;
         } catch (error) {
-            console.warn('[chat-ask] the meeting assistant did not answer:', error);
+            log.warn('[chat-ask] the meeting assistant did not answer:', error);
             return reply('I could not get an answer from the meeting assistant just now.');
         } finally {
             busy = false;
@@ -363,9 +366,9 @@ export function startChatAnswer(
     send: (messages: string[]) => Promise<void>,
     answerer: ChatAnswerer = meetingAnswerer,
 ): Promise<void> {
-    console.log(`[chat-ask] question platform=${platform} explicit=${parsed.explicit} chars=${parsed.question.length}`);
+    log.info(`[chat-ask] question platform=${platform} explicit=${parsed.explicit} chars=${parsed.question.length}`);
     return answerer
         .answer(parsed, sender, platform)
         .then((messages) => (messages.length ? send(messages) : undefined))
-        .catch((error) => console.warn('[chat-ask] could not post the answer:', error));
+        .catch((error) => log.warn('[chat-ask] could not post the answer:', error));
 }

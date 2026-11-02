@@ -33,6 +33,9 @@
 import { randomUUID } from 'node:crypto';
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
+import { createLogger } from './logger.js';
+
+const log = createLogger('metering');
 
 export const PK_PREFIX = 'mtr#';
 export const TABLE_ENV_VAR = 'METERING_TABLE_NAME';
@@ -184,7 +187,7 @@ export const recordMetering = async (
         await client.send(new PutItemCommand({ TableName: table, Item: item }));
         return true;
     } catch (error) {
-        console.warn(
+        log.warn(
             `[METERING] could not write the ${service} record for ${callId}: ${
                 error instanceof Error ? error.message : String(error)
             }`,
@@ -322,7 +325,7 @@ export const resolveComputeSize = async (
             return { vcpus, memoryMiB, architecture: priceArchitecture(), sizeSource: 'ECS task metadata' };
         }
     } catch (error) {
-        console.warn(`[METERING] could not read the task size: ${error instanceof Error ? error.message : error}`);
+        log.warn(`[METERING] could not read the task size: ${error instanceof Error ? error.message : error}`);
     }
     return fallback;
 };

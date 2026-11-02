@@ -45,6 +45,9 @@ import {
     resolveTranslatorLanguage,
     supportedTranslatorLanguageNames,
 } from './translator-languages.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('assistant-toggles');
 
 /**
  * Which surface asked for the change, recorded on every toggle so one log line
@@ -605,7 +608,7 @@ export async function applyAssistantChatCommand(
         );
     }
     if (command.twoLanguages !== undefined) {
-        console.log(formatChatRefusalLog(requestedBy, 'two translator languages named'));
+        log.info(formatChatRefusalLog(requestedBy, 'two translator languages named'));
         return [
             `${prefix} name one language and I will translate between it and the meeting's language,`
                 + ' for example "LMA translate French".',
@@ -613,7 +616,7 @@ export async function applyAssistantChatCommand(
     }
     if (command.unsupportedLanguage !== undefined) {
         const detail = `unsupported translator language ${command.unsupportedLanguage}`;
-        console.log(formatChatRefusalLog(requestedBy, detail));
+        log.info(formatChatRefusalLog(requestedBy, detail));
         return [
             `${prefix} I can't translate into "${command.unsupportedLanguage}". `
                 + `Supported languages: ${supportedTranslatorLanguageNames().join(', ')}.`,
@@ -627,7 +630,7 @@ export async function applyAssistantChatCommand(
     if (command.translatorLanguage !== undefined) {
         const own = meetingLanguage(details.transcribeLanguageCode, details.transcribePreferredLanguage);
         if (own && own.name === command.translatorLanguage) {
-            console.log(formatChatRefusalLog(requestedBy, `${own.name} is the meeting's own language`));
+            log.info(formatChatRefusalLog(requestedBy, `${own.name} is the meeting's own language`));
             return [
                 `${prefix} ${own.name} is the language this meeting is transcribed in.`
                     + ' Name the language to translate it into, for example "LMA translate French".',
@@ -638,7 +641,7 @@ export async function applyAssistantChatCommand(
 
     const sent = restore.requestFor(command);
     if (sent.activationMode !== command.activationMode) {
-        console.log(
+        log.info(
             `${ASSISTANT_TOGGLE_LOG_TAG} requesting restore of activationMode=${sent.activationMode}`
                 + ` on leaving an always-listening meeting mode for meetingMode=${command.meetingMode}`,
         );

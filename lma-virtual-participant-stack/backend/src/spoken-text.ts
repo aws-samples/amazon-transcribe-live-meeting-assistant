@@ -31,6 +31,10 @@
  * keeps its address after its text and a bare URL is left whole.
  */
 
+import { createLogger } from './logger.js';
+
+const logger = createLogger('spoken-text');
+
 export interface SpokenTextOptions {
     /** Keep link addresses, for text that is read rather than spoken: a bare
      *  URL is left whole, and a link becomes "text (address)". */
@@ -256,7 +260,7 @@ export function toSpokenText(markdown: string, options: SpokenTextOptions = {}):
  * Shared by the Nova Sonic and ElevenLabs agents, which both speak the result
  * rather than render it.
  */
-export function spokenStrandsAnswer(responsePayload: unknown, log: (line: string) => void = console.log): string {
+export function spokenStrandsAnswer(responsePayload: unknown, log: (line: string) => void = logger.info): string {
     const message = (responsePayload as { message?: unknown } | null)?.message;
     if (!message) return JSON.stringify(responsePayload);
     if (typeof message !== 'string') return JSON.stringify(message);

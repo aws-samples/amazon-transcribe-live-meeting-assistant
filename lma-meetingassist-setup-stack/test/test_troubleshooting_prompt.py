@@ -308,11 +308,35 @@ def test_the_shipped_prompt_carries_the_rules_the_agent_is_wrong_without(
 def test_the_trigger_example_stops_at_the_next_field() -> None:
     """The "VP exit:" line is space-separated and other fields can follow
     trigger=, so a greedy glob would give every exit its own bucket and make
-    the count useless. The example captures up to the next space."""
+    the count useless. The example captures up to the next space, or the
+    closing quote of a JSON record's message."""
     text = PROMPT_FILE.read_text(encoding="utf-8")
 
     assert 'parse @message "trigger=*"' not in text
-    assert r"/trigger=(?<trigger>\S+)/" in text
+    assert r'/trigger=(?<trigger>[^\s"]+)/' in text
+    assert r"/trigger=(?<trigger>\S+)/" not in text
+
+
+def test_the_trigger_example_reads_a_plain_line_and_a_json_record_alike() -> None:
+    import re
+
+    text = PROMPT_FILE.read_text(encoding="utf-8")
+    pattern = re.search(r"parse @message /(.+?)/\n", text).group(1).replace("(?<", "(?P<")
+    plain = "VP exit: reason=left trigger=chat:leave-command"
+    record = (
+        '{"ts":"2026-11-02T10:00:00.000Z","level":"INFO","component":"main",'
+        '"msg":"VP exit: reason=left trigger=chat:leave-command","vpId":"vp-1"}'
+    )
+
+    for line in (plain, record):
+        assert re.search(pattern, line).group("trigger") == "chat:leave-command"
+
+
+def test_the_prompt_describes_the_json_line_fields() -> None:
+    text = prompt_text()
+
+    for field in ("vpId", "callId", "meetingPlatform", "level", "msg", "component"):
+        assert field in text
 
 
 @pytest.mark.parametrize(

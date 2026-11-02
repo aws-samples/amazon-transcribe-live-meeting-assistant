@@ -10,10 +10,13 @@ import {
   AssistantReconfigureRequest,
   formatAssistantToggleLog,
 } from './assistant-toggles.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('noop-agent');
 
 export class NoOpAgent implements VoiceAssistantProvider {
   async start(): Promise<void> {
-    console.log('Voice assistant disabled (provider=none)');
+    log.info('Voice assistant disabled (provider=none)');
   }
 
   async stop(): Promise<void> {
@@ -38,7 +41,7 @@ export class NoOpAgent implements VoiceAssistantProvider {
       activationModeAfter: 'wake_phrase',
       detail: 'the voice assistant is not enabled for this meeting',
     };
-    console.log(formatAssistantToggleLog(request, outcome));
+    log.info(formatAssistantToggleLog(request, outcome));
     return outcome;
   }
 

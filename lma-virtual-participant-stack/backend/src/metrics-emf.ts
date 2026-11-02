@@ -23,6 +23,9 @@
  */
 
 import * as catalogue from './metrics-catalogue.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('metrics-emf');
 
 export type MetricSink = (line: string) => void;
 
@@ -64,7 +67,7 @@ export class MetricEmitter {
         if (!this.enabled) {
             if (!this.warnedDisabled) {
                 this.warnedDisabled = true;
-                console.warn(
+                log.warn(
                     `${catalogue.METRIC_NAMESPACE_ENV_VAR} is unset, so this Virtual Participant `
                     + 'publishes no application metrics.',
                 );
@@ -75,11 +78,11 @@ export class MetricEmitter {
         if (unit === undefined) {
             // Refused rather than passed through: an unlisted name would create
             // a series that no widget reads.
-            console.error(`refusing to emit metric '${name}': not in src/metrics-catalogue.ts`);
+            log.error(`refusing to emit metric '${name}': not in src/metrics-catalogue.ts`);
             return;
         }
         if (!Number.isFinite(value)) {
-            console.error(`refusing to emit metric '${name}' with non-finite value ${value}`);
+            log.error(`refusing to emit metric '${name}' with non-finite value ${value}`);
             return;
         }
         const record = {
@@ -101,7 +104,7 @@ export class MetricEmitter {
             this.sink(JSON.stringify(record));
         } catch (error) {
             // Measuring a meeting must never be able to interrupt it.
-            console.error(`could not write an application metric record: ${String(error)}`);
+            log.error(`could not write an application metric record: ${String(error)}`);
         }
     }
 }

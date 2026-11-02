@@ -23,6 +23,9 @@ import {
 } from '@aws-sdk/client-bedrock-runtime';
 import { randomUUID } from 'crypto';
 import { isNovaThrottle, noteNovaThrottle, throttleBackoffMs } from './nova-throttle.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('tool-ack-clip');
 
 /** What the fallback says. One short sentence that is true whatever was asked. */
 export const TOOL_ACK_PHRASE = 'One moment, let me look that up.';
@@ -90,14 +93,14 @@ export async function renderToolAckClip(
     noteNovaThrottle('tool-ack-clip', `attempt=${attempt + 1}/${attempts}`);
     if (attempt + 1 >= attempts) break;
     const delay = throttleBackoffMs(attempt, { ...TOOL_ACK_RENDER_BACKOFF, random: options.random });
-    console.warn(`[tool-ack] action=render-throttled attempt=${attempt + 1} retry_in_ms=${delay}`);
+    log.warn(`[tool-ack] action=render-throttled attempt=${attempt + 1} retry_in_ms=${delay}`);
     await sleep(delay);
     if (options.shouldContinue && !options.shouldContinue()) {
-      console.warn('[tool-ack] action=render-abandoned reason=agent-stopped');
+      log.warn('[tool-ack] action=render-abandoned reason=agent-stopped');
       return null;
     }
   }
-  console.warn(`[tool-ack] action=render-skipped reason=throttled attempts=${attempts}`);
+  log.warn(`[tool-ack] action=render-skipped reason=throttled attempts=${attempts}`);
   return null;
 }
 
@@ -213,7 +216,7 @@ async function renderOnce(
     }
   } catch (error) {
     if (isNovaThrottle(error)) return { clip: null, throttled: true };
-    console.warn('[tool-ack] action=render-failed', error instanceof Error ? error.message : String(error));
+    log.warn('[tool-ack] action=render-failed', error instanceof Error ? error.message : String(error));
     return { clip: null, throttled: false };
   } finally {
     done = true;
@@ -222,13 +225,13 @@ async function renderOnce(
   const clip = Buffer.concat(parts);
   const clipMs = pcmDurationMs(clip);
   if (clip.length === 0 || clipMs > TOOL_ACK_MAX_CLIP_MS) {
-    console.warn(
+    log.warn(
       `[tool-ack] action=render-discarded audio_ms=${clipMs} render_ms=${Date.now() - startedAt}`
       + ` voice=${voiceId}`,
     );
     return { clip: null, throttled: false };
   }
-  console.log(
+  log.info(
     `[tool-ack] action=rendered audio_ms=${clipMs} render_ms=${Date.now() - startedAt} voice=${voiceId}`
     + (spoken ? ` text="${spoken.trim()}"` : ''),
   );
