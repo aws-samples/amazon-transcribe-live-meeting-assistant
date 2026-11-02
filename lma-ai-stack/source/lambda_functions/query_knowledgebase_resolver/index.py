@@ -4,6 +4,7 @@
 
 #
 import json
+import logging
 import os
 
 import boto3
@@ -14,7 +15,10 @@ from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
 
 # pylint: enable=import-error
 
-print("Boto3 version: ", boto3.__version__)
+# Questions, answers and the transcript passages they cite are logged at DEBUG
+# only; set LOG_LEVEL to DEBUG to see them.
+LOGGER = logging.getLogger()
+LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 KB_REGION = os.environ.get("KB_REGION") or os.environ["AWS_REGION"]
 KB_ID = os.environ.get("KB_ID")
@@ -62,19 +66,19 @@ def get_kb_response(query, userId, isAdminUser, sessionId):
         },
     }
     if isAdminUser:
-        print("Admin user, no retrieval filters")
+        LOGGER.info("Admin user, no retrieval filters")
         input["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"].pop(
             "retrievalConfiguration", None
         )
     if sessionId:
         input["sessionId"] = sessionId
-    print("Amazon Bedrock KB Request: ", input)
+    LOGGER.debug("Amazon Bedrock KB Request: %s", input)
     try:
         resp = KB_CLIENT.retrieve_and_generate(**input)
     except Exception as e:
-        print("Amazon Bedrock KB Exception: ", e)
+        LOGGER.warning("Amazon Bedrock KB Exception: %s", e)
         resp = {"systemMessage": "Amazon Bedrock KB Error: " + str(e)}
-    print("Amazon Bedrock KB Response: ", json.dumps(resp))
+    LOGGER.debug("Amazon Bedrock KB Response: %s", json.dumps(resp))
     return resp
 
 
@@ -107,7 +111,7 @@ def markdown_response(kb_response):
 
 
 def handler(event, context):
-    print("Received event: %s" % json.dumps(event))
+    LOGGER.debug("Received event: %s", json.dumps(event))
     query = event["arguments"]["input"]
     sessionId = event["arguments"].get("sessionId") or None
     userId = event["identity"]["username"]
@@ -117,5 +121,5 @@ def handler(event, context):
         isAdminUser = "Admin" in groups
     kb_response = get_kb_response(query, userId, isAdminUser, sessionId)
     kb_response["markdown"] = markdown_response(kb_response)
-    print("Returning response: %s" % json.dumps(kb_response))
+    LOGGER.debug("Returning response: %s", json.dumps(kb_response))
     return json.dumps(kb_response)

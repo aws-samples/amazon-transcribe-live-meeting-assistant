@@ -935,3 +935,16 @@ def test_a_failure_to_mark_the_meeting_does_not_fail_the_request(
     result = index.handler(start_event({"username": OWNER}), FakeContext())
     assert result["Success"] is True
     assert starter.calls
+
+
+def test_a_meeting_whose_transcript_was_deleted_is_not_regenerated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The kept summary is not replaced by one written from an empty transcript."""
+    deleted = {**MEETING_ROW, "TranscriptDeletedAt": {"S": "2026-11-02T10:30:00.000Z"}}
+    _, _, starter, written = install(monkeypatch, meeting=deleted)
+    result = index.handler(start_event({"username": OWNER}), FakeContext())
+    assert result["Success"] is False
+    assert "transcript was deleted" in result["Message"]
+    assert starter.calls == []
+    assert written == []

@@ -58,7 +58,7 @@ def write_agent_assist_to_kds(message: Dict[str, Any]):
             KINESIS_CLIENT.put_record(
                 StreamName=CALL_DATA_STREAM_NAME, PartitionKey=callId, Data=json.dumps(message)
             )
-            LOGGER.info("Write AGENT_ASSIST event to KDS: %s", json.dumps(message))
+            LOGGER.debug("Write AGENT_ASSIST event to KDS: %s", json.dumps(message))
         except Exception as error:
             LOGGER.error(
                 "Error writing AGENT_ASSIST event to KDS ",
@@ -159,7 +159,7 @@ def get_lambda_agent_assist_transcript(
         "userEmail": owner,  # Add userEmail for tools that require UBAC
     }
 
-    LOGGER.info("Agent Assist Lambda Request: %s", content)
+    LOGGER.debug("Agent Assist Lambda Request: %s", content)
 
     lambda_response = LAMBDA_CLIENT.invoke(
         FunctionName=LAMBDA_AGENT_ASSIST_FUNCTION_ARN,
@@ -400,7 +400,8 @@ def publish_contact_lens_lambda_agent_assist_transcript_segment(
 def handler(event, context: LambdaContext):
     # pylint: disable=unused-argument
     """Lambda handler"""
-    LOGGER.info("Agent assist lambda event", extra={"event": event})
+    # The event carries the transcript segment that asked, so DEBUG only.
+    LOGGER.debug("Agent assist lambda event", extra={"event": event})
 
     data = json.loads(json.dumps(event))
 

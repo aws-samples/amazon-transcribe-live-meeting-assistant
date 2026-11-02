@@ -278,7 +278,7 @@ def call_bedrock(prompt_data, call_id=None, model_id=None):
         region=BEDROCK_REGION if BEDROCK_REGION != os.environ.get("AWS_REGION") else None,
     )
     generated_text = get_generated_text(response)
-    print("Bedrock response: ", json.dumps(generated_text))
+    logger.debug("Bedrock response: %s", json.dumps(generated_text))
     return generated_text
 
 
@@ -384,9 +384,10 @@ def generate_summary(
             TIMED_TRANSCRIPT_PLACEHOLDER: timed_transcript or "",
         }
         prompt = PLACEHOLDERS.sub(lambda match: values[match.group(0)], prompt)
-        print("Prompt:", prompt)
+        # The prompt carries the whole transcript, so it is logged at DEBUG only.
+        logger.debug("Prompt: %s", prompt)
         response = call_bedrock(prompt, call_id, model_id)
-        print("API Response:", response)
+        logger.debug("API Response: %s", response)
         result[key] = response
     if len(result.keys()) == 1:
         # there's only one summary in here, so let's return just that.
@@ -469,7 +470,7 @@ def write_to_s3(callId, metadata, transcript, summary, keyframes=None):
     transcript_file_key = f"{S3_PREFIX}{filename}-TRANSCRIPT.txt"
     summary = format_summary(summary, metadata)
     kbMetadata = getKBMetadata(metadata)
-    print(f"KB Summary: {summary}")
+    logger.debug("KB Summary: %s", summary)
     print(f"KB Metadata: {kbMetadata}")
     s3.put_object(Bucket=S3_BUCKET_NAME, Key=summary_file_key, Body=summary)
     print(f"Wrote summary to S3: s3://{S3_BUCKET_NAME}/{summary_file_key}")
@@ -519,7 +520,7 @@ def handler(event, context):
     except Exception as e:
         print(e)
         summary = "An error occurred."
-    print("Returning: ", json.dumps({"summary": summary}))
+    logger.debug("Returning: %s", json.dumps({"summary": summary}))
     return {"summary": summary}
 
 

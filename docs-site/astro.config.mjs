@@ -60,6 +60,10 @@ export default defineConfig({
             },
             { label: "Meeting Agenda", slug: "meeting-agenda" },
             { label: "Meeting Consent", slug: "meeting-consent" },
+            {
+              label: "Transcript Deletion After the Summary",
+              slug: "transcript-deletion",
+            },
             { label: "Meeting Video and Key Frames", slug: "meeting-video" },
             { label: "Meetings Query Tool", slug: "meetings-query-tool" },
           ],

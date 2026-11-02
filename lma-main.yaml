@@ -1239,15 +1239,33 @@ Parameters:
 
   LogLevel:
     Type: String
-    Default: INFO
+    Default: DEBUG
     AllowedValues:
       - DEBUG
       - INFO
       - WARN
       - ERROR
     Description: >-
-      Default logging level for all Lambda functions. Set to DEBUG for
-      troubleshooting, INFO for normal operation.
+      Logging level for the Lambda functions and containers. DEBUG, the default
+      for now while issues are being diagnosed, also logs meeting content: the
+      summary prompt with its transcript, meeting assistant requests and answers,
+      and the voice assistants' heard and spoken text. Set WARN or ERROR for
+      production deployments.
+
+  AppSyncFieldLogLevel:
+    Type: String
+    Default: ERROR
+    AllowedValues:
+      - NONE
+      - ERROR
+      - INFO
+      - DEBUG
+      - ALL
+    Description: >-
+      What the GraphQL API writes to its CloudWatch log group, /aws/appsync/apis/<api id>.
+      ERROR logs requests that fail, without their content. DEBUG and ALL also log each
+      request's content, which includes transcript text; use them only while diagnosing a
+      problem. The log group keeps entries for CloudWatchLogsExpirationInDays.
 
   EnableOperationalAlarms:
     Type: String
@@ -1426,6 +1444,7 @@ Metadata:
           - EnableOperationalAlarms
           - TranscribeConcurrentStreamAlarmThreshold
           - LogLevel
+          - AppSyncFieldLogLevel
       - Label:
           default: Security Configuration
         Parameters:
@@ -1445,6 +1464,8 @@ Metadata:
         default: Record Meeting Video
       LogLevel:
         default: Log Level
+      AppSyncFieldLogLevel:
+        default: GraphQL API Log Level
       AdminEmail:
         default: Admin Email Address
       AllowedSignUpEmailDomain:
@@ -3415,6 +3436,7 @@ Resources:
         VoiceEnrollmentRetentionDays: !Ref VoiceEnrollmentRetentionDays
         VoiceEnrollmentTermsVersion: !Ref VoiceEnrollmentTermsVersion
         LogLevel: !Ref LogLevel
+        AppSyncFieldLogLevel: !Ref AppSyncFieldLogLevel
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack
@@ -3485,6 +3507,7 @@ Resources:
           - !GetAtt TRANSCRIPTBEDROCKKB.Outputs.KnowledgeBaseID
           - ""
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        LogLevel: !Ref LogLevel
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         # Changes to Params below force MeetingAssist Setup to update.
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
@@ -3889,6 +3912,37 @@ Resources:
       Dimensions:
         - Name: QueueName
           Value: !GetAtt AISTACK.Outputs.CallEventProcessorDiscardedRecordsQueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+      OKActions:
+        - !Ref AlertsTopic
+
+  TranscriptDeletionDeadLetterQueueDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-transcript-deletion-dead-letter-queue-depth"
+      AlarmDescription: >-
+        A transcript deletion did not complete after its retries, so a meeting's
+        transcript is still stored although the Retention settings say it should
+        have been deleted. Check the TranscriptDeletionFunction log group for
+        the error, then read a message from this queue: each one carries the
+        CallId. Once the cause is fixed, invoke the function with
+        {"CallId": "<id>", "Trigger": "scheduled"} for each meeting, which
+        deletes it, and purge the queue. Messages stay for 14 days. OK
+        notifications are enabled, since the queue returning to empty means a
+        person acted.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt AISTACK.Outputs.TranscriptDeletionDeadLetterQueueName
       Statistic: Maximum
       Period: 300
       EvaluationPeriods: 1

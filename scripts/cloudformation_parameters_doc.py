@@ -428,6 +428,10 @@ CLASSIFICATION: Dict[str, Classification] = {
         RESOURCE,
         "Sets the threshold of the concurrent-stream alarm and the dashboard line drawn at it.",
     ),
+    "AppSyncFieldLogLevel": _c(
+        RESOURCE,
+        "Sets the GraphQL API's log level and whether its log entries carry request content.",
+    ),
     "LogLevel": _c(
         RUNTIME,
         "Read by each function and task's logging when the process starts, so a change applies as processes are replaced.",

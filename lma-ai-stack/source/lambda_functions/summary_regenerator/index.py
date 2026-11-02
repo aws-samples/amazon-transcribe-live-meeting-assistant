@@ -438,6 +438,15 @@ def start(call_id, identity, self_arn):
         return {"Success": False, "Message": "not permitted"}
     if not TRANSCRIPT_SUMMARY_FUNCTION_ARN:
         return {"Success": False, "Message": "summarisation is not configured for this deployment"}
+    # The Retention settings deleted the transcript once the meeting was
+    # summarized, so a new summary would be written from nothing and replace
+    # the one that was kept.
+    if meeting.get("TranscriptDeletedAt"):
+        return {
+            "Success": False,
+            "Message": "the transcript was deleted under the Retention settings, so the summary "
+            "cannot be regenerated",
+        }
 
     now = datetime.now(timezone.utc)
     state = parse_state(meeting.get("CallSummaryState"))

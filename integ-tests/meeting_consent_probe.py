@@ -150,9 +150,14 @@ class ConsentSettingsOverride:
     section while the test ran is kept, and it is safe to call more than once.
     """
 
-    def __init__(self, stack: Stack | None = None, *, store: Any = None) -> None:
+    def __init__(self, stack: Stack | None = None, *, store: Any = None,
+                 section: str = SECTION, updated_by: str = UPDATED_BY) -> None:
         cfg = _lma_config()
         self._cfg = cfg
+        # Another section for another test (test_transcript_deletion.py uses
+        # Retention); the same save, apply and restore.
+        self.section = section
+        self.updated_by = updated_by
         # `store` is for the plumbing tests, which run without AWS.
         self.store = store or cfg.ConfigurationStore(
             stack.configuration_table,
@@ -178,23 +183,23 @@ class ConsentSettingsOverride:
         if not record.exists:
             raise RuntimeError(f"the active configuration profile {active!r} is not stored")
         self.profile = active
-        self.had_section = SECTION in record.body
-        self.saved = dict(record.body.get(SECTION) or {}) if self.had_section else None
+        self.had_section = self.section in record.body
+        self.saved = dict(record.body.get(self.section) or {}) if self.had_section else None
 
     def apply(self, **overrides: Any) -> None:
         if self.profile is None:
             raise RuntimeError("save() must run before apply()")
         values = {**(self.saved or {}), **overrides}
         self.store.write_section(
-            self.profile, SECTION, values, updated_by=UPDATED_BY, expected_version=None,
-            comment=f"integration test: meeting consent {overrides}",
+            self.profile, self.section, values, updated_by=self.updated_by, expected_version=None,
+            comment=f"integration test: {self.section} {overrides}",
         )
         self.applied = True
 
     def resolved(self) -> dict:
         """The section as the transcriber resolves it: baseline merged with the profile."""
         self.store.invalidate()
-        return dict(self.store.get_section(SECTION).values)
+        return dict(self.store.get_section(self.section).values)
 
     def restore(self, attempts: int = 5) -> None:
         if self.profile is None or not self.applied:
@@ -203,13 +208,13 @@ class ConsentSettingsOverride:
             current = self.store.read_profile(self.profile, consistent_read=True)
             body = dict(current.body)
             if self.had_section:
-                body[SECTION] = dict(self.saved or {})
+                body[self.section] = dict(self.saved or {})
             else:
-                body.pop(SECTION, None)
+                body.pop(self.section, None)
             try:
                 self.store.write_profile(
-                    self.profile, body, updated_by=UPDATED_BY, expected_version=current.version,
-                    comment="integration test: meeting consent restored",
+                    self.profile, body, updated_by=self.updated_by, expected_version=current.version,
+                    comment=f"integration test: {self.section} restored",
                 )
                 self.applied = False
                 return

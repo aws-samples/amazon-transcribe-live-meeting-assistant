@@ -147,6 +147,65 @@ def test_a_retention_longer_than_the_stack_parameter_is_not_used(monkeypatch):
     assert abs(_days_ahead(ep.get_transcription_ttl()) - 3) < 0.01
 
 
+@pytest.mark.parametrize("choice", ["immediately", "after_15_minutes", "after_60_minutes"])
+def test_segment_expiry_is_at_most_two_days_while_transcripts_are_deleted(monkeypatch, choice):
+    """The backstop expiry, should the scheduled deletion never run."""
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(
+        parameters,
+        "_SHARED_STORE",
+        _RetentionStore({"transcriptDeletionAfterSummary": choice}),
+    )
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 2) < 0.01
+
+
+def test_a_shorter_retention_still_applies_while_transcripts_are_deleted(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(
+        parameters,
+        "_SHARED_STORE",
+        _RetentionStore(
+            {"transcriptDeletionAfterSummary": "immediately", "transcriptionExpirationInDays": 0.5}
+        ),
+    )
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 0.5) < 0.01
+
+
+def test_segment_expiry_is_unchanged_while_deletion_is_off(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(
+        parameters,
+        "_SHARED_STORE",
+        _RetentionStore({"transcriptDeletionAfterSummary": "off"}),
+    )
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 90) < 0.01
+
+
+def test_with_nothing_saved_the_shipped_off_applies(monkeypatch):
+    """The setting has no stack parameter: an empty section is the shipped Off."""
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(parameters, "_SHARED_STORE", _RetentionStore({}))
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 90) < 0.01
+
+
+def test_an_unreadable_setting_gives_the_usual_expiry(monkeypatch):
+    """A segment is never lost over its expiry; the deletion itself still runs."""
+
+    class Unreadable(_RetentionStore):
+        calls = 0
+
+        def get_section(self, name):
+            # The period in days reads first, then the deletion setting.
+            Unreadable.calls += 1
+            if Unreadable.calls > 1:
+                raise RuntimeError("the configuration table is unavailable")
+            return super().get_section(name)
+
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(parameters, "_SHARED_STORE", Unreadable({}))
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 90) < 0.01
+
+
 def test_segment_expiry_uses_the_transcription_retention(monkeypatch):
     monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "3")
     monkeypatch.setenv("MEETING_RECORD_EXPIRATION_IN_DAYS", "99")
@@ -467,3 +526,14 @@ def test_contact_lens_categories_do_not_become_transcript_segments():
 def test_os_environment_is_not_mutated_by_importing_the_module():
     """Guards the reload-based TTL tests from leaking settings into the rest."""
     assert os.environ.get("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS") in (None, "90", "")
+
+
+def test_a_record_that_is_not_deleted_with_the_transcript_keeps_the_full_period(monkeypatch):
+    """Key frames share the transcript retention but are not deleted with it."""
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(
+        parameters,
+        "_SHARED_STORE",
+        _RetentionStore({"transcriptDeletionAfterSummary": "immediately"}),
+    )
+    assert abs(_days_ahead(ep.get_transcription_ttl(limited_by_deletion=False)) - 90) < 0.01

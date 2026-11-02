@@ -1114,3 +1114,107 @@ def test_a_failure_to_queue_the_agenda_pass_does_not_fail_the_segment(
     monkeypatch.setattr(agenda_hook, "invoke", refuse)
     process_event(_respond(schema), _segment(301.0), monkeypatch)
     assert emitted.counts.get(metric_names.TRANSCRIPT_SEGMENTS_WRITTEN) == 1
+
+
+# ── the transcript deletion is told when a meeting ends and is summarized ────
+
+DELETION_ARN = "arn:aws:lambda:us-east-1:123456789012:function:stack-TranscriptDeletion"
+
+
+@pytest.fixture
+def deletion_function(monkeypatch) -> RecordingLambda:
+    hook = RecordingLambda()
+    monkeypatch.setattr(cep, "TRANSCRIPT_DELETION_FUNCTION_ARN", DELETION_ARN)
+    monkeypatch.setattr(cep, "LAMBDA_HOOK_CLIENT", hook, raising=False)
+    monkeypatch.setattr(cep, "POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN", "", raising=False)
+    return hook
+
+
+def _deletion_payloads(hook: RecordingLambda) -> List[Dict[str, Any]]:
+    return [
+        json.loads(invocation["Payload"])
+        for invocation in hook.invocations
+        if invocation["FunctionName"] == DELETION_ARN
+    ]
+
+
+def test_the_first_end_tells_the_transcript_deletion_the_meeting_ended(
+    schema, emitted, deletion_function, monkeypatch
+):
+    session = QueuedSession(
+        schema,
+        [
+            {"getCall": {"CallId": "call-1", "Status": "STARTED"}},
+            {"updateCallStatus": {"CallId": "call-1", "Status": "ENDED"}},
+        ],
+    )
+    process_event(session, {"EventType": "END", "CallId": "call-1"}, monkeypatch)
+    assert _deletion_payloads(deletion_function) == [
+        {"CallId": "call-1", "Trigger": "meeting-ended"}
+    ]
+
+
+def test_a_redelivered_end_does_not_tell_the_transcript_deletion_again(
+    schema, emitted, deletion_function, monkeypatch
+):
+    session = QueuedSession(
+        schema,
+        [
+            {"getCall": {"CallId": "call-1", "Status": "ENDED"}},
+            {"updateCallStatus": {"CallId": "call-1", "Status": "ENDED"}},
+        ],
+    )
+    process_event(session, {"EventType": "END", "CallId": "call-1"}, monkeypatch)
+    assert _deletion_payloads(deletion_function) == []
+
+
+def test_a_stored_summary_tells_the_transcript_deletion(
+    schema, emitted, deletion_function, monkeypatch
+):
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    process_event(
+        session,
+        {"EventType": "ADD_SUMMARY", "CallId": "call-1", "CallSummaryText": "{}"},
+        monkeypatch,
+    )
+    assert _deletion_payloads(deletion_function) == [
+        {"CallId": "call-1", "Trigger": "summary-written"}
+    ]
+
+
+def test_a_summary_is_stored_even_if_the_transcript_deletion_cannot_be_told(
+    schema, emitted, monkeypatch
+):
+    def unavailable(**_kwargs: Any) -> Dict[str, Any]:
+        raise RuntimeError("Lambda unavailable")
+
+    monkeypatch.setattr(cep, "TRANSCRIPT_DELETION_FUNCTION_ARN", DELETION_ARN)
+    monkeypatch.setattr(cep, "POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN", "", raising=False)
+    monkeypatch.setattr(
+        cep,
+        "LAMBDA_HOOK_CLIENT",
+        type("C", (), {"invoke": staticmethod(unavailable)})(),
+        raising=False,
+    )
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    process_event(
+        session,
+        {"EventType": "ADD_SUMMARY", "CallId": "call-1", "CallSummaryText": "{}"},
+        monkeypatch,
+    )
+    logged = [record["message"] for record in cep.LOGGER.records]
+    assert any("could not tell the transcript deletion function" in m for m in logged), logged
+
+
+@pytest.mark.parametrize("text", ["An error occurred.", "No summary available", "  "])
+def test_a_failed_summary_does_not_bring_the_transcript_deletion_forward(
+    schema, emitted, deletion_function, monkeypatch, text
+):
+    """The transcript waits for the end-of-meeting fallback, so the summary can be regenerated."""
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    process_event(
+        session,
+        {"EventType": "ADD_SUMMARY", "CallId": "call-1", "CallSummaryText": text},
+        monkeypatch,
+    )
+    assert _deletion_payloads(deletion_function) == []

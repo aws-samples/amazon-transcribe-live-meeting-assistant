@@ -1,0 +1,2 @@
+# boto3 and botocore are provided by the Lambda runtime; lma_config by the
+# configuration layer.

@@ -18,7 +18,7 @@ import boto3
 
 # Configure logging
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 # Initialize AWS clients
 lambda_client = boto3.client("lambda")
@@ -43,7 +43,7 @@ def lambda_handler(event, context):
     }
     """
     try:
-        logger.info(f"STRANDS Chat Interface - Processing event: {json.dumps(event)}")
+        logger.debug(f"STRANDS Chat Interface - Processing event: {json.dumps(event)}")
 
         # Extract parameters from AppSync event
         arguments = event.get("arguments", {})
@@ -92,7 +92,7 @@ def lambda_handler(event, context):
         logger.info(
             f"STRANDS Chat Interface - Invoking AsyncAgentAssistOrchestrator: {orchestrator_arn}"
         )
-        logger.info(f"STRANDS Chat Interface - Payload: {json.dumps(orchestrator_payload)}")
+        logger.debug(f"STRANDS Chat Interface - Payload: {json.dumps(orchestrator_payload)}")
 
         # Invoke AsyncAgentAssistOrchestrator asynchronously
         # The response will be streamed via addChatToken mutations

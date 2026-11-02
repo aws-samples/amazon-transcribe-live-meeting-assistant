@@ -317,12 +317,12 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
         break;
 
       case 'agent_response':
-        log.info('📝 Agent text response:', message.agent_response_event?.agent_response);
+        log.debug('📝 Agent text response:', message.agent_response_event?.agent_response);
         break;
 
       case 'user_transcript': {
         const userText: string = message.user_transcription_event?.user_transcript || '';
-        log.info('👤 Agent heard:', userText);
+        log.debug('👤 Agent heard:', userText);
         if (userText) {
           this.lastUserTranscript = userText;
           this.lastUserTranscriptAt = Date.now();

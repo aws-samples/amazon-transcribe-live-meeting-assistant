@@ -7,7 +7,7 @@ SPDX-License-Identifier: MIT-0
 
 # Monitoring & Alerting
 
-LMA deploys an SNS topic for operational alerts, 14 alarms that notify it, and
+LMA deploys an SNS topic for operational alerts, 15 alarms that notify it, and
 one CloudWatch dashboard per deployment. (One fewer alarm where the
 stale-meeting reaper is switched off, which removes the alarm that watches it.) Everything described here is created by
 `lma-main.yaml` as part of the normal stack deployment — there is nothing extra
@@ -55,6 +55,7 @@ problem.
 | Alarm | Fires when | Topic | Tuned by |
 |---|---|---|---|
 | `discarded-records-queue-depth` | The queue holding Kinesis records the Call Event Processor could not process has one or more messages visible (`Maximum` over 5 min, `> 0`). Also notifies on recovery. | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
+| `transcript-deletion-dead-letter-queue-depth` | A transcript deletion did not complete after its retries, so a meeting's transcript is still stored although the Retention settings say it should have been deleted (`Maximum` of visible messages over 5 min, `> 0`). Also notifies on recovery. See [Transcript Deletion After the Summary](transcript-deletion.md). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `call-event-processor-errors` | The Call Event Processor failed one or more invocations (`Sum` over 5 min, `>= 1`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `call-event-processor-throttles` | Lambda refused to start an invocation for want of account concurrency (`Sum` over 5 min, `> 0`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `kinesis-consumer-iterator-age` | The consumer is more than 5 minutes behind the stream in two of the last three 5-minute windows (`Maximum`, `> 300000` ms). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
@@ -357,10 +358,10 @@ needing a second round trip through somebody's inbox.
 In us-east-1, a standard-resolution CloudWatch alarm costs $0.10 per alarm
 metric per month, with the first ten alarm metrics included at no charge. **An
 alarm built on a metric-math expression bills per metric referenced in the
-expression, not per alarm**, so the 14 alarms here are 16 billable alarm metrics
-— twelve reading a single metric each, plus two metric-math alarms reading two
-metrics each. That is $0.60 per month for an account with the free allowance
-still available, and $1.60 per month for one that has already used it elsewhere.
+expression, not per alarm**, so the 15 alarms here are 17 billable alarm metrics
+— thirteen reading a single metric each, plus two metric-math alarms reading two
+metrics each. That is $0.70 per month for an account with the free allowance
+still available, and $1.70 per month for one that has already used it elsewhere.
 
 The seven metrics LMA publishes are **custom metrics**, which are billed
 separately from the alarms that read them: $0.30 per metric per month in

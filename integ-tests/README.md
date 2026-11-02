@@ -187,6 +187,23 @@ and the fragment sizes, without a stack:
 `AWS_PROFILE=default python integ-tests/desktop_video_probe.py --region us-west-2 --media-only /tmp/slides`
 (this calls Polly).
 
+## Transcript deletion after the summary
+
+`test_transcript_deletion.py` checks that a meeting's transcript is deleted once
+it is summarized (see [Transcript Deletion After the Summary](../docs/transcript-deletion.md)).
+It is opt-in: while it runs, it sets the deployment's Retention › "Delete the
+transcript after the summary" to Immediately, so **every meeting that ends on
+the stack in that time has its transcript deleted**. It streams one meeting,
+waits for its summary (up to five minutes), and checks the segments, the
+transcript file's versions, the meeting record's deletion fields and the
+scheduled sweep. The setting is saved first and put back in the module's
+teardown.
+
+```bash
+AWS_PROFILE=default LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user LMA_TEST_TRANSCRIPT_DELETION=1 \
+    .venv/bin/python -m pytest integ-tests/test_transcript_deletion.py --stack-name lma-integtest1 -s
+```
+
 ## Meeting consent on the Stream Audio path
 
 `test_meeting_consent.py` checks how the WebSocket transcriber gates a streamed

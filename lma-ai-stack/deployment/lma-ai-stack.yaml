@@ -771,6 +771,21 @@ Parameters:
       Logging level for Lambda functions. Set to DEBUG for troubleshooting,
       INFO for normal operation.
 
+  AppSyncFieldLogLevel:
+    Type: String
+    Default: ERROR
+    AllowedValues:
+      - NONE
+      - ERROR
+      - INFO
+      - DEBUG
+      - ALL
+    Description: >-
+      What the GraphQL API writes to its CloudWatch log group, /aws/appsync/apis/<api id>.
+      ERROR logs requests that fail, without their content. DEBUG and ALL also log each
+      request's content, which includes transcript text; use them only while diagnosing a
+      problem. The log group keeps entries for CloudWatchLogsExpirationInDays.
+
   EnableVoiceEnrollment:
     Type: String
     Default: "false"
@@ -857,6 +872,13 @@ Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   ShouldDeleteDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "false"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  # The transcript knowledge base, whose entries a transcript deletion removes.
+  HasTranscriptKnowledgeBase: !Not [!Equals [!Ref BedrockKnowledgeBaseID, ""]]
+  # Request content (verbose) in the GraphQL API's logs, at the two levels that
+  # are for diagnosis.
+  ShouldLogAppSyncRequestContent: !Or
+    - !Equals [!Ref AppSyncFieldLogLevel, DEBUG]
+    - !Equals [!Ref AppSyncFieldLogLevel, ALL]
   # The VNC ALB exists only to route the UI's noVNC connection to an ECS task's
   # websockify port. MicroVMs each return a dedicated HTTPS endpoint from
   # RunMicrovm, so under MICROVM the ALB has no targets and is pure cost.
@@ -1177,6 +1199,12 @@ Outputs:
       Generated name of the stale-meeting reaper Lambda function, for the
       FunctionName dimension of AWS/Lambda metrics
     Value: !Ref StaleMeetingReaperFunction
+
+  TranscriptDeletionDeadLetterQueueName:
+    Description: >-
+      Generated name of the queue holding transcript deletions that did not
+      complete after their retries, for the QueueName dimension of AWS/SQS metrics
+    Value: !GetAtt TranscriptDeletionDeadLetterQueue.QueueName
 
   CallEventProcessorDiscardedRecordsQueueName:
     Description: >-
@@ -2773,6 +2801,7 @@ Resources:
       # for a version cache plus alias-qualified wiring buys nothing at 440 ms.
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !GetAtt AsyncAgentAssistOrchestrator.Arn
       Timeout: 30
       MemorySize: 128
@@ -3172,6 +3201,11 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt SpeakerNameResolverFunction.Arn
+            # Told when each meeting ends and when its summary is stored.
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt TranscriptDeletionFunction.Arn
             # The automatic agenda pass, queued once a meeting with no agenda
             # passes its fifth minute.
             - Effect: Allow
@@ -3260,6 +3294,7 @@ Resources:
             !If [IsTranscriptSummaryEnabled, "true", "false"]
           ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN: !GetAtt AsyncTranscriptSummaryOrchestrator.Arn
           SPEAKER_NAME_RESOLVER_ARN: !GetAtt SpeakerNameResolverFunction.Arn
+          TRANSCRIPT_DELETION_FUNCTION_ARN: !GetAtt TranscriptDeletionFunction.Arn
           AGENDA_DERIVER_ARN: !GetAtt AgendaDeriverFunction.Arn
           # Reads the text of each key frame once it is stored.
           KEYFRAME_TEXT_EXTRACTOR_ARN: !GetAtt KeyframeTextExtractorFunction.Arn
@@ -3747,6 +3782,7 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           KB_ID: !Ref BedrockKnowledgeBaseID
           KB_ACCOUNT_ID: !Ref AWS::AccountId
           KB_REGION: !Ref AWS::Region
@@ -4664,6 +4700,236 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
       SourceArn: !GetAtt StaleMeetingReaperScheduleRule.Arn
+
+  ##########################################################################
+  # Transcript deletion after the summary
+  #
+  # When the Retention section's "Delete the transcript after the summary"
+  # setting is on, the call event processor tells TranscriptDeletionFunction
+  # when each meeting ends and when its summary is stored. The function either
+  # deletes the transcript there and then or creates a one-time EventBridge
+  # Scheduler schedule, in TranscriptDeletionScheduleGroup, that invokes it at
+  # the minute the deletion is due. See docs/transcript-deletion.md.
+  ##########################################################################
+  TranscriptDeletionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: lambda_function.handler
+      Role: !GetAtt TranscriptDeletionFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      Layers:
+        # lma_config, for the setting. Pure Python, so compatible with arm64.
+        - !Ref ConfigurationPythonLayer
+      CodeUri: ../source/lambda_functions/transcript_deletion
+      Description: Deletes a meeting's transcript once it is summarized, as the Retention settings say
+      MemorySize: 256
+      Timeout: 300
+      Tracing: Active
+      # An asynchronous invoke that still fails after Lambda's two retries is
+      # kept here; so is a schedule that still fails after the Scheduler's.
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt TranscriptDeletionDeadLetterQueue.Arn
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          RECORDINGS_BUCKET: !Ref S3BucketName
+          TRANSCRIPT_PREFIX: !Ref TranscriptFilePrefix
+          TRANSCRIPT_KB_ID: !Ref BedrockKnowledgeBaseID
+          SCHEDULE_GROUP_NAME: !Ref TranscriptDeletionScheduleGroup
+          SCHEDULER_ROLE_ARN: !GetAtt TranscriptDeletionSchedulerRole.Arn
+          DEAD_LETTER_QUEUE_ARN: !GetAtt TranscriptDeletionDeadLetterQueue.Arn
+          IS_TRANSCRIPT_SUMMARY_ENABLED: !If [IsTranscriptSummaryEnabled, "true", "false"]
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/TranscriptDeletionFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency; it runs a few times per meeting"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - TranscriptDeletionFunctionLogGroup
+      # Ordered behind the seeder, like every configuration reader.
+      - SeedConfiguration
+
+  TranscriptDeletionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/TranscriptDeletionFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  TranscriptDeletionFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Transcript deletion Lambda execution role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-TranscriptDeletion
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # The meeting record (read, and stamped with the deletion) and
+              # its transcript partition (queried and deleted).
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:DeleteItem
+                Resource: !GetAtt EventSourcingTable.Arn
+              # Every version of the meeting's transcript files.
+              - Effect: Allow
+                Action:
+                  - s3:ListBucketVersions
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}"
+                Condition:
+                  StringLike:
+                    "s3:prefix": !Sub "${TranscriptFilePrefix}*"
+              - Effect: Allow
+                Action:
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/${TranscriptFilePrefix}*"
+              # The one-time schedules, in this stack's group only.
+              - Effect: Allow
+                Action:
+                  - scheduler:CreateSchedule
+                  - scheduler:UpdateSchedule
+                Resource: !Sub "arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${TranscriptDeletionScheduleGroup}/*"
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt TranscriptDeletionSchedulerRole.Arn
+                Condition:
+                  StringEquals:
+                    # A service principal, the same in every partition.
+                    "iam:PassedToService": scheduler.amazonaws.com
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt TranscriptDeletionDeadLetterQueue.Arn
+              # Read-only, on the shared configuration table: the setting is
+              # read from it.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !GetAtt ConfigurationTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+                      - !Sub "sqs.${AWS::Region}.${AWS::URLSuffix}"
+        - !If
+          - HasTranscriptKnowledgeBase
+          - PolicyName: !Sub ${AWS::StackName}-TranscriptDeletionKnowledgeBase
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                # The transcript knowledge base's entries for the deleted files.
+                - Effect: Allow
+                  Action:
+                    - bedrock:ListDataSources
+                    - bedrock:GetDataSource
+                    - bedrock:DeleteKnowledgeBaseDocuments
+                  Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BedrockKnowledgeBaseID}"
+          - !Ref AWS::NoValue
+
+  TranscriptDeletionScheduleGroup:
+    Type: AWS::Scheduler::ScheduleGroup
+
+  # Assumed by EventBridge Scheduler to run a deletion schedule. Its grant is
+  # TranscriptDeletionSchedulerPolicy, a separate resource, because the
+  # function names this role in its environment and the grant names the
+  # function.
+  TranscriptDeletionSchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Lets EventBridge Scheduler invoke the transcript deletion function
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
+
+  TranscriptDeletionSchedulerPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${AWS::StackName}-TranscriptDeletionScheduler
+      Roles:
+        - !Ref TranscriptDeletionSchedulerRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource: !GetAtt TranscriptDeletionFunction.Arn
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt TranscriptDeletionDeadLetterQueue.Arn
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+            Condition:
+              StringEquals:
+                "kms:ViaService":
+                  - !Sub "sqs.${AWS::Region}.${AWS::URLSuffix}"
+
+  # Deletions that did not complete after their retries. The parent stack's
+  # TranscriptDeletionDeadLetterQueueDepthAlarm watches it.
+  TranscriptDeletionDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
+    Properties:
+      KmsMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+      KmsDataKeyReusePeriodSeconds: 300
+      # 14 days, the SQS maximum: each message names a meeting whose
+      # transcript still has to be deleted, by running the function again.
+      MessageRetentionPeriod: 1209600
 
   UpdateChatButtonConfigResolverFunction:
     Type: AWS::Serverless::Function
@@ -6775,11 +7041,123 @@ Resources:
         - AuthenticationType: AWS_IAM
       LogConfig:
         CloudWatchLogsRoleArn: !GetAtt AppSyncCwlRole.Arn
-        ExcludeVerboseContent: false
-        FieldLogLevel: ALL
+        ExcludeVerboseContent: !If [ShouldLogAppSyncRequestContent, false, true]
+        FieldLogLevel: !Ref AppSyncFieldLogLevel
       # Commenting out Xray as it causes issues with the ServiceLinked role on first deployment
       # similar to: https://github.com/aws/aws-cdk/issues/16598
       # XrayEnabled: true
+
+  # The GraphQL API's log group, /aws/appsync/apis/<api id>, is created by
+  # AppSync rather than declared here, so CloudFormation cannot set its
+  # retention; this custom resource does, creating the group first if AppSync
+  # has not yet, and again whenever CloudWatchLogsExpirationInDays changes. The
+  # group is left in place when the stack is deleted, as AppSync leaves it.
+  AppSyncLogRetentionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: AppSyncLogRetention
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:PutRetentionPolicy
+                  - logs:AssociateKmsKey
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/appsync/apis/${AppSyncApiEncrypted.ApiId}*"
+
+  AppSyncLogRetentionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/AppSyncLogRetentionFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  AppSyncLogRetentionFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - AppSyncLogRetentionFunctionLogGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for custom resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    Properties:
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 60
+      Role: !GetAtt AppSyncLogRetentionRole.Arn
+      LoggingConfig:
+        LogGroup: !Sub "/${AWS::StackName}/lambda/AppSyncLogRetentionFunction"
+      TracingConfig:
+        Mode: Active
+      Code:
+        ZipFile: |
+          import logging
+
+          import boto3
+          import cfnresponse
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          logs = boto3.client("logs")
+
+
+          def handler(event, context):
+              try:
+                  if event["RequestType"] == "Delete":
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+                  properties = event["ResourceProperties"]
+                  group = properties["LogGroupName"]
+                  key = properties.get("KmsKeyId") or ""
+                  try:
+                      if key:
+                          logs.create_log_group(logGroupName=group, kmsKeyId=key)
+                      else:
+                          logs.create_log_group(logGroupName=group)
+                  except logs.exceptions.ResourceAlreadyExistsException:
+                      if key:
+                          try:
+                              logs.associate_kms_key(logGroupName=group, kmsKeyId=key)
+                          except Exception as error:  # the retention still applies
+                              logger.warning("could not associate %s with %s: %s", key, group, error)
+                  logs.put_retention_policy(
+                      logGroupName=group, retentionInDays=int(properties["RetentionInDays"])
+                  )
+                  logger.info("%s keeps entries for %s days", group, properties["RetentionInDays"])
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physicalResourceId=group)
+              except Exception as error:
+                  logger.exception("could not set the retention")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason=str(error))
+
+  AppSyncLogRetention:
+    Type: Custom::AppSyncLogRetention
+    Properties:
+      ServiceToken: !GetAtt AppSyncLogRetentionFunction.Arn
+      LogGroupName: !Sub "/aws/appsync/apis/${AppSyncApiEncrypted.ApiId}"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   AppSyncSchema:
     Type: AWS::AppSync::GraphQLSchema

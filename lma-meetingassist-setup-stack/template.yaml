@@ -122,6 +122,18 @@ Parameters:
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
 
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+    Description: >-
+      Logging level for the meeting assistant function. At DEBUG it logs the
+      requests, tool results and answers it handles.
+
   CustomerManagedEncryptionKeyArn:
     Type: String
     Description: ARN of the customer managed KMS key for encryption
@@ -502,6 +514,7 @@ Resources:
         Mode: Active
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
           # The models' defaults, read when the configuration cannot be: each
           # request reads them from the Amazon Bedrock Models section first.
