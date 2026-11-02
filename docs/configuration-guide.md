@@ -97,9 +97,8 @@ were never released as parameters.
 | Virtual Participant › Teams: checks without a meeting before leaving | `VPPollsBeforeEndMissing` |
 
 **Upgrading a deployment that set any of these parameters.** The values the
-parameters held are not carried across. After the update, the deployment uses
-each setting's shipped default, or the value an Admin had saved on the
-Configuration page. To keep a value you had set with a parameter:
+parameters held are not carried across. After the update, a deployment upgraded
+from v0.3.10 uses the shipped default for every one of these settings. To keep a value you had set with a parameter:
 
 - create a Custom profile (**Profile › Copy to a new profile**), set the values
   there, save and **Activate** it; or

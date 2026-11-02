@@ -165,8 +165,8 @@ setting on the Configuration page, with a shipped default; the full list is in
 This is a clean break:
 
 - **The values those parameters held are not carried across.** After the update,
-  the deployment uses each setting's shipped default, or the value an Admin had
-  saved on the Configuration page. Check these four first, because they change
+  a deployment upgraded from v0.3.10 uses the shipped default for every one of
+  these settings, since no released version had them on a Configuration page. Check these four first, because they change
   what is captured: `IsContentRedactionEnabled=true` becomes redaction **off**,
   `EnableAudioRecording=false` becomes recording **on**,
   `MeetingInactivityTimeoutInMinutes=0` becomes a reaper that ends meetings after
@@ -185,10 +185,11 @@ This is a clean break:
 **Configuration profiles work like IDP's.** The Configuration page lists the
 deployment's profiles, one of them active. A deployment runs on its Managed
 `default` profile, which every update rewrites with the release's defaults,
-until an Admin creates and activates a Custom profile. On upgrade, the `custom`
-profile an earlier release created is kept as a full copy and stays active if
-an Admin had changed anything in it; if it held no changes it is removed and the
-default is activated. The pages that edit one setting outside the Configuration
+until an Admin creates and activates a Custom profile. On upgrade from v0.3.10,
+the settings carried across from the previous tables (summary prompts, Nova
+Sonic settings, chat buttons, Transcription Engine switches) form a Custom
+profile, which stays active; a deployment with nothing to carry across runs on
+the default profile. The pages that edit one setting outside the Configuration
 page save into the active profile, and refuse while a Managed one is active. See
 [Configuration profiles](configuration-guide.md#configuration-profiles).
 

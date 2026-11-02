@@ -1142,9 +1142,9 @@ configuration pages' saves.
 ## Settings that were stack parameters until 0.4.0
 
 Until 0.4.0, 24 released stack parameters only ever reached application code -- a model
-id, a number, a switch passed to a function as an environment variable -- and
-were also the defaults of Configuration page settings. 0.4.0 removes them as a
-clean break: each is now only a setting, with a shipped default. Three settings
+id, a number, a switch passed to a function as an environment variable. 0.4.0
+removes them as a clean break and makes each a Configuration page setting with a
+shipped default. Three settings
 new in this release (the knowledge-base and key frame text models, and the agenda
 timing) are listed there too, though no release had them as parameters.
 
@@ -1164,7 +1164,7 @@ timing) are listed there too, though no release had them as parameters.
   `virtual_participant`, `transcription` and `recording` sections to its process
   environment as it starts) and the WebSocket transcriber
   (`calleventdata/session-settings.ts`, which reads them as each meeting starts)
-  read the configuration first, as before. Their nested templates keep their own
+  read the configuration first. Their nested templates keep their own
   parameters of the same names, which the main stack no longer passes, so each
   task's environment holds the nested template's default as its fallback.
 - The reaper is always deployed and scheduled; **Meeting Processing › Minutes
