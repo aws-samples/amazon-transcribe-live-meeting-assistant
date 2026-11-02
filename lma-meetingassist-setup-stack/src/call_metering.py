@@ -4,11 +4,16 @@
 """Metering records for the meeting cost estimate, written from this stack.
 
 The canonical writer is ``lma_metering.records`` in the AI stack's
-configuration layer. That layer is not attached to the functions in this stack,
-so the small part of it the meeting assistant needs is repeated here: one
+configuration layer. That layer is attached to this stack's functions only when
+lma-main.yaml deploys them (this template can be deployed on its own, without
+it), so the small part of it the meeting assistant needs is repeated here: one
 DynamoDB item per answer, under ``PK = mtr#<CallId>``, carrying the model's
 token usage. ``lma-ai-stack/test/test_metering_record_contract.py`` asserts the
 two produce the same item, so they cannot drift apart silently.
+
+Each record expires with the meeting retention, read through
+``configuration_settings.read_setting``: the Configuration page's Retention
+section where the layer is attached, at most the stack parameter's value.
 
 Writing never raises: a lost record makes a meeting's estimate lower than it
 was, which docs/meeting-cost-estimate.md lists as a known limit; an answer that failed because its

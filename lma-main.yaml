@@ -897,7 +897,8 @@ Parameters:
       until this timeout elapses. A meeting that is still connected but silent for
       longer than the timeout is also ended, so keep it comfortably longer than the
       longest quiet stretch your meetings have. Set to 0 to leave such meetings open;
-      the reaper that ends them is then not deployed, and the setting below has no effect.
+      the reaper that ends them is then not deployed, and the Configuration page's timeout
+      setting has no effect.
       This is the default; an Admin can change it at run time on the Configuration page (Meeting
       Processing section), which takes precedence while the stack parameter is above 0.
 

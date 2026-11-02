@@ -52,7 +52,7 @@ from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
 from botocore.exceptions import BotoCoreError, ClientError
 
 from .errors import ConfigurationError, ConfigurationTableNotConfigured, InvalidConfiguration
-from .schema import limited_settings, section_schema, validate_section
+from .schema import limited_settings_of, validate_section
 from .sections import section_spec
 from .store import TABLE_NAME_ENV_VAR, ConfigurationStore
 
@@ -249,7 +249,7 @@ def read_setting(
             tests and the readers' own tests hold to that.
     """
     entry = _by_setting()[(section, setting)]
-    if setting in limited_settings(section_schema(section)):
+    if setting in limited_settings_of(section):
         return _limited(
             entry,
             _configured(entry, store, env_var),

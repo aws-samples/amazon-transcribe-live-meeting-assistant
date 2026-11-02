@@ -455,6 +455,16 @@ def limited_settings(schema: Mapping[str, Any]) -> List[str]:
     ]
 
 
+@lru_cache(maxsize=None)
+def limited_settings_of(name: str) -> frozenset:
+    """The limited settings of a registered section, read from its schema once.
+
+    For a reader asking on every read whether a setting is one, which would
+    otherwise parse the section's schema each time.
+    """
+    return frozenset(limited_settings(section_schema(name)))
+
+
 def limit_problems(
     schema: Mapping[str, Any],
     values: Any,

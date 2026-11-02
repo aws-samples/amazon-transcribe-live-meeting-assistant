@@ -86,12 +86,10 @@ LOGGER = Logger(location="%(filename)s:%(lineno)d - %(funcName)s()")
 
 EVENT_SOURCING_TABLE = os.environ["EVENT_SOURCING_TABLE"]
 CALL_DATA_STREAM_NAME = os.environ["CALL_DATA_STREAM_NAME"]
-# 0 disables the reaper without removing its resources. int(float(...)) because
-# the CloudFormation Number type accepts a fractional value.
-#: The MeetingInactivityTimeoutInMinutes parameter's value, read as the stack
-#: has always passed it (a fractional value is truncated). The timeout a run
-#: uses is the Meeting Processing section's (see ``inactivity_timeout_minutes``);
-#: this is what it falls back to.
+#: The MeetingInactivityTimeoutInMinutes parameter's value: what the timeout a
+#: run uses (the Meeting Processing section's, see ``inactivity_timeout_minutes``)
+#: falls back to. ``int(float(...))`` because the CloudFormation Number type
+#: accepts a fractional value, which is truncated as it always was.
 INACTIVITY_TIMEOUT_MINUTES = int(
     float(os.environ.get("MEETING_INACTIVITY_TIMEOUT_IN_MINUTES", "0"))
 )

@@ -93,7 +93,7 @@ from .revisions import (
     clean_text,
     diff_bodies,
 )
-from .schema import limit_problems, limited_settings, section_schema, validate_section
+from .schema import limit_problems, limited_settings_of, section_schema, validate_section
 from .sections import (
     TIER_CONSISTENT_READ,
     TIER_TTL_SECONDS,
@@ -596,6 +596,7 @@ class ConfigurationStore:
                 not be recorded, so nothing was written.
         """
         _validate_sections(body)
+        self._check_limits(body)
         return self._save(
             name,
             lambda _current: dict(body),
@@ -720,7 +721,7 @@ class ConfigurationStore:
         Raises:
             InvalidConfiguration: a setting is above its limit.
         """
-        limited = [name for name in sections if limited_settings(section_schema(name))]
+        limited = [name for name in sections if limited_settings_of(name)]
         if not limited:
             return
         baseline = self.read_record(DEFAULT_KEY, consistent_read=True).body
