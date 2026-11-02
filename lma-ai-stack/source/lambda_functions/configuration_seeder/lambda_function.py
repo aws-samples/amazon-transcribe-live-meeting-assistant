@@ -678,6 +678,32 @@ def start_revision_history(store: ConfigurationStore) -> str:
         return "not-started"
 
 
+def convert_profiles(store: ConfigurationStore) -> str:
+    """Store the operator's profile as a full copy, as every profile is from 0.4.0.
+
+    After :func:`seed`, so anything adopted from a previous table is already in
+    it. A delta from an earlier release keeps every setting it held and is
+    filled from this release's baseline for the rest; the delta stays in its
+    history as the revision before. Reported as the ``ProfileFormat``
+    attribute: "converted" on the run that converted it, "full" once it is
+    one, and "deferred" when it could not be converted now -- its current state
+    could not be recorded first, or an administrator saved it meanwhile -- in
+    which case readers keep using the delta, and the next deployment tries again.
+    """
+    try:
+        converted = store.convert_to_full_copy(
+            OPERATOR_PROFILE, comment="stored as a full copy of the configuration (0.4.0)"
+        )
+    except (RevisionHistoryUnavailable, ConcurrentModification):
+        LOGGER.warning(
+            "could not store the %s profile as a full copy now; the next deployment retries",
+            OPERATOR_PROFILE,
+            exc_info=True,
+        )
+        return "deferred"
+    return "converted" if converted else "full"
+
+
 def handler(event: Dict[str, Any], context: Any) -> None:
     """CloudFormation custom resource entry point."""
     LOGGER.info("seeding the configuration table: %s", json.dumps(event, default=str))
@@ -717,6 +743,7 @@ def handler(event: Dict[str, Any], context: Any) -> None:
             },
             parameter_values=properties.get("ParameterDefaults") or {},
         )
+        outcome["ProfileFormat"] = convert_profiles(store)
         LOGGER.info("seeded the configuration table: %s", outcome)
         cfnresponse.send(event, context, cfnresponse.SUCCESS, outcome, physical_id)
     except Exception as error:  # noqa: BLE001 -- must answer CloudFormation either way

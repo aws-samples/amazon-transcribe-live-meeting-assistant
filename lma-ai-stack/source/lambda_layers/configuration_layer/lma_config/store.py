@@ -65,6 +65,10 @@ from .errors import (
     ConfigurationError,
     ConfigurationTableNotConfigured,
     InvalidConfiguration,
+    ProfileExists,
+    ProfileInUse,
+    ProfileNotFound,
+    ProfileReadOnly,
     RevisionHistoryUnavailable,
     RevisionNotFound,
 )
@@ -113,6 +117,18 @@ _CONDITIONAL_CHECK_FAILED = "ConditionalCheckFailedException"
 
 #: The author recorded for what the deploy-time seeder writes.
 _SEEDER = "cloudformation"
+
+#: ``ProfileFormat`` of a profile that stores every section in full -- a copy of
+#: the configuration rather than a delta over the baseline. Every profile this
+#: store creates is one, and the seeder converts the delta profile an earlier
+#: release created (``convert_to_full_copy``). Reads are the same either way: a
+#: profile is merged over the baseline, which supplies any setting a later
+#: release adds.
+FULL_COPY = "full"
+
+#: Head attributes a save carries from the record it replaces. A whole-item
+#: write would otherwise drop them on the first save after they were set.
+_CARRIED_METADATA = ("ProfileOrigin", "Description", "ProfileFormat")
 
 
 def _utc_now_iso() -> str:
@@ -216,9 +232,9 @@ def deep_merge(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> Dict[str,
     """``overlay`` over ``base``, recursing into nested objects.
 
     A value in the overlay replaces the one in the base, except where both are
-    objects, in which case they are merged key by key. That is what makes a
-    profile a *delta*: it holds only the keys an operator changed, and the rest
-    keep coming from the baseline the deployment shipped.
+    objects, in which case they are merged key by key. A profile is merged over
+    the baseline this way when it is read, so a setting the profile does not
+    hold -- one a later release adds -- comes from the baseline.
     """
     merged: Dict[str, Any] = dict(base)
     for key, value in overlay.items():
@@ -228,6 +244,37 @@ def deep_merge(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> Dict[str,
         else:
             merged[key] = value
     return merged
+
+
+def full_section(name: str, values: Mapping[str, Any], baseline: Any) -> Dict[str, Any]:
+    """A section as a full-copy profile stores it: complete, not a delta.
+
+    Combined with the baseline's copy as the section's readers combine them
+    (its schema's ``mergeStrategy``): key by key for "merge", and for
+    "replace" the profile's value when it holds one, else the baseline's.
+    """
+    shipped = dict(baseline) if isinstance(baseline, Mapping) else {}
+    if section_schema(name).get("mergeStrategy") == "replace":
+        return dict(values) if values else shipped
+    return deep_merge(shipped, values)
+
+
+def full_body(body: Mapping[str, Any], baseline: Mapping[str, Any]) -> Dict[str, Any]:
+    """Every registered section of the baseline, with ``body``'s values over it."""
+    sections = set(baseline) | set(body)
+    return {
+        name: full_section(name, body.get(name) or {}, baseline.get(name))
+        for name in sorted(sections)
+        if isinstance(body.get(name, baseline.get(name)), Mapping)
+    }
+
+
+def _refuse_managed(name: str, current: "ConfigurationRecord") -> None:
+    if current.exists and current.metadata.get("Managed"):
+        raise ProfileReadOnly(
+            f"the configuration profile {name!r} is managed by the deployment and is "
+            "rewritten by every stack update; copy it to a new profile to change it"
+        )
 
 
 @dataclass(frozen=True)
@@ -346,6 +393,22 @@ class ResolvedSection:
     cache_tier: CacheTier
     served_from_cache: bool
     active_profile: Optional[str]
+
+
+@dataclass(frozen=True)
+class ProfileSummary:
+    """One profile as a list of profiles shows it, read without its body."""
+
+    name: str
+    managed: bool
+    active: bool
+    description: str
+    version: int
+    updated_at: str
+    updated_by: str
+    origin: str
+    published_revision: Optional[int]
+    full_copy: bool
 
 
 class ConfigurationStore:
@@ -513,6 +576,9 @@ class ConfigurationStore:
         if not active:
             return None
         name = str(active)
+        if name == DEFAULT_PROFILE_NAME:
+            # An Admin activated the baseline itself: no profile is merged over it.
+            return None
         if not is_profile_key(f"{CONFIG_PREFIX}{name}"):
             LOGGER.warning(
                 "the active-profile pointer in %s names %r, which is not a profile "
@@ -694,9 +760,23 @@ class ConfigurationStore:
         _validate_sections(requested)
         self._check_limits(requested)
         replacements = {section: dict(values) for section, values in requested.items()}
+
+        def build(current: ConfigurationRecord) -> Dict[str, Any]:
+            sections = replacements
+            if current.metadata.get("ProfileFormat") == FULL_COPY:
+                # A full copy stores each section in full, so a section sent as
+                # a delta -- what an editor that resets a field sends -- is
+                # completed from the baseline.
+                baseline = self.read_record(DEFAULT_KEY, consistent_read=True).body
+                sections = {
+                    section: full_section(section, values, baseline.get(section))
+                    for section, values in replacements.items()
+                }
+            return {**current.body, **sections}
+
         return self._save(
             name,
-            lambda current: {**current.body, **replacements},
+            build,
             updated_by=updated_by,
             expected_version=expected_version,
             # Conditional whatever the caller offered. This is a read, a merge
@@ -758,6 +838,7 @@ class ConfigurationStore:
         """
         key = profile_key(name)
         current = self.read_record(key, consistent_read=True)
+        _refuse_managed(name, current)
         if expected_version is not None and current.version != expected_version:
             raise ConcurrentModification(
                 f"the configuration profile {name!r} was saved by "
@@ -795,6 +876,7 @@ class ConfigurationStore:
         comment: Optional[str] = None,
         source: str = SOURCE_SAVE,
         restored_from: Optional[int] = None,
+        extra_metadata: Optional[Mapping[str, Any]] = None,
     ) -> SaveOutcome:
         """Write ``body`` over ``current``, recording the revisions that implies.
 
@@ -839,12 +921,14 @@ class ConfigurationStore:
         plan = self._plan(name, current, body, updated_by, now, comment, source, restored_from)
         if plan.prior is not None:
             self._record_prior(name, *plan.prior)
-        metadata: Dict[str, Any] = {}
         # Carried forward like CreatedAt, because a whole-item write would
-        # otherwise drop it on the operator's first save -- which is exactly
+        # otherwise drop them on the operator's first save -- which is exactly
         # when somebody might still need to know how the profile came to exist.
-        if current.profile_origin:
-            metadata["ProfileOrigin"] = current.profile_origin
+        metadata: Dict[str, Any] = {
+            name: current.metadata[name] for name in _CARRIED_METADATA if current.metadata.get(name)
+        }
+        if extra_metadata:
+            metadata.update(extra_metadata)
         metadata.update(self._counters(plan.latest, plan.published))
         self._put(
             profile_key(name),
@@ -891,6 +975,20 @@ class ConfigurationStore:
         a call that finds the profile already there writes no revision at all.
         """
         metadata: Dict[str, Any] = {"ProfileOrigin": origin} if origin else {}
+        return self._create(name, body, created_by=_SEEDER, source=SOURCE_DEPLOY, metadata=metadata)
+
+    def _create(
+        self,
+        name: str,
+        body: Mapping[str, Any],
+        *,
+        created_by: str,
+        source: str,
+        metadata: Mapping[str, Any],
+        comment: Optional[str] = None,
+    ) -> bool:
+        """Create a profile if it is absent, starting its history; whether it was created."""
+        metadata = dict(metadata)
         first = 0
         if self._revisions is not None:
             first = self._revisions.read_index(name).highest_revision + 1
@@ -902,16 +1000,18 @@ class ConfigurationStore:
             profile_name=name,
             extra_metadata=metadata or None,
             updated_at=now,
+            updated_by=created_by,
         )
         if created and self._revisions is not None:
             entry = RevisionEntry(
                 revision=first,
                 created_at=now,
-                created_by=_SEEDER,
-                source=SOURCE_DEPLOY,
+                created_by=created_by,
+                source=source,
                 version=1,
                 sections=tuple(sorted(body)),
                 size_bytes=_size_of(body),
+                comment=clean_text(comment, MAX_COMMENT_LENGTH) if comment else None,
             )
             self._record_new(name, entry, dict(body), published=first)
         return created
@@ -949,6 +1049,7 @@ class ConfigurationStore:
         current = self.read_record(profile_key(name), consistent_read=True)
         if not current.exists or spec.name in current.body:
             return False
+        _refuse_managed(name, current)
         self._commit(
             name,
             current,
@@ -973,6 +1074,9 @@ class ConfigurationStore:
             Whether the pointer was written.
         """
         validate_profile_name(name)
+        return self._write_pointer(name, only_if_absent=only_if_absent)
+
+    def _write_pointer(self, name: str, *, only_if_absent: bool = False) -> bool:
         metadata = {
             codec.KEY_ATTRIBUTE: ACTIVE_POINTER_KEY,
             "ActiveProfile": name,
@@ -994,6 +1098,200 @@ class ConfigurationStore:
                 return False
             raise
         self.invalidate()
+        return True
+
+    # ── named profiles ─────────────────────────────────────────────────────
+
+    def list_profiles(self) -> List[ProfileSummary]:
+        """Every stored profile and the baseline, without their bodies, by name.
+
+        A scan, because the table has a hash key only: the table holds a few
+        dozen items at most, and the projection leaves out the bodies.
+        """
+        active = self.active_profile_name(consistent_read=True)
+        names = [codec.KEY_ATTRIBUTE, *codec.METADATA_ATTRIBUTES[1:]]
+        request: Dict[str, Any] = {
+            "TableName": self._table_name,
+            "FilterExpression": "begins_with(#key, :prefix)",
+            "ProjectionExpression": ", ".join(f"#a{i}" for i in range(len(names))),
+            "ExpressionAttributeNames": {
+                "#key": codec.KEY_ATTRIBUTE,
+                **{f"#a{i}": name for i, name in enumerate(names)},
+            },
+            "ExpressionAttributeValues": {":prefix": {"S": CONFIG_PREFIX}},
+            "ConsistentRead": True,
+        }
+        profiles: List[ProfileSummary] = []
+        while True:
+            page = self._client.scan(**request)
+            for raw in page.get("Items", []):
+                item = codec.unmarshal_item(raw)
+                key = str(item.get(codec.KEY_ATTRIBUTE, ""))
+                if key == DEFAULT_KEY:
+                    name = DEFAULT_PROFILE_NAME
+                elif is_profile_key(key):
+                    name = key[len(CONFIG_PREFIX) :]
+                else:
+                    continue
+                record = ConfigurationRecord(key=key, body={}, metadata=item)
+                profiles.append(
+                    ProfileSummary(
+                        name=name,
+                        managed=bool(item.get("Managed")),
+                        # With no usable pointer, the baseline is what applies.
+                        active=name == (active or DEFAULT_PROFILE_NAME),
+                        description=str(item.get("Description") or ""),
+                        version=record.version,
+                        updated_at=record.updated_at,
+                        updated_by=record.updated_by,
+                        origin=record.profile_origin,
+                        published_revision=record.published_revision,
+                        full_copy=item.get("ProfileFormat") == FULL_COPY,
+                    )
+                )
+            if not page.get("LastEvaluatedKey"):
+                break
+            request["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+        return sorted(profiles, key=lambda p: (p.name != DEFAULT_PROFILE_NAME, p.name.lower()))
+
+    def create_profile(
+        self,
+        name: str,
+        *,
+        updated_by: str,
+        copy_from: Optional[str] = None,
+        body: Optional[Mapping[str, Any]] = None,
+        description: str = "",
+        comment: Optional[str] = None,
+    ) -> SaveOutcome:
+        """Create a Custom profile as a full copy: of another profile, or of a body.
+
+        ``copy_from`` names the profile to copy (the baseline by default);
+        ``body`` is an imported configuration, laid over the baseline. A copy
+        of a Managed profile is a Custom one.
+
+        Raises:
+            ProfileExists: a profile is already stored under ``name``.
+            ProfileNotFound: ``copy_from`` names no stored profile.
+            InvalidConfiguration: ``body`` does not match the section schemas.
+            ReservedProfileName, InvalidProfileName: ``name`` cannot be used.
+        """
+        validate_profile_name(name)
+        if self.read_record(profile_key(name), consistent_read=True).exists:
+            raise ProfileExists(f"a configuration profile named {name!r} already exists")
+        baseline = self.read_record(DEFAULT_KEY, consistent_read=True).body
+        if body is not None:
+            _validate_sections(body)
+            self._check_limits(body)
+            source_body: Mapping[str, Any] = body
+            origin = "imported"
+        else:
+            source_name = copy_from or DEFAULT_PROFILE_NAME
+            source = self.read_profile(source_name, consistent_read=True)
+            if not source.exists:
+                raise ProfileNotFound(f"there is no configuration profile named {source_name!r}")
+            source_body = source.body
+            origin = f"copied-from-{source_name}"
+        metadata: Dict[str, Any] = {"ProfileOrigin": origin, "ProfileFormat": FULL_COPY}
+        if description:
+            metadata["Description"] = clean_text(description, MAX_COMMENT_LENGTH)
+        full = full_body(source_body, baseline)
+        if not self._create(
+            name,
+            full,
+            created_by=updated_by,
+            source=SOURCE_SAVE,
+            metadata=metadata,
+            comment=comment,
+        ):
+            raise ProfileExists(f"a configuration profile named {name!r} already exists")
+        return SaveOutcome(version=1, revision=self.read_profile(name).published_revision)
+
+    def delete_profile(self, name: str) -> None:
+        """Delete a Custom profile. Its retained revisions stay, as history.
+
+        Raises:
+            ReservedProfileName: ``name`` is the baseline's.
+            ProfileNotFound: no profile is stored under ``name``.
+            ProfileReadOnly: the profile is Managed.
+            ProfileInUse: the profile is the active one.
+        """
+        validate_profile_name(name)
+        current = self.read_record(profile_key(name), consistent_read=True)
+        if not current.exists:
+            raise ProfileNotFound(f"there is no configuration profile named {name!r}")
+        _refuse_managed(name, current)
+        if self.active_profile_name(consistent_read=True) == name:
+            raise ProfileInUse(
+                f"the configuration profile {name!r} is the active one; activate another "
+                "profile before deleting it"
+            )
+        try:
+            self._client.delete_item(
+                TableName=self._table_name,
+                Key={codec.KEY_ATTRIBUTE: {"S": profile_key(name)}},
+                **self._condition_for(current),
+            )
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") == _CONDITIONAL_CHECK_FAILED:
+                raise ConcurrentModification(
+                    f"the configuration profile {name!r} changed while it was being "
+                    "deleted; reload the page and try again"
+                ) from error
+            raise
+        self.invalidate()
+
+    def activate_profile(self, name: str) -> None:
+        """Make ``name`` the profile in force: a stored profile, or ``default``.
+
+        Raises:
+            ProfileNotFound: no profile is stored under ``name``.
+        """
+        if name != DEFAULT_PROFILE_NAME:
+            validate_profile_name(name)
+        if not self.read_profile(name, consistent_read=True).exists:
+            raise ProfileNotFound(f"there is no configuration profile named {name!r}")
+        self._write_pointer(name)
+
+    def _as_stored(self, current: ConfigurationRecord, body: Mapping[str, Any]) -> Dict[str, Any]:
+        """``body`` as ``current`` stores it: completed from the baseline for a full copy.
+
+        A revision restored into a full copy may be one saved while the profile
+        was still a delta.
+        """
+        if current.metadata.get("ProfileFormat") != FULL_COPY:
+            return dict(body)
+        return full_body(body, self.read_record(DEFAULT_KEY, consistent_read=True).body)
+
+    def convert_to_full_copy(self, name: str, *, comment: Optional[str] = None) -> bool:
+        """Store a delta profile from an earlier release as a full copy.
+
+        The profile's settings are kept; every setting it did not hold is
+        filled from the baseline as it stands now. Recorded as a revision, so
+        the delta it was can still be compared and restored.
+
+        Returns:
+            True when this call converted the profile; False when it is absent,
+            Managed, or already a full copy.
+        """
+        current = self.read_record(profile_key(name), consistent_read=True)
+        if (
+            not current.exists
+            or current.metadata.get("Managed")
+            or current.metadata.get("ProfileFormat") == FULL_COPY
+        ):
+            return False
+        baseline = self.read_record(DEFAULT_KEY, consistent_read=True).body
+        self._commit(
+            name,
+            current,
+            full_body(current.body, baseline),
+            updated_by=_SEEDER,
+            condition=self._condition_for(current),
+            comment=comment,
+            source=SOURCE_DEPLOY,
+            extra_metadata={"ProfileFormat": FULL_COPY},
+        )
         return True
 
     # ── history ────────────────────────────────────────────────────────────
@@ -1088,7 +1386,7 @@ class ConfigurationStore:
         record = self.get_revision(name, revision)
         return self._save(
             name,
-            lambda _current: dict(record.body),
+            lambda current: self._as_stored(current, record.body),
             updated_by=updated_by,
             expected_version=int(expected_version),
             condition_on_read=True,
@@ -1520,11 +1818,12 @@ class ConfigurationStore:
         profile_name: Optional[str] = None,
         extra_metadata: Optional[Mapping[str, Any]] = None,
         updated_at: Optional[str] = None,
+        updated_by: str = _SEEDER,
     ) -> bool:
         item = self._item(
             key,
             body,
-            updated_by=_SEEDER,
+            updated_by=updated_by,
             version=1,
             created_at=None,
             extra_metadata=extra_metadata,

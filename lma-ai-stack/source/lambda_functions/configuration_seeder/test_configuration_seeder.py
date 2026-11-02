@@ -1570,3 +1570,44 @@ def test_the_baseline_ships_transcript_deletion_off_beside_the_retention_paramet
         "meetingRecordExpirationInDays": 30,
         "transcriptionExpirationInDays": 7,
     }
+
+
+# ── 0.4.0: the operator's profile becomes a full copy ───────────────────────
+
+
+def test_a_delta_profile_from_an_earlier_release_becomes_a_full_copy(seeder) -> None:
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default")  # a release that stored the profile as a delta
+    store.write_section(
+        "custom",
+        "language_models",
+        {"summaryModelId": "amazon.nova-pro-v1:0"},
+        updated_by="admin@example.com",
+        expected_version=None,
+    )
+    assert seeder.convert_profiles(store) == "converted"
+    body = dynamo.body("Config#custom")
+    baseline = dynamo.body("Config#default")
+    # The administrator's setting is kept...
+    assert body["language_models"]["summaryModelId"] == "amazon.nova-pro-v1:0"
+    # ...and every section the baseline holds is now stored in the profile too.
+    assert set(baseline) <= set(body)
+    assert dynamo.metadata("Config#custom")["ProfileFormat"] == "full"
+
+
+def test_the_conversion_happens_once(seeder) -> None:
+    store, _dynamo = build_store()
+    seeder.seed(store, domain="default")
+    assert seeder.convert_profiles(store) == "converted"
+    assert seeder.convert_profiles(store) == "full"
+
+
+def test_a_conversion_that_cannot_record_history_is_deferred(seeder, monkeypatch) -> None:
+    store, _dynamo = build_store()
+    seeder.seed(store, domain="default")
+
+    def unavailable(*_args, **_kwargs):
+        raise seeder.RevisionHistoryUnavailable("down")
+
+    monkeypatch.setattr(store, "convert_to_full_copy", unavailable)
+    assert seeder.convert_profiles(store) == "deferred"

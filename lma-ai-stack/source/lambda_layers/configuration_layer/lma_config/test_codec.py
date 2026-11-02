@@ -163,6 +163,7 @@ def test_the_metadata_list_is_closed() -> None:
         "Description",
         "Managed",
         "ProfileOrigin",
+        "ProfileFormat",
         "LatestRevision",
         "PublishedRevision",
     )

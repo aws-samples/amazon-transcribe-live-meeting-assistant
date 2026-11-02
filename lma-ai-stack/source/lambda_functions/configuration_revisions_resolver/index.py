@@ -40,9 +40,24 @@ the five that read and act on the history every save records (see
     Label a revision, or clear its label. A labelled revision is kept however
     many revisions follow it.
 
-All seven are for the **Admin** group: on the AppSync field, and re-checked here.
-The profile defaults to ``custom``, the one profile every configuration page
-saves into.
+``Query.listConfigurationProfiles``
+    Every profile and the baseline, without bodies: name, Managed or Custom,
+    description, whether it is active, who saved it last and when.
+
+``Mutation.createConfigurationProfile(input)``
+    Create a Custom profile as a full copy of another profile (the baseline by
+    default), or of an imported configuration laid over the baseline.
+
+``Mutation.deleteConfigurationProfile(input)``
+    Delete a Custom profile that is not the active one. Its history stays.
+
+``Mutation.activateConfigurationProfile(input)``
+    Make a profile, or the baseline itself, the one in force.
+
+All are for the **Admin** group: on the AppSync field, and re-checked here.
+The profile defaults to ``custom``, the profile a deployment creates. The
+baseline (``default``) and Managed profiles can be read, compared and activated,
+and are refused every write.
 """
 
 from __future__ import annotations
@@ -57,6 +72,10 @@ from lma_config import (  # from the configuration layer
     ConcurrentModification,
     ConfigurationStore,
     InvalidConfiguration,
+    ProfileExists,
+    ProfileInUse,
+    ProfileNotFound,
+    ProfileReadOnly,
     RevisionEntry,
     RevisionNotFound,
     registered_sections,
@@ -75,6 +94,8 @@ LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
 DEFAULT_PROFILE = "custom"
+#: The deployment baseline's name, which can be read and activated, never saved.
+BASELINE = "default"
 
 GET_CONFIGURATION_FIELD = "getConfiguration"
 UPDATE_CONFIGURATION_FIELD = "updateConfiguration"
@@ -83,6 +104,10 @@ GET_FIELD = "getConfigurationRevision"
 DIFF_FIELD = "diffConfigurationRevisions"
 RESTORE_FIELD = "restoreConfigurationRevision"
 LABEL_FIELD = "labelConfigurationRevision"
+LIST_PROFILES_FIELD = "listConfigurationProfiles"
+CREATE_PROFILE_FIELD = "createConfigurationProfile"
+DELETE_PROFILE_FIELD = "deleteConfigurationProfile"
+ACTIVATE_PROFILE_FIELD = "activateConfigurationProfile"
 FIELDS = (
     GET_CONFIGURATION_FIELD,
     UPDATE_CONFIGURATION_FIELD,
@@ -91,6 +116,10 @@ FIELDS = (
     DIFF_FIELD,
     RESTORE_FIELD,
     LABEL_FIELD,
+    LIST_PROFILES_FIELD,
+    CREATE_PROFILE_FIELD,
+    DELETE_PROFILE_FIELD,
+    ACTIVATE_PROFILE_FIELD,
 )
 
 # Built once per container. Every read here is a fresh, consistent one: the
@@ -149,8 +178,12 @@ def _field(event: Mapping[str, Any]) -> str:
     return field
 
 
-def _profile(arguments: Mapping[str, Any]) -> str:
-    return validate_profile_name(str(arguments.get("Profile") or DEFAULT_PROFILE))
+def _profile(arguments: Mapping[str, Any], *, allow_baseline: bool = False) -> str:
+    """The profile named, ``custom`` when none is; ``default`` only where it may be read."""
+    name = str(arguments.get("Profile") or DEFAULT_PROFILE)
+    if allow_baseline and name == BASELINE:
+        return name
+    return validate_profile_name(name)
 
 
 def _revision_number(arguments: Mapping[str, Any], name: str) -> int:
@@ -190,9 +223,14 @@ def get_configuration(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     cache, so the editor shows what is stored and a save is checked against
     the version it replaces.
     """
-    profile = _profile(arguments)
-    baseline = CONFIG_STORE.read_profile("default", consistent_read=True)
-    head = CONFIG_STORE.read_profile(profile, consistent_read=True)
+    profile = _profile(arguments, allow_baseline=True)
+    baseline = CONFIG_STORE.read_profile(BASELINE, consistent_read=True)
+    head = (
+        baseline
+        if profile == BASELINE
+        else CONFIG_STORE.read_profile(profile, consistent_read=True)
+    )
+    active = CONFIG_STORE.active_profile_name(consistent_read=True) or BASELINE
     specs = registered_sections()
     sections = [
         {
@@ -210,9 +248,17 @@ def get_configuration(arguments: Mapping[str, Any]) -> Dict[str, Any]:
         "UpdatedBy": head.updated_by or None,
         "UpdatedAt": head.updated_at or None,
         "PublishedRevision": head.published_revision,
+        # The baseline and Managed profiles are read-only: the page shows them
+        # with "Copy to edit" rather than a Save.
+        "Managed": profile == BASELINE or bool(head.metadata.get("Managed")),
+        "Description": head.metadata.get("Description") or None,
+        "Active": profile == active,
+        "FullCopy": head.metadata.get("ProfileFormat") == "full",
         "Sections": json.dumps(sections, sort_keys=True),
         "Default": json.dumps(_registered_only(baseline.body), sort_keys=True),
         "Custom": json.dumps(_registered_only(head.body), sort_keys=True),
+        # For the baseline itself, the profile is empty: nothing is laid over it.
+        **({"Custom": "{}"} if profile == BASELINE else {}),
         # The configuration library: named presets the editor can apply to the
         # page as unsaved changes. See lma_config/presets.py.
         "Presets": json.dumps(shipped_presets(), sort_keys=True),
@@ -344,6 +390,73 @@ def label_revision(input_data: Mapping[str, Any]) -> Dict[str, Any]:
     return {"Success": True, "Profile": profile, "Revision": revision}
 
 
+def _profile_shape(summary: Any) -> Dict[str, Any]:
+    return {
+        "Name": summary.name,
+        "Managed": summary.managed,
+        "Active": summary.active,
+        "Description": summary.description or None,
+        "Version": summary.version,
+        "UpdatedAt": summary.updated_at or None,
+        "UpdatedBy": summary.updated_by or None,
+        "Origin": summary.origin or None,
+        "PublishedRevision": summary.published_revision,
+        "FullCopy": summary.full_copy,
+    }
+
+
+def list_profiles() -> Dict[str, Any]:
+    return {"Profiles": [_profile_shape(p) for p in CONFIG_STORE.list_profiles()]}
+
+
+def create_profile(input_data: Mapping[str, Any], caller: Mapping[str, Any]) -> Dict[str, Any]:
+    name = validate_profile_name(str(input_data.get("Name") or ""))
+    raw = input_data.get("Body")
+    body = None
+    if raw not in (None, ""):
+        try:
+            body = json.loads(raw) if isinstance(raw, str) else raw
+        except json.JSONDecodeError as error:
+            raise ValueError(f"Body is not valid JSON: {error}") from error
+        if not isinstance(body, dict):
+            raise ValueError("Body must be a JSON object of sections")
+        unknown = sorted(n for n in body if n not in registered_sections())
+        if unknown:
+            raise InvalidConfiguration([f"{n}: is not a configuration section" for n in unknown])
+    copy_from = input_data.get("CopyFrom") or None
+    if body is not None and copy_from:
+        raise ValueError("send CopyFrom or Body, not both")
+    outcome = CONFIG_STORE.create_profile(
+        name,
+        updated_by=caller["actor"],
+        copy_from=str(copy_from) if copy_from else None,
+        body=body,
+        description=str(input_data.get("Description") or ""),
+        comment=input_data.get("Comment"),
+    )
+    LOGGER.info("created the configuration profile %s from %s", name, copy_from or "an import")
+    return {
+        "Success": True,
+        "Profile": name,
+        "Version": outcome.version,
+        "Revision": outcome.revision,
+    }
+
+
+def delete_profile(input_data: Mapping[str, Any]) -> Dict[str, Any]:
+    name = validate_profile_name(str(input_data.get("Name") or ""))
+    CONFIG_STORE.delete_profile(name)
+    LOGGER.info("deleted the configuration profile %s", name)
+    return {"Success": True, "Profile": name}
+
+
+def activate_profile(input_data: Mapping[str, Any]) -> Dict[str, Any]:
+    name = _profile({"Profile": input_data.get("Name") or ""}, allow_baseline=True)
+    CONFIG_STORE.activate_profile(name)
+    LOGGER.info("activated the configuration profile %s", name)
+    return {"Success": True, "Profile": name}
+
+
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """AppSync entry point."""
     field = _field(event)
@@ -365,6 +478,14 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return diff_revisions(arguments)
         if field == RESTORE_FIELD:
             return restore_revision(arguments.get("input") or {}, caller)
+        if field == LIST_PROFILES_FIELD:
+            return list_profiles()
+        if field == CREATE_PROFILE_FIELD:
+            return create_profile(arguments.get("input") or {}, caller)
+        if field == DELETE_PROFILE_FIELD:
+            return delete_profile(arguments.get("input") or {})
+        if field == ACTIVATE_PROFILE_FIELD:
+            return activate_profile(arguments.get("input") or {})
         return label_revision(arguments.get("input") or {})
     except ConcurrentModification as error:
         # The prefix the configuration pages match on to tell the admin to
@@ -379,5 +500,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # (A registered section that ships no schema is a packaging fault, not
         # caught here, and reaches the client as itself.)
         raise Exception(f"Invalid: {error}") from error  # pylint: disable=broad-exception-raised
-    except RevisionNotFound as error:
+    except (RevisionNotFound, ProfileNotFound) as error:
         raise Exception(f"Not found: {error}") from error  # pylint: disable=broad-exception-raised
+    except (ProfileExists, ProfileInUse, ProfileReadOnly) as error:
+        # Refusals the page shows as they are: a name taken, the active profile,
+        # or a profile the deployment manages.
+        raise Exception(f"Refused: {error}") from error  # pylint: disable=broad-exception-raised

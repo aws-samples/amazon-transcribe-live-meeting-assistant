@@ -6837,12 +6837,17 @@ Resources:
           PolicyDocument:
             Version: 2012-10-17
             Statement:
-              # PutItem is an editor save or a restore, each a conditional
-              # write of the profile like any other save; no DeleteItem.
+              # PutItem is an editor save, a restore, a new profile or the
+              # active-profile pointer, each conditional like any other save.
+              # DeleteItem deletes a Custom profile, conditional on the version
+              # read; Scan lists the profiles (a hash-key-only table of a few
+              # dozen items).
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Scan
                 Resource: !GetAtt ConfigurationTable.Arn
               - Effect: Allow
                 Action:
@@ -8422,6 +8427,58 @@ Resources:
       DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
       TypeName: Mutation
       FieldName: labelConfigurationRevision
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/configurationRevisionsLambda.js
+
+  ListConfigurationProfilesResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      TypeName: Query
+      FieldName: listConfigurationProfiles
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/configurationRevisionsLambda.js
+
+  CreateConfigurationProfileResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: createConfigurationProfile
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/configurationRevisionsLambda.js
+
+  DeleteConfigurationProfileResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: deleteConfigurationProfile
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/configurationRevisionsLambda.js
+
+  ActivateConfigurationProfileResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: activateConfigurationProfile
       Runtime:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0

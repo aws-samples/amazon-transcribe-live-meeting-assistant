@@ -67,6 +67,9 @@ METADATA_ATTRIBUTES: Tuple[str, ...] = (
     # whether an upgrade managed to carry an operator's prompts across, and the
     # seeder run that could report that is long past by the time anybody looks.
     "ProfileOrigin",
+    # "full" on a profile that stores every section in full, as a copy, rather
+    # than as a delta over the baseline. See store.ConfigurationStore.
+    "ProfileFormat",
     "LatestRevision",
     "PublishedRevision",
 )

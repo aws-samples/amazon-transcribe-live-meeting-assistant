@@ -29,6 +29,10 @@ from .errors import (
     ConfigurationTooLarge,
     InvalidConfiguration,
     InvalidProfileName,
+    ProfileExists,
+    ProfileInUse,
+    ProfileNotFound,
+    ProfileReadOnly,
     ReservedProfileName,
     RevisionHistoryUnavailable,
     RevisionNotFound,
@@ -87,9 +91,11 @@ from .sections import (
     section_spec,
 )
 from .store import (
+    FULL_COPY,
     TABLE_NAME_ENV_VAR,
     ConfigurationRecord,
     ConfigurationStore,
+    ProfileSummary,
     ResolvedDocument,
     ResolvedSection,
     RevisionListing,
@@ -104,6 +110,12 @@ from .transcript_deletion import (
 )
 
 __all__ = [
+    "FULL_COPY",
+    "ProfileExists",
+    "ProfileInUse",
+    "ProfileNotFound",
+    "ProfileReadOnly",
+    "ProfileSummary",
     "ACTIVE_POINTER_KEY",
     "ASR_ENGINE",
     "BODY_ATTRIBUTE",

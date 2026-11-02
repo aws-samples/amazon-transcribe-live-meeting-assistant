@@ -43,7 +43,7 @@ store holds is distinguished by a prefix on that one key:
 | Key | Contents |
 |---|---|
 | `Config#default` | The deployment baseline. CloudFormation writes it on create and rewrites it whenever the shipped content or the code that writes it changes, so it holds the content the installed release ships. |
-| `Config#<name>` | A profile: an administrator's edits, stored as a *delta* over the baseline. Today there is one, `Config#custom`. |
+| `Config#<name>` | A profile. A **Custom** profile is an administrator's configuration, stored as a full copy (`ProfileFormat: full`); `Config#custom` is the one a deployment creates. A **Managed** profile is written by the deployment and is read-only. See [Named profiles](#named-profiles). |
 | `Config#__active` | A pointer naming the profile in force. |
 | `Schema` | Reserved, and not written. The section schemas ship inside the configuration layer instead, so a save is always checked against the schema its readers were released with; see [Section schemas and validation](#section-schemas-and-validation). |
 | `ConfigRevIndex#<name>` | The revision index of a profile: one small entry per retained revision. See [Revisions and audit](#revisions-and-audit). |
@@ -72,7 +72,7 @@ provenance can be read without decompressing anything:
 ```
 Configuration  CreatedAt  UpdatedAt  UpdatedBy  Version
 IsActive  ActiveProfile  Description  Managed  ProfileOrigin
-LatestRevision  PublishedRevision
+ProfileFormat  LatestRevision  PublishedRevision
 ```
 
 `ProfileOrigin` is the one of those that does something an operator may act on:
@@ -109,6 +109,39 @@ Size is checked, not trimmed. DynamoDB's limit is 400 KB per item; a record
 over 350 KB logs a warning, and one over the limit raises. A
 configuration silently missing its tail is much harder to diagnose than a save
 that refuses.
+
+## Named profiles
+
+The table holds any number of profiles. One is active, named by the
+`Config#__active` pointer, and every reader resolves the baseline with the
+active profile merged over it. The pointer may also name `default`, in which
+case nothing is merged over the baseline.
+
+- **Custom profiles** are full copies of the configuration. A new one is a copy
+  of another profile, the baseline by default, or an imported configuration
+  laid over the baseline, and every save stores each section in full: a section
+  sent with only some of its settings is completed from the baseline. The
+  profile is still merged over the baseline when it is read, so a setting a
+  later release adds has a value in every profile.
+- **The baseline and Managed profiles are read-only.** The deployment rewrites
+  them on every stack update, so the store refuses to save, restore or delete
+  them; copy one to change it.
+- **The active profile is not deleted.** Activate another first. A deleted
+  profile's revisions stay in its history, and a profile created again under the
+  same name continues its numbering.
+- **Upgrading to 0.4.0:** the `custom` profile an earlier release stored as a
+  delta is converted to a full copy by the seeder, after anything it adopts:
+  every setting it held is kept, and the rest are filled from the new baseline.
+  The delta it was stays in its history as the revision before. The seeder
+  reports `ProfileFormat` as `converted` on that run, `full` afterwards, and
+  `deferred` if the conversion could not be recorded in history, in which case
+  readers keep using the delta and the next deployment tries again.
+
+The `listConfigurationProfiles` query and the `createConfigurationProfile`,
+`deleteConfigurationProfile` and `activateConfigurationProfile` mutations, all
+for the Admin group, serve them; `getConfiguration(Profile)` reads any of them,
+the baseline included, and reports whether it is Managed and whether it is
+active.
 
 ## The accessor, and the caching policy
 
@@ -1277,7 +1310,7 @@ the consent terms each enrollment agrees to.
 
 | Stage | What it adds |
 |---|---|
-| Named profiles | More than one profile, a way to choose the one in force, and an import that can create one. Export, import and presets work today on the one `custom` profile; see [Export, import and the configuration library](#export-import-and-the-configuration-library) |
+| Named profiles on the Configuration page | The store and the API serve [named profiles](#named-profiles); the page still edits `custom` only |
 | Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired. It waited for the configuration editor: the custom prompt is edited in the DynamoDB console today, which is exactly the route a compressed body closes, so moving it before there was an editor would have left it with no way to edit it. With the editor in place, it needs a schema and a seeder adoption |
 | Replacing the SSM settings blob | The `<stack>-LMASettings` parameter is written only by CloudFormation, at deploy time, and read by the web app for every signed-in user. It is a deployment's wiring rather than something an administrator edits. The Configuration page reads the configuration at run time, but every other page reads only this blob, so a setting another page needs moves when that page reads the configuration too |
 

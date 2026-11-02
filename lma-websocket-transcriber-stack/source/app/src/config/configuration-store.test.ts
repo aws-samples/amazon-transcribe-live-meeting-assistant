@@ -342,6 +342,7 @@ test('the metadata list is closed and matches the Python half exactly', async ()
             'Description',
             'Managed',
             'ProfileOrigin',
+            'ProfileFormat',
             'LatestRevision',
             'PublishedRevision',
         ]
