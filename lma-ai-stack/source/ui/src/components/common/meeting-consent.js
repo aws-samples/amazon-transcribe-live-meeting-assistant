@@ -59,8 +59,9 @@ export const verdictColor = (verdict) => ({ supports_consent: 'green', objection
 /**
  * A display name as the backend matches replies to participants by: NFKC, then
  * case folded, with spacing collapsed. JavaScript has no casefold, so the two
- * characters lower-casing leaves different from Python's casefold() in names
- * -- the sharp s and the final sigma -- are folded here by hand.
+ * most common characters lower-casing leaves different from Python's
+ * casefold() -- the sharp s and the final sigma -- are folded here by hand;
+ * rarer ones are not.
  */
 export const normalizeName = (name) =>
   typeof name === 'string'
@@ -202,7 +203,7 @@ export const consentAsText = (consent) => {
     lines.push('', 'Participants:');
     rows.forEach((row) => {
       const reply = row.decision ? row.decision : 'no reply';
-      lines.push(`- ${row.name}: ${reply}${row.present ? '' : ' (not present at the end)'}`);
+      lines.push(`- ${row.name}: ${reply}${row.present ? '' : ' (not present at the time of this download)'}`);
     });
   }
   const timeline = buildTimeline(consent);

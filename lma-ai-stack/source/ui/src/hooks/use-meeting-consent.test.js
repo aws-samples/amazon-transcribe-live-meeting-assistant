@@ -99,4 +99,24 @@ describe('useMeetingConsent', () => {
     });
     expect(outcome).toBe('Unauthorized');
   });
+
+  it('does not read again for the message its own change produces', async () => {
+    const { client, handlers } = fakeClient();
+    const { result } = renderHook(() => useMeetingConsent('m1', { client }));
+    await waitFor(() => expect(result.current.consent).not.toBeNull());
+    vi.useFakeTimers();
+    try {
+      let change;
+      await act(async () => {
+        change = result.current.recordObjection('Bo Chen');
+        handlers.next({ data: { onUpdateMeetingConsent: { Consent: { Version: 2 } } } });
+        await change;
+      });
+      client.graphql.mockClear();
+      await act(async () => vi.advanceTimersByTime(READ_DELAY_MS));
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(client.graphql).not.toHaveBeenCalled();
+  });
 });

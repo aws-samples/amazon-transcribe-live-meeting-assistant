@@ -150,8 +150,10 @@ below the agenda. It shows:
   replies and attestations, and each change of status with its reason. Replies
   are placed by when LMA recorded them, the order the status is decided in.
 
-If the record cannot be read, the section says so rather than disappearing,
-and the summary download leaves the record out until it can be.
+If the record cannot be read when the page opens, the section says so rather
+than disappearing, and the summary download has no record to include until one
+is read. If a later read fails, the section shows the error above the last
+record read, and the download carries that record.
 
 The images are shown through links signed for whoever opened the page, after
 the same access check as the transcript, and last an hour. An image that has

@@ -257,7 +257,7 @@ const ConsentPanel = ({ state, canEdit = false, isOwner = false, isAdmin = false
   const consent = state?.consent;
   if (!consent) {
     // A failed read is said, not hidden: the record is evidence, and the
-    // summary download leaves it out while it cannot be read.
+    // summary download has no record to include until one is read.
     if (!state?.error) return null;
     return (
       <Container header={<Header variant="h4">Consent</Header>}>

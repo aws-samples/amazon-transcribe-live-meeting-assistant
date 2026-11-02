@@ -44,6 +44,9 @@ const useMeetingConsent = (callId, { client: injected } = {}) => {
   latestCall.current = callId;
   const heldVersion = useRef(null);
   const pending = useRef(null);
+  // Mutations from this page that have not been read back yet; their own
+  // subscription messages need no second read.
+  const inFlight = useRef(0);
 
   const load = useCallback(async () => {
     if (!callId) return;
@@ -70,6 +73,8 @@ const useMeetingConsent = (callId, { client: injected } = {}) => {
 
   useEffect(() => {
     setState({ consent: null, captureAllowed: true, settings: null });
+    setError(null);
+    heldVersion.current = null;
     load();
   }, [load]);
 
@@ -85,6 +90,7 @@ const useMeetingConsent = (callId, { client: injected } = {}) => {
           // already held is skipped and a burst is read once.
           next: (message) => {
             const version = message?.data?.onUpdateMeetingConsent?.Consent?.Version;
+            if (inFlight.current > 0) return;
             if (version != null && version === heldVersion.current) return;
             clearTimeout(pending.current);
             pending.current = setTimeout(load, READ_DELAY_MS);
@@ -103,6 +109,7 @@ const useMeetingConsent = (callId, { client: injected } = {}) => {
   /** Run one mutation, then read the record again. Resolves to an error message or null. */
   const mutate = useCallback(
     async (query, input) => {
+      inFlight.current += 1;
       try {
         await getClient().graphql({ query, variables: { input: { CallId: callId, ...input } } });
         await load();
@@ -110,6 +117,8 @@ const useMeetingConsent = (callId, { client: injected } = {}) => {
       } catch (err) {
         logger.error('meeting consent change failed', err);
         return errorMessage(err);
+      } finally {
+        inFlight.current -= 1;
       }
     },
     [callId, load],
