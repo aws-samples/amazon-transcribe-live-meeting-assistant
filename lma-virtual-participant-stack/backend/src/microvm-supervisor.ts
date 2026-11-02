@@ -37,7 +37,7 @@ import {
     redactPerMeetingConfig,
     type PerMeetingConfig,
 } from './launch-mode.js';
-import { bindLogContext, createLogger, registerSecretValuesFromEnv } from './logger.js';
+import { bindLogContext, createLogger, logMeetingPlatform, registerSecretValuesFromEnv } from './logger.js';
 
 const log = createLogger('microvm-supervisor');
 
@@ -180,7 +180,7 @@ export class Supervisor {
         bindLogContext({
             vpId: this.env.VIRTUAL_PARTICIPANT_ID,
             microvmId: parsedId,
-            meetingPlatform: this.env.MEETING_PLATFORM,
+            meetingPlatform: logMeetingPlatform(this.env.MEETING_PLATFORM),
         });
         registerSecretValuesFromEnv(this.env);
         this.deps.log(

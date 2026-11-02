@@ -12,6 +12,7 @@ import {
     sanitizeForLog,
     type SupervisorDeps,
 } from './microvm-supervisor.js';
+import { getLogContext, logMeetingPlatform } from './logger.js';
 
 /** Minimal ChildProcess stand-in: records kill signals, never spawns anything. */
 function fakeChild(): ChildProcess & { killed: boolean; signals: string[] } {
@@ -172,6 +173,18 @@ test('/run applies per-meeting config to the env and spawns the app', async () =
     assert.equal(h.spawned[0].MEETING_ID, '243574196567966');
     assert.equal(h.sup.state.microvmId, 'mvm-7');
     assert.equal(h.sup.state.appStarted, true);
+});
+
+test('/run binds the meeting to the supervisor\'s log records, the platform in the app\'s spelling', async () => {
+    const h = harness();
+    const payload = JSON.stringify({ MEETING_PLATFORM: 'Teams', VIRTUAL_PARTICIPANT_ID: 'vp-9' });
+    await h.sup.onRun(JSON.stringify({ microvmId: 'mvm-7', runHookPayload: payload }));
+
+    const context = getLogContext();
+    assert.equal(context.vpId, 'vp-9');
+    assert.equal(context.microvmId, 'mvm-7');
+    assert.equal(context.meetingPlatform, 'TEAMS');
+    assert.equal(context.meetingPlatform, logMeetingPlatform('Teams'));
 });
 
 test('/run never spawns the app twice', async () => {

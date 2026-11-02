@@ -86,7 +86,8 @@ test('the lifecycle lines are written whatever the LOG_LEVEL threshold', () => {
     for (const marker of lifecycle) {
         const at = lines.findIndex((line) => line.includes(marker));
         assert.ok(at >= 0, `${marker} is no longer in src/`);
-        const call = lines.slice(Math.max(0, at - 2), at + 1).join('\n');
+        // The call opens on the marker's line or a few lines above it.
+        const call = lines.slice(Math.max(0, at - 6), at + 1).join('\n');
         assert.match(call, /\blog\.always\(/, `${marker} is not written with log.always`);
     }
 });

@@ -316,6 +316,16 @@ export function bindLogContext(fields: LogFields): void {
     }
 }
 
+/**
+ * The spelling `meetingPlatform` is bound in: `MEETING_PLATFORM` arrives as
+ * `ZOOM`, `Teams`, `Chime` …, and one spelling lets one filter value match
+ * every participant, from the app and the MicroVM supervisor alike.
+ */
+export function logMeetingPlatform(raw: string | undefined | null): string | undefined {
+    const value = (raw || '').trim().toUpperCase();
+    return value || undefined;
+}
+
 /** The fields {@link bindLogContext} has bound, as a copy. */
 export function getLogContext(): LogFields {
     return { ...processContext };

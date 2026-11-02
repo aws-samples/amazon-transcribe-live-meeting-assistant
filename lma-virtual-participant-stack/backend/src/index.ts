@@ -45,7 +45,7 @@ import {
     fingerprintSeedForUser,
     stableFingerprintSeed,
 } from './lib/profile.js';
-import { bindLogContext, createLogger } from './logger.js';
+import { bindLogContext, createLogger, logMeetingPlatform } from './logger.js';
 
 const log = createLogger('main');
 
@@ -211,9 +211,7 @@ const main = async (): Promise<void> => {
     // every module's log records carry it; the call id is added when known.
     bindLogContext({
         vpId: details.invite.virtualParticipantId,
-        // One spelling, so a filter on the field matches every participant:
-        // MEETING_PLATFORM arrives as ZOOM, Teams, Chime ...
-        meetingPlatform: details.invite.meetingPlatform.toUpperCase(),
+        meetingPlatform: logMeetingPlatform(details.invite.meetingPlatform),
     });
     const buildInfo = readBuildInfo();
     log.always(
@@ -249,7 +247,7 @@ const main = async (): Promise<void> => {
                 const callId = kinesisStreamManager.getCallId();
                 await statusManager.setCallId(callId);
                 process.env.VP_CALL_ID = callId;
-                bindLogContext({ callId: callId });
+                bindLogContext({ callId });
                 log.info(`Generated and set new VP CallId: ${callId}`);
             }
             
@@ -278,7 +276,7 @@ const main = async (): Promise<void> => {
         const { kinesisStreamManager } = await import('./kinesis-stream.js');
         const callId = kinesisStreamManager.getCallId();
         process.env.VP_CALL_ID = callId;
-        bindLogContext({ callId: callId });
+        bindLogContext({ callId });
         log.info(`Generated local test CallId: ${callId}`);
     }
 
