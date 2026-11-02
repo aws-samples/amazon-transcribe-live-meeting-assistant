@@ -244,8 +244,9 @@ export function registerSecretValue(value: string | undefined | null): void {
 
 /**
  * The environment variables through which the VP receives a credential as a
- * plain string. Credentials it fetches later (from Secrets Manager) are
- * registered where they are fetched.
+ * plain string. The credentials it fetches later from Secrets Manager — the
+ * origin-verify header value (status-manager.ts) and the Zoom sign-in password
+ * (zoom-login.ts) — are registered by the code that fetches them.
  */
 export const SECRET_ENV_VARS: readonly string[] = [
     'MEETING_PASSWORD',
@@ -273,6 +274,11 @@ const JWT = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g;
 const BEARER = /\b(Bearer\s+)[A-Za-z0-9._~+/=-]{20,}/gi;
 // `"password":"x"` inside a JSON.stringify()'d object in the message text.
 const JSON_SECRET_PAIR = /"([A-Za-z0-9_-]+)"(\s*:\s*)"((?:[^"\\]|\\.)*)"/g;
+
+/** Forget every registered secret value. For tests, which share one process per file. */
+export function clearSecretValuesForTest(): void {
+    secretValues.clear();
+}
 
 /** The message text with tokens and registered secret values replaced. */
 export function redactText(text: string): string {
@@ -325,6 +331,14 @@ export function logMeetingPlatform(raw: string | undefined | null): string | und
     const value = (raw || '').trim().toUpperCase();
     return value || undefined;
 }
+
+// The meeting's identity is in the environment before the process starts, so
+// it is bound here and lines written while modules load carry it too; index.ts
+// binds it again with the values it settles on, and adds the call id.
+bindLogContext({
+    vpId: process.env.VIRTUAL_PARTICIPANT_ID,
+    meetingPlatform: logMeetingPlatform(process.env.MEETING_PLATFORM),
+});
 
 /** The fields {@link bindLogContext} has bound, as a copy. */
 export function getLogContext(): LogFields {

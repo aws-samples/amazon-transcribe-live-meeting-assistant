@@ -15,6 +15,7 @@ import {
     REDACTED,
     bindLogContext,
     captureLogs,
+    clearSecretValuesForTest,
     createLogger,
     getLogContext,
     isSecretKey,
@@ -34,6 +35,7 @@ function captureLines(): { lines: string[]; restore: () => void } {
 }
 
 afterEach(() => {
+    clearSecretValuesForTest();
     setLogSink(null);
     setLogLevel(undefined);
     bindLogContext({ vpId: undefined, callId: undefined, meetingPlatform: undefined, extra: undefined });

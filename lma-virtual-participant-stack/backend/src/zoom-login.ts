@@ -13,6 +13,7 @@ import {
     scrollIntoViewAndClick,
 } from './ai-dom-resolver.js';
 import { details } from './details.js';
+import { registerSecretValue } from './logger.js';
 
 export interface ZoomCredentials {
     username: string;
@@ -87,6 +88,7 @@ export async function fetchZoomCredentials(secretName: string): Promise<ZoomCred
     if (!parsed.username || !parsed.password) {
         throw new Error(`Secret ${secretName} missing username or password`);
     }
+    registerSecretValue(parsed.password);
     return parsed;
 }
 

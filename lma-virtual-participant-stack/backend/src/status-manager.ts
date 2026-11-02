@@ -17,7 +17,7 @@ import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { details } from './details.js';
 import { isMicrovmLaunch, microvmVncEndpoint } from './launch-mode.js';
 import { agendaFromVpRow, type VpAgenda } from './meeting-agenda.js';
-import { createLogger } from './logger.js';
+import { createLogger, registerSecretValue } from './logger.js';
 
 const log = createLogger('status-manager');
 
@@ -1223,6 +1223,7 @@ export class VirtualParticipantStatusManager {
         log.error('Origin-verify secret does not contain a headersecret value');
         return null;
       }
+      registerSecretValue(value);
       this.originVerifyHeaderValue = value;
       return value;
     } catch (error) {

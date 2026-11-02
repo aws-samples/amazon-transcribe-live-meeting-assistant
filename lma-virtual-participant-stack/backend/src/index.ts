@@ -718,7 +718,7 @@ const main = async (): Promise<void> => {
 
         // Initialize the appropriate meeting platform handler
         log.info(`Initializing ${details.invite.meetingPlatform} handler...`);
-        log.info(`DEBUG: Meeting platform value: "${details.invite.meetingPlatform}" (type: ${typeof details.invite.meetingPlatform})`);
+        log.debug(`DEBUG: Meeting platform value: "${details.invite.meetingPlatform}" (type: ${typeof details.invite.meetingPlatform})`);
 
         switch (details.invite.meetingPlatform) {
             case 'CHIME':
