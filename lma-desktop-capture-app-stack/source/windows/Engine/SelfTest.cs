@@ -248,6 +248,9 @@ public static class SelfTest
         Check("configured callId is kept across sessions",
             Config.SessionCallId(null, "Fixed", later), "Fixed");
 
+        Console.WriteLine("\nMeeting consent step:");
+        foreach (var (caseName, caseGot, caseWant) in Consent.SelfTestCases()) Check(caseName, caseGot, caseWant);
+
         Console.WriteLine(failures == 0 ? "\nAll self-tests PASSED" : $"\n{failures} self-test(s) FAILED");
         return failures == 0 ? 0 : 1;
     }

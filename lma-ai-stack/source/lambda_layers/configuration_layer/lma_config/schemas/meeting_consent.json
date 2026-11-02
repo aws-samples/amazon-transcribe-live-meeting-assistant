@@ -111,7 +111,7 @@
       "order": 9,
       "type": "string",
       "title": "Streaming clients without a consent step",
-      "description": "What the WebSocket transcriber does, when the mode is Notify or Opt-in, with a meeting from a streaming client that shows no consent step: the browser extension, the Stream Audio embed and the Desktop Capture App. Accept with a warning: the meeting is recorded and transcribed as before, with no consent record, and a warning is logged. Refuse: the meeting is not recorded or transcribed, and the client is told why. Choose Refuse once every client in use has been updated.",
+      "description": "What the WebSocket transcriber does, when the mode is Notify or Opt-in, with a meeting from a streaming client that shows no consent step: the browser extension, the Stream Audio embed, and Desktop Capture App builds from before the consent step. Accept with a warning: the meeting is recorded and transcribed as before, with no consent record, and a warning is logged. Refuse: the meeting is not recorded or transcribed, and the client is told why. Choose Refuse once every client in use has been updated.",
       "enum": ["accept_with_warning", "reject"],
       "enumLabels": {
         "accept_with_warning": "Accept with a warning (no consent record)",

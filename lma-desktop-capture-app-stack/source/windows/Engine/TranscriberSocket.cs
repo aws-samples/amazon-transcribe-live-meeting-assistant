@@ -104,6 +104,29 @@ public sealed class TranscriberSocket
     /// </summary>
     public Action<string>? OnFatalAuth;
 
+    // --- Meeting consent (see Consent.cs) ------------------------------------
+    /// <summary>
+    /// The `consent` field of START: the user's consent step. Sent with every
+    /// START, including after a reconnect; the server records it once and, for a
+    /// meeting somebody objected to, refuses to resume.
+    /// </summary>
+    public Dictionary<string, object>? ConsentPayload;
+    /// <summary>
+    /// Consent frames waiting for a START on an open socket: an evidence image
+    /// taken before Start, or a frame sent while reconnecting. Each is sent once,
+    /// after the next START. Guarded by `_sendLock`.
+    /// </summary>
+    private readonly List<Dictionary<string, object>> _afterStart = new();
+    private bool _startSent;
+
+    /// <summary>Whether the socket is connected now (a frame sent now goes out at once).</summary>
+    public bool IsConnected => _isOpen;
+    /// <summary>
+    /// A CONSENT_STATE frame arrived. One with captureAllowed false means the
+    /// server ended the meeting: the socket stops reconnecting before it closes.
+    /// </summary>
+    public Action<Consent.State>? OnConsentState;
+
     /// <summary>User-facing text for a hopeless auth state (the GUI shows this verbatim).</summary>
     public const string FatalAuthMessage =
         "Your session expired and could not be renewed. Please sign in again.";
@@ -176,24 +199,7 @@ public sealed class TranscriberSocket
         var idToken = IdToken;
         lock (_stateLock) { _presentedAccessToken = access; }
 
-        var builder = new UriBuilder(_config.Endpoint);
-        var query = new StringBuilder(builder.Query.TrimStart('?'));
-        void AddParam(string k, string v)
-        {
-            if (query.Length > 0) query.Append('&');
-            query.Append(Uri.EscapeDataString(k)).Append('=').Append(Uri.EscapeDataString(v));
-        }
-        AddParam("authorization", $"Bearer {access}");
-        if (!string.IsNullOrEmpty(idToken)) AddParam("id_token", idToken);
-        // NOTE: `refresh_token` is deliberately NOT sent. The server only copies
-        // it into the Kinesis START/END events as `RefreshToken` and has no
-        // consumer for it, so sending the real one would persist a long-lived
-        // credential into CloudFront/ALB access logs and the event stream for no
-        // benefit. Omitting beats the old `refresh_token=""` placeholder, which
-        // claimed to carry something and carried nothing. The param is optional
-        // server-side (`refreshToken?: string` — see index.ts / eventtypes.ts).
-        builder.Query = query.ToString();
-        var url = builder.Uri;
+        var url = AuthorizedUri(_config.Endpoint, access, idToken);
 
         var ws = new ClientWebSocket();
         // Keep the response around on a failed upgrade so a 401/403 is readable
@@ -201,14 +207,7 @@ public sealed class TranscriberSocket
         // out of the exception message — that is what drives the auth-vs-
         // transient classification below.
         ws.Options.CollectHttpResponseDetails = true;
-        // Also set the headers — harmless if forwarded, and lets this same client
-        // work if pointed straight at the origin/ALB (no CloudFront) in future.
-        try
-        {
-            ws.Options.SetRequestHeader("authorization", $"Bearer {access}");
-            if (!string.IsNullOrEmpty(idToken)) ws.Options.SetRequestHeader("id_token", idToken);
-        }
-        catch { /* some headers are restricted; query params carry the auth anyway */ }
+        ApplyAuthHeaders(ws, access, idToken);
 
         _ws = ws;
         _cts = new CancellationTokenSource();
@@ -233,6 +232,9 @@ public sealed class TranscriberSocket
         }
 
         // didOpen: healthy connection resets backoff, sends a fresh START, flushes buffer.
+        // This connection has had no START yet: consent frames wait for the one
+        // SendStart() is about to send (see SendConsentFrame).
+        lock (_sendLock) { _startSent = false; }
         _isOpen = true;
         EndConnectAttempt();      // this attempt resolved — a later drop may retry
         _reconnectAttempt = 0;
@@ -247,6 +249,47 @@ public sealed class TranscriberSocket
         SendStart();       // fresh START every (re)connect; server has no resume
         FlushPending();    // replay audio buffered during the outage
         _ = ReceiveLoop(ws, _cts.Token);
+    }
+
+    /// <summary>
+    /// The upgrade URI for `endpoint`, with the auth in the query string as the
+    /// AUTH NOTE above requires. Shared with ConsentSettingsFetcher, whose
+    /// short-lived socket authenticates the same way.
+    /// </summary>
+    public static Uri AuthorizedUri(string endpoint, string access, string idToken)
+    {
+        var builder = new UriBuilder(endpoint);
+        var query = new StringBuilder(builder.Query.TrimStart('?'));
+        void AddParam(string k, string v)
+        {
+            if (query.Length > 0) query.Append('&');
+            query.Append(Uri.EscapeDataString(k)).Append('=').Append(Uri.EscapeDataString(v));
+        }
+        AddParam("authorization", $"Bearer {access}");
+        if (!string.IsNullOrEmpty(idToken)) AddParam("id_token", idToken);
+        // NOTE: `refresh_token` is deliberately NOT sent. The server only copies
+        // it into the Kinesis START/END events as `RefreshToken` and has no
+        // consumer for it, so sending the real one would persist a long-lived
+        // credential into CloudFront/ALB access logs and the event stream for no
+        // benefit. Omitting beats the old `refresh_token=""` placeholder, which
+        // claimed to carry something and carried nothing. The param is optional
+        // server-side (`refreshToken?: string` — see index.ts / eventtypes.ts).
+        builder.Query = query.ToString();
+        return builder.Uri;
+    }
+
+    /// <summary>
+    /// Also set the auth headers — harmless if forwarded, and lets this same
+    /// client work if pointed straight at the origin/ALB (no CloudFront).
+    /// </summary>
+    public static void ApplyAuthHeaders(ClientWebSocket ws, string access, string idToken)
+    {
+        try
+        {
+            ws.Options.SetRequestHeader("authorization", $"Bearer {access}");
+            if (!string.IsNullOrEmpty(idToken)) ws.Options.SetRequestHeader("id_token", idToken);
+        }
+        catch { /* some headers are restricted; query params carry the auth anyway */ }
     }
 
     /// <summary>
@@ -276,7 +319,37 @@ public sealed class TranscriberSocket
         {
             meta["asrEngine"] = _config.AsrEngine;
         }
+        if (ConsentPayload != null)
+        {
+            meta["consent"] = ConsentPayload;
+        }
         SendJson(meta, "START");
+        List<Dictionary<string, object>> waiting;
+        lock (_sendLock)
+        {
+            _startSent = true;
+            waiting = new List<Dictionary<string, object>>(_afterStart);
+            _afterStart.Clear();
+        }
+        foreach (var frame in waiting) SendJson(frame, frame["callEvent"].ToString() ?? "frame");
+    }
+
+    /// <summary>
+    /// Send a consent frame (objection, evidence) for this meeting: now, when the
+    /// meeting's START has gone out on an open socket, or right after the next
+    /// START otherwise.
+    /// </summary>
+    public void SendConsentFrame(Dictionary<string, object> frame)
+    {
+        lock (_sendLock)
+        {
+            if (!_startSent || !_isOpen)
+            {
+                _afterStart.Add(frame);
+                return;
+            }
+        }
+        SendJson(frame, frame["callEvent"].ToString() ?? "frame");
     }
 
     public void SendEnd()
@@ -430,6 +503,8 @@ public sealed class TranscriberSocket
     private async Task ReceiveLoop(ClientWebSocket ws, CancellationToken ct)
     {
         var buffer = new byte[8192];
+        // A text frame may arrive in pieces; consent frames are read whole.
+        var text = new StringBuilder();
         try
         {
             while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
@@ -446,9 +521,26 @@ public sealed class TranscriberSocket
                 }
                 if (result.MessageType == WebSocketMessageType.Text)
                 {
-                    // The transcriber doesn't send app-level frames back; log anything unexpected.
-                    var s = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                    Console.WriteLine($"← server: {s}");
+                    text.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
+                    if (!result.EndOfMessage) continue;
+                    var s = text.ToString();
+                    text.Clear();
+                    // The transcriber's only app-level frames are about meeting consent.
+                    if (Consent.ParseState(s) is { } state)
+                    {
+                        if (state.StopsCapture)
+                        {
+                            // The server ended this meeting and is about to close the
+                            // connection: reconnecting would only be refused again.
+                            _intentionalClose = true;
+                        }
+                        Console.WriteLine($"← consent: {Consent.Describe(state)}");
+                        OnConsentState?.Invoke(state);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"← server: {s}");
+                    }
                 }
             }
             // Loop exited without an explicit close frame (aborted socket).

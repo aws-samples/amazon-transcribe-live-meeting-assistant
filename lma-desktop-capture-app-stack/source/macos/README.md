@@ -56,11 +56,28 @@ client at `utilities/websocket-client/`).
    **ch0 = meeting/system audio (→ CALLER), ch1 = mic (→ AGENT).**
 4. JSON `{..., callEvent:"END"}`, then close.
 
+**Meeting consent:** when the deployment's consent mode is Notify or Opt-in, the
+client asks the transcriber for the settings (`CONSENT_SETTINGS`, on a
+short-lived socket of its own), shows the consent step, sends what the user
+confirmed in a `consent` field of START, and can send `CONSENT_OBJECTION` and
+`CONSENT_EVIDENCE` (a JPEG of the selected screen-video source). The server
+answers with `CONSENT_STATE`; one with `captureAllowed: false` means it ended the
+meeting, and the client stops without END and does not reconnect. See
+`docs/websocket-streaming-api.md` (Meeting Consent Frames) and
+`docs/meeting-consent.md`.
+
+In CLI mode, pass `--consent-method verbal|chat|invite_terms` (and optionally
+`--consent-note`) to confirm the printed notice; an Opt-in meeting exits 2
+without it, and one the transcriber stops for consent exits 3.
+
 Source layout:
 - `Config.swift`         — CLI/env config parsing.
 - `TranscriberSocket.swift` — WebSocket + START/PCM/END framing (URLSession, no deps).
 - `AudioCapture.swift`   — ScreenCaptureKit (system audio) + AVAudioEngine (mic).
 - `StereoMixer.swift`    — align two mono streams → interleaved int16 chunks.
+- `Consent.swift`, `ConsentSelfTest.swift` — meeting consent step (frames, notice, START payload) and its `--selftest` cases.
+- `ConsentSettingsFetcher.swift` — reads the consent settings on a short-lived socket before Start.
+- `ConsentView.swift`    — the consent block on the menu-bar panel.
 - `main.swift`           — wire-up + Ctrl-C shutdown.
 
 ## Build & run (on a Mac)

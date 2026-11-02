@@ -83,6 +83,20 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
     /// Callback so the UI/meter can reflect live connection state.
     var onStateChange: ((_ connected: Bool) -> Void)?
 
+    // --- Meeting consent (see Consent.swift) ---------------------------------
+    /// The `consent` field of START: the user's consent step. Sent with every
+    /// START, including after a reconnect; the server records it once and, for a
+    /// meeting somebody objected to, refuses to resume.
+    var consent: [String: Any]?
+    /// Consent frames waiting for a START on an open socket: an evidence image
+    /// taken before Start, or a frame sent while reconnecting. Each is sent once,
+    /// after the next START. Touched on `queue` only.
+    private var afterStart: [[String: Any]] = []
+    private var startSent = false
+    /// A CONSENT_STATE frame arrived. One with captureAllowed false means the
+    /// server ended the meeting: the socket stops reconnecting before it closes.
+    var onConsentState: ((Consent.State) -> Void)?
+
     /// Fired when auth is broken in a way reconnecting cannot fix — the token was
     /// rejected AND could not be refreshed. The OWNER decides what that means:
     /// the menu-bar app stops the stream and re-shows the sign-in form; the
@@ -149,15 +163,15 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
         }
     }
 
-    private func openSocket() {
+    /// The upgrade request for `endpoint`, authenticated the way the AUTH NOTE
+    /// above requires (query string, plus headers for a direct-to-origin
+    /// connection). nil for an endpoint that is not a URL. Shared with
+    /// ConsentSettingsFetcher, whose short-lived socket authenticates the same way.
+    static func authorizedRequest(endpoint: String, accessToken access: String, idToken: String) -> URLRequest? {
         // Append auth as query params (see AUTH NOTE above) — CloudFront forwards
         // the query string but strips the Authorization header. Mirrors the
         // browser client's useWebSocket queryParams.
-        guard var comps = URLComponents(string: config.endpoint) else {
-            fatalError("Bad endpoint URL: \(config.endpoint)")
-        }
-        let access = accessToken
-        stateLock.lock(); presentedAccessToken = access; stateLock.unlock()
+        guard var comps = URLComponents(string: endpoint) else { return nil }
         var items = comps.queryItems ?? []
         items.append(URLQueryItem(name: "authorization", value: "Bearer \(access)"))
         if !idToken.isEmpty {
@@ -171,15 +185,22 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
         // claimed to carry something and carried nothing. The param is optional
         // server-side (`refreshToken?: string` — see index.ts / eventtypes.ts).
         comps.queryItems = items
-        guard let url = comps.url else {
-            fatalError("Failed to build endpoint URL from: \(config.endpoint)")
-        }
+        guard let url = comps.url else { return nil }
         var req = URLRequest(url: url)
         // Also set the headers — harmless if forwarded, and lets this same client
         // work if pointed straight at the origin/ALB (no CloudFront) in future.
         req.setValue("Bearer \(access)", forHTTPHeaderField: "authorization")
         if !idToken.isEmpty {
             req.setValue(idToken, forHTTPHeaderField: "id_token")
+        }
+        return req
+    }
+
+    private func openSocket() {
+        let access = accessToken
+        stateLock.lock(); presentedAccessToken = access; stateLock.unlock()
+        guard let req = Self.authorizedRequest(endpoint: config.endpoint, accessToken: access, idToken: idToken) else {
+            fatalError("Bad endpoint URL: \(config.endpoint)")
         }
 
         // Release the PREVIOUS session before replacing it. A URLSession retains
@@ -217,7 +238,32 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
         if !config.asrEngine.isEmpty {
             meta["asrEngine"] = config.asrEngine
         }
+        if let consent = consent {
+            meta["consent"] = consent
+        }
         sendJSON(meta, label: "START")
+        queue.async {
+            self.startSent = true
+            let frames = self.afterStart
+            self.afterStart.removeAll()
+            for frame in frames { self.sendJSON(frame, label: frame["callEvent"] as? String ?? "frame") }
+        }
+    }
+
+    /// Whether the socket is connected now (a frame sent now goes out at once).
+    var isConnected: Bool { isOpen }
+
+    /// Send a consent frame (objection, evidence) for this meeting: now, when
+    /// the meeting's START has gone out on an open socket, or right after the
+    /// next START otherwise.
+    func sendConsentFrame(_ frame: [String: Any]) {
+        queue.async {
+            if self.startSent && self.isOpen {
+                self.sendJSON(frame, label: frame["callEvent"] as? String ?? "frame")
+            } else {
+                self.afterStart.append(frame)
+            }
+        }
     }
 
     func sendEnd() {
@@ -335,8 +381,20 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
                     "WS receive/closed: \(Self.redactingTokens("\(err)"))\n".data(using: .utf8)!)
                 self.scheduleReconnect("receive error")
             case .success(let msg):
-                // The transcriber doesn't send app-level frames back; log anything unexpected.
-                if case let .string(s) = msg { print("← server: \(s)") }
+                // The transcriber's only app-level frames are about meeting consent.
+                if case let .string(s) = msg {
+                    if case .state(let state)? = Consent.parseFrame(s) {
+                        if state.stopsCapture {
+                            // The server ended this meeting and is about to close the
+                            // connection: reconnecting would only be refused again.
+                            self.intentionalClose = true
+                        }
+                        print("← consent: \(Consent.describe(state))")
+                        self.onConsentState?(state)
+                    } else {
+                        print("← server: \(s)")
+                    }
+                }
                 self.receiveLoop()
             }
         }
@@ -346,6 +404,9 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didOpenWithProtocol protocol: String?) {
+        // This connection has had no START yet: consent frames wait for the one
+        // sendStart() is about to send (see sendConsentFrame).
+        queue.sync { startSent = false }
         isOpen = true
         endConnectAttempt()      // this attempt resolved — a later drop may retry
         reconnectAttempt = 0     // healthy connection resets backoff

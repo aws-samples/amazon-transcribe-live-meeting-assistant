@@ -83,6 +83,16 @@ public sealed class Config
     public string AsrEngine = "";
 
     /// <summary>
+    /// CLI: the meeting consent step, for a deployment whose consent mode is
+    /// Notify or Opt-in (--consent-method / LMA_CONSENT_METHOD). verbal, chat or
+    /// invite_terms confirms that the notice the CLI prints was shared and, in
+    /// opt-in, that everyone agreed that way. The tray app asks instead.
+    /// </summary>
+    public string ConsentMethod = "";
+    /// <summary>CLI: an optional note recorded with that confirmation (--consent-note).</summary>
+    public string ConsentNote = "";
+
+    /// <summary>
     /// Name of the LMA CloudFormation stack this download came from. Shown in
     /// the UI and used to namespace every machine-scoped identifier (registry
     /// key, mutex, pipe, start-at-login entry) so the clients for multiple LMA
@@ -169,6 +179,8 @@ public sealed class Config
             DiarizeMicChannel = new[] { "1", "true", "yes" }
                 .Contains(Value("diarize-mic", "LMA_DIARIZE_MIC").ToLowerInvariant()),
             AsrEngine = Value("asr-engine", "LMA_ASR_ENGINE", "asrEngine").ToLowerInvariant(),
+            ConsentMethod = Value("consent-method", "LMA_CONSENT_METHOD").ToLowerInvariant(),
+            ConsentNote = Value("consent-note", "LMA_CONSENT_NOTE"),
             StackName = Value("stack-name", "LMA_STACK_NAME", "stackName"),
             AppVersion = Value("app-version", "LMA_APP_VERSION", "appVersion"),
         };

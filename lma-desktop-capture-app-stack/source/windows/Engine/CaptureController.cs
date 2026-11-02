@@ -216,6 +216,86 @@ public sealed class CaptureController
     /// <summary>True while a video stream is running for the active call (UI badge).</summary>
     public bool IsVideoActive { get; private set; }
 
+    // Meeting consent (see Consent.cs). Set by the GUI (or the CLI) before
+    // Start(); null when the deployment needs no consent step.
+    /// <summary>The `consent` field of START.</summary>
+    public Dictionary<string, object>? ConsentPayload;
+    /// <summary>An evidence screenshot taken before Start, sent once after START.</summary>
+    public byte[]? ConsentEvidenceJpeg;
+    /// <summary>A CONSENT_STATE frame for the active meeting (any thread; UI layers marshal).</summary>
+    public Action<Consent.State>? OnConsentState;
+    // An opt-in meeting's video lane waits for its consent: the transcriber
+    // refuses a video stream until the meeting may be captured. 0: no wait (the
+    // start path starts the video); 1: waiting; 2: claimed. Whoever moves it
+    // from 1 to 2 -- the start path or the consent answer, on different
+    // threads -- starts the video, so it starts once.
+    private int _videoAwaitsConsent;
+    private volatile bool _consentAllowsCapture;
+
+    /// <summary>
+    /// The deployment's consent settings, read from the transcriber (see
+    /// ConsentSettingsFetcher). null when it did not answer.
+    /// </summary>
+    public Task<Consent.Settings?> FetchConsentSettingsAsync() =>
+        string.IsNullOrEmpty(Config.AccessToken)
+            ? Task.FromResult<Consent.Settings?>(null)
+            : ConsentSettingsFetcher.FetchAsync(Config, _tokenStore);
+
+    /// <summary>
+    /// The user reported that a participant objected. The transcriber stops
+    /// transcribing and recording at once, ends the meeting and records the
+    /// objection, so this stops capture without an END of its own.
+    /// </summary>
+    public void ReportObjection(string participantName)
+    {
+        var sock = _socket;
+        if (sock == null) return;
+        sock.SendConsentFrame(Consent.ObjectionFrame(participantName));
+        Log(sock.IsConnected
+            ? "Objection reported — recording stopped."
+            : "Recording stopped. The connection was down, so the objection may not have been "
+              + "recorded on the meeting.");
+        // A moment for the frame to go out before the socket closes.
+        Task.Delay(TimeSpan.FromMilliseconds(300)).ContinueWith(_ =>
+        {
+            // Unless the transcriber's answer to the objection already stopped it.
+            if (ReferenceEquals(_socket, sock) && CurrentState.Kind == StateKind.Streaming) Stop(sendEnd: false);
+        });
+    }
+
+    /// <summary>An evidence screenshot taken while streaming: sent for this meeting now.</summary>
+    public void SendConsentEvidence(byte[] jpeg, string note)
+    {
+        var frame = Consent.EvidenceFrame(jpeg, DateTime.UtcNow, note);
+        if (frame == null) { Log("The evidence screenshot is too large to send."); return; }
+        _socket?.SendConsentFrame(frame);
+    }
+
+    /// <summary>
+    /// The transcriber's word on this meeting's consent. captureAllowed false
+    /// means it has ended the meeting: stop here too, with no END.
+    /// </summary>
+    private void HandleConsentState(Consent.State state, TranscriberSocket sock)
+    {
+        OnConsentState?.Invoke(state);
+        if (!ReferenceEquals(_socket, sock)) return;
+        if (state.CaptureAllowed == true)
+        {
+            _consentAllowsCapture = true;
+            if (CurrentState.Kind == StateKind.Streaming && Interlocked.CompareExchange(ref _videoAwaitsConsent, 2, 1) == 1)
+            {
+                StartVideoIfEnabled();
+            }
+        }
+        if (!state.StopsCapture) return;
+        var text = Consent.Describe(state);
+        Log(text);
+        // An objection ends a meeting that was recorded until then; anything else
+        // (refused, consent not recorded) means nothing was captured.
+        bool objected = state.Status == "objected" || state.Code == "OBJECTION_RECEIVED";
+        Stop(objected ? null : State.Err(text), sendEnd: false);
+    }
+
     public void Start(string? callId = null)
     {
         if (string.IsNullOrEmpty(Config.AccessToken)) { SetState(State.Err("Not signed in")); return; }
@@ -247,6 +327,17 @@ public sealed class CaptureController
         }
 
         sock.OnStateChange = connected => mix.SetConnected(connected);
+        sock.ConsentPayload = ConsentPayload;
+        _consentAllowsCapture = false;
+        _videoAwaitsConsent = ConsentPayload != null
+            && ConsentPayload.TryGetValue("mode", out var mode) && Equals(mode, "opt_in") ? 1 : 0;
+        if (ConsentEvidenceJpeg is { } jpeg
+            && Consent.EvidenceFrame(jpeg, DateTime.UtcNow,
+                   "Captured in the Desktop Capture App before recording started") is { } evidence)
+        {
+            sock.SendConsentFrame(evidence);
+        }
+        sock.OnConsentState = state => HandleConsentState(state, sock);
         sock.OnFatalAuth = HandleFatalAuth;
         mix.OnLevels = (m, k, connected, paused) => OnLevels?.Invoke(m, k, connected, paused);
 
@@ -260,7 +351,16 @@ public sealed class CaptureController
             cap.Start();
             Log($"Streaming {ActiveCallId}");
             SetState(State.Streaming);
-            StartVideoIfEnabled();
+            // An opt-in meeting starts its video once its consent allows capture
+            // (HandleConsentState), unless that already happened.
+            if (Volatile.Read(ref _videoAwaitsConsent) == 0)
+            {
+                StartVideoIfEnabled();
+            }
+            else if (_consentAllowsCapture && Interlocked.CompareExchange(ref _videoAwaitsConsent, 2, 1) == 1)
+            {
+                StartVideoIfEnabled();
+            }
         }
         catch (Exception e)
         {
@@ -349,15 +449,20 @@ public sealed class CaptureController
     /// teardown finishes asynchronously and would otherwise overwrite the error
     /// state with idle, swallowing the reason the stream stopped.
     /// </summary>
-    public void Stop(State? finalState = null)
+    /// <summary>
+    /// Stop: send END, tear down capture + socket. `sendEnd` is false when the
+    /// transcriber already ended the meeting for its consent; the video lane is
+    /// then closed without END_VIDEO too, since the server finalized it.
+    /// </summary>
+    public void Stop(State? finalState = null, bool sendEnd = true)
     {
         SetState(State.Stopping);
-        StopVideo(sendEnd: true);
+        StopVideo(sendEnd: sendEnd);
         _capture?.Stop();
         _mixer?.Stop();
         _tee?.Finish();
         _socket?.BeginClose();   // mark intentional first so teardown stays quiet
-        _socket?.SendEnd();
+        if (sendEnd) _socket?.SendEnd();
         var sock = _socket;
         Task.Delay(TimeSpan.FromMilliseconds(400)).ContinueWith(_ =>
         {

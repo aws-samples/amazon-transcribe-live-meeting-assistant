@@ -151,6 +151,49 @@ CloudFormation parameter, so organizations can substitute their own legal
 wording; the app picks it up from the `lma-config.json` baked into the
 download.
 
+### Meeting consent (Notify and Opt-in deployments)
+
+When your administrator sets the deployment's [meeting consent](meeting-consent.md)
+mode to Notify or Opt-in, the panel shows a **Meeting consent** block above
+**Start Recording**, and asks it afresh for every meeting. The app reads the
+mode from the transcriber when you sign in and when the panel opens; with the
+mode Off, or a transcriber from before this feature, no block is shown.
+
+- **The notice** to share, filled with your microphone label and the meeting
+  name: read it out, or press **Copy notice** and paste it into the meeting chat.
+- **The confirmation**: in Opt-in, *Everyone in the meeting agreed to it being
+  recorded and transcribed*, with **how** (out loud, in the meeting chat, or in
+  the invitation's terms) and an optional note. In Notify, *I have told everyone
+  in the meeting*, which may be left unticked.
+- **Capture evidence** (optional): keeps one frame of the screen or window
+  selected as the screen-video source in Settings — the meeting window, for
+  example the chat after everyone replied — on the meeting's consent record,
+  where it is checked with a vision model. It works whether or not screen video
+  is being recorded. On macOS it needs macOS 14 or later and the Screen Recording
+  permission.
+- **While recording**: the consent status as the meeting's record answers it,
+  **Capture evidence** again, and **Participant objected** with an optional
+  name, which stops recording and transcription at once and records the
+  objection on the meeting.
+
+In **Opt-in**, Start is refused until you confirm, and nothing is recorded or
+transcribed until the transcriber has recorded your confirmation on the
+meeting, usually a second or two after Start; screen video starts at that
+point too. If the confirmation cannot be recorded, the recording stops and the
+panel says why. A recording that the transcriber stops for consent — an
+objection, or a confirmation it could not record — is not reconnected.
+
+For headless/CLI use, the app prints the notice and needs
+`--consent-method verbal|chat|invite_terms` (`LMA_CONSENT_METHOD`) to confirm
+how everyone agreed, with an optional `--consent-note` (`LMA_CONSENT_NOTE`); an
+Opt-in meeting started without it exits with code 2, and a meeting the
+transcriber stops for consent exits with code 3.
+
+Builds of the app from before this feature show no consent block. How the
+transcriber treats their recordings — capture with a warning, or refuse — is the
+**Streaming clients without a consent step** setting; see
+[Clients without a consent step](meeting-consent.md#clients-without-a-consent-step).
+
 ## Download and install (macOS)
 
 1. In the LMA web app, open **Meeting Assistant ▸ Sources ▸ Desktop Capture App
