@@ -70,7 +70,7 @@ Meeting Participants See Animated Avatar
 When deploying or updating your LMA stack, set these parameters:
 
 > These are also settings in the **Virtual Participant** section of the
-> [Configuration page](configuration-guide.md): the Simli face ID and the voice assistant provider can be changed there while
+> [Configuration page](configuration-guide.md): the Simli face ID, the voice assistant provider and its activation mode can be changed there while
 > the stack runs, and apply to the next Virtual Participant to start. The stack
 > parameters are their defaults, and a value saved on the page takes precedence
 > until it is reset. The API keys are stack parameters only.
