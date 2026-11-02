@@ -26,12 +26,12 @@ def _validated_models() -> list:
     return document["Resources"]["ValidateParameters"]["Properties"]["BedrockModelIds"]
 
 
-def test_the_shipped_summary_assistant_and_knowledge_base_models_are_validated() -> None:
+def test_exactly_the_shipped_models_every_deployment_calls_are_validated() -> None:
+    """A default that changes takes the old id out of the list too."""
     models = json.loads(SETTING_DEFAULTS.read_text())["language_models"]
-    validated = _validated_models()
-    for setting in ("summaryModelId", "meetingAssistModelId", "knowledgeBaseModelId"):
-        assert models[setting]["default"] in validated, setting
-
-
-def test_the_embedding_model_is_validated() -> None:
-    assert "amazon.titan-embed-text-v2:0" in _validated_models()
+    expected = {
+        models[setting]["default"]
+        for setting in ("summaryModelId", "meetingAssistModelId", "knowledgeBaseModelId")
+    }
+    expected.add("amazon.titan-embed-text-v2:0")
+    assert set(_validated_models()) == expected

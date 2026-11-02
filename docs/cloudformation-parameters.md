@@ -934,8 +934,12 @@ Specifies if Amazon Bedrock model access is validated during deployment. Setting
 The models are settings of the Configuration page since 0.4.0 (Amazon Bedrock
 Models section); see
 [Choosing Amazon Bedrock models](configuration-guide.md#choosing-amazon-bedrock-models).
-`ModelValidation` checks access to the knowledge base embedding model while the
-stack deploys.
+`ModelValidation` checks, while the stack deploys or updates, access to the
+shipped defaults of that section that every deployment calls (the summary model,
+and the meeting assistant and knowledge base model) and to the knowledge base
+embedding model. It does not check the key frame text model or a model chosen
+later on the Configuration page. Set it to `false` for a deployment that uses
+other models and has no access to the shipped ones.
 
 ### Scaling the WebSocket transcriber
 

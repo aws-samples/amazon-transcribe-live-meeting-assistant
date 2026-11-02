@@ -346,7 +346,7 @@ export const transcribeOptionsProblem = (options: TranscribeOptionCombination): 
 
 /**
  * The type of a setting read with an environment fallback, as the Python
- * half's `setting_defaults.json` names it.
+ * half's `setting_defaults.json` and `parameter_defaults.json` name it.
  */
 export type SettingType = 'string' | 'integer' | 'number' | 'boolean';
 
