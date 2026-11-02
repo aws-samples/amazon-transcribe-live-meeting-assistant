@@ -23,10 +23,11 @@ some only one party's, and some set requirements a chat reply does not meet.
 Choose the mode with whoever advises your organisation on those rules. Nothing
 on this page is legal advice.
 
-**Current state:** the consent settings, the consent record and its API are in
-place. No capture method runs the consent flow yet — the Virtual Participant,
-the Desktop Capture App, Stream Audio and the browser extension neither post a
-notice nor wait for consent — so choosing Notify or Opt-in on the Configuration
+**Current state:** the consent settings, the consent record and its API, the
+evidence check and the meeting page's Consent section are in place. No capture
+method runs the consent flow yet — the Virtual Participant, the Desktop Capture
+App, Stream Audio and the browser extension neither post a notice nor wait for
+consent — so choosing Notify or Opt-in on the Configuration
 page does not yet change how any meeting is captured. See
 [Flows by capture method](#flows-by-capture-method).
 
@@ -128,6 +129,63 @@ whether a meeting may be captured. If they cannot be read, starting a meeting's
 consent fails rather than falling back to off, and so does reading a meeting
 that has no consent record; a meeting with a record is read without the
 settings, since its record decides its own gate.
+
+## On the meeting page
+
+A meeting whose consent was started has a **Consent** section on its page,
+below the agenda. It shows:
+
+- the **mode** and, for opt-in, the **rule**;
+- the **status**, and whether the meeting may be **recorded and transcribed**
+  now (*Allowed* or *Withheld*);
+- the **notice** posted, and when it was first posted;
+- the **participants**: everyone listed as present, then anybody else who was
+  listed or replied, each with their latest reply (*Consented*, *Objected* or
+  *No reply*);
+- the owner's **attestation**, when there is one;
+- the **evidence** images as thumbnails, each with the vision model's verdict,
+  confidence and summary when it has been checked; selecting one opens it full
+  size;
+- a **timeline** of everything, oldest first: consent started, notices posted,
+  replies and attestations, and each change of status with its reason. Replies
+  are placed by when LMA recorded them, the order the status is decided in.
+
+If the record cannot be read when the page opens, the section says so rather
+than disappearing, and the summary download has no record to include until one
+is read. If a later read fails, the section shows the error above the last
+record read, and the download carries that record.
+
+The images are shown through links signed for whoever opened the page, after
+the same access check as the transcript, and last an hour. An image that has
+expired (see [What is stored](#what-is-stored)) or was deleted after its check
+is shown as such, with its entry and check. The section updates
+as the record changes, whoever changed it. A meeting whose consent was never
+started shows no section.
+
+Three actions, each offered only to the people the backend lets do it:
+
+- **Record an objection** — the owner, anyone the meeting is shared with, and
+  Admins. Enter the participant's display name and, optionally, what they said.
+  It is recorded as source `ui` under your username, and stops recording and
+  transcription in a notify or opt-in meeting until that participant consents.
+- **Attest that everyone agreed** — the meeting's owner only, and only for an
+  opt-in meeting under the **The meeting owner attests** rule, where it is what
+  grants the meeting. Choose how everyone agreed (out loud, in the chat, or by
+  accepting the invitation's terms) and, optionally, add a statement. It grants
+  the meeting unless somebody objected.
+- **Check with model** (or **Check again**) on an evidence image — the owner
+  and Admins. See
+  [Checking evidence with a vision model](#checking-evidence-with-a-vision-model).
+
+### In the summary download
+
+**Download summary**, **Download as Word** and **Copy to clipboard** in the
+Meeting Summary section add the consent record after the summary, as text: the
+mode, rule and status, whether capture was allowed at the time of the download,
+the notice, the attestation, each participant's latest reply, the timeline, and
+each evidence image's check, followed by the note that the record is supporting
+evidence and not a legal determination. A meeting without a consent record
+downloads as before. The email link carries the summary only.
 
 ## Flows by capture method
 
@@ -305,7 +363,7 @@ result is seen on the next read of the record.
 | Start consent (`startMeetingConsent`) | The owner, an Admin, or a backend role |
 | Record that the notice was posted (`recordMeetingConsentNotice`) | The owner, an Admin, or a backend role |
 | List the participants present (`setMeetingConsentParticipants`) | The owner, an Admin, or a backend role |
-| Record a reply (`recordMeetingConsentEvent`) | A backend role, for a reply read from the chat or the speech. A signed-in user who can read the record may record an **objection**; only the owner or an Admin may record **consent** on a participant's behalf. A signed-in user's entry is recorded as source `ui` under their own username. (The meeting page has no control for this yet; it is planned with the page's Consent panel.) |
+| Record a reply (`recordMeetingConsentEvent`) | A backend role, for a reply read from the chat or the speech. A signed-in user who can read the record may record an **objection**; only the owner or an Admin may record **consent** on a participant's behalf. A signed-in user's entry is recorded as source `ui` under their own username; the meeting page's **Record an objection** makes one |
 | Attest (`attestMeetingConsent`) | The meeting's owner, or a backend role relaying the owner's attestation and naming them |
 | Add evidence (`addMeetingConsentEvidence`) | A backend role |
 | Check evidence with the vision model (`verifyMeetingConsentEvidence`) | The owner, an Admin, or a backend role. Where evidence screenshots are not kept, the check is what deletes the image |
