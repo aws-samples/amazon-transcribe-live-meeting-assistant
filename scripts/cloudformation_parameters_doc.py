@@ -341,7 +341,8 @@ CLASSIFICATION: Dict[str, Classification] = {
         RUNTIME, "Read by the meeting event processor."
     ),
     "AgendaDerivationAfterSeconds": _c(
-        RUNTIME, "Read by the meeting event processor, for each meeting with no agenda."
+        RUNTIME,
+        "Read by the meeting event processor as each meeting's finished segments reach it, until it has queued the automatic pass for that meeting.",
     ),
     "EndOfCallTranscriptSummary": _c(
         RESOURCE,

@@ -1196,11 +1196,12 @@ pattern in the deployment settings parameter, which the processor has always
 compiled at start; a pattern saved on the page that does not compile is logged
 and that one is used.
 
-`meeting_agenda` holds `AgendaDerivationAfterSeconds`, a parameter added with the
-section: the automatic agenda pass's threshold had been a fixed `300` in the call
-event processor's environment. The processor reads it for each finished segment
-of a meeting with no agenda, on the standard tier, and falls back to that
-variable, which the parameter now sets. `0` turns the automatic pass off.
+`meeting_agenda` holds `AgendaDerivationAfterSeconds`. The call event processor
+reads it on the standard tier for each finished segment of a meeting it has not
+yet queued the automatic agenda pass for, and falls back to the
+`AGENDA_DERIVATION_AFTER_SECONDS` variable, which the parameter sets; whether
+the meeting already has an agenda is the deriver's check. `0` turns the
+automatic pass off.
 
 `meeting_processing` also holds `MeetingInactivityTimeoutInMinutes`, which the
 reaper reads per run. The parameter still decides whether the reaper and its
