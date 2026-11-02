@@ -224,8 +224,9 @@ def create_cognito_user(ctx: dict, email: str, group: str | None, password: str)
         )
 
 
-def delete_cognito_user(ctx: dict, email: str) -> None:
-    """Delete a user. Best-effort (never raises), so it is safe on a cleanup path."""
+def delete_cognito_user(ctx: dict, email: str) -> bool:
+    """Delete a user, and say whether it was deleted. Never raises, so it is safe
+    on a cleanup path; a failure is written to stderr."""
     try:
         aws(
             "cognito-idp",
@@ -238,6 +239,8 @@ def delete_cognito_user(ctx: dict, email: str) -> None:
         )
     except RuntimeError as err:
         print(f"Could not delete {email}: {err}", file=sys.stderr)
+        return False
+    return True
 
 
 def _password() -> str:
@@ -389,13 +392,16 @@ def cmd_teardown(args: argparse.Namespace) -> int:
         if not stale:
             print(f"No {UX_TEST_PREFIX} users older than {args.stale}h in {args.stack}.")
             return 0
+        swept = 0
         for name in stale:
-            delete_cognito_user(ctx, name)
-            print(f"Deleted stale {name}.")
-        print(f"Swept {len(stale)} stale {UX_TEST_PREFIX} user(s).")
-        return 0
+            if delete_cognito_user(ctx, name):
+                print(f"Deleted stale {name}.")
+                swept += 1
+        print(f"Swept {swept} of {len(stale)} stale {UX_TEST_PREFIX} user(s).")
+        return 0 if swept == len(stale) else 1
 
-    delete_cognito_user(ctx, email)
+    if not delete_cognito_user(ctx, email):
+        return 1
     print(f"Deleted {email}.")
     return 0
 

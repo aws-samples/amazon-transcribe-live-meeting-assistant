@@ -786,6 +786,16 @@ class _Server(socketserver.ThreadingUnixStreamServer):
     allow_reuse_address = True
 
 
+def _bind_owner_only(socket_path: str, handler: type) -> "_Server":
+    """Bind the control socket with owner-only permissions from the moment it
+    exists, as the module docstring says: the umask is narrowed around the bind."""
+    previous = os.umask(0o077)
+    try:
+        return _Server(socket_path, handler)
+    finally:
+        os.umask(previous)
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     session_dir = Path(args.session).resolve()
     meta = json.loads((session_dir / SESSION_FILE).read_text(encoding="utf-8"))
@@ -799,9 +809,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     recorder.begin()
     socket_path = meta["socket"]
     Path(socket_path).unlink(missing_ok=True)
-    server = _Server(socket_path, _make_handler(recorder))
-    # Owner-only, so the socket is the user's alone, as the module docstring says.
-    os.chmod(socket_path, 0o600)
+    server = _bind_owner_only(socket_path, _make_handler(recorder))
     server_thread = threading.Thread(target=server.serve_forever, name="control", daemon=True)
     server_thread.start()
     write_current(

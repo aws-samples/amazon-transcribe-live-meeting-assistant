@@ -52,7 +52,7 @@ the Configuration page and deletes its fixtures afterwards.
 ### 1. Install the browser MCP server (once)
 
 ```bash
-claude mcp add chrome-devtools -- npx -y chrome-devtools-mcp@latest \
+claude mcp add chrome-devtools -- npx -y chrome-devtools-mcp@1.12.0 \
     --browserUrl http://127.0.0.1:9222 --redactNetworkHeaders
 ```
 

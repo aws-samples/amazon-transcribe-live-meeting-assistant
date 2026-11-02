@@ -2113,3 +2113,29 @@ class TestDemoRenderEndToEnd:
         sheet = (session_dir / "demo.md").read_text()
         assert "00:00  Title" in sheet and "Takeaways" in sheet
         assert "Share a meeting without copying it" in sheet
+
+
+@pytest.mark.unit
+def test_the_control_socket_is_owner_only_from_the_moment_it_is_bound() -> None:
+    import socketserver
+    import stat
+    import tempfile
+
+    class _Quiet(socketserver.StreamRequestHandler):
+        def handle(self) -> None:
+            return None
+
+    # A short path: AF_UNIX paths are limited to about 100 bytes.
+    directory = tempfile.mkdtemp(prefix="uxr-", dir="/tmp")
+    path = os.path.join(directory, "c.sock")
+    previous = os.umask(0o022)
+    try:
+        server = recorder_cli._bind_owner_only(path, _Quiet)
+        try:
+            assert stat.S_IMODE(os.stat(path).st_mode) & 0o077 == 0
+        finally:
+            server.server_close()
+    finally:
+        os.umask(previous)
+        shutil.rmtree(directory, ignore_errors=True)
+    assert os.umask(previous) == previous  # the bind left the umask as it found it

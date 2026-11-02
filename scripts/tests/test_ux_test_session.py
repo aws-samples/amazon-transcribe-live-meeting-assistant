@@ -228,6 +228,35 @@ class TestTeardown:
             assert uts.cmd_teardown(args) == 0
         delete.assert_called_once_with(CTX, "ux-test-1@example.invalid")
 
+    def test_a_failed_delete_is_not_reported_as_deleted(self, capsys):
+        with (
+            patch.object(uts, "_resolve_or_explain", return_value=CTX),
+            patch.object(uts, "delete_cognito_user", return_value=False),
+        ):
+            args = SimpleNamespace(
+                stack="s", email="ux-test-1@example.invalid", stale=None, region="us-east-1"
+            )
+            assert uts.cmd_teardown(args) == 1
+        assert "Deleted" not in capsys.readouterr().out
+
+    def test_a_sweep_counts_only_the_users_it_deleted(self, capsys):
+        stale = ["ux-test-a@example.invalid", "ux-test-b@example.invalid"]
+        with (
+            patch.object(uts, "_resolve_or_explain", return_value=CTX),
+            patch.object(uts, "_stale_ux_users", return_value=stale),
+            patch.object(uts, "delete_cognito_user", side_effect=[True, False]),
+        ):
+            args = SimpleNamespace(stack="s", email=None, stale=12.0, region="us-east-1")
+            assert uts.cmd_teardown(args) == 1
+        out = capsys.readouterr().out
+        assert "Swept 1 of 2" in out and "ux-test-b" not in out
+
+    def test_delete_reports_a_cli_failure(self):
+        with patch.object(uts, "aws", side_effect=RuntimeError("boom")):
+            assert uts.delete_cognito_user(CTX, "ux-test-1@example.invalid") is False
+        with patch.object(uts, "aws", return_value=None):
+            assert uts.delete_cognito_user(CTX, "ux-test-1@example.invalid") is True
+
     def test_teardown_needs_an_email_when_not_sweeping(self):
         args = SimpleNamespace(stack="s", email=None, stale=None, region="us-east-1")
         with pytest.raises(SystemExit, match="--email"):
