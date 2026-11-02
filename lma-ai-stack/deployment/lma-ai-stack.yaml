@@ -9098,13 +9098,15 @@ Resources:
         ## again by the meeting consent resolver when the VP starts the
         ## meeting's consent. See docs/meeting-consent.md.
         #if(!$util.isNullOrBlank($ctx.args.input.consentMode))
-          #if(!["off", "notify", "opt_in"].contains($ctx.args.input.consentMode))
+          #set($consentModes = ["off", "notify", "opt_in"])
+          #if(!$consentModes.contains($ctx.args.input.consentMode))
             $util.error("consentMode must be off, notify or opt_in", "BadRequest")
           #end
           $util.qr($input.put("consentMode", $ctx.args.input.consentMode))
         #end
         #if(!$util.isNullOrBlank($ctx.args.input.consentRule))
-          #if(!["each_participant", "owner_attests"].contains($ctx.args.input.consentRule))
+          #set($consentRules = ["each_participant", "owner_attests"])
+          #if(!$consentRules.contains($ctx.args.input.consentRule))
             $util.error("consentRule must be each_participant or owner_attests", "BadRequest")
           #end
           #if($ctx.args.input.consentMode != "opt_in")
