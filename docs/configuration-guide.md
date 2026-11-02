@@ -112,7 +112,6 @@ is the default of.
 | Virtual Participant › Teams: checks alone before leaving | `VPPollsBeforeEnd` |
 | Virtual Participant › Teams: checks without a meeting before leaving | `VPPollsBeforeEndMissing` |
 | Meeting Agenda › Seconds into a meeting to look for a stated agenda | `AgendaDerivationAfterSeconds` |
-| Retention › Delete the transcript after the summary | `TranscriptDeletionAfterSummary` |
 
 The Amazon Transcribe and Meeting Recording settings apply to meetings streamed
 to LMA from the Stream Audio page, the browser extension and the desktop app,
@@ -189,9 +188,9 @@ for more:
   does not delete anything early, and lengthening it does not keep anything
   longer.
 - Fractions of a day are allowed, as for the parameters, down to 0.1 day.
-- **Delete the transcript after the summary**, in the same section, is not
-  limited by the stack: its default is `TranscriptDeletionAfterSummary`, and
-  any of its choices can be saved. It deletes each meeting's transcript
+- **Delete the transcript after the summary**, in the same section, has no
+  stack parameter: it ships set to Off, and any of its choices can be saved. It
+  deletes each meeting's transcript
   permanently once the meeting is summarized, transcript files included; see
   [Transcript Deletion After the Summary](transcript-deletion.md).
 - The recordings bucket's lifecycle rules, which delete transcript files and

@@ -452,21 +452,6 @@ Parameters:
       will be automatically deleted from LMA after this time.
       Specify partial days like 0.5 to retain transcriptions for half a day.
 
-  TranscriptDeletionAfterSummary:
-    Type: String
-    Default: "off"
-    AllowedValues:
-      - "off"
-      - immediately
-      - after_15_minutes
-      - after_30_minutes
-      - after_60_minutes
-    Description: >-
-      Whether each meeting's transcript is deleted once the meeting is
-      summarized, and how long after: the default of the Retention section's
-      "Delete the transcript after the summary" setting, which an Admin can
-      change on the Configuration page.
-
   MeetingInactivityTimeoutInMinutes:
     Type: Number
     Default: 240
@@ -2773,9 +2758,6 @@ Resources:
           # expire with the transcript: the Retention section's value, at most
           # this parameter's.
           TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS: !Ref TranscriptionExpirationInDays
-          # While transcripts are deleted after the summary, each segment is
-          # written with a short expiry as well; the default of that setting.
-          TRANSCRIPT_DELETION_AFTER_SUMMARY: !Ref TranscriptDeletionAfterSummary
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
       Timeout: 60
       MemorySize: 128
@@ -3299,9 +3281,6 @@ Resources:
           IS_LAMBDA_AGENT_ASSIST_ENABLED: !Ref IsLambdaAgentAssistEnabled
           MEETING_RECORD_EXPIRATION_IN_DAYS: !Ref MeetingRecordExpirationInDays
           TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS: !Ref TranscriptionExpirationInDays
-          # While transcripts are deleted after the summary, each segment is
-          # written with a short expiry as well; the default of that setting.
-          TRANSCRIPT_DELETION_AFTER_SUMMARY: !Ref TranscriptDeletionAfterSummary
           TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN: !Ref TranscriptLambdaHookFunctionArn
           START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN: !Ref StartOfCallLambdaHookFunctionArn
           POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN: !Ref PostCallSummaryLambdaHookFunctionArn
@@ -3616,8 +3595,6 @@ Resources:
         # set lower on the Configuration page and not higher.
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
-        # A default only: the Configuration page may set any of its choices.
-        TranscriptDeletionAfterSummary: !Ref TranscriptDeletionAfterSummary
         AgendaDerivationAfterSeconds: !Ref AgendaDerivationAfterSeconds
 
   # Revision bodies for the configuration history: one gzipped object per
@@ -4767,8 +4744,6 @@ Resources:
           DEAD_LETTER_QUEUE_ARN: !GetAtt TranscriptDeletionDeadLetterQueue.Arn
           IS_TRANSCRIPT_SUMMARY_ENABLED: !If [IsTranscriptSummaryEnabled, "true", "false"]
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-          # The setting's default, read when the configuration cannot be.
-          TRANSCRIPT_DELETION_AFTER_SUMMARY: !Ref TranscriptDeletionAfterSummary
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/TranscriptDeletionFunction

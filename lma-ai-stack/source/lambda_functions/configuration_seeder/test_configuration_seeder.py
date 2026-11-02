@@ -1552,3 +1552,21 @@ def test_the_handler_passes_the_revision_bucket_through(seeder, monkeypatch) -> 
     seeder.handler(event, _Context())
 
     assert seen["revision_bucket"] == "the-revision-bucket"
+
+
+def test_the_baseline_ships_transcript_deletion_off_beside_the_retention_parameters(seeder) -> None:
+    """The deletion setting has no stack parameter; the two periods in days do."""
+    store, dynamo = build_store()
+    seeder.seed(
+        store,
+        domain="default",
+        parameter_values={
+            "MeetingRecordExpirationInDays": "30",
+            "TranscriptionExpirationInDays": "7",
+        },
+    )
+    assert dynamo.body("Config#default")["retention"] == {
+        "transcriptDeletionAfterSummary": "off",
+        "meetingRecordExpirationInDays": 30,
+        "transcriptionExpirationInDays": 7,
+    }

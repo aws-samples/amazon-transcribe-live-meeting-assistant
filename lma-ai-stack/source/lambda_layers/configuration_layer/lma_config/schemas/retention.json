@@ -31,7 +31,7 @@
       "order": 2,
       "type": "string",
       "title": "Delete the transcript after the summary",
-      "description": "Off: the transcript is kept for the days set above. Otherwise the meeting's transcript is deleted permanently once its summary is written, immediately or after the delay chosen here: every turn of the transcript and every meeting assistant answer, the transcript file in the recordings bucket (all of its versions), and its entry in the transcript knowledge base. The summary, the meeting record, the recording and the consent record are kept. If no summary has been written 60 minutes after the meeting ends, the delay counts from then; on a deployment with no end-of-meeting summary, it counts from the end of the meeting. See docs/transcript-deletion.md. The default is the TranscriptDeletionAfterSummary stack parameter.",
+      "description": "Off: the transcript is kept for the days set above. Otherwise the meeting's transcript is deleted permanently once its summary is written, immediately or after the delay chosen here: every turn of the transcript and every meeting assistant answer, the transcript file in the recordings bucket (all of its versions), and its entry in the transcript knowledge base. The summary, the meeting record, the recording and the consent record are kept. If no summary has been written 60 minutes after the meeting ends, the delay counts from then; on a deployment with no end-of-meeting summary, it counts from the end of the meeting. See docs/transcript-deletion.md.",
       "enum": ["off", "immediately", "after_15_minutes", "after_30_minutes", "after_60_minutes"],
       "enumLabels": {
         "off": "Off (keep for the days set above)",

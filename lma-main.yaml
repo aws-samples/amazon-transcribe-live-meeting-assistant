@@ -897,25 +897,6 @@ Parameters:
       This is the default and the upper limit; an Admin can set a shorter period at run time on
       the Configuration page (Retention section), never a longer one.
 
-  TranscriptDeletionAfterSummary:
-    Type: String
-    Default: "off"
-    AllowedValues:
-      - "off"
-      - immediately
-      - after_15_minutes
-      - after_30_minutes
-      - after_60_minutes
-    Description: >-
-      Delete each meeting's transcript permanently once the meeting is summarized:
-      immediately, or 15, 30 or 60 minutes after the summary is written. "off" keeps
-      it for TranscriptionExpirationInDays. Deletes every transcript segment and
-      meeting assistant answer, the transcript file in the recordings bucket (all
-      versions) and its transcript knowledge base entry; the summary and the
-      recording are kept. If no summary has been written 60 minutes after the
-      meeting ends, the delay counts from then. This is the default; an Admin can
-      change it at run time on the Configuration page (Retention section).
-
   MeetingInactivityTimeoutInMinutes:
     Type: Number
     Default: 240
@@ -1434,7 +1415,6 @@ Metadata:
           - EnableVideoRecording
           - MeetingRecordExpirationInDays
           - TranscriptionExpirationInDays
-          - TranscriptDeletionAfterSummary
           - AudioRecordingExpirationInDays
           - CloudWatchLogsExpirationInDays
           - VPSchedulerStateMachineLogsExpirationInDays
@@ -1603,8 +1583,6 @@ Metadata:
         default: Meeting Record Expiration In Days
       TranscriptionExpirationInDays:
         default: Transcription Expiration In Days
-      TranscriptDeletionAfterSummary:
-        default: Delete Transcript After Summary
       AudioRecordingExpirationInDays:
         default: Audio Recording Expiration In Days
       CloudWatchLogsExpirationInDays:
@@ -3350,7 +3328,6 @@ Resources:
         AgentAssistExistingLambdaFunctionArn: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
-        TranscriptDeletionAfterSummary: !Ref TranscriptDeletionAfterSummary
         MeetingInactivityTimeoutInMinutes: !Ref MeetingInactivityTimeoutInMinutes
         MeetingInactivityLookbackInDays: !Ref MeetingInactivityLookbackInDays
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn

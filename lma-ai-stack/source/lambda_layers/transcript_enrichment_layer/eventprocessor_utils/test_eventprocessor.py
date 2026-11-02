@@ -181,12 +181,29 @@ def test_segment_expiry_is_unchanged_while_deletion_is_off(monkeypatch):
     assert abs(_days_ahead(ep.get_transcription_ttl()) - 90) < 0.01
 
 
-def test_the_stack_parameter_turns_the_backstop_expiry_on(monkeypatch):
-    """With nothing saved on the page, the parameter's default is what applies."""
+def test_with_nothing_saved_the_shipped_off_applies(monkeypatch):
+    """The setting has no stack parameter: an empty section is the shipped Off."""
     monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
-    monkeypatch.setenv("TRANSCRIPT_DELETION_AFTER_SUMMARY", "after_30_minutes")
     monkeypatch.setattr(parameters, "_SHARED_STORE", _RetentionStore({}))
-    assert abs(_days_ahead(ep.get_transcription_ttl()) - 2) < 0.01
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 90) < 0.01
+
+
+def test_an_unreadable_setting_gives_the_usual_expiry(monkeypatch):
+    """A segment is never lost over its expiry; the deletion itself still runs."""
+
+    class Unreadable(_RetentionStore):
+        calls = 0
+
+        def get_section(self, name):
+            # The period in days reads first, then the deletion setting.
+            Unreadable.calls += 1
+            if Unreadable.calls > 1:
+                raise RuntimeError("the configuration table is unavailable")
+            return super().get_section(name)
+
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(parameters, "_SHARED_STORE", Unreadable({}))
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 90) < 0.01
 
 
 def test_segment_expiry_uses_the_transcription_retention(monkeypatch):

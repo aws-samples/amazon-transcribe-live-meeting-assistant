@@ -30,9 +30,8 @@ that: it deletes the transcript at the minute it is due.
 ## Turning it on
 
 The choice is the **Retention › Delete the transcript after the summary**
-setting on the Configuration page. Its default is the
-`TranscriptDeletionAfterSummary` stack parameter, so a deployment can be
-created with deletion already on. The choices are:
+setting on the Configuration page, which an Admin can change at any time. It
+ships set to Off. The choices are:
 
 | Choice | Effect |
 |---|---|

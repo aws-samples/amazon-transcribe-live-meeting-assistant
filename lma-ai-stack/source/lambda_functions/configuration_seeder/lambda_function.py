@@ -78,6 +78,7 @@ from lma_config import (  # from the configuration layer
     CHAT_BUTTONS,
     MEETING_CONSENT,
     NOVA_SONIC_CONFIG,
+    RETENTION,
     SUMMARY_PROMPT_TEMPLATES,
     ConcurrentModification,
     ConfigurationStore,
@@ -142,6 +143,9 @@ ASR_ENGINE_DEFAULTS_FILE = "AsrEngine.json"
 #: texts and phrases ready for an administrator who turns it on. The same values
 #: as lma_consent.rules.DEFAULT_SETTINGS, which its tests hold to this file.
 MEETING_CONSENT_DEFAULTS_FILE = "MeetingConsent.json"
+# The Retention settings with no stack parameter. The two periods in days are
+# added to the same section from their parameters (apply_parameter_defaults).
+RETENTION_DEFAULTS_FILE = "Retention.json"
 
 #: The profile an operator's edits land in. One profile in this stage; the key
 #: layout holds as many as wanted.
@@ -192,6 +196,7 @@ def shipped_default_body(domain: str) -> Dict[str, Any]:
     pricing = json.loads((DEFAULTS_DIR / CALL_PRICING_FILE).read_text(encoding="utf-8"))
     asr_engine = json.loads((DEFAULTS_DIR / ASR_ENGINE_DEFAULTS_FILE).read_text(encoding="utf-8"))
     consent = json.loads((DEFAULTS_DIR / MEETING_CONSENT_DEFAULTS_FILE).read_text(encoding="utf-8"))
+    retention = json.loads((DEFAULTS_DIR / RETENTION_DEFAULTS_FILE).read_text(encoding="utf-8"))
     body: Dict[str, Any] = {
         SUMMARY_PROMPT_TEMPLATES.name: numbered_prompts(prompts),
         NOVA_SONIC_CONFIG.name: nova_sonic,
@@ -199,6 +204,7 @@ def shipped_default_body(domain: str) -> Dict[str, Any]:
         CALL_PRICING.name: pricing,
         ASR_ENGINE.name: asr_engine,
         MEETING_CONSENT.name: consent,
+        RETENTION.name: retention,
     }
     # The sections whose defaults are stack parameters ship no content of their
     # own: `seed` fills them from the parameters' values. Present and empty

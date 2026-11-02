@@ -389,10 +389,6 @@ CLASSIFICATION: Dict[str, Classification] = {
         RESOURCE,
         "Sets the lifecycle rules for transcript files and key-frame images on the recordings bucket, and is read by the functions that write transcript segments, to set when each expires.",
     ),
-    "TranscriptDeletionAfterSummary": _c(
-        RUNTIME,
-        "Read by the transcript deletion function at the end of each meeting and when its summary is stored, and by the functions that write transcript segments.",
-    ),
     "AudioRecordingExpirationInDays": _c(
         RESOURCE,
         "Sets the lifecycle rules for audio and video recordings on the recordings bucket.",

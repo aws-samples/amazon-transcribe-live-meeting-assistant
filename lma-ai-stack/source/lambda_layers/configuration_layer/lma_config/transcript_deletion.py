@@ -4,17 +4,19 @@
 
 """Whether, and how soon, a meeting's transcript is deleted once it is summarized.
 
-The Retention section's ``transcriptDeletionAfterSummary`` setting, whose
-default is the TranscriptDeletionAfterSummary stack parameter. Read by the
-transcript deletion function, which acts on it, and by every writer of
-transcript segments, which gives each segment a short expiry while deletion is
-on so that DynamoDB's own expiry still removes it if the deletion never ran.
+The Retention section's ``transcriptDeletionAfterSummary`` setting. It has no
+stack parameter: the configuration seeder ships it set to ``off`` in the
+deployment's baseline (``configuration_seeder/defaults/Retention.json``), and
+an Admin changes it on the Configuration page. Read by the transcript deletion
+function, which acts on it, and by every writer of transcript segments, which
+gives each segment a short expiry while deletion is on so that DynamoDB's own
+expiry still removes it if the deletion never ran.
 """
 
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from .parameters import read_setting
+from .parameters import _shared_store
 
 if TYPE_CHECKING:
     from .store import ConfigurationStore
@@ -23,7 +25,6 @@ LOGGER = logging.getLogger(__name__)
 
 SECTION = "retention"
 SETTING = "transcriptDeletionAfterSummary"
-ENV_VAR = "TRANSCRIPT_DELETION_AFTER_SUMMARY"
 
 #: Each choice, as minutes after the summary is written; None is off.
 DELAY_MINUTES = {
@@ -48,12 +49,18 @@ SEGMENT_EXPIRY_LIMIT_DAYS = 2.0
 def deletion_delay_minutes(*, store: Optional["ConfigurationStore"] = None) -> Optional[int]:
     """Minutes after the summary at which the transcript is deleted, or None when off.
 
-    The section's value, else the stack parameter's environment variable, else
-    off. A value that is not one of the choices is read as off and logged: the
-    schema refuses to save one, and the parameter's AllowedValues refuse to
-    deploy one.
+    The section's resolved value: an Admin's choice, else the shipped ``off``.
+    With no configuration table named, off. A value that is not one of the
+    choices is read as off and logged; the schema refuses to save one.
+
+    Raises:
+        The store's errors when the section cannot be read, so that a caller
+        deciding whether to delete does not take an unreadable setting for off.
     """
-    choice = read_setting(SECTION, SETTING, env_var=ENV_VAR, default="off", store=store)
+    reader = store if store is not None else _shared_store()
+    if reader is None:
+        return None
+    choice = reader.get_section(SECTION).values.get(SETTING, "off")
     if choice not in DELAY_MINUTES:
         LOGGER.warning(
             "%s › %s is %r, which is not a choice; reading it as off", SECTION, SETTING, choice
