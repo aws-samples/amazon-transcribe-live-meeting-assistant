@@ -1372,10 +1372,29 @@ def test_a_recorded_end_comes_with_one_search_for_the_id_and_every_ending() -> N
     assessment = record_for(EXTERNALLY_ENDED_VP_ITEM)["endAssessment"]
 
     assert (
-        '"vp-abc, Received SIGTERM, [terminate] signalling app to exit, '
+        '"VP vp-abc, Received SIGTERM, [terminate] signalling app to exit, '
         'due to external termination, VP exit:"'
     ) in assessment
     assert "ONE search_logs" in assessment
+
+
+def test_the_id_is_searched_as_the_status_lines_spell_it_not_as_the_json_field() -> None:
+    """A VP JSON record carries ``"vpId":"<id>"`` on every line, so the bare id
+    would match the whole stream; "VP <id>" matches only the lines that say
+    something about the participant's progress, in either line format."""
+    assessment = record_for(EXTERNALLY_ENDED_VP_ITEM)["endAssessment"]
+    term = "VP vp-abc"
+    status_plain = "Successfully updated VP vp-abc status to JOINED with preserved fields"
+    status_json = (
+        '{"ts":"2026-10-24T12:33:00.000Z","level":"INFO","component":"status-manager",'
+        '"msg":"Successfully updated VP vp-abc status to JOINED with preserved fields",'
+        '"vpId":"vp-abc"}'
+    )
+    other_json = '{"ts":"2026-10-24T12:34:00.000Z","level":"INFO","msg":"[audio] ok","vpId":"vp-abc"}'
+
+    assert f'"{term}, ' in assessment
+    assert term in status_plain and term in status_json
+    assert term not in other_json
 
 
 # The epoch of the createdAt the lookback tests add (2026-10-24T12:32:50Z).

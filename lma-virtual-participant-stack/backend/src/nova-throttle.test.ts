@@ -20,6 +20,7 @@ import { MetricEmitter } from './metrics-emf.js';
 import { NOVA_SONIC_STREAMS_THROTTLED } from './metrics-catalogue.js';
 import { ASSISTANT_OPEN_ATTEMPTS, NovaAgent } from './nova-agent.js';
 import { renderToolAckClip } from './tool-ack-clip.js';
+import { setLogSink } from './logger.js';
 
 function refusal(): Error {
     const error = new Error('Too many connections, please wait before trying again.') as any;
@@ -36,8 +37,16 @@ beforeEach(() => {
     mock.method(console, 'log', (...args: unknown[]) => { logs.push(args.map(String).join(' ')); });
     mock.method(console, 'warn', (...args: unknown[]) => { warnings.push(args.map(String).join(' ')); });
     mock.method(console, 'error', () => {});
+    // Modules on the structured logger: their records land in the same lists.
+    setLogSink((_line, record) => {
+        if (record.level === 'WARN') warnings.push(record.msg);
+        else if (record.level !== 'ERROR') logs.push(record.msg);
+    });
 });
-afterEach(() => mock.restoreAll());
+afterEach(() => {
+    mock.restoreAll();
+    setLogSink(null);
+});
 
 // ---------------------------------------------------------------------------
 // Recognising a refusal, and backing off

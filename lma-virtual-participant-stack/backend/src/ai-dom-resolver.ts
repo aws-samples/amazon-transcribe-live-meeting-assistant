@@ -14,6 +14,9 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { buildClaudeInvokeParams } from './bedrock-model-compat.js';
 import { CONTEXT_PAGE_AUTOMATION, anthropicUsage, currentCallId, recordMetering } from './metering.js';
 import { POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('ai-dom-resolver');
 
 export type Platform = 'ZOOM' | 'TEAMS' | 'WEBEX' | 'CHIME';
 
@@ -199,7 +202,7 @@ export async function getCachedSelector(
     memoryCache.set(key, entry);
     return entry;
   } catch (err) {
-    console.warn(`[ai-dom-resolver] Cache GetItem failed for ${key}:`, err);
+    log.warn(`[ai-dom-resolver] Cache GetItem failed for ${key}:`, err);
     return null;
   }
 }
@@ -221,7 +224,7 @@ async function persistCacheEntry(
       }),
     );
   } catch (err) {
-    console.warn(`[ai-dom-resolver] Cache PutItem failed for ${key}:`, err);
+    log.warn(`[ai-dom-resolver] Cache PutItem failed for ${key}:`, err);
   }
 }
 
@@ -241,7 +244,7 @@ async function evictCacheEntry(
       }),
     );
   } catch (err) {
-    console.warn(`[ai-dom-resolver] Cache DeleteItem failed for ${key}:`, err);
+    log.warn(`[ai-dom-resolver] Cache DeleteItem failed for ${key}:`, err);
   }
 }
 
@@ -620,7 +623,7 @@ export async function resolveSelector(
   primarySelectors: string[] = [],
 ): Promise<string | null> {
   if (RESOLVER_DISABLED) {
-    console.log('[ai-dom-resolver] Resolver disabled (no model id) — skipping');
+    log.info('[ai-dom-resolver] Resolver disabled (no model id) — skipping');
     return null;
   }
   // Try cache
@@ -637,7 +640,7 @@ export async function resolveSelector(
       });
       return cached.selector;
     }
-    console.log(
+    log.info(
       `[ai-dom-resolver] Cached selector "${cached.selector}" no longer matches — evicting and re-resolving`,
     );
     await evictCacheEntry(opts.platform, opts.step);
@@ -655,7 +658,7 @@ export async function resolveSelector(
       const text = await invokeClaude(prompt, screenshot);
       const json = extractJson(text);
       if (!json || !json.selector) {
-        console.log(
+        log.info(
           `[ai-dom-resolver] Claude returned no selector for ${opts.step}: ${text.slice(0, 200)}`,
         );
         return null;
@@ -674,7 +677,7 @@ export async function resolveSelector(
           misses: 0,
           expiresAt: ttlEpoch(),
         });
-        console.log(
+        log.info(
           `[ai-dom-resolver] Discovered selector for ${opts.step}: ${selector}`,
         );
         return selector;
@@ -685,7 +688,7 @@ export async function resolveSelector(
           'no element matched, or multiple matched without one visible — try a more specific selector',
       };
     } catch (err) {
-      console.error('[ai-dom-resolver] Bedrock call failed:', err);
+      log.error('[ai-dom-resolver] Bedrock call failed:', err);
       return null;
     }
   }
@@ -746,7 +749,7 @@ export async function analyzeUnknownDialog(
     };
     return result;
   } catch (err) {
-    console.error('[ai-dom-resolver] Dialog analysis failed:', err);
+    log.error('[ai-dom-resolver] Dialog analysis failed:', err);
     return null;
   }
 }
@@ -894,7 +897,7 @@ export async function analyzePageAction(
     }
     return domAction;
   } catch (err) {
-    console.error('[ai-dom-resolver] analyzePageAction failed:', err);
+    log.error('[ai-dom-resolver] analyzePageAction failed:', err);
     return null;
   }
 }
@@ -1053,7 +1056,7 @@ export async function classifyJoinState(
       reason: typeof json.reason === 'string' ? json.reason : '',
     };
   } catch (err) {
-    console.error('[ai-dom-resolver] classifyJoinState failed:', err);
+    log.error('[ai-dom-resolver] classifyJoinState failed:', err);
     return null;
   }
 }

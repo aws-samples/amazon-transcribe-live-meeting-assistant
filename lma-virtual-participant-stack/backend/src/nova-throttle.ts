@@ -26,6 +26,9 @@
 
 import { METRICS } from './metrics-emf.js';
 import { NOVA_SONIC_STREAMS_THROTTLED } from './metrics-catalogue.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('nova-throttle');
 
 /** What was opening the stream that was refused, for the log line. */
 export type NovaThrottleContext =
@@ -66,7 +69,7 @@ export function throttleBackoffMs(
  * and one `NovaSonicStreamsThrottled` datapoint.
  */
 export function noteNovaThrottle(context: NovaThrottleContext, detail: string = ''): void {
-  console.warn(
+  log.warn(
     `[nova-throttle] context=${context}${detail ? ` ${detail}` : ''}`
     + ' (Nova Sonic concurrent-stream quota reached for this account and region)',
   );

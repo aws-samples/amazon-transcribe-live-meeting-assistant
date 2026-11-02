@@ -25,6 +25,10 @@
  */
 
 /** A Transcribe result as forwarded to Kinesis, with what it was sent with. */
+import { createLogger } from './logger.js';
+
+const log = createLogger('translator-transcript');
+
 export interface OpenPartial {
     result: any;
     speaker: string;
@@ -96,7 +100,7 @@ export function publishAssistantTurn(raw: string): void {
         try {
             listener(text);
         } catch (error: any) {
-            console.error(`Assistant turn listener failed: ${error?.message || error}`);
+            log.error(`Assistant turn listener failed: ${error?.message || error}`);
         }
     }
 }

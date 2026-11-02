@@ -144,7 +144,9 @@ COMPONENT_NOTES: Dict[str, str] = {
         "the participant leaves on its own; one stopped from outside writes "
         "'Received SIGTERM' and, on a MicroVM, '[terminate] signalling app to "
         "exit' instead. The AI vision classifier's per-30-second verdict "
-        "(JoinState) is also logs-only."
+        "(JoinState) is also logs-only. Many lines are JSON records whose "
+        "vpId, callId, meetingPlatform, level and component fields Logs "
+        "Insights can filter on directly; the message text is in msg."
     ),
     VP_LAUNCH_STATE_MACHINE: (
         "Whether a launch was attempted at all, and how it ended: "

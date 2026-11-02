@@ -36,6 +36,9 @@ import { randomBytes } from 'crypto';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { KeyframeDetector, KeyframeThresholds } from './keyframe-detector.js';
 import type { VideoKeyframeEvent } from './kinesis-stream.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('keyframe-sampler');
 
 const numberEnv = (name: string, fallback: number, min = 0): number => {
     const raw = process.env[name];
@@ -221,12 +224,12 @@ export class KeyframeSampler {
         this.count = 0;
         this.restarts = 0;
         const mode = options.shareActive ? 'while a screen share is on screen' : 'all the time, with the stricter thresholds';
-        console.log(`[Keyframes] Sampling ${DISPLAY} at ${SAMPLE_FPS}/s ${mode}`);
+        log.info(`[Keyframes] Sampling ${DISPLAY} at ${SAMPLE_FPS}/s ${mode}`);
         if (options.shareActive) {
             const poll = async () => {
                 const active = await options.shareActive!().catch(() => null);
                 if (active !== null && active !== this.shareOnScreen) {
-                    console.log(`[Keyframes] Screen share ${active ? 'on screen' : 'no longer on screen'}`);
+                    log.info(`[Keyframes] Screen share ${active ? 'on screen' : 'no longer on screen'}`);
                     this.shareOnScreen = active;
                 }
             };
@@ -245,7 +248,7 @@ export class KeyframeSampler {
         this.ffmpeg?.kill('SIGTERM');
         this.ffmpeg = null;
         if (this.capturing) await this.capturing.catch(() => undefined);
-        console.log(
+        log.info(
             `[Keyframes] Stopped after ${this.count} key frame(s)` +
                 (this.skippedWhileCapturing ? `; ${this.skippedWhileCapturing} sample(s) skipped during captures` : ''),
         );
@@ -262,18 +265,18 @@ export class KeyframeSampler {
         this.ffmpeg = proc;
         this.pending = Buffer.alloc(0);
         proc.stdout?.on('data', (chunk: Buffer) => this.onData(chunk));
-        proc.stderr?.on('data', (d: Buffer) => console.log('[Keyframes] FFmpeg:', d.toString().trim()));
-        proc.on('error', (err) => console.error(`[Keyframes] FFmpeg error: ${err.message}`));
+        proc.stderr?.on('data', (d: Buffer) => log.info('[Keyframes] FFmpeg:', d.toString().trim()));
+        proc.on('error', (err) => log.error(`[Keyframes] FFmpeg error: ${err.message}`));
         proc.on('exit', (code, signal) => {
             if (this.ffmpeg !== proc) return;
             this.ffmpeg = null;
             if (this.stopped) return;
             if (this.restarts >= MAX_RESTARTS) {
-                console.error(`[Keyframes] Sampler exited (code=${code}, signal=${signal}); giving up after ${MAX_RESTARTS} restarts`);
+                log.error(`[Keyframes] Sampler exited (code=${code}, signal=${signal}); giving up after ${MAX_RESTARTS} restarts`);
                 return;
             }
             this.restarts++;
-            console.warn(`[Keyframes] Sampler exited (code=${code}, signal=${signal}); restarting (${this.restarts}/${MAX_RESTARTS})`);
+            log.warn(`[Keyframes] Sampler exited (code=${code}, signal=${signal}); restarting (${this.restarts}/${MAX_RESTARTS})`);
             setTimeout(() => {
                 if (!this.stopped) this.spawnSampler();
             }, 2000 * this.restarts);
@@ -326,7 +329,7 @@ export class KeyframeSampler {
                 // Not saved, so not the reference either: a slide still on
                 // screen is captured on the next settle rather than lost.
                 if (kept) this.detector.forget(kept);
-                console.error(`[Keyframes] Key frame not saved: ${err?.message || err}`);
+                log.error(`[Keyframes] Key frame not saved: ${err?.message || err}`);
             })
             .finally(() => {
                 this.capturing = null;
@@ -361,7 +364,7 @@ export class KeyframeSampler {
             ChangeScore: Math.round(changeScore * 1000) / 1000,
         });
         this.count++;
-        console.log(
+        log.info(
             `[Keyframes] Key frame ${frameId} at ${timestamp.toFixed(1)}s ` +
                 `(change ${(changeScore * 100).toFixed(0)}%, ${(grabbed.image.length / 1024).toFixed(0)}KB + ` +
                 `${(grabbed.thumbnail.length / 1024).toFixed(0)}KB)`,

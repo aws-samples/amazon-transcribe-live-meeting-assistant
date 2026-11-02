@@ -27,11 +27,15 @@ import { meetingLanguage, resolveTranslatorLanguage } from './translator-languag
 import { NovaAgent } from './nova-agent.js';
 import { NoOpAgent } from './noop-agent.js';
 import { details } from './details.js';
+import { setLogSink } from './logger.js';
 
 const captured: string[] = [];
 console.log = (...args: unknown[]) => {
     captured.push(args.map(String).join(' '));
 };
+setLogSink((_line, record) => {
+    captured.push(record.msg);
+});
 
 // ---------------------------------------------------------------------------
 // The language list

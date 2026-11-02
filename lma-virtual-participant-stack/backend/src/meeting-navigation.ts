@@ -38,6 +38,9 @@
  * a fully-quiesced page — they need the document.
  */
 import type { Page } from 'playwright-core';
+import { createLogger } from './logger.js';
+
+const log = createLogger('meeting-navigation');
 
 /**
  * Budget for the initial meeting-page load. Deliberately generous: the cost of
@@ -82,7 +85,7 @@ export async function gotoMeetingPage(
     } catch (err) {
         const current = page.url();
         if (arrivedAtExpectedHost(current, expectedHostPattern)) {
-            console.warn(
+            log.warn(
                 `[${label}] ${url} reported "${String(err).split('\n')[0]}" but the page ` +
                     `settled at ${current} — continuing.`,
             );

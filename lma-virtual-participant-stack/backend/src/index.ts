@@ -45,6 +45,7 @@ import {
     fingerprintSeedForUser,
     stableFingerprintSeed,
 } from './lib/profile.js';
+import { bindLogContext, registerSecretValuesFromEnv } from './logger.js';
 
 // Match the Xvfb screen size; fluxbox toolbar is suppressed in entrypoint.sh.
 const WINDOW_WIDTH = 1920;
@@ -204,6 +205,13 @@ const readBuildInfo = (): { buildDate: string; gitCommit: string; buildSource: s
 
 const main = async (): Promise<void> => {
     runStartedMs = Date.now();
+    // One container serves one meeting, so its identity is bound once here and
+    // every module's log records carry it; the call id is added when known.
+    bindLogContext({
+        vpId: details.invite.virtualParticipantId,
+        meetingPlatform: details.invite.meetingPlatform,
+    });
+    registerSecretValuesFromEnv();
     const buildInfo = readBuildInfo();
     console.log(
         `LMA Virtual Participant starting... [build ${buildInfo.buildDate} commit ${buildInfo.gitCommit} via ${buildInfo.buildSource}]`,
@@ -230,6 +238,7 @@ const main = async (): Promise<void> => {
             if (existingCallId) {
                 // Use existing CallId from VP record
                 process.env.VP_CALL_ID = existingCallId;
+                bindLogContext({ callId: existingCallId });
                 console.log(`Using existing VP CallId: ${existingCallId}`);
             } else {
                 // Generate new CallId and set it in VP record
@@ -237,6 +246,7 @@ const main = async (): Promise<void> => {
                 const callId = kinesisStreamManager.getCallId();
                 await statusManager.setCallId(callId);
                 process.env.VP_CALL_ID = callId;
+                bindLogContext({ callId: callId });
                 console.log(`Generated and set new VP CallId: ${callId}`);
             }
             
@@ -265,6 +275,7 @@ const main = async (): Promise<void> => {
         const { kinesisStreamManager } = await import('./kinesis-stream.js');
         const callId = kinesisStreamManager.getCallId();
         process.env.VP_CALL_ID = callId;
+        bindLogContext({ callId: callId });
         console.log(`Generated local test CallId: ${callId}`);
     }
 

@@ -93,12 +93,13 @@ search_logs runs CloudWatch Logs Insights, so use it for more than grep.
 Supply search_terms for reading lines; supply query_string for everything else:
 - Count the failure modes:
   fields @message | filter @message like "VP exit:"
-  | parse @message /trigger=(?<trigger>\S+)/
+  | parse @message /trigger=(?<trigger>[^\s"]+)/
   | stats count() by trigger
   The "VP exit:" line is space-separated and other fields can follow trigger=,
-  so capture up to the next space with a regular expression; a glob such as
-  "trigger=*" would run to the end of the line and give every exit its own
-  bucket.
+  so capture up to the next space or quote with a regular expression; a glob
+  such as "trigger=*" would run to the end of the line and give every exit its
+  own bucket, and so would \S+ on a JSON line, where the message is followed
+  by a closing quote and the record's other fields with no space between.
 - Find when it started:
   fields @timestamp | filter @message like "fallback is disabled"
   | stats count() by bin(30m)
@@ -106,6 +107,18 @@ Supply search_terms for reading lines; supply query_string for everything else:
   designed fallback line, which is not a cause; the two are told apart by what
   follows it, so filter on the half you mean.
 - Correlate two components in one call by naming both log groups.
+
+LINE FORMAT: many virtual participant lines are one JSON object: ts, level
+(DEBUG, INFO, WARN or ERROR), component, msg (the human-readable text, where
+the markers below appear), and the meeting's identity — vpId, callId and
+meetingPlatform. Logs Insights discovers these fields, so filter vpId = "<id>"
+or filter level = "ERROR" selects exactly, and stats count() by component
+shows where the lines come from. Lines without these fields are plain text:
+the rest of the participant's lines, older lines, output from the container's
+start-up script and the browser process, and every other component's. A field
+filter skips those, so to cover both, match the text with @message like as
+well. Inside a JSON line a double quote in the message is
+written \", so search for the part of a message that has no quotes in it.
 
 Use at least two independent sources before naming a cause. If a search returns
 nothing, change the search before changing your conclusion.
@@ -128,10 +141,12 @@ event or establishes that it did not happen in the window.
 - Virtual participant: "VP exit:" (carries reason= and trigger=) when it left
   on its own. When it was stopped from outside: "Received SIGTERM",
   "due to external termination" and, on a MicroVM,
-  "[terminate] signalling app to exit". Most of these shutdown lines do not
-  carry the VP id; its status lines ("Successfully updated VP <id> status to
-  ...") do, so search the id and the markers together and match them by
-  @logStream.
+  "[terminate] signalling app to exit". Its status lines ("Successfully
+  updated VP <id> status to ...") carry the id in their text, so search
+  "VP <id>" and the markers together and match them by @logStream. Search
+  "VP <id>" rather than the bare id: a JSON line also carries the id in its
+  vpId field, so the bare id matches every line the participant wrote and the
+  newest of them push the status lines out of the results.
 - WebSocket transcriber, bracket-tagged by concern: "[AUTH]" for the WebSocket
   upgrade and token check, "[TRANSCRIBING]" for the Amazon Transcribe session
   lifecycle, "[ASR]" for the MicroVM speech engine, "[DIARIZATION]" for speaker

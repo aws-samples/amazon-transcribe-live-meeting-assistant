@@ -208,12 +208,17 @@ _END_OPERATION_FIELDS = ("endReason", "ecsTerminated", "kinesisEndSent", "schedu
 def _vp_end_search_terms(vp_id: str) -> str:
     """The one search that answers "did it join, and how did it end".
 
-    The id matches the participant's own status lines, which show the join
+    "VP <id>" matches the participant's own status lines, which show the join
     progress and identify its stream; the stop markers and the exit line match
     whichever way it ended. Terms are ORed, so this is one tool call where
     searching for them in turn would be five.
+
+    The id is searched as the status lines spell it rather than bare: a VP
+    line written as a JSON record also carries the id in its ``vpId`` field,
+    so the bare id matches every line the participant wrote, and the newest of
+    those would crowd the join-progress lines out of the row limit.
     """
-    return ", ".join((vp_id, *_VP_EXTERNAL_STOP_MARKERS, _VP_EXIT_MARKER))
+    return ", ".join((f"VP {vp_id}", *_VP_EXTERNAL_STOP_MARKERS, _VP_EXIT_MARKER))
 
 
 def _hours_since(timestamp: Any, now: float) -> Optional[int]:

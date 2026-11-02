@@ -4,6 +4,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { createLogger } from '../logger.js';
+
+const logger = createLogger('profile');
 
 const THIRD_PARTY_COOKIE_ALLOW_PATTERNS = [
     'https://[*.]zoom.us',
@@ -152,7 +155,7 @@ export async function warmupNavigation(
     pageOpener: () => Promise<WarmupPage>,
     options: WarmupOptions = {},
 ): Promise<void> {
-    const log = options.log ?? ((m: string) => console.log(m));
+    const log = options.log ?? ((m: string) => logger.info(m));
     const runMeetingPlatforms = options.runMeetingPlatforms ?? true;
     const navTimeout = options.navTimeoutMs ?? 20_000;
 

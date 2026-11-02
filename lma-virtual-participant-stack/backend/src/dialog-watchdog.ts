@@ -27,6 +27,9 @@ import {
     scrollIntoViewAndClick,
 } from './ai-dom-resolver.js';
 import { details } from './details.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('dialog-watchdog');
 
 const COMMON_DIALOG_SELECTORS = [
     '[role="dialog"]',
@@ -125,7 +128,7 @@ export function startDialogWatchdog(page: Page, opts: WatchdogOpts): () => void 
         lastHandledHtml = fingerprint;
         consecutive = 0;
         if (!analysis) return true;
-        console.log(`[dialog-watchdog ${opts.platform}] ${analysis.type}: ${analysis.message}`);
+        log.info(`[dialog-watchdog ${opts.platform}] ${analysis.type}: ${analysis.message}`);
 
         if (
             !analysis.needsHuman &&
@@ -134,9 +137,9 @@ export function startDialogWatchdog(page: Page, opts: WatchdogOpts): () => void 
         ) {
             const ok = await scrollIntoViewAndClick(page, analysis.primaryActionSelector);
             if (ok) {
-                console.log(`[dialog-watchdog ${opts.platform}] auto-dismissed via ${analysis.primaryActionSelector}`);
+                log.info(`[dialog-watchdog ${opts.platform}] auto-dismissed via ${analysis.primaryActionSelector}`);
             } else {
-                console.warn(`[dialog-watchdog ${opts.platform}] click failed on ${analysis.primaryActionSelector}`);
+                log.warn(`[dialog-watchdog ${opts.platform}] click failed on ${analysis.primaryActionSelector}`);
             }
         } else if (analysis.needsHuman && details.invite.virtualParticipantId) {
             const { createStatusManager } = await import('./status-manager.js');
@@ -156,7 +159,7 @@ export function startDialogWatchdog(page: Page, opts: WatchdogOpts): () => void 
         try {
             hadDialog = await tick();
         } catch (err) {
-            console.warn(`[dialog-watchdog ${opts.platform}] error:`, err);
+            log.warn(`[dialog-watchdog ${opts.platform}] error:`, err);
         }
         // Adaptive cadence: any dialog this tick resets to fast; otherwise
         // count quiet ticks and back off to the idle interval once we've been

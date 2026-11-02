@@ -953,7 +953,7 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
                 Ignored if query_string is given.
             query_string: A complete Logs Insights query, for example
                 'fields @message | filter @message like "VP exit:"
-                | parse @message /trigger=(?<t>\\S+)/ | stats count() by t'.
+                | parse @message /trigger=(?<t>[^\\s"]+)/ | stats count() by t'.
             lookback_hours: How far back to search. Defaults to the
                 deployment's configured window.
             limit: Maximum rows. Defaults to the configured maximum.

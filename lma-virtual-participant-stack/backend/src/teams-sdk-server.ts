@@ -3,6 +3,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { AddressInfo } from 'net';
+import { createLogger } from './logger.js';
+
+const log = createLogger('teams-sdk-server');
 
 const distDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -79,7 +82,7 @@ export async function startTeamsSdkServer(): Promise<TeamsSdkServerHandle> {
     // The ACS calling SDK's secure-context check accepts the literal hostname
     // "localhost" but rejects "127.0.0.1"; the listener stays bound to loopback.
     const origin = `http://localhost:${port}`;
-    console.log(`[teams-sdk] embed server listening on ${origin}`);
+    log.info(`[teams-sdk] embed server listening on ${origin}`);
 
     return {
         origin,

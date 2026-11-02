@@ -13,6 +13,9 @@
  * focus/click that ignores the overlay so the join survives the transient.
  */
 import { Page, ElementHandle } from 'playwright-core';
+import { createLogger } from './logger.js';
+
+const log = createLogger('prejoin-actions');
 
 /**
  * Positional-click budget before falling back to a DOM click. CloakBrowser's
@@ -75,7 +78,7 @@ export async function clickWithDomFallback(
     try {
         await handle.click({ timeout });
     } catch (err) {
-        console.log(`[prejoin] ${label}: positional click failed (${(err as Error)?.message?.split('\n')[0]}); using DOM click`);
+        log.info(`[prejoin] ${label}: positional click failed (${(err as Error)?.message?.split('\n')[0]}); using DOM click`);
         try {
             await domClick(handle);
         } catch {

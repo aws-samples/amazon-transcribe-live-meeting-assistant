@@ -3,6 +3,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createRequire } from 'module';
 import { AddressInfo } from 'net';
+import { createLogger } from './logger.js';
+
+const log = createLogger('zoom-sdk-server');
 
 const require = createRequire(import.meta.url);
 
@@ -316,7 +319,7 @@ export async function startZoomSdkServer(): Promise<ZoomSdkServerHandle> {
 
     const port = (server.address() as AddressInfo).port;
     const origin = `http://127.0.0.1:${port}`;
-    console.log(`[zoom-sdk] embed server listening on ${origin} (SDK v${version})`);
+    log.info(`[zoom-sdk] embed server listening on ${origin} (SDK v${version})`);
 
     return {
         origin,

@@ -15,6 +15,9 @@
  */
 import { spawn } from 'child_process';
 import { connect } from 'net';
+import { createLogger } from './logger.js';
+
+const log = createLogger('microvm-stack');
 
 const ENTRYPOINT = process.env.VP_ENTRYPOINT || '/srv/entrypoint.sh';
 
@@ -62,11 +65,11 @@ export async function bootStack(timeoutMs = 180_000): Promise<boolean> {
             stdio: 'inherit',
         });
         child.on('exit', (code) => {
-            console.log(`[microvm-stack] entrypoint STACK_ONLY exited code=${code}`);
+            log.info(`[microvm-stack] entrypoint STACK_ONLY exited code=${code}`);
             resolve();
         });
         child.on('error', (err) => {
-            console.error('[microvm-stack] failed to spawn entrypoint:', err);
+            log.error('[microvm-stack] failed to spawn entrypoint:', err);
             resolve();
         });
     });
@@ -76,6 +79,6 @@ export async function bootStack(timeoutMs = 180_000): Promise<boolean> {
         if (await stackHealthy()) return true;
         await new Promise((r) => setTimeout(r, 1000));
     }
-    console.error('[microvm-stack] stack did not become healthy before timeout');
+    log.error('[microvm-stack] stack did not become healthy before timeout');
     return false;
 }
