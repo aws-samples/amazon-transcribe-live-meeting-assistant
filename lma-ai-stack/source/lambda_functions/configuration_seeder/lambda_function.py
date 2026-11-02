@@ -76,6 +76,7 @@ from lma_config import (  # from the configuration layer
     ASR_ENGINE,
     CALL_PRICING,
     CHAT_BUTTONS,
+    MEETING_CONSENT,
     NOVA_SONIC_CONFIG,
     SUMMARY_PROMPT_TEMPLATES,
     ConcurrentModification,
@@ -137,6 +138,10 @@ CALL_PRICING_FILE = "CallPricing.json"
 #: chooses otherwise. The previous table had no seeder and read an absent record
 #: as exactly this, so there is no second copy to keep in step.
 ASR_ENGINE_DEFAULTS_FILE = "AsrEngine.json"
+#: Meeting consent as a new deployment ships it: off, with the shipped notice
+#: texts and phrases ready for an administrator who turns it on. The same values
+#: as lma_consent.rules.DEFAULT_SETTINGS, which its tests hold to this file.
+MEETING_CONSENT_DEFAULTS_FILE = "MeetingConsent.json"
 
 #: The profile an operator's edits land in. One profile in this stage; the key
 #: layout holds as many as wanted.
@@ -186,12 +191,14 @@ def shipped_default_body(domain: str) -> Dict[str, Any]:
     buttons = json.loads((DEFAULTS_DIR / CHAT_BUTTONS_DEFAULTS_FILE).read_text(encoding="utf-8"))
     pricing = json.loads((DEFAULTS_DIR / CALL_PRICING_FILE).read_text(encoding="utf-8"))
     asr_engine = json.loads((DEFAULTS_DIR / ASR_ENGINE_DEFAULTS_FILE).read_text(encoding="utf-8"))
+    consent = json.loads((DEFAULTS_DIR / MEETING_CONSENT_DEFAULTS_FILE).read_text(encoding="utf-8"))
     body: Dict[str, Any] = {
         SUMMARY_PROMPT_TEMPLATES.name: numbered_prompts(prompts),
         NOVA_SONIC_CONFIG.name: nova_sonic,
         CHAT_BUTTONS.name: numbered_prompts(buttons),
         CALL_PRICING.name: pricing,
         ASR_ENGINE.name: asr_engine,
+        MEETING_CONSENT.name: consent,
     }
     # The sections whose defaults are stack parameters ship no content of their
     # own: `seed` fills them from the parameters' values. Present and empty

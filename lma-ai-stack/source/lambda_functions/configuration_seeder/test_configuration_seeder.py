@@ -157,6 +157,7 @@ def test_the_baseline_document_holds_the_shipped_prompts_under_its_section(seede
         "chat_buttons",
         "call_pricing",
         "asr_engine",
+        "meeting_consent",
         # Filled from the stack parameters by `seed`; see the tests under
         # "the stack parameters that are defaults".
         "language_models",

@@ -366,3 +366,25 @@ RETENTION = register(
         ),
     )
 )
+
+#: Whether participants are told a meeting is recorded and transcribed, and
+#: whether their consent is needed first: the deployment's default consent mode
+#: and rule, the notice texts, the phrases a reply is read by, and whether a
+#: meeting may be started with another choice. Read by the meeting consent
+#: resolver when a meeting's consent starts and when its settings are asked for.
+#: See docs/meeting-consent.md.
+#:
+#: Immediate tier, because it is consent-bearing: an administrator who turns
+#: opt-in on is promised that the next meeting to start asks first, with no
+#: window in which a cached copy still says otherwise.
+MEETING_CONSENT = register(
+    SectionSpec(
+        name="meeting_consent",
+        cache_tier=CacheTier.IMMEDIATE,
+        description=(
+            "Meeting consent: the default mode (off, notify or opt-in) and opt-in rule, the "
+            "notice texts, the consent and objection phrases, and whether a meeting may use "
+            "another choice."
+        ),
+    )
+)

@@ -27,6 +27,7 @@ title: "LMA Documentation"
 - [Meeting Assistant](meeting-assistant.md) — Strands agent chat interface, built-in tools, Knowledge Base, Guardrails, model selection, wake phrase, custom prompts
 - [Transcript Summarization](transcript-summarization.md) — Automatic and on-demand summaries, regenerating and editing a stored summary, custom prompt templates, Lambda-based summarization
 - [Meeting Agenda](meeting-agenda.md) — An agenda on each meeting: given when a Virtual Participant is started or scheduled (on the form or by an MCP client), the Agenda panel on the meeting page, who can change it, deriving one from the transcript, the summary's agenda coverage section, and asking the assistant how the meeting is going against it
+- [Meeting Consent](meeting-consent.md) — Telling participants a meeting is recorded and transcribed, and waiting for their consent: the off, notify and opt-in modes and the two opt-in rules, the Meeting Consent settings, the consent record kept on each meeting, who can change it, the capture gate and the API capture clients call, and the limitations of what it records
 - [Meeting Video and Key Frames](meeting-video.md) — Key frames of the shared screen: when they are taken, the screen-share signal per platform, measured cost, storage, retention and access, and the API to read them
 - [Meetings Query Tool](meetings-query-tool.md) — Semantic search across past meetings via transcript knowledge base
 

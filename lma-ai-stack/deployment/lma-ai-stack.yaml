@@ -6185,6 +6185,163 @@ Resources:
         LambdaFunctionArn: !GetAtt VideoKeyframesResolverFunction.Arn
 
   ##########################################################################
+  # Meeting consent: the consent record on each meeting (Call.Consent), the
+  # deployment's consent settings, and the capture gate. One resolver Lambda
+  # for getMeetingConsent and every consent mutation. See
+  # docs/meeting-consent.md.
+  ##########################################################################
+
+  MeetingConsentResolverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt MeetingConsentResolverFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      CodeUri: ../source/lambda_functions/meeting_consent_resolver
+      Description: >-
+        Lambda resolver for a meeting's consent record: notices, replies,
+        attestation, evidence and the capture gate
+      MemorySize: 256
+      Timeout: 30
+      Tracing: Active
+      Environment:
+        Variables:
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          RECORDINGS_BUCKET: !Ref S3BucketName
+          CONSENT_EVIDENCE_PREFIX: "lma-consent-evidence/"
+          ADMIN_GROUP: "Admin"
+          LOG_LEVEL: !Ref LogLevel
+      # Carries lma_consent (the consent rules) and lma_config (the deployment's
+      # consent settings). Pure Python, so it does not pin an architecture.
+      Layers:
+        - !Ref ConfigurationPythonLayer
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/MeetingConsentResolverFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table and bucket names, a prefix and a group name"
+    DependsOn:
+      - MeetingConsentResolverFunctionLogGroup
+      # Ordered behind the seeder, like every configuration reader.
+      - SeedConfiguration
+
+  MeetingConsentResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/MeetingConsentResolverFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  MeetingConsentResolverFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: MeetingConsentResolver Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action:
+              - "sts:AssumeRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-MeetingConsentResolver
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # The meeting row only: its Owner and SharedWith, which decide
+              # who may act, and its Consent attribute, the one this writes.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt EventSourcingTable.Arn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "c#*"
+              # Read-only, on the shared configuration table: the Meeting
+              # Consent section.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !GetAtt ConfigurationTable.Arn
+              # The signed evidence links act with this role's access, so it
+              # reads the evidence images and nothing else in the bucket.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-consent-evidence/*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+
+  AppSyncMeetingConsentLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - !Sub "appsync.${AWS::URLSuffix}"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt MeetingConsentResolverFunction.Arn
+
+  MeetingConsentLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: MeetingConsentLambda
+      Description: Lambda function for a meeting's consent record
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncMeetingConsentLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt MeetingConsentResolverFunction.Arn
+
+  ##########################################################################
   # The configuration editor (read every section with its schema, save the
   # sections it changed) and the configuration history (list, read, compare,
   # restore and label the revisions every configuration save records). See
@@ -7200,6 +7357,99 @@ Resources:
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/videoKeyframesLambda.js
 
+  GetMeetingConsentAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingConsentLambdaDataSource.Name
+      TypeName: Query
+      FieldName: getMeetingConsent
+      RequestMappingTemplateS3Location: ../source/appsync/meetingConsent.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  StartMeetingConsentAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingConsentLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: startMeetingConsent
+      RequestMappingTemplateS3Location: ../source/appsync/meetingConsent.request.vtl
+      # Published to onUpdateMeetingConsent, filtered on SharedWith in
+      # subscription.js, so it answers in the form that filter matches.
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  RecordMeetingConsentNoticeAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingConsentLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: recordMeetingConsentNotice
+      RequestMappingTemplateS3Location: ../source/appsync/meetingConsent.request.vtl
+      # Published to onUpdateMeetingConsent, filtered on SharedWith in
+      # subscription.js, so it answers in the form that filter matches.
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  SetMeetingConsentParticipantsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingConsentLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: setMeetingConsentParticipants
+      RequestMappingTemplateS3Location: ../source/appsync/meetingConsent.request.vtl
+      # Published to onUpdateMeetingConsent, filtered on SharedWith in
+      # subscription.js, so it answers in the form that filter matches.
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  RecordMeetingConsentEventAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingConsentLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: recordMeetingConsentEvent
+      RequestMappingTemplateS3Location: ../source/appsync/meetingConsent.request.vtl
+      # Published to onUpdateMeetingConsent, filtered on SharedWith in
+      # subscription.js, so it answers in the form that filter matches.
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  AttestMeetingConsentAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingConsentLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: attestMeetingConsent
+      RequestMappingTemplateS3Location: ../source/appsync/meetingConsent.request.vtl
+      # Published to onUpdateMeetingConsent, filtered on SharedWith in
+      # subscription.js, so it answers in the form that filter matches.
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  AddMeetingConsentEvidenceAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingConsentLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: addMeetingConsentEvidence
+      RequestMappingTemplateS3Location: ../source/appsync/meetingConsent.request.vtl
+      # Published to onUpdateMeetingConsent, filtered on SharedWith in
+      # subscription.js, so it answers in the form that filter matches.
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
   GetTranscriptSegmentsWithSentimentAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -7296,6 +7546,19 @@ Resources:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       TypeName: Subscription
       FieldName: onAddVideoKeyframe
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
+  OnUpdateMeetingConsentAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onUpdateMeetingConsent
       DataSourceName: !GetAtt SubscriptionDataSource.Name
       CodeS3Location: ../source/appsync/subscription.js
       Runtime:

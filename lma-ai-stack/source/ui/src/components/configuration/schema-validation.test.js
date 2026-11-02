@@ -58,6 +58,7 @@ describe('schema-validation', () => {
       'chat_buttons',
       'language_models',
       'meeting_assist',
+      'meeting_consent',
       'meeting_processing',
       'nova_sonic_config',
       'recording',
