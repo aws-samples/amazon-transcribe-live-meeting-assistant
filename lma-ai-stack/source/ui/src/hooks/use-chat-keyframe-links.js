@@ -32,9 +32,9 @@ export const loadKeyframe = async (callId, frameId) => {
 
 /**
  * Several frames of a meeting, with their signed links, by id: one request per
- * hundred frames rather than one per frame. A frame that does not exist, or
- * that the caller may not read, is not in the answer. Used by the chat and the
- * summary.
+ * hundred frames rather than one per frame. A frame that does not exist is not
+ * in the answer; a caller without access to the meeting gets an error for the
+ * whole request. Used by the chat and the summary.
  */
 export const loadKeyframes = async (callId, frameIds) => {
   const ids = [...new Set(frameIds)];

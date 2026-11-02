@@ -72,6 +72,42 @@ describe('SummaryMarkdown', () => {
     expect(frameIdsIn(undefined)).toEqual([]);
   });
 
+  it('reads only what is shown as a picture', () => {
+    expect(frameIdsIn('[a link](keyframe:f-1) and keyframe:f-2 in text')).toEqual([]);
+    expect(frameIdsIn('<img alt="x" src="keyframe:f-3"> ![y](keyframe:f-4)')).toEqual(['f-3', 'f-4']);
+    // An id longer than a frame id is not cut down to one.
+    expect(frameIdsIn(`![z](keyframe:${'a'.repeat(65)})`)).toEqual([]);
+  });
+
+  it('keeps the slides it shows while a changed summary reads the frames it now names', async () => {
+    let answerSecond;
+    const loadFrames = vi
+      .fn()
+      .mockImplementationOnce(async (_callId, ids) => Object.fromEntries(ids.map((id) => [id, frame(id)])))
+      .mockImplementationOnce(
+        (_callId, ids) =>
+          new Promise((resolve) => {
+            answerSecond = () => resolve(Object.fromEntries(ids.map((id) => [id, frame(id)])));
+          }),
+      );
+    const { rerender } = render(
+      <SummaryMarkdown callId="m-1" loadFrames={loadFrames} loadFrame={vi.fn()}>
+        {SLIDES}
+      </SummaryMarkdown>,
+    );
+    await screen.findByRole('img', { name: 'Slide at 00:30' });
+    rerender(
+      <SummaryMarkdown callId="m-1" loadFrames={loadFrames} loadFrame={vi.fn()}>
+        {THREE_SLIDES}
+      </SummaryMarkdown>,
+    );
+    await waitFor(() => expect(loadFrames).toHaveBeenCalledTimes(2));
+    // Still shown while the second read is outstanding.
+    expect(screen.getByRole('img', { name: 'Slide at 00:30' })).toBeTruthy();
+    answerSecond();
+    expect(await screen.findByRole('img', { name: 'Slide at 01:30' })).toBeTruthy();
+  });
+
   it('shows the alt text for a frame that cannot be read', async () => {
     const loadFrames = framesLoader(['0000030000-ab12cd']);
     const { container } = render(

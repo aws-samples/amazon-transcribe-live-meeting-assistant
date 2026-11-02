@@ -34,16 +34,20 @@ import './SummaryMarkdown.css';
 const logger = new ConsoleLogger('SummaryMarkdown');
 
 const KEYFRAME_SCHEME = 'keyframe:';
-const FRAME_REFERENCE = /keyframe:([A-Za-z0-9_-]{1,64})/g;
+// A picture whose source is a frame: markdown image syntax, or an <img> tag,
+// which the shared chain also renders. Only what SummaryImage shows is read.
+const FRAME_REFERENCE =
+  /!\[[^\]]*\]\(keyframe:([A-Za-z0-9_-]{1,64})\)|<img\b[^>]*\bsrc=["']keyframe:([A-Za-z0-9_-]{1,64})["']/gi;
 
-/** The frame ids a summary refers to, each once, in the order they first appear. */
+/** The frame ids a summary's pictures refer to, each once, in the order they first appear. */
 export const frameIdsIn = (markdown) =>
-  typeof markdown === 'string' ? [...new Set([...markdown.matchAll(FRAME_REFERENCE)].map((match) => match[1]))] : [];
+  typeof markdown === 'string'
+    ? [...new Set([...markdown.matchAll(FRAME_REFERENCE)].map((match) => match[1] || match[2]))]
+    : [];
 
 /**
- * The frames the summary names, read together: `done` once the read has
- * answered, and `frames` by id. Absent when a KeyframeImage is used on its own,
- * which then reads its own frame.
+ * The frames the summary names, read together, as `{ frames }` by id. Absent
+ * when a KeyframeImage is used on its own, which then reads its own frame.
  */
 const SummaryFrames = createContext(null);
 
@@ -132,8 +136,9 @@ KeyframeImage.propTypes = {
 
 /**
  * react-markdown's components for one meeting. Built once per meeting (see the
- * useMemo below), so a re-render keeps each picture's component, and with it
- * the frame already read.
+ * useMemo below), so a re-render keeps each picture's component; the frames
+ * themselves are held by the summary's read (SummaryFrames), and a re-read after
+ * a lapsed link by the picture.
  */
 const componentsFor = (callId, loadFrame) => {
   // react-markdown's own props: its hast `node`, which is not a DOM attribute, and
@@ -157,22 +162,24 @@ const SummaryMarkdown = ({ callId = '', children = '', loadFrame = loadKeyframe,
   const components = useMemo(() => componentsFor(callId, loadFrame), [callId, loadFrame]);
   const frameIds = useMemo(() => frameIdsIn(children).filter((id) => FRAME_ID.test(id)), [children]);
   const frameKey = frameIds.join(' ');
-  const [batch, setBatch] = useState({ done: false, frames: {} });
+  const [batch, setBatch] = useState({ frames: {} });
 
+  // Another meeting's frames are never shown for this one.
+  useEffect(() => {
+    setBatch({ frames: {} });
+  }, [callId]);
+
+  // A changed summary (regenerated or edited) keeps showing the frames already
+  // read while the ones it now names are read, and the answer is added to them.
   useEffect(() => {
     let current = true;
-    if (!callId || frameIds.length === 0) {
-      setBatch({ done: true, frames: {} });
-      return undefined;
-    }
-    setBatch({ done: false, frames: {} });
+    if (!callId || frameIds.length === 0) return undefined;
     loadFrames(callId, frameIds)
       .then((frames) => {
-        if (current) setBatch({ done: true, frames: frames || {} });
+        if (current) setBatch((previous) => ({ frames: { ...previous.frames, ...(frames || {}) } }));
       })
       .catch((error) => {
         logger.debug('could not read the key frames for the summary', error);
-        if (current) setBatch({ done: true, frames: {} });
       });
     return () => {
       current = false;

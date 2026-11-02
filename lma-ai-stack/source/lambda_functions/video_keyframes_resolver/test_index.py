@@ -320,7 +320,9 @@ def test_the_frames_a_summary_names_are_read_in_one_request_in_the_order_named(f
     assert dynamo.queries == []
 
 
-def test_keys_left_unprocessed_are_asked_for_again(fakes):
+def test_keys_left_unprocessed_are_asked_for_again(fakes, monkeypatch):
+    waits = []
+    monkeypatch.setattr(index.time, "sleep", waits.append)
     dynamo, _ = fakes([item(ms) for ms in (1000, 2000)])
     dynamo.unprocessed_rounds = 1
     result = call(OWNER, frameIds=["0000001000-ab12cd", "0000002000-ab12cd"])
@@ -329,6 +331,8 @@ def test_keys_left_unprocessed_are_asked_for_again(fakes):
         "0000002000-ab12cd",
     ]
     assert len(dynamo.batches) == 2
+    # Waited once, before the second round.
+    assert waits == [index.RETRY_BASE_SECONDS]
 
 
 def test_an_empty_list_reads_nothing(fakes):

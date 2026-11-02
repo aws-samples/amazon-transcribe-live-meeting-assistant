@@ -113,8 +113,9 @@ How it is built:
   reference as the frame's thumbnail, read through `getVideoKeyframes` for that
   meeting with the same access check as the strip, in one request for every
   frame the summary names; selecting it opens the full picture. A picture whose
-  signed link has lapsed (links last an hour) is read again by itself. A frame that cannot be read, because the meeting's retention has
-  removed it, shows as its alt text. Copy, download, Word, email, the meetings
+  signed link has lapsed (links last an hour) is read again by itself. A frame
+  that cannot be read, because the meeting's retention has removed it, shows as
+  its alt text. Copy, download, Word, email, the meetings
   list's summary preview and the MCP `get_meeting_summary` tool show the alt
   text too, and so does the summary document for the meeting-history knowledge
   base.

@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Dict, List, Literal, Mapping, Optional
 from urllib.parse import unquote, urlparse
 
@@ -56,8 +57,10 @@ DEFAULT_LIMIT = 100
 MAX_LIMIT = 500
 #: The most frames one ``frameIds`` request reads: one BatchGetItem's limit.
 MAX_FRAME_IDS = 100
-#: Rounds of BatchGetItem for the keys DynamoDB leaves unprocessed under load.
+#: Rounds of BatchGetItem for the keys DynamoDB leaves unprocessed under load,
+#: and the wait before the second, doubling for each one after.
 BATCH_ATTEMPTS = 4
+RETRY_BASE_SECONDS = 0.05
 FRAME_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
@@ -299,7 +302,11 @@ def frames_by_id(call_id: str, frame_ids: Any) -> List[Dict[str, Any]]:
             ]
         }
     }
-    for _ in range(BATCH_ATTEMPTS):
+    for attempt in range(BATCH_ATTEMPTS):
+        if attempt:
+            # Keys are left unprocessed mostly under throttling, so wait a little
+            # longer each round before asking again: 50, 100, 200 ms.
+            time.sleep(RETRY_BASE_SECONDS * 2 ** (attempt - 1))
         response = DYNAMODB.batch_get_item(RequestItems=request)
         for found_item in response.get("Responses", {}).get(EVENT_SOURCING_TABLE, []):
             found[found_item["SK"]["S"][len("f#") :]] = found_item
