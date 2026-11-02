@@ -143,9 +143,6 @@
       "transcribe/streaming": {
         "seconds": 0.0001667
       },
-      "transcribe/streaming-call-analytics": {
-        "seconds": 0.0005
-      },
       "transcribe/streaming-pii-redaction": {
         "seconds": 4e-05
       },
@@ -201,7 +198,7 @@
     "Resources that run whether or not a meeting is in progress: the WebSocket transcriber's Fargate service, NAT gateways, the Application Load Balancer, CloudFront, and Virtual Participant EC2 hosts.",
     "Per-request charges of the services LMA is built on: AppSync, DynamoDB, Kinesis Data Streams, LMA's own Lambda functions, S3 storage of recordings, and CloudWatch Logs.",
     "Amazon Bedrock Knowledge Base queries (RetrieveAndGenerate does not report token usage) and the vector store behind them.",
-    "Amazon Bedrock Guardrails, Amazon Translate (live translation in the browser) and Amazon Transcribe Post-Call Analytics.",
+    "Amazon Bedrock Guardrails and Amazon Translate (live translation in the browser).",
     "Third-party services: ElevenLabs, Simli and Tavily web search.",
     "Free tier, Savings Plans, volume tiers beyond the first, and any private pricing agreement."
   ]

@@ -664,9 +664,7 @@ def process_start_event(schema: Any, create_call_response: Any, monkeypatch) -> 
     run(
         cep.execute_process_event_api_mutation(
             message={"EventType": "START", "CallId": "call-1", "AgentId": "someone@example.com"},
-            settings={},
             appsync_session=FakeSession(schema, create_call_response),
-            sns_client=None,
             agent_assist_args={},
             sentiment_analysis_args={},
         )
@@ -791,9 +789,7 @@ def process_event(session: Any, message: Dict[str, Any], monkeypatch) -> None:
     run(
         cep.execute_process_event_api_mutation(
             message=message,
-            settings={},
             appsync_session=session,
-            sns_client=None,
             agent_assist_args={},
             sentiment_analysis_args={},
         )
@@ -982,7 +978,7 @@ def gathered(monkeypatch) -> Dict[str, Any]:
     """Records how many tasks the segment path hands to `asyncio.gather`.
 
     The segment counts are taken from a *slice* of the gathered results, because
-    the gather also carries sentiment, category and meeting-aggregation tasks
+    the gather also carries sentiment and meeting-aggregation tasks
     whose failures are not lost transcript lines. A fixture whose gather holds
     only segment tasks cannot tell that slice from the whole list, so the tests
     below assert the gather holds more than the slice does before believing

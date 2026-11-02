@@ -64,13 +64,6 @@ Parameters:
       The Amazon S3 prefix where the merged output audio files will be saved (must
       end in "/")
 
-  CallAnalyticsPrefix:
-    Type: String
-    Default: lca-call-analytics/
-    Description:
-      The Amazon S3 prefix where the post-call analytics files will be
-      saved, when using analytics api mode (must end in "/")
-
   CallDataStreamName:
     Type: String
     Description: >-
@@ -93,14 +86,6 @@ Parameters:
       - PriceClass_All
     ConstraintDescription: >-
       Allowed Price Classes PriceClass_100 PriceClass_200 and PriceClass_All
-
-  TranscribeApiMode:
-    Type: String
-    Default: analytics
-    AllowedValues:
-      - standard
-      - analytics
-    Description: Set the default operational mode for Transcribe
 
   IsContentRedactionEnabled:
     Type: String
@@ -212,35 +197,6 @@ Parameters:
       job. Leave blank if no
       custom language model is to be used. If yes, the custom language model must
       pre-exist in your account.
-  PcaS3BucketName:
-    Type: String
-    Description: >
-      Value of PCA stack "InputBucket". Effective only Transcribe API Mode parameter
-      is 'analytics'.
-    # yamllint disable rule:line-length
-    AllowedPattern: '( *|(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$))'
-    # yamllint enable rule:line-length
-
-  PcaTranscriptsPrefix:
-    Type: String
-    Default: originalTranscripts/
-    Description: Value of PCA stack "InputBucketTranscriptPrefix".
-
-  PcaPlaybackAudioFilePrefix:
-    Type: String
-    Default: mp3/
-    Description: Value of PCA stack "InputBucketPlaybackAudioPrefix".
-
-  PcaWebAppURL:
-    Type: String
-    AllowedPattern: '^(|https:\/\/.*)$'
-    Description: Value of PCA stack "WebAppURL".
-
-  PcaWebAppCallPathPrefix:
-    Type: String
-    Default: dashboard/parsedFiles/
-    Description: PCA path prefix for call detail pages.
-
   LMASettingsParameterName:
     Type: String
     Description: LCA settings SSM Parameter store
@@ -576,7 +532,6 @@ Conditions:
       - !Equals [!Ref TranscribeLanguageCode, "en-AU"]
       - !Equals [!Ref TranscribeLanguageCode, "en-GB"]
       - !Equals [!Ref TranscribeLanguageCode, "es-US"]
-  ShouldInstallPcaIntegration: !Not [!Equals [!Ref PcaS3BucketName, ""]]
   # Video handling needs a bigger task (ffmpeg mux) and more ephemeral storage.
   # Audio-only deployments keep the original, cheaper shape.
   ShouldEnableVideoRecording: !Equals [!Ref EnableVideoRecording, "true"]
@@ -1084,35 +1039,6 @@ Resources:
         Ref: CloudWatchLogsExpirationInDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
-  TranscriberCallEventTable:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      AttributeDefinitions:
-        # primary key attributes
-        - AttributeName: PK
-          AttributeType: S
-        - AttributeName: SK
-          AttributeType: S
-      KeySchema:
-        - AttributeName: PK
-          KeyType: HASH
-        - AttributeName: SK
-          KeyType: RANGE
-      BillingMode: PAY_PER_REQUEST
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
-      SSESpecification:
-        SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
-      TimeToLiveSpecification:
-        AttributeName: ExpiresAfter
-        Enabled: true
-      StreamSpecification:
-        StreamViewType: NEW_IMAGE
-
   ##########################################################################
   # ELB
   ##########################################################################
@@ -1299,11 +1225,6 @@ Resources:
                 - "arn:aws:s3:::${bucket}/*"
                 - bucket: !Ref S3BucketName
           - Action:
-              - iam:PassRole
-            Effect: Allow
-            Resource:
-              - !GetAtt TcaDataAccessRole.Arn
-          - Action:
               - transcribe:DeleteTranscriptionJob
               - transcribe:GetTranscriptionJob
               - transcribe:GetVocabulary
@@ -1311,7 +1232,6 @@ Resources:
               - transcribe:ListVocabularies
               - transcribe:StartStreamTranscription
               - transcribe:StartTranscriptionJob
-              - transcribe:StartCallAnalyticsStreamTranscription
             Effect: Allow
             Resource: "*"
           - Action:
@@ -1322,15 +1242,6 @@ Resources:
                 - "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${streamName}"
                 - streamName: !Ref CallDataStreamName
 
-          - Action:
-              - dynamodb:Query
-              - dynamodb:Scan
-              - dynamodb:GetItem
-              - dynamodb:PutItem
-              - dynamodb:UpdateItem
-            Effect: Allow
-            Resource:
-              - !GetAtt TranscriberCallEventTable.Arn
           - Action:
               - kms:Decrypt
               - kms:DescribeKey
@@ -1420,55 +1331,6 @@ Resources:
               comprehend, translate, and connect do not support resource-level
               permissions.
 
-  TcaDataAccessRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - transcribe.streaming.amazonaws.com
-            Action:
-              - sts:AssumeRole
-            Condition:
-              StringEquals:
-                aws:SourceAccount: !Sub ${AWS::AccountId}
-      Path: /
-      Policies:
-        - PolicyName: tca-post-call-policy
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
-                Resource:
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}"
-                    - bucket: !Ref S3BucketName
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}/${CallAnalyticsPrefix}*"
-                    - bucket: !Ref S3BucketName
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Resource:
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}/${CallAnalyticsPrefix}*"
-                    - bucket: !Ref S3BucketName
-
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W11
-            reason: >-
-              Transcribe does not support resource-level permissions and KVS streams
-              are dynamic
-
   TranscriberWebsocketTaskDef:
     Type: AWS::ECS::TaskDefinition
     DependsOn: CodeBuildRun
@@ -1487,20 +1349,12 @@ Resources:
               Value: !Ref S3BucketName
             - Name: RECORDINGS_KEY_PREFIX
               Value: !Ref AudioFilePrefix
-            - Name: CALL_ANALYTICS_FILE_PREFIX
-              Value: !Ref CallAnalyticsPrefix
-            - Name: TCA_DATA_ACCESS_ROLE_ARN
-              Value: !GetAtt TcaDataAccessRole.Arn
-            - Name: POST_CALL_CONTENT_REDACTION_OUTPUT
-              Value: "redacted"
             - Name: SERVERHOST
               Value: "0.0.0.0"
             - Name: SERVERPORT
               Value: "8080"
             - Name: KINESIS_STREAM_NAME
               Value: !Ref CallDataStreamName
-            - Name: TRANSCRIBER_CALL_EVENT_TABLE_NAME
-              Value: !Ref TranscriberCallEventTable
             # Transcribe seconds and ASR MicroVM time per meeting, for the
             # meeting cost estimate. Empty disables metering (see metering.ts).
             - Name: METERING_TABLE_NAME
@@ -1511,8 +1365,6 @@ Resources:
               Value: "true"
             - Name: SHOW_SPEAKER_LABEL
               Value: !Ref ShowSpeakerLabel
-            - Name: TRANSCRIBE_API_MODE
-              Value: !Ref TranscribeApiMode
             - Name: IS_CONTENT_REDACTION_ENABLED
               Value: !If
                 - ShouldEnableContentRedaction
@@ -1970,167 +1822,3 @@ Resources:
         VoiceEnrollmentAvailable: !If [HasVoiceEnrollment, "true", "false"]
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
-
-  PCAIntegrationFunction:
-    Type: AWS::Serverless::Function
-    Condition: ShouldInstallPcaIntegration
-    Properties:
-      Description: >-
-        AWS Lambda Function that will be triggered Transcribe Call Analytics completes
-        after end of streaming session
-      Handler: index.handler
-      Layers:
-        # periodically update the Lambda Insights Layer
-        # https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Lambda-Insights-extension-versions.html
-        - !Sub "arn:aws:lambda:${AWS::Region}:580247275435:layer:LambdaInsightsExtension:38"
-      Role: !GetAtt PCAIntegrationFunctionRole.Arn
-      Runtime: nodejs22.x
-      MemorySize: 768
-      Timeout: 900
-      Tracing: Active
-      Environment:
-        Variables:
-          REGION: !Ref AWS::Region
-          KINESIS_STREAM_NAME: !Ref CallDataStreamName
-          TRANSCRIBER_CALL_EVENT_TABLE_NAME: !Ref TranscriberCallEventTable
-          LCA_BUCKET_NAME: !Ref S3BucketName
-          CALL_ANALYTICS_FILE_PREFIX: !Ref CallAnalyticsPrefix
-          PCA_S3_BUCKET_NAME: !Ref PcaS3BucketName
-          PCA_TRANSCRIPTS_PREFIX: !Ref PcaTranscriptsPrefix
-          PCA_AUDIO_PLAYBACK_FILE_PREFIX: !Ref PcaPlaybackAudioFilePrefix
-          PCA_WEB_APP_URL: !Ref PcaWebAppURL
-          PCA_WEB_APP_CALL_PATH_PREFIX: !Ref PcaWebAppCallPathPrefix
-          LOG_LEVEL: !Ref LogLevel
-      CodeUri: ../source/lambda_functions/pca_integration
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/PCAIntegrationFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
-    DependsOn:
-      - PCAIntegrationFunctionLogGroup
-
-  PCAIntegrationFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    # Matches PCAIntegrationFunction's condition, so the group exists exactly
-    # when something writes to it. The trade is deliberate: a deployment that had
-    # the PCA integration, then removed it, loses the group and the logs in it on
-    # the next update. Keeping the group behind while the function is gone would
-    # instead leave it in the way of its own re-creation when the integration is
-    # installed again.
-    Condition: ShouldInstallPcaIntegration
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/PCAIntegrationFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  PCAIntegrationFunctionRole:
-    Type: AWS::IAM::Role
-    Condition: ShouldInstallPcaIntegration
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - lambda.amazonaws.com
-            Action:
-              - sts:AssumeRole
-      Path: /
-      ManagedPolicyArns:
-        # CloudWatch Insights Managed Policy
-        - arn:aws:iam::aws:policy/CloudWatchLambdaInsightsExecutionRolePolicy
-        - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
-      Policies:
-        - PolicyName: lambda-policy
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
-              - Effect: Allow
-                Action:
-                  - dynamodb:Query
-                  - dynamodb:Scan
-                  - dynamodb:GetItem
-                Resource:
-                  - !GetAtt TranscriberCallEventTable.Arn
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
-              - Action:
-                  - kinesis:PutRecord
-                Effect: Allow
-                Resource:
-                  - !Ref CallDataStreamArn
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Resource:
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}"
-                    - bucket: !Ref S3BucketName
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}/*"
-                    - bucket: !Ref S3BucketName
-              - Effect: Allow
-                Action:
-                  - s3:ListBucket
-                  - s3:PutObject
-                Resource:
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}"
-                    - bucket: !Ref PcaS3BucketName
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}/*"
-                    - bucket: !Ref PcaS3BucketName
-
-  AllowEventBridgeToCallPCAIntegrationFunction:
-    Type: "AWS::Lambda::Permission"
-    Condition: ShouldInstallPcaIntegration
-    Properties:
-      FunctionName: !Ref PCAIntegrationFunction
-      Action: "lambda:InvokeFunction"
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt EventBridgeRuleToTriggerPCAIntegrationFunction.Arn
-      SourceAccount: !Ref AWS::AccountId
-
-  EventBridgeRuleToTriggerPCAIntegrationFunction:
-    Type: AWS::Events::Rule
-    Condition: ShouldInstallPcaIntegration
-    Properties:
-      Description: "This rule is triggered when TCA post call output job completes"
-      EventPattern:
-        detail-type:
-          - "Call Analytics Post Call Job State Change"
-        source:
-          - aws.transcribe
-      Targets:
-        - Id: PCAIntegrationTarget
-          Arn: !GetAtt PCAIntegrationFunction.Arn
-      State: "ENABLED"

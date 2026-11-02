@@ -73,8 +73,8 @@ Deleted, for the meeting:
 - every turn of the transcript, partial or final, from the meeting's
   transcript records in DynamoDB;
 - every meeting assistant answer stored with the transcript;
-- the meeting's **Issues detected** field, which quotes the transcript (it is
-  set only by Transcribe Call Analytics);
+- the **Issues detected** field, which quotes the transcript, on a meeting
+  recorded by a version of LMA before 0.4.0 that still carries it;
 - the transcript file in the recordings bucket that the summary step writes for
   the transcript knowledge base, its metadata file, and, for an uploaded
   meeting, the Amazon Transcribe output file. Every version of each file is
@@ -86,9 +86,8 @@ Kept:
 
 - the summary, on the meeting and in the transcript knowledge base, so the
   meeting can still be found and asked about;
-- the meeting record: its title, times, participants, agenda, speaker names,
-  categories and sentiment;
-- category markers, which hold only a category's name;
+- the meeting record: its title, times, participants, agenda, speaker names
+  and sentiment;
 - the audio and video recordings, which follow `AudioRecordingExpirationInDays`.
   Turn **Record meeting audio** off on the Configuration page if the audio must
   not be kept either;
@@ -143,7 +142,7 @@ policy that does not allow the deletion.
 
 As a backstop, while deletion is on each transcript segment and meeting
 assistant answer is also written with a DynamoDB time to live of at most two
-days. Key frames and category markers keep their usual expiry. If a deletion never ran at
+days. Key frames keep their usual expiry. If a deletion never ran at
 all, DynamoDB still removes the segments, on its own schedule.
 
 ## Copies outside the transcript store

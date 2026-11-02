@@ -126,7 +126,6 @@ def test_call_selector_covers_the_fields_the_ui_reads(dsl_schema: DSLSchema):
         "AgentId",
         "RecordingUrl",
         "VideoRecordingUrl",
-        "PcaUrl",
         "Owner",
         "SharedWith",
         "CallSummaryText",

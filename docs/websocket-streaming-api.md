@@ -39,7 +39,7 @@ This document specifies everything a client application needs to connect, authen
 The LMA WebSocket transcriber service accepts real-time audio streams over a WebSocket connection and produces live transcriptions using Amazon Transcribe. Clients connect via a secure WebSocket (`wss://`), authenticate with Amazon Cognito JWT tokens, send JSON control messages to start/end a session, and stream raw PCM audio as binary frames.
 
 **Key capabilities:**
-- Real-time speech-to-text transcription via Amazon Transcribe (standard or Call Analytics)
+- Real-time speech-to-text transcription via Amazon Transcribe
 - Stereo audio support with per-channel speaker attribution
 - Active speaker tracking for multi-participant meetings
 - Optional server-side audio recording to Amazon S3

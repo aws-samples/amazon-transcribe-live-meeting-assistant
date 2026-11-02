@@ -1172,8 +1172,6 @@ timing) are listed there too, though no release had them as parameters.
   without speech before a meeting is ended** set to 0 makes each run end nothing.
 - The meeting assistant's wake phrase falls back to the shipped pattern when the
   one saved on the page does not compile.
-- Call Analytics' post-call output is redacted exactly when the meeting's stream
-  is, and the PCA integration finds it in whichever folder it was written to.
 
 **On upgrade**, the values a deployment's parameters held are not carried
 across: the deployment uses the shipped defaults, or what an Admin saved on the

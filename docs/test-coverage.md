@@ -76,7 +76,7 @@ Two rows deserve comment:
 code every Lambda imports had no suite at all, despite holding
 `normalize_transcript_segments` and the transcript TTL handling, which have
 misbehaved in production before. It now sits just under half, with the remaining
-gap concentrated in four packages that are still untouched:
+gap concentrated in three packages that are still untouched:
 
 | Layer package | Lines |
 |---|---|
@@ -85,7 +85,6 @@ gap concentrated in four packages that are still untouched:
 | `sentiment` | 100% |
 | `appsync_utils` | 0% |
 | `lambda_utils` | 0% |
-| `sns_utils` | 0% |
 | `transcript_batch_processor` | 0% |
 
 `transcript_batch_processor` needs `aws_lambda_powertools` installed as a test

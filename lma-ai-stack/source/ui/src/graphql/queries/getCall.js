@@ -11,8 +11,6 @@ export default /* GraphQL */ `
       AgentId
       Owner
       SharedWith
-      CallCategories
-      IssuesDetected
       CallSummaryText
       CallSummaryState
       SpeakerIdentities
@@ -29,7 +27,6 @@ export default /* GraphQL */ `
       UpdatedAt
       RecordingUrl
       VideoRecordingUrl
-      PcaUrl
       TotalConversationDurationMillis
       Sentiment {
         OverallSentiment {

@@ -133,8 +133,6 @@ A few things to know about these settings:
 - Nothing checks that a custom vocabulary or language model exists. Amazon
   Transcribe checks when a meeting starts, and a meeting whose vocabulary or
   model it does not recognise is not transcribed.
-- Call Analytics' post-call output, where deployed, is redacted exactly when the
-  meeting is.
 - The page offers only the choices the schema lists. A model a later release stops
   offering stays in force where it was saved, and the next save of the section
   asks for another.

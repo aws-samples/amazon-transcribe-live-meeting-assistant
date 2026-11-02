@@ -102,7 +102,7 @@ Parameters:
     Description: >-
       Minimum negative sentiment confidence required to declare a phrase as having
       negative sentiment, in the range 0-1.  Not applicable when using Contact Lens
-      or Transcribe Call Analytics (as sentiment is pre-calculated).
+      (as sentiment is pre-calculated).
 
   SentimentPositiveScoreThreshold:
     Type: Number
@@ -112,8 +112,7 @@ Parameters:
     Description: >-
       Minimum positive sentiment confidence required to declare a phrase as having
       positive sentiment, in the range 0-1.
-      Not applicable when using Contact Lens or Transcribe Call Analytics (as sentiment
-      is pre-calculated).
+      Not applicable when using Contact Lens (as sentiment is pre-calculated).
   ComprehendLanguageCode:
     Type: String
     Description: >-
@@ -770,9 +769,6 @@ Outputs:
   CallEventProcessorFunctionRoleName:
     Description: The Name of the IAM role used by CallEventProcessorFunction
     Value: !Sub "${CallEventProcessorFunction}Role"
-  SNSTopic:
-    Description: The SNS topic name that LMA publishes category events to
-    Value: !GetAtt CategorySNSTopic.TopicName
   FetchTranscriptArn:
     Description:
       The arn for a Lambda function that fetches a call transcript as a
@@ -2815,14 +2811,6 @@ Resources:
 
 
   ##########################################################################
-  # SNS Topic for Category Event Notifications
-  ##########################################################################
-  CategorySNSTopic:
-    Type: AWS::SNS::Topic
-    Properties:
-      KmsMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  ##########################################################################
   # Call Event Processor
   ##########################################################################
   CallEventProcessorFunction:
@@ -2892,14 +2880,6 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref EventSourcingTable
         - Statement:
-            - Effect: Allow
-              Action:
-                - sns:Publish
-              Resource: !Ref CategorySNSTopic
-            - Effect: Allow
-              Action:
-                - ssm:GetParameter
-              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameterName}"
             # Read-only, on the shared configuration table: the wake phrase and
             # the transcript hook mode are read from it.
             - Effect: Allow
@@ -2927,11 +2907,6 @@ Resources:
               Action:
                 - comprehend:DetectSentiment
               Resource: "*"
-            - Effect: Allow
-              Action:
-                - events:PutEvents
-              Resource:
-                - !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:event-bus/default"
             - !If
               - ShouldEnableTranscriptLambdaHookFunction
               - Effect: Allow
@@ -3061,8 +3036,6 @@ Resources:
           KEYFRAME_TEXT_EXTRACTOR_ARN: !GetAtt KeyframeTextExtractorFunction.Arn
           ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !GetAtt AsyncAgentAssistOrchestrator.Arn
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
-          SNS_TOPIC_ARN: !Ref CategorySNSTopic
-          PARAMETER_STORE_NAME: !Ref LMASettingsParameterName
           # Where records that cannot be decoded are copied. Skipping such a
           # record does not fail the invocation, so the event source mapping's
           # on-failure destination never sees it.
@@ -7137,17 +7110,6 @@ Resources:
       RequestMappingTemplateS3Location: ../source/appsync/updateCall.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
 
-  UpdatePcaUrlAppSyncResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: AppSyncSchema
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AppSyncDataSource.Name
-      TypeName: Mutation
-      FieldName: updatePcaUrl
-      RequestMappingTemplateS3Location: ../source/appsync/updateCall.request.vtl
-      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
-
   UpdateAgentAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -7264,28 +7226,6 @@ Resources:
           - !GetAtt UpdateCallAgendaAppSyncFunction.FunctionId
       RequestMappingTemplate: "{}"
       ResponseMappingTemplate: "$util.toJson($ctx.result)"
-
-  AddCallCategoryAppSyncResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: AppSyncSchema
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AppSyncDataSource.Name
-      TypeName: Mutation
-      FieldName: addCallCategory
-      RequestMappingTemplateS3Location: ../source/appsync/updateCall.request.vtl
-      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
-
-  AddIssuesDetectedAppSyncResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: AppSyncSchema
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AppSyncDataSource.Name
-      TypeName: Mutation
-      FieldName: addIssuesDetected
-      RequestMappingTemplateS3Location: ../source/appsync/updateCall.request.vtl
-      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
 
   AddCallSummaryTextAppSyncResolver:
     Type: AWS::AppSync::Resolver

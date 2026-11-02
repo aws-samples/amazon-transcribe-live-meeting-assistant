@@ -31,7 +31,7 @@ import {
     transcriptionProblem,
     useSessionSettingsStore,
 } from './session-settings';
-import { applyTranscribeOptions, diarizationSettingsFor, postCallRedactionOutput } from './transcribe';
+import { applyTranscribeOptions, diarizationSettingsFor } from './transcribe';
 import type { CallMetaData } from './eventtypes';
 import { buildMeteringItem } from '../metering';
 
@@ -212,11 +212,6 @@ test('identifying several languages sends its own flag with the options and the 
         IdentifyMultipleLanguages: true,
         LanguageOptions: 'en-US,es-US',
     });
-});
-
-test('post-call output is redacted exactly when the meeting is', () => {
-    assert.equal(postCallRedactionOutput(true), true);
-    assert.equal(postCallRedactionOutput(false), false);
 });
 
 test('the speaker-partitioning default applies only when the client chose nothing', () => {

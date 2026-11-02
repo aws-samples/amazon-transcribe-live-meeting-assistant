@@ -42,14 +42,10 @@ for path in (str(HERE), str(LAYER), str(CONFIG_LAYER)):
 
 os.environ.setdefault("APPSYNC_GRAPHQL_URL", "https://example.invalid/graphql")
 os.environ.setdefault("STATE_DYNAMODB_TABLE_NAME", "event-sourcing")
-os.environ.setdefault("PARAMETER_STORE_NAME", "lma-settings")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 
 _BOTO3_SESSION = mock.MagicMock()
-_BOTO3_SESSION.client.return_value.get_parameter.return_value = {
-    "Parameter": {"Value": json.dumps({})}
-}
 
 try:
     with mock.patch("boto3.Session", return_value=_BOTO3_SESSION):

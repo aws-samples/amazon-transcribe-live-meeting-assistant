@@ -19,8 +19,6 @@ export default /* GraphQL */ `
       SK
       CallId
       AgentId
-      CallCategories
-      IssuesDetected
       CallSummaryText
       CallSummaryState
       SpeakerIdentities
@@ -35,7 +33,6 @@ export default /* GraphQL */ `
       SystemPhoneNumber
       RecordingUrl
       VideoRecordingUrl
-      PcaUrl
       Owner
       SharedWith
       TotalConversationDurationMillis

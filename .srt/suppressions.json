@@ -97642,19 +97642,6 @@
   },
   {
     "source": "security-matrix",
-    "path": "lma-websocket-transcriber-stack/deployment/lma-websocket-transcriber.yaml",
-    "resourceType": "AWS::DynamoDB::Table",
-    "resourceName": "TranscriberCallEventTable",
-    "issue": "DynamoDB data plane events are not captured by CloudTrail logging",
-    "fix": "Configure CloudTrail to capture DynamoDB data plane events.",
-    "priority": "HIGH",
-    "check_id": "DDB-002",
-    "status": "suppressed",
-    "assessmentCount": 18,
-    "suppressionReason": "CloudTrail data-plane logging for DynamoDB is a cost-optimization decision. LMA DynamoDB tables store meeting transcripts and metadata; all access is via AppSync resolvers with Cognito authentication. Application-level access logging is provided by AppSync CloudWatch logs. CloudTrail data-plane logging can be enabled by operators who require it."
-  },
-  {
-    "source": "security-matrix",
     "path": "lma-virtual-participant-stack/template.yaml",
     "resourceType": "AWS::IAM::Role",
     "resourceName": "VPInstanceRole",

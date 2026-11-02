@@ -30,9 +30,9 @@ it: a late assistant answer, or a segment an engine corrected after the end.
 What is deleted, for the meeting:
 
 * every item under its transcript partition (``trs#<CallId>``) -- each turn of
-  the transcript, partial or final, and each meeting assistant answer -- apart
-  from category markers, which hold only a category's name;
-* ``IssuesDetected`` on the meeting record, which quotes the transcript;
+  the transcript, partial or final, and each meeting assistant answer;
+* ``IssuesDetected`` on the meeting record, which quotes the transcript. Nothing
+  writes it any more, but a meeting stored by an earlier version may carry it;
 * every version of the transcript files in the recordings bucket: the text
   file the summary step writes for the transcript knowledge base, its metadata
   file, and an uploaded meeting's Amazon Transcribe output;
@@ -90,9 +90,6 @@ IS_TRANSCRIPT_SUMMARY_ENABLED = (
 
 #: Minutes after a deletion made on the spot at which the meeting is swept once more.
 SWEEP_MINUTES = 10
-
-#: Items under the transcript partition that are kept: they hold no transcript text.
-KEPT_CHANNELS = frozenset({"CATEGORY_MATCH"})
 
 MEETING_ENDED = "meeting-ended"
 SUMMARY_WRITTEN = "summary-written"
@@ -241,8 +238,7 @@ def _transcript_items(call_id: str) -> Iterable[Dict[str, Any]]:
     """Every item under the meeting's transcript partition, a page at a time."""
     query: Dict[str, Any] = {
         "KeyConditionExpression": Key("PK").eq(f"trs#{call_id}"),
-        "ProjectionExpression": "PK, SK, #channel",
-        "ExpressionAttributeNames": {"#channel": "Channel"},
+        "ProjectionExpression": "PK, SK",
         "ConsistentRead": True,
     }
     while True:
@@ -258,8 +254,6 @@ def delete_segments(call_id: str) -> int:
     # The batch writer resends any item DynamoDB leaves unprocessed.
     with _table().batch_writer() as batch:
         for item in _transcript_items(call_id):
-            if item.get("Channel") in KEPT_CHANNELS:
-                continue
             batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
             deleted += 1
     return deleted

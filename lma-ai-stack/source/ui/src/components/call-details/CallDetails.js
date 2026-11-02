@@ -7,7 +7,6 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import useCallsContext from '../../contexts/calls';
-import useSettingsContext from '../../contexts/settings';
 
 import mapCallsAttributes from '../common/map-call-attributes';
 import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
@@ -28,14 +27,13 @@ const CallDetails = () => {
     setToolsOpen,
     setLiveTranscriptCallId,
   } = useCallsContext();
-  const { settings } = useSettingsContext();
 
   const [call, setCall] = useState(null);
 
   const sendInitCallRequests = async () => {
     const response = await getCallDetailsFromCallIds([callId]);
     logger.debug('call detail response', response);
-    const callsMap = mapCallsAttributes(response, settings);
+    const callsMap = mapCallsAttributes(response);
     const callDetails = callsMap[0];
     if (callDetails) {
       setCall(callDetails);
@@ -65,7 +63,7 @@ const CallDetails = () => {
     }
     const callsFiltered = calls.filter((c) => c.CallId === callId);
     if (callsFiltered && callsFiltered?.length) {
-      const callsMap = mapCallsAttributes([callsFiltered[0]], settings);
+      const callsMap = mapCallsAttributes([callsFiltered[0]]);
       const callDetails = callsMap[0];
       // UpdatedAt advancing is the usual signal that a meeting changed, but it
       // is not the only one: a speaker rename and a summary edit or

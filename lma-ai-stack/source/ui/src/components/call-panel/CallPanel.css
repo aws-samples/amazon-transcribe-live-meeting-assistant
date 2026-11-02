@@ -19,55 +19,6 @@
 .sentiment-image-popover {
     cursor: pointer;
 }
-.issue-detected {
-    text-decoration: underline;
-    text-decoration-color: red;
-    text-decoration-thickness: 3px;
-}
-span.issue-span {
-    text-decoration: underline;
-    text-decoration-color: red;
-    text-decoration-thickness: 2px;
-}
-
-span.issue-pill {
-    background-color: red;
-    border-radius: 2em;
-    padding-left: 1em;
-    padding-right: 1em;
-    line-height: 2.5em;
-    color: white;
-    padding-bottom: 0.1em;
-}
-
-.transcript-segment-category-match  {
-    background-color: lavender;
-    border-radius: 2em;
-    padding-left: 1em;
-    padding-right: 1em;
-    padding-bottom: 0.1em;
-    line-height: 2.5em !important;
-}
-
-.transcript-segment-category-match p {
-    height:1.5em;
-    padding: 0px !important;
-}
-
-.transcript-segment-category-match-alert  {
-    background-color: rgb(255, 147, 147);
-    border-radius: 2em;
-    padding-left: 1em;
-    padding-right: 1em;
-    padding-bottom: 0.1em;
-    line-height: 2.5em !important;
-}
-.transcript-segment-category-match-alert p {
-    height:1.5em;
-    padding: 0px !important;
-    color:white;
-}
-
 .hide-transcript {
     display:none;
 }

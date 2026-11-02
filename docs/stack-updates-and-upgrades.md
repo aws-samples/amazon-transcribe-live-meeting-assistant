@@ -138,10 +138,8 @@ deleted with the stack either way, deliberately:
 |----------|-------|------------------------|
 | `WebAppBucket` | AI stack | Build artifacts a redeployment regenerates; emptied on deletion regardless of this parameter |
 | `MCPServerExternalAppClient` | AI stack | Configuration rather than data; recreated by a redeployment |
-| `TranscriberCallEventTable` | Transcriber stack | Short-lived, TTL'd handoff state for the Post Call Analytics path, not user data. Its template does not read this parameter at all |
 | `AsrImageSourceBucket` | ASR MicroVM stack | Per-stack build context for the MicroVM image, rebuilt from the repository on the next deployment |
 | `CustomHeaderNameSecret`, `CustomHeaderValueSecret` | Transcriber stack | CloudFront origin-verification secrets, regenerated per deployment; retaining them would leave Secrets Manager entries that a new stack cannot use |
-| `CategorySNSTopic` | AI stack | A topic, not a store — it holds no messages between deliveries. Any subscriptions you added to it by hand are lost with it |
 
 One consequence to be aware of when deleting a stack: `AsrImageSourceBucket` has
 versioning enabled and, unlike `WebAppBucket`, no custom resource that empties it
@@ -260,15 +258,41 @@ value is higher than 14 — the default is 90 — your VPC Flow Logs will start
 retaining for longer, and costing more, after this upgrade. Lower it on the VPC
 stack's behalf by lowering the top-level parameter if that is not what you want.
 
-**Three log groups are removed if the feature they belong to is currently off.**
-`BedrockSummaryLambdaLogGroup`, `CognitoUserPoolEmailDomainVerifyFunctionLogGroup`
-and `PCAIntegrationFunctionLogGroup` now exist only when the function that writes
-to them exists. If your deployment has the Bedrock summariser, the sign-up email
-domain restriction or the PCA integration switched **off**, the corresponding
-group is deleted by this upgrade — along with anything it still holds from a
-period when the feature was on. Export what you need from those three before
-upgrading. The alternative was leaving an unowned group behind to block its own
-re-creation when the feature is switched back on.
+**Two log groups are removed if the feature they belong to is currently off.**
+`BedrockSummaryLambdaLogGroup` and `CognitoUserPoolEmailDomainVerifyFunctionLogGroup`
+now exist only when the function that writes to them exists. If your deployment
+has the Bedrock summariser or the sign-up email domain restriction switched
+**off**, the corresponding group is deleted by this upgrade — along with anything
+it still holds from a period when the feature was on. Export what you need from
+those two before upgrading. The alternative was leaving an unowned group behind
+to block its own re-creation when the feature is switched back on. The PCA
+integration's log group is removed with the integration itself; see the next
+paragraph.
+
+**The call analytics features inherited from Live Call Analytics are removed.**
+LMA no longer has the Post-Call Analytics (PCA) integration, the Amazon
+Transcribe Call Analytics streaming mode and its post-call output, call
+categories and their alerts, or "issues detected". What this means on upgrade:
+
+- The WebSocket transcriber stack no longer has the `CallAnalyticsPrefix`,
+  `TranscribeApiMode`, `PcaS3BucketName`, `PcaTranscriptsPrefix`,
+  `PcaPlaybackAudioFilePrefix`, `PcaWebAppURL` and `PcaWebAppCallPathPrefix`
+  parameters. The main stack never exposed them, so a deployment made from the
+  main template needs no change; one that deploys the nested transcriber
+  template on its own must stop passing them. The update deletes the PCA
+  integration function, its log group (with the logs in it), its EventBridge
+  rule, and the transcriber's `TranscriberCallEventTable`.
+- The main stack's `SNSCategoryTopicName` output and the AI stack's category SNS
+  topic are deleted. Anything subscribed to that topic, and anything that reads
+  that output, stops receiving or finding it.
+- The GraphQL API no longer has the `PcaUrl`, `CallCategories` and
+  `IssuesDetected` fields of `Call`, or the `updatePcaUrl`, `addCallCategory`
+  and `addIssuesDetected` mutations. A client that selects or calls any of them
+  gets a validation error and must drop them.
+- Meetings recorded before the upgrade keep any of these attributes they were
+  stored with; nothing reads or shows them. A category marker in an older
+  meeting's transcript is not shown, and is deleted with the rest of the
+  transcript when [transcript deletion](transcript-deletion.md) runs.
 
 **One new parameter.** `VPSchedulerStateMachineLogsExpirationInDays` (default 7)
 sets retention for the scheduled Virtual Participant state machine's execution

@@ -139,8 +139,6 @@ def processor_for(error: Exception) -> tbp.TranscriptBatchProcessor:
     instance = tbp.TranscriptBatchProcessor(
         appsync_client=FakeAppsyncClient(),
         api_mutation_fn=failing_mutation,
-        sns_client=None,
-        settings={},
     )
     instance._kds_processed_messages = [  # pylint: disable=protected-access
         {"status": "success", "result": {"CallId": "call-1"}}

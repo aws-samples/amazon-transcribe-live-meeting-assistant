@@ -187,89 +187,6 @@ def verify_cognito_token(token):
         return None
 
 
-def transform_segment_to_categories_agent_assist(
-    category: str,
-    category_details: Dict[str, Any],
-    call_id: str,
-) -> Dict[str, Any]:
-    """Transforms Contact Lens Categories segment payload to Agent Assist"""
-    created_at = datetime.utcnow().astimezone().isoformat()
-    is_partial = False
-    segment_id = str(uuid.uuid4())
-    channel = "AGENT_ASSISTANT"
-
-    transcript = f"{category}"
-    # get the min and maximum offsets to put a time range
-    segment_item = {}
-    segment_item["BeginOffsetMillis"] = min(
-        (
-            point_of_interest["BeginOffsetMillis"]
-            for point_of_interest in category_details["PointsOfInterest"]
-        )
-    )
-    segment_item["EndOffsetMillis"] = max(
-        (
-            point_of_interest["EndOffsetMillis"]
-            for point_of_interest in category_details["PointsOfInterest"]
-        )
-    )
-
-    start_time: float = segment_item["BeginOffsetMillis"] / 1000
-    end_time: float = segment_item["EndOffsetMillis"] / 1000
-
-    return dict(
-        CallId=call_id,
-        Channel=channel,
-        CreatedAt=created_at,
-        ExpiresAfter=get_transcription_ttl(),
-        EndTime=end_time,
-        IsPartial=is_partial,
-        SegmentId=segment_id,
-        StartTime=start_time,
-        Status="TRANSCRIBING",
-        Transcript=transcript,
-    )
-
-
-def transform_segment_to_issues_agent_assist(
-    segment: Dict[str, Any],
-    issue: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Transforms Contact Lens Transcript Issues payload to Agent Assist"""
-    # pylint: disable=too-many-locals
-    call_id: str = segment["CallId"]
-    created_at = datetime.utcnow().astimezone().isoformat()
-    is_partial = False
-    segment_id = str(uuid.uuid4())
-    channel = "AGENT_ASSISTANT"
-    segment_item = segment["Transcript"]
-    transcript = segment_item["Content"]
-
-    issues_detected = segment.get("Transcript", {}).get("IssuesDetected", [])
-    if not issues_detected:
-        raise ValueError("Invalid issue segment")
-
-    begin_offset = issue["CharacterOffsets"]["BeginOffsetChar"]
-    end_offset = issue["CharacterOffsets"]["EndOffsetChar"]
-    issue_transcript = transcript[begin_offset:end_offset]
-    start_time: float = segment_item["BeginOffsetMillis"] / 1000
-    end_time: float = segment_item["EndOffsetMillis"] / 1000
-    end_time = end_time + 0.001  # UI sort order
-
-    return dict(
-        CallId=call_id,
-        Channel=channel,
-        CreatedAt=created_at,
-        ExpiresAfter=get_transcription_ttl(),
-        EndTime=end_time,
-        IsPartial=is_partial,
-        SegmentId=segment_id,
-        StartTime=start_time,
-        Status="TRANSCRIBING",
-        Transcript=issue_transcript,
-    )
-
-
 def transform_contact_lens_segment(segment: Dict) -> Dict[str, object]:
     """Transforms Kinesis Stream Transcript Payload to addTranscript API"""
     call_id: str = segment["CallId"]
@@ -279,7 +196,6 @@ def transform_contact_lens_segment(segment: Dict) -> Dict[str, object]:
     segment_id: str
     transcript: str
     utterance: Dict[str, Any] = segment.get("Utterance", None)
-    categories: Dict[str, Any] = segment.get("Categories", None)
     contact_lens_transcript: Dict[str, Any] = segment.get("Transcript", None)
     sentiment_args = {}
 
@@ -340,9 +256,6 @@ def transform_contact_lens_segment(segment: Dict) -> Dict[str, object]:
     if utterance:
         transcript_segment["Utterance"] = utterance
 
-    if categories:
-        transcript_segment["Categories"] = categories
-
     if contact_lens_transcript:
         transcript_segment["ContactLensTranscript"] = contact_lens_transcript
 
@@ -362,58 +275,16 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
     transcript: str = None
     is_partial: bool = None
     sentiment: str = None
-    issuesdetected = None
-    sentimentWeighted = None
-    sentimentScore = None
     status: str = "TRANSCRIBING"
     expires_afer = get_transcription_ttl()
     created_at = datetime.utcnow().astimezone().isoformat()
     owner: str = None
     segments = []
 
-    utteranceEvent = message.get("UtteranceEvent", None)
     transcriptEvent = message.get("TranscriptEvent", None)
     contactLensEvent = message.get("ContactId", None)
 
-    if utteranceEvent:  # TCA streaming event in KDS
-        call_id = message["CallId"]
-        channel = utteranceEvent["ParticipantRole"]
-        if channel == "CUSTOMER":
-            channel = "CALLER"
-        segment_id = utteranceEvent["UtteranceId"]
-        start_time = utteranceEvent["BeginOffsetMillis"] / 1000
-        end_time = utteranceEvent["EndOffsetMillis"] / 1000
-        transcript = utteranceEvent["Transcript"]
-        is_partial = utteranceEvent["IsPartial"]
-        if not is_partial and utteranceEvent.get("Sentiment", None):
-            sentiment: str = utteranceEvent.get("Sentiment", None)
-        if not is_partial and utteranceEvent.get("SentimentWeighted", None):
-            sentimentWeighted = utteranceEvent.get("SentimentWeighted", None)
-        if not is_partial and utteranceEvent.get("SentimentScore", None):
-            sentimentScore = utteranceEvent.get("SentimentScore", None)
-
-        if not is_partial and utteranceEvent.get("IssuesDetected", []):
-            issuesdetected = utteranceEvent.get("IssuesDetected")
-        segments.append(
-            dict(
-                CallId=call_id,
-                Channel=channel,
-                SegmentId=segment_id,
-                StartTime=start_time,
-                EndTime=end_time,
-                Transcript=transcript,
-                OriginalTranscript=transcript,
-                IsPartial=is_partial,
-                Sentiment=sentiment,
-                SentimentWeighted=sentimentWeighted,
-                SentimentScore=sentimentScore,
-                IssuesDetected=issuesdetected,
-                Status=status,
-                ExpiresAfter=expires_afer,
-                CreatedAt=created_at,
-            )
-        )
-    elif transcriptEvent:  # Standard Transcribe streaming event in KDS
+    if transcriptEvent:  # Standard Transcribe streaming event in KDS
         call_id = message["CallId"]
         channel = transcriptEvent["Channel"]
         if channel == "CUSTOMER":
@@ -427,7 +298,6 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
         transcript = transcriptEvent["Transcript"]
         is_partial = transcriptEvent["IsPartial"]
         sentiment = None
-        issuesdetected = None
         segments.append(
             dict(
                 CallId=call_id,
@@ -440,7 +310,6 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
                 OriginalTranscript=transcript,
                 IsPartial=is_partial,
                 Sentiment=sentiment,
-                IssuesDetected=issuesdetected,
                 Status=status,
                 ExpiresAfter=expires_afer,
                 CreatedAt=created_at,
@@ -449,7 +318,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
     elif contactLensEvent:  # Contact Lens event
         call_id = message["ContactId"]
         for segment in message.get("Segments", []):
-            # only handle utterances and transcripts - delegate categories to agent assist
+            # only utterances and transcripts become transcript segments
             if "Utterance" not in segment and "Transcript" not in segment:
                 continue
             transcript_segment = {
@@ -514,7 +383,6 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
                 OriginalTranscript=transcript,
                 IsPartial=is_partial,
                 Sentiment=sentiment,
-                IssuesDetected=issuesdetected,
                 Status=status,
                 ExpiresAfter=expires_afer,
                 CreatedAt=created_at,

@@ -8,7 +8,6 @@ import React, { useEffect, useState } from 'react';
 import { Table, Pagination, TextFilter } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 import useCallsContext from '../../contexts/calls';
-import useSettingsContext from '../../contexts/settings';
 
 import mapCallsAttributes from '../common/map-call-attributes';
 import { paginationLabels } from '../common/labels';
@@ -33,7 +32,6 @@ const logger = new ConsoleLogger('CallList');
 
 const CallList = () => {
   const [callList, setCallList] = useState([]);
-  const { settings } = useSettingsContext();
 
   const {
     calls,
@@ -69,7 +67,7 @@ const CallList = () => {
   useEffect(() => {
     if (!isCallsListLoading) {
       logger.debug('setting meeting list', calls);
-      setCallList(mapCallsAttributes(calls, settings));
+      setCallList(mapCallsAttributes(calls));
     } else {
       logger.debug('meeting list is loading');
     }

@@ -3016,7 +3016,6 @@ Resources:
         CallDataStreamName: !Ref CallDataStream
         CallDataStreamArn: !GetAtt CallDataStream.Arn
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
-        TranscribeApiMode: "standard"
         TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
         AsrLauncherFunctionArn: !If
           - ShouldDeployMicrovmAsr
@@ -3050,11 +3049,6 @@ Resources:
         # MicroVM time for the meeting cost estimate, kept as long as the meeting.
         EventSourcingTableName: !GetAtt AISTACK.Outputs.EventSourcingTableName
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
-        PcaS3BucketName: ""
-        PcaTranscriptsPrefix: ""
-        PcaPlaybackAudioFilePrefix: ""
-        PcaWebAppURL: ""
-        PcaWebAppCallPathPrefix: ""
         LMASettingsParameterName: !Ref LMASettingsParameter
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
@@ -4219,10 +4213,6 @@ Outputs:
       - ShouldCreateRecordingBucket
       - !Ref RecordingsBucket
       - ""
-
-  SNSCategoryTopicName:
-    Description: The name of the SNS Topic for matched category and alert notifications
-    Value: !GetAtt AISTACK.Outputs.SNSTopic
 
   FetchTranscriptLambdaArn:
     Description:

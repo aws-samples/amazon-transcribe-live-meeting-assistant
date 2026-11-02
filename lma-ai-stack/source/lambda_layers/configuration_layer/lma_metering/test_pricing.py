@@ -175,7 +175,6 @@ def test_the_shipped_table_prices_every_service_a_writer_meters() -> None:
     base = shipped["regions"]["default"]
     fixed_services = [
         "transcribe/streaming",
-        "transcribe/streaming-call-analytics",
         "transcribe/streaming-pii-redaction",
         "transcribe/streaming-custom-language-model",
         "lambda-microvm/arm64",

@@ -191,8 +191,6 @@ const getSentimentImage = (segment, enableSentimentAnalysis) => {
 };
 
 const TranscriptContent = ({ segment, translateCache }) => {
-  const { settings } = useSettingsContext();
-  const regex = settings?.CategoryAlertRegex ?? '.*';
   const { transcript, segmentId, channel, targetLanguage, translateOn } = segment;
   const k = segmentId.concat('-', targetLanguage);
 
@@ -214,7 +212,7 @@ const TranscriptContent = ({ segment, translateCache }) => {
     }
 
     let className = '';
-    let text = t;
+    const text = t;
     const translatedText = result;
 
     switch (channel) {
@@ -224,15 +222,6 @@ const TranscriptContent = ({ segment, translateCache }) => {
         break;
       case 'AGENT':
       case 'CALLER':
-        break;
-      case 'CATEGORY_MATCH':
-        if (text.match(regex)) {
-          className = 'transcript-segment-category-match-alert';
-          text = `Alert: ${text}`;
-        } else {
-          className = 'transcript-segment-category-match';
-          text = `Category: ${text}`;
-        }
         break;
       default:
         break;
@@ -258,18 +247,6 @@ const TranscriptContent = ({ segment, translateCache }) => {
 
 const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis }) => {
   const { channel } = segment;
-
-  if (channel === 'CATEGORY_MATCH') {
-    const newSegment = { ...segment, transcript: `${segment.transcript}` };
-    return (
-      <Grid className="transcript-segment" disableGutters gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}>
-        {getSentimentImage(segment, enableSentimentAnalysis)}
-        <SpaceBetween direction="vertical" size="xxs">
-          <TranscriptContent segment={newSegment} translateCache={translateCache} />
-        </SpaceBetween>
-      </Grid>
-    );
-  }
 
   let displayChannel = `${segment.channel}`;
   let channelClass = '';
@@ -330,7 +307,10 @@ const EmbedTranscriptPanel = ({ item, callTranscriptPerCallId }) => {
   const maxChannels = 6;
   const { callId } = item;
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
-  const transcriptChannels = Object.keys(transcriptsForThisCallId).slice(0, maxChannels);
+  // CATEGORY_MATCH segments, which LMA before 0.4.0 could store, are not shown.
+  const transcriptChannels = Object.keys(transcriptsForThisCallId)
+    .filter((c) => c !== 'CATEGORY_MATCH')
+    .slice(0, maxChannels);
   const speakerIdentities = parseSpeakerIdentities(item.speakerIdentities);
 
   const handleLanguageSelect = (event) => {
@@ -496,7 +476,6 @@ EmbedTranscriptPanel.propTypes = {
  */
 const EmbedCallDetails = ({ params, sendToParent }) => {
   const { callId, show, layout } = params;
-  const { settings } = useSettingsContext();
 
   const [call, setCall] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -547,7 +526,7 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
           return false;
         }
 
-        const callsMap = mapCallsAttributes(validResponses, settings);
+        const callsMap = mapCallsAttributes(validResponses);
         const callDetails = callsMap[0];
 
         if (!callDetails) {
@@ -578,7 +557,7 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
         throw err;
       }
     },
-    [callId, settings],
+    [callId],
   );
 
   // Initial fetch on mount / callId change.
@@ -649,7 +628,7 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
 
     // Refresh in-place when the call is updated (status transitions etc).
     if (call) {
-      const callsMap = mapCallsAttributes([matching], settings);
+      const callsMap = mapCallsAttributes([matching]);
       const callDetails = callsMap[0];
       // See the note in CallDetails.js: a speaker rename does not move
       // UpdatedAt, so the embedded transcript needs the same second test to
