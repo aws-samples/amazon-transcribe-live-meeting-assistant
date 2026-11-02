@@ -1126,7 +1126,7 @@ ID of the private subnet in Availability Zone 2. Required if UseExistingVPC is t
 |---|---|---|
 | [`EnableOperationalAlarms`](#enableoperationalalarms) | `true` | Resource |
 | [`TranscribeConcurrentStreamAlarmThreshold`](#transcribeconcurrentstreamalarmthreshold) | `20` | Resource |
-| [`LogLevel`](#loglevel) | `INFO` | Read at run time |
+| [`LogLevel`](#loglevel) | `DEBUG` | Read at run time |
 | [`AppSyncFieldLogLevel`](#appsyncfieldloglevel) | `ERROR` | Resource |
 
 ### `EnableOperationalAlarms`
@@ -1153,11 +1153,11 @@ Number of concurrent Amazon Transcribe streaming sessions at which the 'transcri
 
 Console label: *Log Level*
 
-- **Default:** `INFO`
+- **Default:** `DEBUG`
 - **Allowed values:** `DEBUG`, `INFO`, `WARN`, `ERROR`
 - **Kind:** Read at run time. Read by each function and task's logging when the process starts, so a change applies as processes are replaced.
 
-Default logging level for all Lambda functions. Set to DEBUG for troubleshooting, INFO for normal operation.
+Logging level for the Lambda functions and containers. DEBUG, the default for now while issues are being diagnosed, also logs meeting content: the summary prompt with its transcript, meeting assistant requests and answers, and the voice assistants' heard and spoken text. Set WARN or ERROR for production deployments.
 
 ### `AppSyncFieldLogLevel`
 

@@ -1239,15 +1239,18 @@ Parameters:
 
   LogLevel:
     Type: String
-    Default: INFO
+    Default: DEBUG
     AllowedValues:
       - DEBUG
       - INFO
       - WARN
       - ERROR
     Description: >-
-      Default logging level for all Lambda functions. Set to DEBUG for
-      troubleshooting, INFO for normal operation.
+      Logging level for the Lambda functions and containers. DEBUG, the default
+      for now while issues are being diagnosed, also logs meeting content: the
+      summary prompt with its transcript, meeting assistant requests and answers,
+      and the voice assistants' heard and spoken text. Set WARN or ERROR for
+      production deployments.
 
   AppSyncFieldLogLevel:
     Type: String
