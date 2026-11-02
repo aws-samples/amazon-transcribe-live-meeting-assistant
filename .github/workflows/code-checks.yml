@@ -97,8 +97,9 @@ jobs:
       - name: Lint CloudFormation templates
         run: make lint-cfn
 
-      # ruff check + format check over the Lambda functions, the Lambda layers
-      # and scripts/pr_review (read-only; `make lint-python` is the fixing form).
+      # ruff check + format check over the Lambda functions, the Lambda layers,
+      # scripts/pr_review and the demo recorder (read-only; `make lint-python`
+      # is the fixing form).
       - name: Lint Python (ruff)
         run: make lint-python-check
 
@@ -158,6 +159,13 @@ jobs:
       # No AWS and no model call.
       - name: Advisory AI review tests
         run: make test-pr-review
+
+      # The product demo recorder (scripts/ux_recorder*.py), its stack-session
+      # helper and the demo skill's storyboard file. No AWS, Chrome or network.
+      # Pillow and ffmpeg are not installed here, so the render tests skip and the
+      # rendering path is covered only by a local `make test-ux-recorder`.
+      - name: Demo recorder tests
+        run: make test-ux-recorder
 
       - name: WebSocket transcriber dependencies
         working-directory: lma-websocket-transcriber-stack/source/app

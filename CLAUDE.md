@@ -76,10 +76,10 @@ The `Lint and unit tests` check (`.github/workflows/code-checks.yml`, mirrored b
 the `code_checks` job in `.gitlab-ci.yml`) runs on every pull request and on every
 push to `develop` and `main`. It is the authoritative full run. The workflow file
 is the source of truth for what it covers; today that is cfn-lint, ruff (over the
-Lambda functions, the Lambda layers, `scripts/pr_review` and the ASR runtime), the
-UI lint and vitest, `tsc`/eslint, and the SDK, CLI, Lambda, VP, VP-template,
-AI-stack, ASR, integ-plumbing, advisory-review, transcriber and browser-extension
-suites.
+Lambda functions, the Lambda layers, `scripts/pr_review`, the demo recorder and the
+ASR runtime), the UI lint and vitest, `tsc`/eslint, and the SDK, CLI, Lambda, VP,
+VP-template, AI-stack, ASR, integ-plumbing, advisory-review, demo-recorder,
+transcriber and browser-extension suites.
 
 When a change is going to a PR anyway:
 
@@ -244,6 +244,7 @@ patterns.
 | `.claude/skills/dependabot-prs.md` | Triaging, verifying and merging Dependabot dependency PRs |
 | `.claude/skills/prepare-changelog.md` | Writing or updating CHANGELOG entries for a release |
 | `.claude/skills/integ-tests.md` | Running end-to-end integration tests against a live deployed stack (`make integ-tests`) |
+| `.claude/skills/product-demo.md` | Recording a narrated product demo video of the web UI against a deployed stack (`scripts/ux_recorder.py`, `make ux-record-deps`) |
 
 When asked to `review <PR/MR URL>`, follow `.claude/skills/pr-review.md` and
 produce a structured review answering the six questions (good PR / safe /

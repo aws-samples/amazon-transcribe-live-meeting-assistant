@@ -1,0 +1,117 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+#
+# Storyboards for the product-demo skill (.claude/skills/product-demo.md).
+#
+# A storyboard is a demo that has been proposed, confirmed by a person and (usually)
+# recorded once. It is kept so the same demo can be re-recorded on a later release
+# without re-deriving what to show and what to say.
+#
+# This file is memory, not scope. A demo run starts from what the user asks for
+# (a changelog section, a PR, a feature) and proposes three storyboards; an entry
+# here is offered as one of the three when it covers the request. Add an entry
+# AFTER the user has confirmed it, when its chapters, fixtures and narration have
+# been rehearsed against a real stack. Written beforehand it encodes a guess.
+#
+# The first entry below is the exception: it was written to show the format and
+# has not been rehearsed or recorded (last_recorded is null). Rehearse it before
+# offering it as written, and replace it once a real storyboard exists.
+#
+# Storyboards hold no meeting content, account ids, stack names or people, so
+# they are safe to commit. The recordings themselves live under
+# scratch/ux-recordings/ and are never committed.
+#
+# Fields:
+#   id             Stable slug. The session's docs-entry and report name it.
+#   title          The title card and the docs/demo-videos.md heading.
+#   source         What the demo is of: a CHANGELOG section and entries, a PR,
+#                  or a feature doc.
+#   audience       Who it is for, in a phrase.
+#   hook           One sentence: what the viewer can do after watching. Spoken on
+#                  the title card (start --say).
+#   persona        The role the demo is recorded as: Admin (the Admin Cognito
+#                  group) or User (a user in no group, who sees only their own
+#                  meetings and those shared with them).
+#   duration_target  "m:ss". Aim for 2–4 minutes.
+#   fixtures       What must exist before recording, and how to make it. Shipped
+#                  fixtures and synthetic audio unless the user agreed otherwise.
+#   chapters       One per `mark`. `label` is the chapter name, `say` the narration
+#                  spoken before the action (first person plural, present tense,
+#                  why before what), `do` the browser steps precise enough to
+#                  rehearse from.
+#   closing        Spoken on the end card (stop --say): the takeaway and the doc.
+#   takeaways      3–5 lines for the Key takeaways end card. Claims, not a table
+#                  of contents.
+#   not_shown      What the demo deliberately leaves out, and why.
+#   docs           The docs page (and anchor) the docs entry links to.
+#   category       The docs/demo-videos.md heading the entry belongs under.
+#   last_recorded  {date, version} of the most recent recording, or null.
+
+storyboards:
+  - id: meeting-to-summary-and-answers
+    title: From a recorded meeting to a summary and answers
+    source: 'Feature: docs/web-ui-guide.md (Meeting Detail Page) and docs/transcript-summarization.md'
+    audience: People evaluating LMA who have not used it yet
+    hook: >-
+      After a meeting ends, LMA gives you the transcript with each speaker, a
+      written summary, and an assistant that answers questions about what was said.
+    persona: Admin
+    duration_target: '2:30'
+    fixtures:
+      - One finished meeting made from the shipped two-speaker recording
+        utilities/load-simulator/lma_load/fixtures/stereo-demo-call.wav, uploaded on
+        the Upload Audio page with a neutral meeting topic, and left until its
+        status is Ended and the summary has appeared (a few minutes).
+      - Retention > Delete the transcript after the summary left at Off (the
+        default) on the Configuration page; otherwise the transcript is gone by
+        the time the demo is recorded.
+      - The recorded tab signed in as an Admin, on the Meetings List.
+    chapters:
+      - label: The meetings list
+        say: >-
+          Every meeting LMA has captured is listed here, whichever way it was
+          captured, with its status and when it happened.
+        do:
+          - Show the Meetings List with the fixture meeting at the top; hover its row.
+      - label: The transcript, by speaker
+        say: >-
+          We open the meeting. The transcript shows each speaker on their own
+          line, with the time each of them spoke.
+        do:
+          - Open the fixture meeting; scroll the Transcript panel slowly through
+            the first exchanges.
+      - label: The summary
+        say: >-
+          When the meeting ended, LMA wrote a summary of it, in sections an
+          administrator chooses. It can be copied, edited, or regenerated.
+        do:
+          - Scroll to the Meeting Summary panel; let the sections stay on screen.
+      - label: Ask about the meeting
+        say: >-
+          The meeting assistant has read the whole meeting. One of the shortcut
+          buttons asks it for the action items, and the answer streams in.
+        do:
+          - In the Chat panel, press the action-items shortcut; wait for the answer
+            to finish streaming.
+      - label: A question of our own
+        say: >-
+          We can also ask in our own words, and the assistant answers from what
+          was said in this meeting.
+        do:
+          - Type a question about a detail from the recording into the chat box and
+            send it; wait for the answer.
+    closing: >-
+      That is a meeting turned into a transcript, a summary and answers. The Web UI
+      guide in the LMA documentation describes every panel on the meeting page.
+    takeaways:
+      - Every meeting is transcribed with each speaker on their own line
+      - A summary is written automatically when the meeting ends
+      - The meeting assistant answers questions about what was said
+    not_shown:
+      - Capturing a meeting live (Stream Audio, Virtual Participant), which is its
+        own demo; this one starts on a finished meeting
+      - Editing the summary prompt templates on the Configuration page
+    docs: docs/web-ui-guide.md#meeting-detail-page
+    category: Overview
+    last_recorded: null
