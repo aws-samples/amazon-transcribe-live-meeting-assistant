@@ -784,6 +784,67 @@ def test_one_invalid_section_refuses_the_whole_save_and_reports_every_problem() 
     assert not dynamo.requests
 
 
+def test_a_setting_above_the_limit_the_baseline_sets_is_refused() -> None:
+    """Retention may be shortened on the page and not lengthened past the stack's value."""
+    store, dynamo, _ = build()
+    store.write_default({**DEFAULT_BODY, "retention": {"meetingRecordExpirationInDays": 30}})
+    store.seed_profile("custom", {})
+    store.set_active_profile("custom", only_if_absent=True)
+    with pytest.raises(InvalidConfiguration) as raised:
+        store.write_sections(
+            "custom",
+            {"retention": {"meetingRecordExpirationInDays": 45}},
+            updated_by="admin@example.com",
+            expected_version=1,
+        )
+    assert raised.value.problems == [
+        "retention › meetingRecordExpirationInDays: must be at most 30, the limit this "
+        "deployment sets; got 45"
+    ]
+    assert dynamo.body("Config#custom") == {}
+
+    outcome = store.write_sections(
+        "custom",
+        {"retention": {"meetingRecordExpirationInDays": 7.5}},
+        updated_by="admin@example.com",
+        expected_version=1,
+    )
+    assert outcome.version == 2
+    assert dynamo.body("Config#custom") == {"retention": {"meetingRecordExpirationInDays": 7.5}}
+
+
+def test_replacing_a_whole_profile_checks_the_limits_too() -> None:
+    store, dynamo, _ = build()
+    store.write_default({**DEFAULT_BODY, "retention": {"transcriptionExpirationInDays": 7}})
+    store.seed_profile("custom", {})
+    store.set_active_profile("custom", only_if_absent=True)
+    with pytest.raises(InvalidConfiguration) as raised:
+        store.write_profile(
+            "custom",
+            {"retention": {"transcriptionExpirationInDays": 8}},
+            updated_by="admin@example.com",
+            expected_version=1,
+        )
+    assert raised.value.problems == [
+        "retention › transcriptionExpirationInDays: must be at most 7, the limit this "
+        "deployment sets; got 8"
+    ]
+    assert dynamo.body("Config#custom") == {}
+
+
+def test_a_limited_setting_the_baseline_does_not_hold_is_not_refused() -> None:
+    """The readers still apply the parameter's value as the limit."""
+    store, _, _ = build()
+    seed(store)
+    outcome = store.write_sections(
+        "custom",
+        {"retention": {"transcriptionExpirationInDays": 400}},
+        updated_by="admin@example.com",
+        expected_version=1,
+    )
+    assert outcome.version == 2
+
+
 def test_replacing_a_whole_profile_checks_every_section_in_it() -> None:
     store, dynamo, _ = build()
     seed(store)

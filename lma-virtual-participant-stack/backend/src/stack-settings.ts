@@ -15,7 +15,9 @@
  * assistant and its activation mode, avatar and Teams meeting-end detection
  * (the Virtual Participant section). The parameter is now each setting's
  * default: the configuration seeder writes its value into the configuration's
- * baseline, and an administrator's change wins over it.
+ * baseline, and an administrator's change wins over it. The meeting retention
+ * its usage records are written with (the Retention section) is applied too;
+ * there the parameter is an upper limit as well as the default.
  *
  * Rather than change every place that reads one of these variables, this module
  * reads the three sections and sets each variable the configuration holds a
@@ -37,10 +39,12 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
     ConfigurationStore,
     RECORDING,
+    RETENTION,
     SettingType,
     TRANSCRIPTION,
     VIRTUAL_PARTICIPANT,
     coerceSetting,
+    limitedSetting,
     transcribeOptionsProblem,
 } from './configuration-store.js';
 
@@ -73,6 +77,17 @@ export const VIRTUAL_PARTICIPANT_SETTINGS: readonly SettingTarget[] = [
     { section: 'virtual_participant', setting: 'attendeePollMs', envVar: 'VP_ATTENDEE_POLL_MS', type: 'integer' },
     { section: 'virtual_participant', setting: 'pollsBeforeEnd', envVar: 'VP_POLLS_BEFORE_END', type: 'integer' },
     { section: 'virtual_participant', setting: 'pollsBeforeEndMissing', envVar: 'VP_POLLS_BEFORE_END_MISSING', type: 'integer' },
+];
+
+/**
+ * The settings whose stack parameter is their upper limit as well as their
+ * default (`maximumIsDefault` in the section schema): the variable is set to the
+ * smaller of the section's value and its own, never raised. One entry per line,
+ * in the same form as VIRTUAL_PARTICIPANT_SETTINGS, and held to the same places
+ * by the same test.
+ */
+export const VIRTUAL_PARTICIPANT_LIMITED_SETTINGS: readonly SettingTarget[] = [
+    { section: 'retention', setting: 'meetingRecordExpirationInDays', envVar: 'METERING_EXPIRATION_DAYS', type: 'number' },
 ];
 
 /**
@@ -147,6 +162,18 @@ export const applySections = (sections: Sections, env: Record<string, string | u
         }
     }
 
+    for (const target of VIRTUAL_PARTICIPANT_LIMITED_SETTINGS) {
+        const section = sections[target.section] ?? {};
+        if (coerceSetting(target.type, section[target.setting]) === undefined) {
+            continue;
+        }
+        const limited = limitedSetting(section, target.setting, env[target.envVar]);
+        if (limited !== undefined) {
+            env[target.envVar] = String(limited);
+            applied.push(target.envVar);
+        }
+    }
+
     const redactionFlag = coerceSetting('boolean', transcription['contentRedactionEnabled']);
     if (redactionFlag !== undefined) {
         const language = env['TRANSCRIBE_LANGUAGE_CODE'] || 'en-US';
@@ -177,9 +204,10 @@ export const applyConfiguredSettings = async (
                 tableName,
                 client: new DynamoDBClient({ region: env['AWS_REGION'] || 'us-east-1' }),
             });
-        // All three sections are on the immediate tier, so they are taken from one
-        // consistent read of the resolved document -- the reads getSection would
-        // make for each of them, once -- rather than three.
+        // The three sections the Virtual Participant applies are on the immediate
+        // tier, so they are taken from one consistent read of the resolved
+        // document -- the reads getSection would make for each of them, once --
+        // rather than three. The retention section comes from the same read.
         const document = await reader.getDocument(true);
         const sectionOf = (name: string): Record<string, unknown> => {
             const value = document.body[name];
@@ -192,6 +220,7 @@ export const applyConfiguredSettings = async (
                 [VIRTUAL_PARTICIPANT.name]: sectionOf(VIRTUAL_PARTICIPANT.name),
                 [TRANSCRIPTION.name]: sectionOf(TRANSCRIPTION.name),
                 [RECORDING.name]: sectionOf(RECORDING.name),
+                [RETENTION.name]: sectionOf(RETENTION.name),
             },
             env,
         );

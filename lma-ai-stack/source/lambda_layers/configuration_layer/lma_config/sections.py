@@ -332,16 +332,37 @@ MEETING_ASSIST = register(
 )
 
 #: How the call event processor hands segments to a transcript Lambda hook, and
-#: how far back the inactive-meeting reaper looks for meetings to close.
+#: when and how far back the inactive-meeting reaper looks for meetings to close.
 #:
-#: Standard tier: both are read by unattended processing.
+#: Standard tier: all three are read by unattended processing.
 MEETING_PROCESSING = register(
     SectionSpec(
         name="meeting_processing",
         cache_tier=CacheTier.STANDARD,
         description=(
-            "Whether a transcript Lambda hook sees partial segments, and how far back "
-            "the inactive-meeting reaper looks for meetings to close."
+            "Whether a transcript Lambda hook sees partial segments, and how long a meeting "
+            "may be inactive and how far back the inactive-meeting reaper looks for meetings "
+            "to close."
+        ),
+    )
+)
+
+#: How long meeting records and transcript segments are kept: the time each one
+#: is given to live when it is written. The stack parameter of each setting is
+#: both its default and its upper limit (``maximumIsDefault`` in the schema), so
+#: an administrator can shorten retention and cannot lengthen it past what the
+#: deployment allows. Every writer applies that limit itself, from the
+#: parameter's environment variable, whatever the section holds.
+#:
+#: Standard tier: read by every writer of those records, many times a meeting,
+#: and nobody is waiting on a change.
+RETENTION = register(
+    SectionSpec(
+        name="retention",
+        cache_tier=CacheTier.STANDARD,
+        description=(
+            "How many days meeting records and transcript segments are kept, at most the "
+            "stack parameters' values."
         ),
     )
 )

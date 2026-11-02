@@ -870,6 +870,8 @@ Parameters:
       Number of days to retain meeting records. Meetings will be automatically deleted
       from LMA after this time.
       Specify partial days like 0.5 to retain meeting records for half a day.
+      This is the default and the upper limit; an Admin can set a shorter period at run time on
+      the Configuration page (Retention section), never a longer one.
 
   TranscriptionExpirationInDays:
     Type: Number
@@ -878,6 +880,10 @@ Parameters:
       Number of days to retain turn by turn meeting transcriptions.  Transcriptions
       will be automatically deleted from LMA after this time.
       Specify partial days like 0.5 to retain transcriptions for half a day.
+      Also sets the lifecycle rules for transcript files and key-frame images in the recordings
+      bucket, which the Configuration page does not change.
+      This is the default and the upper limit; an Admin can set a shorter period at run time on
+      the Configuration page (Retention section), never a longer one.
 
   MeetingInactivityTimeoutInMinutes:
     Type: Number
@@ -890,7 +896,11 @@ Parameters:
       disconnects without sending its end-of-meeting event stays "In Progress"
       until this timeout elapses. A meeting that is still connected but silent for
       longer than the timeout is also ended, so keep it comfortably longer than the
-      longest quiet stretch your meetings have. Set to 0 to leave such meetings open.
+      longest quiet stretch your meetings have. Set to 0 to leave such meetings open;
+      the reaper that ends them is then not deployed, and the Configuration page's timeout
+      setting has no effect.
+      This is the default; an Admin can change it at run time on the Configuration page (Meeting
+      Processing section), which takes precedence while the stack parameter is above 0.
 
   MeetingInactivityLookbackInDays:
     Type: Number

@@ -118,6 +118,17 @@ UI_ANNOTATIONS = frozenset(
     }
 )
 
+#: Keywords checked against the deployment's baseline rather than against the
+#: value alone, so :func:`check` cannot apply them: the store applies them to a
+#: save (:func:`limit_problems`), and the configuration editor applies its copy
+#: with the defaults it loaded.
+#:
+#: ``maximumIsDefault``: the setting's default, which the deployment writes into
+#: the baseline from a stack parameter, is also its upper limit. An
+#: administrator can set a lower value and not a higher one; see the retention
+#: section.
+BASELINE_KEYWORDS = frozenset({"maximumIsDefault"})
+
 #: How a message names each type. The UI's copy uses the same words.
 _TYPE_WORDS = {
     "object": "an object",
@@ -435,6 +446,53 @@ def validate_section(name: str, values: Any) -> None:
         raise InvalidConfiguration(problems)
 
 
+def limited_settings(schema: Mapping[str, Any]) -> List[str]:
+    """The top-level settings of a section whose default is also their limit."""
+    return [
+        key
+        for key, child in (schema.get("properties") or {}).items()
+        if isinstance(child, Mapping) and child.get("maximumIsDefault") is True
+    ]
+
+
+@lru_cache(maxsize=None)
+def limited_settings_of(name: str) -> frozenset:
+    """The limited settings of a registered section, read from its schema once.
+
+    For a reader asking on every read whether a setting is one, which would
+    otherwise parse the section's schema each time.
+    """
+    return frozenset(limited_settings(section_schema(name)))
+
+
+def limit_problems(
+    schema: Mapping[str, Any],
+    values: Any,
+    defaults: Any,
+    path: Tuple[str, ...] = (),
+) -> List[str]:
+    """Settings of ``values`` above the limit ``defaults`` sets for them.
+
+    ``defaults`` is the section as the deployment's baseline holds it. A setting
+    the baseline does not hold has no limit here; its readers still apply the
+    stack parameter's value as one. The JavaScript copy in the web UI words the
+    problem the same way.
+    """
+    problems: List[str] = []
+    if not isinstance(values, Mapping) or not isinstance(defaults, Mapping):
+        return problems
+    for key in limited_settings(schema):
+        if key not in values:
+            continue
+        value, limit = values[key], defaults.get(key)
+        if _type_matches("number", value) and _type_matches("number", limit) and value > limit:
+            problems.append(
+                f"{format_path(path + (key,))}: must be at most {_number(limit)}, the limit "
+                f"this deployment sets; got {_number(value)}"
+            )
+    return problems
+
+
 def unknown_keywords(schema: Any, path: Tuple[str, ...] = ()) -> List[str]:
     """Keywords in ``schema`` that are neither implemented nor UI annotations.
 
@@ -445,7 +503,9 @@ def unknown_keywords(schema: Any, path: Tuple[str, ...] = ()) -> List[str]:
     found = [
         f"{format_path(path)}: {key}"
         for key in schema
-        if key not in VALIDATION_KEYWORDS and key not in UI_ANNOTATIONS
+        if key not in VALIDATION_KEYWORDS
+        and key not in UI_ANNOTATIONS
+        and key not in BASELINE_KEYWORDS
     ]
     expected = schema.get("type")
     for type_name in [expected] if isinstance(expected, str) else list(expected or []):

@@ -26,11 +26,14 @@ import { FastifyBaseLogger } from 'fastify';
 import {
     ConfigurationStore,
     RECORDING,
+    RETENTION,
     SettingType,
     TRANSCRIPTION,
+    limitedSetting,
     parameterBackedSetting,
     transcribeOptionsProblem,
 } from '../config/configuration-store';
+import { setMeteringRetentionDays } from '../metering';
 import { normalizeErrorForLogging } from '../utils/common';
 
 export interface TranscriptionSettings {
@@ -91,6 +94,24 @@ export const TRANSCRIPTION_SETTINGS: Readonly<
 export const RECORDING_SETTINGS: Readonly<Record<keyof RecordingSettings, SettingSource>> = {
     recordAudio: { envVar: 'SHOULD_RECORD_CALL', type: 'boolean' },
 };
+
+/**
+ * As TRANSCRIPTION_SETTINGS, for the Retention section: the meeting retention
+ * this task's usage records are written with. The stack parameter is the
+ * setting's upper limit as well as its default, so the smaller of the two is
+ * used (`limitedSetting`).
+ */
+export const RETENTION_SETTINGS: Readonly<Record<'meetingRecordExpirationInDays', SettingSource>> = {
+    meetingRecordExpirationInDays: { envVar: 'METERING_EXPIRATION_DAYS', type: 'number' },
+};
+
+/** The meeting retention a Retention section's values give; see RETENTION_SETTINGS. */
+export const meteringRetentionDays = (retention: Record<string, unknown>): number | undefined =>
+    limitedSetting(
+        retention,
+        'meetingRecordExpirationInDays',
+        process.env[RETENTION_SETTINGS.meetingRecordExpirationInDays.envVar]
+    );
 
 const text = (values: Record<string, unknown>, name: keyof typeof TRANSCRIPTION_SETTINGS): string =>
     parameterBackedSetting(values, name, 'string', process.env[TRANSCRIPTION_SETTINGS[name].envVar], '');
@@ -216,7 +237,11 @@ export const getSessionSettings = async (log: FastifyBaseLogger): Promise<Sessio
         const document = await store.getDocument(true);
         transcriptionValues = sectionOf(document.body, TRANSCRIPTION.name);
         recordingValues = sectionOf(document.body, RECORDING.name);
+        // The usage records this task writes from now on expire with the
+        // retention as saved; the same read, so no extra cost.
+        setMeteringRetentionDays(meteringRetentionDays(sectionOf(document.body, RETENTION.name)));
     } catch (error) {
+        setMeteringRetentionDays(undefined);
         log.warn(
             '[SETTINGS]: could not read the Amazon Transcribe and recording settings from the configuration ' +
                 `table; using the stack parameter values of this task, redaction and recording included: ${normalizeErrorForLogging(error)}`

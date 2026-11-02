@@ -15,6 +15,7 @@
   "AssistantWakePhraseRegEx": {"section": "meeting_assist", "setting": "wakePhraseRegex", "type": "string"},
   "TranscriptLambdaHookFunctionNonPartialOnly": {"section": "meeting_processing", "setting": "transcriptHookNonPartialOnly", "type": "boolean"},
   "MeetingInactivityLookbackInDays": {"section": "meeting_processing", "setting": "inactiveMeetingLookbackDays", "type": "integer"},
+  "MeetingInactivityTimeoutInMinutes": {"section": "meeting_processing", "setting": "inactiveMeetingTimeoutMinutes", "type": "integer"},
   "VoiceAssistantProvider": {"section": "virtual_participant", "setting": "voiceAssistantProvider", "type": "string"},
   "VoiceAssistantActivationMode": {"section": "virtual_participant", "setting": "voiceAssistantActivationMode", "type": "string"},
   "VoiceAssistantWakePhrases": {"section": "virtual_participant", "setting": "voiceAssistantWakePhrases", "type": "string"},
@@ -23,5 +24,7 @@
   "SimliFaceId": {"section": "virtual_participant", "setting": "simliFaceId", "type": "string"},
   "VPAttendeePollMs": {"section": "virtual_participant", "setting": "attendeePollMs", "type": "integer"},
   "VPPollsBeforeEnd": {"section": "virtual_participant", "setting": "pollsBeforeEnd", "type": "integer"},
-  "VPPollsBeforeEndMissing": {"section": "virtual_participant", "setting": "pollsBeforeEndMissing", "type": "integer"}
+  "VPPollsBeforeEndMissing": {"section": "virtual_participant", "setting": "pollsBeforeEndMissing", "type": "integer"},
+  "MeetingRecordExpirationInDays": {"section": "retention", "setting": "meetingRecordExpirationInDays", "type": "number"},
+  "TranscriptionExpirationInDays": {"section": "retention", "setting": "transcriptionExpirationInDays", "type": "number"}
 }

@@ -12,7 +12,7 @@ import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 
-import { check, checkDetailed, deepEqual } from './schema-validation';
+import { check, checkDetailed, deepEqual, limitProblems } from './schema-validation';
 
 // Both files sit outside the UI package, where Vite will not serve them, so
 // they are read from disk.
@@ -61,6 +61,7 @@ describe('schema-validation', () => {
       'meeting_processing',
       'nova_sonic_config',
       'recording',
+      'retention',
       'summary_prompt_templates',
       'transcription',
       'virtual_participant',
@@ -98,6 +99,29 @@ describe('schema-validation', () => {
 
   it('refuses a number that is not finite, as JSON has no form for one', () => {
     expect(check({ type: 'number' }, Infinity)).toEqual(['(the value): must be a number; got a non-finite number']);
+  });
+
+  it('reports a setting above the limit its default sets, in the words the server uses', () => {
+    const defaults = { meetingRecordExpirationInDays: 90, transcriptionExpirationInDays: 30 };
+    expect(
+      limitProblems(
+        SCHEMAS.retention,
+        { meetingRecordExpirationInDays: 91, transcriptionExpirationInDays: 30 },
+        defaults,
+        ['retention'],
+      ),
+    ).toEqual([
+      {
+        path: ['retention', 'meetingRecordExpirationInDays'],
+        message: 'must be at most 90, the limit this deployment sets; got 91',
+      },
+    ]);
+    expect(limitProblems(SCHEMAS.retention, { meetingRecordExpirationInDays: 0.5 }, defaults)).toEqual([]);
+    expect(limitProblems(SCHEMAS.retention, { meetingRecordExpirationInDays: 900 }, {})).toEqual([]);
+    // Only a setting that says so has a limit.
+    expect(
+      limitProblems(SCHEMAS.meeting_processing, { inactiveMeetingLookbackDays: 9 }, { inactiveMeetingLookbackDays: 2 }),
+    ).toEqual([]);
   });
 
   it('compares as JSON does', () => {

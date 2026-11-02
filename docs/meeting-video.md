@@ -406,9 +406,12 @@ finds the images. The item has:
 ### Retention, access and deletion
 
 - **Retention.** Key frames are kept as long as the meeting's turn-by-turn
-  transcript: the items carry the transcript's expiry
-  (`TranscriptionExpirationInDays`), and a lifecycle rule on
-  `lma-video-keyframes/` deletes the images after the same number of days.
+  transcript: the items carry the transcript's expiry, and a lifecycle rule on
+  `lma-video-keyframes/` deletes the images after `TranscriptionExpirationInDays`
+  days. A shorter transcript retention set on the Configuration page
+  ([Retention](configuration-guide.md#retention-settings-the-stack-limits))
+  applies to the items and not to the images, which the bucket rule keeps for
+  the parameter's number of days.
 - **Access.** Key frames are meeting data with the transcript's access rule:
   `getVideoKeyframes` and `onAddVideoKeyframe` return them to the meeting's
   owner, to the people it is shared with, and to administrators. Sharing or

@@ -26,6 +26,14 @@ deployment's **default** for the setting:
   deployed ahead of the seeder, or a deployment whose table is unreachable, keeps
   behaving as the parameter says rather than failing.
 
+A few parameters are an **upper limit** as well as the default: retention, where
+an administrator may keep records for less time than the deployment allows and
+not for more. Their settings carry ``maximumIsDefault`` in the section schema.
+The store refuses a save above the baseline's value, and :func:`read_setting`
+returns the smaller of the section's value and the environment variable, so the
+parameter bounds what is used even when the section holds a larger value -- one
+put back by a restore, or one saved before a stack update lowered the parameter.
+
 The parameters are kept, not removed: existing deploy commands and pipelines pass
 them, and removing one would make those fail.
 """
@@ -34,6 +42,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 from functools import lru_cache
@@ -43,7 +52,7 @@ from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
 from botocore.exceptions import BotoCoreError, ClientError
 
 from .errors import ConfigurationError, ConfigurationTableNotConfigured, InvalidConfiguration
-from .schema import validate_section
+from .schema import limited_settings_of, validate_section
 from .sections import section_spec
 from .store import TABLE_NAME_ENV_VAR, ConfigurationStore
 
@@ -54,7 +63,7 @@ PARAMETER_DEFAULTS_FILE = Path(__file__).resolve().parent / "parameter_defaults.
 #: The value types a parameter-backed setting can have. CloudFormation passes
 #: every custom resource property and every environment variable as text, so
 #: each one is read back into its type the same way on both paths.
-VALUE_TYPES = ("string", "integer", "boolean")
+VALUE_TYPES = ("string", "integer", "number", "boolean")
 
 
 class ParameterDefault(NamedTuple):
@@ -111,6 +120,21 @@ def coerce(value_type: str, raw: Any) -> Any:
         if not re.fullmatch(r"[+-]?[0-9]+", text):
             raise ValueError(f"{raw!r} is not an integer")
         return int(text)
+    if value_type == "number":
+        if isinstance(raw, bool):
+            raise ValueError(f"{raw!r} is not a number")
+        if isinstance(raw, (int, float)):
+            number = raw
+        else:
+            text = str(raw).strip()
+            # Decimal notation only, as the TypeScript half reads it: Python's
+            # float() would also take "nan", "inf" and "1_0".
+            if not re.fullmatch(r"[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)", text):
+                raise ValueError(f"{raw!r} is not a number")
+            number = float(text)
+        if not math.isfinite(number):
+            raise ValueError(f"{raw!r} is not a number")
+        return int(number) if float(number).is_integer() else float(number)
     if value_type == "boolean":
         if isinstance(raw, bool):
             return raw
@@ -214,12 +238,53 @@ def read_setting(
     ``CONFIGURATION_TABLE_NAME``, and with that unset the environment variable is
     the answer.
 
+    For a setting whose parameter is also its upper limit (``maximumIsDefault``
+    in the section schema), the answer is the smaller of the section's value and
+    the environment variable's, or ``default`` standing in for the variable. A
+    section value that is not above zero is not used.
+
     Raises:
         KeyError: no parameter is the default of ``section`` › ``setting``. Every
             call names one that ``parameter_defaults.json`` lists; the layer's
             tests and the readers' own tests hold to that.
     """
     entry = _by_setting()[(section, setting)]
+    if setting in limited_settings_of(section):
+        return _limited(
+            entry,
+            _configured(entry, store, env_var),
+            _from_environment(entry, env_var, default),
+        )
+    configured = _configured(entry, store, env_var)
+    if configured is not None:
+        return configured
+    return _from_environment(entry, env_var, default)
+
+
+def _limited(entry: ParameterDefault, configured: Any, limit: Any) -> Any:
+    """The configured value, never above the parameter's (``maximumIsDefault``)."""
+    # The schema refuses a save of zero or less, which would expire a record as
+    # it is written; a value that reached the profile another way is not used.
+    if configured is None or configured <= 0:
+        return limit
+    if limit is None:
+        return configured
+    if configured > limit:
+        LOGGER.warning(
+            "%s › %s is %s, above this deployment's limit of %s; using %s",
+            entry.section,
+            entry.setting,
+            configured,
+            limit,
+            limit,
+        )
+        return limit
+    return configured
+
+
+def _configured(entry: ParameterDefault, store: Optional[ConfigurationStore], env_var: str) -> Any:
+    """The section's resolved value of the setting, or None when it holds none."""
+    section, setting = entry.section, entry.setting
     reader = store if store is not None else _shared_store()
     if reader is not None:
         try:
@@ -245,6 +310,11 @@ def read_setting(
                         entry.value_type,
                         env_var,
                     )
+    return None
+
+
+def _from_environment(entry: ParameterDefault, env_var: str, default: Any) -> Any:
+    """The parameter's environment variable, read as the setting's type; else ``default``."""
     raw = os.environ.get(env_var)
     if raw is None or (raw == "" and entry.value_type != "string"):
         return default

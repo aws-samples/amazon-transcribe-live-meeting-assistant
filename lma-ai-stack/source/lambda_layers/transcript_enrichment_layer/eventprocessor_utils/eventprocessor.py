@@ -20,6 +20,17 @@ else:
     ComprehendClient = object
     DetectSentimentResponseTypeDef = object
 
+try:
+    # The configuration layer, on the functions that attach it beside this one.
+    # pylint: disable-next=import-error
+    from lma_config import read_setting as _read_setting
+except ImportError:  # pragma: no cover - every function that writes records attaches it
+    _read_setting = None
+
+# The stack parameters' values: MeetingRecordExpirationInDays and
+# TranscriptionExpirationInDays. Each is the default of a Retention setting on
+# the Configuration page and also its upper limit, so a record is given the
+# shorter of the two (see _retention_days).
 MEETING_RECORD_EXPIRATION_IN_DAYS = getenv("MEETING_RECORD_EXPIRATION_IN_DAYS", "90")
 TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS = getenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
 
@@ -50,12 +61,43 @@ def get_ttl(expire_in_days):
     return int((datetime.utcnow() + timedelta(days=float(expire_in_days))).timestamp())
 
 
+def _retention_days(setting: str, env_var: str, parameter_value: str) -> float:
+    """Days a record written now is kept: the Retention section's value, at most the parameter's.
+
+    The section is read through the configuration layer, on its standard tier, so
+    a saved change reaches records written about five minutes later. Without the
+    layer, or with no table named, the parameter's value is the answer, as before.
+    """
+    if _read_setting is None:
+        return float(parameter_value)
+    try:
+        days = _read_setting("retention", setting, env_var=env_var, default=float(parameter_value))
+    except Exception:  # pylint: disable=broad-except -- a record is never lost over its expiry
+        logging.getLogger(__name__).warning(
+            "could not read the retention; using %s", env_var, exc_info=True
+        )
+        return float(parameter_value)
+    return float(days) if days else float(parameter_value)
+
+
 def get_meeting_ttl():
-    return get_ttl(MEETING_RECORD_EXPIRATION_IN_DAYS)
+    return get_ttl(
+        _retention_days(
+            "meetingRecordExpirationInDays",
+            "MEETING_RECORD_EXPIRATION_IN_DAYS",
+            MEETING_RECORD_EXPIRATION_IN_DAYS,
+        )
+    )
 
 
 def get_transcription_ttl():
-    return get_ttl(TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS)
+    return get_ttl(
+        _retention_days(
+            "transcriptionExpirationInDays",
+            "TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS",
+            TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS,
+        )
+    )
 
 
 def get_owner_from_jwt(jwt_token):

@@ -93,7 +93,24 @@ CONFIGURATION_DEFAULT = Kind(
     "precedence until it is reset to the default there.",
 )
 
-KINDS = (RESOURCE, CONFIGURATION_DEFAULT, RUNTIME, CREDENTIAL, DEPLOY_CHECK, NO_EFFECT)
+CONFIGURATION_LIMIT = Kind(
+    "Configuration page limit",
+    "The default and the upper limit of a setting an Admin can lower, and not "
+    "raise, on the web UI's Configuration page while the stack runs; see "
+    "[Retention: settings the stack limits](configuration-guide.md#retention-settings-the-stack-limits). "
+    "Every reader uses the smaller of the saved value and the parameter's, so a "
+    "stack update that lowers the parameter applies at once.",
+)
+
+KINDS = (
+    RESOURCE,
+    CONFIGURATION_DEFAULT,
+    CONFIGURATION_LIMIT,
+    RUNTIME,
+    CREDENTIAL,
+    DEPLOY_CHECK,
+    NO_EFFECT,
+)
 
 #: The configuration layer, whose parameter_defaults.json names the parameters
 #: that are the defaults of Configuration page settings, and whose section
@@ -362,11 +379,11 @@ CLASSIFICATION: Dict[str, Classification] = {
     ),
     "MeetingRecordExpirationInDays": _c(
         RUNTIME,
-        "Read by every function and task that writes meeting records, to set when each record expires.",
+        "Read by every function and task that writes meeting, summary or usage records, to set when each record expires.",
     ),
     "TranscriptionExpirationInDays": _c(
         RESOURCE,
-        "Sets a lifecycle rule on the recordings bucket, and is read by the meeting event processor to set when transcript segments expire.",
+        "Sets the lifecycle rules for transcript files and key-frame images on the recordings bucket, and is read by the functions that write transcript segments, to set when each expires.",
     ),
     "AudioRecordingExpirationInDays": _c(
         RESOURCE,
@@ -472,8 +489,11 @@ def parameter_groups(template: Mapping[str, Any]) -> List[Tuple[str, List[str]]]
 # ── the parameters that are Configuration page defaults ─────────────────────
 
 
-def configuration_defaults() -> Dict[str, Tuple[str, str]]:
-    """Parameter name to (section label, setting title), as the page shows them.
+def configuration_defaults() -> Dict[str, Tuple[str, str, bool]]:
+    """Parameter name to (section label, setting title, whether it is a limit).
+
+    The labels are as the page shows them; a limit is a setting whose schema
+    says ``maximumIsDefault``.
 
     Read from the configuration layer rather than restated here, so the
     reference cannot call a parameter a Configuration page default that the
@@ -486,19 +506,33 @@ def configuration_defaults() -> Dict[str, Tuple[str, str]]:
             (CONFIGURATION_LAYER / "schemas" / f"{entry['section']}.json").read_text("utf-8")
         )
         setting = schema["properties"][entry["setting"]]
-        result[parameter] = (schema["sectionLabel"], setting.get("title", entry["setting"]))
+        result[parameter] = (
+            schema["sectionLabel"],
+            setting.get("title", entry["setting"]),
+            setting.get("maximumIsDefault") is True,
+        )
     return result
 
 
-def classification_of(name: str, defaults: Mapping[str, Tuple[str, str]]) -> Classification:
+def classification_of(name: str, defaults: Mapping[str, Tuple[str, str, bool]]) -> Classification:
     """The classification the reference shows: CLASSIFICATION's, unless the
-    parameter is the default of a Configuration page setting."""
+    parameter is the default, or the default and limit, of a Configuration page
+    setting."""
     classification = CLASSIFICATION[name]
     if name not in defaults:
         return classification
-    section, setting = defaults[name]
+    section, setting, is_limit = defaults[name]
+    if classification.kind is RESOURCE:
+        # The parameter also reaches a resource, which the page cannot change,
+        # so changing it is still a stack update that changes resources.
+        role = "default and upper limit" if is_limit else "default"
+        return Classification(
+            RESOURCE,
+            f"{classification.note} Also the {role} of the Configuration page's "
+            f"**{section} › {setting}**.",
+        )
     return Classification(
-        CONFIGURATION_DEFAULT,
+        CONFIGURATION_LIMIT if is_limit else CONFIGURATION_DEFAULT,
         f"Configuration page: **{section} › {setting}**. {classification.note}",
     )
 
@@ -624,17 +658,19 @@ def classification_problems(template: Mapping[str, Any]) -> List[str]:
         for name in sorted(set(CLASSIFICATION) - declared)
     ]
     # A setting an Admin changes at run time is one only code reads, so its
-    # parameter must have been classified as read at run time. Anything else
-    # means the parameter also reaches a resource, which the page cannot change.
+    # parameter is classified as read at run time -- or as a resource, where the
+    # parameter also reaches one the page cannot change (whether the reaper
+    # exists, a bucket lifecycle rule), and the reference keeps it a resource.
     for name in sorted(configuration_defaults()):
         if name not in declared:
             problems.append(
                 f"parameter_defaults.json names {name}, which lma-main.yaml does not declare"
             )
-        elif name in CLASSIFICATION and CLASSIFICATION[name].kind is not RUNTIME:
+        elif name in CLASSIFICATION and CLASSIFICATION[name].kind not in (RUNTIME, RESOURCE):
             problems.append(
                 f"{name} is the default of a Configuration page setting, but CLASSIFICATION "
-                f"says it is {CLASSIFICATION[name].kind.label!r}, not {RUNTIME.label!r}"
+                f"says it is {CLASSIFICATION[name].kind.label!r}, not {RUNTIME.label!r} "
+                f"or {RESOURCE.label!r}"
             )
     return problems
 

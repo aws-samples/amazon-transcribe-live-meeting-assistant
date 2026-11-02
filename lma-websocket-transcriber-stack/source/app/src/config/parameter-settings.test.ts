@@ -14,7 +14,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { coerceSetting, parameterBackedSetting } from './configuration-store';
+import { coerceSetting, limitedSetting, parameterBackedSetting } from './configuration-store';
 
 test('a value is read back into its type as the Python half reads it', () => {
     assert.equal(coerceSetting('string', 'us.amazon.nova-pro-v1:0'), 'us.amazon.nova-pro-v1:0');
@@ -51,4 +51,27 @@ test('an empty environment variable is a value for text only', () => {
     assert.equal(parameterBackedSetting({}, 's', 'string', '', 'fallback'), '');
     assert.equal(parameterBackedSetting({}, 'n', 'integer', '', 4), 4);
     assert.equal(parameterBackedSetting({}, 'b', 'boolean', '', true), true);
+});
+
+test('a number is read back as the Python half reads it, and refused where it refuses one', () => {
+    assert.equal(coerceSetting('number', '90'), 90);
+    assert.equal(coerceSetting('number', '0.5'), 0.5);
+    assert.equal(coerceSetting('number', ' .25 '), 0.25);
+    assert.equal(coerceSetting('number', 1.5), 1.5);
+    assert.equal(coerceSetting('number', 'nan'), undefined);
+    assert.equal(coerceSetting('number', 'inf'), undefined);
+    assert.equal(coerceSetting('number', '1_0'), undefined);
+    assert.equal(coerceSetting('number', ''), undefined);
+    assert.equal(coerceSetting('number', true), undefined);
+    assert.equal(coerceSetting('number', Number.POSITIVE_INFINITY), undefined);
+});
+
+test('a limited setting is the smaller of the section and the parameter', () => {
+    const name = 'meetingRecordExpirationInDays';
+    assert.equal(limitedSetting({ [name]: 30 }, name, '90'), 30);
+    assert.equal(limitedSetting({ [name]: 30 }, name, '7'), 7);
+    assert.equal(limitedSetting({}, name, '0.5'), 0.5);
+    assert.equal(limitedSetting({ [name]: 0 }, name, '90'), 90);
+    assert.equal(limitedSetting({ [name]: 30 }, name, undefined), 30);
+    assert.equal(limitedSetting({}, name, ''), undefined);
 });

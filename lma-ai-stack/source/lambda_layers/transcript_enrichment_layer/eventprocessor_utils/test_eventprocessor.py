@@ -30,11 +30,22 @@ from __future__ import annotations
 import importlib
 import os
 import re
+import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-import eventprocessor_utils.eventprocessor as ep
+# The configuration layer, which every function writing these records attaches
+# beside this one; the Retention section is read through it.
+CONFIGURATION_LAYER = Path(__file__).resolve().parents[2] / "configuration_layer"
+if str(CONFIGURATION_LAYER) not in sys.path:
+    sys.path.insert(0, str(CONFIGURATION_LAYER))
+
+from lma_config import parameters  # noqa: E402
+
+import eventprocessor_utils.eventprocessor as ep  # noqa: E402
 
 # The record shape shared by the custom-producer cases; each test overrides the
 # fields it is about.
@@ -95,6 +106,45 @@ def test_meeting_and_transcription_ttls_read_their_own_settings(monkeypatch):
         # Restore the module for every other test in the session.
         monkeypatch.undo()
         importlib.reload(ep)
+
+
+class _RetentionStore:
+    """Answers the Retention section from a dict, as the configuration store would."""
+
+    def __init__(self, values):
+        self.values = values
+
+    def get_section(self, name):
+        return SimpleNamespace(values=self.values if name == "retention" else {})
+
+
+def _days_ahead(ttl: int) -> float:
+    return (ttl - datetime.now(timezone.utc).timestamp()) / 86400
+
+
+def test_a_shorter_retention_saved_on_the_page_is_used(monkeypatch):
+    monkeypatch.setenv("MEETING_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(
+        parameters,
+        "_SHARED_STORE",
+        _RetentionStore({"meetingRecordExpirationInDays": 30, "transcriptionExpirationInDays": 2}),
+    )
+    assert abs(_days_ahead(ep.get_meeting_ttl()) - 30) < 0.01
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 2) < 0.01
+
+
+def test_a_retention_longer_than_the_stack_parameter_is_not_used(monkeypatch):
+    """The parameter is the limit, whatever the section holds."""
+    monkeypatch.setenv("MEETING_RECORD_EXPIRATION_IN_DAYS", "7")
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "3")
+    monkeypatch.setattr(
+        parameters,
+        "_SHARED_STORE",
+        _RetentionStore({"meetingRecordExpirationInDays": 30, "transcriptionExpirationInDays": 30}),
+    )
+    assert abs(_days_ahead(ep.get_meeting_ttl()) - 7) < 0.01
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 3) < 0.01
 
 
 def test_segment_expiry_uses_the_transcription_retention(monkeypatch):

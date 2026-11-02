@@ -447,7 +447,7 @@ def test_candidate_query_upper_bound_is_the_inactivity_cutoff(run_reaper):
 
 
 def test_timeout_of_zero_disables_the_reaper(run_reaper, monkeypatch):
-    monkeypatch.setattr(reaper, "INACTIVITY_TIMEOUT_MINUTES", 0)
+    monkeypatch.setenv("MEETING_INACTIVITY_TIMEOUT_IN_MINUTES", "0")
     summary, kinesis, dynamodb = run_reaper(
         [list_row("abandoned")],
         [call_row("abandoned", updated_minutes_ago=TIMEOUT_MINUTES + 10)],
@@ -506,3 +506,33 @@ def test_without_one_the_lookback_is_the_parameters(monkeypatch):
     assert reaper.lookback_days() == 7
     monkeypatch.delenv("REAPER_LOOKBACK_IN_DAYS")
     assert reaper.lookback_days() == reaper.FALLBACK_LOOKBACK_DAYS
+
+
+def test_the_timeout_comes_from_the_configuration_when_it_names_one(monkeypatch):
+    from lma_config import parameters
+
+    monkeypatch.setattr(
+        parameters, "_SHARED_STORE", _ConfigurationStore({"inactiveMeetingTimeoutMinutes": 60})
+    )
+    assert reaper.inactivity_timeout_minutes() == 60
+
+
+def test_a_timeout_of_zero_saved_on_the_page_ends_nothing(run_reaper, monkeypatch):
+    from lma_config import parameters
+
+    monkeypatch.setattr(
+        parameters, "_SHARED_STORE", _ConfigurationStore({"inactiveMeetingTimeoutMinutes": 0})
+    )
+    summary, kinesis, _ = run_reaper(
+        [list_row("abandoned")],
+        [call_row("abandoned", updated_minutes_ago=TIMEOUT_MINUTES + 10)],
+    )
+    assert summary == {"enabled": False, "candidates": 0, "ended": 0}
+    assert kinesis.records == []
+
+
+def test_without_one_the_timeout_is_the_parameters(monkeypatch):
+    from lma_config import parameters
+
+    monkeypatch.setattr(parameters, "_SHARED_STORE", _ConfigurationStore({}))
+    assert reaper.inactivity_timeout_minutes() == TIMEOUT_MINUTES

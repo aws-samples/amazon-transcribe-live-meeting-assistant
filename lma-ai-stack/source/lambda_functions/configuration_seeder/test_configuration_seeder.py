@@ -165,6 +165,7 @@ def test_the_baseline_document_holds_the_shipped_prompts_under_its_section(seede
         "meeting_assist",
         "meeting_processing",
         "virtual_participant",
+        "retention",
     }
     assert body["language_models"] == {}
     assert set(body["summary_prompt_templates"]) == {

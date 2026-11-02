@@ -223,3 +223,26 @@ def test_a_copy_is_served_so_a_caller_cannot_change_the_schema():
     first = schema.section_schema("asr_engine")
     first["properties"].clear()
     assert schema.section_schema("asr_engine")["properties"]
+
+
+def test_a_setting_above_its_baseline_limit_is_reported():
+    retention = schema.section_schema("retention")
+    assert schema.limited_settings(retention) == [
+        "meetingRecordExpirationInDays",
+        "transcriptionExpirationInDays",
+    ]
+    assert schema.limit_problems(
+        retention,
+        {"meetingRecordExpirationInDays": 91, "transcriptionExpirationInDays": 90},
+        {"meetingRecordExpirationInDays": 90, "transcriptionExpirationInDays": 90},
+        ("retention",),
+    ) == [
+        "retention › meetingRecordExpirationInDays: must be at most 90, the limit this "
+        "deployment sets; got 91"
+    ]
+
+
+def test_a_limit_the_baseline_does_not_hold_reports_nothing():
+    retention = schema.section_schema("retention")
+    assert schema.limit_problems(retention, {"meetingRecordExpirationInDays": 900}, {}) == []
+    assert schema.limit_problems(retention, {"meetingRecordExpirationInDays": 900}, None) == []

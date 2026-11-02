@@ -382,7 +382,8 @@ The MCP API Gateway includes the following security controls regardless of WAF e
 
 | Data Type | Retention | Configuration |
 |-----------|-----------|---------------|
-| Meeting records | Configurable, default 90 days | DynamoDB TTL via `MeetingRecordExpirationInDays` parameter |
+| Meeting records | Configurable, default 90 days | DynamoDB TTL via the `MeetingRecordExpirationInDays` parameter, which an Admin can shorten, and not lengthen, on the Configuration page ([Retention](configuration-guide.md#retention-settings-the-stack-limits)) |
+| Transcript segments | Configurable, default 90 days | DynamoDB TTL via the `TranscriptionExpirationInDays` parameter, shortened the same way |
 | Audio recordings | Configurable | S3 lifecycle policy |
 | Transcript KB data | Configurable | S3 lifecycle policy |
 | CloudWatch logs | Configurable | `CloudWatchLogsExpirationInDays` parameter |

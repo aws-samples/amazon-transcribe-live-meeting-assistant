@@ -4,11 +4,16 @@
 """Metering records for the meeting cost estimate, written from this stack.
 
 The canonical writer is ``lma_metering.records`` in the AI stack's
-configuration layer. That layer is not attached to the functions in this stack,
-so the small part of it the meeting assistant needs is repeated here: one
+configuration layer. That layer is attached to this stack's functions only when
+lma-main.yaml deploys them (this template can be deployed on its own, without
+it), so the small part of it the meeting assistant needs is repeated here: one
 DynamoDB item per answer, under ``PK = mtr#<CallId>``, carrying the model's
 token usage. ``lma-ai-stack/test/test_metering_record_contract.py`` asserts the
 two produce the same item, so they cannot drift apart silently.
+
+Each record expires with the meeting retention, read through
+``configuration_settings.read_setting``: the Configuration page's Retention
+section where the layer is attached, at most the stack parameter's value.
 
 Writing never raises: a lost record makes a meeting's estimate lower than it
 was, which docs/meeting-cost-estimate.md lists as a known limit; an answer that failed because its
@@ -106,14 +111,35 @@ def build_item(
         "RecordedAt": {"S": recorded_at},
     }
     if expiration_days is None:
-        raw = os.environ.get(EXPIRATION_ENV_VAR, "").strip()
-        try:
-            expiration_days = float(raw) if raw else None
-        except ValueError:
-            expiration_days = None
+        expiration_days = _retention_days()
     if expiration_days and expiration_days > 0:
         item["ExpiresAfter"] = {"N": str(int(moment.timestamp() + expiration_days * 86400))}
     return item
+
+
+def _retention_days() -> Optional[float]:
+    """Days a record written now is kept, or None for no expiry.
+
+    The Retention section's meeting retention on the Configuration page, at most
+    the MeetingRecordExpirationInDays stack parameter's value, which this function
+    carries as METERING_EXPIRATION_DAYS (lma_metering.records reads it the same
+    way). Deployed on its own, without the configuration layer, the variable alone.
+    """
+    # Imported here rather than at the top, so this module still loads on its
+    # own, as the AI stack's contract test loads it beside lma_metering.
+    # pylint: disable-next=import-outside-toplevel
+    from configuration_settings import read_setting
+
+    raw = os.environ.get(EXPIRATION_ENV_VAR, "").strip()
+    try:
+        if raw:
+            float(raw)
+        days = read_setting(
+            "retention", "meetingRecordExpirationInDays", env_var=EXPIRATION_ENV_VAR
+        )
+        return float(days) if days not in (None, "") else None
+    except ValueError:
+        return None
 
 
 _client = None

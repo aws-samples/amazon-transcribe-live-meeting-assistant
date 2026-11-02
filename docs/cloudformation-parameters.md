@@ -32,7 +32,14 @@ Each parameter has a **kind**, which says what changing it does:
   parameter applies wherever nobody has changed the setting on the page, and a
   value saved on the page takes precedence until it is reset to the default
   there. The parameter is kept so that existing deploy commands, pipelines and
-  new installs work as before.
+  new installs work as before. A parameter that also reaches a resource, such as
+  a bucket lifecycle rule, stays a **Resource** parameter, and its entry names
+  the setting it is also the default of.
+- **Configuration page limit** parameters are the default of a setting and also
+  its upper limit: an Admin can set a lower value on the Configuration page and
+  not a higher one, and every reader uses the smaller of the two. Only the
+  retention settings work this way; see
+  [Retention: settings the stack limits](configuration-guide.md#retention-settings-the-stack-limits).
 - **Read at run time** parameters reach the application only as a value it
   reads: an environment variable of a function or task, or a deployment setting.
   A stack update that changes one changes only the configuration of whatever
@@ -60,7 +67,8 @@ The template declares 91 parameters.
 |---|---|---|
 | Resource | 47 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
 | Configuration page default | 25 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
-| Read at run time | 6 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
+| Configuration page limit | 1 | The default and the upper limit of a setting an Admin can lower, and not raise, on the web UI's Configuration page while the stack runs; see [Retention: settings the stack limits](configuration-guide.md#retention-settings-the-stack-limits). Every reader uses the smaller of the saved value and the parameter's, so a stack update that lowers the parameter applies at once. |
+| Read at run time | 5 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
 | Credential | 11 | A secret, the ARN of a secret, or the identifier paired with one. Values are stored in AWS Secrets Manager; see [Integration Credentials](infrastructure-and-security.md#integration-credentials). |
 | Deployment check | 1 | Read only while the stack is deployed, by a check that runs before anything else is created. |
 | No effect | 1 | Declared by the template and read by nothing. Kept so that existing deploy commands and pipelines that pass it keep working. |
@@ -894,7 +902,7 @@ Specify a comma separated list of two letter country codes (uppercase ISO 3166-1
 |---|---|---|
 | [`EnableAudioRecording`](#enableaudiorecording) | `true` | Configuration page default |
 | [`EnableVideoRecording`](#enablevideorecording) | `true` | Resource |
-| [`MeetingRecordExpirationInDays`](#meetingrecordexpirationindays) | `90` | Read at run time |
+| [`MeetingRecordExpirationInDays`](#meetingrecordexpirationindays) | `90` | Configuration page limit |
 | [`TranscriptionExpirationInDays`](#transcriptionexpirationindays) | `90` | Resource |
 | [`AudioRecordingExpirationInDays`](#audiorecordingexpirationindays) | `90` | Resource |
 | [`CloudWatchLogsExpirationInDays`](#cloudwatchlogsexpirationindays) | `90` | Resource |
@@ -929,9 +937,9 @@ Console label: *Meeting Record Expiration In Days*
 
 - **Default:** `90`
 - **Allowed values:** Any number
-- **Kind:** Read at run time. Read by every function and task that writes meeting records, to set when each record expires.
+- **Kind:** Configuration page limit. Configuration page: **Retention › Days to keep meeting records**. Read by every function and task that writes meeting, summary or usage records, to set when each record expires.
 
-Number of days to retain meeting records. Meetings will be automatically deleted from LMA after this time. Specify partial days like 0.5 to retain meeting records for half a day.
+Number of days to retain meeting records. Meetings will be automatically deleted from LMA after this time. Specify partial days like 0.5 to retain meeting records for half a day. This is the default and the upper limit; an Admin can set a shorter period at run time on the Configuration page (Retention section), never a longer one.
 
 ### `TranscriptionExpirationInDays`
 
@@ -939,9 +947,9 @@ Console label: *Transcription Expiration In Days*
 
 - **Default:** `90`
 - **Allowed values:** Any number
-- **Kind:** Resource. Sets a lifecycle rule on the recordings bucket, and is read by the meeting event processor to set when transcript segments expire.
+- **Kind:** Resource. Sets the lifecycle rules for transcript files and key-frame images on the recordings bucket, and is read by the functions that write transcript segments, to set when each expires. Also the default and upper limit of the Configuration page's **Retention › Days to keep transcript segments**.
 
-Number of days to retain turn by turn meeting transcriptions. Transcriptions will be automatically deleted from LMA after this time. Specify partial days like 0.5 to retain transcriptions for half a day.
+Number of days to retain turn by turn meeting transcriptions. Transcriptions will be automatically deleted from LMA after this time. Specify partial days like 0.5 to retain transcriptions for half a day. Also sets the lifecycle rules for transcript files and key-frame images in the recordings bucket, which the Configuration page does not change. This is the default and the upper limit; an Admin can set a shorter period at run time on the Configuration page (Retention section), never a longer one.
 
 ### `AudioRecordingExpirationInDays`
 
@@ -979,9 +987,9 @@ Console label: *Meeting Inactivity Timeout In Minutes*
 
 - **Default:** `240`
 - **Allowed values:** 0 to 10080
-- **Kind:** Resource. Decides whether the inactive-meeting reaper and its schedule exist, and is read by the reaper.
+- **Kind:** Resource. Decides whether the inactive-meeting reaper and its schedule exist, and is read by the reaper. Also the default of the Configuration page's **Meeting Processing › Minutes without speech before a meeting is ended**.
 
-Number of minutes a meeting may go without producing a finalized transcript segment before LMA ends it on the meeting's behalf. A meeting whose client disconnects without sending its end-of-meeting event stays "In Progress" until this timeout elapses. A meeting that is still connected but silent for longer than the timeout is also ended, so keep it comfortably longer than the longest quiet stretch your meetings have. Set to 0 to leave such meetings open.
+Number of minutes a meeting may go without producing a finalized transcript segment before LMA ends it on the meeting's behalf. A meeting whose client disconnects without sending its end-of-meeting event stays "In Progress" until this timeout elapses. A meeting that is still connected but silent for longer than the timeout is also ended, so keep it comfortably longer than the longest quiet stretch your meetings have. Set to 0 to leave such meetings open; the reaper that ends them is then not deployed, and the Configuration page's timeout setting has no effect. This is the default; an Admin can change it at run time on the Configuration page (Meeting Processing section), which takes precedence while the stack parameter is above 0.
 
 ### `MeetingInactivityLookbackInDays`
 
@@ -1332,7 +1340,9 @@ a transcript segment refreshes, so a meeting that is still connected but has
 produced no finalized speech for longer than the timeout is also ended; keep the
 value comfortably longer than the longest quiet stretch your meetings have.
 Meetings still being processed by the upload pipeline are left to the upload
-finalizer.
+finalizer. The parameter decides whether the reaper exists; while it does, the
+timeout itself can be changed in the Meeting Processing section of the
+Configuration page, with the parameter as its default.
 
 `MeetingInactivityLookbackInDays` bounds how much history each run examines. A
 meeting that started before the window is never closed automatically, so if you

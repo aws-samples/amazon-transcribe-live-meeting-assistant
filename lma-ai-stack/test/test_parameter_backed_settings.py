@@ -21,7 +21,11 @@ their environment variable, which looks exactly like a working deployment:
   layer, and read access to the table.
 
 Also asserted: the parameter's console description says it is a default that the
-Configuration page can override.
+Configuration page can override -- or, for a setting whose parameter is also its
+upper limit (``maximumIsDefault``, the retention settings), that the page can
+shorten it and not lengthen it; and every function and task that gives a record
+an expiry reads the retention with the parameter's variable set, the table named,
+the layer attached and read access to the table.
 
 Run via `make test-ai-stack` or pytest directly.
 """
@@ -153,12 +157,27 @@ def test_a_listed_choice_is_exactly_the_parameters_allowed_values(entry) -> None
     assert declared["enum"] == allowed
 
 
+def _is_limit(entry) -> bool:
+    return entry.setting in schema.limited_settings(schema.section_schema(entry.section))
+
+
 @pytest.mark.parametrize("entry", ENTRIES, ids=_ids)
 def test_the_console_description_says_it_is_a_default(entry) -> None:
     description = " ".join(MAIN["Parameters"][entry.parameter]["Description"].split())
+    if _is_limit(entry):
+        assert (
+            "This is the default and the upper limit; an Admin can set a shorter period at run "
+            "time on the Configuration page"
+        ) in description
+        return
     assert "This is the default; an Admin can change it at run time on the Configuration page" in (
         description
     )
+
+
+def test_the_retention_settings_are_limits() -> None:
+    limits = {entry.parameter for entry in ENTRIES if _is_limit(entry)}
+    assert limits == {"MeetingRecordExpirationInDays", "TranscriptionExpirationInDays"}
 
 
 # ── every reader is wired ───────────────────────────────────────────────────
@@ -331,6 +350,7 @@ TRANSCRIBER_SETTINGS = (
 TYPESCRIPT_TABLES = {
     (TRANSCRIBER_SETTINGS, "TRANSCRIPTION_SETTINGS"): "transcription",
     (TRANSCRIBER_SETTINGS, "RECORDING_SETTINGS"): "recording",
+    (TRANSCRIBER_SETTINGS, "RETENTION_SETTINGS"): "retention",
 }
 
 #: A table entry, one per line: `name: { envVar: 'NAME', type: 'kind' },`.
@@ -485,14 +505,16 @@ VP_TABLE_ENTRY = re.compile(
 VP_IMPORT_TIME_READERS = ("details.ts", "voice-assistant.ts", "simli-avatar.ts", "scribe.ts")
 
 
-def _vp_entries() -> List[Tuple[str, str, str, str]]:
+def _vp_entries(table: str = "VIRTUAL_PARTICIPANT_SETTINGS") -> List[Tuple[str, str, str, str]]:
     text = (VP_BACKEND / "stack-settings.ts").read_text(encoding="utf-8")
-    start = text.index("export const VIRTUAL_PARTICIPANT_SETTINGS")
+    start = text.index(f"export const {table}:")
     end = text.index("];", start)
     return [m.groups() for m in map(VP_TABLE_ENTRY.match, text[start:end].splitlines()) if m]
 
 
 VP_ENTRIES = _vp_entries()
+#: The settings whose parameter is their limit, applied as the smaller value.
+VP_LIMITED_ENTRIES = _vp_entries("VIRTUAL_PARTICIPANT_LIMITED_SETTINGS")
 
 
 def _vp_environment() -> Dict[str, Any]:
@@ -505,7 +527,14 @@ def test_the_virtual_participant_table_is_found() -> None:
     assert {section for section, *_ in VP_ENTRIES} == {"transcription", "recording", "virtual_participant"}
 
 
-@pytest.mark.parametrize("section, setting, env_var, value_type", VP_ENTRIES)
+def test_the_virtual_participant_applies_the_meeting_retention_as_a_limit() -> None:
+    assert VP_LIMITED_ENTRIES == [
+        ("retention", "meetingRecordExpirationInDays", "METERING_EXPIRATION_DAYS", "number")
+    ]
+    assert all(_is_limit(_by_setting()[(s, n)]) for s, n, *_ in VP_LIMITED_ENTRIES)
+
+
+@pytest.mark.parametrize("section, setting, env_var, value_type", VP_ENTRIES + VP_LIMITED_ENTRIES)
 def test_a_virtual_participant_setting_is_a_mapped_one_of_the_same_type(
     section, setting, env_var, value_type
 ) -> None:
@@ -514,7 +543,7 @@ def test_a_virtual_participant_setting_is_a_mapped_one_of_the_same_type(
     assert entry.value_type == value_type
 
 
-@pytest.mark.parametrize("section, setting, env_var, value_type", VP_ENTRIES)
+@pytest.mark.parametrize("section, setting, env_var, value_type", VP_ENTRIES + VP_LIMITED_ENTRIES)
 def test_the_virtual_participant_task_sets_the_variable_from_the_same_parameter(
     section, setting, env_var, value_type
 ) -> None:
@@ -569,3 +598,74 @@ def test_the_main_template_gives_the_meeting_assist_stack_the_table_and_the_laye
         "Fn::GetAtt": "AISTACK.Outputs.ConfigurationPythonLayerArn"
     }
     assert "ConfigurationPythonLayerArn" in AI["Outputs"]
+
+
+# ── the writers that give a record an expiry ────────────────────────────────
+
+#: The environment variable each kind of writer reads its retention from, the
+#: parameter it must hold, and what in a function's source marks it as a writer.
+#: The readers are in the shared layers (eventprocessor_utils, lma_metering), so
+#: the scan of read_setting calls above does not see them.
+RETENTION_VARIABLES = {
+    "MEETING_RECORD_EXPIRATION_IN_DAYS": ("MeetingRecordExpirationInDays", "get_meeting_ttl"),
+    "TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS": (
+        "TranscriptionExpirationInDays",
+        "get_transcription_ttl",
+    ),
+    "METERING_EXPIRATION_DAYS": ("MeetingRecordExpirationInDays", "MeteringWriter"),
+}
+
+
+def _retention_writers() -> List[Any]:
+    """(function, resource, variable) for each AI-stack function that writes such records."""
+    found = []
+    for name, resource in AI["Resources"].items():
+        if resource.get("Type") != "AWS::Serverless::Function":
+            continue
+        code = resource["Properties"].get("CodeUri", "")
+        if not isinstance(code, str) or "lambda_functions/" not in code:
+            continue
+        directory = AI_FUNCTIONS / code.rstrip("/").split("lambda_functions/")[1]
+        text = "\n".join(p.read_text(encoding="utf-8") for p in _sources(directory))
+        for variable, (_parameter, marker) in RETENTION_VARIABLES.items():
+            if re.search(rf"\b{marker}\b", text):
+                found.append(pytest.param(name, resource, variable, id=f"{name}:{variable}"))
+    return found
+
+
+RETENTION_WRITERS = _retention_writers()
+
+
+def test_the_retention_writers_are_found() -> None:
+    names = {param.values[0] for param in RETENTION_WRITERS}
+    assert {
+        "CallEventProcessorFunction",
+        "AsyncAgentAssistOrchestrator",
+        "AsyncTranscriptSummaryOrchestrator",
+        "UploadMeetingFinalizerFunction",
+    } <= names
+
+
+@pytest.mark.parametrize("function, resource, variable", RETENTION_WRITERS)
+def test_a_retention_writer_carries_the_parameter_and_can_read_the_section(
+    function, resource, variable
+) -> None:
+    """Without the variable a writer falls back to 90 days whatever the stack says;
+    without the table, the layer or the grant it never sees a shorter period."""
+    parameter, _marker = RETENTION_VARIABLES[variable]
+    properties = resource["Properties"]
+    variables = properties.get("Environment", {}).get("Variables", {})
+    assert variables.get(variable) == {"Ref": parameter}, (
+        f"{function} writes records that expire, so it must set {variable} from {parameter}"
+    )
+    assert variables.get("CONFIGURATION_TABLE_NAME") == {"Ref": "ConfigurationTable"}
+    assert {"Ref": "ConfigurationPythonLayer"} in properties.get("Layers", [])
+    policies = (
+        _role(AI, properties)["Properties"]["Policies"]
+        if "Role" in properties
+        else properties.get("Policies")
+    )
+    rendered = json.dumps(policies, default=str)
+    assert "dynamodb:GetItem" in rendered and "ConfigurationTable" in rendered, (
+        f"{function}'s role cannot read the configuration table"
+    )

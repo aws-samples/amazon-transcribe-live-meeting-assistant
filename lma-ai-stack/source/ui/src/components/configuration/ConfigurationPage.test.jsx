@@ -49,6 +49,7 @@ const TIERS = {
   meeting_assist: 'standard',
   meeting_processing: 'standard',
   virtual_participant: 'immediate',
+  retention: 'standard',
 };
 const SECTIONS = readdirSync(SCHEMA_DIR)
   .filter((name) => name.endsWith('.json'))
@@ -101,7 +102,12 @@ const DEFAULTS = {
   },
   recording: { recordAudio: true },
   meeting_assist: { wakePhraseRegex: '(OK|Okay)[.,! ]*[Aa]ssistant' },
-  meeting_processing: { transcriptHookNonPartialOnly: true, inactiveMeetingLookbackDays: 2 },
+  meeting_processing: {
+    transcriptHookNonPartialOnly: true,
+    inactiveMeetingLookbackDays: 2,
+    inactiveMeetingTimeoutMinutes: 240,
+  },
+  retention: { meetingRecordExpirationInDays: 90, transcriptionExpirationInDays: 30 },
   virtual_participant: {
     voiceAssistantProvider: 'none',
     voiceAssistantActivationMode: 'wake_phrase',
@@ -234,6 +240,32 @@ describe('ConfigurationContent', () => {
     expect(
       within(section('Nova Sonic Voice Assistant')).queryByText(/Virtual Participant section sets the activation mode/),
     ).toBeNull();
+  });
+
+  it('refuses a retention longer than the limit the deployment sets, and saves a shorter one', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    renderEditor();
+    openSection(await screen.findByText('Retention'));
+    const retention = section('Retention');
+    expect(within(retention).getAllByText(/At most 90, the limit this deployment sets/)).toHaveLength(1);
+
+    const days = within(retention).getByLabelText('Days to keep meeting records');
+    fireEvent.change(days, { target: { value: '120' } });
+    // Beside the field, and in the section's list of what stops the save.
+    expect(
+      await within(retention).findAllByText(/must be at most 90, the limit this deployment sets; got 120/),
+    ).toHaveLength(2);
+    expect(pageButton('Save changes').disabled).toBe(true);
+
+    fireEvent.change(days, { target: { value: '7.5' } });
+    fireEvent.click(pageButton('Save changes'));
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
+    graphqlMock.mockResolvedValueOnce(saved()).mockResolvedValueOnce(answer({ version: 5 }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await screen.findByText(/Saved as revision/);
+    expect(JSON.parse(callsOf('UpdateConfiguration')[0][0].variables.input.Sections)).toEqual({
+      retention: { meetingRecordExpirationInDays: 7.5 },
+    });
   });
 
   it('saves Virtual Participant voice separation on a deployment without the on-demand engine', async () => {

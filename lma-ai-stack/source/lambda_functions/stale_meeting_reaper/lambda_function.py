@@ -86,8 +86,10 @@ LOGGER = Logger(location="%(filename)s:%(lineno)d - %(funcName)s()")
 
 EVENT_SOURCING_TABLE = os.environ["EVENT_SOURCING_TABLE"]
 CALL_DATA_STREAM_NAME = os.environ["CALL_DATA_STREAM_NAME"]
-# 0 disables the reaper without removing its resources. int(float(...)) because
-# the CloudFormation Number type accepts a fractional value.
+#: The MeetingInactivityTimeoutInMinutes parameter's value: what the timeout a
+#: run uses (the Meeting Processing section's, see ``inactivity_timeout_minutes``)
+#: falls back to. ``int(float(...))`` because the CloudFormation Number type
+#: accepts a fractional value, which is truncated as it always was.
 INACTIVITY_TIMEOUT_MINUTES = int(
     float(os.environ.get("MEETING_INACTIVITY_TIMEOUT_IN_MINUTES", "0"))
 )
@@ -313,15 +315,34 @@ def lookback_days() -> int:
     )
 
 
+def inactivity_timeout_minutes() -> int:
+    """How long a meeting may go without activity before a run ends it.
+
+    The Meeting Processing section of the Configuration page, whose default is
+    the MeetingInactivityTimeoutInMinutes stack parameter; that parameter's
+    environment variable when the section cannot be read. Read per run, like the
+    lookback. 0 ends nothing. Whether this function and its schedule exist at all
+    is still the parameter's: a deployment where it is 0 has no reaper to read
+    the setting.
+    """
+    return read_setting(
+        MEETING_PROCESSING.name,
+        "inactiveMeetingTimeoutMinutes",
+        env_var="MEETING_INACTIVITY_TIMEOUT_IN_MINUTES",
+        default=INACTIVITY_TIMEOUT_MINUTES,
+    )
+
+
 @LOGGER.inject_lambda_context
 def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
     """Scheduled entry point. Returns a summary of the run for the logs."""
-    if INACTIVITY_TIMEOUT_MINUTES <= 0:
+    timeout_minutes = inactivity_timeout_minutes()
+    if timeout_minutes <= 0:
         LOGGER.info("meeting inactivity timeout is 0; nothing to do")
         return {"enabled": False, "candidates": 0, "ended": 0}
 
     now = _now()
-    cutoff = now - timedelta(minutes=INACTIVITY_TIMEOUT_MINUTES)
+    cutoff = now - timedelta(minutes=timeout_minutes)
     window_start = now - timedelta(days=lookback_days())
 
     candidate_ids = _query_candidate_call_ids(window_start, cutoff)
@@ -355,7 +376,7 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
                 "call_id": call_id,
                 "status": call_row.get("Status"),
                 "last_activity": call_row.get("UpdatedAt") or call_row.get("CreatedAt"),
-                "inactivity_timeout_minutes": INACTIVITY_TIMEOUT_MINUTES,
+                "inactivity_timeout_minutes": timeout_minutes,
             },
         )
 

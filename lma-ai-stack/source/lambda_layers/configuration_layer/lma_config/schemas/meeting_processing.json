@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lma:configuration/meeting_processing",
   "title": "Meeting processing",
-  "description": "How transcript segments reach a transcript Lambda hook, and how far back meetings that were never ended are looked for. The defaults are the values the stack was deployed with; a value set here is used instead until it is reset.",
+  "description": "How transcript segments reach a transcript Lambda hook, and when and how far back meetings that were never ended are looked for. The defaults are the values the stack was deployed with; a value set here is used instead until it is reset.",
   "sectionLabel": "Meeting Processing",
   "appliesText": "A saved change applies within about five minutes.",
   "order": 10,
@@ -24,6 +24,14 @@
       "description": "How far back the inactive-meeting reaper looks for meetings to close. A meeting that started earlier than this is never closed automatically. Applies only when the stack runs the reaper (MeetingInactivityTimeoutInMinutes above 0). Default: the MeetingInactivityLookbackInDays stack parameter.",
       "minimum": 1,
       "maximum": 90
+    },
+    "inactiveMeetingTimeoutMinutes": {
+      "order": 2,
+      "type": "integer",
+      "title": "Minutes without speech before a meeting is ended",
+      "description": "How long a meeting may go without a finished transcript segment before the inactive-meeting reaper ends it on its behalf; 0 leaves such meetings open. Keep it longer than the longest quiet stretch your meetings have. The reaper exists only when the MeetingInactivityTimeoutInMinutes stack parameter is above 0, so on a deployment where it is 0 this setting has no effect. Default: that stack parameter.",
+      "minimum": 0,
+      "maximum": 10080
     }
   },
   "additionalProperties": false

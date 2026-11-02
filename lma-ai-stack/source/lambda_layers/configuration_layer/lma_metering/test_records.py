@@ -13,9 +13,11 @@ usage.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Dict, List
 
 import pytest
+from lma_config import parameters
 
 from lma_metering import records
 
@@ -61,6 +63,36 @@ def test_the_retention_is_read_from_the_environment(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv(records.EXPIRATION_ENV_VAR, "90")
     item = records.build_item("c", "Summary", "s", {"requests": 1}, source="t", now=NOW)
     assert int(item["ExpiresAfter"]["N"]) == int(NOW.timestamp()) + 90 * 86400
+
+
+class _RetentionStore:
+    def __init__(self, values):
+        self.values = values
+
+    def get_section(self, name):
+        return SimpleNamespace(values=self.values if name == "retention" else {})
+
+
+def test_a_shorter_meeting_retention_saved_on_the_page_is_used(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(records.EXPIRATION_ENV_VAR, "90")
+    monkeypatch.setattr(
+        parameters, "_SHARED_STORE", _RetentionStore({"meetingRecordExpirationInDays": 14})
+    )
+    item = records.build_item("c", "Summary", "s", {"requests": 1}, source="t", now=NOW)
+    assert int(item["ExpiresAfter"]["N"]) == int(NOW.timestamp()) + 14 * 86400
+
+
+def test_a_meeting_retention_longer_than_the_stack_parameter_is_not_used(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(records.EXPIRATION_ENV_VAR, "7")
+    monkeypatch.setattr(
+        parameters, "_SHARED_STORE", _RetentionStore({"meetingRecordExpirationInDays": 30})
+    )
+    item = records.build_item("c", "Summary", "s", {"requests": 1}, source="t", now=NOW)
+    assert int(item["ExpiresAfter"]["N"]) == int(NOW.timestamp()) + 7 * 86400
 
 
 def test_usage_keeps_only_finite_non_negative_numbers() -> None:

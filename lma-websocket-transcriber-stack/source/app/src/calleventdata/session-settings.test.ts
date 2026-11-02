@@ -33,6 +33,7 @@ import {
 } from './session-settings';
 import { applyTranscribeOptions, diarizationSettingsFor, postCallRedactionOutput } from './transcribe';
 import type { CallMetaData } from './eventtypes';
+import { buildMeteringItem } from '../metering';
 
 const warnings: string[] = [];
 const log = {
@@ -285,4 +286,40 @@ test('saved options that cannot be used together give way, but the page redactio
     assert.equal(settings.transcription.piiEntityTypes, 'SSN');
     assert.equal(settings.recording.recordAudio, false);
     assert.match(warnings.join('\n'), /cannot be used: identify-language needs language options/);
+});
+
+test('usage records expire with the retention as saved, never past the stack parameter', async () => {
+    const days = (): number => {
+        const now = new Date('2026-11-02T00:00:00Z');
+        const item = buildMeteringItem('call-1', 'Transcription', 'transcribe/streaming', { seconds: 15 }, {
+            source: 'test',
+            now,
+        });
+        return (Number(item?.['ExpiresAfter']?.N) - now.getTime() / 1000) / 86400;
+    };
+    withEnv({ METERING_EXPIRATION_DAYS: '90' });
+
+    useSessionSettingsStore(fakeStore({ retention: { meetingRecordExpirationInDays: 14 } }).store);
+    await getSessionSettings(log);
+    assert.equal(days(), 14);
+
+    // A value above the parameter reaches the profile only by a restore, or by
+    // a stack update lowering the parameter after it was saved.
+    process.env['METERING_EXPIRATION_DAYS'] = '7';
+    useSessionSettingsStore(fakeStore({ retention: { meetingRecordExpirationInDays: 30 } }).store);
+    await getSessionSettings(log);
+    assert.equal(days(), 7);
+
+    // Nothing saved: the parameter's value.
+    process.env['METERING_EXPIRATION_DAYS'] = '0.5';
+    useSessionSettingsStore(fakeStore({}).store);
+    await getSessionSettings(log);
+    assert.equal(days(), 0.5);
+
+    // An unreadable table: the environment variable, as before.
+    process.env['METERING_EXPIRATION_DAYS'] = '90';
+    useSessionSettingsStore(fakeStore('fail').store);
+    await getSessionSettings(log);
+    assert.equal(days(), 90);
+    delete process.env['METERING_EXPIRATION_DAYS'];
 });

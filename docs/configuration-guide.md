@@ -30,6 +30,8 @@ touched keeps following its default. For most settings the default ships with
 LMA and is updated by later releases. For some, the default is the value of a
 stack parameter; see
 [Settings whose default is a stack parameter](#settings-whose-default-is-a-stack-parameter).
+For the retention settings, the stack parameter is a limit as well as the
+default; see [Retention: settings the stack limits](#retention-settings-the-stack-limits).
 
 | Section | What it controls | A saved change applies |
 |---|---|---|
@@ -42,8 +44,9 @@ stack parameter; see
 | Amazon Transcribe | The Amazon Transcribe options of meetings streamed from the Stream Audio page, the browser extension and the desktop app, and of Virtual Participants: language or language identification, redaction, custom vocabulary and language model, and the default for identifying speakers within a channel | To streaming meetings that start after the save, and to the next Virtual Participant to start |
 | Meeting Recording | Whether those meetings' audio is recorded when the client does not say | To streaming meetings that start after the save, and to the next Virtual Participant to start |
 | Meeting Assistant | The regular expression that wakes the meeting assistant in a transcript | To transcript segments processed about five minutes after the save or later |
-| Meeting Processing | Whether a transcript Lambda hook is sent partial segments, and how far back the inactive-meeting reaper looks | Within about five minutes of the save |
+| Meeting Processing | Whether a transcript Lambda hook is sent partial segments, how long a meeting may go without speech before the inactive-meeting reaper ends it, and how far back the reaper looks | Within about five minutes of the save |
 | Virtual Participant | The Virtual Participant's voice assistant provider, activation mode, wake phrases and activation duration, the ElevenLabs agent and Simli face, and how a Teams Virtual Participant decides its meeting has ended | To the next Virtual Participant to start |
+| Retention | How many days meeting records and transcript segments are kept, up to the limit the stack sets | To records written about five minutes after the save or later; a record already written keeps its expiry |
 
 Every section is on **Configuration ▸ Configuration**. The pages that each edited
 one section — Transcript Summary, Nova Sonic Config and Transcription Engine — are
@@ -96,6 +99,7 @@ is the default of.
 | Meeting Assistant › Wake phrase (regular expression) | `AssistantWakePhraseRegEx` |
 | Meeting Processing › Send only finished segments to the transcript Lambda hook | `TranscriptLambdaHookFunctionNonPartialOnly` |
 | Meeting Processing › Days to look back for meetings that were never ended | `MeetingInactivityLookbackInDays` |
+| Meeting Processing › Minutes without speech before a meeting is ended | `MeetingInactivityTimeoutInMinutes` |
 | Virtual Participant › Voice assistant | `VoiceAssistantProvider` |
 | Virtual Participant › Voice assistant activation mode | `VoiceAssistantActivationMode` |
 | Virtual Participant › Wake phrases | `VoiceAssistantWakePhrases` |
@@ -116,6 +120,12 @@ parameters, and a provider or avatar chosen on the page without its key on the
 stack does not start. The Nova Sonic Voice Assistant section says whether its
 Group meeting and Translator meeting modes apply, from the activation mode as
 saved in the Virtual Participant section: they need **Always listening**.
+
+`MeetingInactivityTimeoutInMinutes` also decides whether the inactive-meeting
+reaper is deployed at all: at `0` there is no reaper, and the setting has no
+effect until a stack update sets the parameter above `0`. On a deployment that
+has the reaper, setting the timeout to `0` on the page stops it ending meetings
+until the setting is changed again.
 
 Some things differ from setting these with the parameters:
 
@@ -147,6 +157,39 @@ Some things differ from setting these with the parameters:
 - The page offers the same choices the parameter does. A model a later release
   stops offering stays in force where it was saved, and the next save of the
   section asks for another.
+
+## Retention: settings the stack limits
+
+The **Retention** section sets how many days a meeting's records are kept:
+
+| Section › setting | Default and upper limit from | What it covers |
+|---|---|---|
+| Retention › Days to keep meeting records | `MeetingRecordExpirationInDays` | The meeting, its summary and its usage records |
+| Retention › Days to keep transcript segments | `TranscriptionExpirationInDays` | Each turn of the transcript, and each meeting assistant answer in it |
+
+For these two, the stack parameter is the **upper limit** as well as the
+default. You can keep records for less time than the deployment allows, but not
+for more:
+
+- The page shows the parameter's value as the default, says it is the limit, and
+  marks a longer value as an error before you save. The server checks again, and
+  refuses the save if a value exceeds the limit.
+- Each function and task that writes these records applies the limit itself,
+  from the parameter. So a value above it is never used, even one that reached
+  the configuration another way, such as a restore of an older revision, or one
+  saved before a stack update lowered the parameter. A stack update that lowers
+  the parameter applies at once; one that raises it changes the default, and a
+  shorter value saved on the page stays in force until you reset it.
+- A change applies to records written after it, within about five minutes. A
+  record already written keeps the expiry it was given, so shortening retention
+  does not delete anything early, and lengthening it does not keep anything
+  longer.
+- Fractions of a day are allowed, as for the parameters, down to 0.1 day.
+- The recordings bucket's lifecycle rules, which delete transcript files and
+  key-frame images after `TranscriptionExpirationInDays` days and recordings
+  after `AudioRecordingExpirationInDays` days, follow the stack parameters only.
+  Shortening transcript retention on the page does not delete those files
+  sooner.
 
 ## Using the Configuration page
 
