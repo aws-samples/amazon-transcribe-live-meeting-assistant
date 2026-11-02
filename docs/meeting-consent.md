@@ -134,7 +134,7 @@ replies are read.
 | Capture method | Notice | Replies | Status |
 |---|---|---|---|
 | **Virtual Participant** | Posted in the meeting chat when the Virtual Participant is admitted | Read from the meeting chat, and from what is said, by display name; screenshots of the chat kept as evidence | Not available yet: the Virtual Participant does not run the consent flow. Planned next. |
-| **Desktop Capture App** and **Stream Audio** | Shown to the LMA user to read out or post in their meeting | Attested by the meeting owner (the opt-in rule **The meeting owner attests**), or objections recorded on the meeting page | Not available yet: neither starts a meeting's consent. Planned next. |
+| **Desktop Capture App** and **Stream Audio** | Shown to the LMA user to read out or post in their meeting | Attested by the meeting owner (the opt-in rule **The meeting owner attests**), or objections recorded by the LMA user | Not available yet: neither starts a meeting's consent. Planned next. |
 | **Browser extension** | As for Stream Audio | As for Stream Audio | Not available yet. |
 | **Upload Audio** | None: the recording already exists | — | Not applicable. A recording should only be uploaded with the consent its participants gave when it was made. |
 
@@ -176,8 +176,8 @@ holds:
 | `Status`, `CaptureAllowed` | As above, worked out on every write |
 | `NoticeText` | The notice or request for this meeting, placeholders filled |
 | `NoticePostedAt`, `Notices` | When the notice was first posted; each posting, with its channel (`chat`, `voice`, `banner` or `invite`), text, time and who recorded it. The first posting and the latest 19 are kept |
-| `Participants`, `ParticipantsSeen` | Who is present now, as last listed, and everyone ever listed |
-| `Events` | Every reply and attestation in the order recorded: the participant's display name, `consent` or `objection`, where it was read (`chat`, `voice`, `ui` for an entry made on the meeting page, or `attestation`), the words when sent, when it happened, when it was recorded and by whom |
+| `Participants`, `ParticipantsSeen` | Who is present now, as last listed, and everyone ever listed (the first 500) |
+| `Events` | Every reply and attestation in the order recorded: the participant's display name, `consent` or `objection`, where it was read (`chat`, `voice`, `ui` for an entry a signed-in user made, or `attestation`), the words when sent, when it happened, when it was recorded and by whom |
 | `Attestation` | Who attested, how (`verbal`, `chat` or `invite_terms`), what they said, and when |
 | `Evidence` | The images kept: each one's id, kind (`screenshot` or `invitation`), where it is stored, when it was taken and a note |
 | `StatusHistory` | Each change of status or of `CaptureAllowed`, with the time and reason; the latest 100 are kept |
@@ -195,15 +195,20 @@ leading and trailing `_` removed (the same rule as the key frames' folder).
 Only a backend role can add one, and only from that folder. `getMeetingConsent`
 signs an hour-long link to each image for whoever may read the meeting.
 
+Deleting a meeting deletes its consent record, which is part of the meeting
+row, and every image in its evidence folder. A lifecycle rule on
+`lma-consent-evidence/` also deletes the images after
+`MeetingRecordExpirationInDays`, the meeting record's own retention.
+
 ## Who can do what
 
 | Operation | Who |
 |---|---|
 | Read the record (`getMeetingConsent`, `Call.Consent`, `onUpdateMeetingConsent`) | The meeting's owner, the people it is shared with, Admins, and LMA's backend roles |
 | Start consent (`startMeetingConsent`) | The owner, an Admin, or a backend role |
-| Record that the notice was posted (`recordMeetingConsentNotice`) | Anyone who can read the record |
+| Record that the notice was posted (`recordMeetingConsentNotice`) | The owner, an Admin, or a backend role |
 | List the participants present (`setMeetingConsentParticipants`) | The owner, an Admin, or a backend role |
-| Record a reply (`recordMeetingConsentEvent`) | A backend role, for a reply read from the chat or the speech. Anyone who can read the record may record an **objection** from the meeting page; only the owner or an Admin may record **consent** on a participant's behalf. An entry made on the page is recorded as source `ui` under the signed-in user's own username |
+| Record a reply (`recordMeetingConsentEvent`) | A backend role, for a reply read from the chat or the speech. A signed-in user who can read the record may record an **objection**; only the owner or an Admin may record **consent** on a participant's behalf. A signed-in user's entry is recorded as source `ui` under their own username. (The meeting page has no control for this yet; it is planned with the page's Consent panel.) |
 | Attest (`attestMeetingConsent`) | The meeting's owner, or a backend role relaying the owner's attestation and naming them |
 | Add evidence (`addMeetingConsentEvidence`) | A backend role |
 
@@ -218,8 +223,9 @@ IAM authorization. Every mutation answers with a `MeetingConsentUpdate`
 (`CallId`, `Owner`, `SharedWith`, `Consent`), which is also what the
 `onUpdateMeetingConsent(CallId)` subscription carries. A subscriber receives
 the `Consent` fields the writer selected, so a writer should select the whole
-record; the fragment below does. The meeting page reads `getMeetingConsent`
-again on each message to refresh its evidence links.
+record; the fragment below does. A subscriber that shows the evidence images
+reads `getMeetingConsent` again on each message, because only that query signs
+their links.
 
 ```graphql
 fragment ConsentRecord on MeetingConsent {

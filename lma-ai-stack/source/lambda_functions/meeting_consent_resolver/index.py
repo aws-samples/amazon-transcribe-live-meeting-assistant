@@ -8,8 +8,7 @@
 One function for the query and every mutation, because each of them reads the
 meeting row, applies the same access rule and writes one attribute of it,
 ``Consent``. What the record means is decided in ``lma_consent`` (the
-configuration layer), so this function, the verifier and the capture clients
-decide alike. See docs/meeting-consent.md.
+configuration layer), so this function and the capture clients decide alike. See docs/meeting-consent.md.
 
 Who may do what:
 
@@ -17,7 +16,7 @@ Who may do what:
 ``getMeetingConsent``           The ``getCall`` rule: an Admin, the meeting's owner,
                                 somebody it is shared with, or a backend role.
 ``startMeetingConsent``         The owner, an Admin or a backend role.
-``recordMeetingConsentNotice``  The ``getCall`` rule.
+``recordMeetingConsentNotice``  The owner, an Admin or a backend role.
 ``setMeetingConsentParticipants`` The owner, an Admin or a backend role.
 ``recordMeetingConsentEvent``   A backend role, for a reply read from the chat or
                                 the speech. A signed-in user with access to the
@@ -470,7 +469,12 @@ def start_meeting_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) ->
         if record:
             if record.get("Mode") == mode and record.get("Rule") == rule:
                 return record
-            under_way = record.get("Events") or record.get("Notices") or record.get("Attestation")
+            under_way = (
+                record.get("Events")
+                or record.get("Notices")
+                or record.get("Attestation")
+                or record.get("Evidence")
+            )
             if under_way:
                 raise BadRequestError(
                     f"consent for this meeting is already under way in mode {record.get('Mode')}"
@@ -505,6 +509,17 @@ def start_meeting_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) ->
             "StartedBy": actor(caller),
         }
 
+    meeting, access = load(caller, call_id)
+    current = meeting.get("Consent") or None
+    if (
+        current
+        and (access["owner"] or access["admin"] or access["backend"])
+        and current.get("Mode") == mode
+        and current.get("Rule") == rule
+    ):
+        # A capture client that restarts starts again: answer with the record
+        # as it is, without a write or a subscription message.
+        return update_out(meeting, call_id)
     return write_consent(caller, call_id, change)
 
 
@@ -512,7 +527,9 @@ def record_meeting_consent_notice(caller: Mapping[str, Any], data: Mapping[str, 
     call_id = data["CallId"]
     channel = one_of(data.get("Channel"), consent.NOTICE_CHANNELS, "Channel")
 
-    def change(record, _meeting, _access, now):
+    def change(record, _meeting, access, now):
+        if not (access["owner"] or access["admin"] or access["backend"]):
+            raise refuse(caller, call_id, "record a notice")
         record = require_started(record)
         posted_at = data.get("PostedAt") or now
         notice = {
@@ -558,7 +575,7 @@ def set_meeting_consent_participants(caller: Mapping[str, Any], data: Mapping[st
         seen = list(record.get("ParticipantsSeen") or [])
         seen_keys = {consent.normalize_name(name) for name in seen}
         seen += [name for name in present if consent.normalize_name(name) not in seen_keys]
-        record["ParticipantsSeen"] = seen[: consent.MAX_PARTICIPANTS * 2]
+        record["ParticipantsSeen"] = seen[: consent.MAX_PARTICIPANTS_SEEN]
         return record
 
     return write_consent(caller, call_id, change)

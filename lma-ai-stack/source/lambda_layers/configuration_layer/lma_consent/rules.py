@@ -9,8 +9,8 @@ A meeting's consent record (``Consent`` on the meeting row) holds the mode it
 runs in, the rule an opt-in meeting is granted by, and what has happened: the
 notices posted, the participants present, each participant's replies, the
 owner's attestation and the evidence kept. Everything that decides something
-from that record lives here, so the resolver that writes it, the verifier and
-the capture clients' gate all decide the same way. See docs/meeting-consent.md.
+from that record lives here, so the resolver that writes it and the capture
+clients' gate decide the same way. See docs/meeting-consent.md.
 
 Modes, from least to most strict:
 
@@ -109,6 +109,8 @@ MAX_NAME_LENGTH = 200
 MAX_TEXT_LENGTH = 1000
 MAX_NOTICE_LENGTH = 2000
 MAX_PARTICIPANTS = 250
+#: Everyone ever listed as present; the first this many are kept.
+MAX_PARTICIPANTS_SEEN = 500
 MAX_EVENTS = 500
 MAX_NOTICES = 20
 MAX_EVIDENCE = 50
@@ -351,9 +353,11 @@ def capture_allowed(record: Optional[Mapping[str, Any]], deployment_mode: str = 
 
     A meeting with no consent record is judged by ``deployment_mode``: in an
     ``opt_in`` deployment it may not be captured until its consent has been
-    started and granted, because the absence of a record is not consent.
+    started and granted, because the absence of a record is not consent. So is
+    a record whose mode is not one of :data:`MODES`, which this module cannot
+    judge.
     """
-    if not record or not record.get("Mode"):
+    if not record or record.get("Mode") not in MODES:
         return deployment_mode != MODE_OPT_IN
     _status, allowed, _reason = evaluate(record)
     return allowed

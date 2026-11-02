@@ -121,11 +121,12 @@ def test_an_attestation_entry_is_not_a_participants_reply() -> None:
     assert rules.evaluate(meeting)[:2] == ("pending", False)
 
 
-def test_an_unknown_mode_is_not_treated_as_consent_required() -> None:
-    # A record written by a later release with a mode this one does not know
-    # is read as not requiring consent rather than failing every reader; the
-    # resolver never writes such a mode.
-    assert rules.evaluate(record("something_new"))[0] == "not_required"
+def test_an_unknown_mode_follows_the_deployment_mode() -> None:
+    # A record with a mode this module does not know (the resolver never
+    # writes one) is judged like a missing record.
+    unknown = record("something_new")
+    assert rules.capture_allowed(unknown, "opt_in") is False
+    assert rules.capture_allowed(unknown, "notify") is True
 
 
 # ── status history ─────────────────────────────────────────────────────────

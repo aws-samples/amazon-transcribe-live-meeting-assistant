@@ -413,3 +413,31 @@ def test_an_unsupported_field_is_refused(dynamo) -> None:
         index.handler(
             {"info": {"fieldName": "deleteCall"}, "arguments": {}, "identity": BACKEND}, None
         )
+
+
+def test_starting_again_with_the_same_choice_writes_nothing(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    writes = dynamo.updates
+    result = call("startMeetingConsent", BACKEND, Mode="notify")
+    assert dynamo.updates == writes
+    assert result["Consent"]["Version"] == 1
+
+
+def test_evidence_also_holds_the_mode_in_place(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    call(
+        "addMeetingConsentEvidence",
+        BACKEND,
+        S3Key="lma-consent-evidence/Weekly_sync_2026_11_02/a.jpg",
+    )
+    with pytest.raises(index.BadRequestError, match="already under way"):
+        call("startMeetingConsent", BACKEND, Mode="off")
+
+
+def test_a_shared_user_cannot_record_a_notice(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    with pytest.raises(index.ForbiddenError):
+        call("recordMeetingConsentNotice", user(SHARED), Channel="chat")
+    result = call("recordMeetingConsentNotice", user(OWNER), Channel="chat")
+    assert result["Consent"]["Notices"][0]["PostedBy"] == OWNER
+    assert result["Consent"]["Status"] == "granted"

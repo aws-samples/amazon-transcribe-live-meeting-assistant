@@ -37,6 +37,12 @@ vi.mock('aws-amplify/api', () => ({
 }));
 
 const SCHEMA_DIR = join(import.meta.dirname, '../../../../lambda_layers/configuration_layer/lma_config/schemas');
+const CONSENT_DEFAULTS = JSON.parse(
+  readFileSync(
+    join(import.meta.dirname, '../../../../lambda_functions/configuration_seeder/defaults/MeetingConsent.json'),
+    'utf8',
+  ),
+);
 const TIERS = {
   summary_prompt_templates: 'standard',
   chat_buttons: 'immediate',
@@ -109,18 +115,8 @@ const DEFAULTS = {
     inactiveMeetingTimeoutMinutes: 240,
   },
   retention: { meetingRecordExpirationInDays: 90, transcriptionExpirationInDays: 30 },
-  meeting_consent: {
-    mode: 'off',
-    consentRule: 'each_participant',
-    notifyNoticeText:
-      '{LMA_USER} is using Live Meeting Assistant to record and transcribe this meeting ({meeting}). If you do not agree, reply "{objection_phrase}" in the chat or say so, and recording and transcription will stop.',
-    optInNoticeText:
-      '{LMA_USER} would like to record and transcribe this meeting ({meeting}) with Live Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed. Reply "{consent_phrase}" to agree, or "{objection_phrase}" to decline.',
-    consentPhrases: 'I consent, I agree, I accept',
-    objectionPhrases:
-      "I object, I do not consent, I don't consent, I do not agree, I don't agree, do not record, don't record, stop recording",
-    allowPerMeetingOverride: true,
-  },
+  // The shipped defaults, read from the file the seeder ships them in.
+  meeting_consent: CONSENT_DEFAULTS,
   virtual_participant: {
     voiceAssistantProvider: 'none',
     voiceAssistantActivationMode: 'wake_phrase',

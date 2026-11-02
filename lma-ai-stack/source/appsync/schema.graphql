@@ -984,7 +984,7 @@ type MeetingConsent @aws_cognito_user_pools
 	Notices: [MeetingConsentNotice]
 	# The participants present, as last listed by the capture client.
 	Participants: [String]
-	# Everyone ever listed as present.
+	# Everyone ever listed as present (the first 500).
 	ParticipantsSeen: [String]
 	# Every reply and attestation, in the order recorded.
 	Events: [MeetingConsentEvent]
@@ -1015,7 +1015,7 @@ type MeetingConsentEvent @aws_cognito_user_pools
 	ParticipantName: String
 	# "consent" or "objection".
 	Decision: String
-	# "chat", "voice", "ui" (entered on the meeting page) or "attestation".
+	# "chat", "voice", "ui" (entered by a signed-in user) or "attestation".
 	Source: String
 	# What was said or typed, when the capture client sent it.
 	Text: String
