@@ -340,6 +340,9 @@ CLASSIFICATION: Dict[str, Classification] = {
     "TranscriptLambdaHookFunctionNonPartialOnly": _c(
         RUNTIME, "Read by the meeting event processor."
     ),
+    "AgendaDerivationAfterSeconds": _c(
+        RUNTIME, "Read by the meeting event processor, for each meeting with no agenda."
+    ),
     "EndOfCallTranscriptSummary": _c(
         RESOURCE,
         "Decides whether the Bedrock summarizer exists or a Lambda hook is invoked instead.",

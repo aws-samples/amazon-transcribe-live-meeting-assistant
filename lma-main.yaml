@@ -580,6 +580,18 @@ Parameters:
       This is the default; an Admin can change it at run time on the Configuration page (Meeting
       Processing section), which takes precedence.
 
+  AgendaDerivationAfterSeconds:
+    Type: Number
+    Default: 300
+    MinValue: 0
+    MaxValue: 3600
+    Description: >-
+      Seconds into a meeting with no agenda at which its transcript is read once for an
+      agenda somebody stated, and saved to the meeting if one is found. 0 turns the automatic
+      pass off; the Agenda panel's Derive agenda button works either way.
+      This is the default; an Admin can change it at run time on the Configuration page (Meeting
+      Agenda section), which takes precedence.
+
   EndOfCallTranscriptSummary:
     Default: "BEDROCK"
     Type: String
@@ -1370,6 +1382,7 @@ Metadata:
           - TranscriptLambdaHookFunctionArn
           - TranscriptLambdaHookFunctionNonPartialOnly
           - EndOfCallTranscriptSummary
+          - AgendaDerivationAfterSeconds
           - BedrockModelId
           - KeyframeTextModelId
           - EndOfCallLambdaHookFunctionArn
@@ -1534,6 +1547,8 @@ Metadata:
         default: Lambda Hook Function Mode Non-Partial only
       EndOfCallTranscriptSummary:
         default: End of Call Transcript Summary
+      AgendaDerivationAfterSeconds:
+        default: Seconds into a Meeting to Look for a Stated Agenda
       EndOfCallLambdaHookFunctionArn:
         default: Lambda Hook Function ARN for Custom End of Call Processing (existing)
       StartOfCallLambdaHookFunctionArn:
@@ -3300,6 +3315,7 @@ Resources:
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
         TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
+        AgendaDerivationAfterSeconds: !Ref AgendaDerivationAfterSeconds
         BedrockModelId: !Ref BedrockModelId
         KeyframeTextModelId: !Ref KeyframeTextModelId
         # Not used by any resource of the AI stack: passed so that its

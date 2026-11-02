@@ -61,12 +61,12 @@ disagree. The description under each parameter is the one the console shows.
 
 <!-- BEGIN GENERATED PARAMETER REFERENCE: edit lma-main.yaml or scripts/cloudformation_parameters_doc.py, then run that script -->
 
-The template declares 91 parameters.
+The template declares 92 parameters.
 
 | Kind | Parameters | What changing one does |
 |---|---|---|
 | Resource | 47 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
-| Configuration page default | 25 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
+| Configuration page default | 26 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
 | Configuration page limit | 1 | The default and the upper limit of a setting an Admin can lower, and not raise, on the web UI's Configuration page while the stack runs; see [Retention: settings the stack limits](configuration-guide.md#retention-settings-the-stack-limits). Every reader uses the smaller of the saved value and the parameter's, so a stack update that lowers the parameter applies at once. |
 | Read at run time | 5 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
 | Credential | 11 | A secret, the ARN of a secret, or the identifier paired with one. Values are stored in AWS Secrets Manager; see [Integration Credentials](infrastructure-and-security.md#integration-credentials). |
@@ -783,6 +783,7 @@ Average CPU utilization that WebSocket transcriber auto scaling aims to hold. Ke
 | [`TranscriptLambdaHookFunctionArn`](#transcriptlambdahookfunctionarn) | (empty) | Resource |
 | [`TranscriptLambdaHookFunctionNonPartialOnly`](#transcriptlambdahookfunctionnonpartialonly) | `true` | Configuration page default |
 | [`EndOfCallTranscriptSummary`](#endofcalltranscriptsummary) | `BEDROCK` | Resource |
+| [`AgendaDerivationAfterSeconds`](#agendaderivationafterseconds) | `300` | Configuration page default |
 | [`BedrockModelId`](#bedrockmodelid) | `global.anthropic.claude-sonnet-5-5` | Configuration page default |
 | [`KeyframeTextModelId`](#keyframetextmodelid) | `amazon.nova-lite-v1:0` | Configuration page default |
 | [`EndOfCallLambdaHookFunctionArn`](#endofcalllambdahookfunctionarn) | (empty) | Resource |
@@ -818,6 +819,16 @@ Console label: *End of Call Transcript Summary*
 - **Kind:** Resource. Decides whether the Bedrock summarizer exists or a Lambda hook is invoked instead.
 
 Set to enable call summarization by a Large Language Model. Currently only BEDROCK and LAMBDA are supported. BEDROCK option requires you to choose one of the supported model IDs from the provided list (BedrockModelId). The LAMBDA option requires you to provide a function ARN below.
+
+### `AgendaDerivationAfterSeconds`
+
+Console label: *Seconds into a Meeting to Look for a Stated Agenda*
+
+- **Default:** `300`
+- **Allowed values:** 0 to 3600
+- **Kind:** Configuration page default. Configuration page: **Meeting Agenda › Seconds into a meeting to look for a stated agenda**. Read by the meeting event processor, for each meeting with no agenda.
+
+Seconds into a meeting with no agenda at which its transcript is read once for an agenda somebody stated, and saved to the meeting if one is found. 0 turns the automatic pass off; the Agenda panel's Derive agenda button works either way. This is the default; an Admin can change it at run time on the Configuration page (Meeting Agenda section), which takes precedence.
 
 ### `BedrockModelId`
 

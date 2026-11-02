@@ -57,6 +57,7 @@ describe('schema-validation', () => {
       'call_pricing',
       'chat_buttons',
       'language_models',
+      'meeting_agenda',
       'meeting_assist',
       'meeting_consent',
       'meeting_processing',

@@ -344,7 +344,8 @@ def test_the_event_processor_queues_the_automatic_pass(resources: dict) -> None:
     function = resources["CallEventProcessorFunction"]["Properties"]
     env = function["Environment"]["Variables"]
     assert env["AGENDA_DERIVER_ARN"] == {"Fn::GetAtt": "AgendaDeriverFunction.Arn"}
-    assert env["AGENDA_DERIVATION_AFTER_SECONDS"] == "300"
+    # The default of the Meeting Agenda section, read when the configuration cannot be.
+    assert env["AGENDA_DERIVATION_AFTER_SECONDS"] == {"Ref": "AgendaDerivationAfterSeconds"}
 
 
 def test_derivation_is_metered_under_its_own_context() -> None:
