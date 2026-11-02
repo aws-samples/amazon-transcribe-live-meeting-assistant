@@ -1204,3 +1204,17 @@ def test_a_summary_is_stored_even_if_the_transcript_deletion_cannot_be_told(
     )
     logged = [record["message"] for record in cep.LOGGER.records]
     assert any("could not tell the transcript deletion function" in m for m in logged), logged
+
+
+@pytest.mark.parametrize("text", ["An error occurred.", "No summary available", "  "])
+def test_a_failed_summary_does_not_bring_the_transcript_deletion_forward(
+    schema, emitted, deletion_function, monkeypatch, text
+):
+    """The transcript waits for the end-of-meeting fallback, so the summary can be regenerated."""
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    process_event(
+        session,
+        {"EventType": "ADD_SUMMARY", "CallId": "call-1", "CallSummaryText": text},
+        monkeypatch,
+    )
+    assert _deletion_payloads(deletion_function) == []

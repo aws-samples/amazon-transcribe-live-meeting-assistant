@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import importlib
 import os
-import time
 from datetime import datetime, timezone
 
 import cognito_test_user
@@ -151,11 +150,16 @@ def test_the_transcript_file_is_gone_in_every_version(deleted, stack) -> None:
 
 
 def test_a_sweep_is_scheduled_after_an_immediate_deletion(deleted, stack) -> None:
-    from meeting_consent_probe import read_meeting
+    from meeting_consent_probe import read_meeting, wait_for
 
     # The sweep is scheduled straight after the deletion is recorded.
-    time.sleep(2)
-    meeting = read_meeting(stack, deleted["call_id"]) or {}
+    meeting = wait_for(
+        lambda: (lambda m: m if m.get("TranscriptDeletionScheduledFor") else None)(
+            read_meeting(stack, deleted["call_id"]) or {}
+        ),
+        30,
+        2,
+    ) or {}
     due = meeting.get("TranscriptDeletionScheduledFor")
     assert due, f"no sweep is scheduled for {deleted['call_id']}: {meeting}"
     minutes = (_parse(due) - _parse(meeting["TranscriptDeletedAt"])).total_seconds() / 60

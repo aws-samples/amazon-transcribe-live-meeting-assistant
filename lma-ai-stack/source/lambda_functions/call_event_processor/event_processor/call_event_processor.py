@@ -454,6 +454,19 @@ async def execute_create_call_mutation(
     return result
 
 
+# What the summary step stores when it could not produce a summary; the same
+# list as summary_regenerator's UNUSABLE_SUMMARIES. Compared case-insensitively
+# after stripping.
+FAILED_SUMMARY_TEXTS = frozenset(
+    {"", "an error occurred.", "an error occurred", "no summary available"}
+)
+
+
+def summary_was_produced(text: Any) -> bool:
+    """Whether a stored summary is one, rather than a failed run's placeholder."""
+    return isinstance(text, str) and text.strip().lower() not in FAILED_SUMMARY_TEXTS
+
+
 def was_already_created(create_call_result: Any) -> bool:
     """Whether a createCall result came from a meeting that already existed.
 
@@ -897,7 +910,12 @@ async def execute_add_video_keyframe_mutation(
     """
     try:
         keyframe = build_keyframe_input(
-            message, owner=None, shared_with=None, expires_after=get_transcription_ttl()
+            message,
+            owner=None,
+            shared_with=None,
+            # Key frames are not deleted with the transcript, so they keep the
+            # transcript retention period in full.
+            expires_after=get_transcription_ttl(limited_by_deletion=False),
         )
     except KeyframeEventError as error:
         LOGGER.error(
@@ -1836,8 +1854,12 @@ async def execute_process_event_api_mutation(
             return_value["successes"].append(response)
             # The summary is stored, so the transcript deletion can count its
             # delay from now. Fire-and-forget: if this is lost, the deletion
-            # scheduled at the end of the meeting still runs, later.
-            if TRANSCRIPT_DELETION_FUNCTION_ARN:
+            # scheduled at the end of the meeting still runs, later. Not for a
+            # failed run's placeholder text: the transcript then waits for the
+            # end-of-meeting fallback, leaving time to regenerate the summary.
+            if TRANSCRIPT_DELETION_FUNCTION_ARN and summary_was_produced(
+                message.get("CallSummaryText")
+            ):
                 try:
                     LAMBDA_HOOK_CLIENT.invoke(
                         FunctionName=TRANSCRIPT_DELETION_FUNCTION_ARN,

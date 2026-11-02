@@ -526,3 +526,14 @@ def test_contact_lens_categories_do_not_become_transcript_segments():
 def test_os_environment_is_not_mutated_by_importing_the_module():
     """Guards the reload-based TTL tests from leaking settings into the rest."""
     assert os.environ.get("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS") in (None, "90", "")
+
+
+def test_a_record_that_is_not_deleted_with_the_transcript_keeps_the_full_period(monkeypatch):
+    """Key frames share the transcript retention but are not deleted with it."""
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(
+        parameters,
+        "_SHARED_STORE",
+        _RetentionStore({"transcriptDeletionAfterSummary": "immediately"}),
+    )
+    assert abs(_days_ahead(ep.get_transcription_ttl(limited_by_deletion=False)) - 90) < 0.01

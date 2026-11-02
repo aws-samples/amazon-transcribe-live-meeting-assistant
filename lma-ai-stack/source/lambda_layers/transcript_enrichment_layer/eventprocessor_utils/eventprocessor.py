@@ -111,7 +111,13 @@ def _deletes_transcripts_after_summary() -> bool:
         return False
 
 
-def get_transcription_ttl():
+def get_transcription_ttl(limited_by_deletion: bool = True):
+    """The expiry of a record that follows the transcript retention.
+
+    ``limited_by_deletion`` is for records that hold transcript text, which
+    the transcript deletion removes; a record that only shares the retention
+    period, such as a key frame, passes False and keeps the full period.
+    """
     days = _retention_days(
         "transcriptionExpirationInDays",
         "TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS",
@@ -120,7 +126,7 @@ def get_transcription_ttl():
     # While transcripts are deleted after the summary, the transcript deletion
     # function removes each segment; the short expiry is what removes it if
     # that deletion never ran.
-    if _deletes_transcripts_after_summary():
+    if limited_by_deletion and _deletes_transcripts_after_summary():
         days = min(days, SEGMENT_EXPIRY_LIMIT_DAYS)
     return get_ttl(days)
 

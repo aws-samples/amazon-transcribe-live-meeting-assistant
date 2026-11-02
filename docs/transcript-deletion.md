@@ -49,8 +49,10 @@ while the setting was off keeps its transcript for the days set above.
 - **When the summary is stored**, the delay starts counting. With
   **Immediately**, the transcript is deleted at that point.
 - **If no summary has been stored 60 minutes after the meeting ends** (the
-  summary failed, or is still running), the delay counts from then instead.
-  The transcript is deleted whether or not a summary was ever written.
+  summary step failed, or is still running), the delay counts from then
+  instead. The transcript is deleted whether or not a summary was ever written.
+  Until then an Admin can regenerate a failed summary from the meeting page;
+  once the transcript is deleted, Regenerate is refused.
 - **On a deployment with no end-of-meeting summary** (`EndOfCallTranscriptSummary`
   set to `LAMBDA` with no `EndOfCallLambdaHookFunctionArn`), the delay counts
   from the end of the meeting.
@@ -91,7 +93,7 @@ Kept:
   Turn **Record meeting audio** off on the Configuration page if the audio must
   not be kept either;
 - shared-screen key frames and the text read from them, which follow
-  **Days to keep transcript segments**;
+  **Days to keep transcript segments** in full;
 - the consent record, which is the evidence that participants were told.
 
 ## What users see
@@ -139,8 +141,9 @@ alarm's description says how to run the deletion again. The usual cause is a
 recordings bucket the stack did not create, with S3 Object Lock or a bucket
 policy that does not allow the deletion.
 
-As a backstop, while deletion is on each transcript segment is also written
-with a DynamoDB time to live of at most two days. If a deletion never ran at
+As a backstop, while deletion is on each transcript segment and meeting
+assistant answer is also written with a DynamoDB time to live of at most two
+days. Key frames and category markers keep their usual expiry. If a deletion never ran at
 all, DynamoDB still removes the segments, on its own schedule.
 
 ## Copies outside the transcript store

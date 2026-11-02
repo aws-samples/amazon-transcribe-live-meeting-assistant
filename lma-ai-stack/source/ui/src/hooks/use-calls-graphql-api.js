@@ -60,6 +60,7 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
   const dateRangeRef = useRef(dateRange);
   // Meetings already read again after their summary arrived.
   const summaryRefreshes = useRef(new Set());
+  const summaryRefreshTimers = useRef([]);
   useEffect(() => {
     dateRangeRef.current = dateRange;
   }, [dateRange]);
@@ -190,10 +191,11 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
         const { CallId: callId, CallSummaryText: summary } = callUpdateEvent;
         if (summary && !summaryRefreshes.current.has(callId)) {
           summaryRefreshes.current.add(callId);
-          setTimeout(async () => {
+          const timer = setTimeout(async () => {
             const callValues = await getCallDetailsFromCallIds([callId]);
             if (callValues.length) setCallsDeduped(callValues);
           }, SUMMARY_REFRESH_DELAY_MS);
+          summaryRefreshTimers.current.push(timer);
         }
       },
       error: (error) => {
@@ -201,7 +203,11 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
         setErrorMessage('call update network request failed - please reload the page');
       },
     });
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      summaryRefreshTimers.current.forEach(clearTimeout);
+      summaryRefreshTimers.current = [];
+    };
   }, []);
 
   useEffect(() => {
