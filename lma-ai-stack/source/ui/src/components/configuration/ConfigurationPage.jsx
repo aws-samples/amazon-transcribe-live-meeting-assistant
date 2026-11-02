@@ -15,9 +15,11 @@ import {
   Header,
   Input,
   Modal,
+  SegmentedControl,
   Select,
   SpaceBetween,
   Spinner,
+  Table,
   Textarea,
 } from '@cloudscape-design/components';
 
@@ -54,6 +56,7 @@ import {
   refusedMessage,
   updateConfigurationMutation,
 } from './configuration-api';
+import { compareProfiles, configurationText, readConfigurationText } from './config-text';
 import ConfigurationSection, { sectionElementId } from './ConfigurationSection';
 import { UNAVAILABLE_REASONS } from './section-notices';
 import { checkDetailed, formatPath, limitProblems } from './schema-validation';
@@ -78,6 +81,20 @@ const effectiveOf = (doc) =>
 const profileText = (entry) => (entry.name === DEFAULT_PROFILE ? 'default (deployment default)' : entry.name);
 
 const profileTags = (entry) => [entry.active ? 'Active' : null, entry.managed ? 'Managed' : 'Custom'].filter(Boolean);
+
+// A compared value, for display: a string as it is, anything else as compact
+// JSON, so that `true` and "true" are told apart; a setting one profile does
+// not hold says so.
+const comparedText = (value) => {
+  if (value === undefined) return '(not set)';
+  return typeof value === 'string' ? value : JSON.stringify(value);
+};
+
+const VIEW_OPTIONS = [
+  { id: 'form', text: 'Form' },
+  { id: 'json', text: 'JSON' },
+  { id: 'yaml', text: 'YAML' },
+];
 
 const whenText = (iso) => {
   const parsed = iso ? new Date(iso) : null;
@@ -114,8 +131,21 @@ export const ConfigurationContent = () => {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileError, setProfileError] = useState(null);
+  // The form, or the whole configuration as JSON or YAML text. The text is
+  // read into the page's edits as it is typed, so it is checked and saved like
+  // any other edit; `textError` is what stops a text that does not read.
+  const [view, setView] = useState('form');
+  const [configText, setConfigText] = useState('');
+  const [textError, setTextError] = useState(null);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [compareWith, setCompareWith] = useState(null);
+  const [comparison, setComparison] = useState(null);
+  const [comparing, setComparing] = useState(false);
+  const [compareError, setCompareError] = useState(null);
   const scrolled = useRef(false);
   const fileInput = useRef(null);
+  // The edits the text view last produced, so typing does not rewrite the text.
+  const fromText = useRef(null);
 
   const loadProfiles = useCallback(async () => {
     const result = await client.graphql({ query: listProfilesQuery });
@@ -190,6 +220,43 @@ export const ConfigurationContent = () => {
   );
   const problemCount = Object.values(problems).reduce((total, list) => total + list.length, 0);
 
+  // The text follows every change made elsewhere -- a load, a discard, an
+  // import, a preset -- but not the one it made itself.
+  useEffect(() => {
+    if (view === 'form' || edits === fromText.current) return;
+    setConfigText(configurationText(sections, edits, view));
+    setTextError(null);
+  }, [view, edits, sections]);
+
+  const editText = (value) => {
+    setConfigText(value);
+    try {
+      const parsed = readConfigurationText(value, view, sections);
+      const next = { ...edits, ...parsed.values };
+      fromText.current = next;
+      setEdits(next);
+      setTextError(null);
+    } catch (err) {
+      setTextError(err.message);
+    }
+  };
+
+  // Discarding also puts back a text that did not read, which changed no edit.
+  const discard = () => {
+    fromText.current = null;
+    setTextError(null);
+    setEdits(loaded);
+    if (view !== 'form') setConfigText(configurationText(sections, loaded, view));
+  };
+
+  const chooseView = (next) => {
+    // A text that does not read would be lost by leaving it, so it has to be
+    // corrected or discarded first.
+    if (textError) return;
+    fromText.current = null;
+    setView(next);
+  };
+
   const selected = profiles.find((entry) => entry.name === profile);
 
   // Choosing another profile discards unsaved edits, so it asks first.
@@ -198,6 +265,30 @@ export const ConfigurationContent = () => {
     if (dirty && !window.confirm('Open another profile? Your unsaved changes will be lost.')) return;
     setStatus(null);
     setProfile(name);
+  };
+
+  // Compared as saved, as the export is: unsaved edits are not part of either side.
+  const openCompare = () => {
+    setCompareError(null);
+    setComparison(null);
+    setCompareWith(null);
+    setCompareOpen(true);
+  };
+
+  const compare = async (name) => {
+    setCompareWith(name);
+    setComparing(true);
+    setCompareError(null);
+    try {
+      const other = await read(name);
+      if (!other.exists) throw new Error(`there is no profile named ${name}`);
+      setComparison(compareProfiles(sections, loaded, effectiveOf(other)));
+    } catch (err) {
+      setComparison(null);
+      setCompareError(`Could not read the ${name} profile: ${errorText(err)}`);
+    } finally {
+      setComparing(false);
+    }
   };
 
   const runProfileOperation = async (operation, success) => {
@@ -548,6 +639,7 @@ export const ConfigurationContent = () => {
               items={[
                 { id: 'activate', text: 'Activate', disabled: !doc?.exists || doc?.active },
                 { id: 'copy', text: 'Copy to a new profile', disabled: !doc?.exists },
+                { id: 'compare', text: 'Compare with another profile', disabled: !doc?.exists || profiles.length < 2 },
                 {
                   id: 'delete',
                   text: 'Delete',
@@ -561,6 +653,7 @@ export const ConfigurationContent = () => {
                 setProfileError(null);
                 if (detail.id === 'activate') activate();
                 else if (detail.id === 'copy') openCopy();
+                else if (detail.id === 'compare') openCompare();
                 else if (detail.id === 'delete') setDeleteOpen(true);
               }}
             >
@@ -600,10 +693,14 @@ export const ConfigurationContent = () => {
               Import, export and presets
             </ButtonDropdown>
             <Button iconName="refresh" onClick={load} disabled={loading || saving} ariaLabel="Reload" />
-            <Button onClick={() => setEdits(loaded)} disabled={!dirty || saving}>
+            <Button onClick={discard} disabled={(!dirty && !textError) || saving}>
               Discard changes
             </Button>
-            <Button variant="primary" onClick={openSave} disabled={!dirty || problemCount > 0 || saving || readOnly}>
+            <Button
+              variant="primary"
+              onClick={openSave}
+              disabled={!dirty || problemCount > 0 || Boolean(textError) || saving || readOnly}
+            >
               Save changes
             </Button>
           </SpaceBetween>
@@ -635,7 +732,9 @@ export const ConfigurationContent = () => {
           action={<Button onClick={openCopy}>Copy to a new profile</Button>}
         >
           {`Every stack update rewrites it${
-            profile === DEFAULT_PROFILE ? ' with the release defaults and the stack parameters' : ''
+            profile === DEFAULT_PROFILE
+              ? ' with the release defaults and what the ConfigurationPreset and CustomConfigPath stack parameters name'
+              : ''
           }, so it cannot be saved. Copy it to a Custom profile to change a setting, then activate the copy.`}
         </Alert>
       )}
@@ -686,28 +785,77 @@ export const ConfigurationContent = () => {
         </Alert>
       )}
 
-      {problemCount > 0 && (
+      {problemCount > 0 && view === 'form' && (
         <Alert type="error">
           {`${problemCount} ${problemCount === 1 ? 'setting needs' : 'settings need'} correcting before the ` +
             'configuration can be saved. Each is marked in its section.'}
         </Alert>
       )}
 
-      {sections.map((section) => (
-        <ConfigurationSection
-          key={section.name}
-          section={section}
-          values={edits[section.name] || {}}
-          loaded={loaded[section.name] || {}}
-          defaults={doc.defaults[section.name] || {}}
-          problems={problems[section.name] || []}
-          settings={settings}
-          saved={loaded}
-          readOnly={readOnly}
-          expanded={focus ? focus === section.name : section.schema.defaultExpanded === true}
-          onChange={setSection(section.name)}
-        />
-      ))}
+      <SegmentedControl
+        label="View"
+        selectedId={view}
+        options={VIEW_OPTIONS.map((option) => ({ ...option, disabled: Boolean(textError) && option.id !== view }))}
+        onChange={({ detail }) => chooseView(detail.selectedId)}
+      />
+
+      {view !== 'form' && (
+        <FormField
+          label={`The configuration as ${view.toUpperCase()}`}
+          description={
+            readOnly
+              ? 'Read-only: copy the profile to a Custom one to change it.'
+              : 'Every section, keyed by its name. What you type is checked as you type and saved like an edit ' +
+                'in the form; a section you leave out keeps its values.'
+          }
+          errorText={textError || undefined}
+          stretch
+        >
+          <Textarea
+            value={configText}
+            rows={32}
+            readOnly={readOnly}
+            spellcheck={false}
+            ariaLabel={`Configuration ${view.toUpperCase()}`}
+            className="lma-config-text"
+            onChange={({ detail }) => editText(detail.value)}
+          />
+        </FormField>
+      )}
+
+      {view !== 'form' && problemCount > 0 && (
+        <Alert
+          type="error"
+          header={`${problemCount} ${problemCount === 1 ? 'setting needs' : 'settings need'} correcting`}
+        >
+          <ul>
+            {changed.flatMap((section) =>
+              (problems[section.name] || []).map((problem) => (
+                <li key={`${section.name}:${formatPath(problem.path)}:${problem.message}`}>
+                  {`${sectionLabel(section)} › ${formatPath(problem.path)}: ${problem.message}`}
+                </li>
+              )),
+            )}
+          </ul>
+        </Alert>
+      )}
+
+      {view === 'form' &&
+        sections.map((section) => (
+          <ConfigurationSection
+            key={section.name}
+            section={section}
+            values={edits[section.name] || {}}
+            loaded={loaded[section.name] || {}}
+            defaults={doc.defaults[section.name] || {}}
+            problems={problems[section.name] || []}
+            settings={settings}
+            saved={loaded}
+            readOnly={readOnly}
+            expanded={focus ? focus === section.name : section.schema.defaultExpanded === true}
+            onChange={setSection(section.name)}
+          />
+        ))}
 
       <input
         ref={fileInput}
@@ -757,6 +905,71 @@ export const ConfigurationContent = () => {
             ))}
           </ul>
           <Box>Nothing is saved until you review the changes and save them.</Box>
+        </SpaceBetween>
+      </Modal>
+
+      <Modal
+        visible={compareOpen}
+        size="large"
+        onDismiss={() => setCompareOpen(false)}
+        header={`Compare ${profile} with another profile`}
+        footer={
+          <Box float="right">
+            <Button variant="primary" onClick={() => setCompareOpen(false)}>
+              Close
+            </Button>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          <Box>
+            {`Both profiles as saved, setting by setting.${dirty ? ' Your unsaved changes are not included.' : ''}`}
+          </Box>
+          <FormField label="Compare with">
+            <Select
+              ariaLabel="Profile to compare with"
+              placeholder="Choose a profile"
+              selectedOption={compareWith ? { value: compareWith, label: compareWith } : null}
+              options={profiles
+                .filter((entry) => entry.name !== profile)
+                .map((entry) => ({ value: entry.name, label: profileText(entry), tags: profileTags(entry) }))}
+              onChange={({ detail }) => compare(detail.selectedOption.value)}
+              disabled={comparing}
+            />
+          </FormField>
+          {compareError && <Alert type="error">{compareError}</Alert>}
+          {comparing && (
+            <Box>
+              <Spinner /> Reading the profile...
+            </Box>
+          )}
+          {comparison && !comparing && (
+            <Table
+              variant="embedded"
+              wrapLines
+              items={comparison}
+              trackBy={(item) => `${item.section}:${JSON.stringify(item.path)}`}
+              empty={<Box textAlign="center">The two profiles hold the same value for every setting.</Box>}
+              header={
+                <Header counter={`(${comparison.length})`}>
+                  {comparison.length === 1 ? 'Setting that differs' : 'Settings that differ'}
+                </Header>
+              }
+              columnDefinitions={[
+                {
+                  id: 'setting',
+                  header: 'Setting',
+                  cell: (item) => {
+                    const section = sections.find((candidate) => candidate.name === item.section);
+                    const title = item.path.length === 1 ? section?.schema.properties?.[item.path[0]]?.title : null;
+                    return `${section ? sectionLabel(section) : item.section} › ${title || formatPath(item.path)}`;
+                  },
+                },
+                { id: 'left', header: profile, cell: (item) => comparedText(item.left) },
+                { id: 'right', header: compareWith, cell: (item) => comparedText(item.right) },
+              ]}
+            />
+          )}
         </SpaceBetween>
       </Modal>
 
