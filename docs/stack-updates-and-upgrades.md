@@ -14,7 +14,7 @@ title: "Stack Updates & Upgrades"
 - [What May Change](#what-may-change)
 - [Data Retention On Stack Deletion](#data-retention-on-stack-deletion)
 - [Version Migration Notes](#version-migration-notes)
-  - [v0.3.11](#v0311)
+  - [v0.4.0](#v040)
   - [v0.3.0](#v030)
   - [v0.2.0](#v020)
 - [Related Documentation](#related-documentation)
@@ -154,7 +154,39 @@ update that carries it has completed.
 
 ## Version Migration Notes
 
-### v0.3.11
+### v0.4.0
+
+**Stack parameters that were defaults of runtime settings are removed.** 0.4.0
+drops 27 parameters, among them the Amazon Bedrock model ids, the Amazon Transcribe
+language and redaction options, `EnableAudioRecording`, the wake phrase, the voice
+assistant settings and `MeetingInactivityTimeoutInMinutes`. Each is now only a
+setting on the Configuration page, with a shipped default; the full list is in
+[Settings that were stack parameters before 0.4.0](configuration-guide.md#settings-that-were-stack-parameters-before-040).
+This is a clean break:
+
+- **The values those parameters held are not carried across.** After the update,
+  the deployment uses each setting's shipped default, or the value an Admin had
+  saved on the Configuration page. To keep values you had set with the
+  parameters, note them before you update (the stack's **Parameters** tab in the
+  CloudFormation console), then either create a Custom profile with them and
+  activate it, or write them into a configuration file and deploy with the new
+  `CustomConfigPath` parameter, which makes them the deployment default; see
+  [Choosing the default configuration at deploy time](configuration-store.md#choosing-the-default-configuration-at-deploy-time).
+- **Remove the parameters from deploy commands and pipelines.** CloudFormation
+  refuses an update that names a parameter the template does not declare.
+  `lma deploy` leaves them out on its own.
+- **The inactive-meeting reaper is always deployed.** A timeout of 0 on the
+  Configuration page makes it end nothing.
+
+**Configuration profiles work like IDP's.** The Configuration page lists the
+deployment's profiles, one of them active. A deployment runs on its Managed
+`default` profile, which every update rewrites with the release's defaults,
+until an Admin creates and activates a Custom profile. On upgrade, the `custom`
+profile an earlier release created is kept as a full copy and stays active if
+an Admin had changed anything in it; if it held no changes it is removed and the
+default is activated. The pages that edit one setting outside the Configuration
+page save into the active profile, and refuse while a Managed one is active. See
+[Configuration profiles](configuration-guide.md#configuration-profiles).
 
 Every Lambda function, MicroVM and CodeBuild project in the deployment now logs
 to a log group the stack declares, with the retention set by

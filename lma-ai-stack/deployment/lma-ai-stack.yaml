@@ -146,17 +146,6 @@ Parameters:
       redaction logic, profanity filtering, or custom rules to highlight patterns
       in the transcript.
 
-  TranscriptLambdaHookFunctionNonPartialOnly:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: >
-      Specifies if Transcript Lambda Hook Function (if specified) is invoked for Non-Partial
-      transcript segments only (true), or for
-      both Partial and Non-Partial transcript segments (false).
-
   EndOfCallTranscriptSummary:
     Default: "BEDROCK"
     Type: String
@@ -171,50 +160,12 @@ Parameters:
       list (BedrockModelId). The LAMBDA option requires you to provide a function
       ARN below.
 
-  KeyframeTextModelId:
-    Type: String
-    Default: "amazon.nova-lite-v1:0"
-    # Kept in step with the parameter of the same name in lma-main.yaml, which
-    # passes its value through.
-    AllowedValues:
-      - "amazon.nova-lite-v1:0"
-      - "amazon.nova-pro-v1:0"
-      - "us.amazon.nova-premier-v1:0"
-      - "global.amazon.nova-2-lite-v1:0"
-      - "us.amazon.nova-2-lite-v1:0"
-      - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      - "us.anthropic.claude-sonnet-4-6"
-      - "us.anthropic.claude-haiku-5-5"
-      - "us.anthropic.claude-sonnet-5-5"
-      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      - "global.anthropic.claude-sonnet-4-6"
-      - "global.anthropic.claude-haiku-5-5"
-      - "global.anthropic.claude-sonnet-5-5"
-    Description: >-
-      Default Bedrock model that reads the text of each key frame of the shared
-      screen. An Admin can change it at run time on the Configuration page.
-
   # The meeting assistant's two models. Its functions are in the meeting-assist
   # stack; they are passed here only so the configuration seeder can write them
   # into the baseline as the defaults of the Amazon Bedrock Models section.
   # lma-main.yaml validates them against its own AllowedValues. Empty, as a
   # standalone deployment of this stack leaves them, is not written, and the
   # readers fall back to their own environment variables.
-  MeetingAssistServiceBedrockModelID:
-    Type: String
-    Default: ""
-    Description: >-
-      Default Bedrock model of the meeting assistant and the troubleshooting
-      agent, written into the configuration baseline.
-
-  MeetingAssistKnowledgeBaseModelID:
-    Type: String
-    Default: ""
-    Description: >-
-      Default Bedrock model the meeting assistant's knowledge bases generate
-      answers with, written into the configuration baseline.
-
   # The Amazon Transcribe options and the audio-recording default. Read by the
   # WebSocket transcriber, not by anything in this stack; passed here only so
   # the configuration seeder can write them into the baseline as the defaults
@@ -226,133 +177,11 @@ Parameters:
   # For the language options, entity types, custom vocabulary and custom
   # language model, empty is a valid value ("none"): it is written, and takes
   # precedence over the transcriber's variable.
-  TranscribeLanguageCode:
-    Type: String
-    Default: ""
-    Description: Default of the Amazon Transcribe language, written into the configuration baseline.
-
-  TranscribeLanguageOptions:
-    Type: String
-    Default: ""
-    Description: Default of the language-identification options, written into the configuration baseline.
-
-  TranscribePreferredLanguage:
-    Type: String
-    Default: ""
-    Description: Default of the preferred identified language, written into the configuration baseline.
-
-  IsContentRedactionEnabled:
-    Type: String
-    Default: ""
-    Description: Default of whether transcripts are redacted, written into the configuration baseline.
-
-  TranscribePiiEntityTypes:
-    Type: String
-    Default: ""
-    Description: Default of the redacted entity types, written into the configuration baseline.
-
-  CustomVocabularyName:
-    Type: String
-    Default: ""
-    Description: Default of the custom vocabulary, written into the configuration baseline.
-
-  CustomLanguageModelName:
-    Type: String
-    Default: ""
-    Description: Default of the custom language model, written into the configuration baseline.
-
-  ShowSpeakerLabel:
-    Type: String
-    Default: ""
-    Description: Default of the default for speaker partitioning, written into the configuration baseline.
-
-  EnableAudioRecording:
-    Type: String
-    Default: ""
-    Description: Default of whether meeting audio is recorded, written into the configuration baseline.
-
   # The Virtual Participant's own settings. Read by the Virtual Participant, not
   # by anything in this stack; passed here only so the configuration seeder can
   # write them into the baseline as the defaults of the Virtual Participant
   # section. lma-main.yaml validates them; empty, as a standalone deployment of
   # this stack leaves them, is not written where the section needs a value.
-  VoiceAssistantProvider:
-    Type: String
-    Default: ""
-    Description: Default of the voice assistant provider, written into the configuration baseline.
-
-  VoiceAssistantWakePhrases:
-    Type: String
-    Default: ""
-    Description: Default of the voice assistant wake phrases, written into the configuration baseline.
-
-  VoiceAssistantActivationDuration:
-    Type: String
-    Default: ""
-    Description: Default of the voice assistant activation duration, written into the configuration baseline.
-
-  ElevenLabsAgentId:
-    Type: String
-    Default: ""
-    Description: Default of the ElevenLabs agent, written into the configuration baseline.
-
-  SimliFaceId:
-    Type: String
-    Default: ""
-    Description: Default of the Simli avatar face, written into the configuration baseline.
-
-  VPAttendeePollMs:
-    Type: String
-    Default: ""
-    Description: Default of the Teams meeting-check interval, written into the configuration baseline.
-
-  VPPollsBeforeEnd:
-    Type: String
-    Default: ""
-    Description: Default of the Teams checks alone before leaving, written into the configuration baseline.
-
-  VPPollsBeforeEndMissing:
-    Type: String
-    Default: ""
-    Description: Default of the Teams checks without a meeting before leaving, written into the configuration baseline.
-
-  BedrockModelId:
-    Default: "global.anthropic.claude-sonnet-5-5"
-    Type: String
-    # Kept in step with the BedrockModelId parameter of the same name in
-    # lma-main.yaml, which is where every deployment sets it: lma-main passes its
-    # own value straight through to this stack, so a value offered there and not
-    # here fails the nested update. test_ai_stack_template.py asserts the two
-    # lists match.
-    AllowedValues:
-      - "amazon.nova-micro-v1:0"
-      - "amazon.nova-lite-v1:0"
-      - "amazon.nova-pro-v1:0"
-      - "us.amazon.nova-premier-v1:0"
-      - "global.amazon.nova-2-lite-v1:0"
-      - "us.amazon.nova-2-lite-v1:0"
-      - "us.anthropic.claude-opus-4-20250514-v1:0"
-      - "us.anthropic.claude-opus-4-1-20250805-v1:0"
-      - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      - "us.anthropic.claude-sonnet-4-6"
-      - "us.anthropic.claude-opus-4-6-v1"
-      - "us.anthropic.claude-haiku-5-5"
-      - "us.anthropic.claude-sonnet-5-5"
-      - "us.anthropic.claude-opus-5-5"
-      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      - "global.anthropic.claude-sonnet-4-6"
-      - "global.anthropic.claude-opus-4-6-v1"
-      - "global.anthropic.claude-haiku-5-5"
-      - "global.anthropic.claude-sonnet-5-5"
-      - "global.anthropic.claude-opus-5-5"
-
-    Description: >
-      Default Bedrock model for summaries and meeting insights. An Admin can
-      change it at run time on the Configuration page. Includes Nova models
-      (cost-effective) and Claude 4+ (cutting-edge). Some models require
-      inference profiles.
-
   EndOfCallLambdaHookFunctionArn:
     Default: ""
     Type: String
@@ -452,38 +281,6 @@ Parameters:
       will be automatically deleted from LMA after this time.
       Specify partial days like 0.5 to retain transcriptions for half a day.
 
-  MeetingInactivityTimeoutInMinutes:
-    Type: Number
-    Default: 240
-    MinValue: 0
-    MaxValue: 10080
-    Description: >-
-      Number of minutes a meeting may go without producing a finalized transcript
-      segment before LMA ends it on the meeting's behalf. A meeting whose client
-      disconnects without sending its end-of-meeting event stays "In Progress"
-      until this timeout elapses. Set to 0 to leave such meetings open.
-
-  AgendaDerivationAfterSeconds:
-    Type: Number
-    Default: 300
-    MinValue: 0
-    MaxValue: 3600
-    Description: >-
-      Default of the Meeting Agenda section's automatic-pass threshold: seconds into a
-      meeting with no agenda at which its transcript is read once for a stated agenda.
-      0 turns the automatic pass off. lma-main.yaml validates it.
-
-  MeetingInactivityLookbackInDays:
-    Type: Number
-    Default: 2
-    MinValue: 1
-    MaxValue: 90
-    Description: >-
-      How far back to look for meetings to close. A meeting that started longer
-      ago than this is never closed automatically, so raise it temporarily if you
-      are updating a deployment that has accumulated older meetings stuck in
-      progress. Higher values read more meeting records on every run.
-
   # NOTE: These parameters are dynamically updated during release
   BootstrapBucketBaseName:
     Type: String
@@ -511,13 +308,6 @@ Parameters:
     Description: >
       Artifacts version (semver). Used to point to a specific release in the S3
       bootstrap bucket
-
-  AssistantWakePhraseRegEx:
-    Type: String
-    Default: "(OK|Okay)[.,! ]*[Aa]ssistant"
-    Description: >
-      A regular expression for the wake phrase that invokes the Meeting Assistant.
-      Default is 'OK Assistant'.
 
   EnableVoiceToneAnalysis:
     Type: String
@@ -765,20 +555,6 @@ Parameters:
       Name of the EventBridge Schedule Group for Virtual Participants from the VP stack.
       This should match the schedule group name created by the Virtual Participant stack.
 
-  VoiceAssistantActivationMode:
-    Type: String
-    Default: "wake_phrase"
-    AllowedValues:
-      - "always_active"
-      - "wake_phrase"
-      - "strands_tool (coming soon)"
-    Description: >-
-      Activation mode of the Virtual Participant voice assistant, passed to the
-      configuration seeder as the default of the Virtual Participant section's
-      activation mode, which the Virtual Participant reads as it starts and the
-      Configuration page reads to say whether the Group and Translator meeting
-      modes apply.
-
   LogLevel:
     Type: String
     Default: INFO
@@ -873,14 +649,10 @@ Metadata:
         default:
           Lambda Hook Function ARN for Custom Transcript Segment Processing
           (existing)
-      TranscriptLambdaHookFunctionNonPartialOnly:
-        default: Lambda Hook Function Mode Non-Partial only
       EndOfCallLambdaHookFunctionArn:
         default: Lambda Hook Function ARN for Custom End of Call Processing (existing)
       EndOfCallTranscriptSummary:
         default: End of Call Transcript Summary
-      BedrockModelId:
-        default: Bedrock supported LLM model ID
       StartOfCallLambdaHookFunctionArn:
         default: Lambda Hook Function ARN for Custom Start of Call Processing (existing)
       PostCallSummaryLambdaHookFunctionArn:
@@ -907,10 +679,6 @@ Conditions:
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
   ShouldEnableGeoRestriction: !Not [!Equals [!Ref CloudFrontAllowedGeos, ""]]
-  # A timeout of 0 keeps the reaper's resources in the stack but stops its
-  # schedule, so the setting can be turned back on without a resource replace.
-  ShouldReapInactiveMeetings:
-    !Not [!Equals [!Ref MeetingInactivityTimeoutInMinutes, 0]]
   ShouldEnableMCPServer: !Equals [!Ref EnableMCPServer, "true"]
   # Biometric data, so this gates the EXISTENCE of the resources rather than
   # just their use: with it false there is nowhere for a voiceprint to be stored.
@@ -2631,7 +2399,6 @@ Resources:
       Runtime: python3.12
       Environment:
         Variables:
-          BEDROCK_MODEL_ID: !Ref BedrockModelId
           FETCH_TRANSCRIPT_LAMBDA_ARN: !GetAtt FetchTranscript.Arn
           PROCESS_TRANSCRIPT: "True"
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
@@ -3308,8 +3075,6 @@ Resources:
           # The defaults of the hook mode and the wake phrase, read when the
           # configuration cannot be; each batch reads the Meeting Processing
           # and Meeting Assistant sections first.
-          TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY: !Ref TranscriptLambdaHookFunctionNonPartialOnly
-          ASSISTANT_WAKE_PHRASE_REGEX: !Ref AssistantWakePhraseRegEx
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           IS_TRANSCRIPT_SUMMARY_ENABLED:
             !If [IsTranscriptSummaryEnabled, "true", "false"]
@@ -3323,7 +3088,6 @@ Resources:
           # once for an agenda somebody stated. 0 turns the automatic pass off;
           # the Agenda panel's button works either way. The default of the
           # Meeting Agenda section, read when the configuration cannot be.
-          AGENDA_DERIVATION_AFTER_SECONDS: !Ref AgendaDerivationAfterSeconds
           ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !GetAtt AsyncAgentAssistOrchestrator.Arn
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
           SNS_TOPIC_ARN: !Ref CategorySNSTopic
@@ -3609,37 +3373,10 @@ Resources:
       # changes one reaches every setting an Admin has not changed on the
       # Configuration page. Keyed by the lma-main.yaml parameter name.
       ParameterDefaults:
-        BedrockModelId: !Ref BedrockModelId
-        MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
-        MeetingAssistKnowledgeBaseModelID: !Ref MeetingAssistKnowledgeBaseModelID
-        KeyframeTextModelId: !Ref KeyframeTextModelId
-        TranscribeLanguageCode: !Ref TranscribeLanguageCode
-        TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
-        TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
-        IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
-        TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
-        CustomVocabularyName: !Ref CustomVocabularyName
-        CustomLanguageModelName: !Ref CustomLanguageModelName
-        ShowSpeakerLabel: !Ref ShowSpeakerLabel
-        EnableAudioRecording: !Ref EnableAudioRecording
-        AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
-        TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
-        MeetingInactivityLookbackInDays: !Ref MeetingInactivityLookbackInDays
-        VoiceAssistantProvider: !Ref VoiceAssistantProvider
-        VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
-        VoiceAssistantWakePhrases: !Ref VoiceAssistantWakePhrases
-        VoiceAssistantActivationDuration: !Ref VoiceAssistantActivationDuration
-        ElevenLabsAgentId: !Ref ElevenLabsAgentId
-        SimliFaceId: !Ref SimliFaceId
-        VPAttendeePollMs: !Ref VPAttendeePollMs
-        VPPollsBeforeEnd: !Ref VPPollsBeforeEnd
-        VPPollsBeforeEndMissing: !Ref VPPollsBeforeEndMissing
-        MeetingInactivityTimeoutInMinutes: !Ref MeetingInactivityTimeoutInMinutes
         # Limits as well as defaults: the Retention section's settings may be
         # set lower on the Configuration page and not higher.
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
-        AgendaDerivationAfterSeconds: !Ref AgendaDerivationAfterSeconds
 
   # Revision bodies for the configuration history: one gzipped object per
   # revision at config_revisions/<profile>/<nnnnnn>.json.gz, with the metadata
@@ -3831,7 +3568,6 @@ Resources:
           KB_ACCOUNT_ID: !Ref AWS::AccountId
           KB_REGION: !Ref AWS::Region
           # The model's default, read when the configuration cannot be.
-          MODEL_ID: !Ref BedrockModelId
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
       Layers:
         - !Ref ConfigurationPythonLayer
@@ -3867,7 +3603,6 @@ Resources:
       Environment:
         Variables:
           # The model's default, read when the configuration cannot be.
-          BEDROCK_MODEL_ID: !Ref BedrockModelId
           BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
       Layers:
@@ -4623,14 +4358,12 @@ Resources:
         Variables:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
-          MEETING_INACTIVITY_TIMEOUT_IN_MINUTES: !Ref MeetingInactivityTimeoutInMinutes
           # How far back a run looks for candidates. Has to exceed the longest
           # meeting a deployment expects plus the inactivity timeout, because a
           # meeting that started before the window is not examined: an upgrade
           # that inherits older stuck meetings widens it once. Each run reads it
           # from the Meeting Processing section first; this is its default, read
           # when the configuration cannot be.
-          REAPER_LOOKBACK_IN_DAYS: !Ref MeetingInactivityLookbackInDays
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           # Caps the meeting rows read per run. Candidates cannot be narrowed on
           # the index (it projects no Status), so each one costs part of a
@@ -4732,7 +4465,9 @@ Resources:
         Runs the stale meeting reaper. The interval bounds how long after
         MeetingInactivityTimeoutInMinutes a meeting keeps showing as in progress.
       ScheduleExpression: "rate(15 minutes)"
-      State: !If [ShouldReapInactiveMeetings, ENABLED, DISABLED]
+      # Always on: a timeout of 0 on the Configuration page (Meeting Processing)
+      # makes each run end nothing.
+      State: ENABLED
       Targets:
         - Arn: !GetAtt StaleMeetingReaperFunction.Arn
           Id: StaleMeetingReaperTarget
@@ -5358,7 +5093,6 @@ Resources:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
           # The model's default, read when the configuration cannot be.
-          BEDROCK_MODEL_ID: !Ref BedrockModelId
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
           # Token usage per naming pass, for the meeting cost estimate.
@@ -5537,7 +5271,6 @@ Resources:
           RECORDINGS_BUCKET: !Ref S3BucketName
           KEYFRAMES_PREFIX: "lma-video-keyframes/"
           # The model's default, read when the configuration cannot be.
-          KEYFRAME_TEXT_MODEL_ID: !Ref KeyframeTextModelId
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           # Token usage per frame, for the meeting cost estimate.
           METERING_TABLE_NAME: !Ref EventSourcingTable
@@ -5671,7 +5404,6 @@ Resources:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
           # The model's default, read when the configuration cannot be.
-          BEDROCK_MODEL_ID: !Ref BedrockModelId
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
           # Token usage per pass, for the meeting cost estimate.
@@ -10985,7 +10717,6 @@ Resources:
           TRANSCRIPT_KB_ID: !Ref BedrockKnowledgeBaseID
           # The search tool's model default, read when the configuration
           # cannot be.
-          BEDROCK_MODEL_ID: !Ref BedrockModelId
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl

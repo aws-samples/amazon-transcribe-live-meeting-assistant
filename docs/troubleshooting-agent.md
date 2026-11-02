@@ -170,15 +170,15 @@ nested-stack name, a few after the parent stack, the MicroVM groups live under
 `/aws/lambda-microvms/`, and AppSync's group is named after the API id. The
 agent refuses to query a name that `discover_log_groups` did not return, because
 a guessed name produces an empty result that reads exactly like an absence of
-evidence. On a stack upgraded from a release before v0.3.11 it also finds the
+evidence. On a stack upgraded from a release before v0.4.0 it also finds the
 MicroVM log groups that release used, `/aws/lambda-microvms/<stack>-vp` and
 `-asr`, which the upgrade leaves in place. Where a MicroVM's output goes is
 fixed when the MicroVM is launched, so a Virtual Participant launched before the
 upgrade finished — whichever image it ran on — logged only there. Each MicroVM
 group is labelled `current` or `legacy`, and
 when a legacy group exists the agent is told to search it before concluding
-there is no evidence (see the [v0.3.11 migration
-notes](stack-updates-and-upgrades.md#v0311)).
+there is no evidence (see the [v0.4.0 migration
+notes](stack-updates-and-upgrades.md#v040)).
 
 **`VPLaunchType` is a first-class input.** Under the default `MICROVM`, the
 Virtual Participant's Fargate log group exists and is permanently empty and no
@@ -310,8 +310,7 @@ group is the highest-volume stream in the solution.
 
 The agent uses the same Bedrock model as the Meeting Assistant — the
 **Meeting assistant** model in the Amazon Bedrock Models section of the
-Configuration page, whose default is the `MeetingAssistServiceBedrockModelID`
-stack parameter — so selecting a stronger model there gives a stronger
+Configuration page — so selecting a stronger model there gives a stronger
 diagnosis. Each run reads the model as it starts. Its token usage is logged at
 the end of every run.
 

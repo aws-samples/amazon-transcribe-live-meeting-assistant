@@ -3,39 +3,31 @@
 # This file is licensed under the MIT License.
 # See the LICENSE file in the project root for full license information.
 
-"""Runtime settings whose deployment default is a CloudFormation parameter.
+"""Runtime settings that used to be CloudFormation parameters, and the two that still are.
 
-Some of LMA's stack parameters only ever reached application code: a model id,
-a number, a switch, passed to a function as an environment variable and read
-there. Those settings now live in a configuration section, so an administrator
-can change them on the Configuration page, and the parameter stays as the
-deployment's **default** for the setting:
+Until 0.4.0 many of LMA's stack parameters only ever reached application code:
+a model id, a number, a switch, passed to a function as an environment variable.
+Those settings live in configuration sections now, and their parameters are gone:
 
-* ``parameter_defaults.json`` beside this module names, for each such parameter,
-  the section and setting it is the default of, and the setting's type.
-* The configuration seeder is given the parameters' values as the
-  ``ParameterDefaults`` property of its custom resource, and
-  :func:`apply_parameter_defaults` writes them into the baseline
-  ``Config#default``. A stack update that changes a parameter changes that
-  property, so the seeder runs again and the baseline follows.
-* An administrator's change is stored in the profile, like any other, and wins
-  over the baseline until it is reset.
-* :func:`read_setting` is how a reader gets the value. The function or task keeps
-  the parameter's environment variable, which it falls back to whenever the
-  section does not hold the setting or the table cannot be read -- so a reader
-  deployed ahead of the seeder, or a deployment whose table is unreachable, keeps
-  behaving as the parameter says rather than failing.
+* ``setting_defaults.json`` beside this module holds each one's shipped default
+  and type, by section and setting, with the parameter it replaced. The
+  configuration seeder writes the defaults into the baseline ``Config#default``
+  (:func:`shipped_setting_defaults`), and :func:`read_setting` falls back to
+  them when the configuration cannot be read.
+* ``parameter_defaults.json`` names the stack parameters that remain the
+  defaults of settings: the two retention periods, which are an **upper limit**
+  as well as the default. An administrator may keep records for less time than
+  the deployment allows and not for more. Their settings carry
+  ``maximumIsDefault`` in the section schema. The seeder is given their values
+  as the ``ParameterDefaults`` property of its custom resource
+  (:func:`apply_parameter_defaults`), the store refuses a save above the
+  baseline's value, and :func:`read_setting` returns the smaller of the section's
+  value and the parameter's environment variable.
+* An administrator's change is stored in a Custom profile, like any other.
 
-A few parameters are an **upper limit** as well as the default: retention, where
-an administrator may keep records for less time than the deployment allows and
-not for more. Their settings carry ``maximumIsDefault`` in the section schema.
-The store refuses a save above the baseline's value, and :func:`read_setting`
-returns the smaller of the section's value and the environment variable, so the
-parameter bounds what is used even when the section holds a larger value -- one
-put back by a restore, or one saved before a stack update lowered the parameter.
-
-The parameters are kept, not removed: existing deploy commands and pipelines pass
-them, and removing one would make those fail.
+:func:`read_setting` is how a reader gets the value: the active configuration;
+then, for a setting a parameter still backs, the parameter's environment
+variable; then the caller's default; then the shipped default.
 """
 
 from __future__ import annotations
@@ -59,6 +51,7 @@ from .store import TABLE_NAME_ENV_VAR, ConfigurationStore
 LOGGER = logging.getLogger(__name__)
 
 PARAMETER_DEFAULTS_FILE = Path(__file__).resolve().parent / "parameter_defaults.json"
+SETTING_DEFAULTS_FILE = Path(__file__).resolve().parent / "setting_defaults.json"
 
 #: The value types a parameter-backed setting can have. CloudFormation passes
 #: every custom resource property and every environment variable as text, so
@@ -96,8 +89,42 @@ def parameter_defaults() -> Tuple[ParameterDefault, ...]:
     return tuple(entries)
 
 
+@lru_cache(maxsize=1)
+def _setting_defaults() -> Dict[str, Dict[str, Dict[str, Any]]]:
+    raw = json.loads(SETTING_DEFAULTS_FILE.read_text(encoding="utf-8"))
+    for section, settings in raw.items():
+        section_spec(section)
+        for setting, spec in settings.items():
+            if spec["type"] not in VALUE_TYPES:
+                raise ConfigurationError(
+                    f"{section} › {setting} declares the type {spec['type']!r}; "
+                    f"expected one of {VALUE_TYPES}"
+                )
+    return raw
+
+
+def shipped_setting_defaults() -> Dict[str, Dict[str, Any]]:
+    """The shipped default of each setting no stack parameter backs, by section."""
+    return {
+        section: {setting: spec["default"] for setting, spec in settings.items()}
+        for section, settings in _setting_defaults().items()
+    }
+
+
+def _shipped(section: str, setting: str) -> Optional[Dict[str, Any]]:
+    return _setting_defaults().get(section, {}).get(setting)
+
+
 def _by_setting() -> Dict[Tuple[str, str], ParameterDefault]:
-    return {(entry.section, entry.setting): entry for entry in parameter_defaults()}
+    entries = {
+        (section, setting): ParameterDefault(
+            spec.get("formerParameter", ""), section, setting, spec["type"]
+        )
+        for section, settings in _setting_defaults().items()
+        for setting, spec in settings.items()
+    }
+    entries.update({(entry.section, entry.setting): entry for entry in parameter_defaults()})
+    return entries
 
 
 def coerce(value_type: str, raw: Any) -> Any:
@@ -222,21 +249,22 @@ def read_setting(
     section: str,
     setting: str,
     *,
-    env_var: str,
+    env_var: str = "",
     default: Any = None,
     store: Optional[ConfigurationStore] = None,
 ) -> Any:
-    """The value of a parameter-backed setting.
+    """The value of a runtime setting.
 
     In order of preference: the section's resolved value (an administrator's
-    change, or else the baseline the seeder wrote from the parameter); the
-    parameter's environment variable on this function or task; ``default``.
+    change, or else the baseline the seeder wrote); the environment variable
+    ``env_var`` names, for a setting a stack parameter still backs; ``default``;
+    and the setting's shipped default (``setting_defaults.json``), so a reader
+    that cannot reach the configuration still has a value.
 
     Call it where the value is used, not at import, so the section's cache tier
     decides how soon a change is seen. ``store`` lets a function that already
     holds a store share its cache; otherwise one store per process is built from
-    ``CONFIGURATION_TABLE_NAME``, and with that unset the environment variable is
-    the answer.
+    ``CONFIGURATION_TABLE_NAME``.
 
     For a setting whose parameter is also its upper limit (``maximumIsDefault``
     in the section schema), the answer is the smaller of the section's value and
@@ -244,21 +272,25 @@ def read_setting(
     section value that is not above zero is not used.
 
     Raises:
-        KeyError: no parameter is the default of ``section`` › ``setting``. Every
-            call names one that ``parameter_defaults.json`` lists; the layer's
-            tests and the readers' own tests hold to that.
+        KeyError: neither file lists ``section`` › ``setting``. The layer's tests
+            and the readers' own tests hold every call to one that is listed.
     """
     entry = _by_setting()[(section, setting)]
     if setting in limited_settings_of(section):
         return _limited(
             entry,
-            _configured(entry, store, env_var),
+            _configured(entry, store, env_var or entry.parameter),
             _from_environment(entry, env_var, default),
         )
-    configured = _configured(entry, store, env_var)
+    configured = _configured(entry, store, env_var or entry.parameter)
     if configured is not None:
         return configured
-    return _from_environment(entry, env_var, default)
+    value = _from_environment(entry, env_var, default) if env_var else default
+    if value is None:
+        shipped = _shipped(section, setting)
+        if shipped is not None:
+            return shipped["default"]
+    return value
 
 
 def _limited(entry: ParameterDefault, configured: Any, limit: Any) -> Any:

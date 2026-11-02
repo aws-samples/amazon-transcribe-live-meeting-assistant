@@ -17,7 +17,7 @@ This guide walks you through setting up the Simli avatar integration for the LMA
 - LMA deployed (version 0.2.31 and above)
 - A voice assistant configured and working (`amazon_nova_sonic` or `elevenlabs`)
 - Simli account with API access
-- **Both** an API key (as either `SimliApiKey` or `SimliApiKeySecretArn`) and `SimliFaceId` set on the stack — the avatar is only enabled when both are non-empty. Setting just one (e.g. only the API key) will silently leave the avatar disabled and the Virtual Participant will join with no camera.
+- **Both** an API key (as either the `SimliApiKey` or the `SimliApiKeySecretArn` stack parameter) and a face ID (**Virtual Participant › Simli face ID** on the [Configuration page](configuration-guide.md)) set — the avatar is only enabled when both are non-empty. Setting just one (e.g. only the API key) will silently leave the avatar disabled and the Virtual Participant will join with no camera.
 
 ## How It Works
 
@@ -65,24 +65,35 @@ Meeting Participants See Animated Avatar
 
 ## Step 2: Deploy LMA with Simli Configuration
 
-### 2.1 Required CloudFormation Parameters
+### 2.1 Required Parameter and Settings
 
-When deploying or updating your LMA stack, set these parameters:
-
-> These are also settings in the **Virtual Participant** section of the
-> [Configuration page](configuration-guide.md): the Simli face ID, the voice assistant provider and its activation mode can be changed there while
-> the stack runs, and apply to the next Virtual Participant to start. The stack
-> parameters are their defaults, and a value saved on the page takes precedence
-> until it is reset. The API keys are stack parameters only.
+The API key is a CloudFormation stack parameter. When deploying or updating
+your LMA stack, set:
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | `SimliApiKey` | Your Simli API key | **Required for the avatar.** API key from Step 1.2. |
-| `SimliFaceId` | Your chosen Face ID | **Required for the avatar.** Face ID from Step 1.3. |
-| `VoiceAssistantProvider` | `amazon_nova_sonic` or `elevenlabs` | A voice assistant must be enabled |
-| `VoiceAssistantActivationMode` | `wake_phrase` or `always_active` | Choose activation mode |
 
-> **Important:** Although each Simli parameter shows as "(Optional)" in the CloudFormation template (the stack deploys fine without them), the avatar feature itself requires **both** an API key — as either `SimliApiKey` or `SimliApiKeySecretArn` — *and* `SimliFaceId` to be non-empty. Set both, or leave both blank.
+The face ID and the voice assistant are settings in the **Virtual Participant**
+section of the [Configuration page](configuration-guide.md), not stack
+parameters. They can be changed while the stack runs, with no stack update, and
+apply to the next Virtual Participant to start. To change them, an Admin opens
+the Configuration page, makes and activates a Custom configuration profile if
+one is not already active (**Profile** › **Copy to a new profile**, then
+**Activate**; see [Configuration profiles](configuration-guide.md#configuration-profiles)),
+and saves:
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| **Virtual Participant › Simli face ID** | Your chosen Face ID | **Required for the avatar.** Face ID from Step 1.3. |
+| **Virtual Participant › Voice assistant** | Amazon Nova Sonic (`amazon_nova_sonic`) or ElevenLabs (`elevenlabs`) | A voice assistant must be enabled |
+| **Virtual Participant › Voice assistant activation mode** | Wake phrase (`wake_phrase`) or Always listening (`always_active`) | Choose activation mode |
+
+To start a new deployment with these values already set, point the
+`CustomConfigPath` stack parameter at a configuration file that holds them; see
+[Choosing the default configuration at deploy time](configuration-store.md#choosing-the-default-configuration-at-deploy-time).
+
+> **Important:** Although the Simli parameters show as "(Optional)" in the CloudFormation template (the stack deploys fine without them), the avatar feature itself requires **both** an API key — as either `SimliApiKey` or `SimliApiKeySecretArn` — *and* **Virtual Participant › Simli face ID** to be non-empty. Set both, or leave both blank.
 
 The stack keeps the API key in AWS Secrets Manager, in a secret named
 `<stack-name>/integrations/simli-api-key` encrypted with the deployment's
@@ -93,8 +104,8 @@ launcher does the equivalent, by a different route —
 see [Integration Credentials](infrastructure-and-security.md#integration-credentials).
 If you already keep the key in Secrets Manager, set
 `SimliApiKeySecretArn` to that secret's ARN instead of `SimliApiKey` — supply
-one form or the other, not both. `SimliFaceId` is not a credential and is
-passed as an ordinary parameter either way.
+one form or the other, not both. The face ID is not a credential and is a
+Configuration page setting either way.
 
 **To rotate the key:** generate a new one in the Simli dashboard, put the new
 value in the `SimliApiKey` parameter, and apply the stack update. Virtual
@@ -129,12 +140,13 @@ The following environment variables are set automatically by CloudFormation but 
 
 ## Step 3: Verify Installation
 
-### 3.1 Check CloudFormation Deployment
+### 3.1 Check CloudFormation Deployment and Configuration
 
 1. Go to AWS CloudFormation console
 2. Find your LMA stack
 3. Verify the nested Virtual Participant stack deployed successfully
-4. Check that `SimliFaceId` is set, and that the API key is set as either `SimliApiKey` or `SimliApiKeySecretArn`
+4. Check that the API key is set as either `SimliApiKey` or `SimliApiKeySecretArn`
+5. On the Configuration page, check that **Virtual Participant › Simli face ID** is set in the active profile
 
 ### 3.2 Test the Avatar
 
@@ -194,8 +206,8 @@ When Simli avatar is active, the Virtual Participant's behavior changes slightly
 
 **Solution:**
 - Check CloudWatch logs for `Failed to initialize Simli Avatar` errors
-- Verify `SimliFaceId` is set on the stack, and that the Face ID exists in your
-  Simli account
+- Verify **Virtual Participant › Simli face ID** is set on the Configuration
+  page, and that the Face ID exists in your Simli account
 - Verify the secret holding the API key has a value:
   `aws secretsmanager get-secret-value --secret-id <stack-name>/integrations/simli-api-key --query SecretString --output text`
 - Ensure the Simli API key is valid and has not expired. An expired or revoked
@@ -206,7 +218,7 @@ When Simli avatar is active, the Virtual Participant's behavior changes slightly
 **Cause:** Audio not being forwarded to Simli
 
 **Solution:**
-- Verify a voice assistant is configured and working (`VoiceAssistantProvider` is not `none`)
+- Verify a voice assistant is configured and working (**Virtual Participant › Voice assistant** on the Configuration page is not **None**)
 - Check logs for `🎭 Sent X audio chunks to Simli avatar` messages
 - If no audio chunk messages appear, the voice assistant may not be producing audio
 - Test the voice assistant independently first (say "Hey Alex, are you there?")
@@ -288,7 +300,7 @@ When Simli avatar is active, the Virtual Participant's behavior changes slightly
 
 Enabling Simli requires browser settings that bridge the avatar's video into the meeting. Those settings make a Zoom join **more likely to require a login or trigger a CAPTCHA** before the Virtual Participant is let in.
 
-**If you are hitting login prompts or CAPTCHA challenges on join and don't need the on-camera avatar, leave `SimliApiKey` and `SimliFaceId` unset** — the VP joins with the most reliable profile. If you do want the avatar, signing in with per-user Zoom credentials makes joins far more reliable. See [Zoom Sign-in & Join Reliability → Simli and join reliability](./zoom-credentials-and-join-reliability.md#simli-and-join-reliability) for details.
+**If you are hitting login prompts or CAPTCHA challenges on join and don't need the on-camera avatar, leave `SimliApiKey` and **Virtual Participant › Simli face ID** unset** — the VP joins with the most reliable profile. If you do want the avatar, signing in with per-user Zoom credentials makes joins far more reliable. See [Zoom Sign-in & Join Reliability → Simli and join reliability](./zoom-credentials-and-join-reliability.md#simli-and-join-reliability) for details.
 
 ## Cost Considerations
 
@@ -318,7 +330,7 @@ Enabling Simli requires browser settings that bridge the avatar's video into the
 ✅ **What You Need:**
 - Simli account with API key and Face ID
 - A voice assistant configured (Nova Sonic or ElevenLabs)
-- 2 CloudFormation parameters (`SimliApiKey` + `SimliFaceId`)
+- The `SimliApiKey` CloudFormation parameter and the **Virtual Participant › Simli face ID** setting on the Configuration page
 
 ✅ **Key Features:**
 - Seamless integration with existing voice assistants

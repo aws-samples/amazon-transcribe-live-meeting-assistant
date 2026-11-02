@@ -64,13 +64,13 @@ The voice agent is always listening and leads the conversation. Sessions auto-re
 
 ### wake_phrase
 
-The voice agent activates only when a configured wake phrase is detected in the meeting audio. Once activated, the agent stays active until it has been idle for the configured duration (`VoiceAssistantActivationDuration`, 5-300 seconds, default 30 seconds), and then closes its session and returns to listening mode. This mode is best for normal meetings where the assistant should mostly listen and only respond when directly addressed.
+The voice agent activates only when a configured wake phrase is detected in the meeting audio. Once activated, the agent stays active until it has been idle for the configured duration (**Virtual Participant › Seconds the voice assistant stays active** on the Configuration page, 5-300 seconds, default 30 seconds), and then closes its session and returns to listening mode. This mode is best for normal meetings where the assistant should mostly listen and only respond when directly addressed.
 
 The duration is idle time, not a deadline from the wake phrase. The countdown starts again whenever the assistant is busy and whenever someone engages with it: it does not run while a lookup is in progress or while the meeting can still hear the assistant's answer (Nova Sonic delivers speech several times faster than it is played, so the answer is still playing well after the last of it has arrived), and it restarts when the assistant is addressed by wake phrase again or spoken over. Any wake phrase heard while the window is running restarts it, including "Hey Alex, stop", so a participant who has just silenced the assistant can still follow up. A question asked just as the window is about to lapse is given about three seconds for the assistant to start answering; conversation among the other participants is not engagement and can delay closing only that way, by a few seconds at a time and never beyond twice the configured duration. Because the session stays open for as long as the assistant is audible, asking it to stop while it is still talking always reaches a session that can hear the request. These rules apply to both Amazon Nova Sonic and ElevenLabs; on ElevenLabs, "busy" means a `strands_agent` client tool call is running or the agent's audio is still arriving or queued for playback.
 
 ## Wake Phrase Configuration
 
-Configure the wake phrase using the **VoiceAssistantWakePhrase** parameter:
+Configure the wake phrase with **Virtual Participant › Wake phrases** on the [Configuration page](configuration-guide.md):
 
 - Provide a comma-separated list of phrases (e.g., `hey alex,ok alex`)
 - Matching is case-insensitive
@@ -156,7 +156,7 @@ On **ElevenLabs**, only the transcript mechanism and audio barge-in apply. The E
 
 ## Meeting Mode
 
-The voice assistant supports three meeting modes, configured via the **Meeting Mode** selector in the Nova Sonic Voice Assistant section of the Configuration page (admin-only). The `group` and `translator` modes need the assistant to be always listening: if the stack is deployed with `VoiceAssistantActivationMode = wake_phrase` they have no effect and the UI surfaces a warning. On Nova Sonic, the chat commands for those two modes switch activation for the current meeting as well, so they work on a `wake_phrase` deployment — see [Changing Mode During a Meeting](#changing-mode-during-a-meeting).
+The voice assistant supports three meeting modes, configured via the **Meeting Mode** selector in the Nova Sonic Voice Assistant section of the Configuration page (admin-only). The `group` and `translator` modes need the assistant to be always listening: if **Virtual Participant › Voice assistant activation mode** is saved as **Wake phrase** (`wake_phrase`) they have no effect and the UI surfaces a warning. On Nova Sonic, the chat commands for those two modes switch activation for the current meeting as well, so they work on a `wake_phrase` deployment — see [Changing Mode During a Meeting](#changing-mode-during-a-meeting).
 
 | Mode | Starts muted? | Speaks when… | Stops when asked to? | Typical use |
 |---|---|---|---|---|
@@ -166,7 +166,7 @@ The voice assistant supports three meeting modes, configured via the **Meeting M
 
 ### Group Meeting Mode
 
-Group meeting mode enables passive listening where the assistant monitors the full meeting conversation but only speaks when directly addressed. The assistant starts muted and unmutes when a wake phrase is detected in a participant's transcript; after `VoiceAssistantActivationDuration` seconds without further wake-phrase mentions it automatically mutes again.
+Group meeting mode enables passive listening where the assistant monitors the full meeting conversation but only speaks when directly addressed. The assistant starts muted and unmutes when a wake phrase is detected in a participant's transcript; after **Virtual Participant › Seconds the voice assistant stays active** without further wake-phrase mentions it automatically mutes again.
 
 While it is muted the assistant still hears the meeting, but it does not run meeting-assistant lookups (the `strands_agent` tool — document search, meeting history, web search) for conversation that is not addressed to it. If the model asks for one anyway, LMA answers it without invoking the Strands Lambda and writes a `[lookup] action=skipped reason=not-addressed` line to the Virtual Participant's log. A question that starts with a wake phrase unmutes the assistant first, so its lookup runs as usual, as do follow-ups while the assistant is still audible. The same applies to an assistant in `normal` mode that has been asked to stop talking, until it is next addressed by wake phrase, and to ElevenLabs.
 
@@ -215,7 +215,7 @@ The ElevenLabs agent's persona is configured in the ElevenLabs dashboard — LMA
 2. Set the agent's first message to empty.
 3. Choose a voice that can render both languages naturally (an ElevenLabs multilingual voice).
 4. In LMA, set Meeting Mode to `translator` and set `translatorLanguageA` / `translatorLanguageB` to match your agent's configured languages. LMA reads these to keep its own state and docs consistent, but does not push them to ElevenLabs.
-5. Set **Voice assistant activation mode** to **Always listening** in the Virtual Participant section of the Configuration page (or deploy the main stack with `VoiceAssistantActivationMode = always_active`, which is that setting's default) so LMA keeps the WebSocket open and the agent can translate every utterance without a wake phrase.
+5. Set **Voice assistant activation mode** to **Always listening** in the Virtual Participant section of the Configuration page so LMA keeps the WebSocket open and the agent can translate every utterance without a wake phrase.
 
 #### Limitations
 
@@ -229,7 +229,7 @@ The ElevenLabs agent's persona is configured in the ElevenLabs dashboard — LMA
 
 *Nova Sonic only.*
 
-The meeting mode and the activation mode are both read when the Virtual Participant starts, from the Nova Sonic Voice Assistant and Virtual Participant sections of the Configuration page respectively; the activation mode's default is the **VoiceAssistantActivationMode** stack parameter. Participants can also change either one while the meeting is running, by typing a command in the meeting chat.
+The meeting mode and the activation mode are both read when the Virtual Participant starts, from the Nova Sonic Voice Assistant and Virtual Participant sections of the Configuration page respectively. Participants can also change either one while the meeting is running, by typing a command in the meeting chat.
 
 A runtime change lasts for the rest of that meeting and is not written back to configuration: the configuration keeps the modes as saved on the Configuration page, and the next meeting starts in them. Anyone in the meeting may issue these commands, like the existing `LMA leave`.
 
@@ -375,22 +375,25 @@ The voice used by the assistant is configurable per provider. Set the desired vo
 - **Nova Sonic 2**: Choose from multiple AWS voice IDs available in the Bedrock console
 - **ElevenLabs**: Choose from multiple ElevenLabs voice IDs available in your ElevenLabs account
 
-## CloudFormation Parameters
+## Configuration Settings
 
-The following CloudFormation parameters control voice assistant behavior:
+The following settings in the **Virtual Participant** section of the
+[Configuration page](configuration-guide.md) control voice assistant behavior.
+They are not stack parameters: they can be changed while the stack runs, with no
+stack update, and apply to the next Virtual Participant to start. To change one,
+an Admin makes and activates a Custom configuration profile (see
+[Configuration profiles](configuration-guide.md#configuration-profiles)) and
+saves the setting there; a new deployment can start with them set through the
+`CustomConfigPath` stack parameter (see
+[Choosing the default configuration at deploy time](configuration-store.md#choosing-the-default-configuration-at-deploy-time)).
+The provider API keys remain stack parameters.
 
-> These are also settings in the **Virtual Participant** section of the
-> [Configuration page](configuration-guide.md): the provider, the activation mode, the wake phrases and the activation duration can be changed there while
-> the stack runs, and apply to the next Virtual Participant to start. The stack
-> parameters are their defaults, and a value saved on the page takes precedence
-> until it is reset. The API keys are stack parameters only.
-
-| Parameter | Values | Description |
+| Setting | Values | Description |
 |---|---|---|
-| **VoiceAssistantProvider** | `none` (default), `elevenlabs`, `amazon_nova_sonic` | Selects the voice provider or disables the voice assistant |
-| **VoiceAssistantActivationMode** | `always_active`, `wake_phrase` | Controls whether the assistant is always listening or wake-phrase activated |
-| **VoiceAssistantWakePhrase** | Comma-separated phrases | Wake phrases that activate the assistant (used with `wake_phrase` mode) |
-| **VoiceAssistantActivationDuration** | `5`-`300` seconds | How long the assistant stays active once it is idle after a wake phrase (see [wake_phrase](#wake_phrase)) |
+| **Voice assistant** | None (`none`, default), ElevenLabs (`elevenlabs`), Amazon Nova Sonic (`amazon_nova_sonic`) | Selects the voice provider or disables the voice assistant |
+| **Voice assistant activation mode** | Always listening (`always_active`), Wake phrase (`wake_phrase`, default) | Controls whether the assistant is always listening or wake-phrase activated |
+| **Wake phrases** | Comma-separated phrases | Wake phrases that activate the assistant (used with `wake_phrase` mode) |
+| **Seconds the voice assistant stays active** | `5`-`300` seconds | How long the assistant stays active once it is idle after a wake phrase (see [wake_phrase](#wake_phrase)) |
 
 ## See Also
 

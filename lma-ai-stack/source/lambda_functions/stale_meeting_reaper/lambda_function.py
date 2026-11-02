@@ -94,7 +94,7 @@ INACTIVITY_TIMEOUT_MINUTES = int(
     float(os.environ.get("MEETING_INACTIVITY_TIMEOUT_IN_MINUTES", "0"))
 )
 #: The lookback when neither the configuration nor REAPER_LOOKBACK_IN_DAYS
-#: says; the MeetingInactivityLookbackInDays parameter's default.
+#: says; its shipped default.
 FALLBACK_LOOKBACK_DAYS = 2
 # Bounds the work a single invocation does; the next scheduled run continues.
 MAX_CANDIDATES = int(float(os.environ.get("REAPER_MAX_CANDIDATES", "500")))
@@ -301,7 +301,7 @@ def lookback_days() -> int:
     """How many days back a run looks for meetings to close.
 
     The Meeting Processing section of the Configuration page, whose default is
-    the MeetingInactivityLookbackInDays stack parameter; that parameter's
+    its shipped default; that parameter's
     environment variable when the section cannot be read. Read per run, so a
     change applies from the next scheduled run that starts five minutes after it.
     A whole number of days: a fractional value, which CloudFormation's Number
@@ -319,7 +319,7 @@ def inactivity_timeout_minutes() -> int:
     """How long a meeting may go without activity before a run ends it.
 
     The Meeting Processing section of the Configuration page, whose default is
-    the MeetingInactivityTimeoutInMinutes stack parameter; that parameter's
+    its shipped default; that parameter's
     environment variable when the section cannot be read. Read per run, like the
     lookback. 0 ends nothing. Whether this function and its schedule exist at all
     is still the parameter's: a deployment where it is 0 has no reaper to read

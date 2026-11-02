@@ -77,7 +77,7 @@ ENABLE_STREAMING = os.environ.get('ENABLE_STREAMING', 'false').lower() == 'true'
 AGENT_TEMPERATURE = 0.3
 
 # Fallback for KB_MODEL_ID, reached only by a deployment whose environment does not
-# set it. Tracks the default of the MeetingAssistKnowledgeBaseModelID parameter.
+# set it. Tracks its shipped default.
 DEFAULT_KB_MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
 # Likewise for MODEL_ID and the MeetingAssistServiceBedrockModelID parameter.
 DEFAULT_AGENT_MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
@@ -87,7 +87,7 @@ def configured_agent_model_id() -> str:
     """The model the assistant answers with.
 
     The Amazon Bedrock Models section of the Configuration page, whose default is
-    the MeetingAssistServiceBedrockModelID stack parameter; that parameter's
+    its shipped default; that parameter's
     environment variable (MODEL_ID) when the section cannot be read. Read per
     request, so a change reaches the assistant within the section's cache tier.
     """
@@ -523,8 +523,7 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
             "requires custom Orchestration and Generation prompt templates, which LMA does "
             "not supply. Choose a model a knowledge base can generate with as Meeting "
             "assistant knowledge bases in the Amazon Bedrock Models section of the "
-            "Configuration page, or as the MeetingAssistKnowledgeBaseModelID CloudFormation "
-            "parameter, which is its default.",
+            "Configuration page.",
             kb_model_id,
         )
         return None
@@ -776,8 +775,7 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
             "requires custom Orchestration and Generation prompt templates, which LMA does "
             "not supply. Choose a model a knowledge base can generate with as Meeting "
             "assistant knowledge bases in the Amazon Bedrock Models section of the "
-            "Configuration page, or as the MeetingAssistKnowledgeBaseModelID CloudFormation "
-            "parameter, which is its default. The recent_meetings_list tool "
+            "Configuration page. The recent_meetings_list tool "
             "is unaffected, so chronological listing of past meetings still works.",
             kb_model_id,
         )

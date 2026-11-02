@@ -100,7 +100,7 @@ APPSYNC_GRAPHQL_URL = os.environ.get("APPSYNC_GRAPHQL_URL", "")
 #: for that group is scoped to.
 APPSYNC_API_ID = os.environ.get("APPSYNC_API_ID", "")
 #: The model when neither the configuration nor TROUBLESHOOTING_MODEL_ID names
-#: one; the MeetingAssistServiceBedrockModelID parameter's default.
+#: one; its shipped default.
 FALLBACK_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 BEDROCK_GUARDRAIL_ID = os.environ.get("BEDROCK_GUARDRAIL_ID", "").strip()
 BEDROCK_GUARDRAIL_VERSION = os.environ.get("BEDROCK_GUARDRAIL_VERSION", "").strip()
@@ -1054,7 +1054,7 @@ def configured_model_id() -> str:
     """The model the agent runs on: the meeting assistant's.
 
     The Amazon Bedrock Models section of the Configuration page, whose default is
-    the MeetingAssistServiceBedrockModelID stack parameter, passed to this
+    its shipped default, passed to this
     function as TROUBLESHOOTING_MODEL_ID and read when the section cannot be.
     """
     return read_setting(

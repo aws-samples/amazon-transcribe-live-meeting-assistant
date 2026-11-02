@@ -1,0 +1,151 @@
+{
+  "language_models": {
+    "summaryModelId": {
+      "type": "string",
+      "default": "global.anthropic.claude-sonnet-5-5",
+      "formerParameter": "BedrockModelId"
+    },
+    "meetingAssistModelId": {
+      "type": "string",
+      "default": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "formerParameter": "MeetingAssistServiceBedrockModelID"
+    },
+    "knowledgeBaseModelId": {
+      "type": "string",
+      "default": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "formerParameter": "MeetingAssistKnowledgeBaseModelID"
+    },
+    "keyframeTextModelId": {
+      "type": "string",
+      "default": "amazon.nova-lite-v1:0",
+      "formerParameter": "KeyframeTextModelId"
+    }
+  },
+  "transcription": {
+    "languageCode": {
+      "type": "string",
+      "default": "en-US",
+      "formerParameter": "TranscribeLanguageCode"
+    },
+    "languageOptions": {
+      "type": "string",
+      "default": "en-US, es-US",
+      "formerParameter": "TranscribeLanguageOptions"
+    },
+    "preferredLanguage": {
+      "type": "string",
+      "default": "None",
+      "formerParameter": "TranscribePreferredLanguage"
+    },
+    "contentRedactionEnabled": {
+      "type": "boolean",
+      "default": false,
+      "formerParameter": "IsContentRedactionEnabled"
+    },
+    "piiEntityTypes": {
+      "type": "string",
+      "default": "BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN",
+      "formerParameter": "TranscribePiiEntityTypes"
+    },
+    "customVocabularyName": {
+      "type": "string",
+      "default": "",
+      "formerParameter": "CustomVocabularyName"
+    },
+    "customLanguageModelName": {
+      "type": "string",
+      "default": "",
+      "formerParameter": "CustomLanguageModelName"
+    },
+    "showSpeakerLabel": {
+      "type": "boolean",
+      "default": false,
+      "formerParameter": "ShowSpeakerLabel"
+    }
+  },
+  "recording": {
+    "recordAudio": {
+      "type": "boolean",
+      "default": true,
+      "formerParameter": "EnableAudioRecording"
+    }
+  },
+  "meeting_assist": {
+    "wakePhraseRegex": {
+      "type": "string",
+      "default": "(OK|Okay)[.,! ]*[Aa]ssistant",
+      "formerParameter": "AssistantWakePhraseRegEx"
+    }
+  },
+  "meeting_processing": {
+    "transcriptHookNonPartialOnly": {
+      "type": "boolean",
+      "default": true,
+      "formerParameter": "TranscriptLambdaHookFunctionNonPartialOnly"
+    },
+    "inactiveMeetingLookbackDays": {
+      "type": "integer",
+      "default": 2,
+      "formerParameter": "MeetingInactivityLookbackInDays"
+    },
+    "inactiveMeetingTimeoutMinutes": {
+      "type": "integer",
+      "default": 240,
+      "formerParameter": "MeetingInactivityTimeoutInMinutes"
+    }
+  },
+  "virtual_participant": {
+    "voiceAssistantProvider": {
+      "type": "string",
+      "default": "none",
+      "formerParameter": "VoiceAssistantProvider"
+    },
+    "voiceAssistantActivationMode": {
+      "type": "string",
+      "default": "wake_phrase",
+      "formerParameter": "VoiceAssistantActivationMode"
+    },
+    "voiceAssistantWakePhrases": {
+      "type": "string",
+      "default": "hey alex,ok alex,hi alex,hello alex",
+      "formerParameter": "VoiceAssistantWakePhrases"
+    },
+    "voiceAssistantActivationDuration": {
+      "type": "integer",
+      "default": 30,
+      "formerParameter": "VoiceAssistantActivationDuration"
+    },
+    "elevenLabsAgentId": {
+      "type": "string",
+      "default": "",
+      "formerParameter": "ElevenLabsAgentId"
+    },
+    "simliFaceId": {
+      "type": "string",
+      "default": "",
+      "formerParameter": "SimliFaceId"
+    },
+    "attendeePollMs": {
+      "type": "integer",
+      "default": 20000,
+      "formerParameter": "VPAttendeePollMs"
+    },
+    "pollsBeforeEnd": {
+      "type": "integer",
+      "default": 3,
+      "formerParameter": "VPPollsBeforeEnd"
+    },
+    "pollsBeforeEndMissing": {
+      "type": "integer",
+      "default": 15,
+      "formerParameter": "VPPollsBeforeEndMissing"
+    }
+  },
+  "meeting_agenda": {
+    "autoDeriveAfterSeconds": {
+      "type": "integer",
+      "default": 300,
+      "formerParameter": "AgendaDerivationAfterSeconds"
+    }
+  }
+}

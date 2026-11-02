@@ -18,7 +18,7 @@ const formatPath = function(path) {
 };
 
 const { DynamoDBClient, GetItemCommand } = require('@aws-sdk/client-dynamodb');
-const { S3Client, CopyObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, CopyObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
 const { KinesisClient, PutRecordCommand } = require('@aws-sdk/client-kinesis');
 const REGION = process.env.REGION || 'us-east-1';
 const s3Client = new S3Client({ region: REGION });
@@ -34,7 +34,6 @@ const PCA_TRANSCRIPTS_PREFIX = formatPath(process.env.PCA_TRANSCRIPTS_PREFIX || 
 const PCA_AUDIO_PLAYBACK_FILE_PREFIX = formatPath(process.env.PCA_AUDIO_PLAYBACK_FILE_PREFIX || '');
 const PCA_WEB_APP_URL = formatPath(process.env.PCA_WEB_APP_URL || '');
 const PCA_WEB_APP_CALL_PATH_PREFIX = formatPath(process.env.PCA_WEB_APP_CALL_PATH_PREFIX || '');
-const IS_CONTENT_REDACTION_ENABLED = (process.env.IS_CONTENT_REDACTION_ENABLED || 'true') === 'true';
 
 
 function mkTcaFilename(sessionData) {
@@ -48,12 +47,22 @@ function mkTcaFilename(sessionData) {
   return f;
 }
 
+// Where Call Analytics wrote a meeting's post-call output: "redacted-analytics/"
+// for a meeting whose stream was redacted (the Amazon Transcribe section of the
+// Configuration page), "analytics/" otherwise. Looked up rather than assumed,
+// because whether a meeting is redacted is decided per meeting.
 // TODO - Refactor to use new TCA Post Call event - now includes Transcript file and Media File Uris.
-function getAnalyticsOutputUri(sessionId, suffix) {
-  const analyticsfolder = (IS_CONTENT_REDACTION_ENABLED) ? "redacted-analytics/" : "analytics/";
-  const uri = `/${LCA_BUCKET_NAME}/${CALL_ANALYTICS_FILE_PREFIX}${analyticsfolder}${sessionId}${suffix}`;
-  return uri;
-}
+const getAnalyticsOutputUri = async function getAnalyticsOutputUri(s3Client, sessionId, suffix) {
+  const keyIn = (folder) => `${CALL_ANALYTICS_FILE_PREFIX}${folder}${sessionId}${suffix}`;
+  let folder = 'analytics/';
+  try {
+    await s3Client.send(new HeadObjectCommand({ Bucket: LCA_BUCKET_NAME, Key: keyIn('redacted-analytics/') }));
+    folder = 'redacted-analytics/';
+  } catch (err) {
+    // Not there: the meeting was not redacted, or its output is not written yet.
+  }
+  return `/${LCA_BUCKET_NAME}/${keyIn(folder)}`;
+};
 
 const getSessionDataFromDdb = async function getSessionDataFromDdb(dynamoClient, sessionId) {
   // Set the parameters
@@ -110,7 +119,7 @@ const writePcaUrlToKds = async function writePcaUrlToKds(kinesisClient, sessionD
 const copyAudioRecordingToPca = async function copyAudioRecordingToPca(s3Client, sessionData) {
   const copyParms = {
     Bucket: PCA_S3_BUCKET_NAME,
-    CopySource: encodeURI(getAnalyticsOutputUri(sessionData.sessionId, '.wav')),
+    CopySource: encodeURI(await getAnalyticsOutputUri(s3Client, sessionData.sessionId, '.wav')),
     Key: PCA_AUDIO_PLAYBACK_FILE_PREFIX + mkTcaFilename(sessionData) + ".wav",
   }
   console.log("Copying post call analytics Recording to PCA: ", copyParms);
@@ -126,7 +135,7 @@ const copyPostCallAnalyticsToPca = async function copyPostCallAnalyticsToPca(s3C
   const filename = mkTcaFilename(sessionData);
   const copyParms = {
     Bucket: PCA_S3_BUCKET_NAME,
-    CopySource: encodeURI(getAnalyticsOutputUri(sessionData.sessionId, '.json')),
+    CopySource: encodeURI(await getAnalyticsOutputUri(s3Client, sessionData.sessionId, '.json')),
     Key: PCA_TRANSCRIPTS_PREFIX + filename + ".json",
   }
   console.log("Copying post call analytics Transcript to PCA: ", copyParms);

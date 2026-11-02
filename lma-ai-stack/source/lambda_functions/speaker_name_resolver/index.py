@@ -51,7 +51,7 @@ LOGGER = logging.getLogger()
 LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 #: The model when neither the configuration nor BEDROCK_MODEL_ID names one;
-#: the BedrockModelId parameter's default.
+#: its shipped default.
 FALLBACK_MODEL_ID = "global.anthropic.claude-sonnet-5-5"
 
 EVENT_SOURCING_TABLE = os.environ["EVENT_SOURCING_TABLE"]
@@ -210,7 +210,7 @@ def call_bedrock(prompt, call_id=None):
     output is parsed into an identity map, so a reasoning block reaching the parser
     would corrupt attribution rather than just read oddly. The model is the
     summaries' one: the Amazon Bedrock Models section of the Configuration page,
-    whose default is the BedrockModelId stack parameter.
+    with its shipped default.
     """
     model_id = read_setting(
         LANGUAGE_MODELS.name,

@@ -25,7 +25,7 @@ operator typed. Four independent reasons, all of them live in the current tree:
   image's name and the stack does not own. Where a MicroVM's output went is
   fixed when it is launched, not when its image was built: an upgraded stack
   keeps both groups, and a MicroVM launched before the deployment was updated
-  to v0.3.11 — including one launched during the update before its launcher
+  to v0.4.0 — including one launched during the update before its launcher
   function was updated, which CloudFormation does only after the image
   rebuild — wrote to the older one. Either name searched alone reports
   "no logs" for some participants, and would be believed. See
@@ -207,7 +207,7 @@ LEGACY_GENERATION = "legacy"
 
 #: (suffix, generation) for each MicroVM log group name a deployment can hold,
 #: appended to ``/aws/lambda-microvms/<stack>``. Discovery looks each one up and
-#: reports only those CloudWatch returns: a deployment created at v0.3.11 or
+#: reports only those CloudWatch returns: a deployment created at v0.4.0 or
 #: later never had the legacy groups, and one upgraded from earlier has both.
 MICROVM_LOG_GENERATIONS: Sequence[tuple[str, str]] = (
     ("-vp-logs", CURRENT_GENERATION),

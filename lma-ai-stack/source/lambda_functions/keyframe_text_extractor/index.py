@@ -51,7 +51,7 @@ EVENT_SOURCING_TABLE = os.environ.get("EVENT_SOURCING_TABLE", "")
 RECORDINGS_BUCKET = os.environ.get("RECORDINGS_BUCKET", "")
 KEYFRAMES_PREFIX = os.environ.get("KEYFRAMES_PREFIX", "lma-video-keyframes/")
 #: The model used when neither the configuration nor KEYFRAME_TEXT_MODEL_ID
-#: names one; the KeyframeTextModelId parameter's default.
+#: names one; its shipped default.
 FALLBACK_MODEL_ID = "amazon.nova-lite-v1:0"
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 
@@ -80,7 +80,7 @@ def model_id() -> str:
     """The model that reads key frames.
 
     The Amazon Bedrock Models section of the Configuration page, whose default is
-    the KeyframeTextModelId stack parameter; that parameter's environment
+    its shipped default; that parameter's environment
     variable when the section cannot be read.
     """
     return read_setting(

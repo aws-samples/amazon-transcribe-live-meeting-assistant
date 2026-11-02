@@ -146,22 +146,33 @@ You can either:
 
 ## Step 3: Deploy LMA with ElevenLabs Configuration
 
-### 3.1 Update CloudFormation Parameters
+### 3.1 Set the API Key and the Virtual Participant Settings
 
-When deploying or updating your LMA stack, set these parameters:
-
-> These are also settings in the **Virtual Participant** section of the
-> [Configuration page](configuration-guide.md): the provider, the ElevenLabs agent ID, the activation mode and the activation duration can be changed there while
-> the stack runs, and apply to the next Virtual Participant to start. The stack
-> parameters are their defaults, and a value saved on the page takes precedence
-> until it is reset. The API keys are stack parameters only.
+The API key is a CloudFormation stack parameter. When deploying or updating
+your LMA stack, set:
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `VoiceAssistantProvider` | `elevenlabs` | Enable ElevenLabs voice assistant |
-| `VoiceAssistantActivationMode` | `wake_phrase` or `always_active` | Choose activation mode |
 | `ElevenLabsApiKey` | `sk_...` | Your ElevenLabs API key from Step 1.5 |
-| `ElevenLabsAgentId` | `agent_...` | Your agent ID from Step 1.4 |
+
+The provider, the agent ID and the activation mode are settings in the
+**Virtual Participant** section of the [Configuration page](configuration-guide.md),
+not stack parameters. They can be changed while the stack runs, with no stack
+update, and apply to the next Virtual Participant to start. To change them, an
+Admin opens the Configuration page, makes and activates a Custom configuration
+profile if one is not already active (**Profile** › **Copy to a new profile**,
+then **Activate**; see [Configuration profiles](configuration-guide.md#configuration-profiles)),
+and saves:
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| **Virtual Participant › Voice assistant** | ElevenLabs (`elevenlabs`) | Enable ElevenLabs voice assistant |
+| **Virtual Participant › Voice assistant activation mode** | Wake phrase (`wake_phrase`) or Always listening (`always_active`) | Choose activation mode |
+| **Virtual Participant › ElevenLabs agent ID** | `agent_...` | Your agent ID from Step 1.4 |
+
+To start a new deployment with these values already set, point the
+`CustomConfigPath` stack parameter at a configuration file that holds them; see
+[Choosing the default configuration at deploy time](configuration-store.md#choosing-the-default-configuration-at-deploy-time).
 
 The stack keeps the API key in AWS Secrets Manager, in a secret named
 `<stack-name>/integrations/elevenlabs-api-key` encrypted with the deployment's
@@ -188,33 +199,35 @@ parameter to match, or the next stack update writes the old value back. See
 **Wake Phrase Mode** (Recommended)
 - Agent activates when user says "Hey Alex"
 - Saves costs by only connecting when needed
-- Automatically disconnects once it has been idle for `VoiceAssistantActivationDuration` (default 30 seconds); a lookup in progress or an answer still playing is not idle
-- Set: `VoiceAssistantActivationMode=wake_phrase`
+- Automatically disconnects once it has been idle for **Virtual Participant › Seconds the voice assistant stays active** (default 30 seconds); a lookup in progress or an answer still playing is not idle
+- Set: **Virtual Participant › Voice assistant activation mode** to **Wake phrase** (`wake_phrase`)
 
 **Always Active Mode**
 - Agent is always listening
 - Responds immediately without wake phrase
 - Higher costs (continuous connection)
-- Set: `VoiceAssistantActivationMode=always_active`
+- Set: **Virtual Participant › Voice assistant activation mode** to **Always listening** (`always_active`)
 
-### 3.3 Optional Parameters
+### 3.3 Optional Settings
+
+**Virtual Participant › Seconds the voice assistant stays active** on the
+Configuration page (default `30`, range 5 to 300) is the number of seconds of
+idle time before a wake-phrase activation disconnects (see
+[wake_phrase](voice-assistant.md#wake_phrase)).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `VoiceAssistantActivationDuration` | `30` | Seconds of idle time before a wake-phrase activation disconnects (see [wake_phrase](voice-assistant.md#wake_phrase)) |
 | `ElevenLabsOutputFormat` | `pcm_16000` | Audio output format |
 | `ElevenLabsPlaybackRate` | `16000` | Audio playback rate in Hz |
 
 ## Step 4: Verify Installation
 
-### 4.1 Check CloudFormation Outputs
+### 4.1 Check the Configuration
 
-1. Go to AWS CloudFormation console
-2. Find your LMA stack
-3. Go to the **Outputs** tab
-4. Verify these outputs exist:
-   - `VoiceAssistantProvider`: Should show `elevenlabs`
-   - `StrandsLambdaArn`: Should show the Lambda ARN
+1. Open the LMA web UI as an Admin and go to the Configuration page
+2. Open the **Virtual Participant** section of the active profile
+3. Verify that **Voice assistant** shows **ElevenLabs** and that
+   **ElevenLabs agent ID** holds your agent ID
 
 ### 4.2 Test Voice Assistant
 
@@ -265,7 +278,7 @@ View logs in CloudWatch:
 - Speak clearly: "Hey Alex" (pause) "your question"
 - Check microphone is working in the meeting
 - Try: "Hey Alex, are you there?" as a simple test
-- Verify `VoiceAssistantActivationMode=wake_phrase` is set
+- Verify **Virtual Participant › Voice assistant activation mode** is **Wake phrase** on the Configuration page
 
 ### Issue: "Tool Call Timed Out"
 
@@ -403,7 +416,7 @@ Once configured, the voice assistant can:
 
 - **Recommended for most use cases**
 - Only connects when activated
-- Automatically disconnects after 30 seconds idle (`VoiceAssistantActivationDuration`)
+- Automatically disconnects after 30 seconds idle (**Virtual Participant › Seconds the voice assistant stays active**)
 - Saves ~90% of connection costs
 
 ### Always Active Mode
@@ -432,11 +445,9 @@ private wakePhrases = ['hey alex', 'ok alex', 'hi alex', 'hello alex', 'hey assi
 
 ### Custom Activation Duration
 
-Set longer activation for complex queries:
-
-```bash
-VoiceAssistantActivationDuration=60  # 60 seconds
-```
+Set longer activation for complex queries by changing **Virtual Participant ›
+Seconds the voice assistant stays active** on the Configuration page, for
+example to `60`.
 
 ### Custom Audio Format
 

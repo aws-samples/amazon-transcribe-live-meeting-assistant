@@ -53,6 +53,7 @@ from lma_config import (  # noqa: E402
     MEETING_ASSIST,
     MEETING_PROCESSING,
     read_setting,
+    shipped_setting_defaults,
 )
 from metrics_utils import catalogue as metric_names
 from metrics_utils.emf import METRICS
@@ -132,7 +133,7 @@ def transcript_hook_nonpartial_only() -> bool:
     """Whether the transcript Lambda hook is sent finished segments only.
 
     The Meeting Processing section of the Configuration page, whose default is
-    the TranscriptLambdaHookFunctionNonPartialOnly stack parameter; that
+    its shipped default; that
     parameter's environment variable when the section cannot be read.
     """
     return read_setting(
@@ -169,7 +170,7 @@ def _compiled_wake_phrase(pattern: str) -> Optional[Pattern[str]]:
     except re.error as error:
         LOGGER.warning(
             "the configured wake phrase is not a regular expression (%s); using the "
-            "pattern in the deployment settings until it is corrected",
+            "shipped pattern until it is corrected",
             error,
         )
         return None
@@ -178,16 +179,15 @@ def _compiled_wake_phrase(pattern: str) -> Optional[Pattern[str]]:
 def wake_phrase_pattern() -> Optional[Pattern[str]]:
     """The regular expression that wakes the meeting assistant.
 
-    The Meeting Assistant section of the Configuration page, whose default is the
-    AssistantWakePhraseRegEx stack parameter. When that cannot be read, or holds
-    a pattern that does not compile, the deployment's own pattern, from its
-    settings parameter, is used, as it always was.
+    The Meeting Assistant section of the Configuration page, with its shipped
+    default. When the saved pattern does not compile, the shipped one is used
+    until it is corrected.
     """
-    configured = read_setting(
-        MEETING_ASSIST.name, "wakePhraseRegex", env_var="ASSISTANT_WAKE_PHRASE_REGEX"
-    )
+    configured = read_setting(MEETING_ASSIST.name, "wakePhraseRegex")
     compiled = _compiled_wake_phrase(configured) if configured else None
-    return compiled if compiled is not None else SETTINGS.get("AssistantWakePhraseRegEx")
+    if compiled is not None:
+        return compiled
+    return _compiled_wake_phrase(shipped_setting_defaults()[MEETING_ASSIST.name]["wakePhraseRegex"])
 
 
 if (

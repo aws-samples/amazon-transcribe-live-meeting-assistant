@@ -33,7 +33,7 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 # The model when neither the configuration nor BEDROCK_MODEL_ID names one; the
-# BedrockModelId parameter's default.
+# its shipped default.
 FALLBACK_MODEL_ID = "global.anthropic.claude-sonnet-5-5"
 
 # grab environment variables
@@ -245,7 +245,7 @@ def summary_model_id():
     """The model summaries are written with.
 
     The Amazon Bedrock Models section of the Configuration page, whose default is
-    the BedrockModelId stack parameter; that parameter's environment variable
+    its shipped default; that parameter's environment variable
     when the section cannot be read. Read through the summariser's own store, so
     it shares the prompt templates' cached document rather than adding a read.
     """

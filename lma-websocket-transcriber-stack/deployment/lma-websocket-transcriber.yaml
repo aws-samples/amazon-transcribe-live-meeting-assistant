@@ -1993,7 +1993,6 @@ Resources:
           PCA_AUDIO_PLAYBACK_FILE_PREFIX: !Ref PcaPlaybackAudioFilePrefix
           PCA_WEB_APP_URL: !Ref PcaWebAppURL
           PCA_WEB_APP_CALL_PATH_PREFIX: !Ref PcaWebAppCallPathPrefix
-          IS_CONTENT_REDACTION_ENABLED: !Ref IsContentRedactionEnabled
           LOG_LEVEL: !Ref LogLevel
       CodeUri: ../source/lambda_functions/pca_integration
       LoggingConfig:

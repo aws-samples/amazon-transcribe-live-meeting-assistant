@@ -21,82 +21,6 @@ Parameters:
       STRANDS_BEDROCK_WITH_KB (Create) automatically creates a Bedrock Knowledge Base for document search.
       STRANDS_BEDROCK_WITH_KB (Use Existing) uses an existing Bedrock Knowledge Base you provide.
 
-  MeetingAssistServiceBedrockModelID:
-    Type: String
-    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-    # The Amazon Bedrock Models section of the Configuration page offers
-    # exactly these models (lma_config/schemas/language_models.json in the AI
-    # stack's configuration layer): add or remove a model in both places.
-    # test_parameter_backed_settings.py fails if they differ.
-    AllowedValues:
-      - "amazon.nova-micro-v1:0"
-      - "amazon.nova-lite-v1:0"
-      - "amazon.nova-pro-v1:0"
-      - "us.amazon.nova-premier-v1:0"
-      - "global.amazon.nova-2-lite-v1:0"
-      - "us.amazon.nova-2-lite-v1:0"
-      - "us.anthropic.claude-opus-4-20250514-v1:0"
-      - "us.anthropic.claude-opus-4-1-20250805-v1:0"
-      - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      - "us.anthropic.claude-sonnet-4-6"
-      - "us.anthropic.claude-opus-4-6-v1"
-      - "us.anthropic.claude-haiku-5-5"
-      - "us.anthropic.claude-sonnet-5-5"
-      - "us.anthropic.claude-opus-5-5"
-      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      - "global.anthropic.claude-sonnet-4-6"
-      - "global.anthropic.claude-opus-4-6-v1"
-      - "global.anthropic.claude-haiku-5-5"
-      - "global.anthropic.claude-sonnet-5-5"
-      - "global.anthropic.claude-opus-5-5"
-    Description: >-
-      Select a Bedrock LLM model for the meeting assistant. Includes Nova models (cost-effective)
-      and Claude 4+ models (cutting-edge). Some models require inference profiles. The Claude 5
-      generation reasons before it answers, which raises answer quality but also raises output
-      token use several-fold, so it costs more per meeting than Claude 4.5 at the same size.
-      This is the default; an Admin can change it at run time on the Configuration
-      page (Amazon Bedrock Models section), which takes precedence.
-
-  MeetingAssistKnowledgeBaseModelID:
-    Type: String
-    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-    # A knowledge base supplies its own orchestration and generation prompt
-    # templates, and RetrieveAndGenerate rejects any model those templates do not
-    # cover, so the models usable here are a narrower set than the agent can run
-    # on and the list must stay a subset of
-    # MeetingAssistServiceBedrockModelID's.
-    #
-    # Which models those are is a property of the individual model, not of its
-    # generation: us.anthropic.claude-opus-4-1-20250805-v1:0 is refused while
-    # us.anthropic.claude-opus-4-6-v1 is accepted, and both are Claude 4. So every
-    # id below has been verified by a RetrieveAndGenerate call against a live
-    # knowledge base (us-west-2, 2026-10-21) and nothing is added without one;
-    # test_meeting_assist_kb_model.py holds the evidence and fails if this list
-    # and that record disagree.
-    # The Amazon Bedrock Models section of the Configuration page offers
-    # exactly these models (lma_config/schemas/language_models.json in the AI
-    # stack's configuration layer): add or remove a model in both places.
-    # test_parameter_backed_settings.py fails if they differ.
-    AllowedValues:
-      - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      - "us.anthropic.claude-sonnet-4-6"
-      - "us.anthropic.claude-opus-4-6-v1"
-      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      - "global.anthropic.claude-sonnet-4-6"
-      - "global.anthropic.claude-opus-4-6-v1"
-    Description: >-
-      Select the Bedrock model the Meeting Assistant's knowledge bases use to generate an answer
-      from what they retrieve -- the document-search tool and the past-meeting-search tool. This
-      is separate from MeetingAssistServiceBedrockModelID so that the agent can run on any model
-      it supports, including models a knowledge base cannot generate with. Whether a knowledge
-      base can generate with a model is a property of that model, so only models verified against
-      a live knowledge base are offered here. Enable access to the model you pick in the Amazon
-      Bedrock console for your region.
-      This is the default; an Admin can change it at run time on the Configuration
-      page (Amazon Bedrock Models section), which takes precedence.
-
   TavilyApiKey:
     Type: String
     NoEcho: true
@@ -155,18 +79,6 @@ Parameters:
       Participant task execution role on FARGATE and EC2. See
       docs/infrastructure-and-security.md#bringing-your-own-secret.
 
-  ElevenLabsAgentId:
-    Type: String
-    Default: ""
-    Description: >-
-      (Optional) ElevenLabs Conversational AI Agent ID for customized voice assistant behavior.
-      Create an agent at https://elevenlabs.io/app/conversational-ai and copy its ID here.
-      Leave blank to use default conversational AI without custom personality.
-      This is the default; an Admin can change it at run time on the Configuration page (Virtual
-      Participant section), which takes precedence.
-    AllowedPattern: "^(|[a-zA-Z0-9_-]{10,})$"
-    ConstraintDescription: "Must be empty or a valid ElevenLabs Agent ID"
-
   SimliApiKey:
     Type: String
     NoEcho: true
@@ -196,32 +108,6 @@ Parameters:
       (the default), or the Virtual Participant task execution role on FARGATE
       and EC2. See docs/infrastructure-and-security.md#bringing-your-own-secret.
 
-  SimliFaceId:
-    Type: String
-    Default: ""
-    Description: >-
-      (Optional) Simli Face ID for the avatar appearance. Required when
-      SimliApiKey is set — the avatar is enabled only when BOTH parameters
-      are non-empty. Get this from your Simli dashboard at https://simli.com.
-      This is the default; an Admin can change it at run time on the Configuration page (Virtual
-      Participant section), which takes precedence.
-
-  VoiceAssistantProvider:
-    Type: String
-    Default: "none"
-    AllowedValues:
-      - "none"
-      - "elevenlabs"
-      - "amazon_nova_sonic"
-    Description: >-
-      Voice AI assistant provider for Virtual Participant. Choose 'none' to
-      disable voice responses (default), 'elevenlabs' for ElevenLabs
-      Conversational AI (requires API key above), or 'amazon_nova_sonic' for
-      Amazon Nova Sonic, which needs no API key and is configured in the Nova
-      Sonic Voice Assistant section of the Configuration page in the LMA UI.
-      This is the default; an Admin can change it at run time on the Configuration page (Virtual
-      Participant section), which takes precedence.
-
   AmazonNovaSonicRegion:
     Type: String
     Default: ""
@@ -235,39 +121,6 @@ Parameters:
       deployment constrained to a particular region for compliance can keep
       everything else local and reach the voice assistant elsewhere. Only
       used when VoiceAssistantProvider is amazon_nova_sonic.
-
-  VoiceAssistantActivationMode:
-    Type: String
-    Default: "wake_phrase"
-    AllowedValues:
-      - "always_active"
-      - "wake_phrase"
-      - "strands_tool (coming soon)"
-    Description: >-
-      How the voice assistant is activated. 'always_active' for interviewer/meeting leader use cases (agent leads conversation),
-      'wake_phrase' to activate only when wake phrase is detected (max 300 seconds), or 'strands_tool' for intelligent activation by Strands agent.
-      This is the default; an Admin can change it at run time on the Configuration page (Virtual
-      Participant section), which takes precedence.
-
-  VoiceAssistantWakePhrases:
-    Type: String
-    Default: "hey alex,ok alex,hi alex,hello alex"
-    Description: >-
-      Comma-separated list of wake phrases for voice assistant activation (case-insensitive).
-      Only used when VoiceAssistantActivationMode is 'wake_phrase'. Example: "hey alex,ok alex,hi alex"
-      This is the default; an Admin can change it at run time on the Configuration page (Virtual
-      Participant section), which takes precedence.
-
-  VoiceAssistantActivationDuration:
-    Type: Number
-    Default: 30
-    MinValue: 5
-    MaxValue: 300
-    Description: >-
-      How long the voice assistant stays active after wake phrase detection (in seconds).
-      Only used when VoiceAssistantActivationMode is 'wake_phrase'. Default is 30 seconds. Maximum is 300 seconds.
-      This is the default; an Admin can change it at run time on the Configuration page (Virtual
-      Participant section), which takes precedence.
 
   BedrockGuardrailId:
     Type: String
@@ -306,15 +159,6 @@ Parameters:
       If MeetingAssistService is 'STRANDS_BEDROCK_WITH_KB (Create)', provide comma separated list of optional S3 prefixes 
       with the paths to your source documents e.g. "prefix1/, prefix2/". If you leave blank, all documents in your S3 bucket will be scanned.
 
-  AssistantWakePhraseRegEx:
-    Type: String
-    Default: "(OK|Okay)[.,! ]*[Aa]ssistant"
-    Description: >
-      A regular expression for the wake phrase that invokes the Meeting Assistant.
-      The shipped pattern matches 'OK Assistant'.
-      This is the default; an Admin can change it at run time on the Configuration page (Meeting
-      Assistant section), which takes precedence.
-
   TranscriptKnowledgeBase:
     Default: "BEDROCK_KNOWLEDGE_BASE (Create)"
     Type: String
@@ -351,19 +195,6 @@ Parameters:
       - "true"
       - "false"
 
-  IsContentRedactionEnabled:
-    Type: String
-    Default: "false"
-    Description: >-
-      Enable content redaction from Amazon Transcribe transcription output. This is
-      only used when
-      the 'en-US' language is selected in the TranscribeLanguageCode parameter.
-      This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence.
-    AllowedValues:
-      - "true"
-      - "false"
-
   TranscribeContentRedactionType:
     Type: String
     Default: PII
@@ -371,128 +202,6 @@ Parameters:
       Type of content redaction from Amazon Transcribe transcription output.
     AllowedValues:
       - PII
-
-  TranscribeLanguageCode:
-    Type: String
-    Description: >-
-      Language code or language identification setting for Amazon Transcribe. NOTE:
-      Language identification can't  be combined with custom language models or redaction.
-      This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence.
-
-    Default: en-US
-    AllowedValues:
-      - identify-language
-      - identify-multiple-languages
-      - en-US
-      - es-US
-      - en-GB
-      - fr-CA
-      - fr-FR
-      - en-AU
-      - it-IT
-      - de-DE
-      - pt-BR
-      - ja-JP
-      - ko-KR
-      - zh-CN
-      - hi-IN
-      - th-TH
-
-  TranscribeLanguageOptions:
-    Type: String
-    Default: "en-US, es-US"
-    AllowedPattern: '^(?:\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*(?:,\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*)*)?$'
-    ConstraintDescription: >-
-      Unsupported language code or invalid syntax. Allowed values are: en-US, es-US,
-      en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN,
-      th-TH
-    Description: >-
-      When using language identification, specify two or more language codes, e.g.
-      "en-US, es-US" that represent the languages that may be  used in your meeting.
-      Including more than five is not recommended.  Enter only one language dialect
-      per language - e.g. 'en-US, en-AU' is not allowed.
-      Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE,
-      pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
-      NOTE: The identify-language feature has not yet been applied to the virtual participant. 
-      If selected, the virtual participant will use the value of TranscribePreferredLanguage (if set) or 'en-US' (by default).
-      This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence.
-
-  TranscribePreferredLanguage:
-    Type: String
-    Description: >-
-      Optionally select a preferred language when using language identification -
-      must be one of the languages entered for TranscribeLanguageOptions.
-      This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence.
-    Default: None
-    AllowedValues:
-      - None
-      - en-US
-      - es-US
-      - en-GB
-      - fr-CA
-      - fr-FR
-      - en-AU
-      - it-IT
-      - de-DE
-      - pt-BR
-      - ja-JP
-      - ko-KR
-      - zh-CN
-      - hi-IN
-      - th-TH
-
-  ShowSpeakerLabel:
-    Type: String
-    Default: "false"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: >-
-      Default for Amazon Transcribe speaker partitioning (diarization) on
-      WebSocket streaming sessions - the desktop capture app and the Stream Audio
-      browser tab. When enabled, Transcribe tells apart individual voices within
-      an audio channel and each distinct voice is appended to the channel's
-      speaker name as "(spk_0)", "(spk_1)", and so on. Works best with five or
-      fewer voices per channel. This is only the DEFAULT: clients that offer
-      per-channel speaker identification settings (the desktop capture app and
-      the Stream Audio tab) send their own choice per meeting, which takes
-      precedence. Leave "false" unless you want it on for clients that do not.
-      This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence.
-
-  TranscribePiiEntityTypes:
-    Type: String
-    Default: BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN
-    Description: >-
-      Select the PII entity types you want to identify or redact. Remove the values
-      that you don't want to redact from the default.  DO NOT ADD CUSTOM VALUES HERE.
-      This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence.
-
-  CustomVocabularyName:
-    Type: String
-    Default: ""
-    Description: >-
-      The name of the vocabulary to use when processing the transcription job. Leave
-      blank if no custom vocabulary to be used. If yes, the custom
-      vocabulary must pre-exist in your account.
-      This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence.
-
-  CustomLanguageModelName:
-    Type: String
-    Default: ""
-    Description: >-
-      The name of the custom language model to use when processing the transcription
-      job. Leave blank if no
-      custom language model is to be used. If specified, the custom language model
-      must pre-exist in your account,  match the Language Code selected above, and
-      use the 'Narrow Band' base model.
-      This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence.
 
   EnableMicrovmAsr:
     Type: String
@@ -567,31 +276,6 @@ Parameters:
       redaction logic, profanity filtering, or custom rules to highlight patterns
       in the transcript.
 
-  TranscriptLambdaHookFunctionNonPartialOnly:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: >
-      Specifies if Transcript Lambda Hook Function (if specified) is invoked for Non-Partial
-      transcript segments only (true), or for
-      both Partial and Non-Partial transcript segments (false).
-      This is the default; an Admin can change it at run time on the Configuration page (Meeting
-      Processing section), which takes precedence.
-
-  AgendaDerivationAfterSeconds:
-    Type: Number
-    Default: 300
-    MinValue: 0
-    MaxValue: 3600
-    Description: >-
-      Seconds into a meeting with no agenda at which its transcript is read once for an
-      agenda somebody stated, and saved to the meeting if one is found. 0 turns the automatic
-      pass off; the Agenda panel's Derive agenda button works either way.
-      This is the default; an Admin can change it at run time on the Configuration page (Meeting
-      Agenda section), which takes precedence.
-
   EndOfCallTranscriptSummary:
     Default: "BEDROCK"
     Type: String
@@ -605,78 +289,6 @@ Parameters:
       BEDROCK option requires you to choose one of the supported model IDs from the  provided
       list (BedrockModelId). The LAMBDA option requires you to provide a function
       ARN below.
-
-  BedrockModelId:
-    Default: "global.anthropic.claude-sonnet-5-5"
-    Type: String
-    # The Amazon Bedrock Models section of the Configuration page offers
-    # exactly these models (lma_config/schemas/language_models.json in the AI
-    # stack's configuration layer): add or remove a model in both places.
-    # test_parameter_backed_settings.py fails if they differ.
-    AllowedValues:
-      - "amazon.nova-micro-v1:0"
-      - "amazon.nova-lite-v1:0"
-      - "amazon.nova-pro-v1:0"
-      - "us.amazon.nova-premier-v1:0"
-      - "global.amazon.nova-2-lite-v1:0"
-      - "us.amazon.nova-2-lite-v1:0"
-      - "us.anthropic.claude-opus-4-20250514-v1:0"
-      - "us.anthropic.claude-opus-4-1-20250805-v1:0"
-      - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      - "us.anthropic.claude-sonnet-4-6"
-      - "us.anthropic.claude-opus-4-6-v1"
-      - "us.anthropic.claude-haiku-5-5"
-      - "us.anthropic.claude-sonnet-5-5"
-      - "us.anthropic.claude-opus-5-5"
-      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      - "global.anthropic.claude-sonnet-4-6"
-      - "global.anthropic.claude-opus-4-6-v1"
-      - "global.anthropic.claude-haiku-5-5"
-      - "global.anthropic.claude-sonnet-5-5"
-      - "global.anthropic.claude-opus-5-5"
-    Description: >
-      If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
-      of supported models. Includes Nova models (cost-effective) and Claude 4+ (cutting-edge).
-      Some models require inference profiles. The Claude 5 generation reasons before it answers,
-      which raises summary quality but also raises output token use several-fold, so it costs
-      more per meeting than Claude 4.5 at the same size.
-      This is the default; an Admin can change it at run time on the Configuration
-      page (Amazon Bedrock Models section), which takes precedence.
-
-  KeyframeTextModelId:
-    Type: String
-    Default: "amazon.nova-lite-v1:0"
-    # Image-capable models only: the model reads a picture of the shared screen.
-    # Kept in step with the parameter of the same name in
-    # lma-ai-stack/deployment/lma-ai-stack.yaml, which this value is passed to.
-    # The Amazon Bedrock Models section of the Configuration page offers
-    # exactly these models (lma_config/schemas/language_models.json in the AI
-    # stack's configuration layer): add or remove a model in both places.
-    # test_parameter_backed_settings.py fails if they differ.
-    AllowedValues:
-      - "amazon.nova-lite-v1:0"
-      - "amazon.nova-pro-v1:0"
-      - "us.amazon.nova-premier-v1:0"
-      - "global.amazon.nova-2-lite-v1:0"
-      - "us.amazon.nova-2-lite-v1:0"
-      - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      - "us.anthropic.claude-sonnet-4-6"
-      - "us.anthropic.claude-haiku-5-5"
-      - "us.anthropic.claude-sonnet-5-5"
-      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      - "global.anthropic.claude-sonnet-4-6"
-      - "global.anthropic.claude-haiku-5-5"
-      - "global.anthropic.claude-sonnet-5-5"
-    Description: >-
-      Bedrock model that reads the text of each key frame of the shared screen,
-      once, when the frame is stored (docs/meeting-video.md). The text is what
-      the meeting assistant reads first, what the meeting page searches, and
-      what the meeting-history knowledge base indexes. Amazon Nova Lite read
-      every word of the measured frames at about $0.0002 a frame.
-      This is the default; an Admin can change it at run time on the Configuration
-      page (Amazon Bedrock Models section), which takes precedence.
 
   EndOfCallLambdaHookFunctionArn:
     Default: ""
@@ -756,19 +368,6 @@ Parameters:
     AllowedPattern: "^(|[A-Z]{2}(,[A-Z]{2})*)$"
     ConstraintDescription: >-
       Comma separated list of uppercase two letter country codes or empty
-
-  EnableAudioRecording:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: >-
-      Enable or disable recording of audio during a meeting. If set to false, the
-      meeting will not be recorded.
-      If set to true, the meeting will be recorded.
-      This is the default; an Admin can change it at run time on the Configuration page (Meeting
-      Recording section), which takes precedence.
 
   ZoomMeetingSdkClientId:
     Type: String
@@ -927,38 +526,6 @@ Parameters:
       bucket, which the Configuration page does not change.
       This is the default and the upper limit; an Admin can set a shorter period at run time on
       the Configuration page (Retention section), never a longer one.
-
-  MeetingInactivityTimeoutInMinutes:
-    Type: Number
-    Default: 240
-    MinValue: 0
-    MaxValue: 10080
-    Description: >-
-      Number of minutes a meeting may go without producing a finalized transcript
-      segment before LMA ends it on the meeting's behalf. A meeting whose client
-      disconnects without sending its end-of-meeting event stays "In Progress"
-      until this timeout elapses. A meeting that is still connected but silent for
-      longer than the timeout is also ended, so keep it comfortably longer than the
-      longest quiet stretch your meetings have. Set to 0 to leave such meetings open;
-      the reaper that ends them is then not deployed, and the Configuration page's timeout
-      setting has no effect.
-      This is the default; an Admin can change it at run time on the Configuration page (Meeting
-      Processing section), which takes precedence while the stack parameter is above 0.
-
-  MeetingInactivityLookbackInDays:
-    Type: Number
-    Default: 2
-    MinValue: 1
-    MaxValue: 90
-    Description: >-
-      How far back to look for meetings to close. A meeting that started longer
-      ago than this is never closed automatically, so raise it temporarily if you
-      are updating a deployment that has accumulated older meetings stuck in
-      progress. Higher values read more meeting records on every run. A whole
-      number of days: a fractional value is not used, and the reaper looks back 2
-      days instead.
-      This is the default; an Admin can change it at run time on the Configuration page (Meeting
-      Processing section), which takes precedence.
 
   CloudWatchLogsExpirationInDays:
     Type: Number
@@ -1162,46 +729,6 @@ Parameters:
     Description: >-
       Maximum number of EC2 instances for scaling (only used if VPLaunchType=EC2).
 
-  VPAttendeePollMs:
-    Type: Number
-    Default: 20000
-    MinValue: 1000
-    MaxValue: 120000
-    Description: >-
-      How often a Teams Virtual Participant samples the meeting UI to
-      decide whether the meeting is still running, in milliseconds.
-      Leave at the default unless advised otherwise.
-      This is the default; an Admin can change it at run time on the Configuration page (Virtual
-      Participant section), which takes precedence.
-
-  VPPollsBeforeEnd:
-    Type: Number
-    Default: 3
-    MinValue: 1
-    MaxValue: 90
-    Description: >-
-      Consecutive polls on which a Teams meeting must show one or fewer
-      attendees before the Virtual Participant leaves. 3 polls at the default
-      cadence is about 60 seconds.
-      This is the default; an Admin can change it at run time on the Configuration page (Virtual
-      Participant section), which takes precedence.
-
-  VPPollsBeforeEndMissing:
-    Type: Number
-    Default: 15
-    MinValue: 1
-    MaxValue: 90
-    Description: >-
-      Consecutive polls on which a Teams meeting must show neither a readable
-      attendee count nor any in-meeting controls before the Virtual Participant
-      leaves. 15 polls at the default cadence is about 5 minutes. Raise
-      this if participants report the Virtual Participant leaving meetings
-      that are still in progress. A value producing a tolerance outside 4 to
-      30 minutes at the chosen cadence is adjusted into that range, so at the
-      default cadence anything below 12 is raised.
-      This is the default; an Admin can change it at run time on the Configuration page (Virtual
-      Participant section), which takes precedence.
-
   TranscriberDesiredTaskCount:
     Type: Number
     Default: 1
@@ -1341,34 +868,19 @@ Metadata:
           - VPMinInstances
           - VPMaxInstances
       - Label:
-          default: Virtual Participant Meeting-End Detection (Teams)
-        Parameters:
-          - VPAttendeePollMs
-          - VPPollsBeforeEnd
-          - VPPollsBeforeEndMissing
-      - Label:
           default: Meeting Assist Options
         Parameters:
           - MeetingAssistService
-          - MeetingAssistServiceBedrockModelID
-          - MeetingAssistKnowledgeBaseModelID
           - TavilyApiKey
           - TavilyApiKeySecretArn
-          - AssistantWakePhraseRegEx
       - Label:
           default: Meeting Assist Voice Assistant
         Parameters:
           - ElevenLabsApiKey
           - ElevenLabsApiKeySecretArn
-          - ElevenLabsAgentId
           - SimliApiKey
           - SimliApiKeySecretArn
-          - SimliFaceId
-          - VoiceAssistantProvider
           - AmazonNovaSonicRegion
-          - VoiceAssistantActivationMode
-          - VoiceAssistantWakePhrases
-          - VoiceAssistantActivationDuration
           - ZoomMeetingSdkClientId
           - ZoomMeetingSdkClientSecret
           - ZoomMeetingSdkClientSecretArn
@@ -1398,15 +910,7 @@ Metadata:
           default: Amazon Transcribe Configuration
         Parameters:
           - IsPartialTranscriptEnabled
-          - IsContentRedactionEnabled
-          - TranscribeLanguageCode
-          - TranscribeLanguageOptions
-          - TranscribePreferredLanguage
           - TranscribeContentRedactionType
-          - ShowSpeakerLabel
-          - TranscribePiiEntityTypes
-          - CustomVocabularyName
-          - CustomLanguageModelName
       - Label:
           default: On-demand speech engine (EXPERIMENTAL)
         Parameters:
@@ -1429,11 +933,7 @@ Metadata:
           default: Transcript Event Processing Configuration
         Parameters:
           - TranscriptLambdaHookFunctionArn
-          - TranscriptLambdaHookFunctionNonPartialOnly
           - EndOfCallTranscriptSummary
-          - AgendaDerivationAfterSeconds
-          - BedrockModelId
-          - KeyframeTextModelId
           - EndOfCallLambdaHookFunctionArn
           - StartOfCallLambdaHookFunctionArn
           - PostCallSummaryLambdaHookFunctionArn
@@ -1450,15 +950,12 @@ Metadata:
       - Label:
           default: Retention Settings
         Parameters:
-          - EnableAudioRecording
           - EnableVideoRecording
           - MeetingRecordExpirationInDays
           - TranscriptionExpirationInDays
           - AudioRecordingExpirationInDays
           - CloudWatchLogsExpirationInDays
           - VPSchedulerStateMachineLogsExpirationInDays
-          - MeetingInactivityTimeoutInMinutes
-          - MeetingInactivityLookbackInDays
           - EnableDataRetentionOnDelete
       - Label:
           default: AppSync Configuration
@@ -1490,12 +987,6 @@ Metadata:
         Parameters:
           - ModelValidation
     ParameterLabels:
-      BedrockModelId:
-        default: Bedrock Model ID for Summaries and Meeting Insights
-      KeyframeTextModelId:
-        default: Bedrock Model ID for Reading Key Frames of the Shared Screen
-      EnableAudioRecording:
-        default: Record Meeting Audio
       EnableVideoRecording:
         default: Record Meeting Video
       LogLevel:
@@ -1508,10 +999,6 @@ Metadata:
         default: Authorized Account Email Domain(s)
       MeetingAssistService:
         default: Meeting Assist Service
-      MeetingAssistServiceBedrockModelID:
-        default: Meeting Assist Service Bedrock Model ID
-      MeetingAssistKnowledgeBaseModelID:
-        default: Meeting Assist Knowledge Base Bedrock Model ID
       TavilyApiKey:
         default: Tavily API Key for Web Search (STRANDS_BEDROCK only)
       TavilyApiKeySecretArn:
@@ -1520,14 +1007,10 @@ Metadata:
         default: ElevenLabs API Key for Virtual Participant Voice (Optional)
       ElevenLabsApiKeySecretArn:
         default: Existing Secret ARN Holding the ElevenLabs API Key (Optional)
-      ElevenLabsAgentId:
-        default: ElevenLabs Agent ID for Custom Personality (Optional)
       SimliApiKey:
         default: Simli API Key for Avatar (Optional)
       SimliApiKeySecretArn:
         default: Existing Secret ARN Holding the Simli API Key (Optional)
-      SimliFaceId:
-        default: Simli Face ID for Avatar Appearance (Optional)
       ZoomMeetingSdkClientId:
         default: Zoom Meeting SDK Client ID (Optional)
       ZoomMeetingSdkClientSecret:
@@ -1538,18 +1021,8 @@ Metadata:
         default: Azure Communication Services Connection String for Teams SDK Join (Optional)
       AcsConnectionStringSecretArn:
         default: Existing Secret ARN Holding the ACS Connection String (Optional)
-      VoiceAssistantProvider:
-        default: Voice Assistant Provider (none, elevenlabs, amazon_nova_sonic)
       AmazonNovaSonicRegion:
         default: Amazon Nova Sonic Region (blank = this stack's region)
-      VoiceAssistantActivationMode:
-        default: Voice Assistant Activation Mode
-      VoiceAssistantWakePhrases:
-        default: Voice Assistant Wake Phrases (comma-separated)
-      VoiceAssistantActivationDuration:
-        default: Voice Assistant Activation Duration (seconds)
-      AssistantWakePhraseRegEx:
-        default: Meeting Assist Wake Phrase Regular Expression
       BedrockGuardrailId:
         default: Bedrock Guardrail Id (optional)
       BedrockGuardrailVersion:
@@ -1568,24 +1041,8 @@ Metadata:
         default: MCP Server OAuth Callback URLs
       IsPartialTranscriptEnabled:
         default: Enable Partial Transcripts
-      IsContentRedactionEnabled:
-        default: Enable Content Redaction for Transcripts
-      TranscribeLanguageCode:
-        default: Language for Transcription
-      TranscribeLanguageOptions:
-        default: Transcribe Language Options
-      TranscribePreferredLanguage:
-        default: Transcribe Preferred Language
       TranscribeContentRedactionType:
         default: Content Redaction Type for Transcription
-      ShowSpeakerLabel:
-        default: Default for Speaker Identification on Streaming Sessions
-      TranscribePiiEntityTypes:
-        default: Transcription PII Redaction Entity Types
-      CustomVocabularyName:
-        default: Transcription Custom Vocabulary Name
-      CustomLanguageModelName:
-        default: Transcription Custom Language Model Name
       EnableMicrovmAsr:
         default: Deploy the on-demand speech engine (EXPERIMENTAL)
       EnableVoiceEnrollment:
@@ -1600,12 +1057,8 @@ Metadata:
         default:
           Lambda Hook Function ARN for Custom Transcript Segment Processing
           (existing)
-      TranscriptLambdaHookFunctionNonPartialOnly:
-        default: Lambda Hook Function Mode Non-Partial only
       EndOfCallTranscriptSummary:
         default: End of Call Transcript Summary
-      AgendaDerivationAfterSeconds:
-        default: Seconds into a Meeting to Look for a Stated Agenda
       EndOfCallLambdaHookFunctionArn:
         default: Lambda Hook Function ARN for Custom End of Call Processing (existing)
       StartOfCallLambdaHookFunctionArn:
@@ -1632,10 +1085,6 @@ Metadata:
         default: CloudWatch Logs Expiration In Days
       VPSchedulerStateMachineLogsExpirationInDays:
         default: Virtual Participant Scheduler State Machine Logs Expiration In Days
-      MeetingInactivityTimeoutInMinutes:
-        default: Meeting Inactivity Timeout In Minutes
-      MeetingInactivityLookbackInDays:
-        default: Meeting Inactivity Lookback In Days
       EnableAppSyncApiCache:
         default: Enable AppSync Api Cache
       AppSyncApiCacheInstanceType:
@@ -1660,12 +1109,6 @@ Metadata:
         default: VP Minimum Warm Instances
       VPMaxInstances:
         default: VP Maximum Instances
-      VPAttendeePollMs:
-        default: VP Teams Meeting-End Poll Interval (ms)
-      VPPollsBeforeEnd:
-        default: VP Teams Polls Before Leaving An Empty Meeting
-      VPPollsBeforeEndMissing:
-        default: VP Teams Polls Before Leaving An Unreadable Meeting
       TranscriberDesiredTaskCount:
         default: WebSocket Transcriber Task Count
       TranscriberAutoScalingEnabled:
@@ -1854,12 +1297,10 @@ Conditions:
   # SNS rejects a subscription with an empty endpoint, which would fail the
   # whole stack rather than just the subscription.
   ShouldSubscribeAdminEmailToAlerts: !Not [!Equals [!Ref AdminEmail, ""]]
-  # The stale-meeting reaper's schedule rule is created with State DISABLED when
-  # the timeout is 0, so the function exists but is never invoked. An alarm on
-  # "no invocations" would then be permanently in ALARM, so it is not created.
-  ShouldAlarmOnStaleMeetingReaper: !And
-    - !Condition ShouldCreateOperationalAlarms
-    - !Not [!Equals [!Ref MeetingInactivityTimeoutInMinutes, 0]]
+  # The stale-meeting reaper is always scheduled; a timeout of 0 on the
+  # Configuration page makes each run end meetings nothing, so the "no
+  # invocations" alarm still applies.
+  ShouldAlarmOnStaleMeetingReaper: !Condition ShouldCreateOperationalAlarms
   ShouldEnableAsrDiarization: !And
     - !Condition ShouldDeployMicrovmAsr
     - !Not
@@ -2393,38 +1834,7 @@ Resources:
             status = cfnresponse.SUCCESS
             reason = f"Parameters Validated"
             if event['RequestType'] != "Delete":
-              # Validate Transcribe Language options
-              transcribeLanguageCode = event['ResourceProperties'].get('TranscribeLanguageCode', '')
-              transcribeLanguageOptions = event['ResourceProperties'].get('TranscribeLanguageOptions', '')
-              transcribePreferredLanguage = event['ResourceProperties'].get('TranscribePreferredLanguage', '')
-              customVocabularyName = event['ResourceProperties'].get('CustomVocabularyName', '')
-              customLanguageModelName = event['ResourceProperties'].get('CustomLanguageModelName', '')
               modelValidation = event['ResourceProperties'].get('ModelValidation', '')
-              if transcribeLanguageCode in ['identify-language', 'identify-multiple-languages']:
-                if customVocabularyName:
-                  status = cfnresponse.FAILED
-                  reason = f"CustomVocabularyName cannot be set when TranscribeLanguageCode is '{transcribeLanguageCode}'"
-                elif customLanguageModelName:
-                  status = cfnresponse.FAILED
-                  reason = f"CustomLanguageModelName cannot be set when TranscribeLanguageCode is '{transcribeLanguageCode}'"
-                if transcribeLanguageOptions == '':
-                  status = cfnresponse.FAILED
-                  reason = f"At least two languages must be provided for TranscribeLanguageOptions when using language identification"
-                else:
-                  # only one language dialect per language
-                  languages = set()
-                  lang_codes = [l.strip() for l in transcribeLanguageOptions.split(',')]
-                  for lang_code in lang_codes:
-                    lang = lang_code.split('-')[0]
-                    if lang in languages:
-                      status = cfnresponse.FAILED
-                      reason = f"TranscribeLanguageOptions has a duplicate entry for '{lang}' - only one language dialect per language is allowed."
-                    languages.add(lang)
-                  # transcribePreferredLanguage must be in transcribeLanguageOptions
-                  if not transcribePreferredLanguage == 'None':
-                    if not transcribePreferredLanguage in lang_codes:
-                      status = cfnresponse.FAILED
-                      reason = f"TranscribePreferredLanguage '{transcribePreferredLanguage}' is not in TranscribeLanguageOptions '{transcribeLanguageOptions}'"
               # Validate Bedrock model access
               failedModels = []
               requiredmodels = event['ResourceProperties'].get('BedrockModelIds', [])
@@ -2455,22 +1865,12 @@ Resources:
     Type: Custom::ValidateParameters
     Properties:
       ServiceToken: !GetAtt ValidateParametersFunction.Arn
-      TranscribeLanguageCode: !Ref TranscribeLanguageCode
-      TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
-      TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
-      CustomVocabularyName: !Ref CustomVocabularyName
-      CustomLanguageModelName: !Ref CustomLanguageModelName
       ModelValidation: !Ref ModelValidation
+      # The models the summaries, the meeting assistant and the key frames use
+      # are chosen on the Configuration page, which offers only model ids it
+      # knows; the knowledge base embedding model is a deployment's own.
       BedrockModelIds:
-        - !Ref MeetingAssistServiceBedrockModelID # Meeting assistant
-        # Meeting Assistant knowledge base answer generation. Listed separately
-        # because it need not be the agent's model; when the two parameters hold
-        # the same id this validates it twice, which costs one extra short
-        # Converse call per deployment and keeps the list declarative.
-        - !Ref MeetingAssistKnowledgeBaseModelID
         - "amazon.titan-embed-text-v2:0" # Meeting Assistant Bedrock KB embeddings
-        - !Ref BedrockModelId # Meeting summarization
-        - !Ref KeyframeTextModelId # Text of the shared screen's key frames
 
   ##########################################################################
   # Resources shared by multiple nested stacks
@@ -2602,7 +2002,6 @@ Resources:
       ServiceToken: !GetAtt UpdateLMASettingsFunction.Arn
       LCASettingsName: !Ref LMASettingsParameter
       LCASettingsKeyValuePairs:
-        AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
         ShouldUseTranscriptKnowledgeBase: !If
         - ShouldUseTranscriptKnowledgeBase
         - True
@@ -3354,7 +2753,6 @@ Resources:
       Parameters:
         LMAStackName: !Ref AWS::StackName
         AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
-        AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
         AudioRecordingExpirationInDays: !Ref AudioRecordingExpirationInDays
         EnableVoiceToneAnalysis: "false"
         CallAudioSource: "Genesys Cloud Audiohook Web Socket"
@@ -3373,41 +2771,16 @@ Resources:
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         ConfigurationPreset: !Ref ConfigurationPreset
         CustomConfigPath: !Ref CustomConfigPath
-        MeetingInactivityTimeoutInMinutes: !Ref MeetingInactivityTimeoutInMinutes
-        MeetingInactivityLookbackInDays: !Ref MeetingInactivityLookbackInDays
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
-        TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
-        AgendaDerivationAfterSeconds: !Ref AgendaDerivationAfterSeconds
-        BedrockModelId: !Ref BedrockModelId
-        KeyframeTextModelId: !Ref KeyframeTextModelId
         # Not used by any resource of the AI stack: passed so that its
         # configuration seeder writes them into the baseline as the defaults of
         # the Amazon Bedrock Models section, which the meeting assistant reads.
-        MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
-        MeetingAssistKnowledgeBaseModelID: !Ref MeetingAssistKnowledgeBaseModelID
         # Likewise the Amazon Transcribe options and the audio-recording
         # default, which the WebSocket transcriber reads from the Amazon
         # Transcribe and Meeting Recording sections.
-        TranscribeLanguageCode: !Ref TranscribeLanguageCode
-        TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
-        TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
-        IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
-        TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
-        CustomVocabularyName: !Ref CustomVocabularyName
-        CustomLanguageModelName: !Ref CustomLanguageModelName
-        ShowSpeakerLabel: !Ref ShowSpeakerLabel
-        EnableAudioRecording: !Ref EnableAudioRecording
         # And the Virtual Participant's own settings, which it reads from the
         # Virtual Participant section when it starts.
-        VoiceAssistantProvider: !Ref VoiceAssistantProvider
-        VoiceAssistantWakePhrases: !Ref VoiceAssistantWakePhrases
-        VoiceAssistantActivationDuration: !Ref VoiceAssistantActivationDuration
-        ElevenLabsAgentId: !Ref ElevenLabsAgentId
-        SimliFaceId: !Ref SimliFaceId
-        VPAttendeePollMs: !Ref VPAttendeePollMs
-        VPPollsBeforeEnd: !Ref VPPollsBeforeEnd
-        VPPollsBeforeEndMissing: !Ref VPPollsBeforeEndMissing
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
         StartOfCallLambdaHookFunctionArn: !Ref StartOfCallLambdaHookFunctionArn
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
@@ -3473,7 +2846,6 @@ Resources:
         EnableMCPServer: !Ref EnableMCP
         MCPServerCallbackURLs: !Ref MCPServerCallbackURLs
         CognitoUserPoolDomain: !GetAtt COGNITOSTACK.Outputs.CognitoUserPoolDomain
-        VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
         EnableVoiceEnrollment: !Ref EnableVoiceEnrollment
         VoiceEnrollmentRetentionDays: !Ref VoiceEnrollmentRetentionDays
         VoiceEnrollmentTermsVersion: !Ref VoiceEnrollmentTermsVersion
@@ -3533,8 +2905,6 @@ Resources:
             - !GetAtt BEDROCKKB.Outputs.KnowledgeBaseID
             - ""
         BedrockKnowledgeBaseS3BucketName: !Ref BedrockKnowledgeBaseS3BucketName
-        MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
-        MeetingAssistKnowledgeBaseModelID: !Ref MeetingAssistKnowledgeBaseModelID
         # The ARN of the secret holding the key, never the key: whichever form
         # the operator used, the meeting-assist function fetches the value for
         # itself. Empty when web search is not configured.
@@ -3552,9 +2922,7 @@ Resources:
         LogLevel: !Ref LogLevel
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         # Changes to Params below force MeetingAssist Setup to update.
-        TranscribeLanguageCode: !Ref TranscribeLanguageCode
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
-        TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
@@ -3648,15 +3016,7 @@ Resources:
         CallDataStreamArn: !GetAtt CallDataStream.Arn
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         TranscribeApiMode: "standard"
-        IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
         TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
-        TranscribeLanguageCode: !Ref TranscribeLanguageCode
-        TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
-        TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
-        TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
-        ShowSpeakerLabel: !Ref ShowSpeakerLabel
-        CustomVocabularyName: !Ref CustomVocabularyName
-        CustomLanguageModelName: !Ref CustomLanguageModelName
         AsrLauncherFunctionArn: !If
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrLauncherFunctionArn
@@ -3697,7 +3057,6 @@ Resources:
         LMASettingsParameterName: !Ref LMASettingsParameter
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
-        EnableAudioRecording: !Ref EnableAudioRecording
         EnableVideoRecording: !Ref EnableVideoRecording
         VideoRecordingsPrefix: "lma-video-recordings/"
         TranscriberDesiredTaskCount: !Ref TranscriberDesiredTaskCount
@@ -3745,7 +3104,6 @@ Resources:
           - ShouldUseAnyStrandsBedrock
           - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
           - ""
-        EnableAudioRecording: !Ref EnableAudioRecording
         ZoomMeetingSdkClientId: !Ref ZoomMeetingSdkClientId
         # ARNs of the secrets holding these credentials, never the credentials:
         # the Virtual Participant task definition names the ARN and the ECS
@@ -3766,24 +3124,15 @@ Resources:
             - !Ref AcsConnectionStringSecret
             - ""
         EnableVideoRecording: !Ref EnableVideoRecording
-        VPAttendeePollMs: !Ref VPAttendeePollMs
-        VPPollsBeforeEnd: !Ref VPPollsBeforeEnd
-        VPPollsBeforeEndMissing: !Ref VPPollsBeforeEndMissing
         ElevenLabsApiKeySecretArn: !If
           - HasElevenLabsApiKeySecretArn
           - !Ref ElevenLabsApiKeySecretArn
           - !If [HasElevenLabsApiKeyValue, !Ref ElevenLabsApiKeySecret, ""]
-        ElevenLabsAgentId: !Ref ElevenLabsAgentId
         SimliApiKeySecretArn: !If
           - HasSimliApiKeySecretArn
           - !Ref SimliApiKeySecretArn
           - !If [HasSimliApiKeyValue, !Ref SimliApiKeySecret, ""]
-        SimliFaceId: !Ref SimliFaceId
-        VoiceAssistantProvider: !Ref VoiceAssistantProvider
         AmazonNovaSonicRegion: !Ref AmazonNovaSonicRegion
-        VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
-        VoiceAssistantWakePhrases: !Ref VoiceAssistantWakePhrases
-        VoiceAssistantActivationDuration: !Ref VoiceAssistantActivationDuration
         NovaSonicConfigTableName: !GetAtt NOVASONICONFIGSTACK.Outputs.NovaSonicConfigTableName
         # The shared configuration table, which the voice assistant's settings
         # are read from. The Nova Sonic table above is still passed, as the
@@ -3796,12 +3145,7 @@ Resources:
           - ""
         AudioFilePrefix: "lma-audio-recordings/"
         CallDataStreamName: !Ref CallDataStream
-        IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
         TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
-        TranscribeLanguageCode: !Ref TranscribeLanguageCode
-        TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
-        TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
-        CustomVocabularyName: !Ref CustomVocabularyName
         # The on-demand ASR engine, when deployed. Whether a Virtual Participant
         # uses it is the Transcription Engine runtime switch, read at meeting start.
         AsrLauncherFunctionArn: !If

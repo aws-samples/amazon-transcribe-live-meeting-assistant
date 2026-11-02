@@ -34,22 +34,6 @@ Parameters:
   BedrockKnowledgeBaseS3BucketName:
     Type: String
 
-  MeetingAssistServiceBedrockModelID:
-    Type: String
-    # lma-main.yaml always passes this through, so the default is only reached by
-    # a standalone deployment of this template. It tracks lma-main's own default
-    # rather than naming a model no longer offered there.
-    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-
-  MeetingAssistKnowledgeBaseModelID:
-    Type: String
-    # The model the Bedrock Knowledge Bases generate their answers with, kept
-    # separate from the agent's model above because RetrieveAndGenerate accepts a
-    # narrower set of models than Converse does. AllowedValues are stated in
-    # lma-main.yaml, which always passes this through; as above, the default here
-    # is only reached by a standalone deployment of this template.
-    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-
   TavilyApiKeySecretArn:
     Type: String
     Default: ""
@@ -100,11 +84,7 @@ Parameters:
     Description: ARN of Transcript Summary function (if defined)
 
   # Changes to Params below force MeetingAssist Setup to update.
-  TranscribeLanguageCode:
-    Type: String
   TranscriptLambdaHookFunctionArn:
-    Type: String
-  TranscriptLambdaHookFunctionNonPartialOnly:
     Type: String
   MeetingRecordExpirationInDays:
     Type: String
@@ -516,10 +496,6 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
-          # The models' defaults, read when the configuration cannot be: each
-          # request reads them from the Amazon Bedrock Models section first.
-          MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
-          KB_MODEL_ID: !Ref MeetingAssistKnowledgeBaseModelID
           CONFIGURATION_TABLE_NAME: !If [HasConfiguration, !Ref ConfigurationTableName, ""]
           KB_ID: !Ref BedrockKnowledgeBaseId
           KB_REGION: !Ref AWS::Region
@@ -720,7 +696,7 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-VPCSTACK-*"
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/${LMAStackName}-vp-logs*"
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/${LMAStackName}-asr-logs*"
-                  # The MicroVM groups images built before v0.3.11 log to,
+                  # The MicroVM groups images built before v0.4.0 log to,
                   # which a stack upgraded from that release keeps. Named
                   # exactly, as the group and as its streams, with no trailing
                   # wildcard on the name: "-vp*" would also cover a
@@ -873,12 +849,6 @@ Resources:
           # value the IAM grant for that group is scoped to, so the two
           # cannot disagree.
           APPSYNC_API_ID: !Ref AppSyncApiId
-          # Tracks the meeting assistant's model so a deployment that selected a
-          # stronger model gets a stronger diagnosis, without adding a
-          # parameter of its own. The default, read when the configuration
-          # cannot be: each run reads the model from the Amazon Bedrock Models
-          # section first.
-          TROUBLESHOOTING_MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
           CONFIGURATION_TABLE_NAME: !If [HasConfiguration, !Ref ConfigurationTableName, ""]
           BEDROCK_GUARDRAIL_ID: !Ref BedrockGuardrailId
           BEDROCK_GUARDRAIL_VERSION: !Ref BedrockGuardrailVersion
@@ -1027,9 +997,7 @@ Resources:
         - !Ref AWS::NoValue
       CloudFrontDomainName: !Sub "https://${CloudFrontDomainName}/"
       # Changes to Params below force MeetingAssist Setup to execute.
-      TranscribeLanguageCode: !Ref TranscribeLanguageCode
       TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
-      TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
       MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
       TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
       EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary

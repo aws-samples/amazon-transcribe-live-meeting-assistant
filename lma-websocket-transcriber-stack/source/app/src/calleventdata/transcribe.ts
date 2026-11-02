@@ -98,10 +98,6 @@ const RECORDINGS_BUCKET_NAME = process.env['RECORDINGS_BUCKET_NAME'] || null;
 // optional - disable post call analytics output
 const IS_TCA_POST_CALL_ANALYTICS_ENABLED =
     (process.env['IS_TCA_POST_CALL_ANALYTICS_ENABLED'] || 'false') === 'true';
-// Whether Call Analytics' post-call output is redacted: from the
-// IsContentRedactionEnabled stack parameter, which the PCA integration also reads
-// (see where it is used).
-const IS_POST_CALL_REDACTION_ENABLED = (process.env['IS_CONTENT_REDACTION_ENABLED'] || '') === 'true';
 // optional - when redaction is enabled, choose 'redacted' only (dafault), or 'redacted_and_unredacted' for both
 const POST_CALL_CONTENT_REDACTION_OUTPUT =
     process.env['POST_CALL_CONTENT_REDACTION_OUTPUT'] || 'redacted';
@@ -341,12 +337,13 @@ const isStaleSessionError = (error: unknown): boolean => {
 };
 
 /**
- * Whether Call Analytics' post-call output is asked for redacted: only when the
- * stack parameter asks for it and the meeting's stream is redacted, since a
- * redaction output for an unredacted stream is not one Amazon Transcribe takes.
+ * Whether Call Analytics' post-call output is asked for redacted: whenever the
+ * meeting's stream is redacted (the Amazon Transcribe section of the
+ * Configuration page). Amazon Transcribe takes a redaction output only for a
+ * redacted stream, so an unredacted meeting's output is unredacted too. The PCA
+ * integration looks for the output in whichever folder it was written to.
  */
-export const postCallRedactionOutput = (parameterEnabled: boolean, streamRedacted: boolean): boolean =>
-    parameterEnabled && streamRedacted;
+export const postCallRedactionOutput = (streamRedacted: boolean): boolean => streamRedacted;
 
 /**
  * Lays a meeting's Amazon Transcribe options onto a streaming request: the
@@ -545,22 +542,10 @@ export const startTranscribe = async (
                             OutputLocation: tcaOutputLocation,
                             DataAccessRoleArn: TCA_DATA_ACCESS_ROLE_ARN,
                         };
-                        // The post-call output is redacted only when both the
-                        // IsContentRedactionEnabled stack parameter -- which the PCA
-                        // integration reads to choose its folder -- and this
-                        // meeting's own redaction say so: Amazon Transcribe accepts
-                        // a redaction output only for a redacted stream. When the
-                        // two disagree, the output is unredacted and that is said.
-                        if (postCallRedactionOutput(IS_POST_CALL_REDACTION_ENABLED, redactionApplied)) {
+                        // Redacted exactly when this meeting's stream is.
+                        if (postCallRedactionOutput(redactionApplied)) {
                             configuration_event.PostCallAnalyticsSettings.ContentRedactionOutput =
                                 POST_CALL_CONTENT_REDACTION_OUTPUT as ContentRedactionOutput;
-                        } else if (IS_POST_CALL_REDACTION_ENABLED) {
-                            server.log.warn(
-                                `[TRANSCRIBING]: [${callMetaData.callId}] - The IsContentRedactionEnabled parameter ` +
-                                    'asks for redacted post-call analytics, but this meeting is not redacted ' +
-                                    '(see the Amazon Transcribe section of the Configuration page); its post-call ' +
-                                    'output is not redacted.'
-                            );
                         }
                     }
                     yield { ConfigurationEvent: configuration_event };

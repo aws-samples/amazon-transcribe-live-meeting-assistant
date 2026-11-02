@@ -110,8 +110,6 @@ setting_response = SSM_CLIENT.get_parameter(Name=getenv("PARAMETER_STORE_NAME"))
 SETTINGS = json.loads(setting_response["Parameter"]["Value"])
 if "CategoryAlertRegex" in SETTINGS:
     SETTINGS["AlertRegEx"] = re.compile(SETTINGS["CategoryAlertRegex"])
-if "AssistantWakePhraseRegEx" in SETTINGS:
-    SETTINGS["AssistantWakePhraseRegEx"] = re.compile(SETTINGS["AssistantWakePhraseRegEx"])
 
 
 async def process_event(event) -> SequenceTrackingBatchProcessor:

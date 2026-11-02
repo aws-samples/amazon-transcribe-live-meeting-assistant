@@ -8,10 +8,10 @@ Complete each section in order. Check off items as you go. Final dry run should 
 
 - [ ] LMA stack deployed and healthy (check CloudFormation stack status: `CREATE_COMPLETE` or `UPDATE_COMPLETE`)
 - [ ] Virtual Participant enabled with **EC2 launch type** (faster joins, ~30-60 sec vs 1-2 min for Fargate)
-- [ ] Nova Sonic voice assistant configured:
-  - [ ] `VoiceAssistantProvider` = `amazon_nova_sonic`
-  - [ ] `VoiceAssistantActivationMode` = `wake_phrase`
-  - [ ] `VoiceAssistantWakePhrases` includes `hey alex`
+- [ ] Nova Sonic voice assistant configured (Virtual Participant section of the Configuration page, in an active Custom profile):
+  - [ ] **Voice assistant** = Amazon Nova Sonic (`amazon_nova_sonic`)
+  - [ ] **Voice assistant activation mode** = Wake phrase (`wake_phrase`)
+  - [ ] **Wake phrases** includes `hey alex`
   - [ ] Test wake phrase detection in a short test meeting
 - [ ] Tavily API key configured (for web search)
   - [ ] `TavilyApiKey` parameter set in CloudFormation

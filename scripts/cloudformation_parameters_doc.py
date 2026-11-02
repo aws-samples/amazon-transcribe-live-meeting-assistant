@@ -158,35 +158,16 @@ CLASSIFICATION: Dict[str, Classification] = {
         RESOURCE, "Sets the maximum size of the Virtual Participant Auto Scaling group."
     ),
     # Virtual Participant Meeting-End Detection (Teams)
-    "VPAttendeePollMs": _c(
-        RUNTIME, "Read by the Virtual Participant when it starts, from its task environment."
-    ),
-    "VPPollsBeforeEnd": _c(
-        RUNTIME, "Read by the Virtual Participant when it starts, from its task environment."
-    ),
-    "VPPollsBeforeEndMissing": _c(
-        RUNTIME, "Read by the Virtual Participant when it starts, from its task environment."
-    ),
     # Meeting Assist Options
     "MeetingAssistService": _c(
         RESOURCE,
         "Decides whether the meeting assistant's knowledge base is created, used from an existing one, or absent.",
-    ),
-    "MeetingAssistServiceBedrockModelID": _c(
-        RUNTIME,
-        "Read by the meeting assistant and the troubleshooting agent. Their Amazon Bedrock permissions cover every model, so the choice changes no permission.",
-    ),
-    "MeetingAssistKnowledgeBaseModelID": _c(
-        RUNTIME, "Read by the meeting assistant's knowledge-base tools."
     ),
     "TavilyApiKey": _c(
         CREDENTIAL, "Stored in a Secrets Manager secret the meeting assistant reads."
     ),
     "TavilyApiKeySecretArn": _c(
         CREDENTIAL, "Grants the meeting assistant read access to the named secret."
-    ),
-    "AssistantWakePhraseRegEx": _c(
-        RUNTIME, "Written to the deployment settings and read by the meeting event processor."
     ),
     # Meeting Assist Voice Assistant
     "ElevenLabsApiKey": _c(
@@ -195,28 +176,15 @@ CLASSIFICATION: Dict[str, Classification] = {
     "ElevenLabsApiKeySecretArn": _c(
         CREDENTIAL, "Grants the Virtual Participant read access to the named secret."
     ),
-    "ElevenLabsAgentId": _c(
-        RUNTIME, "Read by the Virtual Participant when its voice assistant starts."
-    ),
     "SimliApiKey": _c(
         CREDENTIAL, "Stored in a Secrets Manager secret the Virtual Participant is given."
     ),
     "SimliApiKeySecretArn": _c(
         CREDENTIAL, "Grants the Virtual Participant read access to the named secret."
     ),
-    "SimliFaceId": _c(RUNTIME, "Read by the Virtual Participant when its avatar starts."),
-    "VoiceAssistantProvider": _c(RUNTIME, "Read by the Virtual Participant when it starts."),
     "AmazonNovaSonicRegion": _c(
         RESOURCE,
         "Names the region in the Virtual Participant's permission to invoke Amazon Nova Sonic.",
-    ),
-    "VoiceAssistantActivationMode": _c(
-        RUNTIME,
-        "Read by the Virtual Participant when it starts, and by the Configuration page to say whether the Nova Sonic meeting modes apply.",
-    ),
-    "VoiceAssistantWakePhrases": _c(RUNTIME, "Read by the Virtual Participant when it starts."),
-    "VoiceAssistantActivationDuration": _c(
-        RUNTIME, "Read by the Virtual Participant when it starts."
     ),
     "ZoomMeetingSdkClientId": _c(
         CREDENTIAL,
@@ -266,39 +234,9 @@ CLASSIFICATION: Dict[str, Classification] = {
     ),
     # Amazon Transcribe Configuration
     "IsPartialTranscriptEnabled": _c(NO_EFFECT, "Partial transcripts are always processed."),
-    "IsContentRedactionEnabled": _c(
-        RUNTIME,
-        "Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts. Redaction applies only for the languages Amazon Transcribe redacts.",
-    ),
-    "TranscribeLanguageCode": _c(
-        RUNTIME,
-        "Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts; checked once while the stack is deployed.",
-    ),
-    "TranscribeLanguageOptions": _c(
-        RUNTIME,
-        "Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts; checked once while the stack is deployed.",
-    ),
-    "TranscribePreferredLanguage": _c(
-        RUNTIME,
-        "Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts; checked once while the stack is deployed.",
-    ),
     "TranscribeContentRedactionType": _c(
         RUNTIME,
         "Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts.",
-    ),
-    "ShowSpeakerLabel": _c(
-        RUNTIME, "Read by the WebSocket transcriber for each streaming session."
-    ),
-    "TranscribePiiEntityTypes": _c(
-        RUNTIME, "Read by the WebSocket transcriber for each streaming session."
-    ),
-    "CustomVocabularyName": _c(
-        RUNTIME,
-        "Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts; checked once while the stack is deployed.",
-    ),
-    "CustomLanguageModelName": _c(
-        RUNTIME,
-        "Read by the WebSocket transcriber for each streaming session; checked once while the stack is deployed.",
     ),
     # On-demand speech engine
     "EnableMicrovmAsr": _c(
@@ -337,23 +275,9 @@ CLASSIFICATION: Dict[str, Classification] = {
     "TranscriptLambdaHookFunctionArn": _c(
         RESOURCE, "Grants the meeting event processor permission to invoke the named function."
     ),
-    "TranscriptLambdaHookFunctionNonPartialOnly": _c(
-        RUNTIME, "Read by the meeting event processor."
-    ),
-    "AgendaDerivationAfterSeconds": _c(
-        RUNTIME,
-        "Read by the meeting event processor as each meeting's finished segments reach it, until it has queued the automatic pass for that meeting.",
-    ),
     "EndOfCallTranscriptSummary": _c(
         RESOURCE,
         "Decides whether the Bedrock summarizer exists or a Lambda hook is invoked instead.",
-    ),
-    "BedrockModelId": _c(
-        RUNTIME,
-        "Read by the summarizer and the functions that parse invitations, name speakers, derive agendas, answer transcript knowledge-base queries and analyse MCP usage. Their Amazon Bedrock permissions cover every model, so the choice changes no permission.",
-    ),
-    "KeyframeTextModelId": _c(
-        RUNTIME, "Read by the function that reads the text of each key frame."
     ),
     "EndOfCallLambdaHookFunctionArn": _c(
         RESOURCE, "Grants the summary functions permission to invoke the named function."
@@ -373,10 +297,6 @@ CLASSIFICATION: Dict[str, Classification] = {
         RESOURCE, "Sets the geographic restriction of the web app's CloudFront distribution."
     ),
     # Retention Settings
-    "EnableAudioRecording": _c(
-        RUNTIME,
-        "Read by the WebSocket transcriber as the default for each meeting, and by the Virtual Participant when it starts.",
-    ),
     "EnableVideoRecording": _c(
         RESOURCE,
         "Sizes the transcriber's task for video, and limits the transcriber to one task through a template rule.",
@@ -408,11 +328,6 @@ CLASSIFICATION: Dict[str, Classification] = {
         RESOURCE,
         "Sets the retention of the scheduled Virtual Participant state machine's log group.",
     ),
-    "MeetingInactivityTimeoutInMinutes": _c(
-        RESOURCE,
-        "Decides whether the inactive-meeting reaper and its schedule exist, and is read by the reaper.",
-    ),
-    "MeetingInactivityLookbackInDays": _c(RUNTIME, "Read by the inactive-meeting reaper."),
     "EnableDataRetentionOnDelete": _c(
         RESOURCE, "Sets the deletion policy of the stack's tables, buckets, user pool and keys."
     ),

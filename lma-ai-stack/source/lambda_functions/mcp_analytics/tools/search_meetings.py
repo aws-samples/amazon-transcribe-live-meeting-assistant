@@ -22,7 +22,7 @@ def _configured_model_id() -> str:
     """The model the transcript knowledge base answers with.
 
     The summaries' model: the Amazon Bedrock Models section of the Configuration
-    page, whose default is the BedrockModelId stack parameter, passed to this
+    page, with its shipped default, passed to this
     function as BEDROCK_MODEL_ID and read when the section cannot be. Read per
     search, so a change reaches it within the section's cache tier.
 

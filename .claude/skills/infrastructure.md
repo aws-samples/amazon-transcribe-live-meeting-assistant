@@ -28,7 +28,14 @@ LMA is a set of **nested CloudFormation stacks** orchestrated by
 - `PermissionsBoundaryArn` — applies to all IAM roles when non-empty
 - `CustomerManagedEncryptionKeyArn` — KMS key for CloudWatch Logs / DynamoDB / SQS
 - `EnableDataRetentionOnDelete` — toggles `Retain` vs `Delete` deletion policies
-- `BedrockModelId`, knowledge-base parameters, etc.
+- Knowledge-base parameters, etc.
+
+Runtime settings (Bedrock model choices, Amazon Transcribe options, voice
+assistant settings, the meeting inactivity timeout and similar) are not stack
+parameters: they are settings on the web UI's Configuration page.
+`lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/setting_defaults.json`
+maps each former parameter to its section and setting. Do not add a stack
+parameter for a value an Admin can change on that page.
 
 ## CRITICAL: GovCloud Compatibility Rules
 

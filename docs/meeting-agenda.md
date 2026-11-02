@@ -102,8 +102,7 @@ most about the first half hour of conversation, where agendas are stated.
 
 **Model and cost.** Derivation uses the model summaries use: **Summaries and
 meeting insights** in the Amazon Bedrock Models section of the
-[Configuration page](configuration-guide.md), whose default is the
-**BedrockModelId** stack parameter. Each pass is one model call, recorded
+[Configuration page](configuration-guide.md). Each pass is one model call, recorded
 against the meeting as **Agenda derivation** in its
 [cost estimate](meeting-cost-estimate.md). The automatic pass runs at most once
 per meeting.
@@ -112,11 +111,9 @@ per meeting.
 for a stated agenda**, in the Meeting Agenda section of the
 [Configuration page](configuration-guide.md), sets how far into a meeting the
 automatic pass runs (300 seconds by default); `0` turns it off. A saved change
-applies within about five minutes. Its default is the
-`AgendaDerivationAfterSeconds` stack parameter, which reaches the Call Event
-Processor as its `AGENDA_DERIVATION_AFTER_SECONDS` environment variable, the
-value used when the configuration cannot be read. The **Derive agenda** button
-works either way.
+applies within about five minutes, with no stack update. When the
+configuration cannot be read, the Call Event Processor uses 300 seconds. The
+**Derive agenda** button works either way.
 
 The button's request is answered within AppSync's 30-second limit in the usual
 case. If the model call takes longer, the panel says it is still reading the

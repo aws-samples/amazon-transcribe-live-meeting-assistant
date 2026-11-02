@@ -23,7 +23,7 @@ logger.setLevel(logging.INFO)
 # Environment variables
 #
 # The model is the summaries' one: the Amazon Bedrock Models section of the
-# Configuration page, whose default is the BedrockModelId stack parameter. The
+# Configuration page, with its shipped default. The
 # template also passes that parameter as BEDROCK_MODEL_ID, read when the section
 # cannot be; the literal below is reached only by a local invocation that sets
 # no environment, so it tracks the parameter's own default.

@@ -267,7 +267,7 @@ def prompt_text() -> str:
         # whose events have aged past retention reports none. Telling the
         # agent to skip those would send it past its own evidence.
         "Never skip a group on it alone",
-        # A stack upgraded from before v0.3.11 has two MicroVM groups, and a
+        # A stack upgraded from before v0.4.0 has two MicroVM groups, and a
         # participant whose MicroVM was launched before the upgrade logged only
         # to the older one; the stream name is how its microvmId finds it.
         "search the legacy group too",
