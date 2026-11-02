@@ -4,7 +4,7 @@
   "title": "Retention",
   "description": "How long meeting records and transcripts are kept. Each of the two periods in days defaults to the value the stack was deployed with, which is also the longest this deployment allows: a shorter period can be set here, a longer one cannot. Recordings in the recordings bucket, and the bucket's lifecycle rules, follow the stack parameters only.",
   "sectionLabel": "Retention",
-  "appliesText": "A saved change applies within about five minutes: a period in days to records written after that, and the transcript deletion choice to meetings that end after that. A record already written keeps the expiry it was given, and a meeting already scheduled for deletion keeps its time.",
+  "appliesText": "A saved period in days applies within about five minutes, to records written after that; a saved transcript deletion choice applies to the next meeting that ends. A record already written keeps the expiry it was given, and a meeting already scheduled for deletion keeps its time.",
   "order": 12,
   "collapsible": true,
   "defaultExpanded": false,

@@ -186,7 +186,7 @@ def aws(monkeypatch):
 
 
 def _set_delay(monkeypatch, minutes):
-    monkeypatch.setattr(lf, "deletion_delay_minutes", lambda: minutes)
+    monkeypatch.setattr(lf, "current_delay", lambda: minutes)
 
 
 def _meeting(aws):
@@ -385,3 +385,17 @@ def test_times_are_written_and_read_in_utc():
         2026, 11, 2, 9, 0, tzinfo=timezone.utc
     )
     assert lf._parse_iso("not a time") is None
+
+
+def test_the_setting_is_read_past_the_cache(monkeypatch):
+    """A save on the Configuration page applies to the next meeting to end."""
+    calls = []
+
+    class Store:
+        def invalidate(self):
+            calls.append("invalidate")
+
+    monkeypatch.setattr(lf, "_STORE", Store())
+    monkeypatch.setattr(lf, "deletion_delay_minutes", lambda store=None: calls.append("read") or 15)
+    assert lf.current_delay() == 15
+    assert calls == ["invalidate", "read"]

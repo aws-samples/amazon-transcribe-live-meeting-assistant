@@ -61,7 +61,12 @@ from botocore.config import Config as BotoCoreConfig
 from botocore.exceptions import BotoCoreError, ClientError
 
 # pylint: disable=import-error
-from lma_config import SUMMARY_WAIT_MINUTES, deletion_delay_minutes  # configuration layer
+from lma_config import (  # configuration layer
+    SUMMARY_WAIT_MINUTES,
+    TABLE_NAME_ENV_VAR,
+    ConfigurationStore,
+    deletion_delay_minutes,
+)
 
 # pylint: enable=import-error
 
@@ -113,6 +118,23 @@ def _table() -> Any:
 
 def _error_code(error: ClientError) -> str:
     return str(error.response.get("Error", {}).get("Code", ""))
+
+
+_STORE: Optional[Any] = None
+
+
+def current_delay() -> Optional[int]:
+    """The setting as saved now, not as cached: a save applies to the next meeting to end.
+
+    One read of the configuration table, twice a meeting. Without the table
+    named, the stack parameter's value.
+    """
+    global _STORE  # pylint: disable=global-statement -- one store per process
+    if _STORE is None and os.environ.get(TABLE_NAME_ENV_VAR):
+        _STORE = ConfigurationStore()
+    if _STORE is not None:
+        _STORE.invalidate()
+    return deletion_delay_minutes(store=_STORE)
 
 
 def _now() -> datetime:
@@ -423,7 +445,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if trigger == SCHEDULED:
         return delete_transcript(call_id, trigger)
 
-    delay = deletion_delay_minutes()
+    delay = current_delay()
     if delay is None:
         return {"action": "none"}
 

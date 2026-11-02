@@ -40,10 +40,10 @@ created with deletion already on. The choices are:
 | Immediately | The transcript is deleted as soon as the summary is stored. |
 | 15, 30 or 60 minutes after the summary | The transcript is deleted that long after the summary is stored, which leaves time to read or download it. |
 
-A saved change applies within about five minutes, to meetings that end after
-that. A meeting that has already ended keeps the deletion time it was given,
-and a meeting that ended while the setting was off keeps its transcript for the
-days set above.
+A saved change applies to the next meeting that ends: the deletion reads the
+setting as saved each time a meeting ends or is summarized. A meeting that has
+already ended keeps the deletion time it was given, and a meeting that ended
+while the setting was off keeps its transcript for the days set above.
 
 ## When the transcript is deleted
 
