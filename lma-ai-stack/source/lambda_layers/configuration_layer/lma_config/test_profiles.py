@@ -299,7 +299,8 @@ def test_a_full_copy_keeps_its_format_and_origin_across_saves(store):
 
 
 def test_a_delta_revision_restored_into_a_full_copy_is_completed():
-    from test_revisions import BUCKET, FakeDynamo as HistoryDynamo, FakeS3
+    from test_revisions import BUCKET, FakeS3
+    from test_revisions import FakeDynamo as HistoryDynamo
 
     store = ConfigurationStore(
         TABLE, client=HistoryDynamo(), revision_bucket=BUCKET, s3_client=FakeS3()
