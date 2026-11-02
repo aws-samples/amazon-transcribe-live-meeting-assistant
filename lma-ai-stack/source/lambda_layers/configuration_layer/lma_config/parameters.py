@@ -279,10 +279,10 @@ def read_setting(
     if setting in limited_settings_of(section):
         return _limited(
             entry,
-            _configured(entry, store, env_var or entry.parameter),
+            _configured(entry, store, env_var or "the shipped default"),
             _from_environment(entry, env_var, default),
         )
-    configured = _configured(entry, store, env_var or entry.parameter)
+    configured = _configured(entry, store, env_var or "the shipped default")
     if configured is not None:
         return configured
     value = _from_environment(entry, env_var, default) if env_var else default

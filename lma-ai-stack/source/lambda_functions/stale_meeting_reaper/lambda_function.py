@@ -17,8 +17,8 @@ meeting row keeps the status it had — ``STARTED`` or ``TRANSCRIBING`` — and 
 UI shows it as in progress for as long as the row is retained.
 
 This function is the backstop for those meetings. On a schedule it looks for
-meeting rows whose last activity is older than
-``MEETING_INACTIVITY_TIMEOUT_IN_MINUTES`` and emits the same ``END`` event the
+meeting rows whose last activity is older than the Meeting Processing section's
+inactivity timeout and emits the same ``END`` event the
 client would have sent, so the meeting ends, its summary is generated, and it
 leaves the in-progress list.
 
@@ -86,16 +86,6 @@ LOGGER = Logger(location="%(filename)s:%(lineno)d - %(funcName)s()")
 
 EVENT_SOURCING_TABLE = os.environ["EVENT_SOURCING_TABLE"]
 CALL_DATA_STREAM_NAME = os.environ["CALL_DATA_STREAM_NAME"]
-#: The MeetingInactivityTimeoutInMinutes parameter's value: what the timeout a
-#: run uses (the Meeting Processing section's, see ``inactivity_timeout_minutes``)
-#: falls back to. ``int(float(...))`` because the CloudFormation Number type
-#: accepts a fractional value, which is truncated as it always was.
-INACTIVITY_TIMEOUT_MINUTES = int(
-    float(os.environ.get("MEETING_INACTIVITY_TIMEOUT_IN_MINUTES", "0"))
-)
-#: The lookback when neither the configuration nor REAPER_LOOKBACK_IN_DAYS
-#: says; its shipped default.
-FALLBACK_LOOKBACK_DAYS = 2
 # Bounds the work a single invocation does; the next scheduled run continues.
 MAX_CANDIDATES = int(float(os.environ.get("REAPER_MAX_CANDIDATES", "500")))
 MAX_MEETINGS_PER_RUN = int(float(os.environ.get("REAPER_MAX_MEETINGS_PER_RUN", "100")))
@@ -300,37 +290,21 @@ def _emit_end_event(call_row: Dict[str, Any]) -> None:
 def lookback_days() -> int:
     """How many days back a run looks for meetings to close.
 
-    The Meeting Processing section of the Configuration page, whose default is
-    its shipped default; that parameter's
-    environment variable when the section cannot be read. Read per run, so a
-    change applies from the next scheduled run that starts five minutes after it.
-    A whole number of days: a fractional value, which CloudFormation's Number
-    type would accept, is not one the setting takes, and the default applies.
+    The Meeting Processing section of the Configuration page, else its shipped
+    default (``setting_defaults.json``). Read per run, so a change applies from
+    the next scheduled run that starts five minutes after it.
     """
-    return read_setting(
-        MEETING_PROCESSING.name,
-        "inactiveMeetingLookbackDays",
-        env_var="REAPER_LOOKBACK_IN_DAYS",
-        default=FALLBACK_LOOKBACK_DAYS,
-    )
+    return read_setting(MEETING_PROCESSING.name, "inactiveMeetingLookbackDays")
 
 
 def inactivity_timeout_minutes() -> int:
     """How long a meeting may go without activity before a run ends it.
 
-    The Meeting Processing section of the Configuration page, whose default is
-    its shipped default; that parameter's
-    environment variable when the section cannot be read. Read per run, like the
-    lookback. 0 ends nothing. Whether this function and its schedule exist at all
-    is still the parameter's: a deployment where it is 0 has no reaper to read
-    the setting.
+    The Meeting Processing section of the Configuration page, else its shipped
+    default (``setting_defaults.json``). Read per run, like the lookback. 0 ends
+    nothing; the function and its schedule always exist.
     """
-    return read_setting(
-        MEETING_PROCESSING.name,
-        "inactiveMeetingTimeoutMinutes",
-        env_var="MEETING_INACTIVITY_TIMEOUT_IN_MINUTES",
-        default=INACTIVITY_TIMEOUT_MINUTES,
-    )
+    return read_setting(MEETING_PROCESSING.name, "inactiveMeetingTimeoutMinutes")
 
 
 @LOGGER.inject_lambda_context

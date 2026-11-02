@@ -54,12 +54,19 @@ function mkTcaFilename(sessionData) {
 // TODO - Refactor to use new TCA Post Call event - now includes Transcript file and Media File Uris.
 const getAnalyticsOutputUri = async function getAnalyticsOutputUri(s3Client, sessionId, suffix) {
   const keyIn = (folder) => `${CALL_ANALYTICS_FILE_PREFIX}${folder}${sessionId}${suffix}`;
+  // A redacted meeting's output is in redacted-analytics/; with
+  // POST_CALL_CONTENT_REDACTION_OUTPUT=redacted_and_unredacted it is in both
+  // folders, and the redacted copy is the one PCA gets.
   let folder = 'analytics/';
   try {
     await s3Client.send(new HeadObjectCommand({ Bucket: LCA_BUCKET_NAME, Key: keyIn('redacted-analytics/') }));
     folder = 'redacted-analytics/';
   } catch (err) {
-    // Not there: the meeting was not redacted, or its output is not written yet.
+    // Only "not there" means the meeting was not redacted. Anything else is
+    // raised, rather than copying the unredacted output in its place.
+    if (err?.name !== 'NotFound' && err?.$metadata?.httpStatusCode !== 404) {
+      throw err;
+    }
   }
   return `/${LCA_BUCKET_NAME}/${keyIn(folder)}`;
 };

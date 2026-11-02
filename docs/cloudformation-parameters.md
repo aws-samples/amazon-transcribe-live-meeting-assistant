@@ -230,7 +230,7 @@ Console label: *Simli API Key for Avatar (Optional)*
 - **Allowed values:** Any text
 - **Kind:** Credential. Stored in a Secrets Manager secret the Virtual Participant is given.
 
-(Optional) API key for Simli avatar. The avatar feature requires BOTH SimliApiKey and SimliFaceId — leave both blank to disable the avatar, or set both to enable an animated lip-synced avatar as the Virtual Participant's camera feed. Get your API key from https://simli.com. Leave blank to disable avatar.
+(Optional) API key for Simli avatar. The avatar feature requires BOTH this key and the Simli face ID on the Configuration page (Virtual Participant section) — leave both blank to disable the avatar, or set both to enable an animated lip-synced avatar as the Virtual Participant's camera feed. Get your API key from https://simli.com. Leave blank to disable avatar.
 
 ### `SimliApiKeySecretArn`
 
@@ -240,7 +240,7 @@ Console label: *Existing Secret ARN Holding the Simli API Key (Optional)*
 - **Allowed values:** Must be empty, or the ARN of a Secrets Manager secret (arn:aws:secretsmanager:&lt;region&gt;:&lt;account&gt;:secret:&lt;name&gt;).
 - **Kind:** Credential. Grants the Virtual Participant read access to the named secret.
 
-(Optional) ARN of an existing Secrets Manager secret whose value is the Simli API key. Use this instead of SimliApiKey when the key is already provisioned in Secrets Manager. Supply one form or the other, not both. SimliFaceId is still required alongside it. A secret encrypted with your own KMS key must grant kms:Decrypt in that key's policy to whichever role reads it: the MicroVM launcher function's role under VPLaunchType MICROVM (the default), or the Virtual Participant task execution role on FARGATE and EC2. See docs/infrastructure-and-security.md#bringing-your-own-secret.
+(Optional) ARN of an existing Secrets Manager secret whose value is the Simli API key. Use this instead of SimliApiKey when the key is already provisioned in Secrets Manager. Supply one form or the other, not both. The Simli face ID on the Configuration page (Virtual Participant section) is still required alongside it. A secret encrypted with your own KMS key must grant kms:Decrypt in that key's policy to whichever role reads it: the MicroVM launcher function's role under VPLaunchType MICROVM (the default), or the Virtual Participant task execution role on FARGATE and EC2. See docs/infrastructure-and-security.md#bringing-your-own-secret.
 
 ### `AmazonNovaSonicRegion`
 
@@ -250,7 +250,7 @@ Console label: *Amazon Nova Sonic Region (blank = this stack's region)*
 - **Allowed values:** Must be empty, or an AWS Region name such as us-east-1.
 - **Kind:** Resource. Names the region in the Virtual Participant's permission to invoke Amazon Nova Sonic.
 
-Region to reach Amazon Nova Sonic in, when it differs from the region this stack is deployed to. Leave empty to use the stack's own region. Nova Sonic is available in fewer regions than LMA itself, so a deployment constrained to a particular region for compliance can keep everything else local and reach the voice assistant elsewhere. Only used when VoiceAssistantProvider is amazon_nova_sonic.
+Region to reach Amazon Nova Sonic in, when it differs from the region this stack is deployed to. Leave empty to use the stack's own region. Nova Sonic is available in fewer regions than LMA itself, so a deployment constrained to a particular region for compliance can keep everything else local and reach the voice assistant elsewhere. Only used when the voice assistant on the Configuration page (Virtual Participant section) is Amazon Nova Sonic.
 
 ### `ZoomMeetingSdkClientId`
 
@@ -579,7 +579,7 @@ Console label: *End of Call Transcript Summary*
 - **Allowed values:** `BEDROCK`, `LAMBDA`
 - **Kind:** Resource. Decides whether the Bedrock summarizer exists or a Lambda hook is invoked instead.
 
-Set to enable call summarization by a Large Language Model. Currently only BEDROCK and LAMBDA are supported. BEDROCK option requires you to choose one of the supported model IDs from the provided list (BedrockModelId). The LAMBDA option requires you to provide a function ARN below.
+Set to enable call summarization by a Large Language Model. Currently only BEDROCK and LAMBDA are supported. BEDROCK option uses the model chosen on the Configuration page (Amazon Bedrock Models section). The LAMBDA option requires you to provide a function ARN below.
 
 ### `EndOfCallLambdaHookFunctionArn`
 

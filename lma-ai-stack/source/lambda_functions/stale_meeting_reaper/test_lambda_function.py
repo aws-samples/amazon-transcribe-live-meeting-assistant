@@ -28,11 +28,12 @@ for path in (str(FUNCTION_DIR), str(LAYER)):
 
 TABLE_NAME = "test-event-sourcing-table"
 STREAM_NAME = "test-call-data-stream"
+# The shipped default of Meeting Processing › inactiveMeetingTimeoutMinutes, which a
+# run without a readable configuration uses.
 TIMEOUT_MINUTES = 240
 
 os.environ["EVENT_SOURCING_TABLE"] = TABLE_NAME
 os.environ["CALL_DATA_STREAM_NAME"] = STREAM_NAME
-os.environ["MEETING_INACTIVITY_TIMEOUT_IN_MINUTES"] = str(TIMEOUT_MINUTES)
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 
@@ -447,7 +448,11 @@ def test_candidate_query_upper_bound_is_the_inactivity_cutoff(run_reaper):
 
 
 def test_timeout_of_zero_disables_the_reaper(run_reaper, monkeypatch):
-    monkeypatch.setenv("MEETING_INACTIVITY_TIMEOUT_IN_MINUTES", "0")
+    from lma_config import parameters
+
+    monkeypatch.setattr(
+        parameters, "_SHARED_STORE", _ConfigurationStore({"inactiveMeetingTimeoutMinutes": 0})
+    )
     summary, kinesis, dynamodb = run_reaper(
         [list_row("abandoned")],
         [call_row("abandoned", updated_minutes_ago=TIMEOUT_MINUTES + 10)],
@@ -491,21 +496,26 @@ class _ConfigurationStore:
 def test_the_lookback_comes_from_the_configuration_when_it_names_one(monkeypatch):
     from lma_config import parameters
 
-    monkeypatch.setenv("REAPER_LOOKBACK_IN_DAYS", "2")
     monkeypatch.setattr(
         parameters, "_SHARED_STORE", _ConfigurationStore({"inactiveMeetingLookbackDays": 30})
     )
     assert reaper.lookback_days() == 30
 
 
-def test_without_one_the_lookback_is_the_parameters(monkeypatch):
+def test_without_one_the_lookback_is_the_shipped_default(monkeypatch):
     from lma_config import parameters
 
-    monkeypatch.setenv("REAPER_LOOKBACK_IN_DAYS", "7")
     monkeypatch.setattr(parameters, "_SHARED_STORE", _ConfigurationStore({}))
-    assert reaper.lookback_days() == 7
-    monkeypatch.delenv("REAPER_LOOKBACK_IN_DAYS")
-    assert reaper.lookback_days() == reaper.FALLBACK_LOOKBACK_DAYS
+    assert reaper.lookback_days() == 2
+
+
+def test_without_a_configuration_the_timeout_is_the_shipped_default(monkeypatch):
+    """Not 0: a run that cannot read the configuration still ends stale meetings."""
+    from lma_config import parameters
+
+    monkeypatch.setattr(parameters, "_SHARED_STORE", None)
+    monkeypatch.delenv("CONFIGURATION_TABLE_NAME", raising=False)
+    assert reaper.inactivity_timeout_minutes() == TIMEOUT_MINUTES
 
 
 def test_the_timeout_comes_from_the_configuration_when_it_names_one(monkeypatch):

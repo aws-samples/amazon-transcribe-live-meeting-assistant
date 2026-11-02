@@ -836,27 +836,28 @@ def test_teams_watchdog_defaults_match_the_container(template: dict) -> None:
     assert _numeric("pollsBeforeEndMissing") == params["VPPollsBeforeEndMissing"]["Default"]
 
 
-def test_teams_watchdog_parameters_reach_the_vp_stack_from_lma_main(template: dict) -> None:
-    """A parameter only the nested stack knows about cannot be set by an operator.
+def test_the_teams_watchdog_values_are_settings_not_main_stack_parameters(template: dict) -> None:
+    """Since 0.4.0 an operator sets these on the Configuration page, not with parameters.
 
-    lma-main.yaml is what a deployment actually launches, so each of these has to
-    exist there with the same default and bounds and be passed through to
-    VIRTUALPARTICIPANTSTACK.
+    lma-main.yaml declares and passes none of them; the nested stack's own
+    parameters stay at their defaults as the task's fallback, and those defaults
+    are the settings' shipped ones.
     """
+    import json
+
     main = yaml.load((TEMPLATE.parents[1] / "lma-main.yaml").read_text(), Loader=_CfnLoader)
     passed = main["Resources"]["VIRTUALPARTICIPANTSTACK"]["Properties"]["Parameters"]
-
+    shipped = json.loads(
+        (
+            TEMPLATE.parents[1]
+            / "lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/setting_defaults.json"
+        ).read_text()
+    )["virtual_participant"]
+    by_parameter = {spec["formerParameter"]: spec["default"] for spec in shipped.values()}
     for parameter in TEAMS_WATCHDOG_PARAMS.values():
-        assert parameter in main["Parameters"], f"{parameter} missing from lma-main.yaml"
-        assert passed.get(parameter) == {"Ref": parameter}, (
-            f"{parameter} is not passed through to the VP stack"
-        )
-        nested = template["Parameters"][parameter]
-        top = main["Parameters"][parameter]
-        for field in ("Default", "MinValue", "MaxValue"):
-            assert top[field] == nested[field], (
-                f"{parameter} {field} differs between lma-main.yaml and the VP stack"
-            )
+        assert parameter not in main["Parameters"], f"{parameter} is still a main-stack parameter"
+        assert parameter not in passed, f"{parameter} is still passed to the VP stack"
+        assert template["Parameters"][parameter]["Default"] == by_parameter[parameter]
 
 
 def test_launcher_passes_the_watchdog_tunables_as_static_config(launcher: str) -> None:

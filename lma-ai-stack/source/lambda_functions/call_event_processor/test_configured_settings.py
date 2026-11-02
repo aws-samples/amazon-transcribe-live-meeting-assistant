@@ -12,7 +12,6 @@ deployment's own rather than waking the assistant on nothing.
 
 from __future__ import annotations
 
-import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,10 +25,12 @@ for path in (str(HERE), str(CONFIG_LAYER)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from lma_config import parameters  # noqa: E402
+from lma_config import parameters, shipped_setting_defaults  # noqa: E402
 from test_graphql_response_handling import cep  # noqa: E402
 
-DEPLOYED = re.compile(r"(OK|Okay)[.,! ]*[Aa]ssistant")
+#: The shipped wake phrase: what applies when none is saved, or the saved one
+#: does not compile.
+SHIPPED = shipped_setting_defaults()["meeting_assist"]["wakePhraseRegex"]
 
 
 class _Store:
@@ -42,8 +43,12 @@ class _Store:
 
 @pytest.fixture()
 def configured(monkeypatch):
-    monkeypatch.setattr(cep, "SETTINGS", {"AssistantWakePhraseRegEx": DEPLOYED}, raising=False)
-    monkeypatch.delenv("ASSISTANT_WAKE_PHRASE_REGEX", raising=False)
+    for name in (
+        "ASSISTANT_WAKE_PHRASE_REGEX",
+        "TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY",
+        "AGENDA_DERIVATION_AFTER_SECONDS",
+    ):
+        monkeypatch.delenv(name, raising=False)
     cep._compiled_wake_phrase.cache_clear()
 
     def install(sections):
@@ -60,50 +65,38 @@ def test_the_configured_wake_phrase_wakes_the_assistant(configured) -> None:
     assert not cep.matches_wake_phrase(pattern, "OK assistant")
 
 
-def test_without_one_the_deployment_wake_phrase_applies(configured) -> None:
+def test_without_one_the_shipped_wake_phrase_applies(configured) -> None:
     configured({})
-    assert cep.wake_phrase_pattern() is DEPLOYED
+    assert cep.wake_phrase_pattern().pattern == SHIPPED
 
 
 def test_a_wake_phrase_that_is_not_a_regular_expression_gives_way(configured) -> None:
     configured({"meeting_assist": {"wakePhraseRegex": "(unclosed"}})
-    assert cep.wake_phrase_pattern() is DEPLOYED
+    assert cep.wake_phrase_pattern().pattern == SHIPPED
     assert any("not a regular expression" in r["message"] for r in cep.LOGGER.records)
 
 
-def test_the_hook_mode_comes_from_the_configuration(configured, monkeypatch) -> None:
-    monkeypatch.setenv("TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY", "true")
+def test_the_hook_mode_comes_from_the_configuration(configured) -> None:
     configured({"meeting_processing": {"transcriptHookNonPartialOnly": False}})
     assert cep.transcript_hook_nonpartial_only() is False
 
 
-def test_without_one_the_hook_mode_is_the_parameters(configured, monkeypatch) -> None:
-    monkeypatch.setenv("TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY", "false")
+def test_without_one_the_hook_mode_is_the_shipped_default(configured) -> None:
     configured({})
-    assert cep.transcript_hook_nonpartial_only() is False
-    monkeypatch.delenv("TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY")
     assert cep.transcript_hook_nonpartial_only() is True
 
 
-def test_the_agenda_threshold_comes_from_the_configuration(configured, monkeypatch) -> None:
-    monkeypatch.setenv("AGENDA_DERIVATION_AFTER_SECONDS", "300")
+def test_the_agenda_threshold_comes_from_the_configuration(configured) -> None:
     configured({"meeting_agenda": {"autoDeriveAfterSeconds": 120}})
     assert cep.agenda_derivation_threshold() == 120.0
 
 
-def test_an_agenda_threshold_of_zero_saved_on_the_page_turns_the_pass_off(
-    configured, monkeypatch
-) -> None:
-    monkeypatch.setenv("AGENDA_DERIVATION_AFTER_SECONDS", "300")
+def test_an_agenda_threshold_of_zero_saved_on_the_page_turns_the_pass_off(configured) -> None:
     configured({"meeting_agenda": {"autoDeriveAfterSeconds": 0}})
     assert cep.agenda_derivation_threshold() == 0.0
     assert not cep.agenda_derivation_due("call-1", 9999.0, cep.agenda_derivation_threshold(), set())
 
 
-def test_without_one_the_agenda_threshold_is_the_parameters(configured, monkeypatch) -> None:
-    monkeypatch.setenv("AGENDA_DERIVATION_AFTER_SECONDS", "600")
+def test_without_one_the_agenda_threshold_is_the_shipped_default(configured) -> None:
     configured({})
-    assert cep.agenda_derivation_threshold() == 600.0
-    monkeypatch.delenv("AGENDA_DERIVATION_AFTER_SECONDS")
-    monkeypatch.setattr(cep, "AGENDA_DERIVATION_AFTER_SECONDS", 300.0)
     assert cep.agenda_derivation_threshold() == 300.0

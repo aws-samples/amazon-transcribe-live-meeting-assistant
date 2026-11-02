@@ -65,12 +65,14 @@ Until 0.4.0 these settings were also stack parameters, and the parameter was the
 setting's default. From 0.4.0 they are only settings: the parameters are gone, and
 each setting ships with a default in the deployment's default profile.
 
+The table lists the parameters a released version had; three settings new in
+0.4.0 (the knowledge-base model, the key frame text model and the agenda timing)
+were never released as parameters.
+
 | Section › setting | Stack parameter before 0.4.0 |
 |---|---|
 | Amazon Bedrock Models › Summaries and meeting insights | `BedrockModelId` |
 | Amazon Bedrock Models › Meeting assistant | `MeetingAssistServiceBedrockModelID` |
-| Amazon Bedrock Models › Meeting assistant knowledge bases | `MeetingAssistKnowledgeBaseModelID` |
-| Amazon Bedrock Models › Key frame text | `KeyframeTextModelId` |
 | Amazon Transcribe › Language | `TranscribeLanguageCode` |
 | Amazon Transcribe › Language options | `TranscribeLanguageOptions` |
 | Amazon Transcribe › Preferred language | `TranscribePreferredLanguage` |
@@ -93,7 +95,6 @@ each setting ships with a default in the deployment's default profile.
 | Virtual Participant › Teams: milliseconds between meeting checks | `VPAttendeePollMs` |
 | Virtual Participant › Teams: checks alone before leaving | `VPPollsBeforeEnd` |
 | Virtual Participant › Teams: checks without a meeting before leaving | `VPPollsBeforeEndMissing` |
-| Meeting Agenda › Seconds into a meeting to look for a stated agenda | `AgendaDerivationAfterSeconds` |
 
 **Upgrading a deployment that set any of these parameters.** The values the
 parameters held are not carried across. After the update, the deployment uses

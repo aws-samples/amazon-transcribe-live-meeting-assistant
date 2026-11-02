@@ -28,9 +28,8 @@ KB_ACCOUNT_ID = os.environ.get("KB_ACCOUNT_ID")
 def model_arn():
     """The ARN of the model the knowledge base answers with.
 
-    The model is the summaries' one: the Amazon Bedrock Models section of the
-    Configuration page, with its shipped default,
-    passed to this function as MODEL_ID and read when the section cannot be.
+    The model is the summaries' one: the Amazon Bedrock Models section's value
+    on the Configuration page, else the shipped default in setting_defaults.json.
     Read per request, so a change reaches this function within the section's
     cache tier rather than at its next cold start.
     """

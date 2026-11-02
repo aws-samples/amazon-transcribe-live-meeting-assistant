@@ -85,7 +85,8 @@ Parameters:
     Default: ""
     Description: >-
       (Optional) API key for Simli avatar. The avatar feature requires BOTH
-      SimliApiKey and SimliFaceId — leave both blank to disable the avatar,
+      this key and the Simli face ID on the Configuration page (Virtual
+      Participant section) — leave both blank to disable the avatar,
       or set both to enable an animated lip-synced avatar as the Virtual
       Participant's camera feed.
       Get your API key from https://simli.com. Leave blank to disable avatar.
@@ -102,7 +103,8 @@ Parameters:
       (Optional) ARN of an existing Secrets Manager secret whose value is the
       Simli API key. Use this instead of SimliApiKey when the key is already
       provisioned in Secrets Manager. Supply one form or the other, not both.
-      SimliFaceId is still required alongside it. A secret encrypted with your
+      The Simli face ID on the Configuration page (Virtual Participant
+      section) is still required alongside it. A secret encrypted with your
       own KMS key must grant kms:Decrypt in that key's policy to whichever role
       reads it: the MicroVM launcher function's role under VPLaunchType MICROVM
       (the default), or the Virtual Participant task execution role on FARGATE
@@ -120,7 +122,8 @@ Parameters:
       Nova Sonic is available in fewer regions than LMA itself, so a
       deployment constrained to a particular region for compliance can keep
       everything else local and reach the voice assistant elsewhere. Only
-      used when VoiceAssistantProvider is amazon_nova_sonic.
+      used when the voice assistant on the Configuration page (Virtual
+      Participant section) is Amazon Nova Sonic.
 
   BedrockGuardrailId:
     Type: String
@@ -286,8 +289,8 @@ Parameters:
     Description: >
       Set to enable call summarization by a Large Language Model. Currently only BEDROCK
       and LAMBDA are supported.
-      BEDROCK option requires you to choose one of the supported model IDs from the  provided
-      list (BedrockModelId). The LAMBDA option requires you to provide a function
+      BEDROCK option uses the model chosen on the Configuration page (Amazon Bedrock
+      Models section). The LAMBDA option requires you to provide a function
       ARN below.
 
   EndOfCallLambdaHookFunctionArn:
@@ -1298,7 +1301,7 @@ Conditions:
   # whole stack rather than just the subscription.
   ShouldSubscribeAdminEmailToAlerts: !Not [!Equals [!Ref AdminEmail, ""]]
   # The stale-meeting reaper is always scheduled; a timeout of 0 on the
-  # Configuration page makes each run end meetings nothing, so the "no
+  # Configuration page makes each run end nothing, so the "no
   # invocations" alarm still applies.
   ShouldAlarmOnStaleMeetingReaper: !Condition ShouldCreateOperationalAlarms
   ShouldEnableAsrDiarization: !And
@@ -2773,14 +2776,6 @@ Resources:
         CustomConfigPath: !Ref CustomConfigPath
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
-        # Not used by any resource of the AI stack: passed so that its
-        # configuration seeder writes them into the baseline as the defaults of
-        # the Amazon Bedrock Models section, which the meeting assistant reads.
-        # Likewise the Amazon Transcribe options and the audio-recording
-        # default, which the WebSocket transcriber reads from the Amazon
-        # Transcribe and Meeting Recording sections.
-        # And the Virtual Participant's own settings, which it reads from the
-        # Virtual Participant section when it starts.
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
         StartOfCallLambdaHookFunctionArn: !Ref StartOfCallLambdaHookFunctionArn
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
@@ -3656,9 +3651,8 @@ Resources:
         signal being watched for is the absence of invocations; CloudWatch
         treats an evaluation range with no data at all as breaching regardless
         of EvaluationPeriods, so a fresh install notifies once and then clears,
-        which is expected. This alarm is not created when
-        MeetingInactivityTimeoutInMinutes is 0, because the schedule is then
-        left in place but disabled on purpose.
+        which is expected. This alarm is created whenever
+        EnableOperationalAlarms is true.
       Namespace: AWS/Lambda
       MetricName: Invocations
       Dimensions:

@@ -21,10 +21,9 @@ logger = logging.getLogger()
 def _configured_model_id() -> str:
     """The model the transcript knowledge base answers with.
 
-    The summaries' model: the Amazon Bedrock Models section of the Configuration
-    page, with its shipped default, passed to this
-    function as BEDROCK_MODEL_ID and read when the section cannot be. Read per
-    search, so a change reaches it within the section's cache tier.
+    The summaries' model: the Amazon Bedrock Models section's value on the
+    Configuration page, else the shipped default in setting_defaults.json. Read
+    per search, so a change reaches it within the section's cache tier.
 
     The configuration layer is imported here rather than at the top of the
     module because only this tool reads it: the server's other tools, and their
@@ -101,7 +100,9 @@ def execute(
         model_arn = os.environ.get("MODEL_ARN")
 
     if not model_arn:
-        raise ValueError("Bedrock model not configured (set BEDROCK_MODEL_ID or MODEL_ARN)")
+        raise ValueError(
+            "Bedrock model not configured: choose one in the Amazon Bedrock Models section of the Configuration page"
+        )
 
     kb_client = boto3.client("bedrock-agent-runtime")
 

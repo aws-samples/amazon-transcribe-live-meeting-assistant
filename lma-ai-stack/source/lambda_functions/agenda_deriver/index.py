@@ -48,8 +48,8 @@ from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # confi
 LOGGER = logging.getLogger()
 LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-#: The model when neither the configuration nor BEDROCK_MODEL_ID names one;
-#: its shipped default.
+#: The model when the configuration cannot be read; the same value as the
+#: setting's shipped default in setting_defaults.json.
 FALLBACK_MODEL_ID = "global.anthropic.claude-sonnet-5-5"
 
 EVENT_SOURCING_TABLE = os.environ["EVENT_SOURCING_TABLE"]
@@ -238,8 +238,8 @@ def call_bedrock(prompt, call_id):
 
     Temperature 0 where the model accepts it: this is extraction. Sized like a
     summary section, which reads a transcript of the same order. The model is the
-    summaries' one: the Amazon Bedrock Models section of the Configuration page,
-    with its shipped default.
+    summaries' one: the Amazon Bedrock Models section's value on the
+    Configuration page, else the shipped default in setting_defaults.json.
     """
     model_id = read_setting(
         LANGUAGE_MODELS.name,

@@ -50,8 +50,8 @@ LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 EVENT_SOURCING_TABLE = os.environ.get("EVENT_SOURCING_TABLE", "")
 RECORDINGS_BUCKET = os.environ.get("RECORDINGS_BUCKET", "")
 KEYFRAMES_PREFIX = os.environ.get("KEYFRAMES_PREFIX", "lma-video-keyframes/")
-#: The model used when neither the configuration nor KEYFRAME_TEXT_MODEL_ID
-#: names one; its shipped default.
+#: The model used when the configuration cannot be read; the same value as the
+#: setting's shipped default in setting_defaults.json.
 FALLBACK_MODEL_ID = "amazon.nova-lite-v1:0"
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 
@@ -79,9 +79,8 @@ def frame_key(call_id: str, frame_id: str) -> Dict[str, Any]:
 def model_id() -> str:
     """The model that reads key frames.
 
-    The Amazon Bedrock Models section of the Configuration page, whose default is
-    its shipped default; that parameter's environment
-    variable when the section cannot be read.
+    The Amazon Bedrock Models section's value on the Configuration page, else
+    the shipped default in setting_defaults.json.
     """
     return read_setting(
         LANGUAGE_MODELS.name,

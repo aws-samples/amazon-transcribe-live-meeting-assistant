@@ -156,32 +156,10 @@ Parameters:
     Description: >
       Set to enable call summarization by a Large Language Model. Currently only BEDROCK
       and LAMBDA are supported.
-      BEDROCK option requires you to choose one of the supported model IDs from the  provided
-      list (BedrockModelId). The LAMBDA option requires you to provide a function
+      BEDROCK option uses the model chosen on the Configuration page (Amazon Bedrock
+      Models section). The LAMBDA option requires you to provide a function
       ARN below.
 
-  # The meeting assistant's two models. Its functions are in the meeting-assist
-  # stack; they are passed here only so the configuration seeder can write them
-  # into the baseline as the defaults of the Amazon Bedrock Models section.
-  # lma-main.yaml validates them against its own AllowedValues. Empty, as a
-  # standalone deployment of this stack leaves them, is not written, and the
-  # readers fall back to their own environment variables.
-  # The Amazon Transcribe options and the audio-recording default. Read by the
-  # WebSocket transcriber, not by anything in this stack; passed here only so
-  # the configuration seeder can write them into the baseline as the defaults
-  # of the Amazon Transcribe and Meeting Recording sections. lma-main.yaml
-  # validates them. Empty, as a standalone deployment of this stack leaves
-  # them, is refused for the list settings (by the section's schema) and the
-  # switches (by the type check) and is not written, so the transcriber uses its
-  # own environment variables for those.
-  # For the language options, entity types, custom vocabulary and custom
-  # language model, empty is a valid value ("none"): it is written, and takes
-  # precedence over the transcriber's variable.
-  # The Virtual Participant's own settings. Read by the Virtual Participant, not
-  # by anything in this stack; passed here only so the configuration seeder can
-  # write them into the baseline as the defaults of the Virtual Participant
-  # section. lma-main.yaml validates them; empty, as a standalone deployment of
-  # this stack leaves them, is not written where the section needs a value.
   EndOfCallLambdaHookFunctionArn:
     Default: ""
     Type: String
@@ -3072,9 +3050,6 @@ Resources:
           TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN: !Ref TranscriptLambdaHookFunctionArn
           START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN: !Ref StartOfCallLambdaHookFunctionArn
           POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN: !Ref PostCallSummaryLambdaHookFunctionArn
-          # The defaults of the hook mode and the wake phrase, read when the
-          # configuration cannot be; each batch reads the Meeting Processing
-          # and Meeting Assistant sections first.
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           IS_TRANSCRIPT_SUMMARY_ENABLED:
             !If [IsTranscriptSummaryEnabled, "true", "false"]
@@ -3084,10 +3059,6 @@ Resources:
           AGENDA_DERIVER_ARN: !GetAtt AgendaDeriverFunction.Arn
           # Reads the text of each key frame once it is stored.
           KEYFRAME_TEXT_EXTRACTOR_ARN: !GetAtt KeyframeTextExtractorFunction.Arn
-          # Seconds into a meeting with no agenda at which the transcript is read
-          # once for an agenda somebody stated. 0 turns the automatic pass off;
-          # the Agenda panel's button works either way. The default of the
-          # Meeting Agenda section, read when the configuration cannot be.
           ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !GetAtt AsyncAgentAssistOrchestrator.Arn
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
           SNS_TOPIC_ARN: !Ref CategorySNSTopic
@@ -3567,7 +3538,6 @@ Resources:
           KB_ID: !Ref BedrockKnowledgeBaseID
           KB_ACCOUNT_ID: !Ref AWS::AccountId
           KB_REGION: !Ref AWS::Region
-          # The model's default, read when the configuration cannot be.
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
       Layers:
         - !Ref ConfigurationPythonLayer
@@ -3602,7 +3572,6 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
-          # The model's default, read when the configuration cannot be.
           BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
       Layers:
@@ -4347,8 +4316,8 @@ Resources:
         - arm64
       Layers:
         - !Ref TranscriptEnrichmentPythonLayer
-        # lma_config, for the lookback. Pure Python, so compatible with this
-        # function's arm64 architecture.
+        # lma_config, for the inactivity timeout and the lookback. Pure Python,
+        # so compatible with this function's arm64 architecture.
         - !Ref ConfigurationPythonLayer
       CodeUri: ../source/lambda_functions/stale_meeting_reaper
       Description: Ends meetings with no recent activity by emitting an END event
@@ -4358,12 +4327,11 @@ Resources:
         Variables:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
-          # How far back a run looks for candidates. Has to exceed the longest
+          # Each run reads the inactivity timeout and the lookback from the
+          # Meeting Processing section, else their shipped defaults. The lookback
+          # (how far back a run looks for candidates) has to exceed the longest
           # meeting a deployment expects plus the inactivity timeout, because a
-          # meeting that started before the window is not examined: an upgrade
-          # that inherits older stuck meetings widens it once. Each run reads it
-          # from the Meeting Processing section first; this is its default, read
-          # when the configuration cannot be.
+          # meeting that started before the window is not examined.
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           # Caps the meeting rows read per run. Candidates cannot be narrowed on
           # the index (it projects no Status), so each one costs part of a
@@ -4438,8 +4406,8 @@ Resources:
                 Action:
                   - kinesis:PutRecord
                 Resource: !Ref CallDataStreamArn
-              # Read-only, on the shared configuration table: the lookback is
-              # read from it. The KMS grant below covers decrypting it.
+              # Read-only, on the shared configuration table: the inactivity
+              # timeout and the lookback are read from it. The KMS grant below covers decrypting it.
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
@@ -4462,8 +4430,8 @@ Resources:
     Properties:
       Name: !Sub "${AWS::StackName}-StaleMeetingReaper"
       Description: >-
-        Runs the stale meeting reaper. The interval bounds how long after
-        MeetingInactivityTimeoutInMinutes a meeting keeps showing as in progress.
+        Runs the stale meeting reaper. The interval bounds how long after the
+        Meeting Processing inactivity timeout a meeting keeps showing as in progress.
       ScheduleExpression: "rate(15 minutes)"
       # Always on: a timeout of 0 on the Configuration page (Meeting Processing)
       # makes each run end nothing.
@@ -5092,7 +5060,6 @@ Resources:
         Variables:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
-          # The model's default, read when the configuration cannot be.
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
           # Token usage per naming pass, for the meeting cost estimate.
@@ -5178,7 +5145,7 @@ Resources:
                 Resource: !GetAtt ConfigurationTable.Arn
               # Scoped the same way BedrockSummaryLambda and
               # MeetingInvitationParser scope the identical call, since
-              # BedrockModelId may name a foundation model, a custom model or an
+              # the configured model may name a foundation model, a custom model or an
               # inference profile. Only converse() is called, so the streaming
               # action is not granted.
               - Effect: Allow
@@ -5270,7 +5237,6 @@ Resources:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
           RECORDINGS_BUCKET: !Ref S3BucketName
           KEYFRAMES_PREFIX: "lma-video-keyframes/"
-          # The model's default, read when the configuration cannot be.
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           # Token usage per frame, for the meeting cost estimate.
           METERING_TABLE_NAME: !Ref EventSourcingTable
@@ -5403,7 +5369,6 @@ Resources:
         Variables:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
-          # The model's default, read when the configuration cannot be.
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
           # Token usage per pass, for the meeting cost estimate.
@@ -10715,8 +10680,6 @@ Resources:
           RECORDINGS_BUCKET: !Ref S3BucketName
           TRANSCRIPT_PREFIX: !Ref TranscriptFilePrefix
           TRANSCRIPT_KB_ID: !Ref BedrockKnowledgeBaseID
-          # The search tool's model default, read when the configuration
-          # cannot be.
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl

@@ -15,7 +15,7 @@
       "order": 0,
       "type": "string",
       "title": "Wake phrase (regular expression)",
-      "description": "A Python regular expression searched for in each finished transcript segment; a segment it matches is sent to the meeting assistant. A pattern that is not a valid regular expression is logged and the deployment's own is used.",
+      "description": "A Python regular expression searched for in each finished transcript segment; a segment it matches is sent to the meeting assistant. A pattern that is not a valid regular expression is logged and the shipped one is used.",
       "examples": ["(OK|Okay)[.,! ]*[Aa]ssistant"],
       "minLength": 1,
       "maxLength": 256

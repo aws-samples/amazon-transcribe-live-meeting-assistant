@@ -50,8 +50,8 @@ from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # confi
 LOGGER = logging.getLogger()
 LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-#: The model when neither the configuration nor BEDROCK_MODEL_ID names one;
-#: its shipped default.
+#: The model when the configuration cannot be read; the same value as the
+#: setting's shipped default in setting_defaults.json.
 FALLBACK_MODEL_ID = "global.anthropic.claude-sonnet-5-5"
 
 EVENT_SOURCING_TABLE = os.environ["EVENT_SOURCING_TABLE"]
@@ -209,8 +209,8 @@ def call_bedrock(prompt, call_id=None):
     two passes over one meeting should agree. Only the text blocks are read -- the
     output is parsed into an identity map, so a reasoning block reaching the parser
     would corrupt attribution rather than just read oddly. The model is the
-    summaries' one: the Amazon Bedrock Models section of the Configuration page,
-    with its shipped default.
+    summaries' one: the Amazon Bedrock Models section's value on the
+    Configuration page, else the shipped default in setting_defaults.json.
     """
     model_id = read_setting(
         LANGUAGE_MODELS.name,

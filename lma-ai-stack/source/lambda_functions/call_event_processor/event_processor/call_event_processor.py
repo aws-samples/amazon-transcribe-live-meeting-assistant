@@ -116,8 +116,8 @@ AGENDA_DERIVER_ARN = getenv("AGENDA_DERIVER_ARN", "")
 # Reads the text of each key frame, once, after it is stored. See
 # keyframe_text_extractor.
 KEYFRAME_TEXT_EXTRACTOR_ARN = getenv("KEYFRAME_TEXT_EXTRACTOR_ARN", "")
-#: The AgendaDerivationAfterSeconds parameter's value, from its environment
-#: variable; what the Meeting Agenda section falls back to.
+#: The threshold used when the Meeting Agenda section cannot be read: 300
+#: seconds, the setting's shipped default in setting_defaults.json.
 AGENDA_DERIVATION_AFTER_SECONDS = agenda_derivation_after_seconds(
     getenv("AGENDA_DERIVATION_AFTER_SECONDS", "300")
 )
@@ -132,9 +132,8 @@ ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN = getenv("ASYNC_AGENT_ASSIST_ORCHESTRATOR_AR
 def transcript_hook_nonpartial_only() -> bool:
     """Whether the transcript Lambda hook is sent finished segments only.
 
-    The Meeting Processing section of the Configuration page, whose default is
-    its shipped default; that
-    parameter's environment variable when the section cannot be read.
+    The Meeting Processing section's value on the Configuration page, else the
+    shipped default in setting_defaults.json.
     """
     return read_setting(
         MEETING_PROCESSING.name,
@@ -147,9 +146,8 @@ def transcript_hook_nonpartial_only() -> bool:
 def agenda_derivation_threshold() -> float:
     """Seconds into a meeting with no agenda at which it is read for one; 0 is off.
 
-    The Meeting Agenda section of the Configuration page, whose default is the
-    AgendaDerivationAfterSeconds stack parameter; that parameter's environment
-    variable when the section cannot be read. Read on the section's standard
+    The Meeting Agenda section's value on the Configuration page, else the
+    shipped default in setting_defaults.json. Read on the section's standard
     tier, so a saved change reaches meetings about five minutes later.
     """
     return float(
