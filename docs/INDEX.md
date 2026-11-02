@@ -18,6 +18,7 @@ title: "LMA Documentation"
 
 - [Prerequisites & Deployment](prerequisites-and-deployment.md) — AWS account setup, Bedrock model access, CloudFormation deployment, initial login
 - [Quick Start Guide](quick-start-guide.md) — Your first meeting in 5 minutes using Stream Audio or Virtual Participant
+- [Demo Videos](demo-videos.md) — Recorded walkthroughs of LMA features, and how to record and publish a new one
 
 ### Core Features
 

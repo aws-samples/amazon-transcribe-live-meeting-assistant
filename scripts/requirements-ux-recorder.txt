@@ -1,0 +1,8 @@
+# Python deps for the demo recorder (scripts/ux_recorder.py), used by the
+# product-demo skill (.claude/skills/product-demo.md). Kept out of every Lambda,
+# layer and CI requirements file: the recorder is a local developer tool. Its
+# CDP client and ux_test_session.py are stdlib-only. ffmpeg and ffprobe come from
+# the system, not pip. Check everything with `make ux-record-deps`. Install with:
+#   .venv/bin/pip install -r scripts/requirements-ux-recorder.txt
+boto3>=1.35      # Amazon Polly narration (the generative engine)
+pillow>=10.1     # click markers and title/end cards (ImageFont.load_default(size=...) needs 10.1)

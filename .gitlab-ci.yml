@@ -81,8 +81,9 @@ code_checks:
   script:
     # CloudFormation lint (no AWS).
     - make lint-cfn
-    # ruff check + format check over the Lambda functions, the Lambda layers and
-    # scripts/pr_review (read-only; `make lint-python` is the fixing form).
+    # ruff check + format check over the Lambda functions, the Lambda layers,
+    # scripts/pr_review and the demo recorder (read-only; `make lint-python` is
+    # the fixing form).
     - make lint-python-check
     # Python unit suites (all mock boto3 / use dummy env — no AWS).
     - make test-sdk
@@ -114,6 +115,9 @@ code_checks:
     # whether a model-written comment reaches the public repository, and the four
     # properties of the review job most likely to be deleted by accident.
     - make test-pr-review
+    # The product demo recorder (scripts/ux_recorder*.py), its stack-session
+    # helper and the demo skill's storyboard file. No AWS, Chrome or network.
+    - make test-ux-recorder
     # WebSocket transcriber: unit tests (tsc + eslint via `npm run build`, then
     # node --test on dist) followed by the Fastify 5 websocket smoke test, which
     # boots the server and round-trips a frame — runtime coverage the unit tests

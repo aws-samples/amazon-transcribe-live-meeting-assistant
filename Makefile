@@ -59,12 +59,18 @@ RUFF_VERSION := $(shell sed -n 's/^ruff==//p' $(ASR_SOURCE_DIR)/requirements-dev
 # layers are included because their code is imported by most of the functions.
 # The rest of scripts/ is not included: those files predate this and
 # reformatting them here would make an unrelated diff. The parameter reference
-# generator was written to this lint, so it is named.
+# generator and the demo recorder (with its tests) were written to this lint, so
+# they are named.
 PYTHON_LINT_PATHS := \
 	$(CURDIR)/$(LAMBDA_FUNCTIONS_DIR) \
 	$(CURDIR)/$(LAMBDA_LAYERS_DIR) \
 	$(CURDIR)/scripts/pr_review \
-	$(CURDIR)/scripts/cloudformation_parameters_doc.py
+	$(CURDIR)/scripts/cloudformation_parameters_doc.py \
+	$(CURDIR)/scripts/ux_recorder.py \
+	$(CURDIR)/scripts/ux_recorder_cdp.py \
+	$(CURDIR)/scripts/ux_recorder_render.py \
+	$(CURDIR)/scripts/ux_test_session.py \
+	$(CURDIR)/scripts/tests
 
 # CloudFormation templates to validate
 CFN_TEMPLATES := \
@@ -360,7 +366,7 @@ build-vp: ## Build Virtual Participant (TypeScript)
 	@echo -e "$(GREEN)✅ Virtual Participant build complete!$(NC)"
 
 ##@ Testing
-test: test-ui test-sdk test-cli test-lambdas test-ai-stack test-integ-plumbing test-asr test-pr-review ## Run all tests (no AWS required)
+test: test-ui test-sdk test-cli test-lambdas test-ai-stack test-integ-plumbing test-asr test-pr-review test-ux-recorder ## Run all tests (no AWS required)
 
 test-sdk: ## Run LMA SDK unit tests
 	@echo "Running LMA SDK tests..."
@@ -470,6 +476,14 @@ test-pr-review: ## Unit tests for the advisory AI review harness (no AWS, no mod
 	@echo "Running advisory AI review tests..."
 	$(PYTHON) -m pytest scripts/pr_review/test_ai_pr_review.py -q
 	@echo -e "$(GREEN)✅ Advisory AI review tests passed!$(NC)"
+
+# The demo recorder (scripts/ux_recorder*.py), the stack-session helper and the
+# product-demo skill's storyboard file. Needs no AWS, Chrome or network; the
+# render tests skip without ffmpeg and Pillow.
+test-ux-recorder: ## Unit tests for the product demo recorder and its session helper (no AWS)
+	@echo "Running demo recorder tests..."
+	$(PYTHON) -m pytest scripts/tests -q
+	@echo -e "$(GREEN)✅ Demo recorder tests passed!$(NC)"
 
 # Run one review locally and PRINT it rather than posting. Usage:
 #   make ai-pr-review PR=800
@@ -663,6 +677,27 @@ integ-deploy-and-test: ## Deploy (create/update) a stack from local code, then r
 		$(VENV_DIR)/bin/lma deploy --stack-name "$$STACK_NAME" --from-code . --admin-email "$(ADMIN_EMAIL)" --wait; \
 	fi
 	@$(MAKE) integ-tests STACK="$(INTEG_DEPLOY_STACK)"
+
+##@ Product Demo Recording
+# Narrated demo videos of the web UI: see .claude/skills/product-demo.md. The
+# recording is driven by the agent between browser steps; these only check the
+# tools and prepare a sign-in.
+
+ux-record-deps: ## Check the tools the demo recorder needs (ffmpeg, ffprobe, boto3, Pillow)
+	@$(PYTHON) scripts/ux_recorder.py deps
+
+# Creates a REAL Cognito user with a known password in the stack's pool, for
+# recording as a role other than your own (GROUP=User for a non-admin).
+ux-test-session: ## Create a throwaway sign-in for a demo (Usage: make ux-test-session STACK_NAME=<stack> [REGION=...] [GROUP=Admin|User])
+ifndef STACK_NAME
+	$(error STACK_NAME is not set. Usage: make ux-test-session STACK_NAME=<stack-name> [REGION=... GROUP=...])
+endif
+	@echo "Creating a throwaway sign-in for $(STACK_NAME)..."
+	@$(PYTHON) scripts/ux_test_session.py setup $(STACK_NAME) \
+	    --group $(if $(GROUP),$(GROUP),Admin) \
+	    $(if $(REGION),--region $(REGION),)
+	@echo -e "$(YELLOW)Record as described in .claude/skills/product-demo.md$(NC)"
+	@echo -e "$(YELLOW)Remember to run the teardown command printed above.$(NC)"
 
 ##@ UI Development
 # Usage: make ui-start STACK_NAME=<stack-name>
