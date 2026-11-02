@@ -679,3 +679,20 @@ def test_partition_and_endpoint_literals_do_not_increase(raw: str):
         f"{endpoint_literals} lines hardcode 'amazonaws.com' (was 84). Use "
         f'!Sub "service.${{AWS::URLSuffix}}" instead.'
     )
+
+
+# AppSync's Velocity parser rejects a method call made directly on a list
+# literal (for example ``["a", "b"].contains($x)``) with a "Lexical error" at
+# request time, which cfn-lint and SAM validation do not catch. Assign the
+# list to a variable first.
+_LIST_LITERAL_CALL = re.compile(r"\]\s*\.\s*[A-Za-z_]+\s*\(")
+
+
+@pytest.mark.parametrize("path", [TEMPLATE, MAIN_TEMPLATE])
+def test_no_velocity_method_call_on_a_list_literal(path: Path):
+    offenders = [
+        f"{path.name}:{number}: {line.strip()}"
+        for number, line in enumerate(path.read_text().splitlines(), start=1)
+        if line.lstrip().startswith("#") and _LIST_LITERAL_CALL.search(line)
+    ]
+    assert not offenders, "assign the list to a #set variable first:\n" + "\n".join(offenders)
