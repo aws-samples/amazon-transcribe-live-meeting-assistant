@@ -1093,3 +1093,124 @@ def test_every_marker_used_in_the_suite_is_registered() -> None:
     registered = (Path(__file__).resolve().parent / "pytest.ini").read_text()
     for marker in ("live", "optional_feature"):
         assert f"    {marker}:" in registered, f"{marker} is not registered in pytest.ini"
+
+
+def test_the_meeting_consent_tests_are_opt_in_optional_features() -> None:
+    """They need LMA_TEST_CONSENT=1, and change a deployment-wide setting while they run.
+
+    Without the marker, the scheduled run's --no-skips would turn their opt-in
+    skip into a failure every night.
+    """
+    import test_meeting_consent
+
+    names = [m.name for m in test_meeting_consent.pytestmark]
+    assert "optional_feature" in names, names
+    assert "skipif" in names, names
+
+
+class _FakeConfigurationStore:
+    """The parts of lma_config.ConfigurationStore the consent override uses."""
+
+    def __init__(self, body: dict, active: str | None = "custom") -> None:
+        import meeting_consent_probe
+
+        self.errors = meeting_consent_probe._lma_config()
+        self.active = active
+        self.body = body
+        self.version = 1
+        self.writes: list[str] = []
+        # Called before the next write, to stand in for somebody else's save.
+        self.before_next_write = None
+
+    def active_profile_name(self, consistent_read: bool = False):
+        return self.active
+
+    def read_profile(self, name: str, consistent_read: bool = False):
+        from types import SimpleNamespace
+
+        assert name == self.active
+        return SimpleNamespace(exists=True, body=json.loads(json.dumps(self.body)), version=self.version)
+
+    def _write(self, kind: str, expected_version) -> None:
+        if self.before_next_write:
+            hook, self.before_next_write = self.before_next_write, None
+            hook()
+        if expected_version is not None and expected_version != self.version:
+            raise self.errors.ConcurrentModification("moved on")
+        self.version += 1
+        self.writes.append(kind)
+
+    def write_section(self, name, section, values, *, updated_by, expected_version, comment=None):
+        self._write("section", expected_version)
+        self.body[section] = dict(values)
+        return self.version
+
+    def write_profile(self, name, body, *, updated_by, expected_version, comment=None):
+        self._write("profile", expected_version)
+        self.body = dict(body)
+        return self.version
+
+
+def _override(store):
+    import meeting_consent_probe
+
+    return meeting_consent_probe.ConsentSettingsOverride(store=store)
+
+
+def test_consent_override_removes_a_section_the_profile_did_not_have() -> None:
+    store = _FakeConfigurationStore({"asr_engine": {"x": 1}})
+    override = _override(store)
+    override.save()
+    override.apply(mode="opt_in", consentRule="owner_attests")
+    assert store.body["meeting_consent"] == {"mode": "opt_in", "consentRule": "owner_attests"}
+    override.apply(mode="notify")
+    assert store.body["meeting_consent"] == {"mode": "notify"}
+    override.restore()
+    assert store.body == {"asr_engine": {"x": 1}}
+
+
+def test_consent_override_puts_back_the_saved_section() -> None:
+    saved = {"mode": "notify", "notifyNoticeText": "Recorded."}
+    store = _FakeConfigurationStore({"meeting_consent": dict(saved)})
+    override = _override(store)
+    override.save()
+    override.apply(mode="opt_in", consentRule="owner_attests")
+    # The other keys of the saved section are kept while the test runs.
+    assert store.body["meeting_consent"]["notifyNoticeText"] == "Recorded."
+    override.restore()
+    assert store.body == {"meeting_consent": saved}
+
+
+def test_consent_override_restore_keeps_other_sections_saved_meanwhile_and_retries() -> None:
+    store = _FakeConfigurationStore({})
+    override = _override(store)
+    override.save()
+    override.apply(mode="opt_in")
+
+    def somebody_else_saves() -> None:
+        store.body["chat_buttons"] = {"saved": "meanwhile"}
+        store.version += 1
+
+    store.before_next_write = somebody_else_saves
+    override.restore()
+    assert store.body == {"chat_buttons": {"saved": "meanwhile"}}
+    assert store.writes == ["section", "profile"]
+
+
+def test_consent_override_restore_is_a_no_op_unless_something_was_applied() -> None:
+    store = _FakeConfigurationStore({"meeting_consent": {"mode": "off"}})
+    override = _override(store)
+    override.restore()
+    override.save()
+    override.restore()
+    override.apply(mode="notify")
+    override.restore()
+    override.restore()
+    assert store.writes == ["section", "profile"]
+    assert store.body == {"meeting_consent": {"mode": "off"}}
+
+
+def test_consent_override_refuses_a_deployment_with_no_active_profile() -> None:
+    override = _override(_FakeConfigurationStore({}, active=None))
+    with pytest.raises(RuntimeError, match="no active configuration profile"):
+        override.save()

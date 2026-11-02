@@ -82,6 +82,7 @@ Stack resolution order: `--stack-name` / `STACK=` → `$LMA_STACK_NAME` → `LMA
 | `test_vp_registry_lifecycle` | VP create → get → list → end via AppSync (no meeting) | VP CRUD surface |
 | `test_vp_live_join` *(opt-in)* | VP actually joins a real meeting and leaves `INITIALIZING` | **@zoom/meetingsdk 4→6** |
 | `test_desktop_video.py` *(opt-in, `LMA_TEST_DESKTOP_VIDEO=1`)* | a narrated synthetic slideshow streamed as the desktop capture app streams it → one key frame per slide, at the right times, with both images in S3; the meeting assistant reads the last slide | desktop video key frames and the assistant's shared-screen tool |
+| `test_meeting_consent.py` *(opt-in, `LMA_TEST_CONSENT=1`)* | with the Meeting Consent setting changed for the run and put back afterwards: an unconfirmed opt-in stream is refused and captures nothing; an attested one is transcribed, with its attestation, evidence image and evidence check stored; a notify stream stops, and is recorded as objected and ended, on an objection | the transcriber's consent gate on the Stream Audio path |
 
 `test_vp_live_join` is marked `live` and **skipped** unless `--vp-meeting-id`
 (`MEETING_ID=`) is provided.
@@ -185,3 +186,72 @@ looked at on the meeting page. To build only the media, for a look at the slides
 and the fragment sizes, without a stack:
 `AWS_PROFILE=default python integ-tests/desktop_video_probe.py --region us-west-2 --media-only /tmp/slides`
 (this calls Polly).
+
+## Meeting consent on the Stream Audio path
+
+`test_meeting_consent.py` checks how the WebSocket transcriber gates a streamed
+meeting on its [consent](../docs/meeting-consent.md) step. It is opt-in: it
+changes the deployment's Meeting Consent setting while it runs, takes about
+three minutes, and calls Amazon Transcribe and Bedrock.
+
+```bash
+.venv/bin/pip install -r integ-tests/requirements.txt -r integ-tests/requirements-video.txt
+AWS_PROFILE=default LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user \
+    make integ-tests STACK=lma-integtest1 LMA_TEST_CONSENT=1
+
+# Only this file:
+AWS_PROFILE=default LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user LMA_TEST_CONSENT=1 \
+    .venv/bin/python -m pytest integ-tests/test_meeting_consent.py --stack-name lma-integtest1 -s
+```
+
+Only Pillow is needed from `requirements-video.txt`, to draw the evidence
+image; the ffmpeg it also installs is not used.
+
+**The setting.** The test first asks the transcriber for its consent settings
+(`CONSENT_SETTINGS`) and fails, without changing anything, if it gets no
+answer. It then saves the active configuration profile's `meeting_consent`
+section, and writes the section through the `lma_config` configuration store
+with the caller's AWS credentials. That is the store and the profile the
+Configuration page saves into, so each change appears in the configuration
+history, by `integ-tests/test_meeting_consent.py`. The page's own save is open
+only to the Admin group, which the test user is not in. After each write the
+test waits until the transcriber reports the new mode. In the module's
+teardown, whether the tests passed or not, it puts the section back exactly as
+saved, or removes it again if the profile had none, and keeps any other section
+saved in the meantime. Only a killed process skips that teardown; then restore
+the section on the Configuration page, or from its history.
+
+**The meetings.** Each is streamed as `ws_stream_probe.py` streams, from the
+same WAV fixture, at real-time pace, with a `consent` step in `START`
+(`docs/websocket-streaming-api.md`, section 6.1.5):
+
+| Test | Setting | Asserts |
+|------|---------|---------|
+| `test_opt_in_meeting_without_confirmation_is_refused` | `opt_in`, `owner_attests` | a `START` whose step is not confirmed is answered with `CONSENT_STATE` `CONSENT_NOT_CONFIRMED`, `captureAllowed: false`, and the connection is closed with 1008 |
+| `test_refused_opt_in_meeting_captures_nothing` | the same | 20 seconds later the call has no meeting row and no transcript segments |
+| `test_attested_opt_in_meeting_is_transcribed` | the same | with the step confirmed (method `verbal`) the server reports `granted`, keeps the connection open, and the meeting has transcript segments |
+| `test_attested_opt_in_meeting_records_the_attestation` | the same | the meeting's `Consent` record is `opt_in` / `owner_attests`, `granted`, with an attestation by the meeting's owner (the test user) by `verbal`, and the notice posted on channel `voice` with the text sent |
+| `test_attested_opt_in_meeting_stores_the_evidence_image` | the same | the synthetic chat screenshot sent straight after `START` is the record's one evidence entry, and is stored as a JPEG under `lma-consent-evidence/<meeting>/` in the recordings bucket |
+| `test_attested_opt_in_meeting_evidence_is_checked` | the same | within two minutes the entry has a stored vision-model check with a verdict, a model id and a time. Any verdict passes; this asserts that the check ran |
+| `test_objection_closes_the_connection` | `notify` | `CONSENT_OBJECTION` 18 seconds into a 36-second stream is answered with `OBJECTION_RECEIVED`, `captureAllowed: false`, and the server closes the connection within ten seconds, before the client's `END` |
+| `test_objection_stops_the_transcript` | the same | the meeting has segments from before the objection, the count is the same 20 and 40 seconds afterwards, and no segment ends more than four seconds after it |
+| `test_objection_is_recorded_and_ends_the_meeting` | the same | the record is `objected`, with `CaptureAllowed` false and one objection, by the name sent; the meeting's status is `ENDED` |
+
+With the flag set, a missing dependency, a missing test user, a stack without
+the consent resolver, or a transcriber that does not answer `CONSENT_SETTINGS`
+fails the run rather than skipping. Without the flag the tests are reported as
+skipped, including under `make integ-tests-nightly`, because they carry the
+`optional_feature` marker. A missing check in the last opt-in test usually means
+the evidence check model (**Evidence check model** in the Meeting Consent
+settings, Amazon Nova Lite by default) is not enabled in Bedrock; the image is
+then kept unchecked, as documented.
+
+The meetings (`consent-probe-<refused|granted|objected>-<UTC time>`) are not
+deleted: they expire with the deployment's retention, and the two that were
+created can be opened on the meeting page to see their Consent section. The
+refused one is never created.
+
+To see what a deployment answers without changing anything (the active
+profile, the resolved `meeting_consent` section and the transcriber's
+`CONSENT_SETTINGS` answer):
+`AWS_PROFILE=default LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user python integ-tests/meeting_consent_probe.py lma-integtest1 --region us-west-2`

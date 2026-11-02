@@ -45,6 +45,12 @@ LMA_TEST_USERNAME=you@example.com LMA_TEST_PASSWORD=... \
 LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user \
     AWS_PROFILE=default make integ-tests STACK=lma-integtest1 LMA_TEST_DESKTOP_VIDEO=1
 
+# Meeting consent on the Stream Audio path (~3 min; changes the deployment's
+# Meeting Consent setting for the run and always puts it back). Needs Pillow,
+# from requirements-video.txt, for the evidence image:
+LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user \
+    AWS_PROFILE=default make integ-tests STACK=lma-integtest1 LMA_TEST_CONSENT=1
+
 # Real Virtual Participant join into a live meeting:
 make integ-tests-live STACK=lma-integtest1 PLATFORM=ZOOM \
     MEETING_ID=1234567890 MEETING_PASSWORD=secret
@@ -103,6 +109,7 @@ make docker-build-check-all    # + Virtual Participant image (heavy)
 | `test_vp_registry_lifecycle` | VP create→get→list→end (no meeting) | VP CRUD surface |
 | `test_vp_live_join` *(opt-in)* | VP joins a real meeting | `@zoom/meetingsdk` |
 | `test_desktop_video.py` *(opt-in, `LMA_TEST_DESKTOP_VIDEO=1`)* | synthetic slideshow over the desktop app's video socket → 5 key frames at the slide times, both JPEGs in S3, assistant quotes the unspoken last slide | desktop key frames (`videokeyframes.ts`); the assistant's shared-screen tool once #891 is deployed |
+| `test_meeting_consent.py` *(opt-in, `LMA_TEST_CONSENT=1`)* | sets `meeting_consent` to opt-in / owner attests, then notify, through the `lma_config` store with IAM (the test user is not Admin), restoring it in teardown: unconfirmed opt-in START refused (`CONSENT_NOT_CONFIRMED`, no meeting, no segments); attested opt-in transcribed with attestation, notice, evidence JPEG in `lma-consent-evidence/<meeting>/` and a stored evidence check; notify objection closes the socket, stops segments, record `objected`, meeting `ENDED` | the transcriber's consent gate (`consent/` in the transcriber) and the consent resolver and verifier behind it |
 
 `test_ws_stream_transcribes_to_meeting` is the strongest single check — it streams
 `utilities/load-simulator/lma_load/fixtures/stereo-demo-call.wav` (real speech; the
@@ -130,6 +137,13 @@ written, and transcript segments are produced.
 - **`test_assistant_reads_the_last_slide`** → skipped means the deployed
   assistant has no `meeting_frames.py` (the tool comes with #891, not yet merged); a wrong answer means the tool did not
   run or the model could not read the image (Nova Micro reads no images).
+- **`test_meeting_consent.py`** → failing at setup with "did not answer
+  CONSENT_SETTINGS" means the transcriber image predates the Stream Audio
+  consent step, and nothing was changed. A missing evidence check means the
+  evidence check model is not enabled in Bedrock (see the
+  `ConsentEvidenceVerifierFunction` and `MeetingConsentResolverFunction` logs).
+  If a run was killed before its teardown, check the Meeting Consent section on
+  the Configuration page: the test's saves are in the configuration history.
 - **`test_vp_live_join`** → VP never left `INITIALIZING`; inspect VP ECS task logs
   and the Zoom per-signal checklist in the runbook.
 
