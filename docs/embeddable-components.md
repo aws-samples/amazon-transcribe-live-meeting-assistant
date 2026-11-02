@@ -363,7 +363,7 @@ iframe.contentWindow.postMessage({
 iframe.contentWindow.postMessage({
   type: 'LMA_CREATE_VP',
   meetingName: 'Globex Q4 Renewal Sync',  // Required
-  meetingPlatform: 'ZOOM',                // Required: ZOOM | TEAMS | CHIME | WEBEX
+  meetingPlatform: 'ZOOM',                // Required: ZOOM | TEAMS | CHIME | WEBEX | GOOGLE_MEET
   meetingId: '1234567890',                // Required
   meetingPassword: 'optional'             // Optional
 }, targetOrigin);

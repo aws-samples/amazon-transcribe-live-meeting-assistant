@@ -147,10 +147,11 @@ test('ids sort in time order and keys follow the deletion prefix rule', () => {
     });
 });
 
-test('Zoom and Teams have a share probe; Webex and Chime do not', () => {
+test('Zoom and Teams have a share probe; Webex, Chime and Google Meet do not', () => {
     assert.ok(screenShareProbeFor('ZOOM'));
     assert.ok(screenShareProbeFor('TEAMS', 'dom'));
     assert.ok(screenShareProbeFor('Teams', 'sdk'));
     assert.equal(screenShareProbeFor('WEBEX'), null);
     assert.equal(screenShareProbeFor('CHIME'), null);
+    assert.equal(screenShareProbeFor('GOOGLE_MEET'), null);
 });

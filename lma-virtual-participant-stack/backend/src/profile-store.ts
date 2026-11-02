@@ -122,7 +122,7 @@ export interface ProfileHandle {
 }
 
 // Normalize a meeting platform label to a stable S3 path segment. Mirrors the
-// values the UI / scheduler send ('ZOOM' | 'CHIME' | 'TEAMS' | 'WEBEX', with
+// values the UI / scheduler send ('ZOOM' | 'CHIME' | 'TEAMS' | 'WEBEX' | 'GOOGLE_MEET', with
 // older mixed-case variants) so the key matches between writer and reader.
 // Falls back to 'unknown' so a missing/garbage platform still gets an isolated
 // (never shared) profile rather than colliding with a real one.

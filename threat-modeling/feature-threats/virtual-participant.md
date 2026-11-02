@@ -12,7 +12,7 @@
 ## 1. Feature Overview
 
 The Virtual Participant enables LMA to join meetings autonomously by running a headless Chromium browser (CloakBrowser, driven by Playwright) in an ECS container. It supports:
-- **Platform support**: Zoom, Microsoft Teams, Amazon Chime, WebEx
+- **Platform support**: Zoom, Microsoft Teams, Amazon Chime, WebEx, Google Meet
 - **Meeting join**: Navigates to meeting URLs and joins as a participant
 - **Audio capture**: Captures two-channel audio from the browser
 - **Voice assistant**: Optional — speaks responses into the meeting via Nova Sonic or ElevenLabs

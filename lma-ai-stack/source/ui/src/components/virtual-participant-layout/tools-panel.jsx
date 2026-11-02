@@ -12,9 +12,9 @@ const header = <h2>Virtual Participant</h2>;
 const content = (
   <>
     <p>
-      Send an AI-powered virtual participant (bot) to join meetings on Zoom, Microsoft Teams, Amazon Chime, and Cisco
-      Webex. The bot captures audio for real-time transcription without requiring browser audio streaming. For Google
-      Meet, use the Chrome extension instead.
+      Send an AI-powered virtual participant (bot) to join meetings on Zoom, Microsoft Teams, Amazon Chime, Cisco Webex
+      and Google Meet. The bot captures audio for real-time transcription without requiring browser audio streaming. A
+      Google Meet meeting has to accept guests who join from a browser; where it does not, use the Chrome extension.
     </p>
     <h3>Features</h3>
     <ul>

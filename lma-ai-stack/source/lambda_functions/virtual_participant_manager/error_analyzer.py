@@ -230,7 +230,7 @@ class ErrorAnalyzer:
         Get platform-specific troubleshooting guidance
 
         Args:
-            platform: The meeting platform (zoom, teams, webex, etc.)
+            platform: The meeting platform (zoom, teams, webex, google_meet, etc.)
             category: The error category
 
         Returns:
@@ -277,6 +277,16 @@ class ErrorAnalyzer:
                     "Verify the Webex meeting number",
                     "Check if the meeting is scheduled for the correct time zone",
                     "Ensure the meeting hasn't been moved or cancelled",
+                ],
+            },
+            "google_meet": {
+                ErrorCategory.AUTHENTICATION_ERROR: [
+                    "Check that the meeting accepts guests who are not signed in to a Google account",
+                    "Check that someone in the meeting admits the participant when it asks to join",
+                ],
+                ErrorCategory.MEETING_NOT_FOUND: [
+                    "Verify the Google Meet meeting code (abc-defg-hij) or meet.google.com link",
+                    "Ensure the meeting hasn't ended or been deleted from the calendar event",
                 ],
             },
         }

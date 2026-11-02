@@ -36,7 +36,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--vp-platform",
         action="store",
         default="ZOOM",
-        help="Platform for the VP lifecycle test (ZOOM|TEAMS|CHIME|WEBEX).",
+        help="Platform for the VP lifecycle test (ZOOM|TEAMS|CHIME|WEBEX|GOOGLE_MEET).",
     )
     parser.addoption(
         "--vp-meeting-id",

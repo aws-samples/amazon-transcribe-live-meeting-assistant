@@ -7,6 +7,7 @@ Usage::
     lma vp create --name "Weekly sync" --platform ZOOM --id 1234567890
     lma vp create --name "Weekly sync" --platform ZOOM --id 1234567890 \
         --as-user alice@example.com
+    lma vp create --name "Demo" --platform GOOGLE_MEET --id abc-defg-hij
     lma vp get --id <vp-id>
     lma vp end --id <vp-id>
     lma vp list
@@ -23,7 +24,7 @@ from lma_cli.formatters import console, print_error, print_info, print_success
 
 
 PLATFORM_CHOICES = click.Choice(
-    ["ZOOM", "TEAMS", "CHIME", "WEBEX"],
+    ["ZOOM", "TEAMS", "CHIME", "WEBEX", "GOOGLE_MEET"],
     case_sensitive=False,
 )
 
@@ -46,7 +47,10 @@ def vp_cmd() -> None:
     "--platform", "platform", required=True, type=PLATFORM_CHOICES,
     help="Meeting platform.",
 )
-@click.option("--id", "meeting_id", required=True, help="Meeting ID.")
+@click.option(
+    "--id", "meeting_id", required=True,
+    help="Meeting ID. For GOOGLE_MEET, the meeting code (abc-defg-hij) or its link.",
+)
 @click.option("--password", default="", help="Meeting password (if any).")
 @click.option(
     "--user-name", default=None,

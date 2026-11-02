@@ -7,7 +7,7 @@ import { normalizeChatText } from './chat-text.js';
 export interface MeetingInvite {
   meetingId: string;
   meetingPassword?: string;
-  meetingPlatform: 'Chime' | 'Zoom' | 'Teams' | 'Webex' | 'CHIME' | 'ZOOM' | 'TEAMS' | 'WEBEX';
+  meetingPlatform: 'Chime' | 'Zoom' | 'Teams' | 'Webex' | 'CHIME' | 'ZOOM' | 'TEAMS' | 'WEBEX' | 'GOOGLE_MEET';
   meetingName: string;
   meetingTime: number;
   scheduledFor?: string;
@@ -122,7 +122,7 @@ class DetailsManager {
 
   constructor() {
     // Initialize from environment variables
-    const meetingPlatform = (process.env.MEETING_PLATFORM as 'Chime' | 'Zoom' | 'Teams' | 'Webex' | 'CHIME' | 'ZOOM' | 'TEAMS' | 'WEBEX') || 'Chime';
+    const meetingPlatform = (process.env.MEETING_PLATFORM as 'Chime' | 'Zoom' | 'Teams' | 'Webex' | 'CHIME' | 'ZOOM' | 'TEAMS' | 'WEBEX' | 'GOOGLE_MEET') || 'Chime';
     const meetingId = process.env.MEETING_ID || '';
     const meetingPassword = process.env.MEETING_PASSWORD || '';
     const meetingName = process.env.MEETING_NAME || 'LMA Meeting';
@@ -479,6 +479,18 @@ export interface ExitInfo {
 }
 
 /**
+ * The status detail for a join that never got in, where the platform said why.
+ * Keyed by trigger; any other never-joined trigger gets the generic message.
+ */
+const NEVER_JOINED_DETAIL: Readonly<Record<string, string>> = {
+  'pre-join:meet-refused':
+    "Google Meet did not let the participant join (\"You can't join this video call\"). See the Google Meet notes on the Virtual Participant page.",
+  'pre-join:meet-denied': 'Someone in the Google Meet meeting declined the request to join.',
+  'pre-join:meet-invalid-code': 'Not a Google Meet meeting code or link, or Google Meet does not know the meeting.',
+  'pre-join:meet-ended': 'The Google Meet meeting had already ended.',
+};
+
+/**
  * Build the human-readable status detail shown in the UI alongside
  * COMPLETED. Keep these short and user-facing — the canonical reason code
  * and trigger live in the logs, not in this string.
@@ -504,7 +516,8 @@ export function formatExitMessage(info: ExitInfo): string {
     case 'page-closed':
       return 'Meeting page closed unexpectedly.';
     case 'never-joined':
-      return 'Could not join the meeting (was not admitted, or stuck on the join screen).';
+      return (info.trigger && NEVER_JOINED_DETAIL[info.trigger]) ||
+        'Could not join the meeting (was not admitted, or stuck on the join screen).';
     case 'unknown':
     default:
       return 'Meeting ended.';

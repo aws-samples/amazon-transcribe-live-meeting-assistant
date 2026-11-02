@@ -54,7 +54,7 @@ if [ $# -lt 3 ]; then
     echo ""
     echo "Arguments:"
     echo "  STACK_NAME        - Your LMA CloudFormation stack name (e.g., LMA-dev-stack-2)"
-    echo "  MEETING_PLATFORM  - WEBEX, ZOOM, TEAMS, or CHIME"
+    echo "  MEETING_PLATFORM  - WEBEX, ZOOM, TEAMS, CHIME, or GOOGLE_MEET"
     echo "  MEETING_ID        - The meeting ID to join"
     echo "  MEETING_PASSWORD  - Optional meeting password"
     echo ""

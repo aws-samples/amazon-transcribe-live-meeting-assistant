@@ -23,7 +23,7 @@
  *     which teams.ts reads for the active speaker during a share.
  *   - Teams (Azure Communication Services path): the call adapter's state,
  *     exposed by teams-sdk-page.ts as `__lmaScreenShareActive()`.
- *   - Webex and Amazon Chime: no signal; the probe is absent.
+ *   - Webex, Amazon Chime and Google Meet: no signal; the probe is absent.
  *
  * A probe answers `null` when it cannot tell (the page is navigating, the
  * evaluate failed); the sampler keeps the previous answer in that case.

@@ -113,18 +113,22 @@ CRITICAL MEETING ID AND PASSWORD RULES:
      set meetingId to the COMPLETE, UNMODIFIED join URL (keep the full https://... string), and
      only set meetingPassword if an explicit "password"/"pwd" parameter is present in the URL.
 7. For Zoom passwords from URLs: Extract the COMPLETE password from the URL's pwd parameter. The password can contain letters, numbers, and special characters including periods (.). Extract everything after "pwd=" up to the next "&" or end of URL. Do NOT truncate the password at periods or other special characters.
+8. For Google Meet (links on meet.google.com), set meetingId to the meeting code, three, four and
+   three letters separated by hyphens (e.g. "abc-defg-hij" from https://meet.google.com/abc-defg-hij).
+   Google Meet meetings have no password: set meetingPassword to null, and do NOT use the dial-in
+   PIN that Meet invitations list under "Join by phone".
 
 DATE AND TIME HANDLING:
-8. If NO specific date or time is mentioned in the invitation, set meetingDate and meetingTime to null
-9. If the meeting is recurring (contains words like "every", "weekly", "occurs", "recurring"), set isRecurring to true
-10. For recurring meetings, DO NOT use the start date from the invitation if it's in the past
-11. Instead, calculate the NEXT occurrence based on the recurrence pattern
-12. For "every Wednesday" meetings, find the next Wednesday from today
-13. For "weekly" meetings, find the next occurrence based on the day of the week mentioned
-14. ALWAYS ensure the final date is today or in the future
-15. If today matches the recurring day, use today's date only if the time is in the future
-16. If you cannot determine a specific date or time with confidence, leave those fields as null
-17. Do NOT guess or make up dates/times - only extract what is clearly stated
+9. If NO specific date or time is mentioned in the invitation, set meetingDate and meetingTime to null
+10. If the meeting is recurring (contains words like "every", "weekly", "occurs", "recurring"), set isRecurring to true
+11. For recurring meetings, DO NOT use the start date from the invitation if it's in the past
+12. Instead, calculate the NEXT occurrence based on the recurrence pattern
+13. For "every Wednesday" meetings, find the next Wednesday from today
+14. For "weekly" meetings, find the next occurrence based on the day of the week mentioned
+15. ALWAYS ensure the final date is today or in the future
+16. If today matches the recurring day, use today's date only if the time is in the future
+17. If you cannot determine a specific date or time with confidence, leave those fields as null
+18. Do NOT guess or make up dates/times - only extract what is clearly stated
 
 CURRENT CONTEXT:
 - Today's date: {current_date}
@@ -259,6 +263,36 @@ def clean_agenda(agenda):
     return agenda.strip()[:MAX_AGENDA_CHARS]
 
 
+_MEET_CODE = re.compile(r"^([a-z]{3})-?([a-z]{4})-?([a-z]{3})$")
+_MEET_LINK = re.compile(
+    r"^(?:https?://)?meet\.google\.com/(?:meet/)?([a-z]{3}-?[a-z]{4}-?[a-z]{3})/?(?:[?#].*)?$"
+)
+_MEET_OTHER_LINK = re.compile(r"^(?:https?://)?meet\.google\.com/[^\s]+$")
+
+
+def normalize_google_meet_id(value):
+    """Reduce a Google Meet code or link to its code, or return None if it is neither.
+
+    Mirrors parseGoogleMeetMeeting in the Virtual Participant (google-meet-page.ts):
+    a bare code in any case, with or without hyphens, or a meet.google.com link
+    (including Meet's /meet/<code> redirect form) gives "abc-defg-hij". A
+    meet.google.com link whose path is not a code (a /lookup/ link) is returned
+    unchanged, since the Virtual Participant can open it as it is.
+    """
+    if not isinstance(value, str):
+        return None
+    text = "".join(value.split()).lower()
+    if not text:
+        return None
+    link = _MEET_LINK.match(text)
+    code = _MEET_CODE.match(link.group(1) if link else text)
+    if code:
+        return f"{code.group(1)}-{code.group(2)}-{code.group(3)}"
+    if _MEET_OTHER_LINK.match(text):
+        return "".join(value.split())
+    return None
+
+
 def validate_parsed_data(data):
     """Validate and clean parsed meeting data"""
     if not isinstance(data, dict):
@@ -272,6 +306,13 @@ def validate_parsed_data(data):
 
     # Validate platform
     valid_platforms = ["ZOOM", "TEAMS", "CHIME", "WEBEX", "GOOGLE_MEET"]
+    # A Meet link or code identifies the platform by itself. Checked when the model
+    # gave no platform as well: the UI otherwise falls back to its own ZOOM default
+    # and hands the user a Zoom form holding a Meet link.
+    if data.get("meetingPlatform") not in valid_platforms and normalize_google_meet_id(
+        data.get("meetingId")
+    ):
+        data["meetingPlatform"] = "GOOGLE_MEET"
     if data.get("meetingPlatform") and data["meetingPlatform"] not in valid_platforms:
         # Try to infer platform from meeting ID or URL
         meeting_id = data.get("meetingId", "").lower()
@@ -325,6 +366,15 @@ def validate_parsed_data(data):
                 if webex_pr_match:
                     data["meetingId"] = webex_pr_match.group(1)
 
+    # Google Meet: store the meeting code ("abc-defg-hij") rather than the link, as
+    # the create form does, and no password. A Meet invitation's only number is the
+    # dial-in PIN, which is not a meeting password.
+    if data.get("meetingPlatform") == "GOOGLE_MEET":
+        data["meetingPassword"] = None
+        meet_id = normalize_google_meet_id(data.get("meetingId"))
+        if meet_id:
+            data["meetingId"] = meet_id
+
     # Clean up meeting ID for Teams.
     # New format: https://teams.microsoft.com/meet/243574196567966?p=ixpjsDWNj8cLxyHlQD
     #   -> meetingId="243574196567966", meetingPassword="ixpjsDWNj8cLxyHlQD"
@@ -362,22 +412,16 @@ def validate_parsed_data(data):
     return data
 
 
-# Platforms the Virtual Participant has a handler for. GOOGLE_MEET is deliberately
-# absent: the model is still asked to identify it (so a Meet invitation can be
-# rejected with something useful to read), but there is no Meet handler, so letting
-# it through would auto-fill the create form with a platform that fails at launch
-# with "Unsupported meeting platform". Meet meetings are captured with the Chrome
-# extension instead. See GitHub #661.
-VP_SUPPORTED_PLATFORMS = ["ZOOM", "TEAMS", "CHIME", "WEBEX"]
+# Platforms the Virtual Participant has a handler for, kept in step with the
+# platform switch in the Virtual Participant's index.ts. A platform the parser
+# can name but the Virtual Participant cannot join is refused up front, rather
+# than auto-filling the create form with a platform that fails at launch with
+# "Unsupported meeting platform".
+VP_SUPPORTED_PLATFORMS = ["ZOOM", "TEAMS", "CHIME", "WEBEX", "GOOGLE_MEET"]
 
-UNSUPPORTED_PLATFORM_MESSAGES = {
-    "GOOGLE_MEET": (
-        "This looks like a Google Meet invitation. The Virtual Participant cannot "
-        "join Google Meet meetings. Use the LMA Chrome extension to capture a Meet "
-        "meeting you are in yourself, or enter a different meeting's details "
-        "manually."
-    ),
-}
+# What to tell the user for a recognised platform that is not supported. Empty
+# while every platform the prompt names has a handler.
+UNSUPPORTED_PLATFORM_MESSAGES: dict = {}
 
 
 def handler(event, context):
@@ -403,12 +447,6 @@ def handler(event, context):
             # "Unsupported meeting platform" after the user had filled everything
             # else in. The message reaches the paste-invitation dialog directly.
             platform = result["data"].get("meetingPlatform")
-            # A missing platform would skip the check, and the UI then falls back to
-            # its own default of ZOOM — handing the user a Zoom form holding a Meet
-            # link, which fails for a reason that has nothing to do with Meet. The
-            # link itself is enough to tell.
-            if not platform and "meet.google" in (result["data"].get("meetingId") or "").lower():
-                platform = "GOOGLE_MEET"
             if platform and platform not in VP_SUPPORTED_PLATFORMS:
                 logger.info("Rejecting unsupported meeting platform: %s", platform)
                 return json.dumps(

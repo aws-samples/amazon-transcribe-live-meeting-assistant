@@ -260,7 +260,7 @@ starting after consent is the same path as resuming after a pause.
 The **Create Virtual Participant** form has a **Meeting consent** choice: the
 deployment's setting (the default), Off, Notify, Opt-in with each participant
 consenting, or Opt-in with the meeting owner attesting. The each-participant
-choice is not offered for Webex, and for Teams it is marked as needing the join
+choice is not offered for Webex or Google Meet, and for Teams it is marked as needing the join
 through Azure Communication Services (see
 [What each platform supports](#what-each-platform-supports)). Any choice other
 than the deployment's is stored on the VP's row (`consentMode` and `consentRule` in
@@ -420,13 +420,18 @@ rule, so it is never allowed to be shorter than the meeting:
   says so. Use the owner-attests rule on Webex.
 - **Where the platform shows no chat sender** (the Teams browser join), no
   consent reply can be attributed, so the each-participant rule is not met
-  either, and the detail line says that instead.
+  either, and the detail line says that instead. The Google Meet join is
+  treated the same way: it reads a sender for each chat message, but that
+  reading has not yet been confirmed in a live meeting, and a consent recorded
+  for the wrong person would be worse than none, so consent replies on Meet are
+  read without a sender.
 
 The count is the one each platform handler already reads to leave a meeting it
 is alone in: whenever the count on the page changes on the Chime and Zoom
 browser joins (plus a check every 30 seconds on Zoom), every 3 seconds on the
-two SDK joins, and every 20 seconds by default on the Teams browser join (the
-Virtual Participant section's attendee poll interval). One person leaving and
+two SDK joins, every 20 seconds by default on the Teams browser join (the
+Virtual Participant section's attendee poll interval), and every 20 seconds on
+the Google Meet join. One person leaving and
 another joining between two readings leaves the count unchanged, which the VP
 cannot see; the window is as long as the interval between readings.
 
@@ -443,6 +448,7 @@ identities are never listed.
 | Teams (browser) | **Not shown** | Count | **No**: consent replies cannot be attributed, so the rule is never met | The People pane is opened and shot, then the chat reopened |
 | Teams (Azure Communication Services) | Shown | Names | Yes | One screenshot of LMA's SDK page |
 | Webex (browser) | Shown | **None** | **No**: see [Who is present](#who-is-present) | The participants panel is opened, shot and closed again |
+| Google Meet (browser) | Read, but **not used for consent** | Count | **No**: consent replies are read without a sender, as on the Teams browser join | The People panel is opened and shot, then the chat reopened |
 
 Notify, owner-attests and objections work on every join. Opening and closing
 panels is best effort: a button the VP cannot find means a chat screenshot
