@@ -13,7 +13,7 @@
  * objection, attest -- and the evidence check are requests the backend applies
  * its own access rule to. See docs/meeting-consent.md.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Badge,
@@ -73,6 +73,8 @@ const EvidenceItem = ({ item, onVerify, canVerify }) => {
   // An image can expire before the record that lists it (the evidence
   // folder's lifecycle rule follows the transcript's retention).
   const [unavailable, setUnavailable] = useState(false);
+  // A fresh link (each read signs the image again) deserves another try.
+  useEffect(() => setUnavailable(false), [item.SignedUrl]);
   const check = async () => {
     setChecking(true);
     setFailure(null);
@@ -253,13 +255,24 @@ const AttestModal = ({ onDismiss, onSubmit }) => {
 const ConsentPanel = ({ state, canEdit = false, isOwner = false, isAdmin = false }) => {
   const [dialog, setDialog] = useState(null);
   const consent = state?.consent;
-  if (!consent) return null;
+  if (!consent) {
+    // A failed read is said, not hidden: the record is evidence, and the
+    // summary download leaves it out while it cannot be read.
+    if (!state?.error) return null;
+    return (
+      <Container header={<Header variant="h4">Consent</Header>}>
+        <Alert type="error">{`The consent record could not be read: ${state.error}`}</Alert>
+      </Container>
+    );
+  }
 
   const rows = participantRows(consent);
   const timeline = buildTimeline(consent);
   const evidence = consent.Evidence || [];
   const attestation = consent.Attestation;
-  const offerAttestation = isOwner && consent.Mode !== 'off';
+  // Only where an attestation is what grants the meeting; elsewhere it would
+  // add an entry that changes nothing.
+  const offerAttestation = isOwner && consent.Mode === 'opt_in' && consent.Rule === 'owner_attests';
 
   return (
     <Container

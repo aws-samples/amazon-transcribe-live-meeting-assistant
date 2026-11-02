@@ -56,9 +56,16 @@ export const VERDICT_LABELS = {
 /** The Cloudscape Badge color for a verifier verdict. */
 export const verdictColor = (verdict) => ({ supports_consent: 'green', objection_found: 'red' }[verdict] || 'grey');
 
-/** A display name as the backend matches replies to participants by. */
+/**
+ * A display name as the backend matches replies to participants by: NFKC, then
+ * case folded, with spacing collapsed. JavaScript has no casefold, so the two
+ * characters lower-casing leaves different from Python's casefold() in names
+ * -- the sharp s and the final sigma -- are folded here by hand.
+ */
 export const normalizeName = (name) =>
-  typeof name === 'string' ? name.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim() : '';
+  typeof name === 'string'
+    ? name.normalize('NFKC').toLowerCase().replace(/ß/g, 'ss').replace(/ς/g, 'σ').replace(/\s+/g, ' ').trim()
+    : '';
 
 /**
  * Each participant's latest reply, keyed by normalised name, in the order the
@@ -138,6 +145,9 @@ export const buildTimeline = (consent) => {
   (consent.Events || []).forEach((event) => {
     entries.push({
       at: event.OccurredAt || event.RecordedAt,
+      // Ordered by when the backend recorded it, as the status is decided;
+      // a client's own clock, which OccurredAt is, can be off.
+      orderAt: event.RecordedAt || event.OccurredAt,
       kind: event.Source === 'attestation' ? 'attestation' : event.Decision,
       text: describeEvent(event),
     });
@@ -152,13 +162,20 @@ export const buildTimeline = (consent) => {
     });
   });
   const order = { started: 0, notice: 1, attestation: 2, consent: 2, objection: 2, status: 3 };
+  // Compared as instants, not as strings: "10:00:00.500Z" sorts before
+  // "10:00:00Z" as text, and an offset other than Z sorts by its local digits.
+  const instant = (entry) => {
+    const ms = Date.parse(entry.orderAt || entry.at || '');
+    return Number.isNaN(ms) ? null : ms;
+  };
   return entries
-    .map((entry, index) => ({ ...entry, index }))
+    .map((entry, index) => ({ ...entry, index, ms: instant(entry) }))
     .sort((a, b) => {
-      if (a.at && b.at && a.at !== b.at) return a.at < b.at ? -1 : 1;
-      if (!a.at !== !b.at) return a.at ? -1 : 1;
+      if (a.ms !== null && b.ms !== null && a.ms !== b.ms) return a.ms - b.ms;
+      if ((a.ms === null) !== (b.ms === null)) return a.ms === null ? 1 : -1;
       return (order[a.kind] ?? 9) - (order[b.kind] ?? 9) || a.index - b.index;
-    });
+    })
+    .map(({ ms, orderAt, ...entry }) => entry);
 };
 
 /** The record as plain text, for the summary download and the Word document. */

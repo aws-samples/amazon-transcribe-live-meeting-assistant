@@ -24,9 +24,10 @@ Choose the mode with whoever advises your organisation on those rules. Nothing
 on this page is legal advice.
 
 **Current state:** the consent settings, the consent record and its API, the
-evidence check and the meeting page's Consent section are in place. No capture method runs the consent flow yet — the Virtual Participant,
-the Desktop Capture App, Stream Audio and the browser extension neither post a
-notice nor wait for consent — so choosing Notify or Opt-in on the Configuration
+evidence check and the meeting page's Consent section are in place. No capture
+method runs the consent flow yet — the Virtual Participant, the Desktop Capture
+App, Stream Audio and the browser extension neither post a notice nor wait for
+consent — so choosing Notify or Opt-in on the Configuration
 page does not yet change how any meeting is captured. See
 [Flows by capture method](#flows-by-capture-method).
 
@@ -146,7 +147,11 @@ below the agenda. It shows:
   confidence and summary when it has been checked; selecting one opens it full
   size;
 - a **timeline** of everything, oldest first: consent started, notices posted,
-  replies and attestations, and each change of status with its reason.
+  replies and attestations, and each change of status with its reason. Replies
+  are placed by when LMA recorded them, the order the status is decided in.
+
+If the record cannot be read, the section says so rather than disappearing,
+and the summary download leaves the record out until it can be.
 
 The images are shown through links signed for whoever opened the page, after
 the same access check as the transcript, and last an hour. An image that has
@@ -161,10 +166,11 @@ Three actions, each offered only to the people the backend lets do it:
   Admins. Enter the participant's display name and, optionally, what they said.
   It is recorded as source `ui` under your username, and stops recording and
   transcription in a notify or opt-in meeting until that participant consents.
-- **Attest that everyone agreed** — the meeting's owner only. Choose how
-  everyone agreed (out loud, in the chat, or by accepting the invitation's
-  terms) and, optionally, add a statement. It grants an opt-in meeting under
-  the **The meeting owner attests** rule, unless somebody objected.
+- **Attest that everyone agreed** — the meeting's owner only, and only for an
+  opt-in meeting under the **The meeting owner attests** rule, where it is what
+  grants the meeting. Choose how everyone agreed (out loud, in the chat, or by
+  accepting the invitation's terms) and, optionally, add a statement. It grants
+  the meeting unless somebody objected.
 - **Check with model** (or **Check again**) on an evidence image — the owner
   and Admins. See
   [Checking evidence with a vision model](#checking-evidence-with-a-vision-model).

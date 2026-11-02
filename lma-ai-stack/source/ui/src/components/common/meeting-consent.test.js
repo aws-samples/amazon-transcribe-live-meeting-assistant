@@ -60,6 +60,30 @@ describe('meeting-consent', () => {
     expect(buildTimeline(null)).toEqual([]);
   });
 
+  it('matches names as the backend case-folds them', () => {
+    const consent = {
+      Participants: ['Strauß'],
+      Events: [{ ParticipantName: 'STRAUSS', Decision: 'consent', Source: 'chat' }],
+    };
+    expect(participantRows(consent)).toEqual([{ name: 'Strauß', present: true, decision: 'consent' }]);
+  });
+
+  it('orders the timeline by instant, and replies by when they were recorded', () => {
+    const consent = {
+      StatusHistory: [{ Status: 'objected', CaptureAllowed: false, At: '2026-11-02T10:00:00.900Z' }],
+      Events: [
+        {
+          ParticipantName: 'Bo',
+          Decision: 'objection',
+          Source: 'chat',
+          OccurredAt: '2026-11-02T11:00:00+01:00',
+          RecordedAt: '2026-11-02T10:00:00.500Z',
+        },
+      ],
+    };
+    expect(buildTimeline(consent).map((entry) => entry.kind)).toEqual(['objection', 'status']);
+  });
+
   it('maps statuses to indicator types', () => {
     expect(statusIndicatorType('granted')).toBe('success');
     expect(statusIndicatorType('objected')).toBe('error');

@@ -15,6 +15,9 @@ import verifyMeetingConsentEvidence from '../graphql/queries/verifyMeetingConsen
 
 const logger = new ConsoleLogger('useMeetingConsent');
 
+/** How long after a change is announced the record is read, so a burst is read once. */
+export const READ_DELAY_MS = 750;
+
 /** The first GraphQL error's message, or the error's own. */
 export const errorMessage = (error) =>
   error?.errors?.[0]?.message || error?.message || 'the request could not be completed';
@@ -39,6 +42,8 @@ const useMeetingConsent = (callId, { client: injected } = {}) => {
   const [error, setError] = useState(null);
   const latestCall = useRef(callId);
   latestCall.current = callId;
+  const heldVersion = useRef(null);
+  const pending = useRef(null);
 
   const load = useCallback(async () => {
     if (!callId) return;
@@ -48,6 +53,7 @@ const useMeetingConsent = (callId, { client: injected } = {}) => {
       const answer = response?.data?.getMeetingConsent;
       // A slow answer for a meeting the page has moved away from is dropped.
       if (latestCall.current !== callId) return;
+      heldVersion.current = answer?.Consent?.Version ?? null;
       setState({
         consent: answer?.Consent || null,
         captureAllowed: answer?.CaptureAllowed ?? true,
@@ -74,13 +80,24 @@ const useMeetingConsent = (callId, { client: injected } = {}) => {
       subscription = getClient()
         .graphql({ query: onUpdateMeetingConsent, variables: { callId } })
         .subscribe({
-          next: () => load(),
+          // A capture client writes often (each change of who is present), and
+          // every read signs the images again; so a message for the version
+          // already held is skipped and a burst is read once.
+          next: (message) => {
+            const version = message?.data?.onUpdateMeetingConsent?.Consent?.Version;
+            if (version != null && version === heldVersion.current) return;
+            clearTimeout(pending.current);
+            pending.current = setTimeout(load, READ_DELAY_MS);
+          },
           error: (err) => logger.error('meeting consent subscription failed', err),
         });
     } catch (err) {
       logger.error('could not subscribe to meeting consent changes', err);
     }
-    return () => subscription?.unsubscribe?.();
+    return () => {
+      clearTimeout(pending.current);
+      subscription?.unsubscribe?.();
+    };
   }, [callId, load]);
 
   /** Run one mutation, then read the record again. Resolves to an error message or null. */

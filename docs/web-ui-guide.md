@@ -144,7 +144,8 @@ recorded and transcribed now, the notice posted, each participant's latest
 reply, the owner's attestation, the evidence screenshots with a vision model's
 check of each, and a timeline. The owner, anyone the meeting is shared with and
 an Admin can record an objection; the owner and Admins can check evidence; the
-owner can attest that everyone agreed. The summary download includes the record. See
+owner can attest that everyone agreed, in an opt-in meeting whose rule is that
+the owner attests. The summary download includes the record. See
 [Meeting Consent](meeting-consent.md#on-the-meeting-page).
 
 ### Estimated Cost

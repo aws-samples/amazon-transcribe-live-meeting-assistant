@@ -47,6 +47,17 @@ const stateWith = (overrides = {}) => ({
 });
 
 describe('ConsentPanel', () => {
+  it('says so when the record could not be read', () => {
+    render(<ConsentPanel state={stateWith({ consent: null, error: 'Network error' })} />);
+    expect(screen.getByText('The consent record could not be read: Network error')).toBeInTheDocument();
+  });
+
+  it('offers attestation only where it grants the meeting', () => {
+    const eachParticipant = { ...CONSENT, Rule: 'each_participant' };
+    render(<ConsentPanel state={stateWith({ consent: eachParticipant })} canEdit isOwner />);
+    expect(screen.queryByText('Attest that everyone agreed')).not.toBeInTheDocument();
+  });
+
   it('shows nothing for a meeting whose consent was never started', () => {
     const { container } = render(<ConsentPanel state={stateWith({ consent: null })} canEdit isOwner />);
     expect(container).toBeEmptyDOMElement();

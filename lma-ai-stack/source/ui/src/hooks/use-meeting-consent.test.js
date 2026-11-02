@@ -6,7 +6,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
-import useMeetingConsent from './use-meeting-consent';
+import useMeetingConsent, { READ_DELAY_MS } from './use-meeting-consent';
 
 const fakeClient = () => {
   const handlers = {};
@@ -48,7 +48,22 @@ describe('useMeetingConsent', () => {
     expect(result.current.captureAllowed).toBe(false);
     expect(result.current.settings.Mode).toBe('opt_in');
     client.graphql.mockClear();
-    await act(async () => handlers.next({}));
+    vi.useFakeTimers();
+    try {
+      // The version already held is not read again.
+      await act(async () => handlers.next({ data: { onUpdateMeetingConsent: { Consent: { Version: 1 } } } }));
+      await act(async () => vi.advanceTimersByTime(READ_DELAY_MS));
+      expect(client.graphql).not.toHaveBeenCalled();
+      // A burst of newer versions is read once.
+      await act(async () => {
+        handlers.next({ data: { onUpdateMeetingConsent: { Consent: { Version: 2 } } } });
+        handlers.next({ data: { onUpdateMeetingConsent: { Consent: { Version: 3 } } } });
+      });
+      await act(async () => vi.advanceTimersByTime(READ_DELAY_MS));
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(client.graphql).toHaveBeenCalledTimes(1);
     expect(client.graphql.mock.calls[0][0].query).toContain('query GetMeetingConsent');
   });
 
