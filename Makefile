@@ -688,14 +688,15 @@ ux-record-deps: ## Check the tools the demo recorder needs (ffmpeg, ffprobe, bot
 
 # Creates a REAL Cognito user with a known password in the stack's pool, for
 # recording as a role other than your own (GROUP=User for a non-admin).
-ux-test-session: ## Create a throwaway sign-in for a demo (Usage: make ux-test-session STACK_NAME=<stack> [REGION=...] [GROUP=Admin|User])
+ux-test-session: ## Create a throwaway sign-in for a demo (Usage: make ux-test-session STACK_NAME=<stack> [REGION=...] [GROUP=Admin|User] [EMAIL_DOMAIN=...])
 ifndef STACK_NAME
 	$(error STACK_NAME is not set. Usage: make ux-test-session STACK_NAME=<stack-name> [REGION=... GROUP=...])
 endif
 	@echo "Creating a throwaway sign-in for $(STACK_NAME)..."
 	@$(PYTHON) scripts/ux_test_session.py setup $(STACK_NAME) \
 	    --group $(if $(GROUP),$(GROUP),Admin) \
-	    $(if $(REGION),--region $(REGION),)
+	    $(if $(REGION),--region $(REGION),) \
+	    $(if $(EMAIL_DOMAIN),--email-domain $(EMAIL_DOMAIN),)
 	@echo -e "$(YELLOW)Record as described in .claude/skills/product-demo.md$(NC)"
 	@echo -e "$(YELLOW)Remember to run the teardown command printed above.$(NC)"
 
