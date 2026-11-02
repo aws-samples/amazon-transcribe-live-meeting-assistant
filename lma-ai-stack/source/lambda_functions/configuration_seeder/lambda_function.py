@@ -81,6 +81,7 @@ from botocore.exceptions import ClientError
 
 # pylint: disable=import-error
 from lma_config import (  # from the configuration layer
+    ACTIVE_POINTER_KEY,
     ASR_ENGINE,
     CALL_PRICING,
     CHAT_BUTTONS,
@@ -673,7 +674,16 @@ def seed(
     # The later stores' outcomes, when this run creates the profile with their
     # sections already in it; see below.
     carried: Dict[str, str] = {}
-    if existing.exists:
+    # The operator's profile is created only on a table that has never been
+    # seeded -- a new deployment, or an upgrade from a release with no
+    # configuration store -- which is when there is anything to carry into it.
+    # A deployment that has run without it since, because it was removed as
+    # empty or an Admin deleted it, is not given it back.
+    first_seeding = not store.read_record(ACTIVE_POINTER_KEY, consistent_read=True).exists
+    if not existing.exists and not first_seeding:
+        profile_action = "not-needed"
+        profile_origin = UNKNOWN_ORIGIN
+    elif existing.exists:
         profile_action = "kept"
         # Read back rather than recomputed. This run cannot tell what an upgrade
         # did months ago, and the one thing somebody may still have to act on --
@@ -851,7 +861,7 @@ def settle_profiles(store: ConfigurationStore, adoption: Mapping[str, str]) -> s
         converted = store.convert_to_full_copy(
             OPERATOR_PROFILE, comment="stored as a full copy of the configuration"
         )
-    except (RevisionHistoryUnavailable, ConcurrentModification):
+    except (RevisionHistoryUnavailable, ConcurrentModification, ClientError):
         LOGGER.warning(
             "could not settle the %s profile now; the next deployment retries",
             OPERATOR_PROFILE,

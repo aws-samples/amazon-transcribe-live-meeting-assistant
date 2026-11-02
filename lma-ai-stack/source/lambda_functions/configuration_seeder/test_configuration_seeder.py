@@ -901,16 +901,18 @@ def test_the_active_pointer_is_set_once_and_then_left_alone(seeder) -> None:
     assert dynamo.metadata("Config#__active")["ActiveProfile"] == "production"
 
 
-def test_a_profile_deleted_by_hand_is_recreated_on_the_next_deployment(seeder) -> None:
-    """Why the condition is on the record, not on the CloudFormation request type.
+def test_a_table_restored_empty_is_seeded_again_whatever_the_request_type(seeder) -> None:
+    """Why the condition is on the records, not on the CloudFormation request type.
 
-    Keying off `RequestType == 'Create'` would leave a deployment whose profile
-    record is missing -- restored table, hand-deleted item -- with no profile at
-    all until the stack was recreated.
+    Keying off `RequestType == 'Create'` would leave a deployment whose table
+    was restored empty with no pointer and no profile until the stack was
+    recreated. A profile deleted while the pointer stays is not recreated: the
+    deployment then runs on its default profile, as it was left.
     """
     store, dynamo = build_store()
     seeder.seed(store, domain="default")
     del dynamo.items["Config#custom"]
+    del dynamo.items["Config#__active"]
     assert seeder.seed(store, domain="default")["Profile"] == "created"
     assert "Config#custom" in dynamo.items
 
@@ -1794,3 +1796,14 @@ def test_an_invalid_custom_configuration_fails_the_deployment(seeder, text, prob
 def test_a_custom_configuration_path_must_be_an_s3_uri(seeder) -> None:
     with pytest.raises(seeder.InvalidConfiguration, match="is not an s3://bucket/key URI"):
         seeder.read_custom_configuration("https://example.com/config.yaml", client=_S3Object(""))
+
+
+def test_a_removed_profile_is_not_created_again_by_a_later_deployment(seeder) -> None:
+    store, dynamo = build_store()
+    outcome = seeder.seed(store, domain="default")
+    seeder.settle_profiles(store, seeder._adoption_outcomes(outcome))
+    assert "Config#custom" not in dynamo.items
+    again = seeder.seed(store, domain="default")
+    assert again["Profile"] == "not-needed"
+    assert "Config#custom" not in dynamo.items
+    assert seeder.settle_profiles(store, seeder._adoption_outcomes(again)) == "absent"
