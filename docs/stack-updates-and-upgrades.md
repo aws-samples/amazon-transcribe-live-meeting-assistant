@@ -183,8 +183,10 @@ This is a clean break:
   With the default `ModelValidation=true`, the update to 0.4.0 checks access to
   `global.anthropic.claude-sonnet-5-5` and
   `global.anthropic.claude-haiku-4-5-20251001-v1:0`, the shipped defaults of the
-  Amazon Bedrock Models section, and fails if the account cannot invoke them.
-  Enable both in the Amazon Bedrock console before updating, or set
+  Amazon Bedrock Models section, and to the knowledge base embedding model
+  `amazon.titan-embed-text-v2:0` (which v0.3.10 already checked), and fails if
+  the account cannot invoke them. Enable all three in the Amazon Bedrock console
+  before updating, or set
   `ModelValidation=false` for a deployment that uses other models.
 - **The inactive-meeting reaper is always deployed.** A timeout of 0 on the
   Configuration page makes it end nothing.

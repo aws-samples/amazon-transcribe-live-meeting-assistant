@@ -123,14 +123,16 @@ AWS_PROFILE=default ./scripts/ux_test_session.py setup <STACK> --group User \
 # then run the teardown command it prints
 ```
 
-(`make ux-test-session STACK_NAME=<STACK> [REGION=…] [GROUP=User]` is the same
-command.) This creates a real Cognito user with a known password in a live pool,
+(`make ux-test-session STACK_NAME=<STACK> [REGION=…] [GROUP=User] [EMAIL_DOMAIN=…]`
+is the same command.) This creates a real Cognito user with a known password in a live pool,
 so **always run the teardown it prints** — nothing else expires that account;
 `teardown <STACK> --stale` sweeps any whose teardown was never run. The stack's
 app client is *not* modified: `admin-set-user-password --permanent` is a user-pool
 admin API, and the browser signs in over SRP, which the UI client already allows.
 A stack deployed with `AllowedSignUpEmailDomain` refuses addresses outside that
-domain, including admin-created ones; pass `--email-domain <that domain>`.
+domain, including admin-created ones; pass `--email-domain <that domain>`. The
+sweep matches only users on the domain it is given, so a user made that way is
+swept by `teardown <STACK> --stale --email-domain <that domain>`.
 
 A fresh User owns no meetings, so its fixtures have to be made while signed in as
 it (or shared to it from the Admin account).

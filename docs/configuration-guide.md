@@ -255,9 +255,9 @@ most sections a setting you remove returns to its default, as **Reset to
 default** would; to turn a shipped summary section off, set its prompt to
 `NONE`. The chat buttons are the exception: that section is saved as a whole
 list, so the buttons the text holds are the list, and removing them all brings
-back the shipped buttons. Settings this deployment does not offer are left out of the text, as the
-form leaves them out, and are not taken from it if you add them. While
-the text does not parse, the page neither saves nor switches view; correct it,
+back the shipped buttons. Settings this deployment does not offer are left out
+of the text, as the form leaves them out, and are not taken from it if you add
+them. While the text does not parse, the page neither saves nor switches view; correct it,
 or choose **Discard changes**. The text of the default and Managed profiles is
 read-only, as their form is.
 
