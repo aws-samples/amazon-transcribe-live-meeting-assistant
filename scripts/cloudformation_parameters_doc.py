@@ -195,7 +195,7 @@ CLASSIFICATION: Dict[str, Classification] = {
     ),
     "VoiceAssistantActivationMode": _c(
         RUNTIME,
-        "Read by the Virtual Participant when it starts, and built into the web app when the stack deploys it, so a change also rebuilds the web app.",
+        "Read by the Virtual Participant when it starts, and by the Configuration page to say whether the Nova Sonic meeting modes apply.",
     ),
     "VoiceAssistantWakePhrases": _c(RUNTIME, "Read by the Virtual Participant when it starts."),
     "VoiceAssistantActivationDuration": _c(

@@ -54,7 +54,7 @@ This guide walks you through setting up the AWS Nova Sonic 2 voice assistant wit
 When deploying or updating your LMA stack, set these parameters:
 
 > These are also settings in the **Virtual Participant** section of the
-> [Configuration page](configuration-guide.md): the provider, the wake phrases and the activation duration can be changed there while
+> [Configuration page](configuration-guide.md): the provider, the activation mode, the wake phrases and the activation duration can be changed there while
 > the stack runs, and apply to the next Virtual Participant to start. The stack
 > parameters are their defaults, and a value saved on the page takes precedence
 > until it is reset. The API keys are stack parameters only.
@@ -184,7 +184,7 @@ The `meetingMode` field controls how the voice assistant behaves in a meeting. T
 | **Group Meeting** | `group` | Passive listening; only speaks when "Alex" is mentioned |
 | **Translator** | `translator` | Real-time bidirectional interpreter between two languages |
 
-> **Requires `VoiceAssistantActivationMode = always_active`** for `group` and `translator` modes to take effect. The Meeting Mode selector in the Nova Sonic Configuration UI is disabled when the deployment uses `wake_phrase` mode.
+> **Requires the voice assistant activation mode to be Always listening** (`always_active`) for `group` and `translator` modes to take effect. The mode is set in the Virtual Participant section of the Configuration page, whose default is the `VoiceAssistantActivationMode` stack parameter; while it is saved as `wake_phrase`, the Nova Sonic Voice Assistant section says those modes are ignored.
 
 ---
 

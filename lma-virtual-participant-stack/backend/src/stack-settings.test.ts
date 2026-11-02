@@ -29,6 +29,7 @@ const started = (): Record<string, string | undefined> => ({
     ENABLE_CONTENT_REDACTION: 'false',
     ENABLE_AUDIO_RECORDING: 'true',
     VOICE_ASSISTANT_PROVIDER: 'none',
+    VOICE_ASSISTANT_ACTIVATION_MODE: 'wake_phrase',
     VOICE_ASSISTANT_ACTIVATION_DURATION: '30',
     VP_ATTENDEE_POLL_MS: '20000',
 });
@@ -39,6 +40,7 @@ test('a value the configuration holds replaces the variable, as text', () => {
         {
             virtual_participant: {
                 voiceAssistantProvider: 'amazon_nova_sonic',
+                voiceAssistantActivationMode: 'always_active',
                 voiceAssistantActivationDuration: 60,
                 attendeePollMs: 10000,
             },
@@ -48,6 +50,7 @@ test('a value the configuration holds replaces the variable, as text', () => {
         env,
     );
     assert.equal(env['VOICE_ASSISTANT_PROVIDER'], 'amazon_nova_sonic');
+    assert.equal(env['VOICE_ASSISTANT_ACTIVATION_MODE'], 'always_active');
     assert.equal(env['VOICE_ASSISTANT_ACTIVATION_DURATION'], '60');
     assert.equal(env['VP_ATTENDEE_POLL_MS'], '10000');
     assert.equal(env['ENABLE_AUDIO_RECORDING'], 'false');

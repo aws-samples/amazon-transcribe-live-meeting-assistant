@@ -246,6 +246,8 @@ Parameters:
     Description: >-
       How the voice assistant is activated. 'always_active' for interviewer/meeting leader use cases (agent leads conversation),
       'wake_phrase' to activate only when wake phrase is detected (max 300 seconds), or 'strands_tool' for intelligent activation by Strands agent.
+      This is the default; an Admin can change it at run time on the Configuration page (Virtual
+      Participant section), which takes precedence.
 
   VoiceAssistantWakePhrases:
     Type: String

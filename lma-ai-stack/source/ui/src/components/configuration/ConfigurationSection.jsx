@@ -23,6 +23,7 @@ const ConfigurationSection = ({
   defaults,
   problems,
   settings = {},
+  saved = {},
   readOnly = false,
   expanded = false,
   onChange,
@@ -61,7 +62,7 @@ const ConfigurationSection = ({
         }
       >
         <SpaceBetween size="l">
-          <SectionNotice section={name} settings={settings} />
+          <SectionNotice section={name} settings={settings} configuration={saved} />
           {problems.length > 0 && (
             <Alert type="error" header="This section cannot be saved as it is">
               <ul>
@@ -104,6 +105,8 @@ ConfigurationSection.propTypes = {
   defaults: PropTypes.shape({}).isRequired,
   problems: PropTypes.arrayOf(PropTypes.shape({ message: PropTypes.string })).isRequired,
   settings: PropTypes.shape({}),
+  // Every section's values as saved; see SectionNotice.
+  saved: PropTypes.shape({}),
   readOnly: PropTypes.bool,
   expanded: PropTypes.bool,
   onChange: PropTypes.func.isRequired,

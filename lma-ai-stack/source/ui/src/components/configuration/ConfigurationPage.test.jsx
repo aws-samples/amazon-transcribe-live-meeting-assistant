@@ -104,6 +104,7 @@ const DEFAULTS = {
   meeting_processing: { transcriptHookNonPartialOnly: true, inactiveMeetingLookbackDays: 2 },
   virtual_participant: {
     voiceAssistantProvider: 'none',
+    voiceAssistantActivationMode: 'wake_phrase',
     voiceAssistantWakePhrases: 'hey alex,ok alex',
     voiceAssistantActivationDuration: 30,
     elevenLabsAgentId: '',
@@ -197,6 +198,26 @@ describe('ConfigurationContent', () => {
     expect(within(withEngine).getByText('Virtual Participant voice separation')).toBeTruthy();
     expect(within(withEngine).getByText(/Experimental/)).toBeTruthy();
     expect(within(withEngine).queryByText('Every meeting is transcribed by Amazon Transcribe')).toBeNull();
+  });
+
+  it('says the meeting modes are ignored while the saved activation mode is not always listening', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    const { unmount } = renderEditor();
+    openSection(await screen.findByText('Nova Sonic Voice Assistant'));
+    const notice = within(section('Nova Sonic Voice Assistant')).getByText(/The Virtual Participant section sets it/);
+    expect(notice.textContent).toMatch(/sets it to Wake phrase, so those modes are ignored/);
+
+    expect(screen.getAllByText('Voice assistant activation mode').length).toBeGreaterThan(0);
+    unmount();
+
+    graphqlMock.mockResolvedValueOnce(
+      answer({ custom: { virtual_participant: { voiceAssistantActivationMode: 'always_active' } } }),
+    );
+    renderEditor();
+    openSection(await screen.findByText('Nova Sonic Voice Assistant'));
+    expect(
+      within(section('Nova Sonic Voice Assistant')).queryByText(/The Virtual Participant section sets it/),
+    ).toBeNull();
   });
 
   it('saves Virtual Participant voice separation on a deployment without the on-demand engine', async () => {

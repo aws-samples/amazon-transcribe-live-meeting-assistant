@@ -510,6 +510,7 @@ export const ConfigurationContent = () => {
           defaults={doc.defaults[section.name] || {}}
           problems={problems[section.name] || []}
           settings={settings}
+          saved={loaded}
           readOnly={readOnly}
           expanded={focus ? focus === section.name : section.schema.defaultExpanded === true}
           onChange={setSection(section.name)}

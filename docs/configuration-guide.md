@@ -43,7 +43,7 @@ stack parameter; see
 | Meeting Recording | Whether those meetings' audio is recorded when the client does not say | To streaming meetings that start after the save, and to the next Virtual Participant to start |
 | Meeting Assistant | The regular expression that wakes the meeting assistant in a transcript | To transcript segments processed about five minutes after the save or later |
 | Meeting Processing | Whether a transcript Lambda hook is sent partial segments, and how far back the inactive-meeting reaper looks | Within about five minutes of the save |
-| Virtual Participant | The Virtual Participant's voice assistant provider, wake phrases and activation duration, the ElevenLabs agent and Simli face, and how a Teams Virtual Participant decides its meeting has ended | To the next Virtual Participant to start |
+| Virtual Participant | The Virtual Participant's voice assistant provider, activation mode, wake phrases and activation duration, the ElevenLabs agent and Simli face, and how a Teams Virtual Participant decides its meeting has ended | To the next Virtual Participant to start |
 
 Every section is on **Configuration ▸ Configuration**. The pages that each edited
 one section — Transcript Summary, Nova Sonic Config and Transcription Engine — are
@@ -97,6 +97,7 @@ is the default of.
 | Meeting Processing › Send only finished segments to the transcript Lambda hook | `TranscriptLambdaHookFunctionNonPartialOnly` |
 | Meeting Processing › Days to look back for meetings that were never ended | `MeetingInactivityLookbackInDays` |
 | Virtual Participant › Voice assistant | `VoiceAssistantProvider` |
+| Virtual Participant › Voice assistant activation mode | `VoiceAssistantActivationMode` |
 | Virtual Participant › Wake phrases | `VoiceAssistantWakePhrases` |
 | Virtual Participant › Seconds the voice assistant stays active | `VoiceAssistantActivationDuration` |
 | Virtual Participant › ElevenLabs agent ID | `ElevenLabsAgentId` |
@@ -110,10 +111,11 @@ to LMA from the Stream Audio page, the browser extension and the desktop app,
 and to Virtual Participants. A Virtual Participant uses the language, language
 options, preferred language, redaction and custom vocabulary; the custom
 language model, the redacted entity types and the speaker-identification default
-apply to streaming meetings only. The voice assistant's activation mode and the
-integration API keys stay stack parameters: the activation mode is built into
-the web app, and a provider or avatar chosen on the page without its key on the
-stack does not start.
+apply to streaming meetings only. The integration API keys stay stack
+parameters, and a provider or avatar chosen on the page without its key on the
+stack does not start. The Nova Sonic Voice Assistant section says whether its
+Group meeting and Translator meeting modes apply, from the activation mode as
+saved in the Virtual Participant section: they need **Always listening**.
 
 Some things differ from setting these with the parameters:
 
