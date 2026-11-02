@@ -41,6 +41,7 @@ the meeting platform shows, not a verified identity.
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -103,18 +104,25 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "allowPerMeetingOverride": True,
 }
 
-# Bounds on what one meeting's record holds, so it stays far below DynamoDB's
-# 400 KB item limit together with the rest of the meeting row.
-MAX_NAME_LENGTH = 200
-MAX_TEXT_LENGTH = 1000
+# Bounds on each part of one meeting's record. They bound each list; the record
+# as a whole is held to MAX_RECORD_BYTES by fit_to_budget, because the record
+# shares one DynamoDB item (400 KB at most) with the rest of the meeting row --
+# its summary, agenda and speaker names among them.
+MAX_NAME_LENGTH = 100
+MAX_TEXT_LENGTH = 500
 MAX_NOTICE_LENGTH = 2000
 MAX_PARTICIPANTS = 250
 #: Everyone ever listed as present; the first this many are kept.
 MAX_PARTICIPANTS_SEEN = 500
-MAX_EVENTS = 500
-MAX_NOTICES = 20
-MAX_EVIDENCE = 50
+MAX_EVENTS = 300
+MAX_NOTICES = 10
+MAX_EVIDENCE = 30
 MAX_STATUS_HISTORY = 100
+#: The most a record may take, serialised as JSON: under two fifths of the item
+#: limit, leaving the rest of the row (a long summary is tens of kilobytes) the
+#: remainder. Every list at its cap fits within it once fit_to_budget has shrunk
+#: what it may; test_rules holds to that.
+MAX_RECORD_BYTES = 150_000
 
 _SPACES = re.compile(r"\s+")
 _NOT_WORD = re.compile(r"[^\w']+")
@@ -303,6 +311,122 @@ def compact_events(events: Sequence[Mapping[str, Any]], limit: int = MAX_EVENTS)
             break
         keep.add(position)
     return [event for position, event in enumerate(events) if position in keep]
+
+
+class RecordFull(Exception):
+    """The record cannot be brought within MAX_RECORD_BYTES without losing what
+    its status depends on."""
+
+
+def record_size(record: Mapping[str, Any]) -> int:
+    """The record's size serialised as compact JSON, in bytes.
+
+    Close to, and slightly above, what DynamoDB counts for the same map, which
+    is what the budget is for.
+    """
+    return len(json.dumps(record, default=str, separators=(",", ":")).encode("utf-8"))
+
+
+def _deciding_positions(events: Sequence[Mapping[str, Any]]) -> set:
+    """Each participant's latest reply and the latest attestation entry."""
+    keep, seen = set(), set()
+    for position in range(len(events) - 1, -1, -1):
+        event = events[position]
+        if event.get("Source") == SOURCE_ATTESTATION:
+            key: Tuple[str, ...] = ("attestation",)
+        else:
+            key = ("reply", normalize_name(event.get("ParticipantName")))
+        if key not in seen:
+            seen.add(key)
+            keep.add(position)
+    return keep
+
+
+#: What a reply keeps when nothing else is left to shrink: enough to decide the
+#: status and to say when and where it was made.
+_ESSENTIAL_EVENT_FIELDS = ("ParticipantName", "Decision", "Source", "OccurredAt")
+
+
+def fit_to_budget(record: Dict[str, Any], limit: int = MAX_RECORD_BYTES) -> Dict[str, Any]:
+    """``record`` shrunk, if it has to be, to at most ``limit`` bytes.
+
+    Never drops anything the status depends on -- a participant's latest reply,
+    the attestation, the participants present -- and shrinks in this order,
+    stopping as soon as the record fits:
+
+    1. replies that are no longer anybody's latest, oldest first;
+    2. the words of replies, oldest first, keeping who replied and how;
+    3. the oldest status history entries, keeping the latest ten;
+    4. the notices posted between the first and the latest;
+    5. the names once listed but not present now;
+    6. the replies a vision model read in each evidence image, keeping its verdict;
+    7. every reply's other fields (its id, who recorded it and when), and each
+       evidence image's note and summary.
+
+    Raises:
+        RecordFull: the record is still over ``limit`` after all of that.
+    """
+    size = record_size(record)
+    if size <= limit:
+        return record
+
+    def piece(value: Any) -> int:
+        return record_size({"v": value}) - 6  # the value's own bytes, with its comma
+
+    # 1. Earlier replies, oldest first, removed until the estimate fits.
+    events = list(record.get("Events") or [])
+    deciding = _deciding_positions(events)
+    dropped = set()
+    for position in range(len(events)):
+        if size <= limit:
+            break
+        if position not in deciding:
+            dropped.add(position)
+            size -= piece(events[position])
+    record["Events"] = [e for p, e in enumerate(events) if p not in dropped]
+    size = record_size(record)
+    # 2. The words of the replies kept, oldest first.
+    for event in record["Events"]:
+        if size <= limit:
+            break
+        if event.get("Text"):
+            size -= piece(event["Text"]) - piece(None)
+            event["Text"] = None
+    size = record_size(record)
+    if size <= limit:
+        return record
+    # 3-5. The older history, the middle notices, the names no longer present.
+    record["StatusHistory"] = list(record.get("StatusHistory") or [])[-10:]
+    notices = list(record.get("Notices") or [])
+    if len(notices) > 2:
+        record["Notices"] = [notices[0], notices[-1]]
+    present = {normalize_name(name) for name in record.get("Participants") or []}
+    record["ParticipantsSeen"] = [
+        name for name in record.get("ParticipantsSeen") or [] if normalize_name(name) in present
+    ]
+    if record_size(record) <= limit:
+        return record
+    # 6. What a model read in each image; its verdict stays.
+    for entry in record.get("Evidence") or []:
+        verification = entry.get("Verification")
+        if isinstance(verification, dict) and verification.get("Replies"):
+            verification["Replies"] = []
+    if record_size(record) <= limit:
+        return record
+    # 7. The replies kept, down to who, how, where and when.
+    record["Events"] = [
+        {key: event.get(key) for key in _ESSENTIAL_EVENT_FIELDS} for event in record["Events"]
+    ]
+    for entry in record.get("Evidence") or []:
+        entry["Note"] = None
+        if isinstance(entry.get("Verification"), dict):
+            entry["Verification"]["Summary"] = None
+    if record_size(record) <= limit:
+        return record
+    raise RecordFull(
+        f"the meeting's consent record would exceed {limit} bytes even without the "
+        "earlier replies, their words and the older history"
+    )
 
 
 def evaluate(record: Optional[Mapping[str, Any]]) -> Tuple[str, bool, str]:

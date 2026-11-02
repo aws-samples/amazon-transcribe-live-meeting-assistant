@@ -492,3 +492,19 @@ def test_a_backend_write_is_attributed_to_lma_not_its_session(dynamo) -> None:
     result = call("recordMeetingConsentNotice", BACKEND, Channel="chat")
     assert result["Consent"]["StartedBy"] == "LMA"
     assert result["Consent"]["Notices"][0]["PostedBy"] == "LMA"
+
+
+def test_a_restart_needs_no_settings(dynamo, monkeypatch) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    monkeypatch.setattr(index, "_STORE", FakeStore(fail=True))
+    assert call("startMeetingConsent", BACKEND)["Consent"]["Mode"] == "notify"
+    with pytest.raises(index.ConfigurationUnavailableError):
+        call("startMeetingConsent", BACKEND, Mode="opt_in")
+
+
+def test_a_record_that_cannot_be_kept_within_its_budget_is_refused(dynamo, monkeypatch) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    monkeypatch.setattr(index.consent, "MAX_RECORD_BYTES", 10)
+    monkeypatch.setattr(index.consent.fit_to_budget, "__defaults__", (10,))
+    with pytest.raises(index.BadRequestError, match="would exceed"):
+        call("recordMeetingConsentNotice", BACKEND, Channel="chat")

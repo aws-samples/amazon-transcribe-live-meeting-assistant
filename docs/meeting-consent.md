@@ -177,7 +177,7 @@ holds:
 | `Mode`, `Rule` | The meeting's mode, and for opt-in its rule |
 | `Status`, `CaptureAllowed` | As above, worked out on every write |
 | `NoticeText` | The notice or request for this meeting, placeholders filled |
-| `NoticePostedAt`, `Notices` | When the notice was first posted; each posting, with its channel (`chat`, `voice`, `banner` or `invite`), text, time and who recorded it. The first posting and the latest 19 are kept |
+| `NoticePostedAt`, `Notices` | When the notice was first posted; each posting, with its channel (`chat`, `voice`, `banner` or `invite`), text, time and who recorded it. The first posting and the latest 9 are kept |
 | `Participants`, `ParticipantsSeen` | Who is present now, as last listed, and everyone ever listed (the first 500) |
 | `Events` | Every reply and attestation in the order recorded: the participant's display name, `consent` or `objection`, where it was read (`chat`, `voice`, `ui` for an entry a signed-in user made, or `attestation`), the words when sent, when it happened, when it was recorded and by whom |
 | `Attestation` | Who attested, how (`verbal`, `chat` or `invite_terms`), what they said, and when |
@@ -185,10 +185,19 @@ holds:
 | `StatusHistory` | Each change of status or of `CaptureAllowed`, with the time and reason; the latest 100 are kept |
 | `StartedAt`, `StartedBy`, `UpdatedAt`, `Version` | When and by whom consent was started; when it last changed; a count that increases with every write |
 
-A meeting keeps at most 250 participants, 500 events and 50 evidence images.
-When a long meeting reaches 500 events, older events are dropped, but never a
-participant's latest reply or the latest attestation, so the status does not
-change by being compacted.
+A meeting keeps at most 250 participants present, 300 events and 30 evidence
+images. When a long meeting reaches 300 events, older events are dropped, but
+never a participant's latest reply or the latest attestation, so the status
+does not change by being compacted.
+
+The record shares one database item, of at most 400 KB, with the rest of the
+meeting row, so it is also held to 150 KB as a whole. A write that would take it
+past that first sheds what the status does not depend on, in this order: replies
+that are no longer anybody's latest, the words of replies, the older status
+history, the notices between the first and the latest, the names no longer
+present, what a vision model read in each evidence image, and finally each
+reply's other details and each image's note. A write that still would not fit is
+refused with a message saying so.
 
 Evidence images are private objects in the recordings bucket, under
 `lma-consent-evidence/<meeting>/`, where `<meeting>` is the CallId with every
@@ -314,8 +323,8 @@ Arguments that are checked:
 - Every other mutation is refused until consent has been started.
 - A backend role's reply names its `Source`, `chat` or `voice`; an attestation
   by a backend role names `AttestedBy`.
-- Names are cut at 200 characters, reply and statement texts at 1,000, notices
-  at 2,000.
+- Names are cut at 100 characters, reply and statement texts at 500, notices
+  at 2,000, and an evidence key may be at most 256 characters.
 
 Each write reads the meeting row and writes the record back on condition that
 nobody else wrote it in between, retrying a few times, so replies that arrive

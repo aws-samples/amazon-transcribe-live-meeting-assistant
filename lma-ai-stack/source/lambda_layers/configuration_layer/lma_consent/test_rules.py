@@ -265,3 +265,93 @@ def test_the_seeded_defaults_are_the_rules_defaults() -> None:
         / "MeetingConsent.json"
     )
     assert json.loads(shipped.read_text(encoding="utf-8")) == rules.DEFAULT_SETTINGS
+
+
+# ── size ───────────────────────────────────────────────────────────────────
+
+
+def _full_record():
+    """Every list at its cap and every text at its longest."""
+    long_name = "N" * rules.MAX_NAME_LENGTH
+    names = [
+        f"{index:03d}{long_name}"[: rules.MAX_NAME_LENGTH]
+        for index in range(rules.MAX_PARTICIPANTS)
+    ]
+    text = "w" * rules.MAX_TEXT_LENGTH
+    return {
+        "Mode": "opt_in",
+        "Rule": "each_participant",
+        "NoticeText": "n" * rules.MAX_NOTICE_LENGTH,
+        "Notices": [
+            {
+                "Channel": "chat",
+                "Text": "n" * rules.MAX_NOTICE_LENGTH,
+                "PostedAt": NOW,
+                "PostedBy": "LMA",
+            }
+        ]
+        * rules.MAX_NOTICES,
+        "Participants": names,
+        "ParticipantsSeen": names + [f"x{n}" for n in names],
+        "Events": [
+            {
+                "EventId": "0123456789abcdef",
+                "ParticipantName": names[index % len(names)],
+                "Decision": "consent",
+                "Source": "chat",
+                "Text": text,
+                "OccurredAt": NOW,
+                "RecordedAt": NOW,
+                "RecordedBy": long_name,
+            }
+            for index in range(rules.MAX_EVENTS)
+        ],
+        "Evidence": [
+            {
+                "EvidenceId": "0123456789abcdef",
+                "S3Key": "k" * 256,
+                "Note": text,
+                "Verification": {
+                    "Verdict": "inconclusive",
+                    "Summary": "s" * 500,
+                    "Replies": [{"Name": long_name, "Text": text, "Decision": "consent"}] * 100,
+                },
+            }
+        ]
+        * rules.MAX_EVIDENCE,
+        "StatusHistory": [
+            {"Status": "pending", "CaptureAllowed": False, "At": NOW, "Reason": "r" * 100}
+        ]
+        * rules.MAX_STATUS_HISTORY,
+    }
+
+
+def test_a_record_at_every_cap_is_brought_within_the_budget() -> None:
+    record = _full_record()
+    assert rules.record_size(record) > rules.MAX_RECORD_BYTES
+    before = rules.evaluate(record)
+    rules.fit_to_budget(record)
+    assert rules.record_size(record) <= rules.MAX_RECORD_BYTES
+    assert rules.evaluate(record) == before
+    assert len(record["Participants"]) == rules.MAX_PARTICIPANTS
+
+
+def test_shrinking_keeps_an_objection_and_its_words_when_it_can() -> None:
+    record = _full_record()
+    record["Events"].append(
+        {"ParticipantName": "Bo", "Decision": "objection", "Source": "chat", "Text": "I object"}
+    )
+    rules.fit_to_budget(record)
+    assert rules.evaluate(record)[:2] == ("objected", False)
+    assert any(e["ParticipantName"] == "Bo" for e in record["Events"])
+
+
+def test_a_record_within_the_budget_is_left_alone() -> None:
+    record = {"Mode": "notify", "Events": [reply("Ana", "consent")]}
+    assert rules.fit_to_budget(record) == {"Mode": "notify", "Events": [reply("Ana", "consent")]}
+
+
+def test_a_record_that_cannot_fit_is_refused() -> None:
+    record = {"Mode": "notify", "NoticeText": "n" * 2000, "Events": []}
+    with pytest.raises(rules.RecordFull):
+        rules.fit_to_budget(record, limit=100)

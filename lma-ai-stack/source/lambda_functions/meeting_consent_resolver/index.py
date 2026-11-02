@@ -80,7 +80,7 @@ BACKEND_ATTRIBUTION = "LMA"
 #: Attempts at the read-and-conditional-write before a conflict is reported.
 WRITE_ATTEMPTS = 5
 EVIDENCE_KINDS = ("screenshot", "invitation")
-MAX_KEY_LENGTH = 512
+MAX_KEY_LENGTH = 256
 
 DYNAMODB = boto3.client("dynamodb", config=CLIENT_CONFIG)
 SERIALIZER = TypeSerializer()
@@ -381,6 +381,10 @@ def write_consent(
         version = int((current or {}).get("Version") or 0)
         updated["Version"] = version + 1
         updated["UpdatedAt"] = now
+        try:
+            consent.fit_to_budget(updated)
+        except consent.RecordFull as error:
+            raise BadRequestError(str(error)) from error
         names = {"#c": "Consent"}
         values = {":c": SERIALIZER.serialize(_dynamo(updated))}
         if current:
@@ -490,11 +494,22 @@ def requested_choice(
 
 def start_meeting_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
     call_id = data["CallId"]
-    settings = consent_settings()
     meeting, access = load(caller, call_id)
     if not (access["owner"] or access["admin"] or access["backend"]):
         raise refuse(caller, call_id, "start")
     current = meeting.get("Consent") or None
+    try:
+        settings = consent_settings()
+    except ConfigurationUnavailableError:
+        # A restart that names no other choice needs no settings: it keeps the
+        # meeting's own.
+        restart = data.get("Mode") in (None, (current or {}).get("Mode")) and data.get("Rule") in (
+            None,
+            (current or {}).get("Rule"),
+        )
+        if current and current.get("Mode") in consent.MODES and restart:
+            return update_out(meeting, call_id)
+        raise
     mode, rule = requested_choice(data, current, settings)
     if current and current.get("Mode") == mode and current.get("Rule") == rule:
         # A capture client that restarts starts again: answer with the record
