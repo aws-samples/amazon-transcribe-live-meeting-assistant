@@ -10,6 +10,9 @@ import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startTeamsSdkServer, TeamsSdkServerHandle } from './teams-sdk-server.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('teams-sdk');
 
 export function endpointFromConnectionString(connectionString: string): string {
     const match = /endpoint=([^;]+)/i.exec(connectionString);
@@ -65,7 +68,7 @@ export default class TeamsSdk {
                 await page.evaluate((m: string) => (window as any).__lmaSendChat(m), message);
                 await new Promise((r) => setTimeout(r, 200));
             } catch (err) {
-                console.warn('[teams-sdk] sendChat failed (non-fatal):', err);
+                log.warn('[teams-sdk] sendChat failed (non-fatal):', err);
             }
         }
     }
@@ -75,9 +78,9 @@ export default class TeamsSdk {
         const wantVideo = simliAvatar.isConnected();
         try {
             await page.evaluate((m: boolean) => (window as any).__lmaSetMuted(m), !wantMic);
-            console.log(`[teams-sdk] microphone ${wantMic ? 'unmuted (voice assistant / avatar audio)' : 'muted (no voice assistant)'}`);
+            log.info(`[teams-sdk] microphone ${wantMic ? 'unmuted (voice assistant / avatar audio)' : 'muted (no voice assistant)'}`);
         } catch (err) {
-            console.warn('[teams-sdk] mute/unmute failed:', err);
+            log.warn('[teams-sdk] mute/unmute failed:', err);
         }
         if (!wantVideo) return;
         for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -86,7 +89,7 @@ export default class TeamsSdk {
                 .catch(() => false);
             if (ok) {
                 const diag = await page.evaluate(() => (window as any).__lmaCameraDiag).catch(() => null);
-                console.log(
+                log.info(
                     `[teams-sdk] started video (avatar camera) attempt ${attempt} ${diag ? JSON.stringify(diag) : ''}`,
                 );
                 this.startVideoSendMonitor(page);
@@ -94,7 +97,7 @@ export default class TeamsSdk {
             }
             await new Promise((r) => setTimeout(r, 2000));
         }
-        console.warn('[teams-sdk] failed to start avatar camera after 3 attempts');
+        log.warn('[teams-sdk] failed to start avatar camera after 3 attempts');
     }
 
     // Frames actually leaving the container is the only proof other attendees
@@ -113,9 +116,9 @@ export default class TeamsSdk {
                 (n: number, r: any) => n + (r.framesSent || r.framesEncoded || 0),
                 0,
             );
-            console.log(`[teams-sdk] video send stats: ${JSON.stringify(stats)}`);
+            log.info(`[teams-sdk] video send stats: ${JSON.stringify(stats)}`);
             if (sent === 0) {
-                console.warn(
+                log.warn(
                     '[teams-sdk] no video frames sent yet — remote participants will see a blank tile',
                 );
             }
@@ -157,9 +160,9 @@ export default class TeamsSdk {
                 page.evaluate(() => (window as any).__lmaLeave?.()),
                 new Promise((r) => setTimeout(() => r('leave-timeout'), 8000)),
             ]);
-            console.log(`[teams-sdk] left call (${result})`);
+            log.info(`[teams-sdk] left call (${result})`);
         } catch (err) {
-            console.warn('[teams-sdk] leave failed (session may linger in the roster):', err);
+            log.warn('[teams-sdk] leave failed (session may linger in the roster):', err);
         }
     }
 
@@ -176,7 +179,7 @@ export default class TeamsSdk {
             if (!on) {
                 consecutiveOff += 1;
                 if (consecutiveOff >= 2) {
-                    console.warn('[teams-sdk] camera OFF (x2) with avatar connected — re-starting video');
+                    log.warn('[teams-sdk] camera OFF (x2) with avatar connected — re-starting video');
                     await page.evaluate(() => (window as any).__lmaStartCamera()).catch(() => {});
                     consecutiveOff = 0;
                 }
@@ -192,9 +195,9 @@ export default class TeamsSdk {
         page.on('console', (message: ConsoleMessage) => {
             const text = message.text();
             if (text.includes('[LMA-TeamsSDK]')) {
-                console.log(`TeamsSDK page: ${text}`);
+                log.info(`TeamsSDK page: ${text}`);
             } else if (message.type() === 'error' || message.type() === 'warning') {
-                console.log(`TeamsSDK page ${message.type()}: ${text.slice(0, 500)}`);
+                log.info(`TeamsSDK page ${message.type()}: ${text.slice(0, 500)}`);
             }
         });
         // Response bodies can carry tokens/identity material, so the body dump
@@ -203,25 +206,25 @@ export default class TeamsSdk {
         page.on('response', (response) => {
             const status = response.status();
             if (status >= 400) {
-                console.log(`[teams-sdk] HTTP ${status} ← ${response.url().slice(0, 300)}`);
+                log.info(`[teams-sdk] HTTP ${status} ← ${response.url().slice(0, 300)}`);
                 if (logErrorBodies) {
                     response
                         .text()
                         .then((body) => {
-                            if (body) console.log(`[teams-sdk] HTTP ${status} body: ${body.slice(0, 600)}`);
+                            if (body) log.info(`[teams-sdk] HTTP ${status} body: ${body.slice(0, 600)}`);
                         })
                         .catch(() => {});
                 }
             }
         });
         page.on('requestfailed', (request) => {
-            console.log(
+            log.warn(
                 `[teams-sdk] request FAILED (${request.failure()?.errorText ?? 'unknown'}) ← ${request.url().slice(0, 300)}`,
             );
         });
-        page.on('pageerror', (error: unknown) => console.warn('[teams-sdk] page error:', error));
+        page.on('pageerror', (error: unknown) => log.warn('[teams-sdk] page error:', error));
         page.on('crash', () => {
-            console.error('[teams-sdk] page crashed (renderer crash) — ending meeting');
+            log.error('[teams-sdk] page crashed (renderer crash) — ending meeting');
             this.requestEnd({ reason: 'page-closed', trigger: 'renderer-crash' });
         });
 
@@ -246,7 +249,7 @@ export default class TeamsSdk {
             throw new Error('meeting not found: meeting ID is empty');
         }
         // Redact the query string: the passcode rides in ?p= and this goes to CloudWatch.
-        if (meetingLink) console.log(`[teams-sdk] joining via meeting link ${meetingLink.split('?')[0]}`);
+        if (meetingLink) log.info(`[teams-sdk] joining via meeting link ${meetingLink.split('?')[0]}`);
 
         await substep('Authorizing with Azure Communication Services…');
         const identityClient = new CommunicationIdentityClient(connectionString);
@@ -289,7 +292,7 @@ export default class TeamsSdk {
             );
             const initError = await page.evaluate(() => (window as any).__lmaJoinError).catch(() => null);
             if (initError) {
-                if (initError.detail) console.error(`[teams-sdk] init error detail: ${initError.detail}`);
+                if (initError.detail) log.error(`[teams-sdk] init error detail: ${initError.detail}`);
                 throw new Error(`Teams SDK setup failed: ${initError.reason || 'unknown'}`);
             }
 
@@ -321,12 +324,12 @@ export default class TeamsSdk {
                 if (state.call.callState === 'InLobby' || state.call.page === 'lobby') {
                     if (!lobbyAnnounced) {
                         lobbyAnnounced = true;
-                        console.log('[teams-sdk] in lobby, waiting to be admitted');
+                        log.info('[teams-sdk] in lobby, waiting to be admitted');
                         await substep('Waiting to be admitted from the lobby…');
                     }
                 }
                 if (state.endReason) {
-                    console.log(`[teams-sdk] call ended before admission (code=${state.endReason.code} subCode=${state.endReason.subCode})`);
+                    log.info(`[teams-sdk] call ended before admission (code=${state.endReason.code} subCode=${state.endReason.subCode})`);
                     return { reason: 'never-joined', trigger: 'acs-not-admitted' };
                 }
                 if (state.call.callState === 'Connected' && state.call.page === 'call') {
@@ -337,10 +340,10 @@ export default class TeamsSdk {
             }
 
             if (!joined) {
-                console.log('[teams-sdk] never admitted before waitingTimeout');
+                log.info('[teams-sdk] never admitted before waitingTimeout');
                 return { reason: 'never-joined', trigger: 'acs-not-admitted' };
             }
-            console.log('[teams-sdk] joined meeting');
+            log.info('[teams-sdk] joined meeting');
 
             await substep('Setting up audio and video…');
             await this.setupInMeetingMedia(page);
@@ -350,7 +353,7 @@ export default class TeamsSdk {
             await substep('In the meeting — posting introduction…');
             await this.sendMessages(page, details.introMessages);
             if (details.start) {
-                console.log(details.startMessages[0]);
+                log.info(details.startMessages[0]);
                 await this.sendMessages(page, details.startMessages);
                 transcriptionService.startTranscription();
             }
@@ -390,7 +393,7 @@ export default class TeamsSdk {
                     const codes = snap.endReason
                         ? `code=${snap.endReason.code} subCode=${snap.endReason.subCode}`
                         : 'no endReason';
-                    console.log(`[teams-sdk] call ended (page=${snap.call.page} ${codes})`);
+                    log.info(`[teams-sdk] call ended (page=${snap.call.page} ${codes})`);
                     this.requestEnd({
                         reason: removed ? 'removed-from-meeting' : 'host-ended',
                         // The platform's codes go after a colon so that
@@ -418,7 +421,7 @@ export default class TeamsSdk {
                     const sender = chat.senderName || null;
                     const body = chat.text || '';
                     if (matchesEndCommand(body)) {
-                        console.log(`[teams-sdk] asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
+                        log.info(`[teams-sdk] asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
                         await this.sendMessages(page, exitMessagesFor(sender));
                         details.start = false;
                         this.requestEnd({ reason: 'end-command', trigger: 'chat', requestedBy: sender, matchedMessage: body });
@@ -443,22 +446,22 @@ export default class TeamsSdk {
                     } else if (matchesChatCommand(body, details.helpCommand)) {
                         // Answered whether or not transcription is paused: the list is how
                         // someone finds out how to resume it.
-                        console.log('[chat-help] posting the chat command list');
+                        log.info('[chat-help] posting the chat command list');
                         await this.sendMessages(page, chatHelpMessages(voiceAssistant));
                     } else if (details.start && matchesChatCommand(body, details.pauseCommand)) {
                         details.start = false;
-                        console.log(details.pauseMessages[0]);
+                        log.info(details.pauseMessages[0]);
                         await this.sendMessages(page, details.pauseMessages);
                     } else if (!details.start && matchesChatCommand(body, details.startCommand)) {
                         details.start = true;
-                        console.log(details.startMessages[0]);
+                        log.info(details.startMessages[0]);
                         await this.sendMessages(page, details.startMessages);
                         transcriptionService.startTranscription();
                     } else if (details.start) {
                         const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
                         const formatted = `[${timestamp}] ${sender ? `${sender}: ` : ''}${body}`;
                         details.messages.push(formatted);
-                        console.log('New message:', formatted);
+                        log.info('New message:', formatted);
                     }
                 }
 
@@ -468,7 +471,7 @@ export default class TeamsSdk {
                     if (snap.count >= 0 && snap.count <= 1) {
                         consecutiveLonely += 1;
                         if (consecutiveLonely >= POLLS_BEFORE_LONELY) {
-                            console.log(`[teams-sdk] alone in meeting (count=${snap.count}) — leaving`);
+                            log.info(`[teams-sdk] alone in meeting (count=${snap.count}) — leaving`);
                             details.start = false;
                             this.requestEnd({ reason: 'alone-in-meeting', trigger: 'acs-participants' });
                         }
@@ -478,7 +481,7 @@ export default class TeamsSdk {
                 }
             }, 3000);
 
-            console.log('Waiting for meeting end.');
+            log.info('Waiting for meeting end.');
             const timeoutPromise = new Promise<ExitInfo>((resolve) =>
                 setTimeout(() => resolve({ reason: 'meeting-timeout', trigger: 'meetingTimeout' }), details.meetingTimeout),
             );
@@ -486,7 +489,7 @@ export default class TeamsSdk {
             clearInterval(monitorTimer);
             details.start = false;
 
-            console.log(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
+            log.info(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
             return exitInfo;
         } finally {
             // Must run on every exit path, not just a normal meeting end: the
@@ -501,9 +504,9 @@ export default class TeamsSdk {
             if (this.identityClient && this.acsUser) {
                 try {
                     await this.identityClient.deleteUser(this.acsUser);
-                    console.log('[teams-sdk] revoked ACS identity');
+                    log.info('[teams-sdk] revoked ACS identity');
                 } catch (err) {
-                    console.warn('[teams-sdk] failed to delete ACS identity (token expires on its own):', err);
+                    log.warn('[teams-sdk] failed to delete ACS identity (token expires on its own):', err);
                 }
             }
         }
