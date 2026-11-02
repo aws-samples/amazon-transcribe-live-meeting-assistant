@@ -372,3 +372,8 @@ class TestHandlerLogging(unittest.TestCase):
         self.assertFalse(response["success"])
         self.assertNotIn("987654xyz", output)
         self.assertIn("success=False", output)
+
+    def test_null_arguments_return_the_missing_text_error(self):
+        response = json.loads(index.handler({"arguments": None}, None))
+        self.assertFalse(response["success"])
+        self.assertIn("required", response["error"])

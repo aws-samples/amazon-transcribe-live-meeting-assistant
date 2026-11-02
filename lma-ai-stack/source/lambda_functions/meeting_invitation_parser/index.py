@@ -384,7 +384,7 @@ UNSUPPORTED_PLATFORM_MESSAGES = {
 
 def handler(event, context):
     """Lambda handler for parsing meeting invitations"""
-    invitation_text = event.get("arguments", {}).get("invitationText", "") or ""
+    invitation_text = (event.get("arguments") or {}).get("invitationText") or ""
     # The invitation text can carry meeting passcodes, so only its size is logged.
     logger.info("Received invitation to parse: %d characters", len(invitation_text))
 
@@ -394,6 +394,7 @@ def handler(event, context):
 
         # Parse the meeting invitation
         result = parse_meeting_invitation(invitation_text)
+        platform = None
 
         if result["success"]:
             # Validate and clean the parsed data
@@ -428,7 +429,7 @@ def handler(event, context):
         logger.info(
             "Returning result: success=%s, platform=%s, fields=%s",
             result.get("success"),
-            data.get("meetingPlatform"),
+            platform,
             sorted(k for k, v in data.items() if v),
         )
         return json.dumps(result)
