@@ -137,6 +137,16 @@ it while the meeting runs and after it ends, and **Derive agenda** reads the
 transcript for an agenda somebody stated. See
 [Meeting Agenda](meeting-agenda.md).
 
+### Consent
+
+For a meeting whose consent was started: its mode and status, whether it may be
+recorded and transcribed now, the notice posted, each participant's latest
+reply, the owner's attestation, the evidence screenshots with a vision model's
+check of each, and a timeline. The owner, anyone the meeting is shared with and
+an Admin can record an objection; the owner and Admins can check evidence; the
+owner can attest that everyone agreed. The summary download includes the record. See
+[Meeting Consent](meeting-consent.md#on-the-meeting-page).
+
 ### Estimated Cost
 
 A collapsed section showing an itemised estimate of what the meeting cost: Transcribe

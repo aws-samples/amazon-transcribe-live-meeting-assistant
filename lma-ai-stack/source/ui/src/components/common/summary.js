@@ -3,6 +3,8 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { consentAsText } from './meeting-consent';
+
 // A picture of a key frame in a summary (the "Slides presented" section), which
 // the meeting page shows as the frame itself; see SummaryMarkdown.jsx.
 const KEYFRAME_IMAGE = /!\[([^\]\n]*)\]\(keyframe:[A-Za-z0-9_-]{1,64}\)/g;
@@ -99,7 +101,11 @@ export const getTextFileFormattedSummary = (callSummaryText) => {
   return summary;
 };
 
-export const getTextFileFormattedMeetingDetails = (meeting) => {
+/**
+ * The meeting as plain text: title, date, length and summary, and the consent
+ * record when the meeting has one (see meeting-consent.js).
+ */
+export const getTextFileFormattedMeetingDetails = (meeting, consent = null) => {
   let meetingDetails = '';
   meetingDetails += `Title: ${meeting.callId}\n`;
 
@@ -113,6 +119,10 @@ export const getTextFileFormattedMeetingDetails = (meeting) => {
 
   const summary = getTextFileFormattedSummary(meeting.callSummaryText);
   meetingDetails += `\n\n${summary}`;
+
+  if (consent) {
+    meetingDetails += `\n\n${consentAsText(consent)}\n`;
+  }
 
   return meetingDetails;
 };

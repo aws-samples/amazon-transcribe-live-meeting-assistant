@@ -51,6 +51,8 @@ import {
 } from '../common/speaker-identities';
 import SpeakerIdentitiesPanel from './SpeakerIdentitiesPanel';
 import AgendaPanel from './AgendaPanel';
+import ConsentPanel from './ConsentPanel';
+import useMeetingConsent from '../../hooks/use-meeting-consent';
 import CallCostPanel from './CallCostPanel';
 
 import RecordingPlayer from '../recording-player';
@@ -229,7 +231,7 @@ const EDIT_AFTER_MEETING_REASON =
 // progress and failure are read back from the meeting rather than from the
 // mutation's answer, and that handover is worth driving directly.
 // eslint-disable-next-line arrow-body-style
-export const CallSummary = ({ item, onSave, onRegenerate, readOnly }) => {
+export const CallSummary = ({ item, onSave, onRegenerate, readOnly, consent = null }) => {
   const [setCopySuccess] = useState(false);
 
   const summaryState = useMemo(() => parseSummaryState(item.callSummaryState), [item.callSummaryState]);
@@ -344,7 +346,7 @@ export const CallSummary = ({ item, onSave, onRegenerate, readOnly }) => {
 
   const copyToClipboard = async () => {
     try {
-      const summaryText = getTextFileFormattedMeetingDetails(item);
+      const summaryText = getTextFileFormattedMeetingDetails(item, consent);
       await navigator.clipboard.writeText(summaryText);
       setCopySuccess(true);
       // Reset the success state after 2 seconds
@@ -354,7 +356,7 @@ export const CallSummary = ({ item, onSave, onRegenerate, readOnly }) => {
       // Fallback for older browsers
       try {
         const textArea = document.createElement('textarea');
-        textArea.value = getTextFileFormattedMeetingDetails(item);
+        textArea.value = getTextFileFormattedMeetingDetails(item, consent);
         document.body.appendChild(textArea);
         textArea.select();
         document.execCommand('copy');
@@ -369,14 +371,14 @@ export const CallSummary = ({ item, onSave, onRegenerate, readOnly }) => {
 
   const downloadCallSummary = async (option) => {
     if (option.detail.id === 'download') {
-      await exportToTextFile(getTextFileFormattedMeetingDetails(item), `Summary-${item.callId}`);
+      await exportToTextFile(getTextFileFormattedMeetingDetails(item, consent), `Summary-${item.callId}`);
     } else if (option.detail.id === 'email') {
       // Both halves are encoded: a meeting name is free text, and
       // getEmailFormattedSummary returns an encoded body.
       const subject = encodeURIComponent(item.callId ?? '');
       window.open(`mailto:?subject=${subject}&body=${getEmailFormattedSummary(item.callSummaryText)}`);
     } else if (option.detail.id === 'docx') {
-      await exportToDocxFile(getTextFileFormattedMeetingDetails(item), `Summary-${item.callId}`);
+      await exportToDocxFile(getTextFileFormattedMeetingDetails(item, consent), `Summary-${item.callId}`);
     } else if (option.detail.id === 'copy') {
       await copyToClipboard();
     }
@@ -2065,6 +2067,11 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
   const speakerNamesReadOnly =
     !isAdminUser && item.owner !== user?.username && !isSharedWith(item.sharedWith, user?.username);
 
+  // The consent record, for the Consent panel and the summary download. Read
+  // with its own query, which signs the evidence links, and kept current by
+  // its own subscription.
+  const meetingConsent = useMeetingConsent(item.callId);
+
   /**
    * Apply a rename made from a transcript segment.
    *
@@ -2313,6 +2320,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           onSave={sendUpdateCallSummary ? saveCallSummary : undefined}
           onRegenerate={sendRegenerateCallSummary ? regenerateCallSummaryForItem : undefined}
           readOnly={speakerNamesReadOnly}
+          consent={meetingConsent.consent}
         />
       )}
 
@@ -2335,6 +2343,13 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
         onSave={sendUpdateCallAgenda ? (text) => sendUpdateCallAgenda(item.callId, text, user?.username) : undefined}
         onDerive={sendDeriveCallAgenda ? () => sendDeriveCallAgenda(item.callId) : undefined}
         readOnly={speakerNamesReadOnly}
+      />
+
+      <ConsentPanel
+        state={meetingConsent}
+        canEdit={!speakerNamesReadOnly}
+        isOwner={!!user?.username && item.owner === user.username}
+        isAdmin={!!isAdminUser}
       />
 
       {(enableSentimentAnalysis || enableVoiceTone) && (
