@@ -282,21 +282,9 @@ def latest_decisions(events: Sequence[Mapping[str, Any]]) -> Dict[str, str]:
     return latest
 
 
-def compact_events(events: Sequence[Mapping[str, Any]], limit: int = MAX_EVENTS) -> List[Any]:
-    """At most ``limit`` events, never losing one the status depends on.
-
-    Each participant's latest reply and the latest attestation entry are kept
-    whatever their age; the rest of the room is filled with the most recent
-    other events. Order is preserved. So a busy meeting's record stays bounded
-    and an objection is never dropped to make room. (More participants than
-    ``limit`` would keep more than ``limit`` events; the participant list is
-    capped well below the event cap, so that does not arise.)
-    """
-    events = list(events or [])
-    if len(events) <= limit:
-        return events
-    keep = set()
-    seen = set()
+def _deciding_positions(events: Sequence[Mapping[str, Any]]) -> set:
+    """Each participant's latest reply and the latest attestation entry."""
+    keep, seen = set(), set()
     for position in range(len(events) - 1, -1, -1):
         event = events[position]
         if event.get("Source") == SOURCE_ATTESTATION:
@@ -306,6 +294,23 @@ def compact_events(events: Sequence[Mapping[str, Any]], limit: int = MAX_EVENTS)
         if key not in seen:
             seen.add(key)
             keep.add(position)
+    return keep
+
+
+def compact_events(events: Sequence[Mapping[str, Any]], limit: int = MAX_EVENTS) -> List[Any]:
+    """At most ``limit`` events, never losing one the status depends on.
+
+    Each participant's latest reply and the latest attestation entry are kept
+    whatever their age; the rest of the room is filled with the most recent
+    other events. Order is preserved. So an objection is never dropped to make
+    room. Replies can come from more distinct names than ``limit`` -- anybody
+    may reply, listed or not -- and then more than ``limit`` events are kept;
+    :func:`fit_to_budget` bounds the record's size whatever their number.
+    """
+    events = list(events or [])
+    if len(events) <= limit:
+        return events
+    keep = _deciding_positions(events)
     for position in range(len(events) - 1, -1, -1):
         if len(keep) >= limit:
             break
@@ -327,21 +332,6 @@ def record_size(record: Mapping[str, Any]) -> int:
     return len(json.dumps(record, default=str, separators=(",", ":")).encode("utf-8"))
 
 
-def _deciding_positions(events: Sequence[Mapping[str, Any]]) -> set:
-    """Each participant's latest reply and the latest attestation entry."""
-    keep, seen = set(), set()
-    for position in range(len(events) - 1, -1, -1):
-        event = events[position]
-        if event.get("Source") == SOURCE_ATTESTATION:
-            key: Tuple[str, ...] = ("attestation",)
-        else:
-            key = ("reply", normalize_name(event.get("ParticipantName")))
-        if key not in seen:
-            seen.add(key)
-            keep.add(position)
-    return keep
-
-
 #: What a reply keeps when nothing else is left to shrink: enough to decide the
 #: status and to say when and where it was made.
 _ESSENTIAL_EVENT_FIELDS = ("ParticipantName", "Decision", "Source", "OccurredAt")
@@ -359,9 +349,8 @@ def fit_to_budget(record: Dict[str, Any], limit: int = MAX_RECORD_BYTES) -> Dict
     3. the oldest status history entries, keeping the latest ten;
     4. the notices posted between the first and the latest;
     5. the names once listed but not present now;
-    6. the replies a vision model read in each evidence image, keeping its verdict;
-    7. every reply's other fields (its id, who recorded it and when), and each
-       evidence image's note and summary.
+    6. every reply's other fields (its id, who recorded it and when), and each
+       evidence image's note.
 
     Raises:
         RecordFull: the record is still over ``limit`` after all of that.
@@ -406,21 +395,12 @@ def fit_to_budget(record: Dict[str, Any], limit: int = MAX_RECORD_BYTES) -> Dict
     ]
     if record_size(record) <= limit:
         return record
-    # 6. What a model read in each image; its verdict stays.
-    for entry in record.get("Evidence") or []:
-        verification = entry.get("Verification")
-        if isinstance(verification, dict) and verification.get("Replies"):
-            verification["Replies"] = []
-    if record_size(record) <= limit:
-        return record
-    # 7. The replies kept, down to who, how, where and when.
+    # 6. The replies kept, down to who, how, where and when.
     record["Events"] = [
         {key: event.get(key) for key in _ESSENTIAL_EVENT_FIELDS} for event in record["Events"]
     ]
     for entry in record.get("Evidence") or []:
         entry["Note"] = None
-        if isinstance(entry.get("Verification"), dict):
-            entry["Verification"]["Summary"] = None
     if record_size(record) <= limit:
         return record
     raise RecordFull(

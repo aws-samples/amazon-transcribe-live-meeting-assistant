@@ -24,8 +24,8 @@ Who may do what:
                                 an Admin may record consent on a participant's
                                 behalf. A signed-in user's entry is recorded as
                                 source ``ui`` under their own username.
-``attestMeetingConsent``        The meeting's owner, or a backend role naming who
-                                attested.
+``attestMeetingConsent``        The meeting's owner, or a backend role relaying
+                                the owner's attestation, recorded as the owner's.
 ``addMeetingConsentEvidence``   A backend role, for an image it stored under the
                                 meeting's own evidence folder.
 =============================== ==================================================
@@ -687,16 +687,22 @@ def attest_meeting_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) -
     call_id = data["CallId"]
     method = one_of(data.get("Method"), consent.ATTESTATION_METHODS, "Method")
     statement = consent.clip(data.get("Statement"), consent.MAX_TEXT_LENGTH)
-    if caller["is_backend"]:
-        attested_by = required_text(data.get("AttestedBy"), "AttestedBy", consent.MAX_NAME_LENGTH)
-    else:
-        attested_by = caller["username"]
+    named = consent.clip(data.get("AttestedBy"), consent.MAX_NAME_LENGTH)
 
-    def change(record, _meeting, access, now):
+    def change(record, meeting, access, now):
         # The owner's own statement: not an Admin's or a shared user's on their
-        # behalf. A backend role relays one it received from the owner.
+        # behalf. A backend role relays one it received from the owner, and
+        # names the owner, so the record never attributes an attestation to
+        # anybody else.
         if not (access["owner"] or access["backend"]):
             raise refuse(caller, call_id, "attest")
+        owner = str(meeting.get("Owner") or "")
+        if access["backend"] and not access["owner"]:
+            if not owner:
+                raise BadRequestError("the meeting has no owner to attest")
+            if named and consent.normalize_name(named) != consent.normalize_name(owner):
+                raise BadRequestError("AttestedBy must name the meeting's owner")
+        attested_by = owner if access["backend"] else caller["username"]
         record = require_started(record)
         record["Attestation"] = {
             "AttestedBy": attested_by,

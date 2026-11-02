@@ -311,11 +311,6 @@ def _full_record():
                 "EvidenceId": "0123456789abcdef",
                 "S3Key": "k" * 256,
                 "Note": text,
-                "Verification": {
-                    "Verdict": "inconclusive",
-                    "Summary": "s" * 500,
-                    "Replies": [{"Name": long_name, "Text": text, "Decision": "consent"}] * 100,
-                },
             }
         ]
         * rules.MAX_EVIDENCE,

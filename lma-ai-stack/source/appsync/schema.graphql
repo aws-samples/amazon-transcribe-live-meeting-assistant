@@ -1149,8 +1149,9 @@ input AttestMeetingConsentInput {
 	# "verbal", "chat" or "invite_terms".
 	Method: String!
 	Statement: String
-	# Backend roles only, and required for them: who attested. A signed-in
-	# user's attestation is their own, and only the meeting's owner may make one.
+	# Backend roles only: the meeting's owner, whose attestation is relayed;
+	# anybody else is refused, and omitted it is the owner. A signed-in user's
+	# attestation is their own, and only the meeting's owner may make one.
 	AttestedBy: String
 }
 

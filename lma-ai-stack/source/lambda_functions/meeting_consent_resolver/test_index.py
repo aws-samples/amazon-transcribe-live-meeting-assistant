@@ -337,8 +337,8 @@ def test_only_the_owner_or_the_backend_attests(dynamo) -> None:
     for identity in (user(SHARED), user("admin@example.com", admin=True)):
         with pytest.raises(index.ForbiddenError):
             call("attestMeetingConsent", identity, Method="verbal")
-    with pytest.raises(index.BadRequestError, match="AttestedBy"):
-        call("attestMeetingConsent", BACKEND, Method="verbal")
+    with pytest.raises(index.BadRequestError, match="must name the meeting's owner"):
+        call("attestMeetingConsent", BACKEND, Method="verbal", AttestedBy="Somebody else")
     result = call(
         "attestMeetingConsent", user(OWNER), Method="invite_terms", Statement="In the invite"
     )
@@ -350,7 +350,8 @@ def test_only_the_owner_or_the_backend_attests(dynamo) -> None:
 
 def test_an_objection_after_the_attestation_stops_capture(dynamo) -> None:
     call("startMeetingConsent", BACKEND, Mode="opt_in", Rule="owner_attests")
-    call("attestMeetingConsent", BACKEND, Method="chat", AttestedBy="Ana (owner)")
+    relayed = call("attestMeetingConsent", BACKEND, Method="chat")
+    assert relayed["Consent"]["Attestation"]["AttestedBy"] == OWNER
     result = call(
         "recordMeetingConsentEvent",
         BACKEND,

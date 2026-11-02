@@ -195,14 +195,15 @@ meeting row, so it is also held to 150 KB as a whole. A write that would take it
 past that first sheds what the status does not depend on, in this order: replies
 that are no longer anybody's latest, the words of replies, the older status
 history, the notices between the first and the latest, the names no longer
-present, what a vision model read in each evidence image, and finally each
-reply's other details and each image's note. A write that still would not fit is
+present, and finally each reply's other details and each image's note. A write that still would not fit is
 refused with a message saying so.
 
 Evidence images are private objects in the recordings bucket, under
 `lma-consent-evidence/<meeting>/`, where `<meeting>` is the CallId with every
 character other than letters, digits, `_` and `.` replaced by `_` and any
 leading and trailing `_` removed (the same rule as the key frames' folder).
+Two CallIds that differ only in such characters, `a b` and `a_b` for example,
+share a folder, as they do for key frames.
 Only a backend role can add one, and only from that folder. `getMeetingConsent`
 signs an hour-long link to each image for whoever may read the meeting.
 
@@ -321,8 +322,9 @@ Arguments that are checked:
   changed and the change is added to the status history; the participants
   listed and when consent was first started are kept.
 - Every other mutation is refused until consent has been started.
-- A backend role's reply names its `Source`, `chat` or `voice`; an attestation
-  by a backend role names `AttestedBy`.
+- A backend role's reply names its `Source`, `chat` or `voice`. An attestation
+  a backend role relays is recorded as the meeting owner's; `AttestedBy`, when
+  given, must name the owner.
 - Names are cut at 100 characters, reply and statement texts at 500, notices
   at 2,000, and an evidence key may be at most 256 characters.
 
