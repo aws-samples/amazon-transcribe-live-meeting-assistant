@@ -83,3 +83,27 @@ def test_without_one_the_hook_mode_is_the_parameters(configured, monkeypatch) ->
     assert cep.transcript_hook_nonpartial_only() is False
     monkeypatch.delenv("TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY")
     assert cep.transcript_hook_nonpartial_only() is True
+
+
+def test_the_agenda_threshold_comes_from_the_configuration(configured, monkeypatch) -> None:
+    monkeypatch.setenv("AGENDA_DERIVATION_AFTER_SECONDS", "300")
+    configured({"meeting_agenda": {"autoDeriveAfterSeconds": 120}})
+    assert cep.agenda_derivation_threshold() == 120.0
+
+
+def test_an_agenda_threshold_of_zero_saved_on_the_page_turns_the_pass_off(
+    configured, monkeypatch
+) -> None:
+    monkeypatch.setenv("AGENDA_DERIVATION_AFTER_SECONDS", "300")
+    configured({"meeting_agenda": {"autoDeriveAfterSeconds": 0}})
+    assert cep.agenda_derivation_threshold() == 0.0
+    assert not cep.agenda_derivation_due("call-1", 9999.0, cep.agenda_derivation_threshold(), set())
+
+
+def test_without_one_the_agenda_threshold_is_the_parameters(configured, monkeypatch) -> None:
+    monkeypatch.setenv("AGENDA_DERIVATION_AFTER_SECONDS", "600")
+    configured({})
+    assert cep.agenda_derivation_threshold() == 600.0
+    monkeypatch.delenv("AGENDA_DERIVATION_AFTER_SECONDS")
+    monkeypatch.setattr(cep, "AGENDA_DERIVATION_AFTER_SECONDS", 300.0)
+    assert cep.agenda_derivation_threshold() == 300.0

@@ -463,6 +463,16 @@ Parameters:
       disconnects without sending its end-of-meeting event stays "In Progress"
       until this timeout elapses. Set to 0 to leave such meetings open.
 
+  AgendaDerivationAfterSeconds:
+    Type: Number
+    Default: 300
+    MinValue: 0
+    MaxValue: 3600
+    Description: >-
+      Default of the Meeting Agenda section's automatic-pass threshold: seconds into a
+      meeting with no agenda at which its transcript is read once for a stated agenda.
+      0 turns the automatic pass off. lma-main.yaml validates it.
+
   MeetingInactivityLookbackInDays:
     Type: Number
     Default: 2
@@ -3255,8 +3265,9 @@ Resources:
           KEYFRAME_TEXT_EXTRACTOR_ARN: !GetAtt KeyframeTextExtractorFunction.Arn
           # Seconds into a meeting with no agenda at which the transcript is read
           # once for an agenda somebody stated. 0 turns the automatic pass off;
-          # the Agenda panel's button works either way.
-          AGENDA_DERIVATION_AFTER_SECONDS: "300"
+          # the Agenda panel's button works either way. The default of the
+          # Meeting Agenda section, read when the configuration cannot be.
+          AGENDA_DERIVATION_AFTER_SECONDS: !Ref AgendaDerivationAfterSeconds
           ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !GetAtt AsyncAgentAssistOrchestrator.Arn
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
           SNS_TOPIC_ARN: !Ref CategorySNSTopic
@@ -3549,6 +3560,7 @@ Resources:
         # set lower on the Configuration page and not higher.
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
+        AgendaDerivationAfterSeconds: !Ref AgendaDerivationAfterSeconds
 
   # Revision bodies for the configuration history: one gzipped object per
   # revision at config_revisions/<profile>/<nnnnnn>.json.gz, with the metadata

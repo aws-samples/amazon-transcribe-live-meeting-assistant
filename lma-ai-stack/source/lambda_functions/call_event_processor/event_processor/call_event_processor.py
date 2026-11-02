@@ -48,7 +48,12 @@ from graphql_helpers import (
 
 # Validation of ADD_VIDEO_KEYFRAME, AWS-free for the same reason as pure.py below.
 from keyframe_input import KeyframeEventError, build_keyframe_input  # noqa: E402
-from lma_config import MEETING_ASSIST, MEETING_PROCESSING, read_setting  # noqa: E402
+from lma_config import (  # noqa: E402
+    MEETING_AGENDA,
+    MEETING_ASSIST,
+    MEETING_PROCESSING,
+    read_setting,
+)
 from metrics_utils import catalogue as metric_names
 from metrics_utils.emf import METRICS
 
@@ -100,12 +105,15 @@ POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN = getenv(
 
 ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN = getenv("ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN", "")
 SPEAKER_NAME_RESOLVER_ARN = getenv("SPEAKER_NAME_RESOLVER_ARN", "")
-# The automatic agenda pass: a meeting with no agenda is read once, about this
-# far in, for an agenda somebody stated. 0 turns it off. See agenda_deriver.
+# The automatic agenda pass: a meeting with no agenda is read once, about
+# agenda_derivation_threshold() seconds in, for an agenda somebody stated. 0
+# turns it off. See agenda_deriver.
 AGENDA_DERIVER_ARN = getenv("AGENDA_DERIVER_ARN", "")
 # Reads the text of each key frame, once, after it is stored. See
 # keyframe_text_extractor.
 KEYFRAME_TEXT_EXTRACTOR_ARN = getenv("KEYFRAME_TEXT_EXTRACTOR_ARN", "")
+#: The AgendaDerivationAfterSeconds parameter's value, from its environment
+#: variable; what the Meeting Agenda section falls back to.
 AGENDA_DERIVATION_AFTER_SECONDS = agenda_derivation_after_seconds(
     getenv("AGENDA_DERIVATION_AFTER_SECONDS", "300")
 )
@@ -129,6 +137,24 @@ def transcript_hook_nonpartial_only() -> bool:
         "transcriptHookNonPartialOnly",
         env_var="TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY",
         default=True,
+    )
+
+
+def agenda_derivation_threshold() -> float:
+    """Seconds into a meeting with no agenda at which it is read for one; 0 is off.
+
+    The Meeting Agenda section of the Configuration page, whose default is the
+    AgendaDerivationAfterSeconds stack parameter; that parameter's environment
+    variable when the section cannot be read. Read on the section's standard
+    tier, so a saved change reaches meetings about five minutes later.
+    """
+    return float(
+        read_setting(
+            MEETING_AGENDA.name,
+            "autoDeriveAfterSeconds",
+            env_var="AGENDA_DERIVATION_AFTER_SECONDS",
+            default=AGENDA_DERIVATION_AFTER_SECONDS,
+        )
     )
 
 
@@ -1877,10 +1903,12 @@ async def execute_process_event_api_mutation(
             if (
                 AGENDA_DERIVER_ARN
                 and not normalized_message["IsPartial"]
+                # A meeting already queued here needs no read of the threshold.
+                and normalized_message.get("CallId") not in AGENDA_PASS_QUEUED
                 and agenda_derivation_due(
                     normalized_message.get("CallId"),
                     normalized_message.get("EndTime"),
-                    AGENDA_DERIVATION_AFTER_SECONDS,
+                    agenda_derivation_threshold(),
                     AGENDA_PASS_QUEUED,
                 )
             ):

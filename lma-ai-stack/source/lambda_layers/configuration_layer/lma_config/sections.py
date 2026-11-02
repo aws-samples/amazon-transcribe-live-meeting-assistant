@@ -347,6 +347,18 @@ MEETING_PROCESSING = register(
     )
 )
 
+#: When the call event processor reads a meeting's transcript, once, for an
+#: agenda somebody stated (agenda_deriver), in a meeting that has none.
+#:
+#: Standard tier: read by unattended processing, per batch of segments.
+MEETING_AGENDA = register(
+    SectionSpec(
+        name="meeting_agenda",
+        cache_tier=CacheTier.STANDARD,
+        description="When a meeting with no agenda is read for one somebody stated.",
+    )
+)
+
 #: How long meeting records and transcript segments are kept: the time each one
 #: is given to live when it is written. The stack parameter of each setting is
 #: both its default and its upper limit (``maximumIsDefault`` in the schema), so
