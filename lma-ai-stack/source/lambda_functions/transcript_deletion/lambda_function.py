@@ -127,7 +127,7 @@ def current_delay() -> Optional[int]:
     """The setting as saved now, not as cached: a save applies to the next meeting to end.
 
     One read of the configuration table, twice a meeting. Without the table
-    named, the stack parameter's value.
+    named, off (None).
     """
     global _STORE  # pylint: disable=global-statement -- one store per process
     if _STORE is None and os.environ.get(TABLE_NAME_ENV_VAR):
@@ -301,6 +301,7 @@ def delete_files(call_id: str) -> List[str]:
 
 
 def _s3_data_sources() -> List[str]:
+    """The ids of the transcript knowledge base's S3 data sources."""
     agent = _client("bedrock-agent")
     ids: List[str] = []
     token: Optional[str] = None
@@ -309,7 +310,13 @@ def _s3_data_sources() -> List[str]:
         if token:
             kwargs["nextToken"] = token
         page = agent.list_data_sources(**kwargs)
-        ids.extend(summary["dataSourceId"] for summary in page.get("dataSourceSummaries", []))
+        for summary in page.get("dataSourceSummaries", []):
+            source = agent.get_data_source(
+                knowledgeBaseId=TRANSCRIPT_KB_ID, dataSourceId=summary["dataSourceId"]
+            )
+            configuration = source.get("dataSource", {}).get("dataSourceConfiguration", {})
+            if configuration.get("type") == "S3":
+                ids.append(summary["dataSourceId"])
         token = page.get("nextToken")
         if not token:
             return ids

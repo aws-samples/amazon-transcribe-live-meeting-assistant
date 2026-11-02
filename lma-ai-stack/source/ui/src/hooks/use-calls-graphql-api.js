@@ -48,12 +48,18 @@ const logger = new ConsoleLogger('useCallsGraphQlApi');
 const LIST_PAGE_SIZE = 100;
 const MAX_PAGES_PER_LOAD = 20;
 
+// How long after a meeting's summary arrives it is read again, for the
+// transcript deletion time (see the onUpdateCall subscription).
+const SUMMARY_REFRESH_DELAY_MS = 5000;
+
 const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
   // dateRange is { startDateIso, endDateIso } — the active meeting-list window.
   const [dateRange, setDateRange] = useState(initialDateRange || hoursToDateRange(DEFAULT_DATE_RANGE_HOURS));
   // Mirror of dateRange held in a ref so subscription callbacks (which close
   // over an old dateRange otherwise) always see the latest value.
   const dateRangeRef = useRef(dateRange);
+  // Meetings already read again after their summary arrived.
+  const summaryRefreshes = useRef(new Set());
   useEffect(() => {
     dateRangeRef.current = dateRange;
   }, [dateRange]);
@@ -177,6 +183,18 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
         if (!callUpdateEvent?.CallId) return;
         if (!isWithinActiveRange(callUpdateEvent?.CreatedAt)) return;
         setCallsDeduped([callUpdateEvent]);
+        // The transcript deletion writes when the transcript is due to be
+        // deleted (or was) onto the meeting record directly, so no update
+        // carries it. Read the meeting once more shortly after its summary
+        // first arrives, which is when that time is set.
+        const { CallId: callId, CallSummaryText: summary } = callUpdateEvent;
+        if (summary && !summaryRefreshes.current.has(callId)) {
+          summaryRefreshes.current.add(callId);
+          setTimeout(async () => {
+            const callValues = await getCallDetailsFromCallIds([callId]);
+            if (callValues.length) setCallsDeduped(callValues);
+          }, SUMMARY_REFRESH_DELAY_MS);
+        }
       },
       error: (error) => {
         logger.error(error);

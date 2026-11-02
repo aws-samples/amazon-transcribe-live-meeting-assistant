@@ -99,6 +99,9 @@ Kept:
 While deletion is pending, the meeting page shows above the transcript when it
 will be deleted, so anyone who needs a copy can download it first. Once it is
 deleted, the page says when, and the transcript download is no longer offered.
+A meeting page that is open when the meeting ends shows the deletion time a few
+seconds after the summary appears. It shows that the transcript has been deleted
+the next time it is loaded.
 
 After the deletion:
 

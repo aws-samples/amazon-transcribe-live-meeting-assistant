@@ -4862,6 +4862,7 @@ Resources:
                 - Effect: Allow
                   Action:
                     - bedrock:ListDataSources
+                    - bedrock:GetDataSource
                     - bedrock:DeleteKnowledgeBaseDocuments
                   Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BedrockKnowledgeBaseID}"
           - !Ref AWS::NoValue

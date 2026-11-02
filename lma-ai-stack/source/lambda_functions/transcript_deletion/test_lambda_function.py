@@ -153,7 +153,11 @@ class FakeKnowledgeBase:
         self.deleted = []
 
     def list_data_sources(self, **_):
-        return {"dataSourceSummaries": [{"dataSourceId": "DS1"}]}
+        return {"dataSourceSummaries": [{"dataSourceId": "DS1"}, {"dataSourceId": "WEB"}]}
+
+    def get_data_source(self, knowledgeBaseId, dataSourceId):
+        kind = "S3" if dataSourceId == "DS1" else "WEB"
+        return {"dataSource": {"dataSourceConfiguration": {"type": kind}}}
 
     def delete_knowledge_base_documents(self, knowledgeBaseId, dataSourceId, documentIdentifiers):
         self.deleted.append((knowledgeBaseId, dataSourceId, documentIdentifiers))
