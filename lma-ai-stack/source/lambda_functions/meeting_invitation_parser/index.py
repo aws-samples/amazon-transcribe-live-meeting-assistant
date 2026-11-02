@@ -66,7 +66,8 @@ def call_bedrock(prompt_data):
     )
 
     generated_text = get_generated_text(response)
-    logger.info(f"Bedrock response: {generated_text}")
+    # The response holds what was parsed from the invitation, so only its size is logged.
+    logger.info("Bedrock response: %d characters", len(generated_text or ""))
     return generated_text
 
 
@@ -381,17 +382,17 @@ UNSUPPORTED_PLATFORM_MESSAGES = {
 
 def handler(event, context):
     """Lambda handler for parsing meeting invitations"""
-    logger.info(f"Received event: {json.dumps(event)}")
+    invitation_text = (event.get("arguments") or {}).get("invitationText") or ""
+    # The invitation text can carry meeting passcodes, so only its size is logged.
+    logger.info("Received invitation to parse: %d characters", len(invitation_text))
 
     try:
-        # Extract meeting invitation text from the event
-        invitation_text = event.get("arguments", {}).get("invitationText", "")
-
         if not invitation_text or not invitation_text.strip():
             return json.dumps({"success": False, "error": "Meeting invitation text is required"})
 
         # Parse the meeting invitation
         result = parse_meeting_invitation(invitation_text)
+        platform = None
 
         if result["success"]:
             # Validate and clean the parsed data
@@ -420,7 +421,15 @@ def handler(event, context):
                     }
                 )
 
-        logger.info(f"Returning result: {json.dumps(result)}")
+        # The parsed fields can include a meeting passcode, so the result is
+        # logged by outcome, platform and the names of the fields it filled in.
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        logger.info(
+            "Returning result: success=%s, platform=%s, fields=%s",
+            result.get("success"),
+            platform,
+            sorted(k for k, v in data.items() if v),
+        )
         return json.dumps(result)
 
     except Exception as e:

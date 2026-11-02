@@ -18,23 +18,46 @@ dynamodb = boto3.resource("dynamodb")
 TABLE_NAME = os.environ.get("MCP_API_KEYS_TABLE", "")
 
 
-def handler(event, context):
-    logger.info(f"Authorizer event: {json.dumps(event)}")
-    method_arn = event.get("methodArn", "")
+def request_summary(event):
+    """The fields of a request that are logged: never its headers or token."""
+    request_context = event.get("requestContext") or {}
+    return {
+        "requestId": request_context.get("requestId", ""),
+        "httpMethod": event.get("httpMethod", ""),
+        "resource": event.get("resource") or event.get("path", ""),
+    }
 
-    # Support both x-api-key header and Authorization: Bearer <key>
+
+def extract_token(event):
+    """The API key from authorizationToken, x-api-key or Authorization: Bearer."""
     token = event.get("authorizationToken", "")
-    if not token:
-        headers = event.get("headers", {})
-        token = headers.get("x-api-key", "") or headers.get("X-Api-Key", "")
-        if not token:
-            auth = headers.get("Authorization", "") or headers.get("authorization", "")
-            if auth.startswith("Bearer "):
-                token = auth[7:]
+    if token:
+        return token
+    headers = event.get("headers") or {}
+    token = headers.get("x-api-key", "") or headers.get("X-Api-Key", "")
+    if token:
+        return token
+    auth = headers.get("Authorization", "") or headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[7:]
+    return ""
 
-    if not token or not TABLE_NAME:
+
+def handler(event, context):
+    summary = request_summary(event)
+    method_arn = event.get("methodArn", "")
+    token = extract_token(event)
+
+    if not TABLE_NAME:
+        logger.error("MCP_API_KEYS_TABLE is not set; denying: %s", json.dumps(summary))
         return deny_policy(method_arn)
 
+    if not token:
+        logger.info("Request without an API key: %s", json.dumps(summary))
+        return deny_policy(method_arn)
+
+    # Nothing derived from the presented key is logged. A matched key is named
+    # by the KeyPrefix stored with it, as the key manager and key list name it.
     key_hash = hashlib.sha256(token.encode()).hexdigest()
 
     try:
@@ -43,10 +66,15 @@ def handler(event, context):
         item = resp.get("Item")
 
         if not item or item.get("Enabled") != "true":
-            logger.info("Key not found or disabled")
+            logger.info("Key not found or disabled: %s", json.dumps(summary))
             return deny_policy(method_arn)
 
-        logger.info(f"Authorized user: {item.get('Username')}")
+        logger.info(
+            "Authorized user: %s, keyPrefix=%s: %s",
+            item.get("Username"),
+            item.get("KeyPrefix", ""),
+            json.dumps(summary),
+        )
         return allow_policy(
             method_arn,
             {
@@ -56,8 +84,9 @@ def handler(event, context):
             },
         )
 
-    except Exception as e:
-        logger.error(f"Auth error: {e}")
+    except Exception as e:  # pylint: disable=broad-except
+        # The exception type only: its message is not logged.
+        logger.error("Auth error (%s): %s", type(e).__name__, json.dumps(summary))
         return deny_policy(method_arn)
 
 

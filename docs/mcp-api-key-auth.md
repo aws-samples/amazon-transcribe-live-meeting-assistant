@@ -176,6 +176,7 @@ Located on the **MCP Servers Configuration** page (`/configuration/mcp-servers`)
 - API Gateway throttling: 50 burst, 100 sustained requests/sec
 - Keys can be revoked immediately by the user
 - `lma_` prefix makes keys identifiable if leaked in logs
+- The authorizer logs each request's ID, HTTP method and resource path, and names a matched key only by its stored 12-character prefix (the prefix shown in the key list); at the default `AppSyncFieldLogLevel` (`ERROR`) the AppSync API's logs exclude resolver arguments and results, including the key returned when one is generated
 - REQUEST authorizer with no IdentitySource means every request invokes the authorizer Lambda (no bypass via missing headers)
 
 ## Testing
@@ -187,6 +188,12 @@ Located on the **MCP Servers Configuration** page (`/configuration/mcp-servers`)
 # Tests: initialize (Bearer), initialize (x-api-key), tools/list,
 #        tools/call (list_meetings), ping, bad key rejection
 ```
+
+The integration suite's `integ-tests/test_mcp_api_key_logging.py` generates a
+key as the Cognito test user, calls the endpoint with it and with an unknown
+key, revokes it, and checks what the authorizer's and the AppSync API's log
+groups recorded. It runs in `make integ-tests` whenever a test user is
+configured; see [integ-tests/README.md](../integ-tests/README.md).
 
 ## Connecting from Quick Suite
 

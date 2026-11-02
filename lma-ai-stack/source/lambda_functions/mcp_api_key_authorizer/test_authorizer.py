@@ -167,8 +167,11 @@ class TestDenyPolicies(unittest.TestCase):
         index.TABLE_NAME = ""
         try:
             event = {"methodArn": METHOD_ARN, "authorizationToken": "lma_test"}
-            result = index.handler(event, None)
+            with self.assertLogs(index.logger, level="ERROR") as captured:
+                result = index.handler(event, None)
             self.assertEqual(result["policyDocument"]["Statement"][0]["Effect"], "Deny")
+            self.assertIn("MCP_API_KEYS_TABLE is not set", "\n".join(captured.output))
+            self.assertNotIn("lma_test", "\n".join(captured.output))
         finally:
             index.TABLE_NAME = original
 
@@ -224,6 +227,99 @@ class TestSHA256Hashing(unittest.TestCase):
         index.handler(event, None)
 
         mock_table.get_item.assert_called_once_with(Key={"KeyHash": expected_hash})
+
+
+FULL_KEY = "lma_0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b"  # pragma: allowlist secret
+
+
+def request_event(headers):
+    """A REQUEST-authorizer event as API Gateway sends it."""
+    return {
+        "type": "REQUEST",
+        "methodArn": METHOD_ARN,
+        "resource": "/{proxy+}",
+        "path": "/mcp",
+        "httpMethod": "POST",
+        "headers": headers,
+        "multiValueHeaders": {k: [v] for k, v in headers.items()},
+        "requestContext": {"requestId": "req-123", "httpMethod": "POST"},
+    }
+
+
+class TestLogOutputOmitsKey(unittest.TestCase):
+    """The presented API key never appears in log output; a matched key's stored prefix may."""
+
+    def run_and_capture(self, event, table_behaviour):
+        with patch.object(index, "dynamodb") as mock_dynamo:
+            mock_table = MagicMock()
+            table_behaviour(mock_table)
+            mock_dynamo.Table.return_value = mock_table
+            with self.assertLogs(index.logger, level="DEBUG") as captured:
+                result = index.handler(event, None)
+        return result, "\n".join(captured.output)
+
+    def assert_key_not_logged(self, output):
+        self.assertNotIn(FULL_KEY, output)
+        # Nothing longer than the stored 12-character prefix either.
+        self.assertNotIn(FULL_KEY[:13], output)
+
+    def test_allowed_request_logs_only_key_prefix(self):
+        def found(table):
+            table.get_item.return_value = {"Item": make_valid_item(FULL_KEY)}
+
+        for headers in (
+            {"x-api-key": FULL_KEY},
+            {"X-Api-Key": FULL_KEY},
+            {"Authorization": f"Bearer {FULL_KEY}"},
+            {"authorization": f"Bearer {FULL_KEY}"},
+        ):
+            with self.subTest(header=next(iter(headers))):
+                result, output = self.run_and_capture(request_event(headers), found)
+                self.assertEqual(result["policyDocument"]["Statement"][0]["Effect"], "Allow")
+                self.assert_key_not_logged(output)
+                self.assertIn(f"keyPrefix={FULL_KEY[:12]}", output)
+                self.assertIn("req-123", output)
+
+    def test_unknown_key_logs_no_part_of_key(self):
+        def missing(table):
+            table.get_item.return_value = {}
+
+        result, output = self.run_and_capture(request_event({"x-api-key": FULL_KEY}), missing)
+        self.assertEqual(result["policyDocument"]["Statement"][0]["Effect"], "Deny")
+        self.assertNotIn(FULL_KEY[:12], output)
+        self.assertIn("req-123", output)
+
+    def test_lookup_error_logs_no_part_of_key(self):
+        def failing(table):
+            table.get_item.side_effect = RuntimeError(f"lookup failed for {FULL_KEY}")
+
+        result, output = self.run_and_capture(request_event({"x-api-key": FULL_KEY}), failing)
+        self.assertEqual(result["policyDocument"]["Statement"][0]["Effect"], "Deny")
+        self.assertNotIn(FULL_KEY[:12], output)
+        self.assertIn("RuntimeError", output)
+
+    def test_authorization_token_field_not_logged(self):
+        def found(table):
+            table.get_item.return_value = {"Item": make_valid_item(FULL_KEY)}
+
+        event = {"methodArn": METHOD_ARN, "authorizationToken": FULL_KEY}
+        _, output = self.run_and_capture(event, found)
+        self.assert_key_not_logged(output)
+
+    def test_request_without_key_is_denied_and_headers_not_logged(self):
+        def unused(table):
+            table.get_item.side_effect = AssertionError("not called")
+
+        headers = {"Cookie": "session=abc123secret", "User-Agent": "test"}
+        result, output = self.run_and_capture(request_event(headers), unused)
+        self.assertEqual(result["policyDocument"]["Statement"][0]["Effect"], "Deny")
+        self.assertNotIn("abc123secret", output)
+
+    def test_null_headers_are_denied(self):
+        event = request_event({})
+        event["headers"] = None
+        result = index.handler(event, None)
+        self.assertEqual(result["policyDocument"]["Statement"][0]["Effect"], "Deny")
 
 
 if __name__ == "__main__":

@@ -330,3 +330,51 @@ class TestAgenda(unittest.TestCase):
     def test_the_agenda_is_bounded_to_what_the_form_can_submit(self):
         out = index.validate_parsed_data({"agenda": "x" * (index.MAX_AGENDA_CHARS + 10)})
         self.assertEqual(len(out["agenda"]), index.MAX_AGENDA_CHARS)
+
+
+class TestHandlerLogging(unittest.TestCase):
+    INVITATION = "Join Zoom https://zoom.us/j/96187501703 Passcode: 987654xyz"
+
+    def run_handler(self, model_text):
+        from unittest.mock import MagicMock, patch
+
+        bedrock = MagicMock()
+        bedrock.converse.return_value = {"output": {"message": {"content": [{"text": model_text}]}}}
+        with (
+            patch.object(index, "bedrock", bedrock),
+            patch.object(index, "read_setting", return_value="us.anthropic.claude-test"),
+            self.assertLogs(index.logger, level="DEBUG") as captured,
+        ):
+            response = json.loads(
+                index.handler({"arguments": {"invitationText": self.INVITATION}}, None)
+            )
+        return response, "\n".join(captured.output)
+
+    def test_parsed_invitation_is_logged_without_its_content(self):
+        parsed = {
+            "meetingName": "Quarterly planning",
+            "meetingPlatform": "ZOOM",
+            "meetingId": "96187501703",
+            "meetingPassword": "987654xyz",
+            "agenda": None,
+        }
+        response, output = self.run_handler(json.dumps(parsed))
+        self.assertTrue(response["success"])
+        self.assertEqual(response["data"]["meetingPassword"], "987654xyz")
+        self.assertNotIn("987654xyz", output)
+        self.assertNotIn("Quarterly planning", output)
+        self.assertNotIn("96187501703", output)
+        self.assertIn(f"{len(self.INVITATION)} characters", output)
+        self.assertIn("success=True, platform=ZOOM", output)
+        self.assertIn("meetingPassword", output)
+
+    def test_unparseable_model_response_is_logged_without_its_content(self):
+        response, output = self.run_handler("Passcode is 987654xyz, no JSON here")
+        self.assertFalse(response["success"])
+        self.assertNotIn("987654xyz", output)
+        self.assertIn("success=False", output)
+
+    def test_null_arguments_return_the_missing_text_error(self):
+        response = json.loads(index.handler({"arguments": None}, None))
+        self.assertFalse(response["success"])
+        self.assertIn("required", response["error"])
