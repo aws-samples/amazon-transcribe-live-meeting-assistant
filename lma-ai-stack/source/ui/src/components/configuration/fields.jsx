@@ -70,6 +70,7 @@ const SCHEMA = PropTypes.shape({
   mergeStrategy: PropTypes.string,
   disabledValue: PropTypes.string,
   numberedKeys: PropTypes.bool,
+  maximumIsDefault: PropTypes.bool,
   propertyNames: PropTypes.shape({ pattern: PropTypes.string }),
   properties: PropTypes.objectOf(PropTypes.shape({})),
   items: PropTypes.shape({}),
@@ -264,9 +265,21 @@ ScalarControl.propTypes = {
 };
 
 const ScalarField = ({ schema, path, label, secondaryControl = null }) => {
-  const { values, set } = useSection();
+  const { values, defaults, set } = useSection();
+  // A setting whose default is also its limit says so, whatever its value.
+  const limit = schema.maximumIsDefault === true ? getAt(defaults, path) : undefined;
+  const constraintText =
+    typeof limit === 'number'
+      ? `At most ${limit}, the limit this deployment sets, which is also the default`
+      : undefined;
   return (
-    <FieldFrame label={label} description={schema.description} path={path} secondaryControl={secondaryControl}>
+    <FieldFrame
+      label={label}
+      description={schema.description}
+      path={path}
+      secondaryControl={secondaryControl}
+      constraintText={constraintText}
+    >
       <ScalarControl
         schema={schema}
         value={getAt(values, path)}

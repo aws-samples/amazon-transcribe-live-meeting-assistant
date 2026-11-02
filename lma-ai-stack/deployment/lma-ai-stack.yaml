@@ -2716,11 +2716,18 @@ Resources:
           LAMBDA_AGENT_ASSIST_FUNCTION_ARN: !Ref AgentAssistExistingLambdaFunctionArn
           DYNAMODB_TABLE_NAME: !Ref EventSourcingTable
           EVENT_API_HTTP_URL: !GetAtt EventApiDns.HttpUrl
+          # The meeting assistant's answers are transcript segments, so they
+          # expire with the transcript: the Retention section's value, at most
+          # this parameter's.
+          TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS: !Ref TranscriptionExpirationInDays
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
       Timeout: 60
       MemorySize: 128
       Handler: lambda_function.handler
       Layers:
         - !Ref TranscriptEnrichmentPythonLayer
+        # lma_config, for the Retention section.
+        - !Ref ConfigurationPythonLayer
       CodeUri: ../source/lambda_functions/async_agent_assist_orchestrator
       Description: This AWS Lambda Function orchestrates agent assist processing.
       LoggingConfig:
@@ -2739,6 +2746,8 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     DependsOn:
       - AsyncAgentAssistOrchestratorLogGroup
+      # Ordered behind the seeder, like every configuration reader.
+      - SeedConfiguration
 
   StrandsChatInterfaceFunction:
     Type: AWS::Serverless::Function
@@ -2838,6 +2847,20 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
+              # Read-only, on the shared configuration table: the Retention
+              # section, which shortens the expiry of the records written here.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !GetAtt ConfigurationTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
               - Effect: Allow
                 Action: kinesis:PutRecord
                 Resource: !Ref CallDataStreamArn
@@ -2886,11 +2909,17 @@ Resources:
           # Must exceed the resolver's own 60s timeout, so a pass that is still
           # running is never abandoned and retried from here.
           SPEAKER_NAME_READ_TIMEOUT: 75
+          # The expiry of the summary it writes when the request names none:
+          # the Retention section's value, at most this parameter's.
+          MEETING_RECORD_EXPIRATION_IN_DAYS: !Ref MeetingRecordExpirationInDays
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
       Timeout: 240
       MemorySize: 128
       Handler: lambda_function.handler
       Layers:
         - !Ref TranscriptEnrichmentPythonLayer
+        # lma_config, for the Retention section.
+        - !Ref ConfigurationPythonLayer
       CodeUri: ../source/lambda_functions/async_transcript_summary_orchestrator
       Description: This AWS Lambda Function orchestrates call summary processing processing.
       LoggingConfig:
@@ -2909,6 +2938,8 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     DependsOn:
       - AsyncTranscriptSummaryOrchestratorLogGroup
+      # Ordered behind the seeder, like every configuration reader.
+      - SeedConfiguration
 
   AsyncTranscriptSummaryOrchestratorLogGroup:
     Type: AWS::Logs::LogGroup
@@ -2938,6 +2969,20 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
+              # Read-only, on the shared configuration table: the Retention
+              # section, which shortens the expiry of the records written here.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !GetAtt ConfigurationTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
               - Effect: Allow
                 Action: kinesis:PutRecord
                 Resource: !Ref CallDataStreamArn
@@ -3499,6 +3544,11 @@ Resources:
         VPAttendeePollMs: !Ref VPAttendeePollMs
         VPPollsBeforeEnd: !Ref VPPollsBeforeEnd
         VPPollsBeforeEndMissing: !Ref VPPollsBeforeEndMissing
+        MeetingInactivityTimeoutInMinutes: !Ref MeetingInactivityTimeoutInMinutes
+        # Limits as well as defaults: the Retention section's settings may be
+        # set lower on the Configuration page and not higher.
+        MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
+        TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
 
   # Revision bodies for the configuration history: one gzipped object per
   # revision at config_revisions/<profile>/<nnnnnn>.json.gz, with the metadata
@@ -4302,6 +4352,8 @@ Resources:
           # Batch transcription seconds, for the meeting cost estimate.
           METERING_TABLE_NAME: !Ref EventSourcingTable
           METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
+          # The Retention section, which can shorten that expiry.
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
       # lma_metering; pure Python, so compatible with this function's arm64.
       Layers:
         - !Ref ConfigurationPythonLayer
@@ -4321,6 +4373,8 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     DependsOn:
       - UploadMeetingFinalizerFunctionLogGroup
+      # Ordered behind the seeder, like every configuration reader.
+      - SeedConfiguration
 
   UploadMeetingFinalizerFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -4388,6 +4442,13 @@ Resources:
                 Action:
                   - kinesis:PutRecord
                 Resource: !Ref CallDataStreamArn
+              # Read-only, on the shared configuration table: the Retention
+              # section, which shortens the expiry of the metering records. The
+              # KMS grant below covers decrypting it.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !GetAtt ConfigurationTable.Arn
               # Inspect the completed job's tags so we can confirm it's ours.
               # transcribe:GetTranscriptionJob has no resource-level IAM.
               - Effect: Allow

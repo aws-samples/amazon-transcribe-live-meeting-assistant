@@ -76,7 +76,23 @@ const toNumber = (value: number): AttributeValue => {
     return { N: text };
 };
 
+/**
+ * The meeting retention in days as the last meeting to start read it: the
+ * Retention section's value, at most the stack parameter's (see
+ * `getSessionSettings`). Undefined until a meeting has read it, or when the
+ * configuration could not be read, and then the environment variable answers.
+ */
+let configuredRetentionDays: number | undefined;
+
+/** Set by each meeting as it starts; exposed for tests. */
+export const setMeteringRetentionDays = (days: number | undefined): void => {
+    configuredRetentionDays = days;
+};
+
 const expirationDays = (): number | undefined => {
+    if (configuredRetentionDays !== undefined) {
+        return configuredRetentionDays > 0 ? configuredRetentionDays : undefined;
+    }
     const raw = (process.env[EXPIRATION_ENV_VAR] || '').trim();
     if (!raw) {
         return undefined;

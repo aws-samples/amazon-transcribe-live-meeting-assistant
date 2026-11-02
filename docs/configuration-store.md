@@ -328,7 +328,8 @@ so a release cannot ship a default its own save would refuse.
 | `transcription` | The nine Amazon Transcribe options: language, preferred language and redaction type from their stack parameters' lists; language options as comma-separated codes from that list; entity types as comma-separated capitalised names; vocabulary and language model names in Amazon Transcribe's character set, empty for none; the two switches `true` or `false` |
 | `recording` | `recordAudio`, `true` or `false`, nothing else |
 | `meeting_assist` | `wakePhraseRegex`, text of 1 to 256 characters |
-| `meeting_processing` | `transcriptHookNonPartialOnly`, `true` or `false`; `inactiveMeetingLookbackDays`, a whole number from 1 to 90, the parameter's range |
+| `meeting_processing` | `transcriptHookNonPartialOnly`, `true` or `false`; `inactiveMeetingLookbackDays`, a whole number from 1 to 90, and `inactiveMeetingTimeoutMinutes`, a whole number from 0 to 10080, their parameters' ranges |
+| `retention` | `meetingRecordExpirationInDays` and `transcriptionExpirationInDays`, numbers of days of at least 0.1, each at most the baseline's value (`maximumIsDefault`, below) |
 | `virtual_participant` | The provider from its parameter's list; wake phrases as text; the activation duration, poll interval and poll counts as whole numbers in their parameters' ranges; the ElevenLabs agent and Simli face ids in the characters their services use, empty for none |
 | `call_pricing` | Prices that are finite and not negative, under `regions › <region or default> › <service>/<api-or-model> › <unit>`; region codes in the form `us-east-1`; the lists and notes as lists and objects of text; `currency` `USD`; no keys the estimator does not read |
 
@@ -351,6 +352,17 @@ A keyword the validator does not implement is refused by the layer's tests rathe
 than ignored, because an ignored keyword is a constraint that looks enforced and
 is not. The UI annotations are listed in the module as `UI_ANNOTATIONS`, and the
 same test refuses a key that is in neither list, which catches a misspelt one.
+
+One keyword, `maximumIsDefault: true`, is checked against the deployment's
+baseline rather than against the value alone, so the validator above cannot
+apply it; it is listed as `BASELINE_KEYWORDS`. It says the setting's default,
+which the seeder writes from a stack parameter, is also its upper limit. The
+store applies it to every save that writes such a section (`limit_problems`,
+one extra read of the baseline), refusing a value above the baseline's with
+`must be at most 90, the limit this deployment sets; got 120`; the editor applies
+its copy (`limitProblems`) with the defaults it loaded. A setting the baseline
+does not hold has no limit at the save, and its readers still apply the
+parameter's value as one.
 
 The web UI holds a JavaScript copy of the validator,
 `lma-ai-stack/source/ui/src/components/configuration/schema-validation.js`, for a
@@ -376,7 +388,9 @@ paragraph separator. It also writes numbers in messages as JavaScript does
 
 The seeder and a restore are not checked because what they write was accepted
 when it was first saved, and refusing it would turn a deployment or a recovery
-into a failure.
+into a failure. That includes the limit of a retention setting: a restore can put
+back a value above today's limit, and every reader of the setting still uses
+the parameter's value in its place.
 
 The four older configuration mutations still filter their input the way they
 always have — dropping a field they do not know, a Nova Sonic setting outside its
@@ -1169,7 +1183,7 @@ app. A participant can still switch one running meeting's mode with a chat
 command ([Changing Mode During a Meeting](voice-assistant.md#changing-mode-during-a-meeting)),
 and that is not written back to the configuration.
 
-### The wake phrase, the transcript hook mode and the reaper's lookback
+### The wake phrase, the transcript hook mode and the reaper's timeout and lookback
 
 `meeting_assist` holds `AssistantWakePhraseRegEx`, and `meeting_processing`
 `TranscriptLambdaHookFunctionNonPartialOnly` and
@@ -1179,19 +1193,64 @@ pattern in the deployment settings parameter, which the processor has always
 compiled at start; a pattern saved on the page that does not compile is logged
 and that one is used.
 
-### Stack parameters that stay
+`meeting_processing` also holds `MeetingInactivityTimeoutInMinutes`, which the
+reaper reads per run. The parameter still decides whether the reaper and its
+schedule exist (the template's condition is that it is above `0`), so only its
+value moved: on a deployment created with `0` there is nothing to read the
+setting, and on one with a reaper, `0` saved on the page makes each run end
+nothing. The reaper falls back to the parameter's variable as it has always read
+it, truncating a fractional value.
 
-Of the parameters that only application code reads, these three are kept as
+## Stack parameters as upper limits: retention
+
+`MeetingRecordExpirationInDays` and `TranscriptionExpirationInDays` set when a
+record expires: each writer stamps `ExpiresAfter`, the DynamoDB TTL, as the record
+is written. For retention an administrator may want to keep records for less
+time than the deployment allows, but a deployment's retention is often a
+compliance commitment, so a runtime value must not lengthen it. These two are
+therefore settings of a `retention` section (standard tier) whose parameter is
+the **upper limit** as well as the default:
+
+- The seeder writes the parameters into the baseline as for any other
+  parameter-backed setting, and the schema marks both settings
+  `maximumIsDefault`. A save above the baseline's value is refused (see
+  [The validator](#the-validator)), and the page shows the limit beside each.
+- `read_setting` answers a limited setting with the smaller of the section's
+  value and the parameter's environment variable, so the parameter bounds what
+  is used even when the section holds more: a restored revision, or a value
+  saved before a stack update lowered the parameter. A section value that is not
+  above zero is ignored. The TypeScript half's `limitedSetting` does the same.
+- A change applies to records written after it, within the standard tier's five
+  minutes. A record keeps the expiry it was written with.
+- The recordings bucket's lifecycle rules stay tied to the parameters:
+  `TranscriptionExpirationInDays` also deletes transcript files and key-frame
+  images in the bucket, and that half did not move.
+
+The writers, each of which carries the parameter's variable as the limit:
+
+| Records | Writer | How it reads the section |
+|---|---|---|
+| Meeting records and summaries; transcript segments and meeting assistant answers | Call event processor, the transcript summary and agent-assist orchestrators | `get_meeting_ttl` and `get_transcription_ttl` in `eventprocessor_utils`, through `read_setting`, with `MEETING_RECORD_EXPIRATION_IN_DAYS` and `TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS` |
+| Usage (metering) records | The six AI-stack functions that write them | `lma_metering.records`, through `read_setting`, with `METERING_EXPIRATION_DAYS` |
+| Usage records | The meeting assistant | `call_metering.py`, through `configuration_settings.read_setting` |
+| Usage records | The WebSocket transcriber | Read with each meeting's settings (`session-settings.ts`) and applied to the records written after it |
+| Usage records | The Virtual Participant | Applied to `METERING_EXPIRATION_DAYS` as it starts (`stack-settings.ts`), never raising it |
+
+`lma-ai-stack/test/test_parameter_backed_settings.py` finds every AI-stack
+function that writes such records and holds it to carrying the variable from the
+right parameter, the table's name, the layer and read access to the table. The
+two orchestrators did not carry the variables before this section existed, so
+they gave their records 90 days whatever the parameters said; they now follow
+both.
+
+## Stack parameters that stay
+
+Of the parameters that only application code reads, these two are kept as
 stack parameters by design (the others not yet on the Configuration page are
 listed under [Still to come](#still-to-come)):
 
 - `LogLevel` is read by each process's logging when the process starts, so a
   runtime value would apply at an unpredictable later time.
-- `MeetingRecordExpirationInDays` sets when meeting and metering records expire,
-  and is read by five separate writers in two languages. Retention is a setting
-  where the stack parameter is better as an upper bound on a runtime value than
-  as a default an Admin can raise, which is a different mechanism from the one
-  above.
 - `BedrockGuardrailVersion` chooses which version of the deployment's Bedrock
   guardrail applies. The guardrail is a safety control, so changing which version
   applies stays a deployment.
@@ -1210,8 +1269,6 @@ the consent terms each enrollment agrees to.
 |---|---|
 | Named profiles | More than one profile, a way to choose the one in force, and an import that can create one. Export, import and presets work today on the one `custom` profile; see [Export, import and the configuration library](#export-import-and-the-configuration-library) |
 | Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired. It waited for the configuration editor: the custom prompt is edited in the DynamoDB console today, which is exactly the route a compressed body closes, so moving it before there was an editor would have left it with no way to edit it. With the editor in place, it needs a schema and a seeder adoption |
-| Parameters with a resource half | `TranscriptionExpirationInDays` sets a bucket lifecycle rule as well as the expiry of transcript records, and `MeetingInactivityTimeoutInMinutes` decides whether the reaper's schedule exists as well as its timeout. Each would be split: the record arithmetic moves, the resource half stays |
-| Upper bounds rather than defaults | Retention settings such as `MeetingRecordExpirationInDays` (see [Stack parameters that stay](#stack-parameters-that-stay)): a runtime value the parameter bounds, rather than one it defaults |
 | Replacing the SSM settings blob | The `<stack>-LMASettings` parameter is written only by CloudFormation, at deploy time, and read by the web app for every signed-in user. It is a deployment's wiring rather than something an administrator edits. The Configuration page reads the configuration at run time, but every other page reads only this blob, so a setting another page needs moves when that page reads the configuration too |
 
 A shipped summary section that has been turned off is listed by the
@@ -1243,6 +1300,7 @@ row of the table above.
 | The configuration library | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/presets/` and `presets.py` |
 | The configuration editor in the web UI | `lma-ai-stack/source/ui/src/components/configuration/`: `ConfigurationPage.jsx`, the controls in `fields.jsx`, the rules in `config-model.js` and the validator copy in `schema-validation.js` |
 | Deploy-time seeder | `lma-ai-stack/source/lambda_functions/configuration_seeder/` |
+| Retention limits | `maximumIsDefault` in `schemas/retention.json`, `limit_problems` in `schema.py`, applied by the store's `write_sections`; `limitedSetting` in the TypeScript accessor |
 | Stack parameters that are defaults, and the reader for them | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/parameter_defaults.json` and `parameters.py`; in TypeScript `parameterBackedSetting` in the shared accessor and the transcriber's `calleventdata/session-settings.ts`; the cross-template test `lma-ai-stack/test/test_parameter_backed_settings.py` |
 | Table, bucket, layer, custom resource and the `ConfigurationRevisionWriteAccess` policy every writer attaches | `lma-ai-stack/deployment/lma-ai-stack.yaml` |
 | Content-hash computation | `lib/lma_sdk/lma_sdk/_core/publish.py` |

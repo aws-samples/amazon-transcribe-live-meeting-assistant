@@ -163,9 +163,12 @@ its shutdown never runs:
   Fargate task hosting the connection goes away without running its close
   handler, the `StaleMeetingReaper` Lambda ends the meeting instead. It runs
   every 15 minutes and ends meetings that have produced no finalized transcript
-  segment for longer than `MeetingInactivityTimeoutInMinutes` (default 240),
-  so a meeting can show as in progress for up to that long plus one schedule
-  interval before it closes on its own.
+  segment for longer than the inactivity timeout (default 240 minutes), so a
+  meeting can show as in progress for up to that long plus one schedule
+  interval before it closes on its own. The timeout is **Minutes without speech
+  before a meeting is ended** in the Meeting Processing section of the
+  [Configuration page](configuration-guide.md), whose default is the
+  `MeetingInactivityTimeoutInMinutes` stack parameter.
 
 To see what the reaper is doing, look at the
 `/<AISTACK-name>/lambda/StaleMeetingReaperFunction` log group: each run logs a
@@ -187,8 +190,10 @@ parameter is its default. Each run also stops after reading
 500 candidate meetings; they are examined newest-first, so meetings that have just
 become eligible are always covered, and a run that hits the cap says so in its log.
 
-Setting `MeetingInactivityTimeoutInMinutes` to `0` disables the schedule. With
-it disabled, or to end a meeting sooner than the timeout, you can still end a
+Setting the `MeetingInactivityTimeoutInMinutes` stack parameter to `0` removes the
+reaper and its schedule; setting the timeout to `0` on the Configuration page
+keeps the reaper running but ending nothing. With it disabled, or to end a
+meeting sooner than the timeout, you can still end a
 meeting by hand by updating its record (`PK` = `SK` = `c#<CallId>`) in the event
 sourcing DynamoDB table.
 

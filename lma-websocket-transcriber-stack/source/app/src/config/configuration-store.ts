@@ -276,6 +276,20 @@ export const VIRTUAL_PARTICIPANT = declareSection({
         'activation duration, the ElevenLabs agent and Simli face, and Teams meeting-end detection.',
 });
 
+/**
+ * How long meeting records and transcript segments are kept. Each stack
+ * parameter is both the default and the upper limit of its setting, so a writer
+ * uses the smaller of the section's value and the parameter's; see
+ * `limitedSetting`. Standard, as in the Python half: read by every writer of
+ * those records, and nobody is waiting on a change.
+ */
+export const RETENTION = declareSection({
+    name: 'retention',
+    cacheTier: 'standard',
+    description:
+        'How many days meeting records and transcript segments are kept, at most the stack parameters\' values.',
+});
+
 /** The Amazon Transcribe options whose combination is checked; see transcribeOptionsProblem. */
 export interface TranscribeOptionCombination {
     readonly languageCode: string;
@@ -332,9 +346,13 @@ export const transcribeOptionsProblem = (options: TranscribeOptionCombination): 
  * The type of a setting whose default is a stack parameter, as the Python
  * half's `parameter_defaults.json` names it.
  */
-export type SettingType = 'string' | 'integer' | 'boolean';
+export type SettingType = 'string' | 'integer' | 'number' | 'boolean';
 
-type SettingValue<K extends SettingType> = K extends 'string' ? string : K extends 'integer' ? number : boolean;
+type SettingValue<K extends SettingType> = K extends 'string'
+    ? string
+    : K extends 'integer' | 'number'
+        ? number
+        : boolean;
 
 /**
  * `raw` read back into a setting's type, or undefined when it is not one.
@@ -343,7 +361,7 @@ type SettingValue<K extends SettingType> = K extends 'string' ? string : K exten
  * reader either from the configuration (JSON-typed) or from an environment
  * variable (text), and the two halves must agree on what a value is:
  * `true`/`false` in any case for a boolean, digits with an optional sign for an
- * integer, and anything for text.
+ * integer, decimal notation for a number, and anything for text.
  */
 export const coerceSetting = <K extends SettingType>(type: K, raw: unknown): SettingValue<K> | undefined => {
     if (raw === undefined || raw === null) {
@@ -358,6 +376,16 @@ export const coerceSetting = <K extends SettingType>(type: K, raw: unknown): Set
         }
         const text = String(raw).trim().toLowerCase();
         return text === 'true' || text === 'false' ? ((text === 'true') as SettingValue<K>) : undefined;
+    }
+    if (type === 'number') {
+        if (typeof raw === 'number') {
+            return Number.isFinite(raw) ? (raw as SettingValue<K>) : undefined;
+        }
+        if (typeof raw === 'boolean') {
+            return undefined;
+        }
+        const decimal = String(raw).trim();
+        return /^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)$/.test(decimal) ? (Number(decimal) as SettingValue<K>) : undefined;
     }
     if (typeof raw === 'number') {
         return Number.isInteger(raw) ? (raw as SettingValue<K>) : undefined;
@@ -393,6 +421,26 @@ export const parameterBackedSetting = <K extends SettingType>(
         return fallback;
     }
     return coerceSetting(type, envValue) ?? fallback;
+};
+
+/**
+ * The value of a numeric setting whose stack parameter is its upper limit as
+ * well as its default (`maximumIsDefault` in the section schema), as the Python
+ * half's `read_setting` reads one: the smaller of the section's value and the
+ * environment variable's. A section value that is not above zero is not used;
+ * with neither, undefined.
+ */
+export const limitedSetting = (
+    values: Record<string, unknown>,
+    name: string,
+    envValue: string | undefined
+): number | undefined => {
+    const configured = coerceSetting('number', values[name]);
+    const limit = envValue === undefined || envValue.trim() === '' ? undefined : coerceSetting('number', envValue);
+    if (configured === undefined || configured <= 0) {
+        return limit;
+    }
+    return limit === undefined ? configured : Math.min(configured, limit);
 };
 
 /**

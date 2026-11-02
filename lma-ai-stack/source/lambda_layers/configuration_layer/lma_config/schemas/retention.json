@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/retention",
+  "title": "Retention",
+  "description": "How long meeting records and transcript segments are kept. Each default is the value the stack was deployed with, and is also the longest this deployment allows: a shorter period can be set here, a longer one cannot. Recordings in the recordings bucket, and the bucket's lifecycle rules, follow the stack parameters only.",
+  "sectionLabel": "Retention",
+  "appliesText": "A saved change applies within about five minutes, to records written after that. A record already written keeps the expiry it was given.",
+  "order": 12,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "type": "object",
+  "properties": {
+    "meetingRecordExpirationInDays": {
+      "order": 0,
+      "type": "number",
+      "title": "Days to keep meeting records",
+      "description": "How long a meeting, its summary and its usage records are kept after each is written; fractions of a day are allowed. At most the MeetingRecordExpirationInDays stack parameter, which is also the default.",
+      "minimum": 0.1,
+      "maximumIsDefault": true
+    },
+    "transcriptionExpirationInDays": {
+      "order": 1,
+      "type": "number",
+      "title": "Days to keep transcript segments",
+      "description": "How long each turn of a meeting's transcript, and each meeting assistant answer in it, is kept after it is written; fractions of a day are allowed. At most the TranscriptionExpirationInDays stack parameter, which is also the default.",
+      "minimum": 0.1,
+      "maximumIsDefault": true
+    }
+  },
+  "additionalProperties": false
+}

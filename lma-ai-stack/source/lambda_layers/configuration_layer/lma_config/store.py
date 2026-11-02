@@ -93,7 +93,7 @@ from .revisions import (
     clean_text,
     diff_bodies,
 )
-from .schema import validate_section
+from .schema import limit_problems, limited_settings, section_schema, validate_section
 from .sections import (
     TIER_CONSISTENT_READ,
     TIER_TTL_SECONDS,
@@ -691,6 +691,7 @@ class ConfigurationStore:
         """
         requested = {section_spec(section).name: values for section, values in sections.items()}
         _validate_sections(requested)
+        self._check_limits(requested)
         replacements = {section: dict(values) for section, values in requested.items()}
         return self._save(
             name,
@@ -706,6 +707,30 @@ class ConfigurationStore:
             condition_on_read=True,
             comment=comment,
         )
+
+    def _check_limits(self, sections: Mapping[str, Any]) -> None:
+        """Refuse a setting saved above the limit the deployment's baseline sets.
+
+        Only for a section with such a setting (``maximumIsDefault`` in its
+        schema), which costs one more read of the baseline. Each reader applies
+        the same limit again, from the stack parameter its function or task
+        carries, so a value that reaches a profile another way -- a restore, or
+        a baseline lowered by a later stack update -- is still never exceeded.
+
+        Raises:
+            InvalidConfiguration: a setting is above its limit.
+        """
+        limited = [name for name in sections if limited_settings(section_schema(name))]
+        if not limited:
+            return
+        baseline = self.read_record(DEFAULT_KEY, consistent_read=True).body
+        problems: List[str] = []
+        for name in limited:
+            problems.extend(
+                limit_problems(section_schema(name), sections[name], baseline.get(name), (name,))
+            )
+        if problems:
+            raise InvalidConfiguration(problems)
 
     def _save(
         self,

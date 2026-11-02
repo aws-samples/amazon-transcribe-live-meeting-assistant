@@ -155,3 +155,19 @@ test('with no table named nothing is read', async () => {
     assert.deepEqual(result.applied, []);
     assert.deepEqual(env, started());
 });
+
+test('the meeting retention is applied, and never raised past the stack parameter', () => {
+    const shorter = { ...started(), METERING_EXPIRATION_DAYS: '90' };
+    const applied = applySections({ retention: { meetingRecordExpirationInDays: 14 } }, shorter);
+    assert.equal(shorter['METERING_EXPIRATION_DAYS'], '14');
+    assert.ok(applied.applied.includes('METERING_EXPIRATION_DAYS'));
+
+    const longer = { ...started(), METERING_EXPIRATION_DAYS: '7' };
+    applySections({ retention: { meetingRecordExpirationInDays: 30 } }, longer);
+    assert.equal(longer['METERING_EXPIRATION_DAYS'], '7');
+
+    const unset = { ...started(), METERING_EXPIRATION_DAYS: '0.5' };
+    const none = applySections({ retention: {} }, unset);
+    assert.equal(unset['METERING_EXPIRATION_DAYS'], '0.5');
+    assert.ok(!none.applied.includes('METERING_EXPIRATION_DAYS'));
+});

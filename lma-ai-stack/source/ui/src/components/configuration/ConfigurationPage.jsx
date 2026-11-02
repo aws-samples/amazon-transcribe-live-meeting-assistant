@@ -48,7 +48,7 @@ import {
 } from './configuration-api';
 import ConfigurationSection, { sectionElementId } from './ConfigurationSection';
 import { UNAVAILABLE_REASONS } from './section-notices';
-import { checkDetailed, formatPath } from './schema-validation';
+import { checkDetailed, formatPath, limitProblems } from './schema-validation';
 import './configuration.css';
 
 const client = generateClient();
@@ -134,8 +134,16 @@ export const ConfigurationContent = () => {
       storedSection(section.schema, doc.defaults[section.name], edits[section.name]),
     ]),
   );
+  // The schema's own checks, then the limits the deployment's defaults set
+  // (maximumIsDefault), which the server applies too.
   const problems = Object.fromEntries(
-    changed.map((section) => [section.name, checkDetailed(section.schema, stored[section.name])]),
+    changed.map((section) => [
+      section.name,
+      [
+        ...checkDetailed(section.schema, stored[section.name]),
+        ...limitProblems(section.schema, stored[section.name], doc.defaults[section.name]),
+      ],
+    ]),
   );
   const problemCount = Object.values(problems).reduce((total, list) => total + list.length, 0);
 

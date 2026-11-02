@@ -49,7 +49,7 @@ def _no_shared_store(monkeypatch):
     monkeypatch.setattr(parameters, "_SHARED_STORE", None)
 
 
-JSON_TYPE = {"string": "string", "integer": "integer", "boolean": "boolean"}
+JSON_TYPE = {"string": "string", "integer": "integer", "number": "number", "boolean": "boolean"}
 
 
 def test_the_file_lists_at_least_one_parameter():
@@ -80,6 +80,11 @@ def test_no_setting_is_backed_by_two_parameters():
         ("integer", "90", 90),
         ("integer", " 7 ", 7),
         ("integer", 12, 12),
+        ("number", "90", 90),
+        ("number", "0.5", 0.5),
+        ("number", " .25 ", 0.25),
+        ("number", 7, 7),
+        ("number", 1.5, 1.5),
         ("boolean", "true", True),
         ("boolean", "False", False),
         ("boolean", True, True),
@@ -97,6 +102,11 @@ def test_a_value_is_read_back_into_its_type(value_type, raw, expected):
         ("integer", ""),
         ("integer", "1_000"),
         ("integer", "2.5"),
+        ("number", "nan"),
+        ("number", "inf"),
+        ("number", "1_0"),
+        ("number", ""),
+        ("number", True),
         ("boolean", "yes"),
     ],
 )
@@ -119,9 +129,12 @@ def _valid_value(entry):
         return declared["enum"][0]
     if "pattern" in declared:
         return ""
-    return {"string": "text", "integer": declared.get("minimum", 1), "boolean": True}[
-        entry.value_type
-    ]
+    return {
+        "string": "text",
+        "integer": declared.get("minimum", 1),
+        "number": 30,
+        "boolean": True,
+    }[entry.value_type]
 
 
 def test_the_seeder_write_lays_each_parameter_over_the_baseline():
@@ -257,3 +270,53 @@ def test_one_store_serves_every_read_in_a_process(monkeypatch):
         parameters.read_setting(entry.section, entry.setting, env_var="UNSET_ENV")
     assert len(built) == 1
     assert built[0].reads == 3
+
+
+# ── a parameter that is the setting's upper limit ───────────────────────────
+
+RETENTION = "retention"
+MEETINGS = "meetingRecordExpirationInDays"
+
+
+def test_a_limited_setting_uses_a_shorter_configured_value(monkeypatch):
+    monkeypatch.setenv("LIMIT_ENV", "90")
+    store = _Store({RETENTION: {MEETINGS: 30}})
+    assert parameters.read_setting(RETENTION, MEETINGS, env_var="LIMIT_ENV", store=store) == 30
+
+
+def test_a_limited_setting_never_exceeds_the_parameter(monkeypatch):
+    """A longer value can reach the profile by a restore, or by a stack update
+    lowering the parameter after it was saved; the parameter still bounds it."""
+    monkeypatch.setenv("LIMIT_ENV", "7")
+    store = _Store({RETENTION: {MEETINGS: 30}})
+    assert parameters.read_setting(RETENTION, MEETINGS, env_var="LIMIT_ENV", store=store) == 7
+
+
+def test_a_limited_setting_the_section_lacks_is_the_parameter(monkeypatch):
+    monkeypatch.setenv("LIMIT_ENV", "0.5")
+    store = _Store({RETENTION: {}})
+    assert parameters.read_setting(RETENTION, MEETINGS, env_var="LIMIT_ENV", store=store) == 0.5
+
+
+def test_a_limited_setting_that_is_not_above_zero_is_not_used(monkeypatch):
+    monkeypatch.setenv("LIMIT_ENV", "90")
+    store = _Store({RETENTION: {MEETINGS: 0}})
+    assert parameters.read_setting(RETENTION, MEETINGS, env_var="LIMIT_ENV", store=store) == 90
+
+
+def test_a_limited_setting_with_no_parameter_uses_the_section():
+    store = _Store({RETENTION: {MEETINGS: 30}})
+    assert parameters.read_setting(RETENTION, MEETINGS, env_var="UNSET_ENV", store=store) == 30
+
+
+def test_a_limited_setting_with_neither_gets_its_default():
+    assert parameters.read_setting(RETENTION, MEETINGS, env_var="UNSET_ENV", default=None) is None
+
+
+def test_a_limited_setting_whose_table_cannot_be_read_is_the_parameter(monkeypatch):
+    monkeypatch.setenv("LIMIT_ENV", "14")
+    error = ClientError({"Error": {"Code": "AccessDeniedException", "Message": "no"}}, "GetItem")
+    assert (
+        parameters.read_setting(RETENTION, MEETINGS, env_var="LIMIT_ENV", store=_Store(error=error))
+        == 14
+    )

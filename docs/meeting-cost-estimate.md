@@ -245,7 +245,7 @@ Metering records are items in the meeting table (`EventSourcingTable`) under
 | `Details` | Strings for the reader: launch type, sizes, how a duration was measured. Never priced. |
 | `Region` | The region the usage was billed in, when not the deployment's. |
 | `Source`, `RecordedAt` | The component that wrote it, and when. |
-| `ExpiresAfter` | The same retention as the meeting record (`MeetingRecordExpirationInDays`), so a meeting's cost expires with it. |
+| `ExpiresAfter` | The same retention as the meeting record (`MeetingRecordExpirationInDays`, or the shorter period set in the Retention section of the Configuration page), so a meeting's cost expires with it. |
 
 The grant each component gains for metering is `dynamodb:PutItem` on the meeting
 table, conditioned on `dynamodb:LeadingKeys` matching `mtr#*`, in addition to

@@ -192,6 +192,31 @@ export const checkDetailed = (schema, value, path = []) => {
   return problems;
 };
 
+/**
+ * Settings of `values` above the limit `defaults` sets for them: those whose
+ * schema says `maximumIsDefault`, where the deployment's default is also the
+ * upper limit (the retention settings). The server's copy is limit_problems in
+ * lma_config/schema.py, which words the problem the same way; a setting the
+ * defaults do not hold has no limit here.
+ */
+export const limitProblems = (schema, values, defaults, path = []) => {
+  const problems = [];
+  if (!isObject(values) || !isObject(defaults)) return problems;
+  Object.entries(schema.properties || {}).forEach(([key, child]) => {
+    if (!isObject(child) || child.maximumIsDefault !== true) return;
+    if (!Object.prototype.hasOwnProperty.call(values, key)) return;
+    const value = values[key];
+    const limit = defaults[key];
+    if (isNumber(value) && isNumber(limit) && value > limit) {
+      problems.push({
+        path: [...path, key],
+        message: `must be at most ${limit}, the limit this deployment sets; got ${value}`,
+      });
+    }
+  });
+  return problems;
+};
+
 /** The problems as the server words them: "<path>: <message>". */
 export const check = (schema, value, path = []) =>
   checkDetailed(schema, value, path).map((problem) => `${formatPath(problem.path)}: ${problem.message}`);

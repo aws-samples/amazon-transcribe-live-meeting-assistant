@@ -64,6 +64,7 @@ from decimal import Decimal
 from typing import Any, Callable, Dict, Mapping, Optional
 
 import boto3
+from lma_config import RETENTION, read_setting
 
 LOGGER = logging.getLogger(__name__)
 
@@ -149,16 +150,34 @@ def _expires_after(now_epoch: float, days: Optional[float]) -> Optional[int]:
 
 
 def _env_days() -> Optional[float]:
+    """Days a record written now is kept, or None for no expiry.
+
+    The meeting retention: the Retention section's value on the Configuration
+    page, at most the MeetingRecordExpirationInDays stack parameter's, which this
+    function or task carries as ``METERING_EXPIRATION_DAYS``. Read on the
+    section's standard tier, so a saved change reaches records written about five
+    minutes later; with no configuration table named, the variable alone answers,
+    and with neither a record gets no expiry.
+    """
     raw = os.environ.get(EXPIRATION_ENV_VAR, "").strip()
-    if not raw:
-        return None
+    if raw:
+        try:
+            float(raw)
+        except ValueError:
+            LOGGER.warning(
+                "%s=%r is not a number; metering records get no TTL", EXPIRATION_ENV_VAR, raw
+            )
+            return None
     try:
-        return float(raw)
-    except ValueError:
-        LOGGER.warning(
-            "%s=%r is not a number; metering records get no TTL", EXPIRATION_ENV_VAR, raw
+        days = read_setting(
+            RETENTION.name, "meetingRecordExpirationInDays", env_var=EXPIRATION_ENV_VAR
         )
-        return None
+    except Exception:  # pylint: disable=broad-except -- a metering write never throws
+        LOGGER.warning(
+            "could not read the meeting retention; using %s", EXPIRATION_ENV_VAR, exc_info=True
+        )
+        return float(raw) if raw else None
+    return float(days) if days is not None else None
 
 
 def _number(value: float) -> Dict[str, str]:
