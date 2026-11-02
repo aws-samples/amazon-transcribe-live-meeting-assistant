@@ -321,6 +321,150 @@ Sent to signal the end of the audio streaming session.
 | `callId` | `string` (UUID) | **Yes** | Must match the `callId` from the START message |
 | `shouldRecordCall` | `boolean` | No | Override whether the server saves the audio recording to S3. If omitted, uses the server's default configuration. |
 
+#### 6.1.4 Frames the Server Sends
+
+The server sends JSON text frames to the client only for meeting consent
+(below). Each has an `event` field, not `callEvent`. A client that does not
+use meeting consent never asks for one, and may ignore any text frame it
+receives.
+
+#### 6.1.5 Meeting Consent Frames
+
+When the deployment's [meeting consent](meeting-consent.md) mode is Notify or
+Opt-in, a client shows its user a consent step before streaming and sends what
+the user confirmed with `START`. The server records it on the meeting once the
+meeting exists, and transcribes and records audio only while the meeting's
+consent allows it. See
+[Stream Audio and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app)
+for the behaviour; this section is the protocol.
+
+**Ask for the settings** (any time on an open connection, usually once on
+connecting):
+
+```json
+{ "callEvent": "CONSENT_SETTINGS" }
+```
+
+The server answers:
+
+```json
+{
+  "event": "CONSENT_SETTINGS",
+  "available": true,
+  "mode": "opt_in",
+  "rule": "owner_attests",
+  "supported": true,
+  "noticeTemplate": "{LMA_USER} would like to record and transcribe this meeting ({meeting}) ...",
+  "consentPhrase": "I consent",
+  "objectionPhrase": "I object",
+  "clientsWithoutConsent": "accept_with_warning"
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `available` | `false` when the settings could not be read, with a `message`; the other fields are then absent |
+| `mode` | `off`, `notify` or `opt_in`. With `off` no consent step is needed |
+| `rule` | For `opt_in`, `owner_attests`: the rule a streaming client's meeting runs under, met by the user's confirmation. `null` otherwise |
+| `supported` | `false` when the deployment's opt-in rule cannot be met by a streaming client, with the `reason`; the server refuses such a meeting |
+| `noticeTemplate` | The notice (notify) or consent request (opt-in) to show. Fill `{LMA_USER}` (the user, or "The meeting organizer"), `{meeting}` (the meeting's name, or "this meeting"), `{consent_phrase}` and `{objection_phrase}` (the two phrases below); leave other text in braces as written |
+| `clientsWithoutConsent` | What the server does with a `START` that has no `consent` field: `accept_with_warning` or `reject` |
+
+**Send the step with START**, in a `consent` field:
+
+```json
+{
+  "callEvent": "START",
+  "callId": "Weekly sync - 2026-11-02-10:00:00.000",
+  "agentId": "ana@example.com",
+  "samplingRate": 16000,
+  "consent": {
+    "mode": "opt_in",
+    "confirmed": true,
+    "method": "verbal",
+    "noticeText": "ana@example.com would like to record and transcribe this meeting (Weekly sync) ...",
+    "lmaUser": "ana@example.com",
+    "meetingName": "Weekly sync",
+    "statement": "Everyone agreed at the start of the call.",
+    "client": "Stream Audio"
+  }
+}
+```
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `mode` | Yes | The mode the step was shown for. An opt-in meeting whose step was shown for another mode is refused (the settings changed) |
+| `confirmed` | For opt-in | `true` when the user confirmed: in opt-in, that everyone agreed; in notify, that the notice was given. An opt-in meeting without it is refused |
+| `method` | For opt-in | `verbal`, `chat` or `invite_terms`: how everyone was told or agreed |
+| `noticeText` | No | The notice as shown, placeholders filled (at most 2,000 characters); recorded as the notice posted |
+| `lmaUser`, `meetingName` | No | Fill the placeholders of the notice stored on the meeting (at most 100 characters each) |
+| `statement` | No | The user's own words about how everyone agreed (at most 500 characters) |
+| `client` | No | The client's name, used in the attestation's statement when there is none |
+
+A client that implements the consent step should send the `consent` field
+with every `START`, with `mode: "off"` when it has not read the settings. In an
+opt-in deployment such a `START` is refused with `CONSENT_NOT_CONFIRMED`, which
+tells the client to read the settings again, instead of being treated by
+`clientsWithoutConsent` as a client without a consent step.
+
+In opt-in, audio sent after `START` is discarded until the meeting's consent
+allows capture, usually a second or two later; there is no need to wait before
+sending it.
+
+**Report an objection** while streaming:
+
+```json
+{ "callEvent": "CONSENT_OBJECTION", "participantName": "Bo Chen", "source": "voice", "text": "I object" }
+```
+
+`participantName` (default *A participant*), `source` (`voice`, the default,
+or `chat`) and `text` are optional. The server stops transcribing and
+recording at once, ends the meeting as if `END` had been sent, records the
+objection, and closes the connection. Do not send `END` afterwards.
+
+**Send an evidence image** after `START`:
+
+```json
+{
+  "callEvent": "CONSENT_EVIDENCE",
+  "image": "data:image/jpeg;base64,/9j/4AAQ...",
+  "capturedAt": "2026-11-02T10:01:30.000Z",
+  "note": "The meeting window after the request"
+}
+```
+
+`image` is a JPEG or PNG, as base64 with or without the `data:` prefix, of at
+most 3.75 MB; at most five are accepted per meeting. The server stores it under
+the meeting's evidence folder, adds it to the consent record, and asks for it
+to be checked. `CONSENT_OBJECTION` and `CONSENT_EVIDENCE` apply to the meeting
+started on the same connection; their `callId`, if sent, is not used. They may
+be sent straight after `START`: the server holds them until it has registered
+the meeting (up to eight per connection). A consent step is recorded only on a
+meeting owned by the signed-in user who sent `START`.
+
+**What the server sends back**, after each step and on refusal:
+
+```json
+{
+  "event": "CONSENT_STATE",
+  "callId": "Weekly sync - 2026-11-02-10:00:00.000",
+  "mode": "opt_in",
+  "status": "granted",
+  "captureAllowed": true,
+  "reason": "the meeting owner attested that everyone agreed"
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `status` | The record's status: `pending`, `granted`, `objected` or `not_required` |
+| `captureAllowed` | `false` only when the server has stopped, or will not start, capturing the meeting; the meeting is then ended and the connection closed. Stop capturing and do not reconnect for the same meeting |
+| `code`, `message` | When something was refused or not recorded: `CONSENT_REQUIRED` (no consent step, and the deployment refuses such clients), `CONSENT_NOT_CONFIRMED`, `CONSENT_RULE_UNSUPPORTED`, `CONSENT_NOT_RECORDED` (the record could not be written; in notify capture goes on), `NOTICE_NOT_RECORDED` (the notice was not recorded as posted; capture goes on), `MEETING_NOT_OWNED` (the meeting named belongs to another user; start again with another name), `OBJECTION_RECEIVED`, `EVIDENCE_REFUSED`, `EVIDENCE_NOT_STORED`, `NO_MEETING` |
+| `evidence` | After an evidence image: `evidenceId`, `stored`, and once checked the `verdict` (`supports_consent`, `objection_found` or `inconclusive`) |
+
+A refused `START` is answered with a `CONSENT_STATE` frame and the connection is
+closed with code `1008`; no meeting is created.
+
 #### Full CallMetaData Schema
 
 For reference, here is the complete TypeScript type used by the server:
@@ -337,6 +481,7 @@ type CallMetaData = {
   shouldRecordCall?: boolean;
   diarizeSystemChannel?: boolean;  // START only: diarize ch_0 (system/meeting)
   diarizeMicChannel?: boolean;     // START only: diarize ch_1 (microphone)
+  consent?: object;         // START only: the client's consent step (6.1.5)
   channels?: {              // Server-managed; do not send from client
     [channelId: string]: {
       currentSpeakerName: string | null;
@@ -533,6 +678,7 @@ speaking on both channels therefore gets a different number on each.
 | Duplicate END messages | Server logs a warning; second END is ignored. |
 | WebSocket error (network) | Server logs the error and forces a close, triggering automatic end-of-call cleanup. |
 | Client disconnects unexpectedly | Server detects the close event and automatically writes a call end event and cleans up resources. |
+| Meeting consent refuses the meeting, or stops it | Server sends a `CONSENT_STATE` frame with `captureAllowed: false` and closes the connection with code `1008`. See [Meeting Consent Frames](#615-meeting-consent-frames). |
 
 ### Reconnection
 

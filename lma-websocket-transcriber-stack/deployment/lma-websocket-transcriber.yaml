@@ -341,6 +341,22 @@ Parameters:
       Transcription Engine switches are read from it at meeting start, so a
       change needs no stack update.
 
+  AppSyncGraphQLUrl:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The AI stack's GraphQL endpoint. A meeting whose client sends
+      a consent step has it recorded on the meeting through this API, with the
+      task's role. When empty no consent can be recorded, so a meeting in an
+      opt-in deployment is not recorded or transcribed.
+
+  AppSyncApiId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The ID of the same GraphQL API, which scopes the task role's
+      access to the meeting consent mutations.
+
   AsrDiarizationAvailable:
     Type: String
     Default: "false"
@@ -562,6 +578,9 @@ Conditions:
   HasAsrConfigTable: !Not [!Equals [!Ref AsrConfigTableName, ""]]
   HasEventSourcingTable: !Not [!Equals [!Ref EventSourcingTableName, ""]]
   HasConfigurationTable: !Not [!Equals [!Ref ConfigurationTableName, ""]]
+  HasConsentApi: !And
+    - !Not [!Equals [!Ref AppSyncGraphQLUrl, ""]]
+    - !Not [!Equals [!Ref AppSyncApiId, ""]]
   ShouldEnableTranscriberAutoScaling:
     !Equals [!Ref TranscriberAutoScalingEnabled, "true"]
 
@@ -1352,6 +1371,23 @@ Resources:
               Effect: Allow
               Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AsrConfigTableName}"
             - !Ref AWS::NoValue
+          # Record a meeting's consent step: the meeting's owner (getCall), read
+          # first, and the consent mutations a backend role may call, on this
+          # deployment's GraphQL API, and nothing else on it. Evidence images are
+          # written under lma-consent-evidence/ by the bucket statement above.
+          - !If
+            - HasConsentApi
+            - Action: appsync:GraphQL
+              Effect: Allow
+              Resource:
+                - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Query/fields/getCall"
+                - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/startMeetingConsent"
+                - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/recordMeetingConsentNotice"
+                - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/recordMeetingConsentEvent"
+                - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/attestMeetingConsent"
+                - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/addMeetingConsentEvidence"
+                - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/verifyMeetingConsentEvidence"
+            - !Ref AWS::NoValue
           # Metering records for the meeting cost estimate: PutItem only, and
           # only under the mtr# partitions of the meeting table. The table's
           # key is covered by the kms statement above.
@@ -1514,6 +1550,12 @@ Resources:
               Value: !Ref AsrConfigTableName
             - Name: CONFIGURATION_TABLE_NAME
               Value: !Ref ConfigurationTableName
+            # Meeting consent: where a client's consent step is recorded, and the
+            # recordings-bucket folder its evidence images are stored under.
+            - Name: GRAPHQL_ENDPOINT
+              Value: !If [HasConsentApi, !Ref AppSyncGraphQLUrl, ""]
+            - Name: CONSENT_EVIDENCE_PREFIX
+              Value: "lma-consent-evidence/"
             # Voice enrollment. Empty unless the deployment has it switched on,
             # in which case a meeting asks this function at session start which
             # enrolled voices consent lets it label by name.

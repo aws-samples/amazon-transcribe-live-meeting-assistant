@@ -24,12 +24,14 @@ Choose the mode with whoever advises your organisation on those rules. Nothing
 on this page is legal advice.
 
 **Current state:** the consent settings, the consent record and its API, the
-evidence check and the meeting page's Consent section are in place. No capture
-method runs the consent flow yet — the Virtual Participant, the Desktop Capture
-App, Stream Audio and the browser extension neither post a notice nor wait for
-consent — so choosing Notify or Opt-in on the Configuration
-page does not yet change how any meeting is captured. See
-[Flows by capture method](#flows-by-capture-method).
+evidence check and the meeting page's Consent section are in place, and
+**Stream Audio** runs the consent flow: it shows the notice, asks the user to
+confirm, and the WebSocket transcriber records that on the meeting and
+withholds or stops recording and transcription accordingly (see
+[Stream Audio and the Desktop Capture App](#stream-audio-and-the-desktop-capture-app)).
+The Virtual Participant, the Desktop Capture App and the browser extension do
+not run it yet; how the transcriber treats a client that shows no consent step
+is a setting. See [Flows by capture method](#flows-by-capture-method).
 
 ## The three modes
 
@@ -114,6 +116,7 @@ meeting already under way keeps the mode and rule it started with.
 | Allow a different choice per meeting | Whether a meeting may be started with another mode, rule or notice | On |
 | Keep evidence screenshots | Whether evidence images stay with the meeting, or are deleted once checked | On |
 | Evidence check model | The Amazon Bedrock vision model that checks evidence images; see [Checking evidence with a vision model](#checking-evidence-with-a-vision-model) | Amazon Nova Lite |
+| Streaming clients without a consent step | What the WebSocket transcriber does, in Notify or Opt-in, with a meeting from a client that shows no consent step: **Accept with a warning** (captured as before, with no consent record, and a warning logged) or **Refuse** (not recorded or transcribed, and the client is told why). See [Clients without a consent step](#clients-without-a-consent-step) | Accept with a warning |
 
 In the two texts, `{LMA_USER}` is the person using LMA in the meeting,
 `{meeting}` the meeting's name, and `{consent_phrase}` and `{objection_phrase}`
@@ -196,14 +199,16 @@ replies are read.
 | Capture method | Notice | Replies | Status |
 |---|---|---|---|
 | **Virtual Participant** | Posted in the meeting chat when the Virtual Participant is admitted | Read from the meeting chat, and from what is said, by display name; screenshots of the chat kept as evidence | Not available yet: the Virtual Participant does not run the consent flow. Planned next. |
-| **Desktop Capture App** and **Stream Audio** | Shown to the LMA user to read out or post in their meeting | Attested by the meeting owner (the opt-in rule **The meeting owner attests**), or objections recorded by the LMA user | Not available yet: neither starts a meeting's consent. Planned next. |
-| **Browser extension** | As for Stream Audio | As for Stream Audio | Not available yet. |
+| **Stream Audio** | Shown to the LMA user, with a copy button, to read out or post in their meeting | Attested by the LMA user, who owns the meeting (opt-in is met by the rule **The meeting owner attests**); an objection is reported with **Participant objected** | Available. See [Stream Audio and the Desktop Capture App](#stream-audio-and-the-desktop-capture-app). |
+| **Desktop Capture App** | As for Stream Audio | As for Stream Audio | Not available yet: the app shows no consent step, so its meetings are treated as [clients without a consent step](#clients-without-a-consent-step). Planned next. |
+| **Browser extension** | As for Stream Audio | As for Stream Audio | Not available yet; treated as a client without a consent step. |
 | **Upload Audio** | None: the recording already exists | — | Not applicable. A recording should only be uploaded with the consent its participants gave when it was made. |
 
-Until a capture method runs the flow, its meetings have no consent record and
-are captured as they are today, whatever the consent mode. In a deployment
-whose mode is opt-in, `getMeetingConsent` reports such a meeting as not
-allowed, but nothing acts on that answer yet.
+Until a capture method runs the flow, its meetings have no consent record. A
+Virtual Participant's meetings are captured as they are today, whatever the
+consent mode; a streaming client's are captured or refused as the setting
+**Streaming clients without a consent step** says. In a deployment whose mode is
+opt-in, `getMeetingConsent` reports a meeting with no record as not allowed.
 
 A capture client follows the same steps whichever method it is:
 
@@ -226,6 +231,138 @@ A capture client follows the same steps whichever method it is:
 7. **Keep evidence** where it can: store a screenshot under the meeting's
    evidence folder, record it with `addMeetingConsentEvidence`, and check it
    with `verifyMeetingConsentEvidence`.
+
+## Stream Audio and the Desktop Capture App
+
+Stream Audio sends a meeting's audio to the WebSocket transcriber, which
+creates the meeting. Neither the page nor the user's browser can see the
+meeting's participants or its chat, so the consent step is the LMA user's own:
+they share the notice, and confirm that it was shared or, in opt-in, that
+everyone agreed. The transcriber records that confirmation on the meeting, as a
+backend role, and is the component that decides whether audio is transcribed
+and recorded. The protocol, which other streaming clients can use too, is
+described in [the WebSocket streaming API](websocket-streaming-api.md#615-meeting-consent-frames).
+
+### The consent step
+
+When the page opens its connection to the transcriber it asks for the consent
+settings in force (a `CONSENT_SETTINGS` frame). With the mode Off, or a
+transcriber that does not answer, the page shows no step and streams as before.
+Otherwise a **Meeting consent** panel appears above the Start button with:
+
+- **The notice** for the mode in force (the consent request in opt-in), its
+  placeholders filled with the meeting owner field and the meeting topic, and a
+  **Copy notice** button for pasting it into the meeting's chat.
+- **The confirmation**: in opt-in, *Everyone in the meeting agreed to it being
+  recorded and transcribed*; in notify, *I have told everyone in the meeting,
+  with the notice above*. With it, **how**: out loud, in the meeting chat, or in
+  the invitation's terms, and an optional note.
+- **Capture evidence** (optional): the browser asks which tab or window to
+  share; one frame of it is kept as a JPEG and the capture stops at once. While
+  streaming, the button takes a frame of the tab being streamed, with no prompt.
+- **Participant objected**, while streaming, with an optional name.
+
+In **opt-in**, Start is refused until the confirmation is ticked and a method
+chosen. The page sends its consent step with every `START`, as mode Off when it
+has not read the settings yet (Start pressed straight after opening the page,
+or the settings unavailable), so the transcriber refuses an opt-in meeting the
+page did not ask about, rather than treating it as a client without a consent
+step; the page then reads the settings again and shows the step. In **notify**, streaming may start without them; the notice is then not
+recorded as posted, so the meeting's status stays `pending`, which in notify
+still allows capture.
+
+### What the transcriber records, and when
+
+The confirmation travels in the `consent` field of the `START` frame. The
+meeting does not exist yet at that moment: the transcriber puts the meeting's
+start on the Kinesis stream, and the call event processor creates its row a
+moment later. So the transcriber waits for the row, retrying for up to 30
+seconds, reads the meeting's owner, and then, if it is the signed-in user who
+streams, through the meeting consent API:
+
+1. starts the meeting's consent in the deployment's mode, naming the rule
+   **The meeting owner attests** for opt-in, with the meeting owner field and the
+   topic for the notice's placeholders;
+2. records the notice as posted, if the user confirmed, with the channel the
+   method implies (out loud: `voice`; chat: `chat`; invitation: `invite`) and
+   the text as the page showed it;
+3. in opt-in, relays the attestation, which the record attributes to the
+   meeting's owner (the signed-in user who streams), with the method and the
+   note, or a sentence saying how everyone agreed when there is no note;
+4. stores any evidence image under the meeting's evidence folder, adds it to
+   the record, and asks for it to be checked with the vision model
+   (`verifyMeetingConsentEvidence`). The check is supporting evidence and does
+   not change the status (see
+   [Checking evidence with a vision model](#checking-evidence-with-a-vision-model));
+   if the check fails, the image is kept unchecked. A meeting may send at most
+   five images, each a JPEG or PNG of at most 3.75 MB; an image that is refused
+   or could not be stored does not count towards the five.
+
+After each step the transcriber tells the page what the record says, and the
+page shows it. The transcriber records the step after `START` rather than the
+page recording it itself, because the page cannot know when the meeting's row
+exists and only a backend role may add evidence.
+
+### How capture is gated
+
+- **Notify:** audio is transcribed and recorded from the start, as notify
+  allows until somebody objects. If the consent record cannot be written, the
+  meeting goes on and the page says so: `CONSENT_NOT_RECORDED` when the record
+  could not be started, `NOTICE_NOT_RECORDED` when only the notice could not be
+  recorded as posted.
+- **Opt-in:** nothing is transcribed or recorded until the record answers that
+  the meeting may be captured, usually a second or two after Start. Audio sent
+  before then is discarded, not buffered. If the record cannot be written —
+  the meeting was not created in time, the API refused the attestation, or the
+  transcriber has no API configured — the meeting is ended without anything
+  having been captured, and the page says why.
+- **An objection:** **Participant objected** stops the page's capture, and the
+  transcriber stops transcribing and recording at once, before the objection is
+  written, ends the meeting as if the page had sent `END`, and records the
+  objection (under the name given, or *A participant*, with source `voice`).
+  What was captured before the objection is kept: an objection stops capture,
+  it does not delete what was captured while capture was allowed. A meeting
+  whose record answers that it may not be captured is ended the same way.
+- **A refused meeting** (opt-in without the confirmation, or a deployment the
+  page cannot satisfy) is not created at all: the transcriber answers with the
+  reason and closes the connection.
+- **Video:** a desktop video stream for a meeting is refused while the meeting's
+  consent does not allow capture, and is finalized when an objection stops it.
+
+An opt-in deployment whose rule is **Each participant consents** and that does
+not **allow a different choice per meeting** cannot be satisfied from Stream
+Audio, which has no participant list: the page says so and Start is refused.
+Use a Virtual Participant for such meetings, or allow a per-meeting choice.
+
+If the transcriber cannot read the consent settings when a meeting starts, it
+records the page's step in the mode the page showed, and the meeting consent
+resolver, which reads the settings itself, decides: in either mode nothing is
+transcribed or recorded until the record answers that the meeting may be
+captured, and if the record refuses the step the meeting is ended. A client
+without a step is then captured, since nothing says that a step is needed.
+
+### Clients without a consent step
+
+Clients that show no consent step — the browser extension, the Stream Audio
+embed (`#/embed?component=stream-audio`), the Desktop Capture App, and scripts
+written against the streaming API — send `START` without a
+`consent` field. In Notify or Opt-in the transcriber treats such a meeting by
+the setting **Streaming clients without a consent step**:
+
+- **Accept with a warning** (the shipped default): the meeting is recorded and
+  transcribed as before, with no consent record, and the transcriber logs a
+  warning naming the meeting. This keeps existing desktop builds and
+  integrations working while they are updated, but it means that **in an opt-in
+  deployment such a meeting is captured without anybody having confirmed
+  consent**. Its meeting has no consent record, and `getMeetingConsent` reports
+  it as not allowed.
+- **Refuse:** the meeting is not created, recorded or transcribed; the client is
+  sent a `CONSENT_STATE` frame with the code `CONSENT_REQUIRED` and the
+  connection is closed. A client without the consent step does not read that
+  frame either, so the browser extension and the Stream Audio embed show only
+  that the connection closed, and each reconnect is refused again. Choose this
+  only once every client in use shows the consent step, and not while the
+  browser extension or the Stream Audio embed is in use.
 
 ## What is stored
 
@@ -367,6 +504,23 @@ result is seen on the next read of the record.
 | Attest (`attestMeetingConsent`) | The meeting's owner, or a backend role relaying the owner's attestation and naming them |
 | Add evidence (`addMeetingConsentEvidence`) | A backend role |
 | Check evidence with the vision model (`verifyMeetingConsentEvidence`) | The owner, an Admin, or a backend role. Where evidence screenshots are not kept, the check is what deletes the image |
+
+The WebSocket transcriber's task role is one of LMA's backend roles. It is
+granted the six consent mutations it calls (`startMeetingConsent`,
+`recordMeetingConsentNotice`, `recordMeetingConsentEvent`,
+`attestMeetingConsent`, `addMeetingConsentEvidence` and
+`verifyMeetingConsentEvidence`), and `getCall` to read a meeting's owner before
+writing anything, and nothing else on the API. It acts only
+for the meeting started on the connection a frame arrives on, and records a
+consent step only on a meeting owned by the signed-in user who started it, so a
+signed-in user can record consent, an objection or evidence only for their own
+meeting that they are streaming. A `START` with a consent step that names an
+existing meeting owned by somebody else is refused with `MEETING_NOT_OWNED`
+before anything is written for it, and the client is told to use another
+meeting name. If such a meeting is created while the step is being recorded,
+this connection's capture of it is dropped as soon as its owner is read, with
+nothing written to its consent record and no end event or recording written for
+it.
 
 These rules are applied by the meeting consent resolver on every request, as
 the meeting's other edits are applied by theirs; a meeting the caller may not
@@ -514,6 +668,10 @@ also holds the reply classifier described above.
 - **What LMA records is evidence, not a determination.** The record shows what
   was posted and what was replied, when; whether that amounts to consent where
   the meeting took place is for your organisation to decide.
+- **A streamed meeting's consent is the user's word.** Stream Audio cannot see
+  the participants or the meeting chat, so an opt-in meeting streamed from it
+  is granted on the LMA user's attestation alone. An evidence screenshot is the
+  only part of the record that shows what the participants saw or replied.
 - **Not every capture method runs the flow yet.** See
   [Flows by capture method](#flows-by-capture-method).
 - **The record is meeting data.** It is kept and deleted with the meeting, and

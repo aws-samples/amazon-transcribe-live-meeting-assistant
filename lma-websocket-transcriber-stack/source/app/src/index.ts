@@ -58,7 +58,14 @@ import {
     writeVideoChunk,
     notifyAudioRecordingDone,
     awaitPendingMuxes,
+    getVideoSession,
 } from './videorecording';
+
+import { ConsentApi, createSignedGraphqlCaller } from './consent/appsync';
+import { MEETING_NOT_OWNED_MESSAGE, decideAtStart, parseClientConsent, settingsFrame } from './consent/rules';
+import { ConsentSession } from './consent/session';
+import { PendingConsentFrames } from './consent/pending-frames';
+import { readConsentSettings } from './consent/settings';
 
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 const RECORDINGS_BUCKET_NAME =
@@ -83,6 +90,36 @@ const WS_LOG_INTERVAL = parseInt(process.env['WS_LOG_INTERVAL'] || '120', 10);
 // SHOULD_RECORD_CALL as the fallback: see calleventdata/session-settings.ts.
 
 const s3Client = new S3Client({ region: AWS_REGION });
+
+// Meeting consent (docs/meeting-consent.md). A client's consent step is recorded
+// on the meeting through the AppSync API with this task's role; without the
+// endpoint no consent can be recorded, so an opt-in meeting is not captured.
+const GRAPHQL_ENDPOINT = process.env['GRAPHQL_ENDPOINT'] || '';
+const CONSENT_EVIDENCE_PREFIX = process.env['CONSENT_EVIDENCE_PREFIX'] || 'lma-consent-evidence/';
+const consentApi = GRAPHQL_ENDPOINT
+    ? new ConsentApi(createSignedGraphqlCaller(GRAPHQL_ENDPOINT, AWS_REGION))
+    : undefined;
+
+/** A JSON frame to the client. Clients that predate these frames ignore them. */
+const sendFrame = (ws: WebSocket, frame: Record<string, unknown>): void => {
+    if (ws.readyState !== WebSocket.OPEN) {
+        return;
+    }
+    try {
+        ws.send(JSON.stringify(frame));
+    } catch (error) {
+        server.log.error(`[CONSENT]: could not send a frame to the client: ${normalizeErrorForLogging(error)}`);
+    }
+};
+
+/** Consent frames that arrived while their connection's START was still being handled. */
+const pendingConsentFrames = new PendingConsentFrames<WebSocket>();
+
+const putConsentEvidence = async (key: string, bytes: Buffer, contentType: string): Promise<void> => {
+    await s3Client.send(
+        new PutObjectCommand({ Bucket: RECORDINGS_BUCKET_NAME, Key: key, Body: bytes, ContentType: contentType })
+    );
+};
 
 const socketMap = new Map<WebSocket, SocketCallData>();
 // Sockets dedicated to a video stream (announced by START_VIDEO). Binary
@@ -259,6 +296,9 @@ const registerHandlers = (
                     error
                 )}`
             );
+            // A START that failed part-way registered nothing: its held consent
+            // frames are not waiting for anything any more.
+            pendingConsentFrames.drop(ws);
             try {
                 ws.close(1011, 'internal error processing message');
             } catch (closeErr) {
@@ -308,6 +348,13 @@ const onBinaryMessage = async (
     }
 
     const socketData = socketMap.get(ws);
+
+    // Audio a meeting's consent does not allow is neither transcribed nor
+    // recorded: an opt-in meeting before its consent is recorded, and any
+    // meeting after an objection.
+    if (socketData?.consent && !socketData.consent.gateOpen) {
+        return;
+    }
 
     if (
         socketData !== undefined &&
@@ -407,17 +454,30 @@ const onTextMessage = async (
         );
         return;
     }
+    // Synchronously, before this handler's first await: the socket hands each
+    // frame to its handler as it arrives without waiting for the previous one,
+    // so consent frames sent right behind a START are held from here until the
+    // START has registered its meeting on the connection.
+    if (callMetaData.callEvent === 'START') {
+        pendingConsentFrames.begin(ws);
+    }
     if (!match) {
         server.log.error(
             `[AUTH]: [${clientIP}] - No Bearer token found in header or query string. ${describeRequest(
                 request
             )}`
         );
-
+        pendingConsentFrames.drop(ws);
         return;
     }
 
     const accessToken = match[1];
+
+    // Consent frames are answered before the generic log line below: an
+    // evidence frame carries an image, which does not belong in the log.
+    if (await onConsentFrame(clientIP, ws, callMetaData as unknown as Record<string, unknown>)) {
+        return;
+    }
 
     // The parsed frame is logged rather than the raw `data` string: a client may
     // put token fields in the control frame as well as in the query string, and
@@ -450,6 +510,66 @@ const onTextMessage = async (
         );
 
         callMetaData.agentId = callMetaData.agentId || randomUUID();
+
+        // Whether this meeting may be captured, from the Meeting Consent settings
+        // and the client's consent step (docs/meeting-consent.md). A refused
+        // meeting is not created at all.
+        const clientConsent = parseClientConsent(callMetaData.consent);
+        const consentDecision = decideAtStart(await readConsentSettings(server.log), clientConsent);
+        if (consentDecision.kind === 'reject') {
+            server.log.warn(
+                `[CONSENT]: [${clientIP}][${callMetaData.callId}] - Not capturing this meeting (${consentDecision.code}): ${consentDecision.message}`
+            );
+            sendFrame(ws, {
+                event: 'CONSENT_STATE',
+                callId: callMetaData.callId,
+                captureAllowed: false,
+                code: consentDecision.code,
+                message: consentDecision.message,
+            });
+            pendingConsentFrames.drop(ws);
+            ws.close(1008, 'meeting consent required');
+            return;
+        }
+        // A consent step is recorded only on the caller's own meeting: a START
+        // naming an existing meeting of somebody else's is refused before
+        // anything is written for it. (A meeting created between this read and
+        // the session's own is caught there.)
+        if (consentDecision.kind === 'consent' && consentApi) {
+            let owner: string | null | undefined;
+            try {
+                owner = await consentApi.meetingOwner(callMetaData.callId);
+            } catch (error) {
+                server.log.warn(
+                    `[CONSENT]: [${clientIP}][${callMetaData.callId}] - Could not read the meeting's owner at START: ${normalizeErrorForLogging(error)}`
+                );
+            }
+            if (typeof owner === 'string' && owner !== getAuthenticatedCaller(request)?.username) {
+                server.log.warn(
+                    `[CONSENT]: [${clientIP}][${callMetaData.callId}] - The meeting belongs to another user; not capturing it.`
+                );
+                sendFrame(ws, {
+                    event: 'CONSENT_STATE',
+                    callId: callMetaData.callId,
+                    captureAllowed: false,
+                    code: 'MEETING_NOT_OWNED',
+                    message: MEETING_NOT_OWNED_MESSAGE,
+                });
+                pendingConsentFrames.drop(ws);
+                ws.close(1008, 'meeting consent required');
+                return;
+            }
+        }
+        if (consentDecision.kind === 'capture' && consentDecision.warning) {
+            server.log.warn(`[CONSENT]: [${clientIP}][${callMetaData.callId}] - ${consentDecision.warning}`);
+            sendFrame(ws, {
+                event: 'CONSENT_STATE',
+                callId: callMetaData.callId,
+                captureAllowed: true,
+                code: 'CONSENT_NOT_RECORDED',
+                message: 'This meeting is captured without a consent record.',
+            });
+        }
 
         await writeCallStartEvent(callMetaData, server);
         const tempRecordingFilename = getTempRecordingFileName(callMetaData);
@@ -498,13 +618,40 @@ const onTextMessage = async (
             // later authorizes START_VIDEO for the same callId.
             ownerSub: getAuthenticatedCaller(request)?.sub,
         };
+        if (consentDecision.kind === 'consent' && clientConsent) {
+            socketCallMap.consent = new ConsentSession(callMetaData.callId, consentDecision, clientConsent, {
+                api: consentApi,
+                callerUsername: getAuthenticatedCaller(request)?.username,
+                putEvidence: putConsentEvidence,
+                evidencePrefix: CONSENT_EVIDENCE_PREFIX,
+                send: (frame) => sendFrame(ws, frame),
+                onGate: (open, reason, discard) => onConsentGate(ws, socketCallMap, open, reason, discard),
+                log: server.log,
+            });
+        }
         socketMap.set(ws, socketCallMap);
-        // Before transcription starts, so the clock the time-to-first-segment
-        // metric reads covers establishing the engine's stream as well. That is
-        // part of what an operator asking "why is there no transcript" is
-        // waiting on.
-        noteStreamingSessionStarted(socketCallMap.callMetadata);
-        await startTranscription(socketCallMap, server);
+        void socketCallMap.consent?.begin();
+        // Consent frames sent right behind this START, before transcription
+        // starts: a held objection closes the gate before the engine is started.
+        for (const frame of pendingConsentFrames.release(ws)) {
+            await onConsentFrame(clientIP, ws, frame);
+        }
+        // An opt-in meeting starts transcribing when its consent record allows
+        // it (onConsentGate); every other meeting starts now.
+        if (
+            !socketCallMap.ended &&
+            !socketCallMap.transcriptionStarted &&
+            (!socketCallMap.consent || socketCallMap.consent.gateOpen)
+        ) {
+            socketCallMap.transcriptionStarted = true;
+            // Before transcription starts, so the clock the time-to-first-segment
+            // metric reads covers establishing the engine's stream as well. That is
+            // part of what an operator asking "why is there no transcript" is
+            // waiting on. Not before: the wait for an opt-in meeting's consent is
+            // not part of it.
+            noteStreamingSessionStarted(socketCallMap.callMetadata);
+            await startTranscription(socketCallMap, server);
+        }
     } else if (callMetaData.callEvent === 'SPEAKER_CHANGE') {
         const socketData = socketMap.get(ws);
         server.log.debug(
@@ -572,6 +719,13 @@ const onTextMessage = async (
             return;
         }
         bindLogContext({ callId: callMetaData.callId });
+        if (audioSession.consent && !audioSession.consent.gateOpen) {
+            server.log.warn(
+                `[START_VIDEO]: [${clientIP}][${callMetaData.callId}] - The meeting's consent does not allow capture now; refusing video stream.`
+            );
+            ws.close(1008, 'meeting consent does not allow capture');
+            return;
+        }
         const session = startVideoSession(
             callMetaData,
             server,
@@ -617,8 +771,182 @@ const onTextMessage = async (
     }
 };
 
+/**
+ * The three consent frames: CONSENT_SETTINGS (what a client's consent step
+ * shows), CONSENT_OBJECTION and CONSENT_EVIDENCE (for the meeting this socket
+ * started). True when the frame was one of them.
+ */
+const onConsentFrame = async (
+    clientIP: string,
+    ws: WebSocket,
+    frame: Record<string, unknown>
+): Promise<boolean> => {
+    const kind = frame['callEvent'];
+    if (kind === 'CONSENT_SETTINGS') {
+        const settings = await readConsentSettings(server.log);
+        sendFrame(
+            ws,
+            settings
+                ? settingsFrame(settings)
+                : {
+                    event: 'CONSENT_SETTINGS',
+                    available: false,
+                    message: 'The meeting consent settings could not be read; try again.',
+                }
+        );
+        return true;
+    }
+    if (kind !== 'CONSENT_OBJECTION' && kind !== 'CONSENT_EVIDENCE') {
+        return false;
+    }
+    // Only for the meeting this socket started: the frame's own callId is not
+    // used to find one.
+    // An ended meeting still on the connection (its recording uploading) is not
+    // the one a frame is for: the frame waits for the START that follows it.
+    const registered = socketMap.get(ws);
+    const socketData = registered && !registered.ended ? registered : undefined;
+    if (!socketData) {
+        const held = pendingConsentFrames.hold(ws, frame);
+        if (held === 'held') {
+            return true;
+        }
+        server.log.warn(`[CONSENT]: [${clientIP}] - ${kind} on a connection with no meeting; ignoring.`);
+        sendFrame(ws, { event: 'CONSENT_STATE', code: 'NO_MEETING', message: `${kind} needs a started meeting on this connection.` });
+        return true;
+    }
+    const callId = socketData.callMetadata.callId;
+    if (kind === 'CONSENT_OBJECTION') {
+        server.log.info(`[CONSENT]: [${clientIP}][${callId}] - The client reported an objection; stopping capture.`);
+        if (socketData.consent) {
+            void socketData.consent.objection({
+                participantName: frame['participantName'] as string | undefined,
+                source: frame['source'] as string | undefined,
+                text: frame['text'] as string | undefined,
+            });
+        } else {
+            // A meeting captured without a consent record: capture still stops.
+            sendFrame(ws, {
+                event: 'CONSENT_STATE',
+                callId,
+                captureAllowed: false,
+                code: 'CONSENT_NOT_RECORDED',
+                message: 'Capture stopped. The objection was not recorded, because this meeting has no consent record.',
+            });
+            await stopCaptureForConsent(ws, socketData, 'the client reported an objection');
+        }
+        return true;
+    }
+    if (!socketData.consent) {
+        sendFrame(ws, {
+            event: 'CONSENT_STATE',
+            callId,
+            code: 'EVIDENCE_REFUSED',
+            message: 'Evidence can only be kept for a meeting with a consent record.',
+        });
+        return true;
+    }
+    void socketData.consent.evidence({
+        image: frame['image'],
+        capturedAt: frame['capturedAt'],
+        note: frame['note'],
+    });
+    return true;
+};
+
+/** The meeting's consent record allows capture (open) or no longer does. */
+const onConsentGate = (
+    ws: WebSocket,
+    socketData: SocketCallData,
+    open: boolean,
+    reason: string,
+    discard = false
+): void => {
+    if (open) {
+        if (!socketData.transcriptionStarted && !socketData.ended) {
+            socketData.transcriptionStarted = true;
+            noteStreamingSessionStarted(socketData.callMetadata);
+            startTranscription(socketData, server).catch((error) => {
+                server.log.error(
+                    `[CONSENT]: [${socketData.callMetadata.callId}] - Could not start transcription: ${normalizeErrorForLogging(error)}`
+                );
+            });
+        }
+        return;
+    }
+    void (discard ? discardCaptureForConsent(ws, socketData, reason) : stopCaptureForConsent(ws, socketData, reason));
+};
+
+/**
+ * Drop this connection's capture of a meeting that is not the caller's: its
+ * streams, engine and temporary recording are released and the connection is
+ * closed, with no end event and no recording written for that meeting.
+ */
+const discardCaptureForConsent = async (ws: WebSocket, socketData: SocketCallData, reason: string): Promise<void> => {
+    const callMetaData = socketData.callMetadata;
+    server.log.warn(`[CONSENT]: [${callMetaData.callId}] - Discarding this connection's capture: ${reason}.`);
+    if (!socketData.ended) {
+        socketData.ended = true;
+        noteStreamingSessionEnded(callMetaData);
+        socketData.writeRecordingStream?.end();
+        socketData.audioInputStream?.end();
+        socketData.audioInputStream?.destroy();
+        try {
+            await stopMicrovmAsr(socketData, server);
+        } catch (error) {
+            server.log.error(
+                `[CONSENT]: [${callMetaData.callId}] - Error stopping the MicroVM ASR engine: ${normalizeErrorForLogging(error)}`
+            );
+        }
+        const tempName = path.basename(getTempRecordingFileName(callMetaData)).replace(/[^a-zA-Z0-9._-]/g, '_');
+        if (tempName && tempName !== '.' && tempName !== '..') {
+            await deleteTempFile(callMetaData, path.resolve(LOCAL_TEMP_DIR, tempName));
+        }
+        if (socketMap.get(ws) === socketData) {
+            socketMap.delete(ws);
+        }
+        // This connection's video of the meeting, if it streamed any, is
+        // discarded too -- unless another live session on this task streams the
+        // same meeting, whose video it would be.
+        const sharedWithAnother = [...socketMap.values()].some(
+            (other) => other !== socketData && !other.ended && other.callMetadata.callId === callMetaData.callId
+        );
+        const video = getVideoSession(callMetaData.callId);
+        if (video && !sharedWithAnother && !video.muxStarted) {
+            video.discarding = true;
+            await endVideoSession(callMetaData.callId, server);
+        }
+    }
+    try {
+        ws.close(1008, 'meeting consent does not allow capture');
+    } catch {
+        // already closed
+    }
+};
+
+/**
+ * Stop capturing a meeting for consent: its video stream is finalized, the
+ * meeting is ended as if the client had sent END (what was captured while it
+ * was allowed is kept), and the connection is closed so nothing more arrives.
+ */
+const stopCaptureForConsent = async (ws: WebSocket, socketData: SocketCallData, reason: string): Promise<void> => {
+    const callId = socketData.callMetadata.callId;
+    server.log.info(`[CONSENT]: [${callId}] - Ending the meeting: ${reason}.`);
+    try {
+        await endVideoSession(callId, server);
+        await endCall(ws, socketData);
+    } catch (error) {
+        server.log.error(`[CONSENT]: [${callId}] - Error ending the meeting: ${normalizeErrorForLogging(error)}`);
+    }
+    try {
+        ws.close(1008, 'meeting consent does not allow capture');
+    } catch {
+        // already closed
+    }
+};
+
 const onWsClose = async (ws: WebSocket, code: number): Promise<void> => {
     ws.close(code);
+    pendingConsentFrames.drop(ws);
     const videoSession = videoSocketMap.get(ws);
     if (videoSession) {
         // Video socket closed without END_VIDEO (crash / network drop). The
@@ -783,7 +1111,11 @@ const endCall = async (
                         callMetaData.callId
                     }] - Deleting websocket from map: ${stringifyCallMetaData(callMetaData)}`
                 );
-                socketMap.delete(ws);
+                // Only this meeting's entry: a client that reuses the connection
+                // may have started its next meeting while this one finished.
+                if (socketMap.get(ws) === socketData) {
+                    socketMap.delete(ws);
+                }
             }
         } else {
             server.log.error('[END]: Missing Call Meta Data in END event');
