@@ -53,6 +53,10 @@ const MARKERS: Marker[] = [
 ];
 
 const SRC = new URL('../src/', import.meta.url);
+const PROMPT = new URL(
+    '../../../lma-llm-template-setup-stack/source/lambda_functions/TroubleshootingAgentSystemPrompt.md',
+    import.meta.url,
+);
 
 function productionSource(dir: URL = SRC): string {
     let text = '';
@@ -109,8 +113,11 @@ test('every marker is a literal substring of the JSON record, so @message like s
 });
 
 test('the trigger= parse the troubleshooting agent is taught reads the plain line and the JSON record alike', () => {
-    // TroubleshootingAgentSystemPrompt.md teaches this expression.
-    const parse = /trigger=(?<trigger>[^\s"]+)/;
+    // The expression TroubleshootingAgentSystemPrompt.md teaches, read from it.
+    const prompt = readFileSync(PROMPT, 'utf8');
+    const taught = prompt.match(/parse @message \/(.+?)\/\r?\n/)?.[1];
+    assert.ok(taught, 'the prompt no longer teaches a parse @message expression');
+    const parse = new RegExp(taught);
     const lines: string[] = [];
     setLogSink((line) => lines.push(line));
     try {

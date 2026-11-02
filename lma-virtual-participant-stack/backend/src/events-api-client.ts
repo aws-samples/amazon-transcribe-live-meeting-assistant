@@ -3,6 +3,9 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { HttpRequest } from '@smithy/protocol-http';
 import { SignatureV4 } from '@smithy/signature-v4';
 import WebSocket from 'ws';
+import { createLogger } from './logger.js';
+
+const log = createLogger('events-api-client');
 
 /**
  * AppSync Events API WebSocket Client
@@ -81,7 +84,7 @@ export class AppSyncEventsClient {
    */
   async connect(): Promise<void> {
     try {
-      console.log('[Events API] Connecting to AppSync Events API...');
+      log.info('[Events API] Connecting to AppSync Events API...');
       
       // Sign connection request
       const authHeaders = await this.sign('{}');
@@ -94,7 +97,7 @@ export class AppSyncEventsClient {
       
       const protocols = [this.AWS_APPSYNC_EVENTS_SUBPROTOCOL, authProtocol];
       
-      console.log(`[Events API] Connecting to: ${wsUrl}`);
+      log.info(`[Events API] Connecting to: ${wsUrl}`);
       this.ws = new WebSocket(wsUrl, protocols);
 
       return new Promise((resolve, reject) => {
@@ -104,7 +107,7 @@ export class AppSyncEventsClient {
         }
 
         this.ws.on('open', () => {
-          console.log('[Events API] WebSocket connected');
+          log.info('[Events API] WebSocket connected');
           // Resolve immediately - don't wait for subscribe
           resolve();
         });
@@ -117,43 +120,43 @@ export class AppSyncEventsClient {
             return;
           }
           
-          console.log('[Events API] Received message:', message.type);
+          log.info('[Events API] Received message:', message.type);
           
           if (message.type === 'subscribe_success') {
-            console.log(`[Events API] Subscribe success: ${message.id}`);
+            log.info(`[Events API] Subscribe success: ${message.id}`);
             this.reconnectAttempts = 0;
           } else if (message.type === 'data') {
             // Handle incoming event
             const subscriptionId = message.id;
             const subscription = this.subscriptions.get(subscriptionId);
             if (subscription) {
-              console.log('[Events API] Received event on subscription:', subscriptionId);
+              log.info('[Events API] Received event on subscription:', subscriptionId);
               // Parse event data (it's a JSON string)
               try {
                 const eventData = JSON.parse(message.event);
                 subscription.callback(eventData);
               } catch (e) {
-                console.error('[Events API] Failed to parse event:', e);
+                log.error('[Events API] Failed to parse event:', e);
               }
             }
           } else if (message.type === 'error' || message.type === 'connection_error' || message.type === 'subscribe_error') {
-            console.error('[Events API] Error:', JSON.stringify(message, null, 2));
+            log.error('[Events API] Error:', JSON.stringify(message, null, 2));
             reject(new Error(`Event API error: ${message.type}`));
           }
         });
 
         this.ws.on('error', (error) => {
-          console.error('[Events API] WebSocket error:', error);
+          log.error('[Events API] WebSocket error:', error);
           reject(error);
         });
 
         this.ws.on('close', (code, reason) => {
-          console.log(`[Events API] WebSocket closed: ${code} - ${reason}`);
+          log.info(`[Events API] WebSocket closed: ${code} - ${reason}`);
           this.handleDisconnect();
         });
       });
     } catch (error) {
-      console.error('[Events API] Failed to connect:', error);
+      log.error('[Events API] Failed to connect:', error);
       throw error;
     }
   }
@@ -185,7 +188,7 @@ export class AppSyncEventsClient {
       };
 
       this.ws.send(JSON.stringify(subscribeMessage));
-      console.log(`[Events API] Subscribed to channel: ${channel} (ID: ${subscriptionId})`);
+      log.info(`[Events API] Subscribed to channel: ${channel} (ID: ${subscriptionId})`);
       
     } catch (error) {
       this.subscriptions.delete(subscriptionId);
@@ -198,7 +201,7 @@ export class AppSyncEventsClient {
    */
   unsubscribe(subscriptionId: string): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.warn('[Events API] Cannot unsubscribe - WebSocket not connected');
+      log.warn('[Events API] Cannot unsubscribe - WebSocket not connected');
       return;
     }
 
@@ -210,7 +213,7 @@ export class AppSyncEventsClient {
     };
 
     this.ws.send(JSON.stringify(unsubscribeMessage));
-    console.log(`[Events API] Unsubscribed: ${subscriptionId}`);
+    log.info(`[Events API] Unsubscribed: ${subscriptionId}`);
   }
 
   /**
@@ -223,7 +226,7 @@ export class AppSyncEventsClient {
       this.reconnectAttempts++;
       const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
       
-      console.log(`[Events API] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+      log.info(`[Events API] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
       
       this.reconnectTimeout = setTimeout(async () => {
         try {
@@ -235,11 +238,11 @@ export class AppSyncEventsClient {
             await this.subscribe(sub.channel, sub.callback);
           }
         } catch (error) {
-          console.error('[Events API] Reconnection failed:', error);
+          log.error('[Events API] Reconnection failed:', error);
         }
       }, delay);
     } else {
-      console.error('[Events API] Max reconnection attempts reached');
+      log.error('[Events API] Max reconnection attempts reached');
     }
   }
 
@@ -258,7 +261,7 @@ export class AppSyncEventsClient {
     }
     
     this.subscriptions.clear();
-    console.log('[Events API] Disconnected');
+    log.info('[Events API] Disconnected');
   }
 
   /**

@@ -516,7 +516,7 @@ export class VirtualParticipantStatusManager {
       log.info(`Retrieved cluster ARN: ${clusterArn}`);
 
       if (!taskArn || !clusterArn) {
-        log.info('Could not get task ARN or cluster ARN from metadata');
+        log.warn('Could not get task ARN or cluster ARN from metadata');
         return;
       }
 
@@ -1093,7 +1093,7 @@ export class VirtualParticipantStatusManager {
         }
       }
 
-      log.info('Could not extract private IP from task metadata');
+      log.warn('Could not extract private IP from task metadata');
       return null;
     } catch (error) {
       log.error('Failed to get task private IP:', error);

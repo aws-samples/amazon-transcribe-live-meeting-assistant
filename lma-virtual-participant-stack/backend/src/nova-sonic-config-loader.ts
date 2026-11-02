@@ -31,6 +31,9 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
 import { isMeetingMode, publishMeetingMode } from './assistant-toggles.js';
 import { ConfigurationStore, NOVA_SONIC_CONFIG } from './configuration-store.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('nova-sonic-config-loader');
 
 /**
  * Supported meeting modes.
@@ -190,7 +193,7 @@ async function readFromConfigurationTable(
       NOVA_SONIC_CONFIG
     );
     if (Object.keys(section.baselineValues).length === 0) {
-      console.warn(
+      log.warn(
         `The configuration table ${tableName} holds no shipped Nova Sonic settings; ` +
           'reading the previous Nova Sonic table instead'
       );
@@ -203,7 +206,7 @@ async function readFromConfigurationTable(
       source: `configuration table (profile: ${section.activeProfile ?? 'none'})`,
     };
   } catch (error) {
-    console.error(`Failed to read Nova Sonic settings from the configuration table ${tableName}:`, error);
+    log.error(`Failed to read Nova Sonic settings from the configuration table ${tableName}:`, error);
     return null;
   }
 }
@@ -233,7 +236,7 @@ export async function loadNovaSonicConfig(
   deps: NovaSonicConfigDeps = {}
 ): Promise<NovaSonicConfig> {
   if (!hasNovaSonicConfigTable(tables)) {
-    console.warn('No Nova Sonic configuration table is named, using default configuration');
+    log.warn('No Nova Sonic configuration table is named, using default configuration');
     return DEFAULT_CONFIG;
   }
 
@@ -244,14 +247,14 @@ export async function loadNovaSonicConfig(
       layers = { ...(await read(dynamoDbClient, tables.legacyTableName)), source: 'previous Nova Sonic table' };
     }
     if (!layers) {
-      console.warn('Nova Sonic configuration could not be read from any table, using default configuration');
+      log.warn('Nova Sonic configuration could not be read from any table, using default configuration');
       return DEFAULT_CONFIG;
     }
 
     // Merge configurations
     const mergedConfig = mergeConfigs(layers.defaultConfig, layers.customConfig);
 
-    console.log(`✓ Loaded Nova Sonic config from the ${layers.source}:`, {
+    log.info(`✓ Loaded Nova Sonic config from the ${layers.source}:`, {
       promptMode: mergedConfig.promptMode,
       modelId: mergedConfig.modelId,
       promptLength: mergedConfig.systemPrompt.length,
@@ -268,8 +271,8 @@ export async function loadNovaSonicConfig(
 
     return mergedConfig;
   } catch (error) {
-    console.error('Failed to load Nova Sonic config from DynamoDB:', error);
-    console.warn('Falling back to default configuration');
+    log.error('Failed to load Nova Sonic config from DynamoDB:', error);
+    log.warn('Falling back to default configuration');
     return DEFAULT_CONFIG;
   }
 }
@@ -298,14 +301,14 @@ async function getConfigItem(
     const response = await docClient.send(command);
 
     if (!response.Item) {
-      console.warn(`Configuration item not found: ${configId}`);
+      log.warn(`Configuration item not found: ${configId}`);
       return null;
     }
 
     return response.Item as DynamoDBConfigItem;
   } catch (error) {
     // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- ECMAScript template literals do not interpret util.format specifiers
-    console.error(`Error fetching config item ${configId}:`, error);
+    log.error(`Error fetching config item ${configId}:`, error);
     return null;
   }
 }
@@ -409,10 +412,10 @@ function mergeConfigs(
     || baseConfig.translatorUnmutePhrases;
 
   // Apply prompt mode logic
-  console.log('🔧 Applying prompt mode logic:');
-  console.log(`   Prompt mode: ${promptMode}`);
-  console.log(`   Default prompt length: ${baseConfig.systemPrompt.length} chars`);
-  console.log(`   Custom prompt length: ${customConfig.systemPrompt?.length || 0} chars`);
+  log.info('🔧 Applying prompt mode logic:');
+  log.info(`   Prompt mode: ${promptMode}`);
+  log.info(`   Default prompt length: ${baseConfig.systemPrompt.length} chars`);
+  log.info(`   Custom prompt length: ${customConfig.systemPrompt?.length || 0} chars`);
 
   const finalPrompt = applyPromptMode(
     baseConfig.systemPrompt,
@@ -420,10 +423,10 @@ function mergeConfigs(
     promptMode
   );
 
-  console.log(`   Final merged prompt length: ${finalPrompt.length} chars`);
-  console.log(`   Meeting mode: ${meetingMode}`);
+  log.info(`   Final merged prompt length: ${finalPrompt.length} chars`);
+  log.info(`   Meeting mode: ${meetingMode}`);
   if (meetingMode === 'translator') {
-    console.log(`   Translator languages: ${translatorLanguageA} ↔ ${translatorLanguageB}`);
+    log.info(`   Translator languages: ${translatorLanguageA} ↔ ${translatorLanguageB}`);
   }
 
   // Return merged configuration
@@ -469,33 +472,33 @@ function applyPromptMode(
 ): string {
   // If no custom prompt, always use default
   if (!customPrompt || customPrompt.trim() === '') {
-    console.log('   ⚠️  No custom prompt provided, using default only');
+    log.info('   ⚠️  No custom prompt provided, using default only');
     return defaultPrompt;
   }
 
-  console.log('   Custom prompt content:');
-  console.log('   ┌' + '─'.repeat(78));
-  console.log('   │ ' + customPrompt.substring(0, 200) + (customPrompt.length > 200 ? '...' : ''));
-  console.log('   └' + '─'.repeat(78));
+  log.info('   Custom prompt content:');
+  log.info('   ┌' + '─'.repeat(78));
+  log.info('   │ ' + customPrompt.substring(0, 200) + (customPrompt.length > 200 ? '...' : ''));
+  log.info('   └' + '─'.repeat(78));
 
   let result: string;
   switch (mode) {
     case 'inject':
       // Append custom prompt to default prompt
-      console.log('   ✓ Mode: INJECT - Appending custom prompt to default');
+      log.info('   ✓ Mode: INJECT - Appending custom prompt to default');
       result = `${defaultPrompt}\n\n${customPrompt}`;
       break;
 
     case 'replace':
       // Replace entirely with custom prompt
-      console.log('   ✓ Mode: REPLACE - Using custom prompt only');
+      log.info('   ✓ Mode: REPLACE - Using custom prompt only');
       result = customPrompt;
       break;
 
     case 'base':
     default:
       // Use custom prompt as-is (replaces default)
-      console.log('   ✓ Mode: BASE - Using custom prompt only');
+      log.info('   ✓ Mode: BASE - Using custom prompt only');
       result = customPrompt;
       break;
   }

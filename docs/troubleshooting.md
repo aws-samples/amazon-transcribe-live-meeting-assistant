@@ -73,12 +73,14 @@ Use the following paths to access logs for each LMA component:
 ### Log Format
 
 The Virtual Participant writes its start-up, status, exit and shutdown lines,
-and those of a first set of its modules, to CloudWatch as JSON objects, one per
-line. CloudWatch Logs Insights discovers the fields of a JSON line by itself, so
-a query can filter on them without a `parse` step. The meeting-platform
-handlers (Chime, Zoom, Teams and Webex), the voice assistants and the
-transcription path still write plain text, as do the container's start-up
-script and Chromium.
+and those of its transcription, recording and Kinesis paths and a first set of
+its other modules, to CloudWatch as JSON objects, one per line. CloudWatch Logs
+Insights discovers the fields of a JSON line by itself, so a query can filter
+on them without a `parse` step. These still write plain text: the
+meeting-platform handlers (Chime, Zoom including its sign-in, Teams and Webex),
+the voice assistants and their activation window, the MCP command handler, the
+`[SETTINGS]` line that reports which settings the participant started with,
+and the container's start-up script and Chromium.
 
 | Field | What it holds |
 |-------|---------------|
@@ -102,7 +104,9 @@ JSON.
 
 In the JSON records, the values of credential-named fields (passwords, tokens,
 secrets, API keys), JSON Web Tokens and bearer tokens in a message, and the
-meeting password are written as `[REDACTED]`.
+meeting password are written as `[REDACTED]`. A numeric passcode is replaced
+only where it stands as a number of its own, so longer numbers, dates and
+times that contain the same digits are left as they are.
 
 Example Logs Insights queries over the Virtual Participant's log group:
 

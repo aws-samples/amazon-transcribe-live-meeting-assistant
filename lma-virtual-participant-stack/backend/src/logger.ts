@@ -225,21 +225,44 @@ export function redact(value: unknown, depth = 0, seen: WeakSet<object> = new We
     }
 }
 
-const secretValues = new Set<string>();
+/**
+ * Each registered value. An all-digit value carries the expression that finds
+ * it as a number of its own; any other value is replaced wherever it occurs.
+ */
+const secretValues = new Map<string, RegExp | null>();
+
+/**
+ * For an all-digit value such as a numeric passcode: not run together with
+ * letters or digits, and not part of a date, a time or a decimal
+ * (2026-11-02, 12:34, 1.5). A percent-encoded character before it (`%3D` in
+ * `p%3D2026`) separates it like any other punctuation.
+ */
+function numericSecretPattern(value: string): RegExp | null {
+    if (!/^\d+$/.test(value)) return null;
+    const before = '(?:(?<=%[0-9A-Fa-f]{2})|(?<![A-Za-z0-9]))(?<!\\d[-:.])';
+    return new RegExp(`${before}${value}(?![A-Za-z0-9])(?![-:.]\\d)`, 'g');
+}
 
 /** The shortest value {@link registerSecretValue} accepts. */
 export const MIN_SECRET_VALUE_LENGTH = 4;
 
 /**
- * Replace every occurrence of `value` in later messages. For credentials the
+ * Replace `value` wherever it occurs in later messages. For credentials the
  * process holds as a plain string (the meeting password), so that no code path
  * — including text forwarded from the meeting page's own console — can write
- * one. Values shorter than {@link MIN_SECRET_VALUE_LENGTH} characters are
- * ignored: replacing "12" everywhere would corrupt every number in the log.
+ * one. An all-digit value, such as a numeric passcode, is replaced only as a
+ * number of its own, so that a passcode of 2026 leaves 2026-11-02 and 12026
+ * alone. The value's URL-encoded form is registered with it, because a
+ * credential can reach a log line inside a URL. Values shorter than
+ * {@link MIN_SECRET_VALUE_LENGTH} characters are ignored: replacing "12"
+ * everywhere would corrupt every number in the log.
  */
 export function registerSecretValue(value: string | undefined | null): void {
     const v = (value || '').trim();
-    if (v.length >= MIN_SECRET_VALUE_LENGTH) secretValues.add(v);
+    if (v.length < MIN_SECRET_VALUE_LENGTH) return;
+    for (const form of new Set([v, encodeURIComponent(v)])) {
+        if (!secretValues.has(form)) secretValues.set(form, numericSecretPattern(form));
+    }
 }
 
 /**
@@ -286,8 +309,9 @@ export function redactText(text: string): string {
     out = out.replace(JSON_SECRET_PAIR, (whole, key: string, sep: string) =>
         isSecretKey(key) ? `"${key}"${sep}"${REDACTED}"` : whole,
     );
-    for (const secret of secretValues) {
-        if (out.includes(secret)) out = out.split(secret).join(REDACTED);
+    for (const [secret, numericPattern] of secretValues) {
+        if (!out.includes(secret)) continue;
+        out = numericPattern ? out.replace(numericPattern, REDACTED) : out.split(secret).join(REDACTED);
     }
     return out;
 }
@@ -323,9 +347,10 @@ export function bindLogContext(fields: LogFields): void {
 }
 
 /**
- * The spelling `meetingPlatform` is bound in: `MEETING_PLATFORM` arrives as
- * `ZOOM`, `Teams`, `Chime` …, and one spelling lets one filter value match
- * every participant, from the app and the MicroVM supervisor alike.
+ * The spelling `meetingPlatform` is bound in: `MEETING_PLATFORM` arrives in
+ * either case (`ZOOM`, `TEAMS` or `Teams` …), and one spelling lets one
+ * filter value match every participant, from the app and the MicroVM
+ * supervisor alike.
  */
 export function logMeetingPlatform(raw: string | undefined | null): string | undefined {
     const value = (raw || '').trim().toUpperCase();
@@ -381,6 +406,21 @@ export function captureLogs(): CapturedLogs {
             sink = previous;
         },
     };
+}
+
+/**
+ * Send each record's `msg` to the `console` method of its level, whatever that
+ * method is at the time: INFO and DEBUG to `console.log`, WARN to
+ * `console.warn`, ERROR to `console.error`. For tests that capture or silence
+ * `console`, so that the records of modules on this logger reach the same
+ * capture. `setLogSink(null)` restores stdout.
+ */
+export function routeLogsToConsole(): void {
+    setLogSink((_line, record) => {
+        if (record.level === 'ERROR') console.error(record.msg);
+        else if (record.level === 'WARN') console.warn(record.msg);
+        else console.log(record.msg);
+    });
 }
 
 // ------------------------------------------------------------------ writing
