@@ -55,7 +55,8 @@ the five that read and act on the history every save records (see
     Make a profile, or the baseline itself, the one in force.
 
 All are for the **Admin** group: on the AppSync field, and re-checked here.
-The profile defaults to ``custom``, the profile a deployment creates. The
+The profile defaults to ``custom``, the profile earlier releases created on
+every deployment, which a deployment may no longer have. The
 baseline (``default``) and Managed profiles can be read, compared and activated,
 and are refused every write.
 """

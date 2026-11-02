@@ -179,12 +179,20 @@ class ConsentSettingsOverride:
     def save(self) -> None:
         active = self.store.active_profile_name(consistent_read=True)
         self.created_profile = False
-        if not active:
-            # The deployment runs on its default profile, which is read-only:
-            # test in a Custom copy of it, activated for the length of the test.
+        managed = bool(
+            active and self.store.read_profile(active, consistent_read=True).metadata.get("Managed")
+        )
+        if not active or managed:
+            # The deployment runs on its default or a Managed profile, which are
+            # read-only: test in a Custom copy of it, activated for the length
+            # of the test. A copy an interrupted run left behind is replaced.
+            self.previously_active = active or "default"
+            if self.store.read_profile(self.TEMPORARY_PROFILE, consistent_read=True).exists:
+                self.store.delete_profile(self.TEMPORARY_PROFILE)
             self.store.create_profile(
                 self.TEMPORARY_PROFILE,
                 updated_by=self.updated_by,
+                copy_from=self.previously_active,
                 description="created and removed by the integration tests",
             )
             self.store.activate_profile(self.TEMPORARY_PROFILE)
@@ -214,7 +222,7 @@ class ConsentSettingsOverride:
 
     def restore(self, attempts: int = 5) -> None:
         if getattr(self, "created_profile", False):
-            self.store.activate_profile("default")
+            self.store.activate_profile(getattr(self, "previously_active", "default"))
             self.store.delete_profile(self.TEMPORARY_PROFILE)
             self.created_profile = False
             self.applied = False

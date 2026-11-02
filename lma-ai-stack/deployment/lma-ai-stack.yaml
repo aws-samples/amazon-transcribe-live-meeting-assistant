@@ -3583,9 +3583,8 @@ Resources:
       ConfigurationBucketName: !Ref ConfigurationBucket
       Domain: !Ref Domain
       # The preset the baseline is built from, and a file laid over it; see
-      # docs/configuration-store.md. A change to either re-runs the seeder. A
-      # change to the file's content alone does not: give the edited file a
-      # new key.
+      # docs/configuration-store.md. A change to either re-runs the seeder,
+      # which reads the file again on every run it makes.
       ConfigurationPreset: !Ref ConfigurationPreset
       CustomConfigPath: !Ref CustomConfigPath
       # Deployment settings a schema's availableWhen names, so a Managed

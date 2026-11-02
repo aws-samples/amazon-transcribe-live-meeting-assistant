@@ -1138,7 +1138,9 @@ class _FakeConfigurationStore:
         from types import SimpleNamespace
 
         assert name == self.active
-        return SimpleNamespace(exists=True, body=json.loads(json.dumps(self.body)), version=self.version)
+        return SimpleNamespace(
+            exists=True, body=json.loads(json.dumps(self.body)), version=self.version, metadata={}
+        )
 
     def _write(self, kind: str, expected_version) -> None:
         if self.before_next_write:
@@ -1241,8 +1243,14 @@ def test_consent_override_restore_is_a_no_op_unless_something_was_applied() -> N
 def test_an_override_on_a_deployment_running_on_its_default_uses_a_temporary_profile() -> None:
     """The default profile is read-only, so the test works in a Custom copy of it."""
     store = _FakeConfigurationStore({}, active=None)
+    from types import SimpleNamespace
+
+    created: set = set()
+    store.read_profile = lambda name, consistent_read=False: SimpleNamespace(
+        exists=name in created, body={}, version=1 if name in created else 0, metadata={}
+    )
     calls: list = []
-    store.create_profile = lambda name, **_: calls.append(("create", name))
+    store.create_profile = lambda name, **_: calls.append(("create", name)) or created.add(name)
     store.activate_profile = lambda name: calls.append(("activate", name)) or setattr(store, "active", name)
     store.delete_profile = lambda name: calls.append(("delete", name))
     override = _override(store)

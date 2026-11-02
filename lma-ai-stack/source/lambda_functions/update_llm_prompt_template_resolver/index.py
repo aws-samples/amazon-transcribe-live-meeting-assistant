@@ -35,8 +35,6 @@ from lma_config import (  # from the configuration layer
 
 # pylint: enable=import-error
 
-#: The profile an operator's edits live in.
-
 
 def _reading_profile() -> str:
     """The profile in force: what this page shows, the baseline when that is active."""

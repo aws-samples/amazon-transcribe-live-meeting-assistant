@@ -381,8 +381,8 @@ type Query @aws_cognito_user_pools
 	# What the configuration editor renders: every section's schema, the shipped
 	# baseline and a profile's changes over it. Profile defaults to "custom".
 	getConfiguration(Profile: String): ConfigurationDocument @aws_cognito_user_pools(cognito_groups: ["Admin"])
-	# The configuration history, for the Admin group. Profile defaults to
-	# "custom", the profile every configuration page saves into.
+	# The configuration history, for the Admin group, per profile. Profile
+	# defaults to "custom", which a deployment may no longer have.
 	listConfigurationRevisions(Profile: String): ConfigurationRevisionList @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	getConfigurationRevision(Profile: String, Revision: Int!): ConfigurationRevisionDetail @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	# Every profile and the baseline, without their bodies.

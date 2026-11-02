@@ -1807,3 +1807,19 @@ def test_a_removed_profile_is_not_created_again_by_a_later_deployment(seeder) ->
     assert again["Profile"] == "not-needed"
     assert "Config#custom" not in dynamo.items
     assert seeder.settle_profiles(store, seeder._adoption_outcomes(again)) == "absent"
+
+
+def test_a_configuration_preset_the_deployment_cannot_run_fails_the_deployment(seeder) -> None:
+    store, dynamo = build_store()
+    with pytest.raises(seeder.InvalidConfiguration, match="needs EnableMicrovmAsr"):
+        seeder.seed(
+            store, domain="default", configuration_preset="on-demand-asr-with-voice-separation"
+        )
+    assert "Config#default" not in dynamo.items
+    seeder.seed(
+        store,
+        domain="default",
+        configuration_preset="on-demand-asr-with-voice-separation",
+        deployment_settings={"AsrEngineAvailable": "true"},
+    )
+    assert "Config#default" in dynamo.items

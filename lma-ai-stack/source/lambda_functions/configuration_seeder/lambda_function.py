@@ -18,12 +18,13 @@ Three writes, each with different rules about what it may overwrite:
     function.
 
 ``Config#custom``
-    The operator's profile. Written **only if it is not there**, so a stack
-    update never discards an edit made from the web UI. The condition lives in
-    the store's ``seed_profile``, not in a branch on the CloudFormation request
-    type: conditioning on ``RequestType == 'Create'`` would also skip the case
-    where the record is genuinely absent on an update, which is what happens
-    after the table is restored or the record is deleted by hand.
+    The operator's profile. Written only on a table that has never been seeded
+    (no ``Config#__active``): a new deployment, an upgrade from a release with
+    no configuration store, or a table restored empty. The condition is on the
+    records, not on the CloudFormation request type, which would miss the
+    restored table. A new deployment's profile holds nothing, and
+    ``settle_profiles`` removes it again so the deployment runs on its default;
+    a deployment that has run without it is not given it back.
 
     How it came to exist is stamped on the record as ``ProfileOrigin`` and
     reported by every later run, which is what keeps a failed adoption visible
@@ -635,6 +636,7 @@ def seed(
     parameter_values: Optional[Mapping[str, Any]] = None,
     configuration_preset: str = "",
     custom_sections: Optional[Mapping[str, Any]] = None,
+    deployment_settings: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, str]:
     """Apply the writes and report what each one did.
 
@@ -658,7 +660,15 @@ def seed(
     # with, so both belong in the baseline.
     preset_applied = "none"
     if configuration_preset and configuration_preset != "none":
-        baseline = apply_preset(baseline, preset_by_id(configuration_preset))
+        chosen = preset_by_id(configuration_preset)
+        if not preset_offered(chosen, dict(deployment_settings or {})):
+            raise InvalidConfiguration(
+                [
+                    f"ConfigurationPreset: {configuration_preset} sets something this deployment "
+                    "does not include (the on-demand ASR preset needs EnableMicrovmAsr)"
+                ]
+            )
+        baseline = apply_preset(baseline, chosen)
         preset_applied = configuration_preset
     if custom_sections:
         for name, values in custom_sections.items():
@@ -854,9 +864,17 @@ def settle_profiles(store: ConfigurationStore, adoption: Mapping[str, str]) -> s
         return "deferred"
     try:
         if not _holds_settings(current.body):
-            if store.active_profile_name(consistent_read=True) == OPERATOR_PROFILE:
+            was_active = store.active_profile_name(consistent_read=True) == OPERATOR_PROFILE
+            if was_active:
                 store.activate_profile("default")
-            store.delete_profile(OPERATOR_PROFILE)
+            try:
+                store.delete_profile(OPERATOR_PROFILE)
+            except ConcurrentModification:
+                # An Admin saved into it meanwhile: it is theirs now, so it goes
+                # back in force, and the next deployment converts it.
+                if was_active:
+                    store.activate_profile(OPERATOR_PROFILE)
+                raise
             return "removed-empty"
         converted = store.convert_to_full_copy(
             OPERATOR_PROFILE, comment="stored as a full copy of the configuration"
@@ -910,6 +928,7 @@ def handler(event: Dict[str, Any], context: Any) -> None:
             },
             parameter_values=properties.get("ParameterDefaults") or {},
             configuration_preset=properties.get("ConfigurationPreset", ""),
+            deployment_settings=properties.get("DeploymentSettings") or {},
             custom_sections=(
                 read_custom_configuration(properties["CustomConfigPath"])
                 if properties.get("CustomConfigPath")

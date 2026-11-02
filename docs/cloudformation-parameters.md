@@ -932,7 +932,7 @@ Console label: *Custom Configuration Path*
 - **Allowed values:** Matches `^(|s3://[^/]+/.+)$`
 - **Kind:** Resource. Decides what the configuration seeder lays over the default configuration, and grants the seeder read access to the file.
 
-Optional s3://bucket/key of a configuration file, JSON or YAML, laid over ConfigurationPreset to make the deployment's default configuration: an object of configuration section name to settings, or a file exported from the Configuration page. It is checked against the configuration schemas, and the deployment fails if it does not match. The stack reads it only when this value changes, so give an edited file a new key. Leave blank to use the preset alone.
+Optional s3://bucket/key of a configuration file, JSON or YAML, laid over ConfigurationPreset to make the deployment's default configuration: an object of configuration section name to settings, or a file exported from the Configuration page. It is checked against the configuration schemas, and the deployment fails if it does not match. It is read again on every stack update, so it must stay readable for the life of the stack, and an edit to it applies on the next update. Leave blank to use the preset alone.
 
 ## Retention Settings
 

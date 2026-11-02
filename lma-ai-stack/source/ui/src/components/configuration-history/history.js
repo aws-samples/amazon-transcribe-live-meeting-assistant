@@ -74,7 +74,8 @@ export const labelRevisionMutation = `
 // The limit the store applies to a label; a labelled revision is never pruned.
 export const MAX_LABEL_LENGTH = 100;
 
-// The one profile every configuration page saves into.
+// The history shown when the link names no profile: the profile earlier
+// releases created on every deployment.
 export const PROFILE = 'custom';
 
 // What each section of the profile is, in the words of the page that edits it.

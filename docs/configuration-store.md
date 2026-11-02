@@ -726,8 +726,9 @@ the save.
 
 Underneath, these are GraphQL operations for the **Admin** group, pinned on the
 AppSync field and checked again in the resolver Lambda behind it. Each takes a
-`Profile`, which defaults to `custom`, the profile every configuration page
-saves into.
+`Profile`, which defaults to `custom` (the profile earlier releases created on
+every deployment, which a deployment may no longer have); the Configuration
+page passes the profile it shows.
 
 | Operation | What it does |
 |---|---|
@@ -815,11 +816,14 @@ across the sections of stores that moved in after the profile existed:
   preset a release no longer ships is deleted, unless it is the active profile.
   A Custom profile already holding a preset's name is left alone, and reported
   as `name-in-use`. Reported as the `ManagedProfiles` attribute.
-- **`Config#custom`** — written **only if it is not already there**, so a stack
-  update never discards an edit made from the web UI. The condition is on the
-  record, not on `RequestType == 'Create'`: keying off the request type would
-  also skip the case where the record is genuinely absent on an update, which is
-  what happens after a table restore or a hand deletion.
+- **`Config#custom`** — written only on a table that has never been seeded
+  (no `Config#__active`): a new deployment, an upgrade from a release with no
+  configuration store, or a table restored empty, so a stack update never
+  discards an edit made from the web UI. The condition is on the records, not
+  on `RequestType == 'Create'`, which would miss the restored table. A new
+  deployment's profile holds nothing and is removed again (see
+  [Named profiles](#named-profiles)), so the deployment runs on its default; a
+  deployment that has run without it is not given it back.
 - **`Config#__active`** — also written only if absent, so an administrator who
   selects a different profile keeps their choice.
 - **One section of `Config#custom` per later store** — added only while the
@@ -845,9 +849,10 @@ Two stack parameters decide what `Config#default` holds, as IDP's
   match, names a section the store does not have, or cannot be read fails the
   stack update, with the problems in the status reason. The seeder is granted
   `s3:GetObject` on that one object; a file encrypted with a customer-managed key
-  also needs that key to allow the seeder's role. The file is read when the
-  parameter's value changes, not when the file does, so give an edited file a new
-  key.
+  also needs that key to allow the seeder's role. The file is read again on every
+  stack update the seeder runs on, so it has to stay readable for the life of the
+  stack, and an edit to it applies on the next update. To change it without an
+  update, edit a Custom profile instead.
 
 Both change only the baseline. A Custom profile keeps what it stores, and the
 active profile stays active. The seeder reports what it applied as the
@@ -1359,7 +1364,7 @@ the consent terms each enrollment agrees to.
 
 | Stage | What it adds |
 |---|---|
-| Named profiles on the Configuration page | The store and the API serve [named profiles](#named-profiles); the page still edits `custom` only |
+| The configuration editor's JSON and YAML views, and comparing profiles | The page edits one profile at a time, through its form |
 | Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired. It waited for the configuration editor: the custom prompt is edited in the DynamoDB console today, which is exactly the route a compressed body closes, so moving it before there was an editor would have left it with no way to edit it. With the editor in place, it needs a schema and a seeder adoption |
 | Replacing the SSM settings blob | The `<stack>-LMASettings` parameter is written only by CloudFormation, at deploy time, and read by the web app for every signed-in user. It is a deployment's wiring rather than something an administrator edits. The Configuration page reads the configuration at run time, but every other page reads only this blob, so a setting another page needs moves when that page reads the configuration too |
 
