@@ -65,6 +65,9 @@ import {
   publishMeetingMode,
   requiresAlwaysListening,
 } from './assistant-toggles.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('nova-agent');
 
 /**
  * Whether the assistant is given a `mute` tool it can call when a participant
@@ -649,27 +652,27 @@ export class NovaAgent implements VoiceAssistantProvider {
     // - 'normal'     -> unmuted
     this._isMuted = (this.meetingMode === 'group');
 
-    console.log('✓ AWS Nova Sonic 2 agent initialized');
-    console.log(`  Model: ${this.modelId}`);
-    console.log(`  Voice: ${this.voiceId}`);
-    console.log(`  Endpointing sensitivity: ${this.endpointingSensitivity}`);
+    log.info('✓ AWS Nova Sonic 2 agent initialized');
+    log.info(`  Model: ${this.modelId}`);
+    log.info(`  Voice: ${this.voiceId}`);
+    log.info(`  Endpointing sensitivity: ${this.endpointingSensitivity}`);
     const local = stackRegion();
-    console.log(
+    log.info(
       `  Nova Sonic region: ${this.novaSonicRegion}` +
         (this.novaSonicRegion !== local ? ` (stack region is ${local})` : ''),
     );
-    console.log(`  Activation mode: ${this.activationMode}`);
-    console.log(`  Meeting mode: ${this.meetingMode}`);
+    log.info(`  Activation mode: ${this.activationMode}`);
+    log.info(`  Meeting mode: ${this.meetingMode}`);
     if (this.meetingMode === 'translator') {
-      console.log(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
+      log.info(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
       if (this.activationMode !== 'always_active') {
-        console.warn(`  ⚠️  Translator mode requires activation mode 'always_active' to work end-to-end. Current: ${this.activationMode}`);
+        log.warn(`  ⚠️  Translator mode requires activation mode 'always_active' to work end-to-end. Current: ${this.activationMode}`);
       }
     } else if (this.meetingMode === 'group') {
-      console.log('  Group meeting mode: enabled (starts muted)');
+      log.info('  Group meeting mode: enabled (starts muted)');
     }
     if (this.strandsLambdaArn) {
-      console.log(`  Strands agent tool: enabled`);
+      log.info(`  Strands agent tool: enabled`);
     }
   }
 
@@ -679,7 +682,7 @@ export class NovaAgent implements VoiceAssistantProvider {
   private sessionRecoveryTimer: NodeJS.Timeout | null = null;
 
   async start(): Promise<void> {
-    console.log('Starting AWS Nova Sonic 2 agent...');
+    log.info('Starting AWS Nova Sonic 2 agent...');
     this.stopped = false;
 
     try {
@@ -699,7 +702,7 @@ export class NovaAgent implements VoiceAssistantProvider {
           });
           
           const config = await loadNovaSonicConfig(dynamoDbClient, configTables);
-          console.log('✓ Loaded Nova Sonic config from DynamoDB');
+          log.info('✓ Loaded Nova Sonic config from DynamoDB');
           
           // Update system prompt, model ID, voice ID, endpointing sensitivity, and meeting mode from config
           this.systemPrompt = config.systemPrompt;
@@ -737,22 +740,22 @@ export class NovaAgent implements VoiceAssistantProvider {
               .filter(p => p.length > 0);
           }
 
-          console.log(`  Updated system prompt (${config.systemPrompt.length} chars)`);
-          console.log(`  Updated model ID: ${config.modelId}`);
-          console.log(`  Updated voice ID: ${this.voiceId}`);
-          console.log(`  Updated endpointing sensitivity: ${this.endpointingSensitivity}`);
-          console.log(`  Updated meeting mode: ${this.meetingMode}`);
+          log.info(`  Updated system prompt (${config.systemPrompt.length} chars)`);
+          log.info(`  Updated model ID: ${config.modelId}`);
+          log.info(`  Updated voice ID: ${this.voiceId}`);
+          log.info(`  Updated endpointing sensitivity: ${this.endpointingSensitivity}`);
+          log.info(`  Updated meeting mode: ${this.meetingMode}`);
           if (this.meetingMode === 'translator') {
-            console.log(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
-            console.log(`  🔇 Mute trigger phrases: ${this.translatorMutePhrases.map(p => `"${p}"`).join(', ')}`);
-            console.log(`  🔓 Unmute trigger phrases: ${this.translatorUnmutePhrases.map(p => `"${p}"`).join(', ')}`);
+            log.info(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
+            log.info(`  🔇 Mute trigger phrases: ${this.translatorMutePhrases.map(p => `"${p}"`).join(', ')}`);
+            log.info(`  🔓 Unmute trigger phrases: ${this.translatorUnmutePhrases.map(p => `"${p}"`).join(', ')}`);
             if (this.activationMode !== 'always_active') {
-              console.warn(`  ⚠️  Translator mode requires activation mode 'always_active' to work end-to-end. Current: ${this.activationMode}`);
+              log.warn(`  ⚠️  Translator mode requires activation mode 'always_active' to work end-to-end. Current: ${this.activationMode}`);
             }
           }
         } catch (error) {
-          console.error('Failed to load Nova Sonic config from DynamoDB:', error);
-          console.log('Using environment variable configuration as fallback');
+          log.error('Failed to load Nova Sonic config from DynamoDB:', error);
+          log.info('Using environment variable configuration as fallback');
         }
       }
       
@@ -780,7 +783,7 @@ export class NovaAgent implements VoiceAssistantProvider {
           region: stackRegion(),
           credentials: defaultProvider(),
         });
-        console.log('✓ Lambda client initialized for Strands agent tool');
+        log.info('✓ Lambda client initialized for Strands agent tool');
 
         // In the background: the clip is only needed once somebody asks the
         // assistant something, and a render that fails costs the fallback
@@ -793,7 +796,7 @@ export class NovaAgent implements VoiceAssistantProvider {
             this.toolAckClip = clip;
           })
           .catch((error) => {
-            console.warn('[tool-ack] action=render-failed', error);
+            log.warn('[tool-ack] action=render-failed', error);
           });
       }
       if (this.meetingMode === 'translator') {
@@ -802,23 +805,23 @@ export class NovaAgent implements VoiceAssistantProvider {
 
       // In wake_phrase mode, defer session creation until activation
       if (this.activationMode === 'wake_phrase') {
-        console.log('⏸️  Wake phrase mode - Session will be created on first activation');
-        console.log('   This saves costs by not keeping connection open when not in use');
+        log.info('⏸️  Wake phrase mode - Session will be created on first activation');
+        log.info('   This saves costs by not keeping connection open when not in use');
         return;
       }
 
       // For always_active mode, create session immediately
       await this.createSession();
-      console.log('✓ AWS Nova Sonic 2 agent started successfully');
+      log.info('✓ AWS Nova Sonic 2 agent started successfully');
     } catch (error) {
-      console.error('Failed to start Nova agent:', error);
+      log.error('Failed to start Nova agent:', error);
       throw error;
     }
   }
 
   private async createSession(isRefresh: boolean = false): Promise<void> {
     if (this.streamingActive) {
-      console.log('Session already active');
+      log.info('Session already active');
       return;
     }
 
@@ -828,7 +831,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // heard by an earlier session must not let a lookup through on this one.
     this.lastUserTurnText = '';
 
-    console.log(`Creating Nova session: ${this.sessionId}${isRefresh ? ' (refresh)' : ''}`);
+    log.info(`Creating Nova session: ${this.sessionId}${isRefresh ? ' (refresh)' : ''}`);
 
     // Start the bidirectional stream
     this.streamingActive = true;
@@ -836,7 +839,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     
     // Initiate the streaming in the background
     this.initiateBidirectionalStreaming().catch(error => {
-      console.error('Error in bidirectional streaming:', error);
+      log.error('Error in bidirectional streaming:', error);
       this._isActive = false;
       this.streamingActive = false;
     });
@@ -924,23 +927,23 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.session = next;
     this.sessionId = next.id!;
     this.lastUserTurnText = '';
-    console.log(`Creating Nova session: ${next.id} (translator turn ${this.translatorTurn + 1})`);
+    log.info(`Creating Nova session: ${next.id} (translator turn ${this.translatorTurn + 1})`);
     // Queues every setup event before returning: with no history to replay
     // there is nothing in it to wait for, so no audio can be queued ahead of it.
     this.setupInitialEvents(false).catch(error => {
-      console.error('Error setting up the next translator session:', error);
+      log.error('Error setting up the next translator session:', error);
     });
     for (const chunk of backlog) {
       this.queueAudio(next, chunk);
     }
     this.initiateBidirectionalStreaming(next).catch(error => {
-      console.error('Error in bidirectional streaming:', error);
+      log.error('Error in bidirectional streaming:', error);
     });
     if (this.activationMode === 'always_active') {
       this.startSessionRefreshTimer();
     }
 
-    console.log(
+    log.info(
       `[translator-turn] n=${this.translatorTurn} from=${outgoing.id} to=${next.id}`
       + ` backlog_ms=${pcmMs(backlog)} draining=${this.drainingSessions.size}`,
     );
@@ -1000,7 +1003,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       this.heldPlayback.delete(session);
       for (const chunk of held) {
         this.playAudio(chunk).catch(err => {
-          console.error('Error playing audio:', err);
+          log.error('Error playing audio:', err);
         });
       }
       // This session's own answer may still be producing audio, and anything
@@ -1025,7 +1028,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       session.isActive = false;
       session.signal?.();
     }, 300);
-    console.log(
+    log.info(
       `[translator-turn] closed ${session.id}: ${why}`
       + ` after ${Date.now() - (session.drainStartedAt ?? Date.now())} ms`,
     );
@@ -1053,7 +1056,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
     session.isActive = false;
     session.audioTurnOpen = false;
-    console.log(`[translator-turn] ${session.id} ended before it was closed`);
+    log.info(`[translator-turn] ${session.id} ended before it was closed`);
     this.releaseHeldPlayback();
   }
 
@@ -1063,7 +1066,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       clearInterval(this.keepAliveTimer);
     }
 
-    console.log(`💓 Keep-alive timer started - sending silence every ${this.KEEP_ALIVE_INTERVAL / 1000} seconds`);
+    log.info(`💓 Keep-alive timer started - sending silence every ${this.KEEP_ALIVE_INTERVAL / 1000} seconds`);
     
     // Send silence chunks periodically to prevent 55-second timeout
     this.keepAliveTimer = setInterval(() => {
@@ -1094,14 +1097,14 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (this.keepAliveTimer) {
       clearInterval(this.keepAliveTimer);
       this.keepAliveTimer = null;
-      console.log('✓ Keep-alive timer stopped');
+      log.info('✓ Keep-alive timer stopped');
     }
   }
 
   private async setupInitialEvents(isRefresh: boolean = false): Promise<void> {
     if (!this.session) return;
 
-    console.log(`Setting up initial events${isRefresh ? ' (with conversation history)' : ''}...`);
+    log.info(`Setting up initial events${isRefresh ? ' (with conversation history)' : ''}...`);
 
     // Session start
     this.addEventToQueue({
@@ -1154,7 +1157,7 @@ export class NovaAgent implements VoiceAssistantProvider {
         },
       };
 
-      console.log(
+      log.info(
         `✓ Tools configured in promptStart: ${tools.map((t: any) => t.toolSpec.name).join(', ')}`,
       );
     }
@@ -1180,11 +1183,11 @@ export class NovaAgent implements VoiceAssistantProvider {
     });
 
     const finalSystemPrompt = this.buildSystemPromptContent();
-    console.log('📋 Final system prompt being sent to Nova:');
-    console.log('─'.repeat(80));
-    console.log(finalSystemPrompt);
-    console.log('─'.repeat(80));
-    console.log(`   Total length: ${finalSystemPrompt.length} characters`);
+    log.info('📋 Final system prompt being sent to Nova:');
+    log.info('─'.repeat(80));
+    log.info(finalSystemPrompt);
+    log.info('─'.repeat(80));
+    log.info(`   Total length: ${finalSystemPrompt.length} characters`);
     
     this.addEventToQueue({
       event: {
@@ -1234,7 +1237,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     });
     this.session.isAudioContentStartSent = true;
 
-    console.log('Initial events setup complete');
+    log.info('Initial events setup complete');
   }
 
   /**
@@ -1514,7 +1517,7 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   private addToConversationHistory(role: 'USER' | 'ASSISTANT', content: string): void {
     if (role === 'USER' && this.isTranslatorTriggerUtterance(content)) {
-      console.log(`💬 Skipping translator trigger utterance from history: "${content.substring(0, 60)}..."`);
+      log.info(`💬 Skipping translator trigger utterance from history: "${content.substring(0, 60)}..."`);
       return;
     }
 
@@ -1537,24 +1540,24 @@ export class NovaAgent implements VoiceAssistantProvider {
     
     if (startIndex === -1) {
       // No USER turns found - manufacture one to satisfy Nova's requirement
-      console.log('📜 No USER turns in history - manufacturing initial USER turn');
+      log.info('📜 No USER turns in history - manufacturing initial USER turn');
       const historyToSend: ConversationTurn[] = [
         { role: 'USER', content: 'Continue our conversation', timestamp: Date.now() },
         ...this.conversationHistory
       ];
       
-      console.log(`📜 Setting up conversation history (${historyToSend.length} turns, starting with manufactured USER)...`);
+      log.info(`📜 Setting up conversation history (${historyToSend.length} turns, starting with manufactured USER)...`);
       await this.sendHistoryTurns(historyToSend);
     } else {
       // Get history starting from first USER turn
       const historyToSend = this.conversationHistory.slice(startIndex);
       
-      console.log(`📜 Setting up conversation history (${historyToSend.length} turns, starting with USER)...`);
+      log.info(`📜 Setting up conversation history (${historyToSend.length} turns, starting with USER)...`);
       
       await this.sendHistoryTurns(historyToSend);
     }
 
-    console.log('✓ Conversation history setup complete');
+    log.info('✓ Conversation history setup complete');
   }
 
   private async sendHistoryTurns(turns: ConversationTurn[]): Promise<void> {
@@ -1607,12 +1610,12 @@ export class NovaAgent implements VoiceAssistantProvider {
       clearTimeout(this.sessionRefreshTimer);
     }
 
-    console.log(`🔄 Session refresh timer started - will queue refresh in ${this.SESSION_REFRESH_INTERVAL / 60000} minutes`);
+    log.info(`🔄 Session refresh timer started - will queue refresh in ${this.SESSION_REFRESH_INTERVAL / 60000} minutes`);
     
     this.sessionRefreshTimer = setTimeout(() => {
       // Queue the refresh - it will execute when agent is idle
       this.refreshQueued = true;
-      console.log('⏰ Session refresh queued - waiting for agent to be idle');
+      log.info('⏰ Session refresh queued - waiting for agent to be idle');
       this.checkAndExecuteQueuedRefresh();
     }, this.SESSION_REFRESH_INTERVAL);
   }
@@ -1625,14 +1628,14 @@ export class NovaAgent implements VoiceAssistantProvider {
     // second teardown, so going on from here would clear the flag and then do
     // nothing, dropping the queued refresh entirely.
     if (this.isRefreshing) {
-      console.log('🔄 Refresh already in flight - will retry refresh check in 2 seconds');
+      log.info('🔄 Refresh already in flight - will retry refresh check in 2 seconds');
       setTimeout(() => this.checkAndExecuteQueuedRefresh(), 2000);
       return;
     }
 
     // Check if agent is busy
     if (this._isSpeaking || this._isProcessingTool) {
-      console.log('🔊 Agent busy - will retry refresh check in 2 seconds');
+      log.info('🔊 Agent busy - will retry refresh check in 2 seconds');
       setTimeout(() => this.checkAndExecuteQueuedRefresh(), 2000);
       return;
     }
@@ -1644,7 +1647,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // text events are the freshest signal we have for "someone is talking",
     // so hold the refresh until they have been quiet for a few seconds.
     if (Date.now() - this.lastUserActivityAt < this.USER_QUIET_MS_BEFORE_REFRESH) {
-      console.log('🗣️  User recently speaking - will retry refresh check in 2 seconds');
+      log.info('🗣️  User recently speaking - will retry refresh check in 2 seconds');
       setTimeout(() => this.checkAndExecuteQueuedRefresh(), 2000);
       return;
     }
@@ -1652,7 +1655,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // Agent is idle - execute refresh
     this.refreshQueued = false;
     this.refreshSession().catch(error => {
-      console.error('Error executing queued refresh:', error);
+      log.error('Error executing queued refresh:', error);
     });
   }
 
@@ -1661,7 +1664,7 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     // Check if agent is busy
     if (this._isSpeaking || this._isProcessingTool) {
-      console.log('🔊 Agent busy - will retry auto-mute check in 1 second');
+      log.info('🔊 Agent busy - will retry auto-mute check in 1 second');
       setTimeout(() => this.checkAndExecuteQueuedAutoMute(), 1000);
       return;
     }
@@ -1674,7 +1677,7 @@ export class NovaAgent implements VoiceAssistantProvider {
   private executeAutoMute(): void {
     if (!this.groupMeetingMode || this._isMuted) return;
     
-    console.log('🔇 Auto-muting agent after conversation end (group meeting mode)');
+    log.info('🔇 Auto-muting agent after conversation end (group meeting mode)');
     this._isMuted = true;
     this.conversationActive = false;
     this.clearConversationTimeout();
@@ -1683,19 +1686,19 @@ export class NovaAgent implements VoiceAssistantProvider {
   private startConversationSession(): void {
     if (!this.groupMeetingMode) return;
     
-    console.log('💬 Starting conversation session');
+    log.info('💬 Starting conversation session');
     this.conversationActive = true;
     this.clearConversationTimeout();
     
     // Set timeout to auto-mute after defaultActivationDuration seconds of no "Alex" mentions
     const timeoutMs = this.defaultActivationDuration * 1000;
     this.conversationTimeout = setTimeout(() => {
-      console.log(`⏰ Conversation timeout reached (${this.defaultActivationDuration}s) - queueing auto-mute`);
+      log.info(`⏰ Conversation timeout reached (${this.defaultActivationDuration}s) - queueing auto-mute`);
       this.autoMuteQueued = true;
       this.checkAndExecuteQueuedAutoMute();
     }, timeoutMs);
     
-    console.log(`⏱️  Conversation timeout set for ${this.defaultActivationDuration} seconds`);
+    log.info(`⏱️  Conversation timeout set for ${this.defaultActivationDuration} seconds`);
   }
 
   private containsWakePhrase(text: string): boolean {
@@ -1709,10 +1712,10 @@ export class NovaAgent implements VoiceAssistantProvider {
       .trim();
     
     // DEBUG: Log the wake phrases being checked
-    console.log('🔍 DEBUG containsWakePhrase():');
-    console.log(`   Input text: "${text}"`);
-    console.log(`   Normalized (punctuation stripped): "${normalized}"`);
-    console.log(`   Configured wake phrases: [${wakePhrases.map(p => `"${p}"`).join(', ')}]`);
+    log.debug('🔍 containsWakePhrase():');
+    log.debug(`   Input text: "${text}"`);
+    log.debug(`   Normalized (punctuation stripped): "${normalized}"`);
+    log.debug(`   Configured wake phrases: [${wakePhrases.map(p => `"${p}"`).join(', ')}]`);
     
     // Use word boundary matching to avoid false positives
     // "okay" should NOT match "ok alex"
@@ -1727,25 +1730,25 @@ export class NovaAgent implements VoiceAssistantProvider {
       const matches = regex.test(normalized);
       
       // DEBUG: Log each phrase test
-      console.log(`   Testing phrase "${phrase}" (regex: /\\b${escapedPhrase}\\b/i): ${matches ? '✓ MATCH' : '✗ no match'}`);
+      log.debug(`   Testing phrase "${phrase}" (regex: /\\b${escapedPhrase}\\b/i): ${matches ? '✓ MATCH' : '✗ no match'}`);
       
       return matches;
     });
     
-    console.log(`   Final result: ${matchResult ? '✓ WAKE PHRASE DETECTED' : '✗ No wake phrase'}`);
+    log.debug(`   Final result: ${matchResult ? '✓ WAKE PHRASE DETECTED' : '✗ No wake phrase'}`);
     return matchResult;
   }
 
   private resetConversationTimeout(): void {
     if (!this.groupMeetingMode || !this.conversationActive) return;
     
-    console.log('🔄 Resetting conversation timeout - user mentioned wake phrase');
+    log.info('🔄 Resetting conversation timeout - user mentioned wake phrase');
     this.clearConversationTimeout();
     
     // Restart timeout
     const timeoutMs = this.defaultActivationDuration * 1000;
     this.conversationTimeout = setTimeout(() => {
-      console.log(`⏰ Conversation timeout reached (${this.defaultActivationDuration}s) - queueing auto-mute`);
+      log.info(`⏰ Conversation timeout reached (${this.defaultActivationDuration}s) - queueing auto-mute`);
       this.autoMuteQueued = true;
       this.checkAndExecuteQueuedAutoMute();
     }, timeoutMs);
@@ -1760,17 +1763,17 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   private async refreshSession(): Promise<void> {
     if (!this.session || !this.session.isActive) {
-      console.log('⚠️  Cannot refresh - session not active');
+      log.warn('⚠️  Cannot refresh - session not active');
       return;
     }
 
     // Don't refresh if already refreshing
     if (this.isRefreshing) {
-      console.log('⚠️  Session refresh already in progress');
+      log.info('⚠️  Session refresh already in progress');
       return;
     }
 
-    console.log('🔄 Refreshing Nova session - closing old session and creating new one...');
+    log.info('🔄 Refreshing Nova session - closing old session and creating new one...');
     
     try {
       // Set refreshing flag
@@ -1822,7 +1825,7 @@ export class NovaAgent implements VoiceAssistantProvider {
           this.session.isActive = false;
           this.session.signal?.();
         } catch (error) {
-          console.error('Error closing old session during refresh:', error);
+          log.error('Error closing old session during refresh:', error);
         }
       }
 
@@ -1839,13 +1842,13 @@ export class NovaAgent implements VoiceAssistantProvider {
       // This will also restart the keep-alive timer
       await this.createSession(true); // Pass true to indicate this is a refresh
 
-      console.log('✅ Session refreshed successfully - new session created and ready');
+      log.info('✅ Session refreshed successfully - new session created and ready');
 
       // Clear refreshing flag
       this.isRefreshing = false;
 
     } catch (error) {
-      console.error('❌ Error during session refresh:', error);
+      log.error('❌ Error during session refresh:', error);
       // Clear refreshing flag on error
       this.isRefreshing = false;
       this._isActive = false;
@@ -1853,9 +1856,9 @@ export class NovaAgent implements VoiceAssistantProvider {
       
       // Try to recover by creating a new session
       this.scheduleSessionCreateRetry(() => {
-        console.log('🔄 Attempting recovery - creating new session');
+        log.info('🔄 Attempting recovery - creating new session');
         this.createSession().catch(err => {
-          console.error('Error in recovery session creation:', err);
+          log.error('Error in recovery session creation:', err);
         });
       });
     }
@@ -1878,7 +1881,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.sessionRecoveryTimer = setTimeout(() => {
       this.sessionRecoveryTimer = null;
       if (this.stopped) {
-        console.log('⏹️  Agent stopped - skipping session recovery');
+        log.info('⏹️  Agent stopped - skipping session recovery');
         return;
       }
       attempt();
@@ -1992,7 +1995,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     const delay = throttleBackoffMs(this.translatorHandoverThrottles, TRANSLATOR_HANDOVER_BACKOFF);
     this.translatorHandoverThrottles += 1;
     this.translatorHandoverBlockedUntil = Date.now() + delay;
-    console.warn(
+    log.warn(
       `[translator-turn] action=kept-session reason=throttled session=${outgoing.id} refused=${failed.id}`
       + ` next_handover_after_ms=${delay} streak=${this.translatorHandoverThrottles}`,
     );
@@ -2005,7 +2008,7 @@ export class NovaAgent implements VoiceAssistantProvider {
   private scheduleThrottledRecovery(failed: SessionData): void {
     const delay = throttleBackoffMs(this.sessionOpenThrottles, SESSION_RECOVERY_BACKOFF);
     this.sessionOpenThrottles += 1;
-    console.warn(
+    log.warn(
       `[nova-throttle] action=retry-session in_ms=${delay} streak=${this.sessionOpenThrottles}`,
     );
     const attempt = (): void => {
@@ -2015,7 +2018,7 @@ export class NovaAgent implements VoiceAssistantProvider {
         return;
       }
       this.refreshSession().catch((error) => {
-        console.error('Error rebuilding the session after a refused open:', error);
+        log.error('Error rebuilding the session after a refused open:', error);
       });
     };
     this.scheduleSessionCreateRetry(attempt, delay);
@@ -2032,7 +2035,7 @@ export class NovaAgent implements VoiceAssistantProvider {
      *  concurrency quota; anything after that is an ordinary stream error. */
     let accepted = false;
     try {
-      console.log('Starting bidirectional stream...');
+      log.info('Starting bidirectional stream...');
 
       const command = new InvokeModelWithBidirectionalStreamCommand({
         modelId: this.modelId,
@@ -2044,7 +2047,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       this.meteredUsage().noteSession();
       this.noteSessionOpened(session);
 
-      console.log('Stream established, processing responses...');
+      log.info('Stream established, processing responses...');
 
       // Process response stream
       await this.processResponseStream(response, session);
@@ -2061,10 +2064,10 @@ export class NovaAgent implements VoiceAssistantProvider {
       // Not once the agent is stopping: stop() closes the session, and its
       // stream ends before the session is cleared.
       if (this.activationMode === 'always_active' && !this.isRefreshing && !this.stopped) {
-        console.log('⚠️  Stream closed unexpectedly - triggering automatic refresh');
+        log.warn('⚠️  Stream closed unexpectedly - triggering automatic refresh');
         // Trigger immediate refresh to recover
         this.refreshSession().catch(error => {
-          console.error('Error in automatic refresh after stream close:', error);
+          log.error('Error in automatic refresh after stream close:', error);
         });
       }
 
@@ -2079,7 +2082,7 @@ export class NovaAgent implements VoiceAssistantProvider {
           `session=${session.id}`,
         );
       } else {
-        console.error('Error in bidirectional streaming:', error);
+        log.error('Error in bidirectional streaming:', error);
       }
       // A translator's next session refused for the quota: the session it was
       // taking over from carries on instead.
@@ -2106,10 +2109,10 @@ export class NovaAgent implements VoiceAssistantProvider {
 
       // Trigger automatic refresh if in always_active mode
       if (this.activationMode === 'always_active' && !this.isRefreshing) {
-        console.log('⚠️  Stream error detected - triggering automatic refresh');
+        log.warn('⚠️  Stream error detected - triggering automatic refresh');
         setTimeout(() => {
           this.refreshSession().catch(err => {
-            console.error('Error in automatic refresh after stream error:', err);
+            log.error('Error in automatic refresh after stream error:', err);
           });
         }, 1000);
       }
@@ -2149,7 +2152,7 @@ export class NovaAgent implements VoiceAssistantProvider {
             }
 
             if (jsonResponse.event?.contentStart) {
-              console.log('Content start:', jsonResponse.event.contentStart.type);
+              log.info('Content start:', jsonResponse.event.contentStart.type);
               // In translator mode up to three sessions deliver events here at
               // once, and the agent-wide audio state below (the interruption
               // gate, the dropped-block flag, the stop acknowledgement's block
@@ -2161,7 +2164,7 @@ export class NovaAgent implements VoiceAssistantProvider {
               
               // Clear interruption gate when Nova starts a new AUDIO content block
               if (jsonResponse.event.contentStart.type === 'AUDIO' && this._isInterrupted) {
-                console.log('✓ New audio content started - clearing interruption gate');
+                log.info('✓ New audio content started - clearing interruption gate');
                 this._isInterrupted = false;
               }
               if (jsonResponse.event.contentStart.type === 'AUDIO') {
@@ -2205,7 +2208,7 @@ export class NovaAgent implements VoiceAssistantProvider {
               }
             } else if (jsonResponse.event?.textOutput) {
               const textContent = jsonResponse.event.textOutput.content;
-              console.log('Text output:', textContent);
+              log.info('Text output:', textContent);
               
               // Check for interruption signal
               if (textContent.includes('"interrupted"') && textContent.includes('true')) {
@@ -2229,12 +2232,12 @@ export class NovaAgent implements VoiceAssistantProvider {
                 this.holdPlayback(session, audioBuffer);
               } else {
                 this.playAudio(audioBuffer).catch(err => {
-                  console.error('Error playing audio:', err);
+                  log.error('Error playing audio:', err);
                 });
               }
             } else if (jsonResponse.event?.toolUse) {
               // Store tool use information
-              console.log('Tool use requested:', jsonResponse.event.toolUse.toolName);
+              log.info('Tool use requested:', jsonResponse.event.toolUse.toolName);
               toolUseContent = jsonResponse.event.toolUse;
               toolUseId = jsonResponse.event.toolUse.toolUseId;
               toolName = jsonResponse.event.toolUse.toolName;
@@ -2258,38 +2261,38 @@ export class NovaAgent implements VoiceAssistantProvider {
               }
             } else if (jsonResponse.event?.contentEnd && jsonResponse.event?.contentEnd?.type === 'TOOL') {
               // Process tool use asynchronously when content ends
-              console.log(`Processing tool use: ${toolName}`);
+              log.info(`Processing tool use: ${toolName}`);
               if (toolName === 'strands_agent' && toolUseContent) {
                 if (lookupSkip) {
                   this.skipStrandsLookup(toolUseId, lookupSkip).catch(error => {
-                    console.error('Error answering a skipped lookup:', error);
+                    log.error('Error answering a skipped lookup:', error);
                   });
                 } else {
                   this.processToolUseAsync(toolUseId, toolName, toolUseContent).catch(error => {
-                    console.error('Error in async tool processing:', error);
+                    log.error('Error in async tool processing:', error);
                   });
                 }
                 lookupSkip = null;
               } else if (toolName === 'mute') {
                 // Handle mute tool call
                 this.handleMuteTool(toolUseId, session).catch(error => {
-                  console.error('Error handling mute tool:', error);
+                  log.error('Error handling mute tool:', error);
                 });
               } else if (toolName === 'set_mode' && toolUseContent) {
                 this.handleSetModeTool(toolUseId, toolUseContent, session).catch(error => {
-                  console.error('Error handling set_mode tool:', error);
+                  log.error('Error handling set_mode tool:', error);
                 });
               } else if (toolName === 'unmute') {
                 // Handle unmute tool call (translator-mode only)
                 this.handleUnmuteTool(toolUseId, session).catch(error => {
-                  console.error('Error handling unmute tool:', error);
+                  log.error('Error handling unmute tool:', error);
                 });
               }
             } else if (jsonResponse.event?.contentEnd) {
               // The stop reason tells a finished turn (END_TURN) from one still
               // being spoken (PARTIAL_TURN) or cut off (INTERRUPTED).
               const endReason = jsonResponse.event.contentEnd.stopReason;
-              console.log(`Content end: ${jsonResponse.event.contentEnd.type}${endReason ? ` ${endReason}` : ''}`);
+              log.info(`Content end: ${jsonResponse.event.contentEnd.type}${endReason ? ` ${endReason}` : ''}`);
               if (jsonResponse.event.contentEnd.type === 'AUDIO') {
                 this.noteAudioBlockEnded();
                 this.dropCurrentAudioBlock = false;
@@ -2340,7 +2343,7 @@ export class NovaAgent implements VoiceAssistantProvider {
                 && !skipForTranslatorMuted && !unheardReply
               ) {
                 this.addToConversationHistory(currentTurn.role, currentTurn.content.trim());
-                console.log(`💬 Saved ${currentTurn.role} turn to history: "${currentTurn.content.substring(0, 50)}..."`);
+                log.info(`💬 Saved ${currentTurn.role} turn to history: "${currentTurn.content.substring(0, 50)}..."`);
                 if (currentTurn.role === 'ASSISTANT') {
                   // What the assistant actually said, for the transcript path
                   // when no ASR source is transcribing its voice. Not published
@@ -2379,18 +2382,18 @@ export class NovaAgent implements VoiceAssistantProvider {
             }
           } catch (e) {
             // Not JSON, might be raw data
-            console.log('Non-JSON response:', textResponse.substring(0, 100));
+            log.info('Non-JSON response:', textResponse.substring(0, 100));
           }
         } else if (event.modelStreamErrorException) {
-          console.error('Model stream error:', event.modelStreamErrorException);
+          log.error('Model stream error:', event.modelStreamErrorException);
         } else if (event.internalServerException) {
-          console.error('Internal server error:', event.internalServerException);
+          log.error('Internal server error:', event.internalServerException);
         }
       }
 
-      console.log('Response stream processing complete');
+      log.info('Response stream processing complete');
     } catch (error) {
-      console.error('Error processing response stream:', error);
+      log.error('Error processing response stream:', error);
     }
   }
 
@@ -2450,7 +2453,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // moment after it was asked back.
     if (this.groupMeetingMode) {
       if (this._isMuted && !askedToStop) {
-        console.log('🔓 Wake phrase detected in user speech - proactively unmuting agent');
+        log.info('🔓 Wake phrase detected in user speech - proactively unmuting agent');
         // Group mode clears the gate directly rather than through unmute(),
         // because unmute() marks the conversation active and would suppress the
         // session started just below — so the request in flight has to be
@@ -2491,14 +2494,14 @@ export class NovaAgent implements VoiceAssistantProvider {
    * why, so that it stays silent rather than retrying.
    */
   private async skipStrandsLookup(toolUseId: string, reason: LookupSkipReason): Promise<void> {
-    console.log(skippedLookupLogLine(reason, this.meetingMode, this.activationMode));
+    log.info(skippedLookupLogLine(reason, this.meetingMode, this.activationMode));
     if (!this.session || !this.session.isActive) {
       return;
     }
     try {
       await this.sendToolResult(toolUseId, SKIPPED_LOOKUP_RESULT);
     } catch (err) {
-      console.warn('Failed to send the skipped-lookup tool result (non-fatal):', err);
+      log.warn('Failed to send the skipped-lookup tool result (non-fatal):', err);
     }
   }
 
@@ -2520,7 +2523,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       // Set flag to prevent deactivation while tool is processing
       this.toolCallsInFlight++;
       this._isProcessingTool = true;
-      console.log(`🔧 Starting async tool processing: ${toolName}`);
+      log.info(`🔧 Starting async tool processing: ${toolName}`);
       
       // Clear conversation timeout during tool execution to prevent premature auto-mute
       // The timeout will be restarted after tool completes
@@ -2535,12 +2538,12 @@ export class NovaAgent implements VoiceAssistantProvider {
       // issued the tool use, and only while it is still active)
       if (sessionStillOurs()) {
         await this.sendToolResult(toolUseId, toolResult);
-        console.log('✓ Tool result sent to Nova - Nova will now process and generate audio response');
+        log.info('✓ Tool result sent to Nova - Nova will now process and generate audio response');
       } else {
-        console.log('⚠️  Session replaced or closed before tool result could be sent - discarding it');
+        log.warn('⚠️  Session replaced or closed before tool result could be sent - discarding it');
       }
     } catch (error) {
-      console.error('Error processing tool use:', error);
+      log.error('Error processing tool use:', error);
       this.noteToolResultReady(toolUseId);
       // Send error result back to Nova, under the same condition
       if (sessionStillOurs()) {
@@ -2566,7 +2569,7 @@ export class NovaAgent implements VoiceAssistantProvider {
           // Restart conversation timeout after tool completes (fresh 30 seconds)
           // This ensures Nova has time to deliver the tool result
           if (this.groupMeetingMode && this.conversationActive) {
-            console.log('🔄 Restarting conversation timeout after tool completion (with 2s padding)');
+            log.info('🔄 Restarting conversation timeout after tool completion (with 2s padding)');
             this.startConversationSession();
           }
         }, 2000);
@@ -2576,7 +2579,7 @@ export class NovaAgent implements VoiceAssistantProvider {
           this.checkAndExecuteQueuedRefresh();
         }
       }, 2000);
-      console.log(`✓ Async tool processing complete: ${toolName}`);
+      log.info(`✓ Async tool processing complete: ${toolName}`);
     }
   }
 
@@ -2585,13 +2588,13 @@ export class NovaAgent implements VoiceAssistantProvider {
       throw new Error('Strands Lambda not configured');
     }
 
-    console.log('Invoking Strands agent Lambda directly...');
+    log.info('Invoking Strands agent Lambda directly...');
     
     // Parse the tool use content to get the query
     const contentObject = JSON.parse(toolUseContent.content);
     const query = contentObject.query;
     
-    console.log(`Query for Strands agent: ${query}`);
+    log.info(`Query for Strands agent: ${query}`);
 
     // Build payload for direct Strands agent invocation
     // The Strands agent Lambda expects: text, call_id, conversation_history, etc.
@@ -2607,7 +2610,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       dynamodb_pk: `c#${callId}`,  // Use callId for dynamodb_pk (matches database schema)
     };
 
-    console.log('Strands agent payload:', JSON.stringify(payload));
+    log.info('Strands agent payload:', JSON.stringify(payload));
 
     // Invoke the Strands Lambda function with RequestResponse for synchronous result
     const command = new InvokeCommand({
@@ -2621,7 +2624,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // Parse the Lambda response
     const responsePayload = JSON.parse(new TextDecoder().decode(response.Payload));
     
-    console.log('Strands agent response received:', JSON.stringify(responsePayload).substring(0, 200));
+    log.info('Strands agent response received:', JSON.stringify(responsePayload).substring(0, 200));
     
     // The answer is written for the meeting chat, in markdown. Nova Sonic is
     // handed it to speak, and given a markdown answer late in a session it
@@ -2638,7 +2641,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       throw new Error('No active session to send tool result');
     }
 
-    console.log(`Sending tool result for tool use ID: ${toolUseId}`);
+    log.info(`Sending tool result for tool use ID: ${toolUseId}`);
     const contentId = randomUUID();
 
     // Tool content start
@@ -2691,7 +2694,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       }
     });
 
-    console.log('Tool result sent to Nova');
+    log.info('Tool result sent to Nova');
   }
 
   private async handleMuteTool(toolUseId: string, issuingSession: SessionData | null = this.session): Promise<void> {
@@ -2701,18 +2704,18 @@ export class NovaAgent implements VoiceAssistantProvider {
     // that only the resume phrase brings back.
     if (issuingSession?.silenced) {
       // The session already acted on as "stop translating".
-      console.log('[voice-mode] action=mute-tool-ignored why=stop-translating');
+      log.info('[voice-mode] action=mute-tool-ignored why=stop-translating');
       return;
     }
     if (
       this.meetingMode === 'translator'
       && (this.leavingTranslator || Date.now() - this.leaveTranslatorRequestedAt < LEAVE_TRANSLATOR_MUTE_WINDOW_MS)
     ) {
-      console.log('[voice-mode] action=mute-tool-taken-as-stop-translating');
+      log.info('[voice-mode] action=mute-tool-taken-as-stop-translating');
       this.handleStopTranslating(issuingSession, 'tool');
       return;
     }
-    console.log('🔇 Mute tool called - muting agent');
+    log.info('🔇 Mute tool called - muting agent');
     // Only translator mode gets an audible cue, sounded before the audio gate
     // engages so the beep itself isn't dropped. That mode replaces the base
     // system prompt and so carries no STOP REQUESTS block, leaving the tone the
@@ -2741,7 +2744,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // translator nobody asked to pause. Its tool result would also go to a
     // session that never issued the tool use.
     if (this.meetingModeGeneration !== generation) {
-      console.log(
+      log.info(
         `[stop-request] route=tool action=superseded-by-mode-change`
         + ` from=${calledInMode} to=${this.meetingMode}`,
       );
@@ -2750,7 +2753,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // "Stop translating" arrived on the participants' transcript during that
     // wait, and leaving translator mode is under way.
     if (this.meetingMode === 'translator' && this.leavingTranslator) {
-      console.log('[voice-mode] action=mute-tool-superseded why=stop-translating');
+      log.info('[voice-mode] action=mute-tool-superseded why=stop-translating');
       return;
     }
 
@@ -2772,7 +2775,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       // gate behind the acknowledgement, or finding it already shut because the
       // fallback got there first — in which case nothing was drained and the
       // word, if it was generated at all, was dropped.
-      console.log(
+      log.info(
         `[stop-request] route=tool action=acknowledged`
         + ` gate=${this._isMuted ? 'already-shut' : 'draining'}`
         + ` flush_ms=${this.MUTE_TOOL_AUDIO_FLUSH_MS}`
@@ -2806,21 +2809,21 @@ export class NovaAgent implements VoiceAssistantProvider {
           instruction: muteInstruction,
         });
       } catch (err) {
-        console.warn('Failed to send mute tool result (non-fatal):', err);
+        log.warn('Failed to send mute tool result (non-fatal):', err);
       }
-      console.log('✓ Agent muted successfully');
+      log.info('✓ Agent muted successfully');
     }
 
     // In translator mode, swap into the MUTED-state session (paused prompt,
     // only the `unmute` tool registered).
     if (this.meetingMode === 'translator') {
       this._translatorState = 'MUTED';
-      console.log('🔄 Translator state -> MUTED, refreshing session...');
+      log.info('🔄 Translator state -> MUTED, refreshing session...');
       if (this.participantTranscriptSeen) {
-        console.log('[translator] action=paused audio=withheld resume=transcript');
+        log.info('[translator] action=paused audio=withheld resume=transcript');
       }
       this.refreshSession().catch(error => {
-        console.error('Error refreshing session for translator MUTE transition:', error);
+        log.error('Error refreshing session for translator MUTE transition:', error);
       });
     }
   }
@@ -2828,10 +2831,10 @@ export class NovaAgent implements VoiceAssistantProvider {
   private async handleUnmuteTool(toolUseId: string, issuingSession: SessionData | null = this.session): Promise<void> {
     if (this.meetingMode === 'translator' && this._translatorState === 'UNMUTED') {
       // Resumed already, from the participants' transcript.
-      console.log('[translator] action=unmute-tool-ignored why=already-resumed');
+      log.info('[translator] action=unmute-tool-ignored why=already-resumed');
       return;
     }
-    console.log('🔓 Unmute tool called - unmuting agent');
+    log.info('🔓 Unmute tool called - unmuting agent');
     this.unmute('tool');
     // Audio gate is now off; play the unmute confirmation tone directly.
     this.playConfirmationTone('unmute');
@@ -2847,18 +2850,18 @@ export class NovaAgent implements VoiceAssistantProvider {
           instruction: unmuteInstruction,
         });
       } catch (err) {
-        console.warn('Failed to send unmute tool result (non-fatal):', err);
+        log.warn('Failed to send unmute tool result (non-fatal):', err);
       }
-      console.log('✓ Agent unmuted successfully');
+      log.info('✓ Agent unmuted successfully');
     }
 
     // In translator mode, swap into the UNMUTED-state session (translator
     // prompt, only the `mute` tool registered).
     if (this.meetingMode === 'translator') {
       this._translatorState = 'UNMUTED';
-      console.log('🔄 Translator state -> UNMUTED, refreshing session...');
+      log.info('🔄 Translator state -> UNMUTED, refreshing session...');
       this.refreshSession().catch(error => {
-        console.error('Error refreshing session for translator UNMUTE transition:', error);
+        log.error('Error refreshing session for translator UNMUTE transition:', error);
       });
     }
   }
@@ -2895,7 +2898,7 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     this.audioChunkCount++;
     if (this.audioChunkCount % 100 === 0) {
-      console.log(`📡 Sent ${this.audioChunkCount} audio chunks to Nova (${chunk.length} bytes each)`);
+      log.info(`📡 Sent ${this.audioChunkCount} audio chunks to Nova (${chunk.length} bytes each)`);
     }
 
     // Send audio chunk to Nova Sonic 2 (even when speaking, to enable barge-in)
@@ -2917,11 +2920,11 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   sendUserMessage(text: string): void {
     if (!this._isActive || !this.session || !this.session.isActive) {
-      console.error('Cannot send message: Session not active');
+      log.error('Cannot send message: Session not active');
       return;
     }
 
-    console.log('📤 Sending text message to Nova:', text);
+    log.info('📤 Sending text message to Nova:', text);
     
     // Track user message in conversation history
     this.addToConversationHistory('USER', text);
@@ -3005,9 +3008,9 @@ export class NovaAgent implements VoiceAssistantProvider {
       pcm = Buffer.concat([a, gap, b]);
     }
     if (this.writePlayback(pcm, false)) {
-      console.log(`🔔 Played ${kind} confirmation tone (${pcm.length} bytes)`);
+      log.info(`🔔 Played ${kind} confirmation tone (${pcm.length} bytes)`);
     } else {
-      console.warn(`⚠️  Could not play ${kind} confirmation tone — pacat stream unavailable`);
+      log.warn(`⚠️  Could not play ${kind} confirmation tone — pacat stream unavailable`);
     }
   }
 
@@ -3032,7 +3035,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // not feel slower to reply.
     const playbackLatencyMs = parseInt(process.env.NOVA_PLAYBACK_LATENCY_MS || '80');
 
-    console.log(
+    log.info(
       `🔊 Starting persistent pacat playback stream (${playbackRate}Hz, ${playbackLatencyMs}ms buffer)...`,
     );
     const spawned = spawn('pacat', [
@@ -3050,29 +3053,29 @@ export class NovaAgent implements VoiceAssistantProvider {
     // now" — see forgetPacatStream.
     spawned.stdin?.on('error', (error: any) => {
       if (error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED') {
-        console.log('🔊 pacat stdin closed (expected during cleanup)');
+        log.info('🔊 pacat stdin closed (expected during cleanup)');
       } else {
-        console.error('❌ pacat stdin error:', error);
+        log.error('❌ pacat stdin error:', error);
       }
       this.forgetPacatStream(spawned);
     });
 
     spawned.on('close', (code: number) => {
-      console.log(`🔊 pacat process exited with code ${code}`);
+      log.info(`🔊 pacat process exited with code ${code}`);
       this.forgetPacatStream(spawned);
     });
 
     spawned.on('error', (error: Error) => {
-      console.error('❌ pacat process error:', error);
+      log.error('❌ pacat process error:', error);
       this.forgetPacatStream(spawned);
     });
 
     spawned.stderr?.on('data', (data: Buffer) => {
       const msg = data.toString().trim();
-      if (msg) console.log(`pacat: ${msg}`);
+      if (msg) log.info(`pacat: ${msg}`);
     });
 
-    console.log('✓ Persistent pacat playback stream started');
+    log.info('✓ Persistent pacat playback stream started');
     return spawned;
   }
 
@@ -3128,7 +3131,7 @@ export class NovaAgent implements VoiceAssistantProvider {
         // Ignore errors during cleanup
       }
       this.pacatProcess = null;
-      console.log(`✓ Persistent pacat stream stopped (${mode})`);
+      log.info(`✓ Persistent pacat stream stopped (${mode})`);
     }
     // Clear speaking state. Note what _isSpeaking means after a `drain`: this
     // agent has stopped accepting speech, not that the meeting has stopped
@@ -3216,7 +3219,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // acknowledgement of a stop request made through the mute tool.
     if (this._isMuted && !isStopAck) {
       this.noteStopAckDropped('muted');
-      console.log('🔇 Audio dropped - agent is muted');
+      log.info('🔇 Audio dropped - agent is muted');
       return;
     }
     
@@ -3262,7 +3265,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.speakingTimeout = setTimeout(() => {
       this._isSpeaking = false;
       this.speakingTimeout = null;
-      console.log('✅ Assistant audio stopped arriving - speaking state cleared');
+      log.info('✅ Assistant audio stopped arriving - speaking state cleared');
       
       // Check if there's a queued refresh waiting for agent to be idle
       if (this.refreshQueued) {
@@ -3287,14 +3290,14 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
 
-    console.log('🔌 Pre-connecting Nova session (wake phrase detected in partial)...');
+    log.info('🔌 Pre-connecting Nova session (wake phrase detected in partial)...');
     this._preConnecting = true;
     this._preConnectPromise = this.createSession()
       .then(() => {
-        console.log('✓ Nova session pre-connected — ready for activation');
+        log.info('✓ Nova session pre-connected — ready for activation');
       })
       .catch((error) => {
-        console.error('❌ Nova pre-connect failed:', error);
+        log.error('❌ Nova pre-connect failed:', error);
       })
       .finally(() => {
         this._preConnecting = false;
@@ -3311,7 +3314,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
 
     const activationDuration = duration || this.defaultActivationDuration;
-    console.log(`🎤 Nova agent activated for ${activationDuration} seconds`);
+    log.info(`🎤 Nova agent activated for ${activationDuration} seconds`);
     // Activation is by wake phrase.
     this.lastAddressedAt = Date.now();
     
@@ -3320,7 +3323,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // and asks the latest question it was given.
     if (this.activationOpening) {
       if (initialContext) this.activationContext = initialContext;
-      console.log('⏳ Activation already opening its session - not opening another');
+      log.info('⏳ Activation already opening its session - not opening another');
       return;
     }
     this.activationContext = initialContext;
@@ -3332,7 +3335,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     const opening = (async () => {
       // Create session if not already active (may already be pre-connected)
       if (!this._isActive && this._preConnecting && this._preConnectPromise) {
-        console.log('⏳ Waiting for in-flight pre-connect to complete...');
+        log.info('⏳ Waiting for in-flight pre-connect to complete...');
         await this._preConnectPromise;
       }
       return this.openAssistantSession();
@@ -3394,7 +3397,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (initialContext) {
       const question = this.extractQuestion(initialContext);
       if (question && question.length > 5) {
-        console.log('📝 Sending initial question to Nova:', question);
+        log.info('📝 Sending initial question to Nova:', question);
         this.sendUserMessage(question);
       }
     }
@@ -3419,16 +3422,16 @@ export class NovaAgent implements VoiceAssistantProvider {
     for (let attempt = 0; attempt < ASSISTANT_OPEN_ATTEMPTS; attempt++) {
       if (this.stopped) return false;
       if (!this._isActive) {
-        console.log('🔌 Creating Nova session...');
+        log.info('🔌 Creating Nova session...');
         try {
           await this.createSession();
-          console.log('✓ Session created');
+          log.info('✓ Session created');
         } catch (error) {
-          console.error('❌ Failed to create session:', error);
+          log.error('❌ Failed to create session:', error);
           return false;
         }
       } else if (attempt === 0) {
-        console.log('✓ Session already active (pre-connected)');
+        log.info('✓ Session already active (pre-connected)');
       }
       const session = this.session as SessionData | null;
       // Nothing to wait on: as before, an active agent or a created session
@@ -3442,12 +3445,12 @@ export class NovaAgent implements VoiceAssistantProvider {
       this.discardSession(session);
       if (attempt + 1 >= ASSISTANT_OPEN_ATTEMPTS) break;
       const delay = throttleBackoffMs(attempt, this.assistantOpenBackoff);
-      console.warn(
+      log.warn(
         `[nova-throttle] action=retry-activation attempt=${attempt + 1}/${ASSISTANT_OPEN_ATTEMPTS} retry_in_ms=${delay}`,
       );
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
-    console.warn(
+    log.warn(
       `[nova-throttle] action=gave-up-activation attempts=${ASSISTANT_OPEN_ATTEMPTS}`
       + ' - the assistant stays silent for this wake phrase; the next one tries again',
     );
@@ -3505,7 +3508,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
 
-    console.log('🔇 Nova agent deactivated');
+    log.info('🔇 Nova agent deactivated');
     this._isActivated = false;
     this.activationWindow.stop();
 
@@ -3515,11 +3518,11 @@ export class NovaAgent implements VoiceAssistantProvider {
     // deactivate(); it is here so that the guarantee holds for every caller.
     const unplayedMs = Math.round(this.playbackEndsAt - Date.now());
     if (this.activationMode === 'wake_phrase' && unplayedMs > 0) {
-      console.log(`🔇 Cutting ${unplayedMs} ms of unplayed assistant audio as the session closes`);
+      log.info(`🔇 Cutting ${unplayedMs} ms of unplayed assistant audio as the session closes`);
       try {
         this.stopPacatStream();
       } catch (err) {
-        console.warn('stopPacatStream during deactivate() failed (non-fatal):', err);
+        log.warn('stopPacatStream during deactivate() failed (non-fatal):', err);
       }
       if (simliAvatar.isConnected()) {
         simliAvatar.clearAudioBuffer().catch(() => {});
@@ -3529,7 +3532,7 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     // In wake_phrase mode, close session to save costs
     if (this.activationMode === 'wake_phrase' && this.session) {
-      console.log('💰 Closing session to save costs (wake_phrase mode)');
+      log.info('💰 Closing session to save costs (wake_phrase mode)');
       this.closeSession();
     }
   }
@@ -3537,7 +3540,7 @@ export class NovaAgent implements VoiceAssistantProvider {
   private async closeSession(): Promise<void> {
     if (!this.session) return;
 
-    console.log('Closing Nova session...');
+    log.info('Closing Nova session...');
     this.closeDrainingSessions('closed');
     this.cancelToolAck('session-closed');
     this.dropCurrentAudioBlock = false;
@@ -3549,7 +3552,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (this.sessionRefreshTimer) {
       clearTimeout(this.sessionRefreshTimer);
       this.sessionRefreshTimer = null;
-      console.log('✓ Session refresh timer cleared');
+      log.info('✓ Session refresh timer cleared');
     }
     
     // Clear conversation timeout
@@ -3598,9 +3601,9 @@ export class NovaAgent implements VoiceAssistantProvider {
       this._isActive = false;
       this.streamingActive = false;
 
-      console.log('✓ Session closed');
+      log.info('✓ Session closed');
     } catch (error) {
-      console.error('Error closing session:', error);
+      log.error('Error closing session:', error);
       // Force cleanup
       this.session = null;
       this.sessionId = null;
@@ -3610,7 +3613,7 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   async stop(): Promise<void> {
-    console.log('Stopping Nova agent...');
+    log.info('Stopping Nova agent...');
 
     // Before anything awaits, so a recovery timer firing during the teardown
     // below already sees it.
@@ -3653,7 +3656,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     await this.usage?.flush();
 
     this._isActivated = false;
-    console.log('✓ Nova agent stopped');
+    log.info('✓ Nova agent stopped');
   }
 
   /**
@@ -3721,7 +3724,7 @@ export class NovaAgent implements VoiceAssistantProvider {
         try {
           this.stopPacatStream();
         } catch (err) {
-          console.warn('stopPacatStream during mute() failed (non-fatal):', err);
+          log.warn('stopPacatStream during mute() failed (non-fatal):', err);
         }
         if (simliAvatar.isConnected()) {
           simliAvatar.clearAudioBuffer().catch(() => {});
@@ -3729,13 +3732,13 @@ export class NovaAgent implements VoiceAssistantProvider {
       }
       return;
     }
-    console.log(`🔇 Nova agent muted${reason ? ` (${reason})` : ''}`);
+    log.info(`🔇 Nova agent muted${reason ? ` (${reason})` : ''}`);
     this._isMuted = true;
     this.conversationActive = false;
     try {
       this.stopPacatStream();
     } catch (err) {
-      console.warn('stopPacatStream during mute() failed (non-fatal):', err);
+      log.warn('stopPacatStream during mute() failed (non-fatal):', err);
     }
     // The avatar buffers its own copy of the speech for lip-sync, so without
     // this it keeps mouthing the rest of an utterance nobody can hear. Same
@@ -3770,7 +3773,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // (finishStopAck). Handing it off now would mean the next chunk of the
     // same word spawning a new stream, which kills the one holding its start.
     const holdForAck = this.stopAck !== null && this.stopAck.blockOpenedAt !== null;
-    console.log(
+    log.info(
       `🔇 Nova agent muted (${reason}, ${holdForAck ? 'holding playback for the acknowledgement' : 'draining playback'})`,
     );
     this._isMuted = true;
@@ -3786,7 +3789,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     try {
       this.stopPacatStream('drain');
     } catch (err) {
-      console.warn('draining playback during mute failed (non-fatal):', err);
+      log.warn('draining playback during mute failed (non-fatal):', err);
     }
   }
 
@@ -3797,7 +3800,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (!this._isMuted) {
       return;
     }
-    console.log(`🔓 Nova agent unmuted${reason ? ` (${reason})` : ''}`);
+    log.info(`🔓 Nova agent unmuted${reason ? ` (${reason})` : ''}`);
     this._isMuted = false;
     this.conversationActive = true;
 
@@ -3843,7 +3846,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // saying UNMUTED with only the `mute` tool registered, so the resume phrase
     // would have no tool to call and the translator would never speak again.
     if (this.meetingMode === 'translator') {
-      console.log('🌐 Translator mode - stop requests are only taken from the configured pause phrase');
+      log.info('🌐 Translator mode - stop requests are only taken from the configured pause phrase');
       this.logStopRequest('declined-translator');
       return false;
     }
@@ -3943,7 +3946,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     const late = lateFrom !== null;
     const latency = against === null ? 'n/a' : `${now - against}`;
 
-    console.log(
+    log.info(
       `[stop-request] route=tool action=claimed transcript_deferred=${against !== null}`
       + ` tool_latency_ms=${latency} late=${late}`
       + ` speaking=${this._isSpeaking} interrupted=${this._isInterrupted}`
@@ -3957,7 +3960,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       try {
         this.stopPacatStream('drain');
       } catch (err) {
-        console.warn('draining acknowledgement playback failed (non-fatal):', err);
+        log.warn('draining acknowledgement playback failed (non-fatal):', err);
       }
     }
 
@@ -4022,14 +4025,14 @@ export class NovaAgent implements VoiceAssistantProvider {
       // The other route already silenced the assistant — on the tool path that
       // means the meeting heard "Okay" and then nothing, which is the whole
       // point of the window.
-      console.log(
+      log.info(
         `[stop-request] route=${route} action=stood-down elapsed_ms=${elapsedMs}`
         + ` tool_seen=${request.toolSeen} interrupted=${this._isInterrupted}`,
       );
       return;
     }
 
-    console.log(
+    log.info(
       `[stop-request] route=${route} action=fired-fallback elapsed_ms=${elapsedMs}`
       + ` tool_seen=${request.toolSeen} interrupted=${this._isInterrupted}`
       + ` speaking=${this._isSpeaking}`,
@@ -4047,7 +4050,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       try {
         this.stopPacatStream('drain');
       } catch (err) {
-        console.warn('draining acknowledgement playback failed (non-fatal):', err);
+        log.warn('draining acknowledgement playback failed (non-fatal):', err);
       }
     }
     const request = this.stopRequest;
@@ -4058,7 +4061,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       clearTimeout(request.timer);
     }
     this.stopRequest = null;
-    console.log(
+    log.info(
       `[stop-request] route=${request.fromTranscript ? 'transcript' : 'tool'}`
       + ` action=cancelled why=${why}`
       + ` elapsed_ms=${Date.now() - request.seenAt} tool_seen=${request.toolSeen}`,
@@ -4090,7 +4093,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.cancelToolAck('superseded');
     const preambleAt = this.lastAssistantAudioStartAt;
     if (preambleAt > 0 && preambleAt >= now - TOOL_ACK_LOOKBACK_MS && preambleAt > this.lastUserTextAt) {
-      console.log(`[tool-ack] source=model latency_ms=${preambleAt - now}`);
+      log.info(`[tool-ack] source=model latency_ms=${preambleAt - now}`);
       return;
     }
     const pending: NonNullable<NovaAgent['pendingToolAck']> = {
@@ -4117,14 +4120,14 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
     if (pending.fallbackAt === null) {
-      console.log(`[tool-ack] source=model latency_ms=${now - pending.toolAt}`);
+      log.info(`[tool-ack] source=model latency_ms=${now - pending.toolAt}`);
       this.clearToolAck();
       return;
     }
     if (!pending.resultSent && now - pending.toolAt < TOOL_ACK_LATE_PREAMBLE_MS) {
       // The model's own preamble, arriving after the clip already said it.
       this.dropCurrentAudioBlock = true;
-      console.log(`[tool-ack] action=late-preamble-dropped latency_ms=${now - pending.toolAt}`);
+      log.info(`[tool-ack] action=late-preamble-dropped latency_ms=${now - pending.toolAt}`);
       return;
     }
     // Past the window this is the answer, or a reply to something new.
@@ -4138,7 +4141,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
     if (pending.fallbackAt === null) {
-      console.log(`[tool-ack] source=none reason=result-first latency_ms=${Date.now() - pending.toolAt}`);
+      log.info(`[tool-ack] source=none reason=result-first latency_ms=${Date.now() - pending.toolAt}`);
     }
     pending.resultSent = true;
     this.clearToolAck();
@@ -4170,7 +4173,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     const now = Date.now();
     const skip = this.toolAckSkipReason(pending);
     if (skip) {
-      console.log(`[tool-ack] source=none reason=${skip} latency_ms=${now - pending.toolAt}`);
+      log.info(`[tool-ack] source=none reason=${skip} latency_ms=${now - pending.toolAt}`);
       this.clearToolAck();
       return;
     }
@@ -4179,14 +4182,14 @@ export class NovaAgent implements VoiceAssistantProvider {
     // predates the tool call has already cut off the utterance it interrupted,
     // and the gate only stays shut because Nova has not opened a block since.
     if (!this.writePlayback(clip)) {
-      console.log(`[tool-ack] source=none reason=no-playback latency_ms=${now - pending.toolAt}`);
+      log.info(`[tool-ack] source=none reason=no-playback latency_ms=${now - pending.toolAt}`);
       this.clearToolAck();
       return;
     }
     this.markSpeaking();
     pending.fallbackAt = now;
     this.toolAckPlayingUntil = this.playbackEndsAt;
-    console.log(
+    log.info(
       `[tool-ack] source=fallback latency_ms=${now - pending.toolAt} audio_ms=${pcmDurationMs(clip)}`,
     );
   }
@@ -4203,7 +4206,7 @@ export class NovaAgent implements VoiceAssistantProvider {
   private cancelToolAck(why: string): void {
     const pending = this.pendingToolAck;
     if (pending && pending.fallbackAt === null) {
-      console.log(`[tool-ack] source=none reason=${why} latency_ms=${Date.now() - pending.toolAt}`);
+      log.info(`[tool-ack] source=none reason=${why} latency_ms=${Date.now() - pending.toolAt}`);
     }
     this.clearToolAck();
   }
@@ -4212,11 +4215,11 @@ export class NovaAgent implements VoiceAssistantProvider {
   private silenceToolAck(why: string): void {
     this.cancelToolAck(why);
     if (this.toolAckPlayingUntil > Date.now()) {
-      console.log(`[tool-ack] action=cut why=${why}`);
+      log.info(`[tool-ack] action=cut why=${why}`);
       try {
         this.stopPacatStream();
       } catch (err) {
-        console.warn('stopPacatStream while cutting the acknowledgement failed (non-fatal):', err);
+        log.warn('stopPacatStream while cutting the acknowledgement failed (non-fatal):', err);
       }
       if (simliAvatar.isConnected()) {
         simliAvatar.clearAudioBuffer().catch(() => {});
@@ -4226,7 +4229,7 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   /** Barge-in: drop all assistant audio until Nova opens its next audio block. */
   private handleInterruption(): void {
-    console.log('⚠️  Interruption detected - dropping all audio until next turn');
+    log.info('⚠️  Interruption detected - dropping all audio until next turn');
     this._isInterrupted = true;
     this.lastInterruptionAt = Date.now();
     // Somebody talking over the assistant is talking to it: the window's idle
@@ -4267,7 +4270,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
     ack.blockOpenedAt = Date.now();
-    console.log(
+    log.info(
       `[stop-request] route=${ack.route} action=ack-started delay_ms=${delayMs}`
       + ` gate=${this._isMuted ? 'shut' : 'open'}`,
     );
@@ -4326,7 +4329,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       clearTimeout(ack.timer);
     }
     const audioMs = Math.round(ack.bytes / this.playbackBytesPerMs());
-    console.log(
+    log.info(
       `[stop-request] route=${ack.route} action=${action} audio_ms=${audioMs}`
       + ` gate=${this._isMuted ? 'shut' : 'open'}`
       + ` elapsed_ms=${Date.now() - ack.toolAt}`,
@@ -4335,7 +4338,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       try {
         this.stopPacatStream('drain');
       } catch (err) {
-        console.warn('draining acknowledgement playback failed (non-fatal):', err);
+        log.warn('draining acknowledgement playback failed (non-fatal):', err);
       }
     }
   }
@@ -4360,7 +4363,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // Only worth a line once an acknowledgement had started: an unused window
     // closing is the ordinary case and says nothing.
     if (ack.blockOpenedAt !== null) {
-      console.log(
+      log.info(
         `[stop-request] route=${ack.route} action=ack-cut why=${why}`
         + ` audio_ms=${Math.round(ack.bytes / this.playbackBytesPerMs())}`,
       );
@@ -4394,7 +4397,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     request.ackDropLogged = true;
     // `route` names where the request was recognised, the same as on every
     // other line in the family, so that one CloudWatch filter reads coherently.
-    console.log(
+    log.info(
       `[stop-request] route=${request.fromTranscript ? 'transcript' : 'tool'}`
       + ` action=${request.gateShutByDrain ? 'post-gate-dropped' : 'ack-dropped'}`
       + ` gate=${gate}`
@@ -4407,7 +4410,7 @@ export class NovaAgent implements VoiceAssistantProvider {
    *  Carries the flags and the timings, never the utterance, which is
    *  participant speech. */
   private logStopRequest(action: string): void {
-    console.log(
+    log.info(
       `[stop-request] route=transcript action=${action} mode=${this.meetingMode}`
       + ` window_ms=${STOP_REQUEST_TOOL_GRACE_MS} speaking=${this._isSpeaking}`
       + ` interrupted=${this._isInterrupted} muted=${this._isMuted}`,
@@ -4594,7 +4597,7 @@ export class NovaAgent implements VoiceAssistantProvider {
         // Turns translated under the old pair would prime the new session to
         // keep translating into the language it has just left.
         this.conversationHistory = [];
-        console.log(`🌐 Translator languages are now ${languagesAfter.a} ↔ ${languagesAfter.b} (this meeting only)`);
+        log.info(`🌐 Translator languages are now ${languagesAfter.a} ↔ ${languagesAfter.b} (this meeting only)`);
       }
       if (changed.includes('meetingMode')) {
         this.applyMeetingMode(request.meetingMode as MeetingMode);
@@ -4620,7 +4623,7 @@ export class NovaAgent implements VoiceAssistantProvider {
           detail = 'the assistant will finish switching shortly';
         }
       } catch (error) {
-        console.error('❌ Error rebuilding the Nova session for a mode change:', error);
+        log.error('❌ Error rebuilding the Nova session for a mode change:', error);
         // Only promise the participant a recovery when one was actually
         // scheduled. Where none is needed the mode change is simply done, and
         // the session the next wake phrase builds carries it.
@@ -4683,13 +4686,13 @@ export class NovaAgent implements VoiceAssistantProvider {
         try {
           await this.sendToolResult(toolUseId, result);
         } catch (err) {
-          console.warn('Failed to send set_mode tool result (non-fatal):', err);
+          log.warn('Failed to send set_mode tool result (non-fatal):', err);
         }
       }
     };
 
     if (!isVoiceMode(mode) || !addressed) {
-      console.log(`[voice-mode] mode=${isVoiceMode(mode) ? mode : 'unrecognised'} action=ignored addressed=${addressed}`);
+      log.info(`[voice-mode] mode=${isVoiceMode(mode) ? mode : 'unrecognised'} action=ignored addressed=${addressed}`);
       // The model calls the tool for talk about modes that was not addressed to
       // it, and told to stay silent it still answered out loud after the call
       // in 8 runs of 8 (amazon.nova-2-sonic-v1:0, October 2026), so whatever it
@@ -4710,7 +4713,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     };
     const prediction = predictVoiceModeChange(state, command);
     const sentence = voiceModeSentence(state, command, prediction);
-    console.log(`[voice-mode] mode=${mode} action=${prediction.result === 'applied' ? 'switching' : prediction.result}`);
+    log.info(`[voice-mode] mode=${mode} action=${prediction.result === 'applied' ? 'switching' : prediction.result}`);
 
     if (prediction.result === 'applied') {
       this.pendingVoiceModeSwitch = {
@@ -4727,7 +4730,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       // while a voice switch is waiting, which `reconfigure` cannot see: it
       // would apply this request instead of declining it.
       applyAssistantChatCommand(this, command, null, undefined, 'voice').catch((error) => {
-        console.error('Error recording a voice mode request:', error);
+        log.error('Error recording a voice mode request:', error);
       });
     }
     await reply({
@@ -4752,12 +4755,12 @@ export class NovaAgent implements VoiceAssistantProvider {
       reconfiguring: this._reconfiguring,
     }, pending.command);
     if (now.result !== 'applied') {
-      console.log(`[voice-mode] action=superseded after=${why} now=${now.result}`);
+      log.info(`[voice-mode] action=superseded after=${why} now=${now.result}`);
       return;
     }
-    console.log(`[voice-mode] action=switch after=${why}`);
+    log.info(`[voice-mode] action=switch after=${why}`);
     applyAssistantChatCommand(this, pending.command, null, undefined, 'voice').catch((error) => {
-      console.error('Error applying a voice mode change:', error);
+      log.error('Error applying a voice mode change:', error);
     });
   }
 
@@ -4827,12 +4830,12 @@ export class NovaAgent implements VoiceAssistantProvider {
    *  `unmute` tool does from the paused session. */
   private resumeTranslator(route: 'transcript'): void {
     if (this._reconfiguring || this.leavingTranslator) return;
-    console.log(`[translator] action=resume route=${route}`);
+    log.info(`[translator] action=resume route=${route}`);
     this.unmute(route);
     this.playConfirmationTone('unmute');
     this._translatorState = 'UNMUTED';
     this.refreshSession().catch(error => {
-      console.error('Error refreshing session for translator UNMUTE transition:', error);
+      log.error('Error refreshing session for translator UNMUTE transition:', error);
     });
   }
 
@@ -4867,14 +4870,14 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
     this.leavingTranslator = true;
     if (session) session.silenced = true;
-    console.log(
+    log.info(
       `[voice-mode] mode=assistant action=stop-translating route=${route}`
       + `${request !== undefined ? ' why=wake-phrase-while-paused' : ''}`,
     );
     applyAssistantChatCommand(this, { meetingMode: 'normal' }, null, undefined, 'voice')
       .then(() => {
         if (this.meetingMode !== 'normal') {
-          console.log(`[voice-mode] action=stop-translating-declined meetingMode=${this.meetingMode}`);
+          log.info(`[voice-mode] action=stop-translating-declined meetingMode=${this.meetingMode}`);
           // Still translating, so this session's later answers are to be heard,
           // and a pause asked for next is a pause.
           if (session) session.silenced = false;
@@ -4892,7 +4895,7 @@ export class NovaAgent implements VoiceAssistantProvider {
         }
       })
       .catch((error) => {
-        console.error('Error leaving translator mode by voice:', error);
+        log.error('Error leaving translator mode by voice:', error);
         if (session && this.meetingMode === 'translator') session.silenced = false;
         this.leaveTranslatorRequestedAt = 0;
       })
@@ -4913,7 +4916,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
     this.activate(undefined, request).catch((error) => {
-      console.error('Error activating the assistant after leaving translator mode:', error);
+      log.error('Error activating the assistant after leaving translator mode:', error);
     });
   }
 
@@ -4929,7 +4932,7 @@ export class NovaAgent implements VoiceAssistantProvider {
         this.stoppedTranslatingClip = clip;
       })
       .catch((error) => {
-        console.warn('[voice-mode] action=render-failed', error);
+        log.warn('[voice-mode] action=render-failed', error);
       })
       .finally(() => {
         this.stoppedTranslatingClipRendering = false;
@@ -4942,7 +4945,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     request: AssistantReconfigureRequest,
     outcome: AssistantReconfigureOutcome,
   ): AssistantReconfigureOutcome {
-    console.log(formatAssistantToggleLog(request, outcome));
+    log.info(formatAssistantToggleLog(request, outcome));
     return outcome;
   }
 
@@ -5011,9 +5014,9 @@ export class NovaAgent implements VoiceAssistantProvider {
     // had — a translator opening by answering the last question it was asked.
     this.conversationHistory = [];
 
-    console.log(`🔀 Meeting mode is now ${mode}`);
+    log.info(`🔀 Meeting mode is now ${mode}`);
     if (mode === 'translator') {
-      console.log(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
+      log.info(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
       this.renderStoppedTranslatingClip();
       // A "stop translating" from a previous spell in translator mode says
       // nothing about a pause asked for in this one.
@@ -5033,7 +5036,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // early there, which is a reason the next reader should not have to find.
     this.activationWindow.stop();
 
-    console.log(`🔀 Activation mode is now ${mode}`);
+    log.info(`🔀 Activation mode is now ${mode}`);
   }
 
   /**
@@ -5067,7 +5070,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       // acted on when the assistant finishes speaking or when the periodic timer
       // fires, and a freshly switched group-mode assistant starts muted and so
       // may not speak for a long time.
-      console.warn('⚠️  Session refresh still in flight — queueing a rebuild behind it');
+      log.warn('⚠️  Session refresh still in flight — queueing a rebuild behind it');
       this.refreshQueued = true;
       this.checkAndExecuteQueuedRefresh();
       return 'deferred';
@@ -5116,7 +5119,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       // `createSession` returns early when a stream is already marked active, so
       // it can resolve without having opened anything. Report from what is
       // there, the same way `refreshIntoNewMode` does.
-      console.warn('⚠️  No session opened for the new mode — scheduling a recovery');
+      log.warn('⚠️  No session opened for the new mode — scheduling a recovery');
       this.scheduleSessionRecovery();
       return 'deferred';
     }
@@ -5140,7 +5143,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (this.session && this.session.isActive) {
       return 'rebuilt';
     }
-    console.warn('⚠️  Session refresh for a mode change produced no session — its own retry will build one');
+    log.warn('⚠️  Session refresh for a mode change produced no session — its own retry will build one');
     return 'deferred';
   }
 
@@ -5189,13 +5192,13 @@ export class NovaAgent implements VoiceAssistantProvider {
       // session is assigned before the flag is set, and the event stream ends
       // as soon as there is no session to read from, so nothing is streaming.
       if (this.streamingActive) {
-        console.warn('⚠️  Clearing a stream flag left set with no session, so the recovery can open one');
+        log.warn('⚠️  Clearing a stream flag left set with no session, so the recovery can open one');
         this.streamingActive = false;
         this._isActive = false;
       }
-      console.log('🔄 Recovering the Nova session after a failed mode change');
+      log.warn('🔄 Recovering the Nova session after a failed mode change');
       this.createSession().catch(error => {
-        console.error('Error recovering the Nova session after a mode change:', error);
+        log.error('Error recovering the Nova session after a mode change:', error);
       });
     });
     return true;

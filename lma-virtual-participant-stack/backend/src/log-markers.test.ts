@@ -50,6 +50,18 @@ const MARKERS: Marker[] = [
     { marker: '[nova-throttle]', readers: 'docs/voice-assistant.md' },
     { marker: '[DIARIZATION]', readers: 'docs/virtual-participant.md' },
     { marker: '[SETTINGS]', readers: 'operators checking which settings a participant started with' },
+    { marker: '[teams-sdk] joined meeting', readers: 'docs/teams-acs-sdk.md' },
+    { marker: '[zoom-sdk] joined meeting', readers: 'docs/zoom-meeting-sdk.md' },
+    { marker: '[zoom-sdk] clicked preview', readers: 'docs/dependency-upgrade-validation-runbook.md' },
+    { marker: '[zoom-sdk] joined computer audio', readers: 'docs/dependency-upgrade-validation-runbook.md' },
+    { marker: '[zoom-sdk] started video', readers: 'docs/dependency-upgrade-validation-runbook.md' },
+    { marker: '[zoom-sdk] unmuted microphone', readers: 'docs/dependency-upgrade-validation-runbook.md' },
+    { marker: 'ZoomSDK page:', readers: 'docs/dependency-upgrade-validation-runbook.md, docs/zoom-meeting-sdk.md' },
+    {
+        marker: 'dismissing popup',
+        source: "log('dismissing popup",
+        readers: 'docs/zoom-meeting-sdk.md (written by the embedded Zoom SDK page, forwarded as ZoomSDK page:)',
+    },
 ];
 
 const SRC = new URL('../src/', import.meta.url);
@@ -85,6 +97,7 @@ test('the lifecycle lines are written whatever the LOG_LEVEL threshold', () => {
         'Received ${signal}',
         'status updated to COMPLETED due to external termination',
         'Successfully updated VP ${this.participantId} status to',
+        '[SETTINGS] Configuration page values applied:',
     ];
     const lines = productionSource().split('\n');
     for (const marker of lifecycle) {

@@ -47,6 +47,9 @@ import {
     limitedSetting,
     transcribeOptionsProblem,
 } from './configuration-store.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('stack-settings');
 
 interface SettingTarget {
     readonly section: string;
@@ -235,7 +238,9 @@ export const applyConfiguredSettings = async (
 /** What was applied when this module was first imported; see the module comment. */
 export const appliedStackSettings: AppliedSettings = await applyConfiguredSettings();
 
-console.log(
+// Written at any threshold: it carries the notes for a start that fell back to
+// the task's own values, which an operator at WARN needs to see.
+log.always(
     `[SETTINGS] Configuration page values applied: ${appliedStackSettings.applied.join(', ') || 'none'}` +
         (appliedStackSettings.notes.length ? ` (${appliedStackSettings.notes.join('; ')})` : ''),
 );

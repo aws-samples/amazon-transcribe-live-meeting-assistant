@@ -27,6 +27,10 @@
  * a lookup is running throws its answer away (#831).
  */
 
+import { createLogger } from './logger.js';
+
+const log = createLogger('voice-activation-window');
+
 /** How often a held-open window looks again at whether the assistant has gone idle. */
 export const ACTIVATION_RECHECK_MS = 1000;
 
@@ -110,7 +114,7 @@ export class ActivationWindow {
   /** Restart the countdown of a running window and say why. */
   rearm(why: string): void {
     if (!this.running) return;
-    console.log(`🔁 Activation window re-armed (${why})`);
+    log.info(`🔁 Activation window re-armed (${why})`);
     this.noteEngagement();
   }
 
@@ -143,7 +147,7 @@ export class ActivationWindow {
     const hold = this.holdFor(now);
     if (hold) {
       if (hold !== this.holdReason) {
-        console.log(`⏳ Activation window held open (${hold})`);
+        log.info(`⏳ Activation window held open (${hold})`);
       }
       this.holdReason = hold;
       // A participant's turn is not engagement; everything else is the
@@ -159,7 +163,7 @@ export class ActivationWindow {
       this.schedule(remaining);
       return;
     }
-    console.log(`⏰ Activation window elapsed (idle ${now - idleSince} ms of ${this.windowMs} ms)`);
+    log.info(`⏰ Activation window elapsed (idle ${now - idleSince} ms of ${this.windowMs} ms)`);
     this.running = false;
     this.onLapse();
   }

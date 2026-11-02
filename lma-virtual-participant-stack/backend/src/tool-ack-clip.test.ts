@@ -15,6 +15,11 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { renderToolAckClip, TOOL_ACK_MAX_CLIP_MS, pcmDurationMs } from './tool-ack-clip.js';
+import { routeLogsToConsole } from './logger.js';
+
+// Modules on the structured logger write through console here too, so this
+// file's console capture sees their records as it sees console output.
+routeLogsToConsole();
 
 const encoder = new TextEncoder();
 

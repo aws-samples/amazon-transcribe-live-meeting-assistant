@@ -11,12 +11,15 @@ import { VoiceAssistantProvider, ProviderConfig } from './voice-assistant-interf
 import { ElevenLabsAgent } from './elevenlabs-agent.js';
 import { NovaAgent } from './nova-agent.js';
 import { NoOpAgent } from './noop-agent.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('voice-assistant');
 
 /**
  * Create a voice assistant provider based on configuration
  */
 export function createVoiceAssistant(config: ProviderConfig): VoiceAssistantProvider {
-  console.log(`Creating voice assistant: provider=${config.provider}, mode=${config.activationMode}`);
+  log.info(`Creating voice assistant: provider=${config.provider}, mode=${config.activationMode}`);
   
   switch (config.provider) {
     case 'elevenlabs':
@@ -54,10 +57,10 @@ export function createVoiceAssistantFromEnv(): VoiceAssistantProvider {
   const activationMode = (process.env.VOICE_ASSISTANT_ACTIVATION_MODE || 'wake_phrase') as 'always_active' | 'wake_phrase' | 'strands_tool';
   const activationDuration = parseInt(process.env.VOICE_ASSISTANT_ACTIVATION_DURATION || '30');
   
-  console.log(`Voice Assistant Configuration:`);
-  console.log(`  Provider: ${provider}`);
-  console.log(`  Activation Mode: ${activationMode}`);
-  console.log(`  Activation Duration: ${activationDuration}s`);
+  log.info(`Voice Assistant Configuration:`);
+  log.info(`  Provider: ${provider}`);
+  log.info(`  Activation Mode: ${activationMode}`);
+  log.info(`  Activation Duration: ${activationDuration}s`);
 
   // Build provider-specific config
   const baseConfig = {

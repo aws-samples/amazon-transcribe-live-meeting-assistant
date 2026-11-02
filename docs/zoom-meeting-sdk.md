@@ -104,7 +104,7 @@ When both are set, the generated `.env.local` will contain them and `MEETING_ZOO
 | `Failed to create WebGPU Context Provider` / `WebGL is not supported` / `init tf fail` in the browser console | **Harmless noise.** The container runs with `--disable-gpu`; the SDK's video subsystem logs these but still joins and renders fine. Do not enable a GPU/SwiftShader to "fix" it — it has a large CPU cost for no benefit. |
 | `crossOriginIsolated=false` warning | Gallery view degraded to single-stream; the join still works. |
 | VP joins but is silent / no avatar / no transcription | The SDK lands muted, video-off, and sometimes with audio not connected. The handler drives the in-meeting toolbar (join audio, unmute, start video) after join; confirm `media setup complete (audio=true mic=true video=on)` in the log. The avatar (via the patched `getUserMedia`) and the bot's voice (via the `agent_mic` default source) both reach the meeting once video/mic are on. |
-| No consent / AI-summary / interpretation popup gets dismissed | The handler auto-dismisses these (`[zoom-sdk] dismissing popup: ...`). If a specific dialog isn't caught, capture its modal container class + button text so the matcher can be extended. |
+| No consent / AI-summary / interpretation popup gets dismissed | The handler auto-dismisses these (`ZoomSDK page: [LMA-ZoomSDK] dismissing popup: ...`). If a specific dialog isn't caught, capture its modal container class + button text so the matcher can be extended. |
 
 ## Related
 

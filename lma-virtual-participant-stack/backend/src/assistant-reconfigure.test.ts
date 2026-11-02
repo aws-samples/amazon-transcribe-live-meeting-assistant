@@ -34,6 +34,11 @@ import {
     assistantToggleChatReply,
 } from './assistant-toggles.js';
 import { details } from './details.js';
+import { routeLogsToConsole } from './logger.js';
+
+// Modules on the structured logger write through console here too, so this
+// file's console capture sees their records as it sees console output.
+routeLogsToConsole();
 
 // Building an agent and changing its mode both log a great deal, and this file
 // builds a few dozen agents. Node's test runner multiplexes a child's stdout

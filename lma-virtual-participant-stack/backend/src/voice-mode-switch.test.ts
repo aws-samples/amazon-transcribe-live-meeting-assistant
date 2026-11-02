@@ -29,6 +29,11 @@ import {
     voiceModeCommand,
     voiceModeSentence,
 } from './voice-mode-switch.js';
+import { routeLogsToConsole } from './logger.js';
+
+// Modules on the structured logger write through console here too, so this
+// file's console capture sees their records as it sees console output.
+routeLogsToConsole();
 
 // ---------------------------------------------------------------------------
 // The vocabulary and the sentences

@@ -22,6 +22,9 @@ import {
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { ActivationWindow } from './voice-activation-window.js';
 import { spokenStrandsAnswer } from './spoken-text.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('elevenlabs-agent');
 
 export interface ElevenLabsAgentConfig {
   apiKey: string;
@@ -111,34 +114,34 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     this._isMuted = (this.meetingMode === 'group');
 
     if (this.enabled) {
-      console.log('✓ ElevenLabs Conversational AI agent enabled');
-      console.log(`  Activation mode: ${this.activationMode}`);
-      console.log(`  Meeting mode: ${this.meetingMode}`);
+      log.info('✓ ElevenLabs Conversational AI agent enabled');
+      log.info(`  Activation mode: ${this.activationMode}`);
+      log.info(`  Meeting mode: ${this.meetingMode}`);
       if (this.meetingMode === 'translator') {
-        console.log(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
+        log.info(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
       } else if (this.meetingMode === 'group') {
-        console.log('  Group meeting mode: enabled (starts muted)');
+        log.info('  Group meeting mode: enabled (starts muted)');
       }
       if (this.strandsLambdaArn) {
-        console.log(`  Strands agent tool: enabled`);
+        log.info(`  Strands agent tool: enabled`);
       }
     } else {
-      console.log('ElevenLabs agent disabled - no API key provided');
+      log.info('ElevenLabs agent disabled - no API key provided');
     }
   }
 
   async start(): Promise<void> {
-    console.log(`ElevenLabs agent start() called - enabled: ${this.enabled}, apiKey: ${this.apiKey ? 'SET' : 'NOT SET'}`);
+    log.info(`ElevenLabs agent start() called - enabled: ${this.enabled}, apiKey: ${this.apiKey ? 'SET' : 'NOT SET'}`);
     
     if (!this.enabled) {
-      console.log('ElevenLabs agent disabled - skipping (no API key)');
+      log.info('ElevenLabs agent disabled - skipping (no API key)');
       return;
     }
 
     try {
-      console.log('Starting ElevenLabs Conversational AI agent...');
-      console.log(`Agent ID: ${this.agentId || '(using default agent)'}`);
-      console.log(`Activation mode: ${this.activationMode}`);
+      log.info('Starting ElevenLabs Conversational AI agent...');
+      log.info(`Agent ID: ${this.agentId || '(using default agent)'}`);
+      log.info(`Activation mode: ${this.activationMode}`);
 
       // Load shared voice-assistant configuration from DynamoDB (the Nova Sonic
       // settings are shared across providers for meeting-mode / translator settings).
@@ -150,7 +153,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
             credentials: defaultProvider(),
           });
           const config = await loadNovaSonicConfig(dynamoDbClient, configTables);
-          console.log('✓ Loaded voice-assistant config from DynamoDB');
+          log.info('✓ Loaded voice-assistant config from DynamoDB');
 
           if (config.meetingMode) {
             this.meetingMode = config.meetingMode;
@@ -166,16 +169,16 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
             this.translatorLanguageB = config.translatorLanguageB.trim();
           }
 
-          console.log(`  Meeting mode: ${this.meetingMode}`);
+          log.info(`  Meeting mode: ${this.meetingMode}`);
           if (this.meetingMode === 'translator') {
-            console.log(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
+            log.info(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
             if (this.activationMode !== 'always_active') {
-              console.warn(`  ⚠️  Translator mode requires activation mode 'always_active' to work end-to-end. Current: ${this.activationMode}`);
+              log.warn(`  ⚠️  Translator mode requires activation mode 'always_active' to work end-to-end. Current: ${this.activationMode}`);
             }
           }
         } catch (error) {
-          console.error('Failed to load voice-assistant config from DynamoDB:', error);
-          console.log('Using constructor configuration as fallback');
+          log.error('Failed to load voice-assistant config from DynamoDB:', error);
+          log.info('Using constructor configuration as fallback');
         }
       }
 
@@ -185,23 +188,23 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
           region: this.region,
           credentials: defaultProvider(),
         });
-        console.log('✓ Lambda client initialized for Strands agent tool');
+        log.info('✓ Lambda client initialized for Strands agent tool');
       }
 
       // In wake_phrase mode, defer WebSocket connection until activation
       if (this.activationMode === 'wake_phrase') {
-        console.log('⏸️  Wake phrase mode - WebSocket will connect on first activation');
-        console.log('   This saves costs by not keeping connection open when not in use');
+        log.info('⏸️  Wake phrase mode - WebSocket will connect on first activation');
+        log.info('   This saves costs by not keeping connection open when not in use');
         return;
       }
 
       // For always_active mode, connect immediately
       await this.connectWebSocket();
 
-      console.log('✓ ElevenLabs agent started successfully');
+      log.info('✓ ElevenLabs agent started successfully');
     } catch (error) {
-      console.error('Failed to start ElevenLabs agent:', error);
-      console.error('Error details:', error);
+      log.error('Failed to start ElevenLabs agent:', error);
+      log.error('Error details:', error);
       throw error;
     }
   }
@@ -216,8 +219,8 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
           ? `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${this.agentId}&output_format=${outputFormat}`
           : `wss://api.elevenlabs.io/v1/convai/conversation?output_format=${outputFormat}`;
 
-        console.log(`Connecting to ElevenLabs WebSocket: ${wsUrl}`);
-        console.log(`Output format: ${outputFormat}`);
+        log.info(`Connecting to ElevenLabs WebSocket: ${wsUrl}`);
+        log.info(`Output format: ${outputFormat}`);
 
         this.ws = new WebSocket(wsUrl, {
           headers: {
@@ -226,7 +229,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
         });
 
         this.ws.on('open', () => {
-          console.log('✓ Connected to ElevenLabs Conversational AI');
+          log.info('✓ Connected to ElevenLabs Conversational AI');
           this.isConnected = true;
           // A turn heard on an earlier connection must not let a lookup through on this one.
           this.lastUserTranscript = '';
@@ -255,26 +258,30 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
         this.ws.on('message', async (data: Buffer) => {
           try {
             const message = JSON.parse(data.toString());
-            console.log('📨 WebSocket message:', JSON.stringify(message).substring(0, 200));
+            log.info('📨 WebSocket message:', JSON.stringify(message).substring(0, 200));
             await this.handleWebSocketMessage(message);
           } catch (error) {
-            console.log('📨 Binary data received:', data.length, 'bytes');
+            log.info('📨 Binary data received:', data.length, 'bytes');
             // Binary audio data - play it
             await this.playAudio(data);
           }
         });
 
         this.ws.on('error', (error) => {
-          console.error('❌ WebSocket error:', error);
-          console.error('   Error details:', JSON.stringify(error));
+          log.error('❌ WebSocket error:', error);
+          log.error('   Error details:', JSON.stringify(error));
           this.isConnected = false;
           reject(error);
         });
 
+        const socket = this.ws;
         this.ws.on('close', (code, reason) => {
-          console.log(`❌ WebSocket connection closed`);
-          console.log(`   Close code: ${code}`);
-          console.log(`   Close reason: ${reason || 'none'}`);
+          // stop() and the wake-phrase deactivation clear this.ws as they close
+          // the socket, so a socket that is still this.ws closed unexpectedly.
+          const unexpected = this.ws === socket;
+          const line = `${unexpected ? '❌' : '🔌'} WebSocket connection closed (code ${code}, reason: ${reason || 'none'})`;
+          if (unexpected) log.warn(line);
+          else log.info(line);
           this.isConnected = false;
         });
       } catch (error) {
@@ -284,38 +291,38 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
   }
 
   private async handleWebSocketMessage(message: any): Promise<void> {
-    console.log('Received message:', message.type);
+    log.info('Received message:', message.type);
     
     // Log full message for debugging tool calls
     if (message.type && (message.type.includes('tool') || message.type === 'client_tool_call')) {
-      console.log('📋 Full tool message:', JSON.stringify(message));
+      log.info('📋 Full tool message:', JSON.stringify(message));
     }
 
     switch (message.type) {
       case 'conversation_initiation_metadata':
         const convId = message.conversation_initiation_metadata_event?.conversation_id || message.conversation_id;
-        console.log('✓ Conversation initialized:', convId);
+        log.info('✓ Conversation initialized:', convId);
         // Start capturing audio from meeting and sending to agent
         this.startAudioCapture();
         break;
 
       case 'audio':
         // Audio response from agent - play it in the meeting
-        console.log('🔊 Received audio response from agent');
+        log.info('🔊 Received audio response from agent');
         if (message.audio_event?.audio_base_64) {
           const audioBuffer = Buffer.from(message.audio_event.audio_base_64, 'base64');
-          console.log(`   Audio size: ${audioBuffer.length} bytes`);
+          log.info(`   Audio size: ${audioBuffer.length} bytes`);
           await this.playAudio(audioBuffer);
         }
         break;
 
       case 'agent_response':
-        console.log('📝 Agent text response:', message.agent_response_event?.agent_response);
+        log.info('📝 Agent text response:', message.agent_response_event?.agent_response);
         break;
 
       case 'user_transcript': {
         const userText: string = message.user_transcription_event?.user_transcript || '';
-        console.log('👤 Agent heard:', userText);
+        log.info('👤 Agent heard:', userText);
         if (userText) {
           this.lastUserTranscript = userText;
           this.lastUserTranscriptAt = Date.now();
@@ -336,7 +343,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
           // agent audible again.
           const askedToStop = isStopTalkingRequest(userText, configuredWakePhrases());
           if (this._isMuted && !askedToStop) {
-            console.log('🔓 Wake phrase detected in user transcript - proactively unmuting agent');
+            log.info('🔓 Wake phrase detected in user transcript - proactively unmuting agent');
             this._isMuted = false;
             if (!this.conversationActive) this.startConversationSession();
           }
@@ -356,7 +363,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       }
 
       case 'interruption':
-        console.log('⚠️  Agent interrupted');
+        log.info('⚠️  Agent interrupted');
         // Somebody talking over the assistant is talking to it, so the idle
         // countdown restarts and a correction is not cut off by the window.
         this.activationWindow.noteEngagement();
@@ -369,12 +376,12 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
 
       case 'client_tool_call':
         // Handle client tool calls (ElevenLabs client-side tools)
-        console.log('🔧 Client tool call received:', message.tool_name);
+        log.info('🔧 Client tool call received:', message.tool_name);
         await this.handleClientToolCall(message);
         break;
 
       default:
-        console.log('📨 Unknown message type:', message.type, JSON.stringify(message).substring(0, 200));
+        log.info('📨 Unknown message type:', message.type, JSON.stringify(message).substring(0, 200));
     }
   }
 
@@ -388,20 +395,20 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     const toolCallId = toolCall.tool_call_id;
     const parameters = toolCall.parameters || {};
 
-    console.log(`Processing client tool: ${toolName}`);
-    console.log(`Tool call ID: ${toolCallId}`);
-    console.log(`Parameters:`, JSON.stringify(parameters));
+    log.info(`Processing client tool: ${toolName}`);
+    log.info(`Tool call ID: ${toolCallId}`);
+    log.info(`Parameters:`, JSON.stringify(parameters));
 
     // A muted agent that was not addressed was not asked for anything, and its
     // answer would be dropped; see muted-lookup.ts.
     if (toolName === 'strands_agent') {
       const skip = mutedLookupSkipReason(this._isMuted, this.lastUserTranscript);
       if (skip) {
-        console.log(skippedLookupLogLine(skip, this.meetingMode, this.activationMode));
+        log.info(skippedLookupLogLine(skip, this.meetingMode, this.activationMode));
         try {
           await this.sendClientToolResult(toolCallId, SKIPPED_LOOKUP_RESULT);
         } catch (err) {
-          console.warn('Failed to send the skipped-lookup tool result (non-fatal):', err);
+          log.warn('Failed to send the skipped-lookup tool result (non-fatal):', err);
         }
         return;
       }
@@ -422,10 +429,10 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
 
       // Send tool result back to ElevenLabs
       await this.sendClientToolResult(toolCallId, result);
-      console.log('✓ Tool result sent to ElevenLabs');
+      log.info('✓ Tool result sent to ElevenLabs');
 
     } catch (error) {
-      console.error('Error processing client tool call:', error);
+      log.error('Error processing client tool call:', error);
       // Send error result back to ElevenLabs
       await this.sendClientToolResult(toolCallId, {
         error: 'Failed to process tool request',
@@ -447,14 +454,14 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       throw new Error('Strands Lambda not configured');
     }
 
-    console.log('Invoking Strands agent Lambda...');
+    log.info('Invoking Strands agent Lambda...');
     
     const query = parameters.query;
     if (!query) {
       throw new Error('Missing required parameter: query');
     }
     
-    console.log(`Query for Strands agent: ${query}`);
+    log.info(`Query for Strands agent: ${query}`);
 
     // Build payload for Strands agent invocation
     const callId = process.env.VP_CALL_ID || process.env.MEETING_NAME || 'elevenlabs-voice-agent';
@@ -469,7 +476,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       dynamodb_pk: `c#${callId}`,
     };
 
-    console.log('Strands agent payload:', JSON.stringify(payload));
+    log.info('Strands agent payload:', JSON.stringify(payload));
 
     // Invoke the Strands Lambda function synchronously
     const command = new InvokeCommand({
@@ -483,7 +490,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     // Parse the Lambda response
     const responsePayload = JSON.parse(new TextDecoder().decode(response.Payload));
     
-    console.log('Strands agent response received:', JSON.stringify(responsePayload).substring(0, 200));
+    log.info('Strands agent response received:', JSON.stringify(responsePayload).substring(0, 200));
     
     // The answer is written for the meeting chat, in markdown, and the
     // ElevenLabs agent speaks it: reduced to spoken text, as the Nova Sonic
@@ -500,7 +507,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       throw new Error('WebSocket not connected');
     }
 
-    console.log(`Sending client tool result for tool call ID: ${toolCallId}`);
+    log.info(`Sending client tool result for tool call ID: ${toolCallId}`);
 
     // Format result as string if needed
     const resultString = typeof result === 'string' ? result : JSON.stringify(result);
@@ -513,7 +520,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       is_error: false
     }));
 
-    console.log('Client tool result sent');
+    log.info('Client tool result sent');
   }
 
   // Method to receive audio chunks from transcription service
@@ -537,7 +544,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     if (this.isConnected && this.ws?.readyState === WebSocket.OPEN) {
       this.audioChunkCount++;
       if (this.audioChunkCount % 100 === 0) {
-        console.log(`📡 Sent ${this.audioChunkCount} audio chunks to agent (${audioChunk.length} bytes each)`);
+        log.info(`📡 Sent ${this.audioChunkCount} audio chunks to agent (${audioChunk.length} bytes each)`);
       }
       // Send audio to ElevenLabs agent using correct format from docs
       const audioBase64 = audioChunk.toString('base64');
@@ -555,11 +562,11 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
    */
   public sendUserMessage(text: string): void {
     if (!this.ws || !this.isConnected) {
-      console.error('Cannot send message: WebSocket is not connected');
+      log.error('Cannot send message: WebSocket is not connected');
       return;
     }
 
-    console.log('📤 Sending text message to agent:', text);
+    log.info('📤 Sending text message to agent:', text);
     
     // Correct format per ElevenLabs API docs
     const message = {
@@ -571,7 +578,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
   }
 
   private startAudioCapture(): void {
-    console.log('Audio capture will be provided by transcription service');
+    log.info('Audio capture will be provided by transcription service');
     // Audio chunks will be sent via sendAudioChunk() method
     // No need to create separate FFmpeg process
   }
@@ -580,13 +587,13 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     // Group-meeting mode: drop audio from the agent while muted. This mirrors
     // the Nova agent and gives us wake-phrase-gated speech for ElevenLabs too.
     if (this._isMuted) {
-      console.log('🔇 Audio dropped - agent is muted (group meeting mode)');
+      log.info('🔇 Audio dropped - agent is muted (group meeting mode)');
       return;
     }
 
     // Add audio to queue
     this.audioQueue.push(audioBuffer);
-    console.log(`🎵 Audio chunk queued (${audioBuffer.length} bytes) - Queue size: ${this.audioQueue.length}`);
+    log.info(`🎵 Audio chunk queued (${audioBuffer.length} bytes) - Queue size: ${this.audioQueue.length}`);
     
     // Forward audio to Simli avatar for lip-sync animation
     // This runs in parallel with PulseAudio playback - Simli only uses it for video
@@ -613,14 +620,14 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     while (this.audioQueue.length > 0) {
       const audioBuffer = this.audioQueue.shift()!;
       
-      console.log(`🎵 Playing audio chunk (${audioBuffer.length} bytes) - ${this.audioQueue.length} remaining in queue`);
+      log.info(`🎵 Playing audio chunk (${audioBuffer.length} bytes) - ${this.audioQueue.length} remaining in queue`);
       
       try {
         await this.playChunk(audioBuffer);
       } catch (error) {
         // One chunk failing must not leave the queue marked as playing for
         // good, which would also hold the activation window open.
-        console.error('❌ Audio chunk playback failed (continuing with the queue):', error);
+        log.error('❌ Audio chunk playback failed (continuing with the queue):', error);
       }
     }
 
@@ -629,7 +636,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       this._isSpeaking = false;
       this.isPlayingQueue = false;
       this.playbackEndedAt = Date.now();
-      console.log('✅ All audio chunks played to virtual microphone');
+      log.info('✅ All audio chunks played to virtual microphone');
       // A chunk that arrived during this delay found the queue still marked as
       // playing and was only queued, so it is picked up here.
       if (this.audioQueue.length > 0) {
@@ -659,7 +666,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
           // Expected during cleanup - paplay exited before we finished writing
           resolve();
         } else {
-          console.error('❌ paplay stdin error:', error);
+          log.error('❌ paplay stdin error:', error);
           reject(error);
         }
       });
@@ -671,28 +678,28 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       // Handle paplay completion
       paplay.on('close', (code) => {
         if (code === 0) {
-          console.log('✅ Audio chunk played');
+          log.info('✅ Audio chunk played');
         }
         // During cleanup, non-zero exit is expected
         resolve();
       });
 
       paplay.on('error', (error) => {
-        console.error('❌ paplay error:', error);
+        log.error('❌ paplay error:', error);
         reject(error);
       });
 
       paplay.stderr.on('data', (data) => {
         const msg = data.toString();
         if (msg.trim()) {
-          console.log(`paplay: ${msg.trim()}`);
+          log.info(`paplay: ${msg.trim()}`);
         }
       });
     });
   }
 
   async stop(): Promise<void> {
-    console.log('Stopping ElevenLabs agent...');
+    log.info('Stopping ElevenLabs agent...');
 
     this.activationWindow.stop();
 
@@ -707,7 +714,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     }
 
     this.isConnected = false;
-    console.log('✓ ElevenLabs agent stopped');
+    log.info('✓ ElevenLabs agent stopped');
   }
 
   private _preConnecting: boolean = false;
@@ -721,14 +728,14 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       return;
     }
 
-    console.log('🔌 Pre-connecting ElevenLabs WebSocket (wake phrase detected in partial)...');
+    log.info('🔌 Pre-connecting ElevenLabs WebSocket (wake phrase detected in partial)...');
     this._preConnecting = true;
     this._preConnectPromise = this.connectWebSocket()
       .then(() => {
-        console.log('✓ ElevenLabs WebSocket pre-connected — ready for activation');
+        log.info('✓ ElevenLabs WebSocket pre-connected — ready for activation');
       })
       .catch((error) => {
-        console.error('❌ ElevenLabs pre-connect failed:', error);
+        log.error('❌ ElevenLabs pre-connect failed:', error);
       })
       .finally(() => {
         this._preConnecting = false;
@@ -746,26 +753,26 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     }
 
     const activationDuration = duration || this.defaultActivationDuration;
-    console.log(`🎤 Voice assistant activated (closes after ${activationDuration} seconds idle)`);
+    log.info(`🎤 Voice assistant activated (closes after ${activationDuration} seconds idle)`);
     
     // Connect WebSocket if not already connected (may already be pre-connected)
     if (!this.isConnected) {
       if (this._preConnecting && this._preConnectPromise) {
-        console.log('⏳ Waiting for in-flight pre-connect to complete...');
+        log.info('⏳ Waiting for in-flight pre-connect to complete...');
         await this._preConnectPromise;
       }
       if (!this.isConnected) {
-        console.log('🔌 Connecting to ElevenLabs WebSocket...');
+        log.info('🔌 Connecting to ElevenLabs WebSocket...');
         try {
           await this.connectWebSocket();
-          console.log('✓ WebSocket connected');
+          log.info('✓ WebSocket connected');
         } catch (error) {
-          console.error('❌ Failed to connect WebSocket:', error);
+          log.error('❌ Failed to connect WebSocket:', error);
           return; // Don't activate if connection fails
         }
       }
     } else {
-      console.log('✓ WebSocket already connected (pre-connected)');
+      log.info('✓ WebSocket already connected (pre-connected)');
     }
     
     this._isActivated = true;
@@ -783,7 +790,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     if (initialContext) {
       const question = this.extractQuestion(initialContext);
       if (question && question.length > 5) {
-        console.log('📝 Sending initial question to agent:', question);
+        log.info('📝 Sending initial question to agent:', question);
         // Send as text message - agent will respond with voice
         this.sendUserMessage(question);
       }
@@ -818,7 +825,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       return;
     }
 
-    console.log('🔇 Voice assistant deactivated');
+    log.info('🔇 Voice assistant deactivated');
     this._isActivated = false;
     this.activationWindow.stop();
 
@@ -826,13 +833,13 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     // queued assistant audio is played after it. The window does not lapse
     // while audio is queued, so this only acts on a direct deactivate().
     if (this.activationMode === 'wake_phrase' && this.audioQueue.length > 0) {
-      console.log(`🔇 Dropping ${this.audioQueue.length} queued audio chunks as the connection closes`);
+      log.info(`🔇 Dropping ${this.audioQueue.length} queued audio chunks as the connection closes`);
       this.audioQueue = [];
     }
 
     // In wake_phrase mode, disconnect WebSocket to save costs
     if (this.activationMode === 'wake_phrase' && this.ws) {
-      console.log('💰 Disconnecting WebSocket to save costs (wake_phrase mode)');
+      log.info('💰 Disconnecting WebSocket to save costs (wake_phrase mode)');
       this.ws.close();
       this.ws = null;
       this.isConnected = false;
@@ -857,12 +864,12 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
 
   private startConversationSession(): void {
     if (this.meetingMode !== 'group') return;
-    console.log('💬 Starting conversation session (group mode)');
+    log.info('💬 Starting conversation session (group mode)');
     this.conversationActive = true;
     this.clearConversationTimeout();
     const timeoutMs = this.defaultActivationDuration * 1000;
     this.conversationTimeout = setTimeout(() => {
-      console.log(`⏰ Conversation timeout (${this.defaultActivationDuration}s) - re-muting agent`);
+      log.info(`⏰ Conversation timeout (${this.defaultActivationDuration}s) - re-muting agent`);
       this._isMuted = true;
       this.conversationActive = false;
       this.clearConversationTimeout();
@@ -874,7 +881,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     this.clearConversationTimeout();
     const timeoutMs = this.defaultActivationDuration * 1000;
     this.conversationTimeout = setTimeout(() => {
-      console.log(`⏰ Conversation timeout (${this.defaultActivationDuration}s) - re-muting agent`);
+      log.info(`⏰ Conversation timeout (${this.defaultActivationDuration}s) - re-muting agent`);
       this._isMuted = true;
       this.conversationActive = false;
       this.clearConversationTimeout();
@@ -917,11 +924,11 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     if (this._isMuted) {
       return;
     }
-    console.log(`🔇 ElevenLabs agent muted${reason ? ` (${reason})` : ''}`);
+    log.info(`🔇 ElevenLabs agent muted${reason ? ` (${reason})` : ''}`);
     this._isMuted = true;
     this.conversationActive = false;
     if (this.audioQueue.length > 0) {
-      console.log(`🔇 Dropping ${this.audioQueue.length} queued audio chunks on mute`);
+      log.info(`🔇 Dropping ${this.audioQueue.length} queued audio chunks on mute`);
       this.audioQueue = [];
     }
     // The avatar buffers its own copy of the speech for lip-sync, so without
@@ -938,7 +945,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     if (!this._isMuted) {
       return;
     }
-    console.log(`🔓 ElevenLabs agent unmuted${reason ? ` (${reason})` : ''}`);
+    log.info(`🔓 ElevenLabs agent unmuted${reason ? ` (${reason})` : ''}`);
     this._isMuted = false;
     if (!this.conversationActive) {
       this.conversationActive = true;
@@ -966,7 +973,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     // Translator mode declines, matching Nova Sonic: its pause/resume belongs
     // to the trigger-phrase state machine, not to this route.
     if (this.meetingMode === 'translator') {
-      console.log('🌐 Translator mode - stop requests are only taken from the configured pause phrase');
+      log.info('🌐 Translator mode - stop requests are only taken from the configured pause phrase');
       this.logStopRequest('declined-translator');
       return false;
     }
@@ -986,7 +993,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
    *  outcomes where nothing is muted. Carries the flags, never the utterance,
    *  which is participant speech. */
   private logStopRequest(action: string): void {
-    console.log(
+    log.info(
       `[stop-request] route=transcript action=${action} provider=elevenlabs`
       + ` mode=${this.meetingMode} speaking=${this.isSpeaking()} muted=${this._isMuted}`,
     );
@@ -1013,7 +1020,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       activationModeAfter: this.activationMode as ActivationMode,
       detail: 'this voice assistant cannot change mode during a meeting',
     };
-    console.log(formatAssistantToggleLog(request, outcome));
+    log.info(formatAssistantToggleLog(request, outcome));
     return outcome;
   }
 }
