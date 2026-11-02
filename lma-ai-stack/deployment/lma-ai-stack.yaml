@@ -741,11 +741,13 @@ Parameters:
     AllowedValues:
       - "always_active"
       - "wake_phrase"
+      - "strands_tool (coming soon)"
     Description: >-
-      (Informational) Activation mode used by the Virtual Participant voice assistant.
-      Forwarded from the main stack so the Nova Sonic Configuration admin UI can
-      indicate whether Meeting Mode settings (Group / Translator) are active.
-      These modes only take effect when this value is 'always_active'.
+      Activation mode of the Virtual Participant voice assistant, passed to the
+      configuration seeder as the default of the Virtual Participant section's
+      activation mode, which the Virtual Participant reads as it starts and the
+      Configuration page reads to say whether the Group and Translator meeting
+      modes apply.
 
   LogLevel:
     Type: String
@@ -2126,8 +2128,6 @@ Resources:
               - ""
           - Name: VITE_OAUTH_CALLBACK_URL
             Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
-          - Name: VITE_VOICE_ASSISTANT_ACTIVATION_MODE
-            Value: !Ref VoiceAssistantActivationMode
   # The project's build output. Without LogsConfig, CodeBuild writes to
   # /aws/codebuild/<project>, a group it creates with no expiry and the AWS-owned
   # key. Named outside /aws/codebuild/ because that group already exists in any
@@ -2435,7 +2435,6 @@ Resources:
       EnableVoiceToneAnalysis: !Ref EnableVoiceToneAnalysis
       IsSentimentAnalysisEnabled: !Ref IsSentimentAnalysisEnabled
       LMASettingsParameterName: !Ref LMASettingsParameterName
-      VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
       # Makefile calculates and substitute code hash in the filename here during package build
       # to force codebuild to rerun when source code changes, and to correctly roll back to
       # previous version if build fails.
@@ -3492,6 +3491,7 @@ Resources:
         TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
         MeetingInactivityLookbackInDays: !Ref MeetingInactivityLookbackInDays
         VoiceAssistantProvider: !Ref VoiceAssistantProvider
+        VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
         VoiceAssistantWakePhrases: !Ref VoiceAssistantWakePhrases
         VoiceAssistantActivationDuration: !Ref VoiceAssistantActivationDuration
         ElevenLabsAgentId: !Ref ElevenLabsAgentId

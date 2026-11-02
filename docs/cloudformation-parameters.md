@@ -59,8 +59,8 @@ The template declares 91 parameters.
 | Kind | Parameters | What changing one does |
 |---|---|---|
 | Resource | 47 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
-| Configuration page default | 24 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
-| Read at run time | 7 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
+| Configuration page default | 25 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
+| Read at run time | 6 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
 | Credential | 11 | A secret, the ARN of a secret, or the identifier paired with one. Values are stored in AWS Secrets Manager; see [Integration Credentials](infrastructure-and-security.md#integration-credentials). |
 | Deployment check | 1 | Read only while the stack is deployed, by a check that runs before anything else is created. |
 | No effect | 1 | Declared by the template and read by nothing. Kept so that existing deploy commands and pipelines that pass it keep working. |
@@ -262,7 +262,7 @@ A regular expression for the wake phrase that invokes the Meeting Assistant. The
 | [`SimliFaceId`](#simlifaceid) | (empty) | Configuration page default |
 | [`VoiceAssistantProvider`](#voiceassistantprovider) | `none` | Configuration page default |
 | [`AmazonNovaSonicRegion`](#amazonnovasonicregion) | (empty) | Resource |
-| [`VoiceAssistantActivationMode`](#voiceassistantactivationmode) | `wake_phrase` | Read at run time |
+| [`VoiceAssistantActivationMode`](#voiceassistantactivationmode) | `wake_phrase` | Configuration page default |
 | [`VoiceAssistantWakePhrases`](#voiceassistantwakephrases) | `hey alex,ok alex,hi alex,hello alex` | Configuration page default |
 | [`VoiceAssistantActivationDuration`](#voiceassistantactivationduration) | `30` | Configuration page default |
 | [`ZoomMeetingSdkClientId`](#zoommeetingsdkclientid) | (empty) | Credential |
@@ -357,9 +357,9 @@ Console label: *Voice Assistant Activation Mode*
 
 - **Default:** `wake_phrase`
 - **Allowed values:** `always_active`, `wake_phrase`, `strands_tool (coming soon)`
-- **Kind:** Read at run time. Read by the Virtual Participant when it starts, and built into the web app when the stack deploys it, so a change also rebuilds the web app.
+- **Kind:** Configuration page default. Configuration page: **Virtual Participant › Voice assistant activation mode**. Read by the Virtual Participant when it starts, and by the Configuration page to say whether the Nova Sonic meeting modes apply.
 
-How the voice assistant is activated. 'always_active' for interviewer/meeting leader use cases (agent leads conversation), 'wake_phrase' to activate only when wake phrase is detected (max 300 seconds), or 'strands_tool' for intelligent activation by Strands agent.
+How the voice assistant is activated. 'always_active' for interviewer/meeting leader use cases (agent leads conversation), 'wake_phrase' to activate only when wake phrase is detected (max 300 seconds), or 'strands_tool' for intelligent activation by Strands agent. This is the default; an Admin can change it at run time on the Configuration page (Virtual Participant section), which takes precedence.
 
 ### `VoiceAssistantWakePhrases`
 

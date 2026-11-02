@@ -215,12 +215,12 @@ The ElevenLabs agent's persona is configured in the ElevenLabs dashboard — LMA
 2. Set the agent's first message to empty.
 3. Choose a voice that can render both languages naturally (an ElevenLabs multilingual voice).
 4. In LMA, set Meeting Mode to `translator` and set `translatorLanguageA` / `translatorLanguageB` to match your agent's configured languages. LMA reads these to keep its own state and docs consistent, but does not push them to ElevenLabs.
-5. Deploy the main stack with `VoiceAssistantActivationMode = always_active` so LMA keeps the WebSocket open and the agent can translate every utterance without a wake phrase.
+5. Set **Voice assistant activation mode** to **Always listening** in the Virtual Participant section of the Configuration page (or deploy the main stack with `VoiceAssistantActivationMode = always_active`, which is that setting's default) so LMA keeps the WebSocket open and the agent can translate every utterance without a wake phrase.
 
 #### Limitations
 
 - A single agent voice is used for both translation directions. For different voices per direction, two concurrent agents would be required (not supported today).
-- Translator mode only takes effect while the assistant is always listening, as does `group`. The default `normal` mode works under either activation mode. On Nova Sonic, `LMA translate` in the meeting chat switches activation for the current meeting as well as the mode — see [Changing Mode During a Meeting](#changing-mode-during-a-meeting) — so the stack parameter is the default rather than the only way in.
+- Translator mode only takes effect while the assistant is always listening, as does `group`. The default `normal` mode works under either activation mode. On Nova Sonic, `LMA translate` in the meeting chat switches activation for the current meeting as well as the mode — see [Changing Mode During a Meeting](#changing-mode-during-a-meeting) — so the activation mode saved on the Configuration page is the default for each meeting rather than the only way in.
 - The pair can also be chosen for one meeting from the chat with `LMA translate <language>`; see [Choosing the Language from Chat](#choosing-the-language-from-chat).
 - If an utterance is in a language other than the two configured, Nova Sonic falls back to translating it into `translatorLanguageA` per the system prompt.
 - **The assistant can occasionally speak in the wrong language.** Which language Nova Sonic speaks is decided by the model, so a turn can come out in the language that was just spoken rather than in its translation. Within one Nova Sonic session this gets more likely with every turn, so on Nova Sonic each translated turn gets a session of its own (see **One session per translated turn** under [Translator Mode](#translator-mode)); what remains is the occasional single turn. The likeliest case is two people speaking back to back with no pause, which Nova Sonic can treat as one turn and translate into one language. The meeting transcript may not show it: translations are written from Nova Sonic's text, and in one recorded meeting the text was in the right language while the speech was not.
@@ -229,11 +229,11 @@ The ElevenLabs agent's persona is configured in the ElevenLabs dashboard — LMA
 
 *Nova Sonic only.*
 
-The meeting mode and the activation mode are both read when the Virtual Participant starts, from the Nova Sonic Voice Assistant section of the Configuration page and the **VoiceAssistantActivationMode** stack parameter respectively. Participants can also change either one while the meeting is running, by typing a command in the meeting chat.
+The meeting mode and the activation mode are both read when the Virtual Participant starts, from the Nova Sonic Voice Assistant and Virtual Participant sections of the Configuration page respectively; the activation mode's default is the **VoiceAssistantActivationMode** stack parameter. Participants can also change either one while the meeting is running, by typing a command in the meeting chat.
 
-A runtime change lasts for the rest of that meeting and is not written back to configuration: the configuration page keeps holding the deployment's default, and the next meeting starts in it. Anyone in the meeting may issue these commands, like the existing `LMA leave`.
+A runtime change lasts for the rest of that meeting and is not written back to configuration: the configuration keeps the modes as saved on the Configuration page, and the next meeting starts in them. Anyone in the meeting may issue these commands, like the existing `LMA leave`.
 
-**For operators:** this makes **VoiceAssistantActivationMode** a default rather than a fixed setting. `LMA always` — and `LMA translate` and `LMA listen`, which both need an always-listening assistant — will put a meeting on always-listening whatever the stack was deployed with, on the word of any participant including a guest. Always-listening streams meeting audio to the model continuously rather than only after a wake phrase, so it changes both what the meeting costs and when audio leaves the Virtual Participant. There is no per-deployment switch to disable these commands; open an issue if your deployment needs one.
+**For operators:** this makes the saved activation mode a default for each meeting rather than a fixed setting. `LMA always` — and `LMA translate` and `LMA listen`, which both need an always-listening assistant — will put a meeting on always-listening whatever the configuration says, on the word of any participant including a guest. Always-listening streams meeting audio to the model continuously rather than only after a wake phrase, so it changes both what the meeting costs and when audio leaves the Virtual Participant. There is no per-deployment switch to disable these commands; open an issue if your deployment needs one.
 
 ### Chat Commands
 
@@ -380,10 +380,10 @@ The voice used by the assistant is configurable per provider. Set the desired vo
 The following CloudFormation parameters control voice assistant behavior:
 
 > These are also settings in the **Virtual Participant** section of the
-> [Configuration page](configuration-guide.md): the provider, the wake phrases and the activation duration can be changed there while
+> [Configuration page](configuration-guide.md): the provider, the activation mode, the wake phrases and the activation duration can be changed there while
 > the stack runs, and apply to the next Virtual Participant to start. The stack
 > parameters are their defaults, and a value saved on the page takes precedence
-> until it is reset. The activation mode and the API keys are stack parameters only.
+> until it is reset. The API keys are stack parameters only.
 
 | Parameter | Values | Description |
 |---|---|---|

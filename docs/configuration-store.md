@@ -1133,9 +1133,9 @@ named custom vocabulary or language model exists is not checked.
 ### The Virtual Participant
 
 The `virtual_participant` section holds `VoiceAssistantProvider`,
-`VoiceAssistantWakePhrases`, `VoiceAssistantActivationDuration`,
-`ElevenLabsAgentId`, `SimliFaceId`, `VPAttendeePollMs`, `VPPollsBeforeEnd` and
-`VPPollsBeforeEndMissing`. A Virtual Participant also reads the `transcription`
+`VoiceAssistantActivationMode`, `VoiceAssistantWakePhrases`,
+`VoiceAssistantActivationDuration`, `ElevenLabsAgentId`, `SimliFaceId`,
+`VPAttendeePollMs`, `VPPollsBeforeEnd` and `VPPollsBeforeEndMissing`. A Virtual Participant also reads the `transcription`
 and `recording` sections.
 
 Every one of these reached the Virtual Participant as an environment variable
@@ -1157,6 +1157,17 @@ options those checks cover keep the task's values while the page's redaction
 choices still apply, as in the transcriber. Redaction is derived as the template
 derives it, from the flag and the language. The three sections, all on the
 immediate tier, are taken from one consistent read of the resolved document.
+
+`VoiceAssistantActivationMode` was also built into the web app when the stack
+deployed it, for one purpose: the Nova Sonic Voice Assistant section says that its
+Group meeting and Translator meeting modes are ignored unless the voice assistant
+is always listening. That notice now reads the activation mode from the
+configuration the page has loaded, as saved, which is what the next Virtual
+Participant uses; an unsaved change to it does not change the notice. The web
+app is no longer given the parameter, so changing it no longer rebuilds the web
+app. A participant can still switch one running meeting's mode with a chat
+command ([Changing Mode During a Meeting](voice-assistant.md#changing-mode-during-a-meeting)),
+and that is not written back to the configuration.
 
 ### The wake phrase, the transcript hook mode and the reaper's lookback
 
@@ -1199,10 +1210,9 @@ the consent terms each enrollment agrees to.
 |---|---|
 | Named profiles | More than one profile, a way to choose the one in force, and an import that can create one. Export, import and presets work today on the one `custom` profile; see [Export, import and the configuration library](#export-import-and-the-configuration-library) |
 | Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired. It waited for the configuration editor: the custom prompt is edited in the DynamoDB console today, which is exactly the route a compressed body closes, so moving it before there was an editor would have left it with no way to edit it. With the editor in place, it needs a schema and a seeder adoption |
-| Settings the web app reads | `VoiceAssistantActivationMode` is built into the web app when the stack deploys it, as well as read by the Virtual Participant, so moving it means the web app reading its configuration at run time, with the SSM settings blob below |
 | Parameters with a resource half | `TranscriptionExpirationInDays` sets a bucket lifecycle rule as well as the expiry of transcript records, and `MeetingInactivityTimeoutInMinutes` decides whether the reaper's schedule exists as well as its timeout. Each would be split: the record arithmetic moves, the resource half stays |
 | Upper bounds rather than defaults | Retention settings such as `MeetingRecordExpirationInDays` (see [Stack parameters that stay](#stack-parameters-that-stay)): a runtime value the parameter bounds, rather than one it defaults |
-| Replacing the SSM settings blob | The `<stack>-LMASettings` parameter is written only by CloudFormation, at deploy time, and read by the web app for every signed-in user. It is a deployment's wiring rather than something an administrator edits, so it moves with the parameters above, when the web app reads its configuration at run time |
+| Replacing the SSM settings blob | The `<stack>-LMASettings` parameter is written only by CloudFormation, at deploy time, and read by the web app for every signed-in user. It is a deployment's wiring rather than something an administrator edits. The Configuration page reads the configuration at run time, but every other page reads only this blob, so a setting another page needs moves when that page reads the configuration too |
 
 A shipped summary section that has been turned off is listed by the
 Configuration page, marked **Turned off**, with **Turn on**, which brings back

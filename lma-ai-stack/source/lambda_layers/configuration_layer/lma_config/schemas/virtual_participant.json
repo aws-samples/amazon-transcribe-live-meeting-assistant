@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lma:configuration/virtual_participant",
   "title": "Virtual Participant",
-  "description": "The Virtual Participant's voice assistant and avatar, and how a Teams Virtual Participant decides its meeting has ended. The defaults are the values the stack was deployed with; a value set here is used instead until it is reset. The API keys these features need are stack parameters: a provider or avatar chosen here without its key configured does not start.",
+  "description": "The Virtual Participant's voice assistant, how it is activated, its avatar, and how a Teams Virtual Participant decides its meeting has ended. The defaults are the values the stack was deployed with; a value set here is used instead until it is reset. The API keys these features need are stack parameters: a provider or avatar chosen here without its key configured does not start.",
   "sectionLabel": "Virtual Participant",
   "appliesText": "A saved change applies to the next Virtual Participant to start; one already in a meeting keeps the settings it started with.",
   "order": 11,
@@ -23,25 +23,37 @@
         "amazon_nova_sonic": "Amazon Nova Sonic"
       }
     },
-    "voiceAssistantWakePhrases": {
+    "voiceAssistantActivationMode": {
       "order": 1,
       "type": "string",
+      "title": "Voice assistant activation mode",
+      "description": "wake_phrase activates the voice assistant when a participant says a wake phrase, for the number of seconds set below; always_active keeps it listening for the whole meeting, which the Group meeting and Translator meeting modes of the Nova Sonic Voice Assistant section need. Always listening streams meeting audio to the voice assistant's model for the whole meeting, so it costs more. Participants can still switch a running meeting with a chat command. strands_tool (coming soon) is listed because the stack parameter allows it, and is not implemented yet: choose wake_phrase or always_active. Default: the VoiceAssistantActivationMode stack parameter.",
+      "enum": ["always_active", "wake_phrase", "strands_tool (coming soon)"],
+      "enumLabels": {
+        "always_active": "Always listening",
+        "wake_phrase": "Wake phrase",
+        "strands_tool (coming soon)": "Strands tool (coming soon)"
+      }
+    },
+    "voiceAssistantWakePhrases": {
+      "order": 2,
+      "type": "string",
       "title": "Wake phrases",
-      "description": "Comma-separated phrases that activate the voice assistant, case-insensitive. Used when the stack's voice assistant activation mode is wake_phrase. Default: the VoiceAssistantWakePhrases stack parameter.",
+      "description": "Comma-separated phrases that activate the voice assistant, case-insensitive. Used when the activation mode is wake_phrase. Default: the VoiceAssistantWakePhrases stack parameter.",
       "examples": ["hey alex,ok alex,hi alex,hello alex"],
       "minLength": 1,
       "maxLength": 512
     },
     "voiceAssistantActivationDuration": {
-      "order": 2,
+      "order": 3,
       "type": "integer",
       "title": "Seconds the voice assistant stays active",
-      "description": "How long the voice assistant stays active after a wake phrase. Default: the VoiceAssistantActivationDuration stack parameter.",
+      "description": "How long the voice assistant stays active after a wake phrase, when the activation mode is wake_phrase. Default: the VoiceAssistantActivationDuration stack parameter.",
       "minimum": 5,
       "maximum": 300
     },
     "elevenLabsAgentId": {
-      "order": 3,
+      "order": 4,
       "type": "string",
       "title": "ElevenLabs agent ID",
       "description": "An ElevenLabs Conversational AI agent, for a customised voice assistant; empty for the default one. Default: the ElevenLabsAgentId stack parameter.",
@@ -49,7 +61,7 @@
       "pattern": "^([A-Za-z0-9_-]{10,})?$"
     },
     "simliFaceId": {
-      "order": 4,
+      "order": 5,
       "type": "string",
       "title": "Simli face ID",
       "description": "The face of the Simli avatar; the avatar is on only when this and the Simli API key are both set. Default: the SimliFaceId stack parameter.",
@@ -57,7 +69,7 @@
       "pattern": "^[A-Za-z0-9_-]*$"
     },
     "attendeePollMs": {
-      "order": 5,
+      "order": 6,
       "type": "integer",
       "title": "Teams: milliseconds between meeting checks",
       "description": "How often a Teams Virtual Participant checks whether its meeting is still running. Default: the VPAttendeePollMs stack parameter.",
@@ -65,7 +77,7 @@
       "maximum": 120000
     },
     "pollsBeforeEnd": {
-      "order": 6,
+      "order": 7,
       "type": "integer",
       "title": "Teams: checks alone before leaving",
       "description": "Consecutive checks on which the meeting shows one attendee or none before the Virtual Participant leaves. Default: the VPPollsBeforeEnd stack parameter.",
@@ -73,7 +85,7 @@
       "maximum": 90
     },
     "pollsBeforeEndMissing": {
-      "order": 7,
+      "order": 8,
       "type": "integer",
       "title": "Teams: checks without a meeting before leaving",
       "description": "Consecutive checks on which the meeting shows neither an attendee count nor its controls before the Virtual Participant leaves. Raise it if Virtual Participants leave meetings that are still running. Default: the VPPollsBeforeEndMissing stack parameter.",

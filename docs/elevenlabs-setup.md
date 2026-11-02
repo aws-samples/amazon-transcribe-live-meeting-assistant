@@ -151,7 +151,7 @@ You can either:
 When deploying or updating your LMA stack, set these parameters:
 
 > These are also settings in the **Virtual Participant** section of the
-> [Configuration page](configuration-guide.md): the provider, the ElevenLabs agent ID and the activation duration can be changed there while
+> [Configuration page](configuration-guide.md): the provider, the ElevenLabs agent ID, the activation mode and the activation duration can be changed there while
 > the stack runs, and apply to the next Virtual Participant to start. The stack
 > parameters are their defaults, and a value saved on the page takes precedence
 > until it is reset. The API keys are stack parameters only.
