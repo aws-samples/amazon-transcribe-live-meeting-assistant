@@ -502,13 +502,16 @@ def start_meeting_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) ->
         settings = consent_settings()
     except ConfigurationUnavailableError:
         # A restart that names no other choice needs no settings: it keeps the
-        # meeting's own.
-        restart = data.get("Mode") in (None, (current or {}).get("Mode")) and data.get("Rule") in (
-            None,
-            (current or {}).get("Rule"),
-        )
-        if current and current.get("Mode") in consent.MODES and restart:
-            return update_out(meeting, call_id)
+        # meeting's own. Judged as requested_choice judges it, so whether the
+        # settings could be read never changes what counts as a restart.
+        started = current if current and current.get("Mode") in consent.MODES else None
+        if started:
+            mode = data.get("Mode") or started["Mode"]
+            rule = (
+                (data.get("Rule") or started.get("Rule")) if mode == consent.MODE_OPT_IN else None
+            )
+            if mode == started["Mode"] and rule == started.get("Rule"):
+                return update_out(meeting, call_id)
         raise
     mode, rule = requested_choice(data, current, settings)
     if current and current.get("Mode") == mode and current.get("Rule") == rule:

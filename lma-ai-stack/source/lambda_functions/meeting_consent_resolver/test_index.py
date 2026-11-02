@@ -509,3 +509,14 @@ def test_a_record_that_cannot_be_kept_within_its_budget_is_refused(dynamo, monke
     monkeypatch.setattr(index.consent.fit_to_budget, "__defaults__", (10,))
     with pytest.raises(index.BadRequestError, match="would exceed"):
         call("recordMeetingConsentNotice", BACKEND, Channel="chat")
+
+
+def test_a_restart_is_judged_alike_with_or_without_the_settings(dynamo, monkeypatch) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    writes = dynamo.updates
+    # A rule named with a mode that takes none is ignored, whether or not the
+    # settings can be read.
+    assert call("startMeetingConsent", BACKEND, Mode="notify", Rule="owner_attests")
+    monkeypatch.setattr(index, "_STORE", FakeStore(fail=True))
+    assert call("startMeetingConsent", BACKEND, Mode="notify", Rule="owner_attests")
+    assert dynamo.updates == writes

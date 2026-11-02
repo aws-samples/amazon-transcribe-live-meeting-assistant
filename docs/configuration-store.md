@@ -192,7 +192,7 @@ Today's sections and their tiers:
 | `meeting_processing` | `standard` | Read by the call event processor for each segment it hands to a transcript Lambda hook, and by the inactive-meeting reaper as each run starts |
 | `virtual_participant` | `immediate` | Read once by each Virtual Participant as it starts, with the `transcription` and `recording` sections, as for the Nova Sonic settings it reads at the same moment; the page says a change applies to the next one to start |
 | `language_models` | `standard` | Read once per summary, answer, agenda pass, naming pass, knowledge-base query or key frame; nobody is waiting on a model change, and the summariser's **Regenerate** drops the cache before reading, as for the prompts |
-| `meeting_consent` | `immediate` | Read by the meeting consent resolver when a meeting's consent starts and whenever a meeting's consent is read. Consent-bearing: an administrator who turns opt-in on is promised that the next meeting asks first. If it cannot be read, starting a meeting's consent fails rather than falling back to off; see [Meeting Consent](meeting-consent.md) |
+| `meeting_consent` | `immediate` | Read by the meeting consent resolver when a meeting's consent starts and whenever a meeting's consent is read. Consent-bearing: an administrator who turns opt-in on is promised that the next meeting asks first. If it cannot be read, starting a meeting's consent, and reading a meeting with no consent record, fail rather than fall back to off; a restart, and a read of a meeting with a record, do not need it. See [Meeting Consent](meeting-consent.md#the-meeting-consent-settings) |
 
 ### Resolving a read
 
