@@ -826,7 +826,7 @@ Console label: *Seconds into a Meeting to Look for a Stated Agenda*
 
 - **Default:** `300`
 - **Allowed values:** 0 to 3600
-- **Kind:** Configuration page default. Configuration page: **Meeting Agenda › Seconds into a meeting to look for a stated agenda**. Read by the meeting event processor, for each meeting with no agenda.
+- **Kind:** Configuration page default. Configuration page: **Meeting Agenda › Seconds into a meeting to look for a stated agenda**. Read by the meeting event processor as each meeting's finished segments reach it, until it has queued the automatic pass for that meeting.
 
 Seconds into a meeting with no agenda at which its transcript is read once for an agenda somebody stated, and saved to the meeting if one is found. 0 turns the automatic pass off; the Agenda panel's Derive agenda button works either way. This is the default; an Admin can change it at run time on the Configuration page (Meeting Agenda section), which takes precedence.
 

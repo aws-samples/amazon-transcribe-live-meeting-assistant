@@ -112,8 +112,8 @@ AGENDA_DERIVER_ARN = getenv("AGENDA_DERIVER_ARN", "")
 # Reads the text of each key frame, once, after it is stored. See
 # keyframe_text_extractor.
 KEYFRAME_TEXT_EXTRACTOR_ARN = getenv("KEYFRAME_TEXT_EXTRACTOR_ARN", "")
-#: The AgendaDerivationAfterSeconds parameter's value, read as the stack has
-#: always passed it; what the Meeting Agenda section falls back to.
+#: The AgendaDerivationAfterSeconds parameter's value, from its environment
+#: variable; what the Meeting Agenda section falls back to.
 AGENDA_DERIVATION_AFTER_SECONDS = agenda_derivation_after_seconds(
     getenv("AGENDA_DERIVATION_AFTER_SECONDS", "300")
 )
@@ -1903,6 +1903,8 @@ async def execute_process_event_api_mutation(
             if (
                 AGENDA_DERIVER_ARN
                 and not normalized_message["IsPartial"]
+                # A meeting already queued here needs no read of the threshold.
+                and normalized_message.get("CallId") not in AGENDA_PASS_QUEUED
                 and agenda_derivation_due(
                     normalized_message.get("CallId"),
                     normalized_message.get("EndTime"),
