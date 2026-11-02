@@ -13,9 +13,9 @@
  * default (the Amazon Transcribe and Meeting Recording sections, which the
  * WebSocket transcriber reads too), and the Virtual Participant's own voice
  * assistant and its activation mode, avatar and Teams meeting-end detection
- * (the Virtual Participant section). The parameter is now each setting's default: the configuration
- * seeder writes its value into the configuration's baseline, and an
- * administrator's change wins over it.
+ * (the Virtual Participant section). The parameter is now each setting's
+ * default: the configuration seeder writes its value into the configuration's
+ * baseline, and an administrator's change wins over it.
  *
  * Rather than change every place that reads one of these variables, this module
  * reads the three sections and sets each variable the configuration holds a

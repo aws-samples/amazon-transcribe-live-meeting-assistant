@@ -231,7 +231,7 @@ The ElevenLabs agent's persona is configured in the ElevenLabs dashboard — LMA
 
 The meeting mode and the activation mode are both read when the Virtual Participant starts, from the Nova Sonic Voice Assistant and Virtual Participant sections of the Configuration page respectively; the activation mode's default is the **VoiceAssistantActivationMode** stack parameter. Participants can also change either one while the meeting is running, by typing a command in the meeting chat.
 
-A runtime change lasts for the rest of that meeting and is not written back to configuration: the configuration page keeps holding the deployment's default, and the next meeting starts in it. Anyone in the meeting may issue these commands, like the existing `LMA leave`.
+A runtime change lasts for the rest of that meeting and is not written back to configuration: the configuration keeps the modes as saved on the Configuration page, and the next meeting starts in them. Anyone in the meeting may issue these commands, like the existing `LMA leave`.
 
 **For operators:** this makes the saved activation mode a default for each meeting rather than a fixed setting. `LMA always` — and `LMA translate` and `LMA listen`, which both need an always-listening assistant — will put a meeting on always-listening whatever the configuration says, on the word of any participant including a guest. Always-listening streams meeting audio to the model continuously rather than only after a wake phrase, so it changes both what the meeting costs and when audio leaves the Virtual Participant. There is no per-deployment switch to disable these commands; open an issue if your deployment needs one.
 

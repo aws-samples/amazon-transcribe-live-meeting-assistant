@@ -27,7 +27,7 @@
       "order": 1,
       "type": "string",
       "title": "Voice assistant activation mode",
-      "description": "wake_phrase activates the voice assistant when a participant says a wake phrase, for the number of seconds set below; always_active keeps it listening for the whole meeting, which the Group meeting and Translator meeting modes of the Nova Sonic Voice Assistant section need. Always listening streams meeting audio to the voice assistant's model for the whole meeting, so it costs more. Participants can still switch a running meeting with a chat command. Default: the VoiceAssistantActivationMode stack parameter.",
+      "description": "wake_phrase activates the voice assistant when a participant says a wake phrase, for the number of seconds set below; always_active keeps it listening for the whole meeting, which the Group meeting and Translator meeting modes of the Nova Sonic Voice Assistant section need. Always listening streams meeting audio to the voice assistant's model for the whole meeting, so it costs more. Participants can still switch a running meeting with a chat command. strands_tool (coming soon) is listed because the stack parameter allows it, and is not implemented yet: choose wake_phrase or always_active. Default: the VoiceAssistantActivationMode stack parameter.",
       "enum": ["always_active", "wake_phrase", "strands_tool (coming soon)"],
       "enumLabels": {
         "always_active": "Always listening",

@@ -32,9 +32,9 @@ const NovaSonicNotice = ({ configuration = {} }) => {
   if (mode === 'always_active') return null;
   return (
     <Alert type="info">
-      The Group meeting and Translator meeting modes take effect only when the voice assistant&apos;s activation mode is{' '}
-      <b>Always listening</b>. The Virtual Participant section sets it to <b>{ACTIVATION_MODE_LABELS[mode] || mode}</b>,
-      so those modes are ignored until it is changed there, or switched for one meeting with a chat command.
+      The Group meeting and Translator meeting modes need an always-listening voice assistant. The Virtual Participant
+      section sets the activation mode to <b>{ACTIVATION_MODE_LABELS[mode] || mode}</b>, so those modes are ignored
+      until it is set to <b>Always listening</b> there, or switched for one meeting with a chat command.
     </Alert>
   );
 };

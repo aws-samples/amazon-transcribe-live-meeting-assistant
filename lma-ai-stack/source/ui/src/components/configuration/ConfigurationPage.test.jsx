@@ -204,8 +204,10 @@ describe('ConfigurationContent', () => {
     graphqlMock.mockResolvedValueOnce(answer());
     const { unmount } = renderEditor();
     openSection(await screen.findByText('Nova Sonic Voice Assistant'));
-    const notice = within(section('Nova Sonic Voice Assistant')).getByText(/The Virtual Participant section sets it/);
-    expect(notice.textContent).toMatch(/sets it to Wake phrase, so those modes are ignored/);
+    const notice = within(section('Nova Sonic Voice Assistant')).getByText(
+      /Virtual Participant section sets the activation mode/,
+    );
+    expect(notice.textContent).toMatch(/sets the activation mode to Wake phrase, so those modes are ignored/);
 
     expect(screen.getAllByText('Voice assistant activation mode').length).toBeGreaterThan(0);
     unmount();
@@ -213,10 +215,24 @@ describe('ConfigurationContent', () => {
     graphqlMock.mockResolvedValueOnce(
       answer({ custom: { virtual_participant: { voiceAssistantActivationMode: 'always_active' } } }),
     );
+    const { unmount: unmountCustom } = renderEditor();
+    openSection(await screen.findByText('Nova Sonic Voice Assistant'));
+    expect(
+      within(section('Nova Sonic Voice Assistant')).queryByText(/Virtual Participant section sets the activation mode/),
+    ).toBeNull();
+    unmountCustom();
+
+    // A deployment whose stack parameter is always_active, with nothing saved
+    // on the page: the default is what is in force, so there is no notice.
+    const alwaysByDefault = JSON.parse(answer().data.getConfiguration.Default);
+    alwaysByDefault.virtual_participant.voiceAssistantActivationMode = 'always_active';
+    const response = answer();
+    response.data.getConfiguration.Default = JSON.stringify(alwaysByDefault);
+    graphqlMock.mockResolvedValueOnce(response);
     renderEditor();
     openSection(await screen.findByText('Nova Sonic Voice Assistant'));
     expect(
-      within(section('Nova Sonic Voice Assistant')).queryByText(/The Virtual Participant section sets it/),
+      within(section('Nova Sonic Voice Assistant')).queryByText(/Virtual Participant section sets the activation mode/),
     ).toBeNull();
   });
 
