@@ -212,8 +212,23 @@ export const MEET_IN_PAGE_SELECTORS = {
      * integration reads the same attribute.
      */
     participantTile: '[data-participant-id]',
-    /** Where a tile shows the participant's name. */
-    tileName: ['[data-self-name]', '.notranslate'],
+    /**
+     * Where a tile shows the participant's name. The second is what the LMA
+     * Chrome extension's Meet integration reads; the Material icons in a tile
+     * also carry `notranslate`, so they are excluded.
+     */
+    tileName: [
+        '[data-self-name]',
+        '[data-tooltip-id][data-tooltip-anchor-boundary-type] span.notranslate',
+        '.notranslate:not(.google-material-icons)',
+    ],
+    /**
+     * The tile's audio-level indicator, whose class changes while the
+     * participant is heard. The LMA Chrome extension's Meet integration detects
+     * the active speaker the same way (a class mutation on this element while it
+     * is visible).
+     */
+    audioIndicator: '[jscontroller="ES310d"]',
     /**
      * Elements inside a tile that show the speaking indicator while that
      * participant is heard. ASSUMPTION (verify live): Meet's speaking indicator

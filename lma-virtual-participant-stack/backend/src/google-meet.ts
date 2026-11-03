@@ -582,7 +582,25 @@ export default class GoogleMeet {
     private async readTiles(page: Page, withClasses = false): Promise<Array<MeetTileReading & { classes?: string }>> {
         return page
             .evaluate(
-                (sels: { tile: string; names: readonly string[]; speaking: readonly string[]; withClasses: boolean }) => {
+                (sels: { tile: string; names: readonly string[]; speaking: readonly string[]; indicator: string; withClasses: boolean }) => {
+                    // Install, once, an observer that stamps a tile whenever its
+                    // audio-level indicator changes class while visible: that is
+                    // the participant being heard.
+                    const w = window as unknown as { __lmaMeetHeard?: Record<string, number> };
+                    if (!w.__lmaMeetHeard) {
+                        w.__lmaMeetHeard = {};
+                        const heard = w.__lmaMeetHeard;
+                        new MutationObserver((mutations) => {
+                            for (const m of mutations) {
+                                const el = m.target as HTMLElement;
+                                if (m.attributeName !== 'class' || !el.matches?.(sels.indicator)) continue;
+                                if (el.offsetParent === null) continue;
+                                const id = el.closest(sels.tile)?.getAttribute('data-participant-id');
+                                if (id) heard[id] = Date.now();
+                            }
+                        }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
+                    }
+                    const heard = w.__lmaMeetHeard;
                     const out: Array<{ name: string | null; speaking: boolean; classes?: string }> = [];
                     const tiles = Array.from(document.querySelectorAll(sels.tile)).slice(0, 49);
                     for (const tile of tiles) {
@@ -597,10 +615,13 @@ export default class GoogleMeet {
                                 break;
                             }
                         }
-                        const speaking = sels.speaking.some((sel) => {
-                            const el = tile.querySelector(sel) as HTMLElement | null;
-                            return !!el && el.offsetParent !== null;
-                        });
+                        const id = tile.getAttribute('data-participant-id') || '';
+                        const speaking =
+                            Date.now() - (heard[id] ?? 0) < 1500 ||
+                            sels.speaking.some((sel) => {
+                                const el = tile.querySelector(sel) as HTMLElement | null;
+                                return !!el && el.offsetParent !== null;
+                            });
                         if (!sels.withClasses) {
                             out.push({ name, speaking });
                             continue;
@@ -620,6 +641,7 @@ export default class GoogleMeet {
                     tile: MEET_IN_PAGE_SELECTORS.participantTile,
                     names: MEET_IN_PAGE_SELECTORS.tileName,
                     speaking: MEET_IN_PAGE_SELECTORS.speakingIndicator,
+                    indicator: MEET_IN_PAGE_SELECTORS.audioIndicator,
                     withClasses,
                 },
             )
