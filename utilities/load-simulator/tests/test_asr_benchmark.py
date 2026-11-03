@@ -505,3 +505,64 @@ def test_engine_logs_are_found_in_the_older_group_name_too() -> None:
     events = measure.engine_events(logs, measure.engine_log_groups("dev"), VM)
     assert len(events) == len(_engine_log())
     assert measure.engine_events(logs, measure.engine_log_groups("dev"), "microvm-other") == []
+
+
+def test_a_failed_run_is_recorded_and_the_next_one_still_runs(monkeypatch, tmp_path) -> None:
+    import wave as wave_mod
+
+    path = tmp_path / "a.wav"
+    with wave_mod.open(str(path), "wb") as out:
+        out.setnchannels(2)
+        out.setsampwidth(2)
+        out.setframerate(16000)
+        out.writeframes(b"\0" * 6400)
+    switched: list[str] = []
+
+    def fake_switch(session, stack, bundle, run_id, bucket=None):
+        switched.append(bundle)
+        if bundle == "parakeet-tdt-v3-sortformer":
+            raise RuntimeError("image build failed")
+        return True
+
+    class _Pool:
+        def __init__(self, **kwargs) -> None:
+            self.users = [type("U", (), {"email": "u", "access_token": "a", "id_token": "i"})()]
+
+        def provision(self, **kwargs) -> None:
+            pass
+
+        def delete_synthetic_users(self, run_id) -> int:
+            return 1
+
+    class _Session:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def client(self, name, **kwargs):
+            return None
+
+    monkeypatch.setattr(bench.bundles_mod, "current_bundle", lambda cfn, stack: "orig")
+    monkeypatch.setattr(bench.bundles_mod, "switch_bundle", fake_switch)
+    monkeypatch.setattr(bench.boto3, "Session", _Session)
+    monkeypatch.setattr(bench, "SyntheticUserPool", _Pool)
+    monkeypatch.setattr(bench.measure, "resolve_rates", lambda *a: RATES)
+    monkeypatch.setattr(bench.measure, "transcriber_log_group", lambda cfn, stack: "g")
+    monkeypatch.setattr(
+        bench,
+        "_one_run",
+        lambda ctx, stack, params, spec, *rest: {"label": spec.label, "engine": spec.engine},
+    )
+    ctx = bench.RunContext(stack_name="LMA-dev", region="us-east-1", results_dir=tmp_path)
+    params = bench.AsrBenchmarkParams(
+        wav_path=str(path), bundles=["parakeet-tdt-v3-sortformer", "parakeet-tdt-v3-titanet-small"]
+    )
+    results = bench.run(
+        ctx, type("S", (), {"user_pool_id": "p", "user_pool_client_id": "c"})(), params
+    )
+
+    assert [r["label"] for r in results] == [
+        "parakeet-tdt-v3-sortformer",
+        "parakeet-tdt-v3-titanet-small",
+    ]
+    assert results[0]["error"] == "RuntimeError: image build failed"
+    assert switched == ["parakeet-tdt-v3-sortformer", "parakeet-tdt-v3-titanet-small", "orig"]

@@ -141,12 +141,13 @@ def run(ctx: RunContext, stack: LMAStackInfo, params: AsrBenchmarkParams) -> lis
     switched = False
     try:
         for spec in runs:
-            if spec.bundle:
-                switched |= bundles_mod.switch_bundle(
-                    session, ctx.stack_name, spec.bundle, ctx.run_id, params.template_bucket
-                )
-            results.append(
-                _one_run(
+            try:
+                if spec.bundle:
+                    switched = True
+                    bundles_mod.switch_bundle(
+                        session, ctx.stack_name, spec.bundle, ctx.run_id, params.template_bucket
+                    )
+                result = _one_run(
                     ctx,
                     stack,
                     params,
@@ -162,7 +163,14 @@ def run(ctx: RunContext, stack: LMAStackInfo, params: AsrBenchmarkParams) -> lis
                     engine_groups,
                     catalog,
                 )
-            )
+            except Exception as err:
+                logger.exception("%s failed", spec.label)
+                result = {
+                    "label": spec.label,
+                    "engine": spec.engine,
+                    "error": f"{type(err).__name__}: {err}",
+                }
+            results.append(result)
             ctx.write_json("asr-benchmark.json", results)
     finally:
         if switched and original and not params.keep_bundle:
