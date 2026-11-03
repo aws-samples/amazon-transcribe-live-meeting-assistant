@@ -204,12 +204,6 @@ CALL_EVENT_TYPE_TO_STATUS = {
 # such as seen from calls originating with Skype ('anonymous')
 DEFAULT_CUSTOMER_PHONE_NUMBER = getenv("DEFAULT_CUSTOMER_PHONE_NUMBER", "+18005550000")
 DEFAULT_SYSTEM_PHONE_NUMBER = getenv("DEFAULT_SYSTEM_PHONE_NUMBER", "+18005551111")
-CONNECT_CONTACT_ATTR_CUSTOMER_PHONE_NUMBER = getenv(
-    "CONNECT_CONTACT_ATTR_CUSTOMER_PHONE_NUMBER", "LCA Caller Phone Number"
-)
-CONNECT_CONTACT_ATTR_SYSTEM_PHONE_NUMBER = getenv(
-    "CONNECT_CONTACT_ATTR_SYSTEM_PHONE_NUMBER", "LCA System Phone Number"
-)
 
 CUSTOMER_PHONE_NUMBER = ""
 CALL_ID = ""
@@ -383,24 +377,6 @@ async def execute_create_call_mutation(
         print(f"Using AgentId as owner: {owner}")
     message.update({"Owner": owner})
 
-    # Contact Lens STARTED event type doesn't provide customer and system phone numbers, nor does it
-    # have CreatedAt, so we will create a new message structure that conforms to other KDS channels.
-
-    if "ContactId" in message.keys():
-        CALL_ID = message.get("ContactId")
-        created_at = datetime.utcnow().astimezone().isoformat()
-        (CUSTOMER_PHONE_NUMBER, system_phone_number) = (
-            get_caller_and_system_phone_numbers_from_connect(message)
-        )
-        message.update(
-            {
-                "CallId": CALL_ID,
-                "CreatedAt": created_at,
-                "CustomerPhoneNumber": CUSTOMER_PHONE_NUMBER,
-                "SystemPhoneNumber": system_phone_number,
-            }
-        )
-
     query = dsl_gql(
         DSLMutation(
             schema.Mutation.createCall.args(input=message).select(
@@ -466,14 +442,6 @@ async def execute_update_call_status_mutation(
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
 
-    # Contact Lens event requires CallId mapped to ContactId
-
-    if "ContactId" in message.keys():
-        call_id = message.get("ContactId")
-        updated_at = datetime.utcnow().astimezone().isoformat()
-        message["CallId"] = call_id
-        message["UpdatedAt"] = updated_at
-
     query = dsl_gql(
         DSLMutation(
             schema.Mutation.updateCallStatus.args(input={**message, "Status": status}).select(
@@ -504,7 +472,7 @@ async def get_call_status(
     meeting were still open, because doing the end-of-meeting work twice is
     better than not doing it at all.
     """
-    call_id = message.get("ContactId") or message.get("CallId")
+    call_id = message.get("CallId")
     if not call_id or not appsync_session.client.schema:
         return None
 
@@ -1174,32 +1142,6 @@ async def get_call_details(
     )
 
 
-def get_caller_and_system_phone_numbers_from_connect(message: Dict[str, Any]):
-    instanceId = message.get("InstanceId")
-    contactId = message.get("ContactId")
-
-    client = boto3.client("connect")
-    response = client.get_contact_attributes(InstanceId=instanceId, InitialContactId=contactId)
-    # Try to retrieve customer phone number from contact attribute
-    customer_phone_number = response["Attributes"].get(CONNECT_CONTACT_ATTR_CUSTOMER_PHONE_NUMBER)
-    if not customer_phone_number:
-        LOGGER.warning(
-            f"Unable to retrieve contact attribute: '{CONNECT_CONTACT_ATTR_CUSTOMER_PHONE_NUMBER}'. Reverting to default."
-        )
-        customer_phone_number = DEFAULT_CUSTOMER_PHONE_NUMBER
-    # Try to retrieve system phone number from contact attribute: "LCA System Phone Number"
-    system_phone_number = response["Attributes"].get(CONNECT_CONTACT_ATTR_SYSTEM_PHONE_NUMBER)
-    if not system_phone_number:
-        LOGGER.warning(
-            "Unable to retrieve contact attribute: '{CONNECT_CONTACT_ATTR_SYSTEM_PHONE_NUMBER}'. Reverting to default."
-        )
-        system_phone_number = DEFAULT_SYSTEM_PHONE_NUMBER
-    LOGGER.info(
-        f"Setting customer_phone_number={customer_phone_number}, system_phone_number={system_phone_number}"
-    )
-    return (customer_phone_number, system_phone_number)
-
-
 ##########################################################################
 # Fix CamelCasing from Chime
 ##########################################################################
@@ -1488,7 +1430,6 @@ async def execute_process_event_api_mutation(
         #
         #  1. custom i.e. source populates invidividual transcript fields, including optional sentiment field
         #  2. TranscriptEvent - json structure from standard Transcribe API
-        #  3. Contact Lens - a ContactId and a list of Segments
 
         # normalize_transcript_segments also sets transcript segment expiration time
         normalized_messages = normalize_transcript_segments({**message})
@@ -1539,9 +1480,7 @@ async def execute_process_event_api_mutation(
                 queue_agenda_derivation(normalized_message["CallId"])
             if (
                 IS_LAMBDA_AGENT_ASSIST_ENABLED
-                and (
-                    not normalized_message["IsPartial"] or "ContactId" in normalized_message.keys()
-                )
+                and not normalized_message["IsPartial"]
                 and matches_wake_phrase(
                     wake_phrase_pattern(),
                     normalized_message["Transcript"],

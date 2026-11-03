@@ -2764,7 +2764,6 @@ Resources:
         AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
         AudioRecordingExpirationInDays: !Ref AudioRecordingExpirationInDays
         EnableVoiceToneAnalysis: "false"
-        CallAudioSource: "Genesys Cloud Audiohook Web Socket"
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket

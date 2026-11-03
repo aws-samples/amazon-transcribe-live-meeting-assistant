@@ -307,10 +307,7 @@ const EmbedTranscriptPanel = ({ item, callTranscriptPerCallId }) => {
   const maxChannels = 6;
   const { callId } = item;
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
-  // CATEGORY_MATCH segments, which LMA before 0.4.0 could store, are not shown.
-  const transcriptChannels = Object.keys(transcriptsForThisCallId)
-    .filter((c) => c !== 'CATEGORY_MATCH')
-    .slice(0, maxChannels);
+  const transcriptChannels = Object.keys(transcriptsForThisCallId).slice(0, maxChannels);
   const speakerIdentities = parseSpeakerIdentities(item.speakerIdentities);
 
   const handleLanguageSelect = (event) => {

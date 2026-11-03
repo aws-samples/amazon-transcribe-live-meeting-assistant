@@ -128,9 +128,6 @@ enum Channel {
 	CALLER_VOICETONE
 	AGENT_ASSISTANT
 	CHAT_ASSISTANT
-	# Nothing writes this channel. It stays in the enum so that a segment stored
-	# with it by LMA before 0.4.0 can still be read; the UI does not show one.
-	CATEGORY_MATCH
 }
 
 input CreateCallInput {

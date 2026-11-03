@@ -4,12 +4,12 @@
 """Tests for transcript-segment normalisation and the DynamoDB TTL it stamps.
 
 `normalize_transcript_segments` is the funnel every transcript on the Kinesis
-stream passes through on its way to the `addTranscriptSegment` mutation, for all
-three producer shapes: Amazon Transcribe streaming (`TranscriptEvent`), Contact
-Lens (`ContactId`), and the custom shape the WebSocket transcriber and the MicroVM
-ASR engine emit. Everything it gets wrong
-fails at the AppSync boundary, one record at a time, for reasons that surface as
-missing transcript lines rather than as an error anyone sees.
+stream passes through on its way to the `addTranscriptSegment` mutation, for
+both producer shapes: Amazon Transcribe streaming (`TranscriptEvent`) and the
+custom shape the WebSocket transcriber and the MicroVM ASR engine emit.
+Everything it gets wrong fails at the AppSync boundary, one record at a time, for
+reasons that surface as missing transcript lines rather than as an error anyone
+sees.
 
 Two areas are covered because both have misbehaved in production:
 
@@ -413,32 +413,6 @@ def test_an_unset_access_token_leaves_the_owner_unset():
     """No token means no owner; it must not become the string 'None'."""
     segment = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0})
     assert segment.get("Owner") in (None, "")
-
-
-# ── Contact Lens ────────────────────────────────────────────────────────────
-
-
-def test_contact_lens_segments_without_text_do_not_become_transcript_segments():
-    """Only utterances and transcripts become rows; any other segment is skipped."""
-    segments = ep.normalize_transcript_segments(
-        {
-            "ContactId": "contact-1",
-            "Segments": [
-                {"Categories": {"MatchedCategories": ["escalation"]}},
-                {
-                    "Transcript": {
-                        "Id": "t1",
-                        "ParticipantId": "AGENT",
-                        "BeginOffsetMillis": 0,
-                        "EndOffsetMillis": 1000,
-                        "Content": "hello",
-                    }
-                },
-            ],
-        }
-    )
-    assert len(segments) == 1
-    assert segments[0]["CallId"] == "contact-1"
 
 
 def test_os_environment_is_not_mutated_by_importing_the_module():

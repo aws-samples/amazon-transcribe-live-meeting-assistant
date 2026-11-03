@@ -70,10 +70,6 @@ def write_agent_assist_to_kds(message: Dict[str, Any]):
 def publish_lambda_agent_assist_transcript_segment(
     message: Dict[str, Any],
 ):
-    if "ContactId" in message.keys():
-        publish_contact_lens_lambda_agent_assist_transcript_segment(message)
-        return
-
     """Add Lambda Agent Assist GraphQL Mutations"""
     # pylint: disable=too-many-locals
 
@@ -189,99 +185,6 @@ def process_lambda_response(lambda_response):
             extra=error,
         )
     return message
-
-
-def publish_contact_lens_lambda_agent_assist_transcript_segment(
-    segment: Dict[str, Any],
-):
-    """Add Lambda Agent Assist GraphQL Mutations"""
-    # pylint: disable=too-many-locals
-    call_id: str = segment["ContactId"]
-    channel: str = "AGENT_ASSISTANT"
-    status: str = "TRANSCRIBING"
-    is_partial: bool = False
-
-    created_at: str
-    start_time: float
-    end_time: float
-
-    send_lambda_agent_assist_args = []
-    # only send relevant segments to agent assist
-    if "ContactLensTranscript" not in segment:
-        return
-
-    if "Utterance" in segment and segment["Utterance"].get("ParticipantRole") == "CUSTOMER":
-        is_partial = False
-        segment_item = segment["Utterance"]
-        content = segment_item["PartialContent"]
-        segment_id = str(uuid.uuid4())
-
-        created_at = datetime.utcnow().astimezone().isoformat()
-        start_time = segment_item["BeginOffsetMillis"] / 1000
-        end_time = segment_item["EndOffsetMillis"] / 1000
-        end_time = end_time + 0.001  # UI sort order
-
-        send_lambda_agent_assist_args.append(
-            dict(
-                content=content,
-                transcript_segment_args=dict(
-                    CallId=call_id,
-                    Channel=channel,
-                    CreatedAt=created_at,
-                    ExpiresAfter=get_transcription_ttl(),
-                    EndTime=end_time,
-                    IsPartial=is_partial,
-                    SegmentId=segment_id,
-                    StartTime=start_time,
-                    Status=status,
-                ),
-            )
-        )
-
-    if segment["ContactLensTranscript"].get("ParticipantRole") == "CUSTOMER":
-        is_partial = False
-        segment_item = segment["ContactLensTranscript"]
-        content = segment_item["Content"]
-        segment_id = str(uuid.uuid4())
-
-        created_at = datetime.utcnow().astimezone().isoformat()
-        start_time = segment_item["BeginOffsetMillis"] / 1000
-        end_time = segment_item["EndOffsetMillis"] / 1000
-        end_time = end_time + 0.001  # UI sort order
-
-        send_lambda_agent_assist_args.append(
-            dict(
-                content=content,
-                transcript_segment_args=dict(
-                    CallId=call_id,
-                    Channel=channel,
-                    CreatedAt=created_at,
-                    ExpiresAfter=get_transcription_ttl(),
-                    EndTime=end_time,
-                    IsPartial=is_partial,
-                    SegmentId=segment_id,
-                    StartTime=start_time,
-                    Status=status,
-                ),
-            )
-        )
-    for agent_assist_args in send_lambda_agent_assist_args:
-        # write initial message to indicate that wake word was detected and request submitted.
-        checking_segment = {
-            **agent_assist_args["transcript_segment_args"],
-            "Transcript": "Checking...",
-            "IsPartial": True,
-        }
-        write_agent_assist_to_kds(checking_segment)
-
-        transcript_segment = get_lambda_agent_assist_transcript(
-            **agent_assist_args,
-        )
-
-        write_agent_assist_to_kds(transcript_segment)
-
-    # Return the last transcript segment for synchronous callers
-    return transcript_segment if transcript_segment else None
 
 
 @LOGGER.inject_lambda_context

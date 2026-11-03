@@ -19,8 +19,7 @@ export const VoiceToneFluctuationChart = ({ item, callTranscriptPerCallId }) => 
     .slice(0, maxChannels)
     .filter((c) => c !== 'AGENT_ASSISTANT')
     .filter((c) => c !== 'AGENT')
-    .filter((c) => c !== 'CALLER')
-    .filter((c) => c !== 'CATEGORY_MATCH');
+    .filter((c) => c !== 'CALLER');
   const sentimentPerChannel = transcriptChannels
     .map((channel) => transcriptsForThisCallId[channel])
     .map((transcript) =>
@@ -83,8 +82,7 @@ export const SentimentFluctuationChart = ({ item, callTranscriptPerCallId }) => 
     .slice(0, maxChannels)
     .filter((c) => c !== 'AGENT_ASSISTANT')
     .filter((c) => c !== 'AGENT_VOICETONE')
-    .filter((c) => c !== 'CALLER_VOICETONE')
-    .filter((c) => c !== 'CATEGORY_MATCH');
+    .filter((c) => c !== 'CALLER_VOICETONE');
 
   const sentimentPerChannel = transcriptChannels
     .map((channel) => transcriptsForThisCallId[channel])
@@ -147,8 +145,7 @@ export const SentimentPerQuarterChart = ({ item, callTranscriptPerCallId }) => {
     .slice(0, maxChannels)
     .filter((c) => c !== 'AGENT_ASSISTANT')
     .filter((c) => c !== 'AGENT_VOICETONE')
-    .filter((c) => c !== 'CALLER_VOICETONE')
-    .filter((c) => c !== 'CATEGORY_MATCH');
+    .filter((c) => c !== 'CALLER_VOICETONE');
 
   const sentimentByQuarterPerChannel = transcriptChannels
     .map((channel) => item?.sentiment?.SentimentByPeriod?.QUARTER[channel] || [])
