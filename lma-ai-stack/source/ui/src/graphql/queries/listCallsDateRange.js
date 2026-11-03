@@ -14,8 +14,6 @@ export default /* GraphQL */ `
         AgentId
         Owner
         SharedWith
-        CallCategories
-        IssuesDetected
         CallSummaryText
         # Selected here as well as in getCall, for the same reason
         # SpeakerIdentities is below: the meetings-list split panel renders the
@@ -38,7 +36,6 @@ export default /* GraphQL */ `
         UpdatedAt
         RecordingUrl
         VideoRecordingUrl
-        PcaUrl
         TotalConversationDurationMillis
         Sentiment {
           OverallSentiment {

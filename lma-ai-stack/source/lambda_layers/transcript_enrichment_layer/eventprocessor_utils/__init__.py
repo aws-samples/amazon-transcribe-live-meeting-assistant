@@ -8,8 +8,6 @@ from .eventprocessor import (
     get_transcription_ttl,
     normalize_transcript_segments,
     transform_segment_to_add_sentiment,
-    transform_segment_to_categories_agent_assist,
-    transform_segment_to_issues_agent_assist,
 )
 
 __all__ = [
@@ -17,7 +15,5 @@ __all__ = [
     "get_meeting_ttl",
     "get_transcription_ttl",
     "transform_segment_to_add_sentiment",
-    "transform_segment_to_categories_agent_assist",
-    "transform_segment_to_issues_agent_assist",
     "get_owner_from_jwt",
 ]

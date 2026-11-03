@@ -46,12 +46,9 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	Status: CallStatus
 	RecordingUrl: String
 	VideoRecordingUrl: String
-	PcaUrl: String
 	TotalConversationDurationMillis: Float
 	AgentId: String
 	Metadatajson: String
-	CallCategories: [String]
-	IssuesDetected: String
 	CallSummaryText: String
 	# Small JSON object describing where the summary text came from and whether a
 	# regeneration is in flight: {"source","status","startedAt","updatedAt",
@@ -131,6 +128,8 @@ enum Channel {
 	CALLER_VOICETONE
 	AGENT_ASSISTANT
 	CHAT_ASSISTANT
+	# Nothing writes this channel. It stays in the enum so that a segment stored
+	# with it by LMA before 0.4.0 can still be read; the UI does not show one.
 	CATEGORY_MATCH
 }
 
@@ -230,7 +229,6 @@ type Mutation @aws_iam {
 	updateCallAggregation(input: UpdateCallAggregationInput!): Call
 	updateRecordingUrl(input: UpdateRecordingUrlInput!): Call
 	updateVideoRecordingUrl(input: UpdateVideoRecordingUrlInput!): Call
-	updatePcaUrl(input: UpdatePcaUrlInput!): Call
 	updateAgent(input: UpdateAgentInput!): Call
 	updateSpeakerIdentities(input: UpdateSpeakerIdentitiesInput!): Call @aws_cognito_user_pools @aws_iam
 	resolveSpeakerNames(input: ResolveSpeakerNamesInput!): ResolveSpeakerNamesOutput @aws_cognito_user_pools @aws_iam
@@ -251,8 +249,6 @@ type Mutation @aws_iam {
 	grantVoiceConsent: VoiceEnrollmentResult @aws_cognito_user_pools
 	enrolMyVoice(input: EnrolMyVoiceInput!): VoiceEnrollmentResult @aws_cognito_user_pools
 	revokeVoiceConsent(input: RevokeVoiceConsentInput): VoiceEnrollmentResult @aws_cognito_user_pools
-	addCallCategory(input: AddCallCategoryInput!): Call
-	addIssuesDetected(input: AddIssuesDetectedInput!): Call
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call
 	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment
 	# Written by the call event processor for an ADD_VIDEO_KEYFRAME event; IAM only,
@@ -669,7 +665,7 @@ type Subscription {
 	onCreateCall: CreateCallOutput
 		@aws_subscribe(mutations: ["createCall"])
 	onUpdateCall(CallId: ID): Call
-		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updatePcaUrl","updateAgent", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "addCallCategory", "addIssuesDetected", "addCallSummaryText"])
+		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updateAgent", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "addCallSummaryText"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
 	onAddVideoKeyframe(CallId: ID): VideoKeyframe
@@ -821,22 +817,6 @@ input UpdateAgentInput {
 	SharedWith: String
 }
 
-input AddCallCategoryInput {
-	CallId: ID!
-	CallCategories: [String]
-	UpdatedAt: AWSDateTime
-	Owner: String
-	SharedWith: String
-}
-
-input AddIssuesDetectedInput {
-	CallId: ID!
-	IssuesDetected: String!
-	UpdatedAt: AWSDateTime
-	Owner: String
-	SharedWith: String
-}
-
 input AddCallSummaryTextInput {
 	CallId: ID!
 	CallSummaryText: String!
@@ -873,14 +853,6 @@ input UpdateRecordingUrlInput {
 input UpdateVideoRecordingUrlInput {
 	CallId: ID!
 	VideoRecordingUrl: String!
-	UpdatedAt: AWSDateTime
-	Owner: String
-	SharedWith: String
-}
-
-input UpdatePcaUrlInput {
-	CallId: ID!
-	PcaUrl: String!
 	UpdatedAt: AWSDateTime
 	Owner: String
 	SharedWith: String

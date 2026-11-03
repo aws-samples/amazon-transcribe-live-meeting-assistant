@@ -3,11 +3,7 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-import { 
-    TranscriptEvent,
-    UtteranceEvent,
-    CategoryEvent,
-} from '@aws-sdk/client-transcribe-streaming';
+import { TranscriptEvent } from '@aws-sdk/client-transcribe-streaming';
 import stream from 'stream';
 import { WriteStream } from 'fs';
 import type { AsrSessionSet } from './asr-microvm';
@@ -23,7 +19,6 @@ export type EventType =
     | 'ADD_S3_RECORDING_URL'  // optional
     | 'ADD_S3_VIDEO_RECORDING_URL' // optional
     | 'ADD_VIDEO_KEYFRAME' // optional
-    | 'ADD_CALL_CATEGORY' // optional
     | 'END'; // required
 
 export type CallEventBase<Type extends EventType = EventType> = {
@@ -94,15 +89,7 @@ export type AddTranscriptSegmentEvent = CallEventBase<'ADD_TRANSCRIPT_SEGMENT'> 
     IsPartial?: boolean,
     Sentiment?: string,
     TranscriptEvent?: TranscriptEvent,
-    UtteranceEvent?: UtteranceEvent,
     Speaker: string,
-    AccessToken?: string,
-    IdToken?: string,
-    RefreshToken?: string,
-};
-
-export type AddCallCategoryEvent = CallEventBase<'ADD_CALL_CATEGORY'> & {
-    CategoryEvent: CategoryEvent,
     AccessToken?: string,
     IdToken?: string,
     RefreshToken?: string,

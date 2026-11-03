@@ -50,7 +50,6 @@ updates:
   - package-ecosystem: npm
     directories:
       - /lma-websocket-transcriber-stack/source/app
-      - /lma-websocket-transcriber-stack/source/lambda_functions/pca_integration
     schedule:
       interval: weekly
     target-branch: develop

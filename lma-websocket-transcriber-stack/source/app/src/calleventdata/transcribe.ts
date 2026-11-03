@@ -11,14 +11,7 @@ import {
     TranscribeStreamingClient,
     StartStreamTranscriptionCommand,
     TranscriptResultStream,
-    StartCallAnalyticsStreamTranscriptionCommand,
-    StartCallAnalyticsStreamTranscriptionCommandInput,
-    CallAnalyticsTranscriptResultStream,
-    ConfigurationEvent,
-    ParticipantRole,
-    ChannelDefinition,
     StartStreamTranscriptionCommandInput,
-    ContentRedactionOutput,
     LanguageCode,
     ContentRedactionType,
     Item,
@@ -67,40 +60,18 @@ import { noteTranscriptSegment } from '../metrics/session';
 import { meterTranscribeRequest, pcmSeconds } from '../metering';
 import { TranscriptionSettings, getSessionSettings, isRedactionApplied } from './session-settings';
 
-const formatPath = function (path: string) {
-    let pathOut = path;
-    if (path.length > 0 && path.charAt(path.length - 1) != '/') {
-        pathOut += '/';
-    }
-    return pathOut;
-};
-
 import dotenv from 'dotenv';
 // dotenv v17 prints an "injected env" banner to stdout by default; quiet
 // suppresses it to keep production logs clean.
 dotenv.config({ quiet: true });
 
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
-const TRANSCRIBE_API_MODE = process.env['TRANSCRIBE_API_MODE'] || 'standard';
-const isTCAEnabled = TRANSCRIBE_API_MODE === 'analytics';
 // The Amazon Transcribe options -- language, redaction, custom vocabulary and
 // language model, the speaker-partitioning default -- are read per meeting from
 // the Amazon Transcribe section of the Configuration page, with this task's
 // environment as the fallback: see session-settings.ts.
-// Every request is a two-channel stream: channel identification on the standard
-// API, two channel definitions on Call Analytics.
+// Every request is a two-channel stream, with channel identification on.
 const TRANSCRIBE_CHANNELS = 2;
-const TCA_DATA_ACCESS_ROLE_ARN = process.env['TCA_DATA_ACCESS_ROLE_ARN'] || '';
-const CALL_ANALYTICS_FILE_PREFIX = formatPath(
-    process.env['CALL_ANALYTICS_FILE_PREFIX'] || 'lca-call-analytics-json/'
-);
-const RECORDINGS_BUCKET_NAME = process.env['RECORDINGS_BUCKET_NAME'] || null;
-// optional - disable post call analytics output
-const IS_TCA_POST_CALL_ANALYTICS_ENABLED =
-    (process.env['IS_TCA_POST_CALL_ANALYTICS_ENABLED'] || 'false') === 'true';
-// optional - when redaction is enabled, choose 'redacted' only (dafault), or 'redacted_and_unredacted' for both
-const POST_CALL_CONTENT_REDACTION_OUTPUT =
-    process.env['POST_CALL_CONTENT_REDACTION_OUTPUT'] || 'redacted';
 const kdsStreamName = process.env['KINESIS_STREAM_NAME'] || '';
 // Minimum size for a run of same-speaker words to be split out as its own
 // transcript segment; both must be cleared. Fitted to real recordings, where the
@@ -125,12 +96,6 @@ const diarizationMaxSegmentSeconds = parseFloat(
     process.env['DIARIZATION_MAX_SEGMENT_SECONDS'] || String(DEFAULT_MAX_SEGMENT_SECONDS)
 );
 const DEBUG = (process.env['DEBUG'] || 'false') === 'true';
-
-const tcaOutputLocation = `s3://${RECORDINGS_BUCKET_NAME}/${CALL_ANALYTICS_FILE_PREFIX}`;
-
-type transcriptionCommandInput<TCAEnabled> = TCAEnabled extends true
-    ? StartCallAnalyticsStreamTranscriptionCommandInput
-    : StartStreamTranscriptionCommandInput;
 
 const kinesisClient = new KinesisClient({ region: AWS_REGION });
 const transcribeClient = new TranscribeStreamingClient({ region: AWS_REGION });
@@ -337,38 +302,29 @@ const isStaleSessionError = (error: unknown): boolean => {
 };
 
 /**
- * Whether Call Analytics' post-call output is asked for redacted: whenever the
- * meeting's stream is redacted (the Amazon Transcribe section of the
- * Configuration page). Amazon Transcribe takes a redaction output only for a
- * redacted stream, so an unredacted meeting's output is unredacted too. The PCA
- * integration looks for the output in whichever folder it was written to.
- */
-export const postCallRedactionOutput = (streamRedacted: boolean): boolean => streamRedacted;
-
-/**
  * Lays a meeting's Amazon Transcribe options onto a streaming request: the
  * language or language identification, redaction where it applies, and the
  * custom vocabulary and language model when one is named.
  */
 export const applyTranscribeOptions = (
-    tsParams: StartStreamTranscriptionCommandInput | StartCallAnalyticsStreamTranscriptionCommandInput,
+    tsParams: StartStreamTranscriptionCommandInput,
     transcription: TranscriptionSettings
 ): void => {
     const identifying =
         transcription.languageCode === 'identify-language' ||
         transcription.languageCode === 'identify-multiple-languages';
     if (transcription.languageCode === 'identify-language') {
-        (tsParams as StartStreamTranscriptionCommandInput).IdentifyLanguage = true;
+        tsParams.IdentifyLanguage = true;
     } else if (transcription.languageCode === 'identify-multiple-languages') {
-        (tsParams as StartStreamTranscriptionCommandInput).IdentifyMultipleLanguages = true;
+        tsParams.IdentifyMultipleLanguages = true;
     } else {
         tsParams.LanguageCode = transcription.languageCode as LanguageCode;
     }
     if (identifying && transcription.languageOptions) {
-        (tsParams as StartStreamTranscriptionCommandInput).LanguageOptions =
+        tsParams.LanguageOptions =
             transcription.languageOptions.replace(/\s/g, '');
         if (transcription.preferredLanguage !== 'None') {
-            (tsParams as StartStreamTranscriptionCommandInput).PreferredLanguage =
+            tsParams.PreferredLanguage =
                 transcription.preferredLanguage as LanguageCode;
         }
     }
@@ -483,7 +439,6 @@ export const startTranscribe = async (
                 callMetaData.callId,
                 pcmSeconds(attemptAudioBytes, callMetaData.samplingRate, TRANSCRIBE_CHANNELS),
                 {
-                    callAnalytics: isTCAEnabled,
                     redaction: redactionApplied,
                     customLanguageModel: Boolean(transcription.customLanguageModelName),
                     channels: TRANSCRIBE_CHANNELS,
@@ -522,34 +477,6 @@ export const startTranscribe = async (
             );
 
             const transcribeInput = async function* () {
-                if (isTCAEnabled) {
-                    const channel0: ChannelDefinition = {
-                        ChannelId: 0,
-                        ParticipantRole: ParticipantRole.CUSTOMER,
-                    };
-                    const channel1: ChannelDefinition = {
-                        ChannelId: 1,
-                        ParticipantRole: ParticipantRole.AGENT,
-                    };
-                    const channel_definitions: ChannelDefinition[] = [];
-                    channel_definitions.push(channel0);
-                    channel_definitions.push(channel1);
-                    const configuration_event: ConfigurationEvent = {
-                        ChannelDefinitions: channel_definitions,
-                    };
-                    if (IS_TCA_POST_CALL_ANALYTICS_ENABLED) {
-                        configuration_event.PostCallAnalyticsSettings = {
-                            OutputLocation: tcaOutputLocation,
-                            DataAccessRoleArn: TCA_DATA_ACCESS_ROLE_ARN,
-                        };
-                        // Redacted exactly when this meeting's stream is.
-                        if (postCallRedactionOutput(redactionApplied)) {
-                            configuration_event.PostCallAnalyticsSettings.ContentRedactionOutput =
-                                POST_CALL_CONTENT_REDACTION_OUTPUT as ContentRedactionOutput;
-                        }
-                    }
-                    yield { ConfigurationEvent: configuration_event };
-                }
                 if (audioInputStream == undefined) {
                     server.log.error(
                         `[TRANSCRIBING]: [${callMetaData.callId}] - audioInputStream undefined`
@@ -588,12 +515,8 @@ export const startTranscribe = async (
             };
 
             let tsStream;
-            let outputCallAnalyticsStream:
-            | AsyncIterable<CallAnalyticsTranscriptResultStream>
-            | undefined;
-            let outputTranscriptStream: AsyncIterable<TranscriptResultStream> | undefined;
 
-            const tsParams: transcriptionCommandInput<typeof isTCAEnabled> = {
+            const tsParams: StartStreamTranscriptionCommandInput = {
                 MediaSampleRateHertz: callMetaData.samplingRate,
                 MediaEncoding: 'pcm',
                 AudioStream: transcribeInput(),
@@ -616,65 +539,40 @@ export const startTranscribe = async (
 
             applyTranscribeOptions(tsParams, transcription);
 
-            if (isTCAEnabled) {
-                server.log.debug(
-                    `[TRANSCRIBING]: [${
-                        callMetaData.callId
-                    }] -StartCallAnalyticsStreamTranscriptionCommand args: ${JSON.stringify(
-                        tsParams
-                    )}`
-                );
-                const response = await transcribeClient.send(
-                    new StartCallAnalyticsStreamTranscriptionCommand(
-                        tsParams as StartCallAnalyticsStreamTranscriptionCommandInput
-                    )
-                );
-                sessionId = response.SessionId;
-                attemptAccepted = true;
-                server.log.debug(
-                    `[TRANSCRIBING]: [${callMetaData.callId}] === Received Initial response from TCA. Session Id: ${sessionId} ===`
-                );
-
-                outputCallAnalyticsStream = response.CallAnalyticsTranscriptResultStream;
-            } else {
-                (
-                    tsParams as StartStreamTranscriptionCommandInput
-                ).EnableChannelIdentification = true;
-                (tsParams as StartStreamTranscriptionCommandInput).NumberOfChannels = 2;
-                // ShowSpeakerLabel is a STREAM-level flag, so it goes on as soon
-                // as EITHER channel wants diarization; writeTranscriptionSegment
-                // then applies the labels only to the channel(s) that opted in.
-                // Measured: enabling it does not change segmentation or accuracy
-                // on the other channel, so the asymmetric cases cost nothing.
-                // Note there is no MaxSpeakerLabels in the streaming API (batch
-                // only) — speaker count is not tunable here.
-                if (anyChannelDiarized(diarization)) {
-                    (tsParams as StartStreamTranscriptionCommandInput).ShowSpeakerLabel = true;
-                }
-                server.log.debug(
-                    `[TRANSCRIBING]: [${
-                        callMetaData.callId
-                    }] -Transcribe StartStreamTranscriptionCommand args: ${JSON.stringify(
-                        tsParams
-                    )}`
-                );
-                const response = await transcribeClient.send(
-                    new StartStreamTranscriptionCommand(tsParams)
-                );
-                sessionId = response.SessionId;
-                attemptAccepted = true;
-                server.log.debug(
-                    `[TRANSCRIBING]: [${callMetaData.callId}] === Received Initial response from Transcribe. Session Id: ${sessionId} ===`
-                );
-
-                outputTranscriptStream = response.TranscriptResultStream;
+            tsParams.EnableChannelIdentification = true;
+            tsParams.NumberOfChannels = 2;
+            // ShowSpeakerLabel is a STREAM-level flag, so it goes on as soon
+            // as EITHER channel wants diarization; writeTranscriptionSegment
+            // then applies the labels only to the channel(s) that opted in.
+            // Measured: enabling it does not change segmentation or accuracy
+            // on the other channel, so the asymmetric cases cost nothing.
+            // Note there is no MaxSpeakerLabels in the streaming API (batch
+            // only) — speaker count is not tunable here.
+            if (anyChannelDiarized(diarization)) {
+                tsParams.ShowSpeakerLabel = true;
             }
+            server.log.debug(
+                `[TRANSCRIBING]: [${
+                    callMetaData.callId
+                }] -Transcribe StartStreamTranscriptionCommand args: ${JSON.stringify(
+                    tsParams
+                )}`
+            );
+            const response = await transcribeClient.send(
+                new StartStreamTranscriptionCommand(tsParams)
+            );
+            sessionId = response.SessionId;
+            attemptAccepted = true;
+            server.log.debug(
+                `[TRANSCRIBING]: [${callMetaData.callId}] === Received Initial response from Transcribe. Session Id: ${sessionId} ===`
+            );
+
+            const outputTranscriptStream: AsyncIterable<TranscriptResultStream> | undefined =
+                response.TranscriptResultStream;
 
             socketCallMap.startStreamTime = new Date();
 
-            if (outputCallAnalyticsStream) {
-                tsStream = stream.Readable.from(outputCallAnalyticsStream);
-            } else if (outputTranscriptStream) {
+            if (outputTranscriptStream) {
                 tsStream = stream.Readable.from(outputTranscriptStream);
             }
 
@@ -978,7 +876,6 @@ export const writeSegmentToKds = async (
         UpdatedAt: now,
         Sentiment: undefined,
         TranscriptEvent: undefined,
-        UtteranceEvent: undefined,
         Speaker: segment.Speaker,
         AccessToken: callMetadata.accessToken,
         IdToken: callMetadata.idToken,

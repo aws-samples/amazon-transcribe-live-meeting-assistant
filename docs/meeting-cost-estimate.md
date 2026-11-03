@@ -77,7 +77,6 @@ key the price table is looked up by.
 | Context | Service | Unit(s) | Written by | How it is measured |
 |---|---|---|---|---|
 | Transcription | `transcribe/streaming` | `seconds` | WebSocket transcriber, Virtual Participant | Seconds of audio sent in each `StartStreamTranscription` request, rounded up, with Transcribe's 15-second minimum per request. A two-channel stream with channel identification is billed at the stream's duration, not twice it, so it is measured once. Written per request, so reconnects during a long meeting each appear. |
-| Transcription | `transcribe/streaming-call-analytics` | `seconds` | WebSocket transcriber | As above, when `TRANSCRIBE_API_MODE` is `analytics`. |
 | Transcription | `transcribe/streaming-pii-redaction` | `seconds` | WebSocket transcriber, Virtual Participant | The same seconds again when content redaction was applied to the request, because redaction is billed per second on top. |
 | Transcription | `transcribe/streaming-custom-language-model` | `seconds` | WebSocket transcriber | The same seconds again when a custom language model was used. |
 | Transcription | `transcribe/batch` | `seconds` | Upload Audio finalizer | The batch job's duration, read as the end time of the last transcribed word, with the 15-second minimum. Trailing silence, which is billed, is not counted. |
@@ -108,8 +107,7 @@ Every price in it is a public on-demand list price read from the AWS Price List 
 `AmazonECS`, `comprehend`) on **2026-10-28**, in US dollars per single unit — per
 token, per second, per vCPU-second. Where a price is tiered by monthly volume, the
 first tier is listed, which is the highest price; a deployment that transcribes more
-than 250,000 minutes a month pays less than this shows for Call Analytics and the
-Transcribe add-ons. Standard streaming transcription is a flat price.
+than 250,000 minutes a month pays less than this shows for the Transcribe add-ons. Standard streaming transcription is a flat price.
 
 A few examples of what is in it, for `us-east-1`:
 
@@ -208,8 +206,7 @@ include:
 - Amazon Bedrock Knowledge Base queries made by the meeting assistant's document and
   meeting-history tools (RetrieveAndGenerate does not report token usage), and the
   vector store behind them.
-- Amazon Bedrock Guardrails, Amazon Translate (live translation in the browser) and
-  Amazon Transcribe Post-Call Analytics.
+- Amazon Bedrock Guardrails and Amazon Translate (live translation in the browser).
 - The short Nova Sonic clip the voice assistant renders once at start-up to
   acknowledge tool calls.
 - Lambda MicroVM snapshot read and storage charges.

@@ -313,8 +313,6 @@ _CALL_FIELDS = """
       SK
       CallId
       AgentId
-      CallCategories
-      IssuesDetected
       CallSummaryText
       CallSummaryState
       SpeakerIdentities
@@ -329,7 +327,6 @@ _CALL_FIELDS = """
       SystemPhoneNumber
       RecordingUrl
       VideoRecordingUrl
-      PcaUrl
       Owner
       SharedWith
       TotalConversationDurationMillis

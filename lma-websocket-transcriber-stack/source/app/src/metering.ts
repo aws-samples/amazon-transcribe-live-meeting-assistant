@@ -40,7 +40,6 @@ export const EXPIRATION_ENV_VAR = 'METERING_EXPIRATION_DAYS';
 export const CONTEXT_TRANSCRIPTION = 'Transcription';
 
 export const SERVICE_TRANSCRIBE_STREAMING = 'transcribe/streaming';
-export const SERVICE_TRANSCRIBE_CALL_ANALYTICS = 'transcribe/streaming-call-analytics';
 export const SERVICE_TRANSCRIBE_PII_REDACTION = 'transcribe/streaming-pii-redaction';
 export const SERVICE_TRANSCRIBE_CUSTOM_LANGUAGE_MODEL = 'transcribe/streaming-custom-language-model';
 export const SERVICE_MICROVM_ARM64 = 'lambda-microvm/arm64';
@@ -223,7 +222,6 @@ export const meterTranscribeRequest = async (
     callId: string,
     audioSeconds: number,
     options: {
-        callAnalytics: boolean;
         redaction: boolean;
         customLanguageModel: boolean;
         channels: number;
@@ -237,9 +235,8 @@ export const meterTranscribeRequest = async (
         audioSeconds: Math.round(audioSeconds * 10) / 10,
         minimum: `${TRANSCRIBE_MINIMUM_SECONDS_PER_REQUEST}s per request`,
     };
-    const base = options.callAnalytics ? SERVICE_TRANSCRIBE_CALL_ANALYTICS : SERVICE_TRANSCRIBE_STREAMING;
     const writes = [
-        recordMetering(callId, CONTEXT_TRANSCRIPTION, base, { seconds, requests: 1 }, details, options.logger),
+        recordMetering(callId, CONTEXT_TRANSCRIPTION, SERVICE_TRANSCRIBE_STREAMING, { seconds, requests: 1 }, details, options.logger),
     ];
     if (options.redaction) {
         writes.push(

@@ -5,9 +5,9 @@
 
 `normalize_transcript_segments` is the funnel every transcript on the Kinesis
 stream passes through on its way to the `addTranscriptSegment` mutation, for all
-four producers: Amazon Transcribe streaming (`TranscriptEvent`), Transcribe Call
-Analytics (`UtteranceEvent`), Contact Lens (`ContactId`), and the custom shape the
-WebSocket transcriber and the MicroVM ASR engine emit. Everything it gets wrong
+three producer shapes: Amazon Transcribe streaming (`TranscriptEvent`), Contact
+Lens (`ContactId`), and the custom shape the WebSocket transcriber and the MicroVM
+ASR engine emit. Everything it gets wrong
 fails at the AppSync boundary, one record at a time, for reasons that surface as
 missing transcript lines rather than as an error anyone sees.
 
@@ -292,42 +292,6 @@ def test_transcribe_streaming_event_keeps_zero_times():
     assert segment["EndTime"] == 0.0
 
 
-def test_call_analytics_utterance_event_keeps_zero_offsets():
-    segment = normalize_one(
-        {
-            "CallId": "call-1",
-            "UtteranceEvent": {
-                "ParticipantRole": "AGENT",
-                "UtteranceId": "u1",
-                "BeginOffsetMillis": 0,
-                "EndOffsetMillis": 0,
-                "Transcript": "hello",
-                "IsPartial": False,
-            },
-        }
-    )
-    assert segment["StartTime"] == 0.0
-    assert segment["EndTime"] == 0.0
-
-
-def test_call_analytics_offsets_are_converted_to_seconds():
-    segment = normalize_one(
-        {
-            "CallId": "call-1",
-            "UtteranceEvent": {
-                "ParticipantRole": "AGENT",
-                "UtteranceId": "u1",
-                "BeginOffsetMillis": 1500,
-                "EndOffsetMillis": 4250,
-                "Transcript": "hello",
-                "IsPartial": False,
-            },
-        }
-    )
-    assert segment["StartTime"] == 1.5
-    assert segment["EndTime"] == 4.25
-
-
 # ── channel, speaker and identity mapping ───────────────────────────────────
 
 
@@ -336,7 +300,7 @@ def test_call_analytics_offsets_are_converted_to_seconds():
     [("CUSTOMER", "CALLER"), ("AGENT", "AGENT"), ("CALLER", "CALLER")],
 )
 def test_transcribe_streaming_customer_channel_is_renamed_to_caller(producer_channel, expected):
-    """LMA's schema knows CALLER/AGENT; Transcribe Call Analytics says CUSTOMER."""
+    """LMA's schema knows CALLER/AGENT; a producer that says CUSTOMER means CALLER."""
     segment = normalize_one(
         {
             "CallId": "call-1",
@@ -402,52 +366,6 @@ def test_custom_producer_keeps_the_segment_id_it_is_given():
 # ── partial segments and sentiment ──────────────────────────────────────────
 
 
-def test_call_analytics_partial_segment_carries_no_sentiment():
-    """Sentiment on an incomplete utterance would be scored on half a sentence."""
-    segment = normalize_one(
-        {
-            "CallId": "call-1",
-            "UtteranceEvent": {
-                "ParticipantRole": "AGENT",
-                "UtteranceId": "u1",
-                "BeginOffsetMillis": 0,
-                "EndOffsetMillis": 500,
-                "Transcript": "hello",
-                "IsPartial": True,
-                "Sentiment": "POSITIVE",
-                "SentimentWeighted": 5,
-                "SentimentScore": {"Positive": 0.9},
-            },
-        }
-    )
-    assert segment["IsPartial"] is True
-    assert segment["Sentiment"] is None
-    assert segment["SentimentWeighted"] is None
-    assert segment["SentimentScore"] is None
-
-
-def test_call_analytics_final_segment_keeps_its_sentiment():
-    segment = normalize_one(
-        {
-            "CallId": "call-1",
-            "UtteranceEvent": {
-                "ParticipantRole": "AGENT",
-                "UtteranceId": "u1",
-                "BeginOffsetMillis": 0,
-                "EndOffsetMillis": 500,
-                "Transcript": "hello",
-                "IsPartial": False,
-                "Sentiment": "POSITIVE",
-                "SentimentWeighted": 5,
-                "SentimentScore": {"Positive": 0.9},
-            },
-        }
-    )
-    assert segment["Sentiment"] == "POSITIVE"
-    assert segment["SentimentWeighted"] == 5
-    assert segment["SentimentScore"] == {"Positive": 0.9}
-
-
 # ── fields every segment carries ────────────────────────────────────────────
 
 
@@ -500,8 +418,8 @@ def test_an_unset_access_token_leaves_the_owner_unset():
 # ── Contact Lens ────────────────────────────────────────────────────────────
 
 
-def test_contact_lens_categories_do_not_become_transcript_segments():
-    """Category segments are the agent-assist path's business, not transcript rows."""
+def test_contact_lens_segments_without_text_do_not_become_transcript_segments():
+    """Only utterances and transcripts become rows; any other segment is skipped."""
     segments = ep.normalize_transcript_segments(
         {
             "ContactId": "contact-1",

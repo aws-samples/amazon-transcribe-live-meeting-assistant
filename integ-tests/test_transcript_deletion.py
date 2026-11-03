@@ -123,7 +123,7 @@ def deleted(stack, user, deletion_on):
 
 
 def test_the_transcript_segments_are_deleted(deleted) -> None:
-    kept = [s for s in deleted["segments"] if s.get("Channel") != "CATEGORY_MATCH"]
+    kept = deleted["segments"]
     assert kept == [], f"{len(kept)} transcript item(s) remain, e.g. {kept[:1]}"
 
 

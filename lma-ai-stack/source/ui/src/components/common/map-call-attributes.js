@@ -8,16 +8,11 @@ import { getSentimentTrendLabel, getWeightedSentimentLabel } from './sentiment';
 
 /* Maps call attributes from API to a format that can be used in tables and panel */
 // eslint-disable-next-line arrow-body-style
-const mapCallsAttributes = (calls, settings) => {
-  const regex = settings?.CategoryAlertRegex ?? '.*';
-  const countAlerts = (categories) => categories.filter((category) => category.match(regex)).length;
-
+const mapCallsAttributes = (calls) => {
   return calls.map((item) => {
     const {
       CallId: callId,
       AgentId: agentId,
-      CallCategories: callCategories,
-      IssuesDetected: issuesDetected,
       CallSummaryText: callSummaryText,
       CallSummaryState: callSummaryState,
       SpeakerIdentities: speakerIdentities,
@@ -35,7 +30,6 @@ const mapCallsAttributes = (calls, settings) => {
       VideoRecordingUrl: videoRecordingUrl,
       TotalConversationDurationMillis: totalConversationDurationMillis = 0,
       Sentiment: sentiment = {},
-      PcaUrl: pcaUrl,
       Owner: owner,
       SharedWith: sharedWith,
       ListPK: listPK,
@@ -52,16 +46,10 @@ const mapCallsAttributes = (calls, settings) => {
     const callerSentimentTrendLabel = getSentimentTrendLabel(callerSentimentByQuarter);
     const agentSentimentByQuarter = sentiment?.SentimentByPeriod?.QUARTER?.AGENT || [];
     const agentSentimentTrendLabel = getSentimentTrendLabel(agentSentimentByQuarter);
-    const callCategoryCount = callCategories?.length || 0;
-    const alertCount = callCategories?.length ? countAlerts(callCategories) : 0;
 
     return {
       callId,
       agentId,
-      callCategories,
-      callCategoryCount,
-      alertCount,
-      issuesDetected,
       callSummaryText,
       // Raw JSON string; parsed by the readers via parseSummaryState, so a
       // meeting with no state at all reads as a generated summary with nothing
@@ -81,7 +69,6 @@ const mapCallsAttributes = (calls, settings) => {
       updatedAt,
       recordingUrl,
       videoRecordingUrl,
-      pcaUrl,
       totalConversationDurationMillis,
       conversationDurationTimeStamp: new Date(totalConversationDurationMillis).toISOString().substr(11, 8),
       sentiment,

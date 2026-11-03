@@ -83,7 +83,6 @@ these Transcribe features do not apply to it:
 | Custom vocabulary | Not available |
 | Custom language model | Not available |
 | Language identification / multi-language | Not available |
-| Transcribe Call Analytics | Not available |
 | Languages | The default model is **English only** |
 | Speaker labels | Per voice, per channel (the reason to use it) |
 

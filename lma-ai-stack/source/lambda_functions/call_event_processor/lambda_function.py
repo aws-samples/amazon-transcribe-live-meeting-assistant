@@ -6,8 +6,6 @@
 """Transcription Passthrough Lambda Function"""
 
 import asyncio
-import json
-import re
 from os import environ, getenv
 from typing import TYPE_CHECKING, Any, Dict, List
 
@@ -39,18 +37,14 @@ if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import DynamoDBServiceResource
     from mypy_boto3_dynamodb.service_resource import Table as DynamoDbTable
     from mypy_boto3_lambda.client import LambdaClient
-    from mypy_boto3_sns.client import SNSClient
     from mypy_boto3_sqs.client import SQSClient
-    from mypy_boto3_ssm.client import SSMClient
 else:
     Boto3Session = object
     DynamoDBServiceResource = object
     DynamoDbTable = object
     LambdaClient = object
     ComprehendClient = object
-    SNSClient = object
     SQSClient = object
-    SSMClient = object
 
 APPSYNC_GRAPHQL_URL = environ["APPSYNC_GRAPHQL_URL"]
 APPSYNC_CLIENT = AppsyncAioGqlClient(url=APPSYNC_GRAPHQL_URL, fetch_schema_from_transport=True)
@@ -93,9 +87,6 @@ def meter_sentiment_request(call_id: str, text: str) -> None:
     )
 
 
-SNS_CLIENT: SNSClient = BOTO3_SESSION.client("sns", config=CLIENT_CONFIG)
-SSM_CLIENT: SSMClient = BOTO3_SESSION.client("ssm", config=CLIENT_CONFIG)
-
 # Records that cannot be decoded are copied here instead of being reported as
 # batch item failures. The event source mapping's own on-failure destination is
 # the same queue, but it only receives batches the invocation actually failed.
@@ -105,11 +96,6 @@ DISCARDED_RECORDS_QUEUE_URL = getenv("DISCARDED_RECORDS_QUEUE_URL", "")
 LOGGER = Logger(location="%(filename)s:%(lineno)d - %(funcName)s()")
 
 EVENT_LOOP = asyncio.get_event_loop()
-
-setting_response = SSM_CLIENT.get_parameter(Name=getenv("PARAMETER_STORE_NAME"))
-SETTINGS = json.loads(setting_response["Parameter"]["Value"])
-if "CategoryAlertRegex" in SETTINGS:
-    SETTINGS["AlertRegEx"] = re.compile(SETTINGS["CategoryAlertRegex"])
 
 
 async def process_event(event) -> SequenceTrackingBatchProcessor:
@@ -126,8 +112,6 @@ async def process_event(event) -> SequenceTrackingBatchProcessor:
         ),
         # called for each record right before the context manager exits
         api_mutation_fn=execute_process_event_api_mutation,
-        sns_client=SNS_CLIENT,
-        settings=SETTINGS,
     ) as processor:
         await processor.handle_event(event=event)
 

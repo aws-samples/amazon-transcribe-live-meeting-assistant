@@ -100,7 +100,6 @@ test('a record that says nothing is not built', () => {
 
 test('a request with redaction records the add-on as its own line', async () => {
     await meterTranscribeRequest('c', 42.3, {
-        callAnalytics: false,
         redaction: true,
         customLanguageModel: false,
         channels: 2,
@@ -112,18 +111,14 @@ test('a request with redaction records the add-on as its own line', async () => 
     }
 });
 
-test('a Call Analytics request is metered at the Call Analytics price', async () => {
+test('a request with a custom language model records the add-on as its own line', async () => {
     await meterTranscribeRequest('c', 5, {
-        callAnalytics: true,
         redaction: false,
         customLanguageModel: true,
         channels: 2,
     });
     const services = sent.map((s) => s.input.Item['Service'].S).sort();
-    assert.deepEqual(services, [
-        'transcribe/streaming-call-analytics',
-        'transcribe/streaming-custom-language-model',
-    ]);
+    assert.deepEqual(services, ['transcribe/streaming', 'transcribe/streaming-custom-language-model']);
 });
 
 test('a MicroVM is metered at its configured vCPU and memory for its lifetime', async () => {

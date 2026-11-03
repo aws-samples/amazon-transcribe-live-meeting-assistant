@@ -214,7 +214,7 @@ describe('a renamed meeting still maps to a usable row', () => {
       SpeakerIdentities: '{"identities":{"CALLER#Other Participant (spk_0)":{"name":"Bob"}}}',
       TotalConversationDurationMillis: 1000,
     };
-    const [mapped] = mapCallsAttributes([call], {});
+    const [mapped] = mapCallsAttributes([call]);
     expect(mapped.speakerIdentities).toBe(call.SpeakerIdentities);
     expect(mapped.initiationTimeStamp).toBe('2026-10-17T12:00:00.000Z');
     expect(mapped.recordingStatusLabel).not.toBe('Unknown');
@@ -224,8 +224,8 @@ describe('a renamed meeting still maps to a usable row', () => {
     // CallDetails re-renders when UpdatedAt advances OR this string changes; a
     // rename only moves the latter.
     const base = { CallId: 'c1', CreatedAt: '2026-10-17T12:00:00.000Z' };
-    const [before] = mapCallsAttributes([{ ...base, SpeakerIdentities: '{"identities":{}}' }], {});
-    const [after] = mapCallsAttributes([{ ...base, SpeakerIdentities: '{"identities":{"a":{"name":"B"}}}' }], {});
+    const [before] = mapCallsAttributes([{ ...base, SpeakerIdentities: '{"identities":{}}' }]);
+    const [after] = mapCallsAttributes([{ ...base, SpeakerIdentities: '{"identities":{"a":{"name":"B"}}}' }]);
     expect(before.speakerIdentities).not.toBe(after.speakerIdentities);
   });
 });

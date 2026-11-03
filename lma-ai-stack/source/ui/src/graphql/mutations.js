@@ -45,12 +45,9 @@ export const updateCallStatus = /* GraphQL */ `
       SystemPhoneNumber
       Status
       RecordingUrl
-      PcaUrl
       TotalConversationDurationMillis
       AgentId
       Metadatajson
-      CallCategories
-      IssuesDetected
       CallSummaryText
       Owner
       SharedWith
@@ -71,12 +68,9 @@ export const updateCallAggregation = /* GraphQL */ `
       SystemPhoneNumber
       Status
       RecordingUrl
-      PcaUrl
       TotalConversationDurationMillis
       AgentId
       Metadatajson
-      CallCategories
-      IssuesDetected
       CallSummaryText
       Owner
       SharedWith
@@ -97,38 +91,9 @@ export const updateRecordingUrl = /* GraphQL */ `
       SystemPhoneNumber
       Status
       RecordingUrl
-      PcaUrl
       TotalConversationDurationMillis
       AgentId
       Metadatajson
-      CallCategories
-      IssuesDetected
-      CallSummaryText
-      Owner
-      SharedWith
-    }
-  }
-`;
-
-export const updatePcaUrl = /* GraphQL */ `
-  mutation UpdatePcaUrl($input: UpdatePcaUrlInput!) {
-    updatePcaUrl(input: $input) {
-      PK
-      SK
-      CreatedAt
-      UpdatedAt
-      ExpiresAfter
-      CallId
-      CustomerPhoneNumber
-      SystemPhoneNumber
-      Status
-      RecordingUrl
-      PcaUrl
-      TotalConversationDurationMillis
-      AgentId
-      Metadatajson
-      CallCategories
-      IssuesDetected
       CallSummaryText
       Owner
       SharedWith
@@ -149,64 +114,9 @@ export const updateAgent = /* GraphQL */ `
       SystemPhoneNumber
       Status
       RecordingUrl
-      PcaUrl
       TotalConversationDurationMillis
       AgentId
       Metadatajson
-      CallCategories
-      IssuesDetected
-      CallSummaryText
-      Owner
-      SharedWith
-    }
-  }
-`;
-
-export const addCallCategory = /* GraphQL */ `
-  mutation AddCallCategory($input: AddCallCategoryInput!) {
-    addCallCategory(input: $input) {
-      PK
-      SK
-      CreatedAt
-      UpdatedAt
-      ExpiresAfter
-      CallId
-      CustomerPhoneNumber
-      SystemPhoneNumber
-      Status
-      RecordingUrl
-      PcaUrl
-      TotalConversationDurationMillis
-      AgentId
-      Metadatajson
-      CallCategories
-      IssuesDetected
-      CallSummaryText
-      Owner
-      SharedWith
-    }
-  }
-`;
-
-export const addIssuesDetected = /* GraphQL */ `
-  mutation AddIssuesDetected($input: AddIssuesDetectedInput!) {
-    addIssuesDetected(input: $input) {
-      PK
-      SK
-      CreatedAt
-      UpdatedAt
-      ExpiresAfter
-      CallId
-      CustomerPhoneNumber
-      SystemPhoneNumber
-      Status
-      RecordingUrl
-      PcaUrl
-      TotalConversationDurationMillis
-      AgentId
-      Metadatajson
-      CallCategories
-      IssuesDetected
       CallSummaryText
       Owner
       SharedWith
@@ -227,12 +137,9 @@ export const addCallSummaryText = /* GraphQL */ `
       SystemPhoneNumber
       Status
       RecordingUrl
-      PcaUrl
       TotalConversationDurationMillis
       AgentId
       Metadatajson
-      CallCategories
-      IssuesDetected
       CallSummaryText
       Owner
       SharedWith

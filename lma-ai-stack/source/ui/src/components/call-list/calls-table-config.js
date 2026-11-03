@@ -8,7 +8,6 @@ import {
   Button,
   ButtonDropdown,
   CollectionPreferences,
-  Icon,
   Link,
   SpaceBetween,
   StatusIndicator,
@@ -21,8 +20,6 @@ import { TableHeader } from '../common/table';
 import { CALLS_PATH } from '../../routes/constants';
 import { SentimentIndicator } from '../sentiment-icon/SentimentIcon';
 import { SentimentTrendIndicator } from '../sentiment-trend-icon/SentimentTrendIcon';
-import { CategoryAlertPill } from './CategoryAlertPill';
-import { CategoryPills } from './CategoryPills';
 import { getTextOnlySummary } from '../common/summary';
 import { shareModal, deleteModal } from '../common/meeting-controls';
 import { sharedWithEntries } from '../common/shared-with';
@@ -37,13 +34,6 @@ export const COLUMN_DEFINITIONS_MAIN = [
     cell: (item) => <Link href={`#${CALLS_PATH}/${encodeURIComponent(item.callId)}`}>{item.callId}</Link>,
     sortingField: 'callId',
     width: 325,
-  },
-  {
-    id: 'alerts',
-    header: '⚠',
-    cell: (item) => <CategoryAlertPill alertCount={item.alertCount} categories={item.callCategories} />,
-    sortingField: 'alertCount',
-    width: 85,
   },
   {
     id: 'agentId',
@@ -138,37 +128,9 @@ export const COLUMN_DEFINITIONS_MAIN = [
     cell: (item) => item.conversationDurationTimeStamp,
     sortingField: 'conversationDurationTimeStamp',
   },
-  {
-    id: 'menu',
-    header: '',
-    cell: (item) => (
-      <ButtonDropdown
-        items={[
-          {
-            text: 'Open in PCA',
-            href: item.pcaUrl,
-            external: true,
-            disabled: !item.pcaUrl,
-            externalIconAriaLabel: '(opens in new tab)',
-          },
-        ]}
-        expandToViewport
-      >
-        <Icon name="menu" />
-      </ButtonDropdown>
-    ),
-    width: 120,
-  },
-  {
-    id: 'callCategories',
-    header: 'Categories',
-    cell: (item) => <CategoryPills categories={item.callCategories} />,
-    sortingField: 'callCategoryCount',
-    width: 200,
-  },
 ];
 
-export const DEFAULT_SORT_COLUMN = COLUMN_DEFINITIONS_MAIN[3];
+export const DEFAULT_SORT_COLUMN = COLUMN_DEFINITIONS_MAIN.find((column) => column.id === 'initiationTimeStamp');
 
 export const SELECTION_LABELS = {
   itemSelectionLabel: (data, row) => `select ${row.callId}`,

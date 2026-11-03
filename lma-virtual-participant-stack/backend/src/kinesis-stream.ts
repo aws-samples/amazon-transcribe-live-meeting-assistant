@@ -44,13 +44,9 @@ export interface CallMetaData {
   agentId?: string;
   callStreamingStartTime?: string;
   callStreamingEndTime?: string;
-  callCategories?: string[];
-  callCategoryScore?: number;
-  issuesDetected?: string[];
   actionItemsDetected?: string[];
   callSummaryText?: string;
   recordingUrl?: string;
-  pcaUrl?: string;
   sentiment?: {
     OverallSentiment: {
       AGENT?: number;
@@ -66,7 +62,7 @@ export interface CallMetaData {
 }
 
 export interface KinesisRecord {
-  eventType: 'START' | 'CONTINUE' | 'END' | 'ADD_TRANSCRIPT_SEGMENT' | 'ADD_CALL_CATEGORY' | 'ADD_REAL_TIME_CALL_ANALYTICS_METADATA';
+  eventType: 'START' | 'CONTINUE' | 'END' | 'ADD_TRANSCRIPT_SEGMENT';
   callId: string;
   channel?: string;
   segmentId?: string;
@@ -351,7 +347,6 @@ class KinesisStreamManager {
           UpdatedAt: new Date().toISOString(),
           Sentiment: null,
           TranscriptEvent: null,
-          UtteranceEvent: null,
           Speaker: (segment as any).Speaker,
           AccessToken: process.env.USER_ACCESS_TOKEN || '',
           IdToken: process.env.USER_ID_TOKEN || '',
@@ -388,7 +383,6 @@ class KinesisStreamManager {
       UpdatedAt: now,
       Sentiment: null,
       TranscriptEvent: null,
-      UtteranceEvent: null,
       Speaker: segment.speaker,
       AccessToken: process.env.USER_ACCESS_TOKEN || '',
       IdToken: process.env.USER_ID_TOKEN || '',
@@ -527,35 +521,6 @@ class KinesisStreamManager {
     return segments;
   }
 
-  async sendCallCategory(category: string, score?: number): Promise<void> {
-    const record: KinesisRecord = {
-      eventType: 'ADD_CALL_CATEGORY',
-      callId: this.callId,
-      timestamp: Date.now(),
-      callMetaData: {
-        callId: this.callId,
-        callCategories: [category],
-        callCategoryScore: score,
-      },
-    };
-
-    await this.sendRecord(record);
-  }
-
-  async sendRealTimeAnalytics(metadata: Partial<CallMetaData>): Promise<void> {
-    const record: KinesisRecord = {
-      eventType: 'ADD_REAL_TIME_CALL_ANALYTICS_METADATA',
-      callId: this.callId,
-      timestamp: Date.now(),
-      callMetaData: {
-        callId: this.callId,
-        ...metadata,
-      },
-    };
-
-    await this.sendRecord(record);
-  }
-
   // Batch send multiple records for efficiency
   async sendBatchRecords(records: KinesisRecord[]): Promise<void> {
     if (!this.streamName || records.length === 0) {
@@ -598,7 +563,5 @@ export const sendAsrTranscriptSegment = (segment: TranscriptSegment) =>
   kinesisStreamManager.sendAsrTranscriptSegment(segment);
 export const sendAddTranscriptSegment = (speaker: string, transcriptResult: any, timeOffsetSeconds = 0) =>
   kinesisStreamManager.sendTranscriptSegment(speaker, transcriptResult, timeOffsetSeconds);
-export const sendCallCategory = (category: string, score?: number) => 
-  kinesisStreamManager.sendCallCategory(category, score);
 export const sendCallRecording = (url: string) => kinesisStreamManager.sendCallRecording(url);
 export const sendCallVideoRecording = (url: string) => kinesisStreamManager.sendCallVideoRecording(url);

@@ -191,89 +191,6 @@ def process_lambda_response(lambda_response):
     return message
 
 
-def transform_segment_to_issues_agent_assist(
-    segment: Dict[str, Any],
-    issue: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Transforms Contact Lens Transcript Issues payload to Agent Assist"""
-    # pylint: disable=too-many-locals
-    call_id: str = segment["CallId"]
-    created_at = datetime.utcnow().astimezone().isoformat()
-    is_partial = False
-    segment_id = str(uuid.uuid4())
-    channel = "AGENT_ASSISTANT"
-    segment_item = segment["ContactLensTranscript"]
-    transcript = segment_item["Content"]
-
-    issues_detected = segment.get("ContactLensTranscript", {}).get("IssuesDetected", [])
-    if not issues_detected:
-        raise ValueError("Invalid issue segment")
-
-    begin_offset = issue["CharacterOffsets"]["BeginOffsetChar"]
-    end_offset = issue["CharacterOffsets"]["EndOffsetChar"]
-    issue_transcript = transcript[begin_offset:end_offset]
-    start_time: float = segment_item["BeginOffsetMillis"] / 1000
-    end_time: float = segment_item["EndOffsetMillis"] / 1000
-    end_time = end_time + 0.001  # UI sort order
-
-    return dict(
-        CallId=call_id,
-        Channel=channel,
-        CreatedAt=created_at,
-        ExpiresAfter=get_transcription_ttl(),
-        EndTime=end_time,
-        IsPartial=is_partial,
-        SegmentId=segment_id,
-        StartTime=start_time,
-        Status="TRANSCRIBING",
-        Transcript=issue_transcript,
-    )
-
-
-def transform_segment_to_categories_agent_assist(
-    category: str,
-    category_details: Dict[str, Any],
-    call_id: str,
-) -> Dict[str, Any]:
-    """Transforms Contact Lens Categories segment payload to Agent Assist"""
-    created_at = datetime.utcnow().astimezone().isoformat()
-    is_partial = False
-    segment_id = str(uuid.uuid4())
-    channel = "AGENT_ASSISTANT"
-
-    transcript = f"{category}"
-    # get the min and maximum offsets to put a time range
-    segment_item = {}
-    segment_item["BeginOffsetMillis"] = min(
-        (
-            point_of_interest["BeginOffsetMillis"]
-            for point_of_interest in category_details["PointsOfInterest"]
-        )
-    )
-    segment_item["EndOffsetMillis"] = max(
-        (
-            point_of_interest["EndOffsetMillis"]
-            for point_of_interest in category_details["PointsOfInterest"]
-        )
-    )
-
-    start_time: float = segment_item["BeginOffsetMillis"] / 1000
-    end_time: float = segment_item["EndOffsetMillis"] / 1000
-
-    return dict(
-        CallId=call_id,
-        Channel=channel,
-        CreatedAt=created_at,
-        ExpiresAfter=get_transcription_ttl(),
-        EndTime=end_time,
-        IsPartial=is_partial,
-        SegmentId=segment_id,
-        StartTime=start_time,
-        Status="TRANSCRIBING",
-        Transcript=transcript,
-    )
-
-
 def publish_contact_lens_lambda_agent_assist_transcript_segment(
     segment: Dict[str, Any],
 ):
@@ -290,7 +207,7 @@ def publish_contact_lens_lambda_agent_assist_transcript_segment(
 
     send_lambda_agent_assist_args = []
     # only send relevant segments to agent assist
-    if not ("ContactLensTranscript" in segment or "Categories" in segment):
+    if "ContactLensTranscript" not in segment:
         return
 
     if "Utterance" in segment and segment["Utterance"].get("ParticipantRole") == "CUSTOMER":
@@ -321,12 +238,7 @@ def publish_contact_lens_lambda_agent_assist_transcript_segment(
             )
         )
 
-    issues_detected = segment.get("ContactLensTranscript", {}).get("IssuesDetected", [])
-    if (
-        "ContactLensTranscript" in segment
-        and segment["ContactLensTranscript"].get("ParticipantRole") == "CUSTOMER"
-        and not issues_detected
-    ):
+    if segment["ContactLensTranscript"].get("ParticipantRole") == "CUSTOMER":
         is_partial = False
         segment_item = segment["ContactLensTranscript"]
         content = segment_item["Content"]
@@ -353,30 +265,6 @@ def publish_contact_lens_lambda_agent_assist_transcript_segment(
                 ),
             )
         )
-    for issue in issues_detected:
-        issue_segment = transform_segment_to_issues_agent_assist(
-            segment={**segment, "CallId": call_id},
-            issue=issue,
-        )
-        send_lambda_agent_assist_args.append(
-            dict(content=issue_segment["Transcript"], transcript_segment_args=issue_segment),
-        )
-
-    categories = segment.get("Categories", {})
-    for category in categories.get("MatchedCategories", []):
-        category_details = categories["MatchedDetails"][category]
-        category_segment = transform_segment_to_categories_agent_assist(
-            category=category,
-            category_details=category_details,
-            call_id=call_id,
-        )
-        send_lambda_agent_assist_args.append(
-            dict(
-                content=category_segment["Transcript"],
-                transcript_segment_args=category_segment,
-            ),
-        )
-
     for agent_assist_args in send_lambda_agent_assist_args:
         # write initial message to indicate that wake word was detected and request submitted.
         checking_segment = {

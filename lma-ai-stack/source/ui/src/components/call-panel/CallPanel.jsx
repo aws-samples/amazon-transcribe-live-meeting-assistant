@@ -177,18 +177,6 @@ const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds, videoSe
             <StatusIndicator type={item.recordingStatusIcon}>{` ${item.recordingStatusLabel} `}</StatusIndicator>
           </div>
         </SpaceBetween>
-        {item?.pcaUrl?.length && (
-          <SpaceBetween size="xs">
-            <div>
-              <Box margin={{ bottom: 'xxxs' }} color="text-label">
-                <strong>Post Meeting Analytics</strong>
-              </Box>
-              <Button variant="normal" href={item.pcaUrl} target="_blank" iconAlign="right" iconName="external">
-                Open in Post Call Analytics
-              </Button>
-            </div>
-          </SpaceBetween>
-        )}
         {item?.recordingUrl?.length && item?.recordingStatusLabel !== IN_PROGRESS_STATUS && (
           <SpaceBetween size="xs">
             <div>
@@ -390,15 +378,6 @@ export const CallSummary = ({ item, onSave, onRegenerate, readOnly, consent = nu
       header={
         <Header
           variant="h4"
-          info={
-            <Link
-              variant="info"
-              target="_blank"
-              href="https://docs.aws.amazon.com/transcribe/latest/dg/call-analytics-insights.html#call-analytics-insights-summarization"
-            >
-              Info
-            </Link>
-          }
           actions={
             <SpaceBetween size="xxs" direction="horizontal" alignItems="center">
               {regenerating && <StatusIndicator type="loading">Regenerating</StatusIndicator>}
@@ -594,9 +573,6 @@ const getTimestampFromSeconds = (secs) => {
 };
 
 const TranscriptContent = ({ segment, translateCache }) => {
-  const { settings } = useSettingsContext();
-  const regex = settings?.CategoryAlertRegex ?? '.*';
-
   const { transcript, segmentId, channel, targetLanguage, translateOn } = segment;
 
   const k = segmentId.concat('-', targetLanguage);
@@ -620,7 +596,7 @@ const TranscriptContent = ({ segment, translateCache }) => {
     }
 
     let className = '';
-    let text = t;
+    const text = t;
     const translatedText = result;
 
     switch (channel) {
@@ -630,15 +606,6 @@ const TranscriptContent = ({ segment, translateCache }) => {
         break;
       case 'AGENT':
       case 'CALLER':
-        break;
-      case 'CATEGORY_MATCH':
-        if (text.match(regex)) {
-          className = 'transcript-segment-category-match-alert';
-          text = `Alert: ${text}`;
-        } else {
-          className = 'transcript-segment-category-match';
-          text = `Category: ${text}`;
-        }
         break;
       default:
         break;
@@ -758,21 +725,6 @@ const SpeakerRenamePopover = ({ segment, onRenameSpeaker, locked }) => {
 const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis, onRenameSpeaker, readOnly }) => {
   const { channel } = segment;
 
-  if (channel === 'CATEGORY_MATCH') {
-    const categoryText = `${segment.transcript}`;
-    const newSegment = segment;
-    newSegment.transcript = categoryText;
-    // We will return a special version of the grid that's specifically only for category.
-    return (
-      <Grid className="transcript-segment" disableGutters gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}>
-        {getSentimentImage(segment, enableSentimentAnalysis)}
-        <SpaceBetween direction="vertical" size="xxs">
-          <TranscriptContent segment={newSegment} translateCache={translateCache} />
-        </SpaceBetween>
-      </Grid>
-    );
-  }
-
   let displayChannel = `${segment.channel}`;
   let channelClass = '';
 
@@ -875,12 +827,14 @@ const CallInProgressTranscript = ({
   const [updateFlag, setUpdateFlag] = useState(false);
   const [userHasScrolled, setUserHasScrolled] = useState(false);
 
-  // channels: AGENT, AGENT_ASSIST, CALLER, CATEGORY_MATCH,
-  // AGENT_VOICETONE, CALLER_VOICETONE
+  // channels: AGENT, AGENT_ASSIST, CALLER, AGENT_VOICETONE, CALLER_VOICETONE
   const maxChannels = 6;
   const { callId } = item;
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
-  const transcriptChannels = Object.keys(transcriptsForThisCallId).slice(0, maxChannels);
+  // CATEGORY_MATCH segments, which LMA before 0.4.0 could store, are not shown.
+  const transcriptChannels = Object.keys(transcriptsForThisCallId)
+    .filter((c) => c !== 'CATEGORY_MATCH')
+    .slice(0, maxChannels);
 
   const getSegments = () => {
     const currentTurnByTurnSegments = transcriptChannels

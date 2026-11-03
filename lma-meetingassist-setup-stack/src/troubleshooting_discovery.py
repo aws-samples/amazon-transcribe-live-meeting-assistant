@@ -104,7 +104,7 @@ _COMPONENT_PATTERNS: Sequence[tuple[str, str]] = (
     (
         r"/lambda/(CallEventProcessorFunction|StaleMeetingReaperFunction"
         r"|SpeakerNameResolverFunction|FetchTranscript|ListCallsGsiResolver"
-        r"|MeetingControlsResolverFunction|PCAIntegrationFunction"
+        r"|MeetingControlsResolverFunction"
         r"|UploadMeeting\w+|MeetingInvitationParserFunction)",
         TRANSCRIPT_PIPELINE,
     ),

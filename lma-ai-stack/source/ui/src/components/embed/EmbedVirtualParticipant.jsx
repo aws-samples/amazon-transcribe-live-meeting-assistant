@@ -235,36 +235,33 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
   // and the effect below will auto-load it.
   const effectiveCallId = paramCallId || vpDetails?.CallId;
 
-  const fetchCallForVP = useCallback(
-    async (cid) => {
-      if (!cid) return false;
-      try {
-        setCallLoading(true);
-        const response = await getCallDetailsFromCallIds([cid]);
-        const callsMap = mapCallsAttributes(response, settings);
-        const callDetails = callsMap[0];
+  const fetchCallForVP = useCallback(async (cid) => {
+    if (!cid) return false;
+    try {
+      setCallLoading(true);
+      const response = await getCallDetailsFromCallIds([cid]);
+      const callsMap = mapCallsAttributes(response);
+      const callDetails = callsMap[0];
 
-        if (!callDetails) {
-          return false;
-        }
-
-        setCall(callDetails);
-        if (!callTranscriptPerCallId[cid]) {
-          await sendGetTranscriptSegmentsRequest(cid);
-        }
-        if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
-          setLiveTranscriptCallId(cid);
-        }
-        return true;
-      } catch (err) {
-        logger.error('Error fetching call details for VP:', err);
+      if (!callDetails) {
         return false;
-      } finally {
-        setCallLoading(false);
       }
-    },
-    [settings],
-  );
+
+      setCall(callDetails);
+      if (!callTranscriptPerCallId[cid]) {
+        await sendGetTranscriptSegmentsRequest(cid);
+      }
+      if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
+        setLiveTranscriptCallId(cid);
+      }
+      return true;
+    } catch (err) {
+      logger.error('Error fetching call details for VP:', err);
+      return false;
+    } finally {
+      setCallLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!effectiveCallId || !showCallPanels) return () => {};
@@ -287,7 +284,7 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
       return;
     }
 
-    const callsMap = mapCallsAttributes([matching], settings);
+    const callsMap = mapCallsAttributes([matching]);
     const callDetails = callsMap[0];
     // Same guard as CallDetails.js and EmbedCallDetails.jsx: this view renders
     // CallPanel too, and a speaker rename deliberately does not move UpdatedAt,

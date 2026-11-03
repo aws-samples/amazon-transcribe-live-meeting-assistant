@@ -179,6 +179,7 @@ def aws(monkeypatch):
     for n in range(5):
         table.put(PK=f"trs#{CALL_ID}", SK=f"s#{n}", Channel="CALLER", Transcript=f"said {n}")
     table.put(PK=f"trs#{CALL_ID}", SK="s#answer", Channel="AGENT_ASSISTANT", Transcript="answer")
+    # A category marker, as earlier versions wrote them; deleted like any other item.
     table.put(PK=f"trs#{CALL_ID}", SK="s#category", Channel="CATEGORY_MATCH", Transcript="Pricing")
     table.put(PK="trs#another-meeting", SK="s#0", Channel="CALLER", Transcript="kept")
     name = lf.posixify_filename(CALL_ID)
@@ -210,11 +211,11 @@ def _minutes_from_now(moment: datetime) -> float:
 # ── what is deleted ─────────────────────────────────────────────────────────
 
 
-def test_deletes_every_transcript_item_across_pages_but_category_markers(aws):
+def test_deletes_every_transcript_item_across_pages(aws):
     outcome = lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
     remaining = sorted(sk for pk, sk in aws.table.items if pk == f"trs#{CALL_ID}")
-    assert remaining == ["s#category"]
-    assert outcome["segmentsDeleted"] == 6
+    assert remaining == []
+    assert outcome["segmentsDeleted"] == 7
 
 
 def test_leaves_other_meetings_transcripts_alone(aws):
@@ -254,7 +255,7 @@ def test_stamps_the_meeting_and_keeps_its_other_fields(aws):
     lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
     meeting = _meeting(aws)
     assert meeting["TranscriptDeletionTrigger"] == "scheduled"
-    assert meeting["TranscriptSegmentsDeleted"] == 6
+    assert meeting["TranscriptSegmentsDeleted"] == 7
     assert meeting["TranscriptFilesDeleted"] == 3
     assert "IssuesDetected" not in meeting
     assert meeting["Agenda"] == "1. Plan"
@@ -266,7 +267,7 @@ def test_a_second_run_keeps_the_first_deletion_time(aws):
     aws.table.put(PK=f"trs#{CALL_ID}", SK="s#late", Channel="CALLER", Transcript="late")
     lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
     assert _meeting(aws)["TranscriptDeletedAt"] == first
-    assert _meeting(aws)["TranscriptSegmentsDeleted"] == 7
+    assert _meeting(aws)["TranscriptSegmentsDeleted"] == 8
 
 
 def test_a_file_that_cannot_be_deleted_fails_the_invocation_for_a_retry(aws):
@@ -279,7 +280,7 @@ def test_a_file_that_cannot_be_deleted_fails_the_invocation_for_a_retry(aws):
 def test_a_meeting_with_no_record_still_has_its_transcript_deleted(aws):
     del aws.table.items[(f"c#{CALL_ID}", f"c#{CALL_ID}")]
     outcome = lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
-    assert outcome["segmentsDeleted"] == 6
+    assert outcome["segmentsDeleted"] == 7
 
 
 # ── when ────────────────────────────────────────────────────────────────────

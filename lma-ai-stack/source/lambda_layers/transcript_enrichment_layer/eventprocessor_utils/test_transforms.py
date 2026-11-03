@@ -1,27 +1,19 @@
 # Copyright (c) 2025 Amazon.com
 # This file is licensed under the MIT License.
 # See the LICENSE file in the project root for full license information.
-"""Tests for the Contact Lens transforms in eventprocessor_utils.
+"""Tests for the Contact Lens transform in eventprocessor_utils.
 
-Three functions turn a Contact Lens payload into the shapes the AppSync mutations
-take, and all three do arithmetic and string slicing that produces a plausible
-answer whatever it gets wrong:
-
-* `transform_contact_lens_segment` — a transcript row, from either a partial
-  (`Utterance`) or a final (`Transcript`) segment. Partials are **accumulated in a
-  module-level dict**, `UTTERANCES_MAP`, and removed when the final for that id
-  arrives; get that wrong and a meeting either loses text or repeats it.
-* `transform_segment_to_categories_agent_assist` — a category match, timed by the
-  span across every point of interest.
-* `transform_segment_to_issues_agent_assist` — an issue, whose text is cut out of
-  the surrounding transcript by character offsets. An off-by-one here shows up as
-  a truncated sentence on the meeting page, not as an error.
+`transform_contact_lens_segment` turns a Contact Lens payload into the shape the
+AppSync mutation takes: a transcript row, from either a partial (`Utterance`) or
+a final (`Transcript`) segment. Partials are **accumulated in a module-level
+dict**, `UTTERANCES_MAP`, and removed when the final for that id arrives; get that
+wrong and a meeting either loses text or repeats it.
 
 Contact Lens reports times in milliseconds and the rest of LMA works in seconds,
-so every one of these divides by 1000 — the conversion is asserted explicitly
-because a missed division is three orders of magnitude wrong and still renders.
+so the transform divides by 1000 — the conversion is asserted explicitly because
+a missed division is three orders of magnitude wrong and still renders.
 
-No AWS: all three are pure functions over a dict.
+No AWS: it is a pure function over a dict.
 """
 
 from __future__ import annotations
@@ -29,11 +21,7 @@ from __future__ import annotations
 import pytest
 
 import eventprocessor_utils.eventprocessor as ep
-from eventprocessor_utils.eventprocessor import (
-    transform_contact_lens_segment,
-    transform_segment_to_categories_agent_assist,
-    transform_segment_to_issues_agent_assist,
-)
+from eventprocessor_utils.eventprocessor import transform_contact_lens_segment
 
 
 @pytest.fixture(autouse=True)
@@ -117,7 +105,7 @@ def test_a_final_transcript_uses_its_own_content_not_the_accumulation():
 
 
 def test_a_segment_that_is_neither_is_rejected():
-    """A category-only segment reaching here means the caller's filter broke."""
+    """A segment with neither an utterance nor a transcript has no text to carry."""
     with pytest.raises(ValueError, match="Invalid segment type"):
         transform_contact_lens_segment({"CallId": "contact-1", "Categories": {}})
 
@@ -183,127 +171,12 @@ def test_a_partial_never_carries_sentiment():
     assert "Sentiment" not in transform_contact_lens_segment(partial_segment())
 
 
-# ── category segments ───────────────────────────────────────────────────────
-
-
-def test_a_category_spans_all_of_its_points_of_interest():
-    """The row's time range is the outer bound across every match, not the first."""
-    segment = transform_segment_to_categories_agent_assist(
-        category="escalation",
-        category_details={
-            "PointsOfInterest": [
-                {"BeginOffsetMillis": 5000, "EndOffsetMillis": 6000},
-                {"BeginOffsetMillis": 1000, "EndOffsetMillis": 2000},
-                {"BeginOffsetMillis": 8000, "EndOffsetMillis": 9000},
-            ]
-        },
-        call_id="contact-1",
-    )
-    assert segment["StartTime"] == 1.0
-    assert segment["EndTime"] == 9.0
-    assert segment["Transcript"] == "escalation"
-    assert segment["Channel"] == "AGENT_ASSISTANT"
-    assert segment["IsPartial"] is False
-    assert segment["CallId"] == "contact-1"
-
-
-def test_a_category_with_one_point_of_interest_uses_its_bounds():
-    segment = transform_segment_to_categories_agent_assist(
-        category="greeting",
-        category_details={"PointsOfInterest": [{"BeginOffsetMillis": 0, "EndOffsetMillis": 1500}]},
-        call_id="contact-1",
-    )
-    assert segment["StartTime"] == 0.0
-    assert segment["EndTime"] == 1.5
-
-
-def test_each_category_row_gets_its_own_segment_id():
-    details = {"PointsOfInterest": [{"BeginOffsetMillis": 0, "EndOffsetMillis": 1}]}
-    first = transform_segment_to_categories_agent_assist("a", details, "contact-1")
-    second = transform_segment_to_categories_agent_assist("a", details, "contact-1")
-    assert first["SegmentId"] != second["SegmentId"]
-
-
-# ── issue segments ──────────────────────────────────────────────────────────
-
-
-ISSUE_CONTENT = "the widget is broken and I am unhappy"
-
-
-def issue_segment(begin_char: int = 4, end_char: int = 20) -> dict:
-    return {
-        "CallId": "contact-1",
-        "Transcript": {
-            "Id": "t1",
-            "Content": ISSUE_CONTENT,
-            "BeginOffsetMillis": 2000,
-            "EndOffsetMillis": 5000,
-            "IssuesDetected": [
-                {"CharacterOffsets": {"BeginOffsetChar": begin_char, "EndOffsetChar": end_char}}
-            ],
-        },
-    }
-
-
-def test_an_issue_transcript_is_cut_out_by_character_offset():
-    """An off-by-one shows up as a truncated sentence, not as an error."""
-    segment = issue_segment()
-    issue = segment["Transcript"]["IssuesDetected"][0]
-    result = transform_segment_to_issues_agent_assist(segment, issue)
-    assert result["Transcript"] == "widget is broken"
-    assert result["Channel"] == "AGENT_ASSISTANT"
-
-
-def test_the_issue_slice_is_verbatim_and_not_trimmed():
-    """The offsets are Contact Lens's, so the text is taken exactly as given.
-
-    Pinned because trimming would be a reasonable-looking change that would then
-    disagree with the offsets the UI uses to highlight the issue in context.
-    """
-    segment = issue_segment(begin_char=3, end_char=21)
-    issue = segment["Transcript"]["IssuesDetected"][0]
-    result = transform_segment_to_issues_agent_assist(segment, issue)
-    assert result["Transcript"] == " widget is broken "
-    assert result["Transcript"] == ISSUE_CONTENT[3:21]
-
-
-def test_an_issue_ends_a_millisecond_after_its_segment():
-    """The nudge is what keeps the issue sorting after the line it came from."""
-    segment = issue_segment()
-    issue = segment["Transcript"]["IssuesDetected"][0]
-    result = transform_segment_to_issues_agent_assist(segment, issue)
-    assert result["StartTime"] == 2.0
-    assert result["EndTime"] == pytest.approx(5.001)
-    assert result["EndTime"] > result["StartTime"]
-
-
-def test_a_segment_with_no_issues_detected_is_rejected():
-    segment = issue_segment()
-    issue = segment["Transcript"]["IssuesDetected"][0]
-    segment["Transcript"]["IssuesDetected"] = []
-    with pytest.raises(ValueError, match="Invalid issue segment"):
-        transform_segment_to_issues_agent_assist(segment, issue)
-
-
 # ── fields every transformed row carries ────────────────────────────────────
 
 
-@pytest.mark.parametrize("builder", ["contact_lens", "category", "issue"])
-def test_every_transform_stamps_the_transcript_ttl_and_status(builder):
-    """All three rows go to DynamoDB, so all three need an expiry and a status."""
-    if builder == "contact_lens":
-        row = transform_contact_lens_segment(final_segment())
-    elif builder == "category":
-        row = transform_segment_to_categories_agent_assist(
-            "a",
-            {"PointsOfInterest": [{"BeginOffsetMillis": 0, "EndOffsetMillis": 1}]},
-            "contact-1",
-        )
-    else:
-        segment = issue_segment()
-        row = transform_segment_to_issues_agent_assist(
-            segment, segment["Transcript"]["IssuesDetected"][0]
-        )
+def test_the_transform_stamps_the_transcript_ttl_and_status():
+    """The row goes to DynamoDB, so it needs an expiry and a status."""
+    row = transform_contact_lens_segment(final_segment())
     assert row["Status"] == "TRANSCRIBING"
     assert isinstance(row["ExpiresAfter"], int)
     assert row["ExpiresAfter"] > 0

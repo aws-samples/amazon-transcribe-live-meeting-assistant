@@ -70,7 +70,7 @@
       "order": 3,
       "type": "boolean",
       "title": "Redact personal information",
-      "description": "Redact the entity types below from transcripts. Applied only when the language is en-US, en-AU, en-GB or es-US, the languages Amazon Transcribe redacts while streaming. Call Analytics post-call output, where deployed, is redacted exactly when the meeting is."
+      "description": "Redact the entity types below from transcripts. Applied only when the language is en-US, en-AU, en-GB or es-US, the languages Amazon Transcribe redacts while streaming."
     },
     "piiEntityTypes": {
       "order": 4,
