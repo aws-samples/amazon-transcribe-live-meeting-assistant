@@ -66,7 +66,7 @@ alongside the browser and the Node CLI.
 2. One JSON text frame (START): `{callId, agentId, fromNumber, toNumber,
    samplingRate, callEvent:"START"}`.
 3. Raw **16-bit LE PCM, 2-channel interleaved**, ~100 ms binary frames.
-   **ch0 = meeting/system audio (→ CALLER), ch1 = mic (→ AGENT).** Interleave
+   **ch0 = meeting/system audio (→ REMOTE), ch1 = mic (→ LOCAL).** Interleave
    starts at index 0 (we do **not** replicate the browser worklet's off-by-one
    that drops the first mic sample).
 4. JSON `{..., callEvent:"END"}`, then close.
@@ -382,7 +382,7 @@ $sl=0.0;$sr=0.0; for($i=0;$i -lt $n;$i++){
 Start a meeting in the **native Zoom/Teams app**, run the tray app, sign in,
 click **Start**, and watch the LMA web UI meeting list — a new meeting (your
 meeting name / callId) should appear with live transcript segments: your speech
-on the **AGENT** channel, remote participants on the **CALLER** channel.
+on the **LOCAL** channel, remote participants on the **REMOTE** channel.
 
 ### 4. Reconnect
 

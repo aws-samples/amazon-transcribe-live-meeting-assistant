@@ -26,7 +26,7 @@ import SpeakerIdentitiesPanel from './SpeakerIdentitiesPanel';
 
 const SEGMENTS = [
   {
-    channel: 'CALLER',
+    channel: 'REMOTE',
     speaker: 'Other Participant (spk_0)',
     startTime: 0,
     endTime: 4,
@@ -34,7 +34,7 @@ const SEGMENTS = [
     segmentId: 's1',
   },
   {
-    channel: 'CALLER',
+    channel: 'REMOTE',
     speaker: 'Other Participant (spk_0)',
     startTime: 9,
     endTime: 11,
@@ -42,7 +42,7 @@ const SEGMENTS = [
     segmentId: 's2',
   },
   {
-    channel: 'CALLER',
+    channel: 'REMOTE',
     speaker: 'Other Participant (spk_1)',
     startTime: 5,
     endTime: 7,
@@ -114,7 +114,7 @@ describe('SpeakerIdentitiesPanel', () => {
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     const map = savedMap();
-    expect(map.identities['CALLER#Other Participant (spk_0)']).toMatchObject({
+    expect(map.identities['REMOTE#Other Participant (spk_0)']).toMatchObject({
       name: 'Bob Strahan',
       status: 'confirmed',
       source: 'manual',
@@ -127,7 +127,7 @@ describe('SpeakerIdentitiesPanel', () => {
     fireEvent.change(first, { target: { value: 'Bob' } });
     fireEvent.blur(first);
     await waitFor(() => expect(onSave).toHaveBeenCalled());
-    expect(savedMap().identities['CALLER#Other Participant (spk_0)'].status).toBe('confirmed');
+    expect(savedMap().identities['REMOTE#Other Participant (spk_0)'].status).toBe('confirmed');
   });
 
   it('does not write when the field is blurred unchanged', () => {
@@ -144,7 +144,7 @@ describe('SpeakerIdentitiesPanel', () => {
       item: {
         ...ITEM,
         speakerIdentities: JSON.stringify({
-          identities: { 'CALLER#Other Participant (spk_0)': { name: 'Bob' } },
+          identities: { 'REMOTE#Other Participant (spk_0)': { name: 'Bob' } },
         }),
       },
     });
@@ -153,7 +153,7 @@ describe('SpeakerIdentitiesPanel', () => {
     fireEvent.blur(field);
 
     await waitFor(() => expect(onSave).toHaveBeenCalled());
-    expect(savedMap().identities['CALLER#Other Participant (spk_0)']).toBeUndefined();
+    expect(savedMap().identities['REMOTE#Other Participant (spk_0)']).toBeUndefined();
   });
 
   it('keeps an existing name in the field so it can be edited', () => {
@@ -161,7 +161,7 @@ describe('SpeakerIdentitiesPanel', () => {
       item: {
         ...ITEM,
         speakerIdentities: JSON.stringify({
-          identities: { 'CALLER#Other Participant (spk_0)': { name: 'Bob' } },
+          identities: { 'REMOTE#Other Participant (spk_0)': { name: 'Bob' } },
         }),
       },
     });
@@ -173,7 +173,7 @@ describe('SpeakerIdentitiesPanel', () => {
       item: {
         ...ITEM,
         speakerIdentities: JSON.stringify({
-          merges: { 'CALLER#Other Participant (spk_1)': 'CALLER#Other Participant (spk_0)' },
+          merges: { 'REMOTE#Other Participant (spk_1)': 'REMOTE#Other Participant (spk_0)' },
         }),
       },
     });
@@ -202,7 +202,7 @@ describe('SpeakerIdentitiesPanel', () => {
     fireEvent.change(first, { target: { value: 'Someone Unlisted' } });
     fireEvent.blur(first);
     await waitFor(() => expect(onSave).toHaveBeenCalled());
-    expect(savedMap().identities['CALLER#Other Participant (spk_0)'].name).toBe('Someone Unlisted');
+    expect(savedMap().identities['REMOTE#Other Participant (spk_0)'].name).toBe('Someone Unlisted');
     expect(savedMap().candidates).toEqual([]);
   });
 
@@ -330,8 +330,8 @@ describe('identifying speakers from the transcript', () => {
           ...ITEM,
           speakerIdentities: JSON.stringify({
             identities: {
-              'CALLER#Other Participant (spk_0)': { name: 'Bob', status: 'confirmed' },
-              'CALLER#Other Participant (spk_1)': { name: 'Sarah', status: 'confirmed' },
+              'REMOTE#Other Participant (spk_0)': { name: 'Bob', status: 'confirmed' },
+              'REMOTE#Other Participant (spk_1)': { name: 'Sarah', status: 'confirmed' },
             },
           }),
         },
@@ -355,8 +355,8 @@ describe('identifying speakers from the transcript', () => {
           ...ITEM,
           speakerIdentities: JSON.stringify({
             identities: {
-              'CALLER#Other Participant (spk_0)': { name: 'Bob', status: 'proposed' },
-              'CALLER#Other Participant (spk_1)': { name: 'Sarah', status: 'proposed' },
+              'REMOTE#Other Participant (spk_0)': { name: 'Bob', status: 'proposed' },
+              'REMOTE#Other Participant (spk_1)': { name: 'Sarah', status: 'proposed' },
             },
           }),
         },
@@ -385,7 +385,7 @@ describe('a suggested name', () => {
     ...ITEM,
     speakerIdentities: JSON.stringify({
       identities: {
-        'CALLER#Other Participant (spk_0)': {
+        'REMOTE#Other Participant (spk_0)': {
           name: 'Bob Strahan',
           status: 'proposed',
           source: 'addressed-by-name',
@@ -404,7 +404,7 @@ describe('a suggested name', () => {
     renderPanel({ item: proposed });
     fireEvent.click(screen.getByText('Confirm'));
     await waitFor(() => expect(onSave).toHaveBeenCalled());
-    const entry = savedMap().identities['CALLER#Other Participant (spk_0)'];
+    const entry = savedMap().identities['REMOTE#Other Participant (spk_0)'];
     expect(entry.status).toBe('confirmed');
     expect(entry.source).toBe('manual');
     expect(entry.name).toBe('Bob Strahan');
@@ -416,7 +416,7 @@ describe('a suggested name', () => {
     fireEvent.click(screen.getByText('Not Bob Strahan'));
     await waitFor(() => expect(onSave).toHaveBeenCalled());
     const map = savedMap();
-    expect(map.identities['CALLER#Other Participant (spk_0)']).toBeUndefined();
-    expect(map.rejected['CALLER#Other Participant (spk_0)']).toEqual(['Bob Strahan']);
+    expect(map.identities['REMOTE#Other Participant (spk_0)']).toBeUndefined();
+    expect(map.rejected['REMOTE#Other Participant (spk_0)']).toEqual(['Bob Strahan']);
   });
 });

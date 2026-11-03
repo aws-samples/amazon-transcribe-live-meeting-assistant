@@ -30,11 +30,23 @@ export default /* GraphQL */ `
       TotalConversationDurationMillis
       Sentiment {
         OverallSentiment {
+          REMOTE
+          LOCAL
           AGENT
           CALLER
         }
         SentimentByPeriod {
           QUARTER {
+            REMOTE {
+              BeginOffsetMillis
+              EndOffsetMillis
+              Score
+            }
+            LOCAL {
+              BeginOffsetMillis
+              EndOffsetMillis
+              Score
+            }
             AGENT {
               BeginOffsetMillis
               EndOffsetMillis

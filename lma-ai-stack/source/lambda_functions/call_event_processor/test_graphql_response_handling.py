@@ -430,7 +430,65 @@ def test_aggregated_sentiment_scores_the_segments_the_response_carries(schema):
     aggregated = run(
         cep.get_aggregated_sentiment(message={"CallId": "call-1"}, appsync_session=session)
     )
-    assert aggregated["OverallSentiment"]["CALLER"] == 2.5
+    # The segment is stored under CALLER, as a meeting from before 0.4.0 is; the
+    # aggregation is written under its current name.
+    assert aggregated["OverallSentiment"] == {"REMOTE": 2.5}
+
+
+def test_aggregated_sentiment_merges_both_spellings_of_a_channel(schema):
+    """A meeting recorded across an upgrade holds CALLER and REMOTE segments of one channel."""
+
+    def scored(channel, segment_id, start, score):
+        return {
+            "Channel": channel,
+            "SegmentId": segment_id,
+            "StartTime": start,
+            "EndTime": start + 1.0,
+            "Sentiment": "POSITIVE",
+            "SentimentWeighted": score,
+        }
+
+    response = {
+        "getTranscriptSegmentsWithSentiment": {
+            "TranscriptSegmentsWithSentiment": [
+                scored("CALLER", "s1", 0.0, 1.0),
+                scored("REMOTE", "s2", 2.0, 3.0),
+                scored("AGENT", "s3", 4.0, -1.0),
+                scored("LOCAL", "s4", 6.0, -3.0),
+                scored("AGENT_ASSISTANT", "s5", 8.0, 5.0),
+            ]
+        }
+    }
+    aggregated = run(
+        cep.get_aggregated_sentiment(
+            message={"CallId": "call-1"}, appsync_session=FakeSession(schema, response)
+        )
+    )
+    assert aggregated["OverallSentiment"] == {"REMOTE": 2.0, "LOCAL": -2.0}
+    assert set(aggregated["SentimentByPeriod"]["QUARTER"]) == {"REMOTE", "LOCAL"}
+
+
+def test_a_transcript_hook_returning_an_older_channel_name_is_written_as_the_current_one(
+    monkeypatch,
+):
+    """A hook written for an earlier version may hand back the segment with CALLER."""
+
+    class Payload:
+        def read(self):
+            return json.dumps(
+                {"Channel": "CALLER", "Transcript": "hi", "IsPartial": False}
+            ).encode()
+
+    class HookClient:
+        def invoke(self, **_kwargs):
+            return {"Payload": Payload()}
+
+    monkeypatch.setattr(cep, "LAMBDA_HOOK_CLIENT", HookClient(), raising=False)
+    monkeypatch.setattr(cep, "TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN", "arn:hook", raising=False)
+    result = cep.invoke_transcript_lambda_hook(
+        {"Channel": "REMOTE", "Transcript": "hi", "IsPartial": False}
+    )
+    assert result["Channel"] == "REMOTE"
 
 
 @pytest.mark.parametrize("shape", SCORES_NOTHING)

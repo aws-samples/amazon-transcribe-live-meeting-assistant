@@ -318,6 +318,39 @@ and which nothing read, is removed too. The main stack never exposed it, so a
 deployment made from the main template needs no change; one that deploys the
 nested AI stack template on its own must stop passing it.
 
+**The two speech channels are renamed: `CALLER` is now `REMOTE` and `AGENT` is
+now `LOCAL`.** `REMOTE` is the meeting audio, everyone else in the meeting;
+`LOCAL` is the local side, the user's microphone or a Virtual Participant's
+voice assistant. The old names came from the telephony solution LMA started
+from. Every producer LMA ships writes the new names, and the meeting page, the
+meeting list and the sentiment charts label the channels Remote and Local. An
+[uploaded recording](upload-audio.md) puts every speaker on `REMOTE`, since it
+has no local microphone; with speaker identification on, earlier versions put
+the first speaker on `CALLER` and the others on `AGENT`.
+
+- Meetings recorded before the upgrade keep `CALLER` and `AGENT` on their
+  transcript segments, in their sentiment and in the keys of their speaker
+  names until they expire. LMA reads them as `REMOTE` and `LOCAL` everywhere:
+  the transcript, its downloads and embeds, speaker naming, summaries, agendas
+  and the Meeting Assistant. A speaker name saved on such a meeting is stored
+  under the new name the next time the meeting's speaker names change.
+- The GraphQL `Channel` enum declares `REMOTE` and `LOCAL` and keeps `CALLER`
+  and `AGENT`, marked deprecated in the schema, so older segments still load.
+  The `OverallSentiment` and `SentimentByChannel` types, and their inputs, gain
+  `REMOTE` and `LOCAL` fields beside `CALLER` and `AGENT`. A meeting recorded
+  after the upgrade has its sentiment under `REMOTE` and `LOCAL` only, so a
+  client that reads a meeting's sentiment must select those fields, and a
+  client that reads `TranscriptSegment.Channel` must accept the new values.
+- A [transcript Lambda hook](lambda-hook-functions.md#input-event-schema)
+  receives `REMOTE` or `LOCAL` in `Channel`. A hook that compares the channel
+  must be updated. A hook that returns `CALLER` or `AGENT` still works: LMA
+  stores them as the new names.
+- A producer that writes transcript segments to the Kinesis data stream, or
+  calls `addTranscriptSegment`, may keep sending `CALLER` and `AGENT`; LMA
+  stores them as `REMOTE` and `LOCAL`. WebSocket streaming clients send audio
+  rather than channel names and need no change; see the
+  [WebSocket streaming API](websocket-streaming-api.md#channel-based-attribution-stereo).
+
 **One new parameter.** `VPSchedulerStateMachineLogsExpirationInDays` (default 7)
 sets retention for the scheduled Virtual Participant state machine's execution
 history. The default matches the value that was previously hardcoded, so no

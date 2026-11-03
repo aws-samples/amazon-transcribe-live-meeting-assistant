@@ -600,8 +600,8 @@ A Virtual Participant is transcribed by Amazon Transcribe. With a voice assistan
 configured, the VP sends Amazon Transcribe one stream with two channels, with channel
 identification on: the meeting's participants on the first channel and the assistant's
 voice on the second, the same layout as Stream Audio's tab and microphone. Participant
-rows are on the `CALLER` channel, named from the meeting roster, and only they are
-checked for wake phrases and stop requests; the assistant's rows are on the `AGENT`
+rows are on the `REMOTE` channel, named from the meeting roster, and only they are
+checked for wake phrases and stop requests; the assistant's rows are on the `LOCAL`
 channel under the VP's own name. A participant who talks over the assistant therefore
 gets a line of their own, and the assistant can never wake or stop itself. A two-channel
 stream is billed for its duration, the same as one mono stream. Without a voice
@@ -624,7 +624,7 @@ ASR engine instead, from the same section, which then also shows the engine choi
   change. The VP acquires and releases its own MicroVM, and falls back to Amazon
   Transcribe when none can be acquired.
 - **The voice assistant is its own channel.** With the assistant enabled, its speech is
-  transcribed from a second engine session on the same MicroVM and appears on the `AGENT`
+  transcribed from a second engine session on the same MicroVM and appears on the `LOCAL`
   channel under the VP's own name, never diarized, exactly as Stream Audio separates the
   microphone from the tab. Meeting rows are named after the attendee the platform showed
   during them (see [How Speaker Names Are Assigned](#how-speaker-names-are-assigned)).

@@ -428,7 +428,7 @@ def test_a_segment_event_matches_what_the_live_transcriber_emits(h) -> None:
     assert first == {
         "EventType": "ADD_TRANSCRIPT_SEGMENT",
         "CallId": CALL_ID,
-        "Channel": "CALLER",
+        "Channel": "REMOTE",
         "SegmentId": "seg-00000",
         "StartTime": 0.0,
         "EndTime": 1.5,
@@ -608,39 +608,29 @@ def test_every_utterance_is_one_channel_when_diarization_was_not_requested(h) ->
     }
     h.run()
     assert [s["Channel"] for s in h.kinesis.of_type("ADD_TRANSCRIPT_SEGMENT")] == [
-        "CALLER",
-        "CALLER",
+        "REMOTE",
+        "REMOTE",
     ]
 
 
-def test_the_first_diarized_speaker_is_the_caller_and_the_rest_are_the_agent(monkeypatch) -> None:
-    """LMA's transcript view has exactly two channels, so more than two speakers
-    have to collapse onto them; the original label survives separately so the UI
-    can still distinguish the speakers."""
+def test_every_diarized_speaker_is_on_the_remote_channel(monkeypatch) -> None:
+    """An uploaded recording has no local microphone, so no speaker is LOCAL; the
+    original label survives separately so the UI can still distinguish them."""
     transcript = {
         "results": {
             "audio_segments": [
                 {"transcript": "a", "start_time": 0, "end_time": 1, "speaker_label": "spk_0"},
                 {"transcript": "b", "start_time": 1, "end_time": 2, "speaker_label": "spk_1"},
-                {"transcript": "c", "start_time": 2, "end_time": 3, "speaker_label": "spk_3"},
+                {"transcript": "c", "start_time": 2, "end_time": 3, "speaker_label": "spk_10"},
+                {"transcript": "d", "start_time": 3, "end_time": 4, "speaker_label": "ch_1"},
             ]
         }
     }
     harness = Harness(monkeypatch, job_row(EnableDiarization=True), transcript)
     harness.run()
     segments = harness.kinesis.of_type("ADD_TRANSCRIPT_SEGMENT")
-    assert [s["Channel"] for s in segments] == ["CALLER", "AGENT", "AGENT"]
-    assert [s["Speaker"] for s in segments] == ["spk_0", "spk_1", "spk_3"]
-
-
-@pytest.mark.parametrize(
-    ("label", "channel"),
-    [("spk_0", "CALLER"), ("ch_0", "CALLER"), ("spk_1", "AGENT"), ("spk_10", "AGENT")],
-)
-def test_the_channel_mapping_is_by_exact_label(label, channel) -> None:
-    """``spk_10`` starts with the same characters as ``spk_1`` and must not be
-    matched by a prefix test."""
-    assert index._channel_for_speaker(label, True) == channel
+    assert [s["Channel"] for s in segments] == ["REMOTE"] * 4
+    assert [s["Speaker"] for s in segments] == ["spk_0", "spk_1", "spk_10", "ch_1"]
 
 
 def test_an_unlabelled_diarized_segment_is_attributed_to_the_first_speaker(monkeypatch) -> None:
@@ -653,7 +643,7 @@ def test_an_unlabelled_diarized_segment_is_attributed_to_the_first_speaker(monke
     harness.run()
     segment = harness.kinesis.only("ADD_TRANSCRIPT_SEGMENT")
     assert segment["Speaker"] == "spk_0"
-    assert segment["Channel"] == "CALLER"
+    assert segment["Channel"] == "REMOTE"
 
 
 # ---------------------------------------------------------------------------
@@ -989,8 +979,8 @@ def test_a_row_written_by_stage_one_finalizes_end_to_end(monkeypatch) -> None:
         {"Bucket": BUCKET, "Key": f"lma-transcripts/{call_id}.transcribe.json"}
     ]
     segments = harness.kinesis.of_type("ADD_TRANSCRIPT_SEGMENT")
-    # EnableDiarization survived from Stage 1, so the second speaker is the agent.
-    assert [s["Channel"] for s in segments] == ["CALLER", "AGENT"]
+    assert [s["Channel"] for s in segments] == ["REMOTE", "REMOTE"]
+    assert [s["Speaker"] for s in segments] == ["spk_0", "spk_2"]
     assert harness.s3.copies[0]["CopySource"] == {"Bucket": BUCKET, "Key": created["uploadKey"]}
     assert harness.s3.copies[0]["Key"] == f"lma-audio-recordings/{call_id}.mp4"
     # Owner, not the client-supplied agentId, attributes the finished meeting.

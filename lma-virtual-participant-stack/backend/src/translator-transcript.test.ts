@@ -169,7 +169,7 @@ test('assistant turns are written as the assistant only when nothing else transc
     assert.match(needs, /!this\.agentSession \|\| this\.agentSession\.hasGivenUp/);
     const write = methodBody(scribe, 'private handleAssistantTurn');
     assert.match(write, /this\.assistantTurnsNeedTranscript\(\)/);
-    assert.match(write, /channel: 'AGENT'/);
+    assert.match(write, /channel: LOCAL_CHANNEL/);
     assert.match(write, /isPartial: false/);
     assert.match(write, /this\.vpName\(\)/);
     assert.doesNotMatch(write, /processTranscriptResult/);

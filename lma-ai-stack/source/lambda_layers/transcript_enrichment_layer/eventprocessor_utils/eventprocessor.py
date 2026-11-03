@@ -11,6 +11,10 @@ from typing import TYPE_CHECKING, Dict, List
 
 import jwt
 from jwt import PyJWKClient
+
+# The configuration layer, which every function attaching this layer also attaches.
+# pylint: disable-next=import-error
+from lma_channels import LOCAL, REMOTE, canonical_channel
 from sentiment import ComprehendWeightedSentiment
 
 if TYPE_CHECKING:
@@ -205,9 +209,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
 
     if transcriptEvent:  # Standard Transcribe streaming event in KDS
         call_id = message["CallId"]
-        channel = transcriptEvent["Channel"]
-        if channel == "CUSTOMER":
-            channel = "CALLER"
+        channel = canonical_channel(transcriptEvent["Channel"])
         segment_id = transcriptEvent["ResultId"]
         start_time = transcriptEvent["StartTime"]
         end_time = transcriptEvent["EndTime"]
@@ -236,15 +238,12 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
         )
     else:  # custom event message in KDS
         call_id = message["CallId"]
-        channel = "CALLER"
+        # A producer from before 0.4.0, or one outside LMA, may still send the
+        # older channel names, or only IsCaller; either is written as REMOTE/LOCAL.
         if message.get("Channel", None):
-            channel = message["Channel"]
+            channel = canonical_channel(message["Channel"])
         else:
-            iscaller: bool = message.get("IsCaller", True)
-            if iscaller:
-                channel = "CALLER"
-            else:
-                channel = "AGENT"
+            channel = REMOTE if message.get("IsCaller", True) else LOCAL
 
         if message.get("SegmentId", None):
             segment_id = message["SegmentId"]

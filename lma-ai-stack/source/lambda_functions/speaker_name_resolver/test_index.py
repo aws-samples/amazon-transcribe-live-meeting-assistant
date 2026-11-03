@@ -54,8 +54,8 @@ index = _load()
 
 CALL_ID = "meeting-1"
 OWNER = "owner@example.com"
-SPK0 = "CALLER#Other Participant (spk_0)"
-SPK1 = "CALLER#Other Participant (spk_1)"
+SPK0 = "REMOTE#Other Participant (spk_0)"
+SPK1 = "REMOTE#Other Participant (spk_1)"
 
 MEETING_ROW = {
     "PK": {"S": f"c#{CALL_ID}"},
@@ -65,7 +65,7 @@ MEETING_ROW = {
 }
 
 
-def segment_row(speaker, start, text, channel="CALLER", segment_id=None):
+def segment_row(speaker, start, text, channel="REMOTE", segment_id=None):
     return {
         "PK": {"S": f"trs#{CALL_ID}"},
         "SK": {"S": f"{start}#{channel}"},
@@ -552,7 +552,7 @@ def test_a_model_naming_a_label_that_does_not_exist_names_nobody(
     hostile = json.dumps(
         [
             {
-                "label": "CALLER#Ghost (spk_9)",
+                "label": "REMOTE#Ghost (spk_9)",
                 "name": "Ghost",
                 "basis": "self-introduction",
                 "turn": 1,

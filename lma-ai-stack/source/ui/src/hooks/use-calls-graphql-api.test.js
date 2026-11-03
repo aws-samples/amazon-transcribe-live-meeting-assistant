@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('aws-amplify/api', () => ({ generateClient: () => ({ graphql: vi.fn() }) }));
 
-const { isRequestTimeout } = await import('./use-calls-graphql-api');
+const { isRequestTimeout, mapTranscriptSegmentValue } = await import('./use-calls-graphql-api');
 
 describe('isRequestTimeout', () => {
   it("recognises AppSync's execution timeout", () => {
@@ -21,5 +21,18 @@ describe('isRequestTimeout', () => {
     expect(isRequestTimeout({ errors: [{ errorType: 'Unauthorized', message: 'Not Authorized' }] })).toBe(false);
     expect(isRequestTimeout(new TypeError('Failed to fetch'))).toBe(false);
     expect(isRequestTimeout(undefined)).toBe(false);
+  });
+});
+
+describe('mapTranscriptSegmentValue', () => {
+  it('holds a segment stored under an older channel name on the current one', () => {
+    expect(mapTranscriptSegmentValue({ SegmentId: 's1', Channel: 'CALLER' }).channel).toBe('REMOTE');
+    expect(mapTranscriptSegmentValue({ SegmentId: 's2', Channel: 'AGENT' }).channel).toBe('LOCAL');
+  });
+
+  it('keeps the current names and the assistant channels as they are', () => {
+    ['REMOTE', 'LOCAL', 'AGENT_ASSISTANT', 'CHAT_ASSISTANT'].forEach((channel) =>
+      expect(mapTranscriptSegmentValue({ SegmentId: 's', Channel: channel }).channel).toBe(channel),
+    );
   });
 });

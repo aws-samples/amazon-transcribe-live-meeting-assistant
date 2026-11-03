@@ -36,6 +36,13 @@ from __future__ import annotations
 import json
 import re
 
+# The channel names and their older spellings (configuration layer).
+from lma_channels import (  # pylint: disable=import-error
+    SPEECH_CHANNELS,
+    canonical_channel,
+    canonical_keyed,
+)
+
 # Shared with the UI's speaker-identities.js -- see the note there on why the key
 # is the channel plus the speaker string AS STORED.
 DEFAULT_OTHER_SPEAKER_NAME = "Other Participant"
@@ -55,8 +62,9 @@ PLACEHOLDER_SPEAKERS = (
 )
 DIARIZATION_LABEL = re.compile(r"^(.*?)(\s*\(spk_\d+\))$")
 
-# Channels that carry a nameable human voice.
-NAMEABLE_CHANNELS = ("CALLER", "AGENT")
+# Channels that carry a nameable human voice. A segment stored under an older
+# spelling of one is read as that channel (canonical_channel).
+NAMEABLE_CHANNELS = SPEECH_CHANNELS
 
 SELF_INTRODUCTION = "self-introduction"
 ADDRESSED_BY_NAME = "addressed-by-name"
@@ -242,6 +250,11 @@ def parse_identities(raw):
     for section in ("identities", "merges", "segmentOverrides", "rejected"):
         value = parsed.get(section)
         out[section] = value if isinstance(value, dict) else {}
+    # A map written before 0.4.0 keys its voices under the older channel names.
+    # Re-keyed here, so the next write stores them under the current ones.
+    for section in ("identities", "rejected"):
+        out[section] = canonical_keyed(out[section])
+    out["merges"] = canonical_keyed(out["merges"], values_are_keys=True)
     last_pass = parsed.get("lastPass")
     if isinstance(last_pass, dict):
         out["lastPass"] = last_pass
@@ -249,8 +262,8 @@ def parse_identities(raw):
 
 
 def speaker_key(channel, speaker):
-    """Key for one voice: its channel plus the speaker string as stored."""
-    return f"{channel or ''}#{(speaker or '').strip()}"
+    """Key for one voice: its channel, by its current name, plus the speaker string as stored."""
+    return f"{canonical_channel(channel) or ''}#{(speaker or '').strip()}"
 
 
 def split_diarization_label(speaker):
@@ -275,16 +288,17 @@ def build_turns(segments):
     for segment in segments or []:
         if segment.get("IsPartial") is True:
             continue
-        if segment.get("Channel") not in NAMEABLE_CHANNELS:
+        channel = canonical_channel(segment.get("Channel"))
+        if channel not in NAMEABLE_CHANNELS:
             continue
         text = (segment.get("Transcript") or "").strip()
         if not text:
             continue
         rows.append(
             {
-                "channel": segment.get("Channel"),
+                "channel": channel,
                 "speaker": segment.get("Speaker") or "",
-                "key": speaker_key(segment.get("Channel"), segment.get("Speaker")),
+                "key": speaker_key(channel, segment.get("Speaker")),
                 "text": text,
                 "segment_id": segment.get("SegmentId"),
                 "start": float(segment.get("StartTime") or 0),
@@ -359,7 +373,7 @@ def channel_label_bases(turns):
     channel carries ONE base name, and that name appears with two or more
     voice ids, it is a label the client gave the channel and the engine has
     split it into several people. A Virtual Participant meeting is untouched,
-    because its CALLER channel carries a different roster name per attendee.
+    because its REMOTE channel carries a different roster name per attendee.
     The UI's `channelLabelBases` applies the same test, and the two must agree.
 
     Returns a set of `(channel, base)` pairs.

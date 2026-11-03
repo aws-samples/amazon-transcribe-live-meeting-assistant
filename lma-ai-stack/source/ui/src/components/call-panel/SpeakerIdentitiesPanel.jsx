@@ -38,6 +38,7 @@ import {
   TokenGroup,
 } from '@cloudscape-design/components';
 
+import { channelLabel } from '../common/channels';
 import { InfoLink } from '../common/info-link';
 /* eslint-disable react/prop-types, react/destructuring-assignment */
 import {
@@ -135,7 +136,7 @@ const SpeakerRow = ({
     <SpaceBetween direction="vertical" size="xxs">
       <SpaceBetween direction="horizontal" size="xs" alignItems="center">
         <Box variant="small">
-          {row.voiceId ? <Badge>{row.voiceId.replace(/[()]/g, '')}</Badge> : <Badge>{row.channel}</Badge>}
+          {row.voiceId ? <Badge>{row.voiceId.replace(/[()]/g, '')}</Badge> : <Badge>{channelLabel(row.channel)}</Badge>}
         </Box>
         <Box>{nameField}</Box>
         <Box variant="small" color="text-body-secondary">

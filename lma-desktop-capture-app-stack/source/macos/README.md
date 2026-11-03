@@ -53,7 +53,7 @@ client at `utilities/websocket-client/`).
    a query param instead — the server accepts both).
 2. One JSON text frame: `{callId, agentId, fromNumber, toNumber, samplingRate, callEvent:"START"}`.
 3. Raw **16-bit LE PCM, 2-channel interleaved**, ~100 ms binary frames.
-   **ch0 = meeting/system audio (→ CALLER), ch1 = mic (→ AGENT).**
+   **ch0 = meeting/system audio (→ REMOTE), ch1 = mic (→ LOCAL).**
 4. JSON `{..., callEvent:"END"}`, then close.
 
 **Meeting consent:** when the deployment's consent mode is Notify or Opt-in, the
@@ -244,8 +244,8 @@ does anyway. This is a spike-only wrinkle, not a design problem.
 
 Start a meeting in the **native Zoom/Teams app**, run the client, and watch the
 LMA web UI meeting list — a new meeting (your `--call-id`) should appear with
-live transcript segments, with your speech on the AGENT channel and the remote
-participants on the CALLER channel. Also check the transcriber's CloudWatch logs
+live transcript segments, with your speech on the LOCAL channel and the remote
+participants on the REMOTE channel. Also check the transcriber's CloudWatch logs
 for the `START` event and Transcribe session.
 
 ---

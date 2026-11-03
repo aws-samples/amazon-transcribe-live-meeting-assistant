@@ -85,11 +85,11 @@ test('the assistant channel is written in every mode except translator', () => {
     assert.equal(writesAssistantChannel('translator'), false);
 });
 
-test('an assistant result becomes an AGENT row under the VP, on the meeting timeline', () => {
+test('an assistant result becomes a LOCAL row under the VP, on the meeting timeline', () => {
     const partial = assistantSegmentFromResult(result('ch_1', 'Searching for the weather', true), 30, 'LMA Bot');
     const final = assistantSegmentFromResult(result('ch_1', 'Searching for the weather in Herndon.', false), 30, 'LMA Bot');
     assert.ok(partial && final);
-    assert.equal(final.channel, 'AGENT');
+    assert.equal(final.channel, 'LOCAL');
     assert.equal(final.speaker, 'LMA Bot');
     assert.equal(final.startTime, 31.25);
     assert.equal(final.endTime, 32.5);

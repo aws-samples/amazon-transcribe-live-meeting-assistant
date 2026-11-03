@@ -520,7 +520,7 @@ After sending the START message, stream audio data as **binary WebSocket frames*
 | Mode | Channels | Description |
 |------|----------|-------------|
 | **Mono** | 1 | Single audio source. All audio is attributed to the active speaker. |
-| **Stereo** | 2 | Two interleaved channels. Channel 0 (left) = meeting/remote audio ("CALLER"). Channel 1 (right) = microphone/local audio ("AGENT"). |
+| **Stereo** | 2 | Two interleaved channels. Channel 0 (left) = meeting/remote audio (transcript channel `REMOTE`). Channel 1 (right) = microphone/local audio (transcript channel `LOCAL`). |
 
 **Stereo interleaving format:**
 
@@ -575,6 +575,19 @@ The server supports three mechanisms for speaker attribution:
 When streaming stereo audio:
 - **Channel 0** (left) → Attributed to the meeting/remote participant(s). Speaker name is the `activeSpeaker` value.
 - **Channel 1** (right) → Attributed to the local agent/user. Speaker name is the `agentId` value.
+
+Each transcript segment records which of the two it came from in its `Channel`
+field: `REMOTE` for channel 0 and `LOCAL` for channel 1. A client never sends
+these names; they appear in what LMA stores and returns, such as the GraphQL
+`TranscriptSegment.Channel` field, the transcript Lambda hook's input and the
+transcript-segment records on the meeting's Kinesis data stream.
+
+LMA versions before 0.4.0 used the names `CALLER` (for `REMOTE`) and `AGENT`
+(for `LOCAL`). Meetings recorded by those versions keep the older names until
+they expire, and LMA reads them as the new ones. A producer that writes
+transcript segments to the Kinesis data stream directly, or calls the
+`addTranscriptSegment` mutation, may still send `CALLER` or `AGENT`; LMA stores
+them as `REMOTE` and `LOCAL`.
 
 ### Active Speaker Updates
 

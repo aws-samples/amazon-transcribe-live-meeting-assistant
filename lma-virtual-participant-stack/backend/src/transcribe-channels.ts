@@ -12,19 +12,20 @@
  * stream, with channel identification on, so Transcribe never merges a
  * participant's sentence and the assistant's reply into one row:
  *
- *   ch_0  meeting_audio.monitor  participants  -> CALLER rows, roster names,
+ *   ch_0  meeting_audio.monitor  participants  -> REMOTE rows, roster names,
  *                                                 wake phrases, stop requests
- *   ch_1  agent_output.monitor   the assistant -> AGENT rows under the VP's name
+ *   ch_1  agent_output.monitor   the assistant -> LOCAL rows under the VP's name
  *
- * These are the same channel ids and the same CALLER/AGENT mapping as Stream
+ * These are the same channel ids and the same REMOTE/LOCAL mapping as Stream
  * Audio's two-channel stream (lma-websocket-transcriber-stack, transcribe.ts),
- * and the same AGENT row shape as the MicroVM ASR engine's assistant session
+ * and the same LOCAL row shape as the MicroVM ASR engine's assistant session
  * (scribe.ts, handleAgentAsrSegment).
  *
  * One two-channel stream is billed for the stream's duration, like a mono one,
  * so the separation does not open a second stream.
  */
 import type { TranscriptSegment } from './kinesis-stream.js';
+import { LOCAL_CHANNEL } from './channels.js';
 
 /** Transcribe's id for the participants' channel (left). */
 export const MEETING_CHANNEL_ID = 'ch_0';
@@ -68,7 +69,7 @@ export function isOwnIdentity(name: string, ownIdentities: string[]): boolean {
 }
 
 /**
- * The AGENT row for one result on the assistant's channel, or null if it has
+ * The LOCAL row for one result on the assistant's channel, or null if it has
  * no text.
  *
  * The id is keyed on the session offset and Transcribe's ResultId, so a
@@ -92,7 +93,7 @@ export function assistantSegmentFromResult(
     const end = Math.max(result?.EndTime ?? timed[timed.length - 1]?.EndTime ?? start, start);
     const id = result?.ResultId ?? `t${start}`;
     return {
-        channel: 'AGENT',
+        channel: LOCAL_CHANNEL,
         segmentId: `vp-assistant-${timeOffsetSeconds}-${id}`,
         startTime: start + timeOffsetSeconds,
         endTime: end + timeOffsetSeconds,

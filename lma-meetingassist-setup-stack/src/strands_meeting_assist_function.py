@@ -43,6 +43,12 @@ try:
 except ImportError:
     pass
 
+# The stored values of the two speech channels, current and pre-0.4.0 names.
+try:
+    from lma_channels import STORED_SPEECH_CHANNELS  # AI stack's configuration layer
+except ImportError:  # deployed on its own, without the layer; kept equal to it
+    STORED_SPEECH_CHANNELS = ("REMOTE", "LOCAL", "CALLER", "AGENT")
+
 # Import MCP server loader
 try:
     from mcp_server_loader import load_account_mcp_servers
@@ -1753,7 +1759,7 @@ def query_transcript_items(call_id: str, dynamodb_table_name: str) -> List[Dict[
     query_args = {
         'KeyConditionExpression': Key('PK').eq(pk),
         'FilterExpression': (
-            (Attr('Channel').eq('AGENT') | Attr('Channel').eq('CALLER') | Attr('Channel').eq('AGENT_ASSISTANT'))
+            Attr('Channel').is_in([*STORED_SPEECH_CHANNELS, 'AGENT_ASSISTANT'])
             & Attr('IsPartial').eq(False)
         ),
     }

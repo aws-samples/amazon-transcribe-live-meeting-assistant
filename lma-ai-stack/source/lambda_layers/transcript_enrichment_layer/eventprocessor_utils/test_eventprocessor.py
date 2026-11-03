@@ -297,10 +297,16 @@ def test_transcribe_streaming_event_keeps_zero_times():
 
 @pytest.mark.parametrize(
     ("producer_channel", "expected"),
-    [("CUSTOMER", "CALLER"), ("AGENT", "AGENT"), ("CALLER", "CALLER")],
+    [
+        ("REMOTE", "REMOTE"),
+        ("LOCAL", "LOCAL"),
+        ("CUSTOMER", "REMOTE"),
+        ("CALLER", "REMOTE"),
+        ("AGENT", "LOCAL"),
+    ],
 )
-def test_transcribe_streaming_customer_channel_is_renamed_to_caller(producer_channel, expected):
-    """LMA's schema knows CALLER/AGENT; a producer that says CUSTOMER means CALLER."""
+def test_transcribe_streaming_channel_is_written_as_remote_or_local(producer_channel, expected):
+    """A producer from before 0.4.0 sends CALLER/AGENT, and CUSTOMER means the remote side."""
     segment = normalize_one(
         {
             "CallId": "call-1",
@@ -337,15 +343,36 @@ def test_transcribe_streaming_without_a_speaker_gets_a_placeholder():
 def test_custom_producer_channel_follows_is_caller():
     caller = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0, "IsCaller": True})
     agent = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0, "IsCaller": False})
-    assert caller["Channel"] == "CALLER"
-    assert agent["Channel"] == "AGENT"
+    assert caller["Channel"] == "REMOTE"
+    assert agent["Channel"] == "LOCAL"
 
 
 def test_custom_producer_explicit_channel_wins_over_is_caller():
     segment = normalize_one(
-        {**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0, "Channel": "AGENT", "IsCaller": True}
+        {**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0, "Channel": "LOCAL", "IsCaller": True}
     )
-    assert segment["Channel"] == "AGENT"
+    assert segment["Channel"] == "LOCAL"
+
+
+@pytest.mark.parametrize(
+    ("producer_channel", "expected"),
+    [
+        ("REMOTE", "REMOTE"),
+        ("LOCAL", "LOCAL"),
+        ("CALLER", "REMOTE"),
+        ("AGENT", "LOCAL"),
+        ("AGENT_ASSISTANT", "AGENT_ASSISTANT"),
+        ("CHAT_ASSISTANT", "CHAT_ASSISTANT"),
+    ],
+)
+def test_custom_producer_older_channel_names_are_written_as_remote_or_local(
+    producer_channel, expected
+):
+    """A producer from before 0.4.0, or outside LMA, may still send CALLER or AGENT."""
+    segment = normalize_one(
+        {**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0, "Channel": producer_channel}
+    )
+    assert segment["Channel"] == expected
 
 
 def test_custom_producer_gets_a_generated_segment_id_when_none_is_sent():

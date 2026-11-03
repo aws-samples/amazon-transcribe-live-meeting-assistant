@@ -23,9 +23,10 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-#: Channels that carry what people said. The assistant's own answers are left
-#: out: an agenda the assistant repeated back is not one the meeting stated.
-SPEECH_CHANNELS = frozenset({"AGENT", "CALLER"})
+# Channels that carry what people said, under either spelling (configuration
+# layer). The assistant's own answers are left out: an agenda the assistant
+# repeated back is not one the meeting stated.
+from lma_channels import is_speech_channel  # pylint: disable=import-error
 
 #: Upper bound on the transcript text handed to the model: roughly the first half
 #: hour of conversation. Agendas are stated at the start of a meeting, so a long
@@ -70,7 +71,7 @@ def build_transcript(segments: Iterable[Mapping[str, Any]]) -> str:
     cut to MAX_TRANSCRIPT_CHARS from the end."""
     rows = []
     for segment in segments:
-        if segment.get("IsPartial") or segment.get("Channel") not in SPEECH_CHANNELS:
+        if segment.get("IsPartial") or not is_speech_channel(segment.get("Channel")):
             continue
         text = str(segment.get("Transcript") or "").strip()
         if not text:

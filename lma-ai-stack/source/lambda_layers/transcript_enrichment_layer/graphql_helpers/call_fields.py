@@ -8,7 +8,11 @@ from typing import Tuple
 
 from gql.dsl import DSLField, DSLSchema
 
-CHANNELS = ("AGENT", "CALLER")
+# The meeting sentiment's per-channel fields. REMOTE and LOCAL are written; AGENT
+# and CALLER hold an older meeting's values and are still read. Kept identical to
+# the selection of onUpdateCall in the UI, which AppSync fills from this
+# mutation's response.
+CHANNELS = ("REMOTE", "LOCAL", "AGENT", "CALLER")
 
 
 def call_fields(schema: DSLSchema) -> Tuple[DSLField, ...]:

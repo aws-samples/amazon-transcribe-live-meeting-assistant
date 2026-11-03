@@ -305,8 +305,8 @@ public sealed class TranscriberSocket
         var meta = new Dictionary<string, object>
         {
             ["callId"] = _config.CallId,
-            ["agentId"] = _config.AgentId,       // mic channel (ch_1 → AGENT)
-            ["fromNumber"] = _config.FromNumber, // meeting channel (ch_0 → CALLER)
+            ["agentId"] = _config.AgentId,       // mic channel (ch_1 → LOCAL)
+            ["fromNumber"] = _config.FromNumber, // meeting channel (ch_0 → REMOTE)
             ["toNumber"] = _config.ToNumber,
             ["samplingRate"] = _config.SampleRate,
             ["callEvent"] = "START",

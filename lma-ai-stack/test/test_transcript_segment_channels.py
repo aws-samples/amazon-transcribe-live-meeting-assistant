@@ -16,6 +16,11 @@ any Query field whose result reaches a type with a `Channel` field must have a
 request template that applies the filter. A new query of that kind fails here
 until it does.
 
+0.4.0 also renames the two speech channels: CALLER is now REMOTE and AGENT is
+LOCAL. Segments stored before then keep the older names, so the enum declares
+both, the queries must not filter the older names out, and the meeting's
+per-channel sentiment fields exist under both names.
+
 The last test evaluates the request templates with AppSync's
 EvaluateMappingTemplate API, which touches no resource but needs AWS
 credentials, so it runs only when LMA_EVALUATE_APPSYNC=1 is set:
@@ -49,14 +54,29 @@ APPSYNC_DIR = AI_STACK / "source" / "appsync"
 SCHEMA = APPSYNC_DIR / "schema.graphql"
 
 RETIRED_CHANNEL = "CATEGORY_MATCH"
+SPEECH_CHANNELS = {"REMOTE", "LOCAL"}
+# The names LMA before 0.4.0 wrote for REMOTE and LOCAL, still stored and read.
+DEPRECATED_SPEECH_CHANNELS = {"CALLER", "AGENT"}
 CHANNELS = {
-    "CALLER",
-    "AGENT",
+    *SPEECH_CHANNELS,
+    *DEPRECATED_SPEECH_CHANNELS,
     "AGENT_VOICETONE",
     "CALLER_VOICETONE",
     "AGENT_ASSISTANT",
     "CHAT_ASSISTANT",
 }
+# The meeting's sentiment types, keyed by channel.
+SENTIMENT_BY_CHANNEL_TYPES = (
+    "OverallSentiment",
+    "OverallSentimentInput",
+    "SentimentByChannel",
+    "SentimentByChannelInput",
+)
+UI_QUERIES = AI_STACK / "source" / "ui" / "src" / "graphql" / "queries"
+PY_SENTIMENT_SELECTIONS = (
+    AI_STACK / "source" / "lambda_functions" / "summary_regenerator" / "index.py",
+    AI_STACK / "source" / "lambda_functions" / "agenda_deriver" / "index.py",
+)
 
 # The scalars and directives AppSync declares implicitly; see test_appsync_contract.py.
 APPSYNC_PRELUDE = """
@@ -128,8 +148,93 @@ def _request_template(field_name: str) -> Path:
     return matches[0]
 
 
-def test_channel_enum_declares_only_the_channels_written_today(schema) -> None:
+def test_channel_enum_declares_the_channels_written_and_the_older_speech_names(schema) -> None:
     assert set(schema.get_type("Channel").values) == CHANNELS
+
+
+def test_the_older_speech_channel_names_are_marked_deprecated_in_the_schema() -> None:
+    """The comment above the enum names both old values as deprecated.
+
+    It sits above the enum, not between its values: AppSync refuses that.
+    """
+    text = SCHEMA.read_text()
+    start = text.index("enum Channel {")
+    comment = text[text.rindex("\n\n", 0, start) : start]
+    assert "deprecated" in comment
+    for name in DEPRECATED_SPEECH_CHANNELS:
+        assert name in comment, name
+
+
+def test_no_enum_holds_a_comment_between_its_values() -> None:
+    """AppSync's schema parser refuses a `#` comment inside an enum body.
+
+    graphql-core accepts it, so only a deploy would find out: the schema update
+    fails with "Failed to parse schema document" and the stack rolls back.
+    """
+    for name, body in re.findall(r"\benum\s+(\w+)\s*\{([^}]*)\}", SCHEMA.read_text()):
+        assert "#" not in body, f"enum {name} has a comment between its values"
+
+
+def test_a_new_segment_may_carry_either_name_of_a_speech_channel(schema) -> None:
+    """addTranscriptSegment's input is the enum, so an older producer still validates."""
+    channel = schema.get_type("AddTranscriptSegmentInput").fields["Channel"].type.of_type
+    assert SPEECH_CHANNELS | DEPRECATED_SPEECH_CHANNELS <= set(channel.values)
+
+
+@pytest.mark.parametrize("type_name", SENTIMENT_BY_CHANNEL_TYPES)
+def test_sentiment_is_keyed_by_both_names_of_each_speech_channel(schema, type_name) -> None:
+    fields = set(schema.get_type(type_name).fields)
+    assert SPEECH_CHANNELS | DEPRECATED_SPEECH_CHANNELS <= fields
+
+
+def _selected_sentiment_fields(text: str) -> set[str]:
+    """The fields selected under OverallSentiment in a GraphQL document."""
+    block = re.search(r"OverallSentiment\s*\{([^}]*)\}", text)
+    return set(block.group(1).split()) if block else set()
+
+
+def _ui_operations_selecting_sentiment() -> list[Path]:
+    return sorted(p for p in UI_QUERIES.glob("*.js") if "OverallSentiment" in p.read_text())
+
+
+def test_the_ui_operations_selecting_sentiment_were_found() -> None:
+    names = {p.stem for p in _ui_operations_selecting_sentiment()}
+    assert {"getCall", "listCallsDateRange", "onUpdateCall"} <= names
+
+
+@pytest.mark.parametrize(
+    "path",
+    [*_ui_operations_selecting_sentiment(), *PY_SENTIMENT_SELECTIONS],
+    ids=lambda p: p.stem if p.suffix == ".js" else p.parent.name,
+)
+def test_every_sentiment_selection_reads_both_names(path: Path) -> None:
+    """A meeting written today has REMOTE/LOCAL; one stored earlier has CALLER/AGENT.
+
+    The mutations' selections must also match onUpdateCall's, which AppSync fills
+    from each mutation's response.
+    """
+    text = path.read_text()
+    selected = _selected_sentiment_fields(text)
+    assert selected == SPEECH_CHANNELS | DEPRECATED_SPEECH_CHANNELS, path
+    quarter = re.search(r"QUARTER\s*\{(.*?)\n\s*\}\s*\n\s*\}", text, re.S)
+    assert quarter, path
+    for name in SPEECH_CHANNELS | DEPRECATED_SPEECH_CHANNELS:
+        assert re.search(rf"\b{name}\s*\{{", quarter.group(1)), (path, name)
+
+
+@pytest.mark.parametrize(
+    "field_name", ["getTranscriptSegments", "getTranscriptSegmentsWithSentiment"]
+)
+def test_each_segment_query_keeps_both_names_of_the_speech_channels(field_name: str) -> None:
+    """The only channel the filter excludes is the retired one."""
+    text = _request_template(field_name).read_text()
+    filter_block = text[text.index('"filter"') :]
+    for name in SPEECH_CHANNELS | DEPRECATED_SPEECH_CHANNELS:
+        assert f'"{name}"' not in filter_block, name
+    assert re.findall(r":\w+", filter_block.split('"expression"')[1].split("\n")[0]) == [
+        ":isPartial",
+        ":retiredChannel",
+    ]
 
 
 def test_the_queries_returning_stored_segments_are_the_two_transcript_reads(schema) -> None:

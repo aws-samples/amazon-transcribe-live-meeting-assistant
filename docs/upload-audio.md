@@ -95,10 +95,9 @@ expected number of voices (2–30). Amazon Transcribe uses the
 `spk_1`, `spk_2`, etc.
 
 On the meeting detail page, the transcript lines are labelled with those
-speaker IDs. For automatic categorisation into the two-channel `CALLER` /
-`AGENT` buckets LMA uses for live meetings, the first speaker (`spk_0`) is
-treated as `CALLER` and all others as `AGENT` — but the original `spk_N` label
-is preserved in the UI so you can still visually distinguish all speakers.
+speaker IDs. Every speaker in an uploaded recording is on the `REMOTE` channel,
+since an upload has no local microphone; the `spk_N` label is what tells the
+speakers apart.
 
 ## What Happens After the Upload
 

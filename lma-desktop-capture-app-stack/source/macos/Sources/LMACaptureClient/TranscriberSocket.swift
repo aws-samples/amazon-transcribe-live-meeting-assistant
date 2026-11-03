@@ -225,8 +225,8 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
     func sendStart() {
         var meta: [String: Any] = [
             "callId": config.callId,
-            "agentId": config.agentId,      // mic channel (ch_1 → AGENT)
-            "fromNumber": config.fromNumber, // meeting channel (ch_0 → CALLER)
+            "agentId": config.agentId,      // mic channel (ch_1 → LOCAL)
+            "fromNumber": config.fromNumber, // meeting channel (ch_0 → REMOTE)
             "toNumber": config.toNumber,
             "samplingRate": config.sampleRate,
             "callEvent": "START",

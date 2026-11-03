@@ -60,7 +60,7 @@ def strands_module():
     return module
 
 
-def _segment(speaker: str, text: str, end_time: float, channel: str = "CALLER") -> dict:
+def _segment(speaker: str, text: str, end_time: float, channel: str = "REMOTE") -> dict:
     return {
         "Speaker": speaker,
         "Transcript": text,
@@ -203,3 +203,34 @@ def test_a_failed_read_returns_no_transcript_rather_than_raising(strands_module,
     monkeypatch.setattr(strands_module, "dynamodb", resource)
 
     assert strands_module.fetch_meeting_transcript(CALL_ID, TABLE) == ""
+
+
+def test_the_read_selects_both_speech_channels_under_either_name_and_the_assistant(
+    strands_module, monkeypatch
+):
+    """A meeting recorded before 0.4.0 stores its speech as CALLER and AGENT."""
+    from boto3.dynamodb.conditions import Attr
+
+    table = _table_returning(strands_module, monkeypatch, [{"Items": []}])
+    strands_module.query_transcript_items(CALL_ID, TABLE)
+    assert table.query.call_args.kwargs["FilterExpression"] == (
+        Attr("Channel").is_in(["REMOTE", "LOCAL", "CALLER", "AGENT", "AGENT_ASSISTANT"])
+        & Attr("IsPartial").eq(False)
+    )
+
+
+def test_the_standalone_fallback_channel_names_match_the_layer():
+    """Without the configuration layer the function uses its own copy of the names."""
+    import ast
+
+    sys.path.insert(0, str(CONFIGURATION_LAYER))
+    from lma_channels import STORED_SPEECH_CHANNELS
+
+    tree = ast.parse((FUNCTION_SRC / "strands_meeting_assist_function.py").read_text())
+    fallbacks = [
+        ast.literal_eval(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(getattr(t, "id", None) == "STORED_SPEECH_CHANNELS" for t in node.targets)
+    ]
+    assert fallbacks == [STORED_SPEECH_CHANNELS]

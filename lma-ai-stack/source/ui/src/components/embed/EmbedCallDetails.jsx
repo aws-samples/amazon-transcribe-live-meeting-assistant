@@ -220,8 +220,8 @@ const TranscriptContent = ({ segment, translateCache }) => {
       case 'MEETING_ASSISTANT':
         className = 'transcript-segment-agent-assist';
         break;
-      case 'AGENT':
-      case 'CALLER':
+      case 'LOCAL':
+      case 'REMOTE':
         break;
       default:
         break;
@@ -252,7 +252,7 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
   let displayChannel = `${segment.channel}`;
   let channelClass = '';
 
-  if (channel === 'AGENT' || channel === 'CALLER') {
+  if (channel === 'LOCAL' || channel === 'REMOTE') {
     displayChannel = `${segment.speaker}`.trim();
   } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
     displayChannel = 'MEETING_ASSISTANT';
@@ -349,7 +349,7 @@ const EmbedTranscriptPanel = ({ item, callTranscriptPerCallId }) => {
         t.speaker = resolveSpeakerName(
           t,
           speakerIdentities,
-          t.channel === 'CALLER' ? item.callerPhoneNumber : undefined,
+          t.channel === 'REMOTE' ? item.callerPhoneNumber : undefined,
         );
         return t;
       })

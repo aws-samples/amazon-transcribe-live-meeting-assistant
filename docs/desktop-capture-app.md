@@ -30,9 +30,9 @@ https://github.com/user-attachments/assets/9b323496-4eb9-4f22-aa45-0f2f05afaa2e
 ## How it works
 
 - Your **microphone** is transcribed as the meeting owner — the **"My Mic"**
-  channel (the AGENT channel downstream).
+  channel (the LOCAL channel downstream).
 - Your computer's **system audio** — the remote participants — is the
-  **"Meeting Audio"** channel (the CALLER channel downstream).
+  **"Meeting Audio"** channel (the REMOTE channel downstream).
 - Audio streams to the **same** secure WebSocket transcriber endpoint the
   browser options use; the server is unchanged. From there it flows through the
   identical pipeline (real-time transcription, Meeting Assistant, summaries,

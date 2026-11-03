@@ -12,6 +12,7 @@
  * takes one mono 16 kHz stream per session, so each channel is split out and
  * resampled here. Both steps are pure and stateful-per-call, never per frame.
  */
+import { transcriptChannelFor } from './channels';
 import { appendSpeakerLabel, formatSpeakerLabel, isVoiceId } from './diarization';
 
 export const ASR_SAMPLE_RATE = 16000;
@@ -21,14 +22,14 @@ const STEREO_FRAME_BYTES = BYTES_PER_SAMPLE * 2;
 const INT16_MIN = -32768;
 const INT16_MAX = 32767;
 
-/** ch_0 is the browser tab / meeting audio (CALLER), ch_1 the microphone (AGENT). */
+/** ch_0 is the browser tab / meeting audio (REMOTE), ch_1 the microphone (LOCAL). */
 export const ASR_CHANNEL_IDS = ['ch_0', 'ch_1'] as const;
 export type AsrChannelId = (typeof ASR_CHANNEL_IDS)[number];
 
 export const CHANNEL_INDEX: Record<AsrChannelId, number> = { ch_0: 0, ch_1: 1 };
 
 export const channelToTranscriptChannel = (channelId: AsrChannelId): string =>
-    channelId === 'ch_0' ? 'CALLER' : 'AGENT';
+    transcriptChannelFor(channelId);
 
 /**
  * Splits the interleaved stereo stream into per-channel mono buffers.

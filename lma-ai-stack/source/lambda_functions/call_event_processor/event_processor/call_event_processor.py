@@ -46,6 +46,7 @@ from graphql_helpers import (
 
 # Validation of ADD_VIDEO_KEYFRAME, AWS-free for the same reason as pure.py below.
 from keyframe_input import KeyframeEventError, build_keyframe_input  # noqa: E402
+from lma_channels import canonical_channel, is_speech_channel  # noqa: E402
 from lma_config import (  # noqa: E402
     MEETING_AGENDA,
     MEETING_ASSIST,
@@ -613,8 +614,10 @@ async def get_aggregated_sentiment(
         # to aggregate.
         if not isinstance(segment, dict):
             continue
-        channel = segment.get("Channel", None)
-        if channel and channel in ["AGENT", "CALLER"]:
+        # A meeting recorded across an upgrade holds both spellings of a channel;
+        # they are aggregated as one, under the current name.
+        channel = canonical_channel(segment.get("Channel", None))
+        if is_speech_channel(channel):
             if segment.get("SentimentWeighted", None):
                 LOGGER.debug("Aggregating sentiment entry", extra=segment)
                 sentiment_entry: SentimentEntry = {
@@ -1058,6 +1061,9 @@ def invoke_transcript_lambda_hook(message: Dict[str, Any]):
                 "Transcript Lambda Hook result payload parsing exception. Lambda must return JSON object with (modified) input event fields",
                 extra=error,
             )
+        # A hook written for an earlier version may hand back an older channel name.
+        if isinstance(message, dict) and message.get("Channel"):
+            message["Channel"] = canonical_channel(message["Channel"])
     return message
 
 

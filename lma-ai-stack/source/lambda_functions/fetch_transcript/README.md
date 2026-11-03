@@ -7,8 +7,8 @@ This Lambda function retrieves an entire call transcript as a string, in the for
 For example:
 
 ```
-AGENT: Hello, thank you for calling. How can I help you?
-CALLER: Hi, I'm calling about my rewards card.
+Me: Hello, thanks for joining. Shall we start with the budget?
+Other Participant: Yes, I have the numbers from last quarter.
 ```
 There are new lines for each speaker turn. 
 
@@ -22,7 +22,7 @@ If processTranscript is set to true, the following processing will occur:
 
 1. Sequential speaker transcript segments will be merged together into one utterance.
 2. Filler words will be removed (uhh's and uhm's).
-3. `AGENT_ASSIST` and other non `CALLER` or `AGENT` messages will be removed.
+3. Messages on channels other than the two speech channels, `REMOTE` and `LOCAL`, will be removed. Segments that meetings recorded before 0.4.0 stored as `CALLER` and `AGENT` are read as `REMOTE` and `LOCAL`.
 4. HTML elements in the transcript such as Issue tags will be removed.
 
 ### TokenCount (int)

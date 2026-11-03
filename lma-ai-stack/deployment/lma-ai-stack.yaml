@@ -2290,6 +2290,9 @@ Resources:
       MemorySize: 128
       Handler: index.lambda_handler
       CodeUri: ../source/lambda_functions/fetch_transcript
+      Layers:
+        # lma_channels, for the transcript channel names.
+        - !Ref ConfigurationPythonLayer
       Description: This AWS Lambda Function fetches the call transcript for processing.
       LoggingConfig:
         LogGroup:

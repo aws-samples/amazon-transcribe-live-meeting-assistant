@@ -41,6 +41,7 @@ import {
     writesAssistantChannel,
 } from './transcribe-channels.js';
 import { createLogger } from './logger.js';
+import { LOCAL_CHANNEL, REMOTE_CHANNEL } from './channels.js';
 
 const log = createLogger('scribe');
 
@@ -805,14 +806,14 @@ export class TranscriptionService {
         };
         const meetingSession = new MicrovmAsrSession({
             ...common,
-            channel: 'CALLER',
+            channel: REMOTE_CHANNEL,
             diarize,
             onSegment: (segment) => this.handleMeetingAsrSegment(segment),
         });
         const agentSession = voiceAssistant.isEnabled() && details.meetingMode !== 'translator'
             ? new MicrovmAsrSession({
                   ...common,
-                  channel: 'AGENT',
+                  channel: LOCAL_CHANNEL,
                   diarize: false,
                   onSegment: (segment) => this.handleAgentAsrSegment(segment),
               })
@@ -835,12 +836,12 @@ export class TranscriptionService {
         }
         void agentReady.then((ready) => {
             if (!ready && this.agentSession === agentSession) {
-                log.warn("[ASR AGENT] session not ready at start; the assistant's replies appear once it connects");
+                log.warn("[ASR LOCAL] session not ready at start; the assistant's replies appear once it connects");
             }
         });
         const agent = this.agentSession;
         log.info(
-            `[ASR] MicroVM ASR active for ${callId} (speaker labels: ${meetingSession.speakerLabelsActive}, assistant channel: ${agent ? 'AGENT' : 'none'})`,
+            `[ASR] MicroVM ASR active for ${callId} (speaker labels: ${meetingSession.speakerLabelsActive}, assistant channel: ${agent ? LOCAL_CHANNEL : 'none'})`,
         );
         await this.markActive();
 
@@ -865,7 +866,7 @@ export class TranscriptionService {
                     break;
                 }
                 if (agent?.hasGivenUp && !agentGaveUpLogged) {
-                    log.error("[ASR AGENT] session gave up; the assistant's audio is no longer transcribed (Nova Sonic replies are written from its own text)");
+                    log.error("[ASR LOCAL] session gave up; the assistant's audio is no longer transcribed (Nova Sonic replies are written from its own text)");
                     agentGaveUpLogged = true;
                 }
             }
@@ -924,7 +925,7 @@ export class TranscriptionService {
         const roster = this.rosterTimeline.speakerFor(segment.startSec, segment.endSec, rosterLagSeconds());
         const speaker = speakerNameFor(roster, segment.speaker);
         sendAsrTranscriptSegment({
-            channel: 'CALLER',
+            channel: REMOTE_CHANNEL,
             segmentId: segment.segmentId,
             startTime: segment.startSec,
             endTime: segment.endSec,
@@ -946,7 +947,7 @@ export class TranscriptionService {
     /** The assistant's own voice from its own session: labelled as the VP, never diarized, never a wake phrase. */
     private handleAgentAsrSegment(segment: AsrSegment): void {
         sendAsrTranscriptSegment({
-            channel: 'AGENT',
+            channel: LOCAL_CHANNEL,
             segmentId: segment.segmentId,
             startTime: segment.startSec,
             endTime: segment.endSec,
@@ -1506,7 +1507,7 @@ export class TranscriptionService {
         const speaker = this.vpName();
         log.info(`🌐 Assistant turn written to the transcript (${start.toFixed(2)}-${end.toFixed(2)}s): "${text}"`);
         sendAsrTranscriptSegment({
-            channel: 'AGENT',
+            channel: LOCAL_CHANNEL,
             segmentId: `assistant-${this.assistantRows}-${start.toFixed(3)}`,
             startTime: start,
             endTime: end,
@@ -1529,7 +1530,7 @@ export class TranscriptionService {
     }
 
     /**
-     * One result from the assistant's channel (ch_1), written as an AGENT row
+     * One result from the assistant's channel (ch_1), written as a LOCAL row
      * under the VP's name — the same shape as the MicroVM engine's assistant
      * session. It never reaches processTranscriptResult, so the assistant's
      * own words can never be read as a wake phrase or a stop request, and it

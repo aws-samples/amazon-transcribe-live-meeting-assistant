@@ -134,6 +134,28 @@ def test_call_selector_covers_the_fields_the_ui_reads(dsl_schema: DSLSchema):
         assert expected in selected, f"call_fields no longer selects {expected}"
 
 
+def test_call_selector_reads_sentiment_under_both_names_of_each_channel(dsl_schema: DSLSchema):
+    """REMOTE/LOCAL are written today; CALLER/AGENT hold an older meeting's values.
+
+    The UI's onUpdateCall selects all four, and AppSync fills it from this
+    selection, so a missing one would blank that channel's sentiment on screen.
+    """
+    from gql.dsl import DSLQuery, dsl_gql
+    from graphql import print_ast
+
+    document = print_ast(
+        dsl_gql(
+            DSLQuery(dsl_schema.Query.getCall.args(CallId="c").select(*call_fields(dsl_schema)))
+        )
+    )
+    overall = document[document.index("OverallSentiment") :]
+    overall = overall[overall.index("{") + 1 : overall.index("}")]
+    assert set(overall.split()) == {"REMOTE", "LOCAL", "AGENT", "CALLER"}
+    quarter = document[document.index("QUARTER") :]
+    for name in ("REMOTE", "LOCAL", "AGENT", "CALLER"):
+        assert f"{name} {{" in quarter, name
+
+
 def test_transcript_segment_selector_covers_the_fields_the_ui_reads(dsl_schema: DSLSchema):
     selected = {str(field.name) for field in transcript_segment_fields(dsl_schema)}
     for expected in (

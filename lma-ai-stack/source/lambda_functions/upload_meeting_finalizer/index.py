@@ -19,12 +19,10 @@ When a job completes successfully the finalizer:
    them from ``results.items[]`` if Transcribe's preferred representation isn't
    present) emits an ``ADD_TRANSCRIPT_SEGMENT`` event onto ``CallDataStream``
    with the shape the existing ``call_event_processor`` expects from the live
-   websocket transcriber. Channel mapping:
-     * Non-diarization jobs → all segments are ``CALLER``.
-     * Diarization jobs (``ShowSpeakerLabels=True``) → ``spk_0`` is ``CALLER``,
-       everyone else maps to ``AGENT`` (LMA only supports two channels). The
-       utterance's Speaker label is still set to ``spk_N`` so the UI can show
-       distinct speakers.
+   websocket transcriber. Every segment is on the ``REMOTE`` channel: an
+   uploaded recording has no local microphone. With diarization
+   (``ShowSpeakerLabels=True``) the utterance's Speaker label is ``spk_N``, so
+   the UI can still show distinct speakers.
 4. Copies the media file from ``lma-uploads-pending/<callId>/...`` to
    ``lma-audio-recordings/<callId>.<ext>`` (matching the filename LMA's player
    expects) and removes the pending copy.
@@ -52,6 +50,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 # pylint: disable=import-error
+from lma_channels import REMOTE  # configuration layer
 from lma_metering import MeteringWriter  # configuration layer
 
 # pylint: enable=import-error
@@ -227,23 +226,6 @@ def _build_segments(
     return segments
 
 
-def _channel_for_speaker(speaker_label: str, enable_diarization: bool) -> str:
-    """Map a Transcribe speaker_label into the 2-valued LMA Channel enum.
-
-    - Non-diarization: everything is CALLER. (The existing LMA UI is built
-      around a 2-party call; uploaded meetings without diarization are visually
-      single-stream and that's correct.)
-    - Diarization: first speaker (spk_0) → CALLER, everyone else → AGENT.
-      The original speaker_label survives as Segment.Speaker, so the UI can
-      still show e.g. "Speaker 2 (spk_3)".
-    """
-    if not enable_diarization:
-        return "CALLER"
-    if speaker_label in ("spk_0", "ch_0"):
-        return "CALLER"
-    return "AGENT"
-
-
 def _promote_media_file(bucket: str, pending_key: str, call_id: str) -> tuple[str, str]:
     """Copy the uploaded media from ``lma-uploads-pending/...`` to
     ``lma-audio-recordings/<callId>.<ext>`` and delete the pending copy.
@@ -364,11 +346,12 @@ def lambda_handler(event, context):  # noqa: ARG001
 
     now = _now_iso()
     for seg in segments:
-        channel = _channel_for_speaker(seg["Speaker"], enable_diarization)
         event_record = {
             "EventType": "ADD_TRANSCRIPT_SEGMENT",
             "CallId": call_id,
-            "Channel": channel,
+            # An uploaded recording has no local microphone: every speaker is
+            # on REMOTE, told apart by the Speaker label when diarized.
+            "Channel": REMOTE,
             "SegmentId": seg["SegmentId"],
             "StartTime": seg["StartTime"],
             "EndTime": seg["EndTime"],
