@@ -558,6 +558,51 @@ export default class GoogleMeet {
      * (tag, class, data-* and aria attributes, and leaf text), so a live run can
      * confirm which element holds the name and which shows the speaking state.
      */
+    /**
+     * Once per meeting, at debug level: which elements inside each tile change
+     * attributes over two minutes, counted per tile, with the element's tag,
+     * class, jscontroller and the attribute. The element whose changes follow a
+     * participant's speech is the speaking indicator; this is how a live run
+     * shows which one it is when Meet changes its page.
+     */
+    private async logTileActivity(page: Page): Promise<void> {
+        const started = await page
+            .evaluate((tileSel: string) => {
+                const w = window as unknown as { __lmaMeetActivity?: Record<string, Record<string, number>> };
+                if (w.__lmaMeetActivity) return false;
+                const activity: Record<string, Record<string, number>> = {};
+                w.__lmaMeetActivity = activity;
+                new MutationObserver((mutations) => {
+                    for (const m of mutations) {
+                        const el = m.target as Element;
+                        const tile = el.closest?.(tileSel);
+                        if (!tile) continue;
+                        const id = (tile.getAttribute('data-participant-id') || '?').split('/').pop() || '?';
+                        const cls = typeof (el as HTMLElement).className === 'string' ? (el as HTMLElement).className : '';
+                        const key = `${el.tagName.toLowerCase()}.${cls.split(' ').slice(0, 3).join('.')}` +
+                            `[jsc=${el.getAttribute('jscontroller') || ''}] @${m.attributeName}`;
+                        const counts = (activity[id] ??= {});
+                        counts[key] = (counts[key] ?? 0) + 1;
+                    }
+                }).observe(document.body, { subtree: true, attributes: true });
+                return true;
+            }, MEET_IN_PAGE_SELECTORS.participantTile)
+            .catch(() => false);
+        if (!started) return;
+        await new Promise((r) => setTimeout(r, 120_000));
+        const activity = await page
+            .evaluate(() => (window as unknown as { __lmaMeetActivity?: Record<string, Record<string, number>> }).__lmaMeetActivity ?? {})
+            .catch(() => ({}) as Record<string, Record<string, number>>);
+        for (const [tile, counts] of Object.entries(activity)) {
+            const top = Object.entries(counts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 15)
+                .map(([k, n]) => `${n}× ${k}`)
+                .join(' | ');
+            log.debug(`[meet] tile ${tile} activity over 2 min: ${top}`);
+        }
+    }
+
     private async logTileStructure(page: Page): Promise<void> {
         const outline = await page
             .evaluate((tileSel: string) => {
@@ -1024,6 +1069,7 @@ export default class GoogleMeet {
                         tilesLogged = true;
                         log.info(`[meet] participant tiles: ${JSON.stringify(tiles.slice(0, 3))}`);
                         void this.logTileStructure(page);
+                        void this.logTileActivity(page);
                     }
                     const speaker = pickMeetActiveSpeaker(tiles, this.ownIdentities(), lastMeetingSpeaker);
                     if (speaker && speaker !== lastMeetingSpeaker) {
