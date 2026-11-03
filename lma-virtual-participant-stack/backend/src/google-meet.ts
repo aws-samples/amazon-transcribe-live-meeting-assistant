@@ -64,6 +64,11 @@ import {
 } from './google-meet-page.js';
 import { createLogger } from './logger.js';
 
+/** Fresh page loads tried after Meet refuses the guest before the join. */
+export const MEET_REFUSAL_RETRIES = 4;
+/** The pause before each of those retries. */
+export const MEET_REFUSAL_BACKOFF_MS = [4_000, 8_000, 15_000, 20_000];
+
 const log = createLogger('google-meet');
 
 /** One reading of the page: whether the VP is in the meeting, and what the page says. */
@@ -724,14 +729,47 @@ export default class GoogleMeet {
         await substep('Loading the Google Meet join screen…');
         log.info('Entering name.');
         let nameField: ElementHandle<Element> | null = null;
+        // Meet's guest check refuses some page loads and accepts the next one:
+        // measured from this network, the same browser was refused on one load
+        // of a meeting with open access and shown the name field on the next.
+        // So a refusal before the join is retried with a fresh page load, a
+        // few times and with a growing pause, and the browser's Google cookies
+        // are cleared from the second retry on, so a saved profile cannot keep
+        // carrying whatever Meet held against it.
+        let refusals = 0;
+        const retryAfterRefusal = async (why: string): Promise<boolean> => {
+            if (refusals >= MEET_REFUSAL_RETRIES) return false;
+            refusals += 1;
+            const pauseMs = MEET_REFUSAL_BACKOFF_MS[refusals - 1] ?? 20_000;
+            log.warn(`${why} Retrying the page load (${refusals} of ${MEET_REFUSAL_RETRIES}) in ${pauseMs / 1000}s.`);
+            await new Promise((r) => setTimeout(r, pauseMs));
+            if (refusals >= 2) {
+                await page
+                    .context()
+                    .clearCookies({ domain: /(^|\.)google\.com$/ })
+                    .catch(() => undefined);
+            }
+            await gotoMeetingPage(page, meeting.url, MEETING_HOST_PATTERNS.googleMeet, 'meet-join').catch(() => undefined);
+            await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
+            await this.passConsentInterstitial(page);
+            return true;
+        };
         for (let attempt = 0; attempt < 45 && !nameField; attempt++) {
             const reading = await this.readPage(page);
             if (isMeetRefusalRedirect(reading.url)) {
+                if (await retryAfterRefusal(`Google Meet sent the VP to ${reading.url}.`)) {
+                    attempt = 0;
+                    continue;
+                }
                 log.warn(`Google Meet sent the VP to ${reading.url} — it refused this browser as a guest.`);
                 return { reason: 'never-joined', trigger: 'pre-join:meet-refused' };
             }
             const screen = classifyMeetScreenText(reading.text);
             const exit = meetPreJoinExit(screen?.screen ?? null);
+            if (exit?.trigger === 'pre-join:meet-refused' && (await retryAfterRefusal(`Google Meet showed "${screen?.phrase}".`))) {
+                attempt = 0;
+                continue;
+            }
             if (exit) {
                 log.warn(`Google Meet showed "${screen?.phrase}" before the join — not joining (${exit.trigger}).`);
                 return exit;
