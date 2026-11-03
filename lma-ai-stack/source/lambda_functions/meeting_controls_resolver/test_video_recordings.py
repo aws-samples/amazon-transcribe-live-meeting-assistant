@@ -132,7 +132,7 @@ def test_deleting_a_meeting_deletes_the_video_named_on_its_record(monkeypatch) -
     calls = []
     video_url = _url(f"lma-video-recordings/call_m1_{STAMP}.mp4")
     monkeypatch.setattr(index, "cleanup_virtual_participants", lambda callid: None)
-    monkeypatch.setattr(index, "_delete_all_transcript_segments", lambda *a: None)
+    monkeypatch.setattr(index, "delete_transcript_items", lambda callid: 0)
     monkeypatch.setattr(
         index,
         "get_call_details",

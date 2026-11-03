@@ -296,12 +296,15 @@ categories and their alerts, or "issues detected". What this means on upgrade:
 - The `CATEGORY_MATCH` value of the GraphQL `Channel` enum is removed. Older
   meetings' transcripts may still hold category markers stored with that
   channel. `getTranscriptSegments` and `getTranscriptSegmentsWithSentiment`
-  leave them out of their results, so an older meeting's transcript loads,
-  shares and deletes as before. The markers themselves stay in the table until
-  they expire with the rest of the transcript, or until
-  [transcript deletion](transcript-deletion.md) removes them with it. A client
-  that sends `CATEGORY_MATCH` as a channel to `addTranscriptSegment` gets a
-  validation error.
+  leave them out of their results, so an older meeting's transcript loads and
+  shares as before. The markers stay in the table until they expire with the
+  rest of the transcript, until [transcript deletion](transcript-deletion.md)
+  removes them with it, or until the meeting is deleted. A client that sends
+  `CATEGORY_MATCH` as a channel to `addTranscriptSegment` gets a validation
+  error.
+- Deleting a meeting removes every item stored under its transcript, whatever
+  its channel and including partial segments. Earlier versions deleted only the
+  final segments the transcript query returned, and left the rest to expire.
 
 **The Amazon Connect Contact Lens transcript ingestion is removed.** LMA never
 receives Contact Lens events, so the call event processor no longer accepts the
