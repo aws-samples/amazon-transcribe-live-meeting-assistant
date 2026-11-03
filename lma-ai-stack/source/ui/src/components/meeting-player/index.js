@@ -3,6 +3,6 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-import { RecordingPlayer } from './RecordingPlayer';
+import MeetingPlayer from './MeetingPlayer';
 
-export default RecordingPlayer;
+export default MeetingPlayer;

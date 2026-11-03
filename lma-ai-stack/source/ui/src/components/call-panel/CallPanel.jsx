@@ -30,6 +30,7 @@ import {
   TextContent,
   Textarea,
   Toggle,
+  ToggleButton,
 } from '@cloudscape-design/components';
 import ReactMarkdown from 'react-markdown';
 import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate';
@@ -71,7 +72,26 @@ import MeetingChapters from '../meeting-chapters/MeetingChapters';
 import { chaptersFromSummary, withoutChaptersSection } from '../common/chapters';
 import { parseAgendaItems } from '../common/agenda';
 import { formatDurationClock, meetingDurationMillis, platformLabel } from '../common/meeting-header';
-import { recordingSecondsFor, scrollTranscriptToTime } from '../common/video-keyframes';
+import { frameIdSeconds, scrollTranscriptToTime } from '../common/video-keyframes';
+import {
+  SEEK_STEP_SECONDS,
+  chooseMeetingMedia,
+  clockFor,
+  currentSegmentId,
+  playerShortcut,
+  recordingSecondsForFrame,
+  sameAnchors,
+  toRecordingSeconds,
+} from '../meeting-player/playback-sync';
+import { usePlaybackSelector, usePlaybackStore } from '../meeting-player/playback-store';
+import MeetingPlayer from '../meeting-player';
+import {
+  passesSpeakerFilter,
+  rehypeMarkMatches,
+  speakerFilterOptions,
+  stepMatch,
+  textMatches,
+} from '../common/transcript-search';
 import useSettingsContext from '../../contexts/settings';
 
 import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
@@ -448,8 +468,13 @@ const getTimestampFromSeconds = (secs) => {
   return iso.substr(14, 7); // MM:SS.s
 };
 
-const TranscriptContent = ({ segment, translateCache }) => {
+const TranscriptContent = ({ segment, translateCache, query = '' }) => {
   const { transcript, segmentId, channel, targetLanguage, translateOn } = segment;
+  // The search's words marked in the segment's own text (not its translation).
+  const transcriptPlugins = useMemo(
+    () => (query ? [...markdownRehypePlugins, rehypeMarkMatches(query)] : markdownRehypePlugins),
+    [query],
+  );
 
   const k = segmentId.concat('-', targetLanguage);
 
@@ -491,7 +516,7 @@ const TranscriptContent = ({ segment, translateCache }) => {
       // prettier-ignore
       // eslint-disable-next-line react/no-array-index-key
       <TextContent key={`${segmentId}-text-${i}`} color="red" className={className}>
-        <ReactMarkdown rehypePlugins={markdownRehypePlugins}>{text.trim()}</ReactMarkdown>
+        <ReactMarkdown rehypePlugins={transcriptPlugins}>{text.trim()}</ReactMarkdown>
         {/* react-markdown 9 and later take no className: wrapped, so the translation keeps its colour. */}
         <div className="translated-text">
           <ReactMarkdown rehypePlugins={markdownRehypePlugins}>{translatedText.trim()}</ReactMarkdown>
@@ -599,8 +624,17 @@ const SpeakerRenamePopover = ({ segment, onRenameSpeaker, locked }) => {
   );
 };
 
-const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis, onRenameSpeaker, readOnly }) => {
+const TranscriptSegment = ({
+  segment,
+  translateCache,
+  enableSentimentAnalysis,
+  onRenameSpeaker,
+  readOnly,
+  onSeek = null,
+  query = '',
+}) => {
   const { channel } = segment;
+  const times = `${getTimestampFromSeconds(segment.startTime)} - ${getTimestampFromSeconds(segment.endTime)}`;
 
   let displayChannel = `${segment.channel}`;
   let channelClass = '';
@@ -633,12 +667,20 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis, o
               </strong>
             </TextContent>
           )}
-          <TextContent>
-            {`${getTimestampFromSeconds(segment.startTime)} -
-              ${getTimestampFromSeconds(segment.endTime)}`}
-          </TextContent>
+          {onSeek ? (
+            // With a recording to play, the time plays it from this line.
+            <Button
+              variant="inline-link"
+              ariaLabel={`Play from ${getTimestampFromSeconds(segment.startTime)}`}
+              onClick={() => onSeek(segment.startTime)}
+            >
+              {times}
+            </Button>
+          ) : (
+            <TextContent>{times}</TextContent>
+          )}
         </SpaceBetween>
-        <TranscriptContent segment={segment} translateCache={translateCache} />
+        <TranscriptContent segment={segment} translateCache={translateCache} query={query} />
       </SpaceBetween>
     </Grid>
   );
@@ -680,6 +722,174 @@ const appendToPreviousSegment = ({ previous, current }) => {
   previous.mergedSegmentIds = [...(previous.mergedSegmentIds || [previous.segmentId]), current.segmentId];
 };
 
+// Channels that are not somebody speaking: the assistants' answers. Kept as a
+// list of what is excluded, so it holds whatever the two speech channels are
+// called.
+const NON_SPEECH_CHANNELS = ['AGENT_ASSISTANT', 'MEETING_ASSISTANT', 'CHAT_ASSISTANT'];
+const isSpeechSegment = (segment) => !NON_SPEECH_CHANNELS.includes(segment?.channel);
+
+// The segments the transcript shows, of those it holds: not the voice-tone
+// readings, not the chat assistant's (it has its own panel), and only complete
+// ones.
+const isDisplayedSegment = (s) =>
+  // prettier-ignore
+  s?.segmentId
+  && s?.createdAt
+  && (s.agentTranscript === undefined || s.agentTranscript || s.channel !== 'LOCAL')
+  && s.channel !== 'AGENT_VOICETONE'
+  && s.channel !== 'CALLER_VOICETONE'
+  && s.channel !== 'CHAT_ASSISTANT';
+
+const rowIdFor = (s) => `${s.segmentId}-${s.createdAt}`;
+
+// How long after the page scrolls the transcript itself a scroll event is
+// taken to be that scroll rather than the reader's. A smooth scroll over a long
+// transcript takes most of a second.
+const PROGRAMMATIC_SCROLL_MS = 1000;
+
+/**
+ * One line of the transcript. Memoised: while a recording plays, the
+ * transcript re-renders each time the segment being heard changes, and only
+ * the two rows whose highlight moved need to.
+ */
+const TranscriptRow = React.memo(
+  ({
+    segment,
+    current,
+    match,
+    query,
+    translateCache,
+    enableSentimentAnalysis,
+    participantName,
+    onRenameSpeaker,
+    readOnly,
+    onSeek,
+  }) => {
+    const classes = ['transcript-row'];
+    if (current) classes.push('transcript-row-current');
+    if (match) classes.push('transcript-row-match');
+    if (match === 'active') classes.push('transcript-row-match-active');
+    return (
+      <div
+        className={classes.join(' ')}
+        data-start-time={segment.startTime}
+        data-row-id={rowIdFor(segment)}
+        aria-current={current ? 'true' : undefined}
+      >
+        <TranscriptSegment
+          segment={segment}
+          translateCache={translateCache}
+          enableSentimentAnalysis={enableSentimentAnalysis}
+          participantName={participantName}
+          onRenameSpeaker={onRenameSpeaker}
+          readOnly={readOnly}
+          onSeek={onSeek}
+          query={match ? query : ''}
+        />
+      </div>
+    );
+  },
+);
+TranscriptRow.displayName = 'TranscriptRow';
+
+/**
+ * The part of the transcript's box that can be seen: all of it, less the top
+ * when the page has been scrolled and the player, which stays at the top of
+ * the window, lies over it.
+ */
+const visibleBounds = (container) => {
+  const box = container.getBoundingClientRect();
+  const player = container.closest('.transcript-column')?.querySelector('.meeting-player');
+  const cover = player ? player.getBoundingClientRect().bottom : -Infinity;
+  return { top: Math.max(box.top, Math.min(cover, box.bottom)), bottom: box.bottom };
+};
+
+/** Whether a row is wholly inside the visible part of its scrolling container. */
+const rowInView = (container, row) => {
+  const { top, bottom } = visibleBounds(container);
+  const r = row.getBoundingClientRect();
+  return r.top >= top && r.bottom <= bottom;
+};
+
+const findRow = (container, rowId) =>
+  [...(container?.querySelectorAll('[data-row-id]') || [])].find((row) => row.getAttribute('data-row-id') === rowId);
+
+/**
+ * Search and speaker filter for the transcript, above its lines. The search
+ * marks the segments holding every word typed and steps through them; the
+ * speaker chips limit the transcript to some speakers.
+ */
+const TranscriptToolbar = ({
+  query,
+  onQueryChange,
+  matchCount,
+  activeMatch,
+  onStep,
+  speakerNames,
+  selectedSpeakers,
+  onSpeakersChange,
+}) => {
+  let countText = '';
+  if (query.trim()) {
+    countText = matchCount ? `${activeMatch + 1 > 0 ? activeMatch + 1 : 0} of ${matchCount}` : 'No matches';
+  }
+  const toggleSpeaker = (name, pressed) =>
+    onSpeakersChange(pressed ? [...selectedSpeakers, name] : selectedSpeakers.filter((n) => n !== name));
+  return (
+    <div className="transcript-toolbar" data-testid="transcript-toolbar">
+      <div className="transcript-search">
+        <Input
+          type="search"
+          value={query}
+          placeholder="Search the transcript"
+          ariaLabel="Search the transcript"
+          onChange={({ detail }) => onQueryChange(detail.value)}
+          onKeyDown={({ detail }) => {
+            if (detail.key === 'Enter') onStep(detail.shiftKey ? -1 : 1);
+          }}
+        />
+        <Button
+          variant="icon"
+          iconName="angle-up"
+          ariaLabel="Previous match"
+          disabled={!matchCount}
+          onClick={() => onStep(-1)}
+        />
+        <Button
+          variant="icon"
+          iconName="angle-down"
+          ariaLabel="Next match"
+          disabled={!matchCount}
+          onClick={() => onStep(1)}
+        />
+        <span className="transcript-search-count" aria-live="polite" data-testid="transcript-search-count">
+          {countText}
+        </span>
+      </div>
+      {speakerNames.length > 1 && (
+        <div className="transcript-speaker-filter" role="group" aria-label="Show speakers">
+          <ToggleButton
+            pressed={!selectedSpeakers.length}
+            onChange={() => onSpeakersChange([])}
+            ariaLabel="All speakers"
+          >
+            All
+          </ToggleButton>
+          {speakerNames.map((name) => (
+            <ToggleButton
+              key={name}
+              pressed={selectedSpeakers.includes(name)}
+              onChange={({ detail }) => toggleSpeaker(name, detail.pressed)}
+            >
+              {name}
+            </ToggleButton>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const CallInProgressTranscript = ({
   item,
   callTranscriptPerCallId,
@@ -694,8 +904,9 @@ const CallInProgressTranscript = ({
   onRenameSpeaker,
   readOnly,
   active = true,
+  playback = null,
+  onSeek = null,
 }) => {
-  const bottomRef = useRef();
   const containerRef = useRef();
   const [turnByTurnSegments, setTurnByTurnSegments] = useState([]);
   const [translateCache, setTranslateCache] = useState({});
@@ -703,6 +914,16 @@ const CallInProgressTranscript = ({
   const [lastUpdated, setLastUpdated] = useState(Date.now());
   const [updateFlag, setUpdateFlag] = useState(false);
   const [userHasScrolled, setUserHasScrolled] = useState(false);
+  const [query, setQuery] = useState('');
+  const [activeMatch, setActiveMatch] = useState(-1);
+  const [selectedSpeakers, setSelectedSpeakers] = useState([]);
+  // Until when a scroll event is the page's own scrolling, not the reader's.
+  const programmaticUntilRef = useRef(0);
+
+  const isLive = item.recordingStatusLabel === IN_PROGRESS_STATUS;
+  // After the meeting, with a recording to play, Auto-scroll keeps the line
+  // being heard in view; during it, the newest line.
+  const followPlayback = Boolean(playback && onSeek && autoScroll && !isLive);
 
   // channels: LOCAL, AGENT_ASSISTANT, REMOTE, AGENT_VOICETONE, CALLER_VOICETONE
   const maxChannels = 6;
@@ -839,8 +1060,8 @@ const CallInProgressTranscript = ({
     runTranslation();
   }, [callTranscriptPerCallId, translateOn, targetLanguage]);
 
-  const getTurnByTurnSegments = () => {
-    const currentTurnByTurnSegments = transcriptChannels
+  const getTurnByTurnSegments = () =>
+    transcriptChannels
       .map((c) => {
         const { segments } = transcriptsForThisCallId[c];
         return segments;
@@ -899,46 +1120,69 @@ const CallInProgressTranscript = ({
 
         return t;
       })
-      .map(
-        // prettier-ignore
-        (s) => (
-          s?.segmentId
-          && s?.createdAt
-          && (s.agentTranscript === undefined
-            || s.agentTranscript || s.channel !== 'LOCAL')
-          && (s.channel !== 'AGENT_VOICETONE')
-          && (s.channel !== 'CALLER_VOICETONE')
-          && (s.channel !== 'CHAT_ASSISTANT')
-          && (
-            <div key={`${s.segmentId}-${s.createdAt}`} data-start-time={s.startTime}>
-              <TranscriptSegment
-                segment={s}
-                translateCache={translateCache}
-                enableSentimentAnalysis={enableSentimentAnalysis}
-                participantName={item.callerPhoneNumber}
-                onRenameSpeaker={onRenameSpeaker}
-                readOnly={readOnly}
-              />
-            </div>
-          )
-        ),
-      );
+      .filter(isDisplayedSegment);
 
-    // this element is used for scrolling to bottom and to provide padding
-    currentTurnByTurnSegments.push(<div key="bottom" ref={bottomRef} />);
-    return currentTurnByTurnSegments;
-  };
+  // What is shown: the speakers chosen, then the segments holding the search.
+  const speakerNames = useMemo(() => speakerFilterOptions(turnByTurnSegments, isSpeechSegment), [turnByTurnSegments]);
+  // A chosen speaker who is no longer in the transcript (renamed) stops filtering.
+  const activeSpeakers = useMemo(
+    () => selectedSpeakers.filter((name) => speakerNames.includes(name)),
+    [selectedSpeakers, speakerNames],
+  );
+  const visibleSegments = useMemo(
+    () => turnByTurnSegments.filter((s) => passesSpeakerFilter(s, activeSpeakers, isSpeechSegment)),
+    [turnByTurnSegments, activeSpeakers],
+  );
+  const matchIds = useMemo(
+    () => (query.trim() ? visibleSegments.filter((s) => textMatches(s.transcript, query)).map(rowIdFor) : []),
+    [visibleSegments, query],
+  );
+  const matchSet = useMemo(() => new Set(matchIds), [matchIds]);
+  const activeMatchId = activeMatch >= 0 ? matchIds[activeMatch] : null;
+
+  // The line being heard, from the player's position. Re-renders the
+  // transcript only when that line changes.
+  const playbackRows = useMemo(
+    () => visibleSegments.map((s) => ({ id: rowIdFor(s), startTime: s.startTime, endTime: s.endTime })),
+    [visibleSegments],
+  );
+  const selectCurrent = useCallback(
+    (state) => (state.engaged ? currentSegmentId(playbackRows, state.seconds) : null),
+    [playbackRows],
+  );
+  const currentRowId = usePlaybackSelector(onSeek ? playback : null, selectCurrent);
+  const selectSeekCount = useCallback((state) => state.seekCount || 0, []);
+  const seekCount = usePlaybackSelector(onSeek ? playback : null, selectSeekCount);
+
+  const scrollToRow = useCallback((row) => {
+    const container = containerRef.current;
+    if (!container || !row) return;
+    programmaticUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_MS;
+    const box = container.getBoundingClientRect();
+    const visible = visibleBounds(container);
+    const top = row.getBoundingClientRect().top - box.top + container.scrollTop;
+    // A third of the way down what can be seen, so what comes next is in view too.
+    const target = top - (visible.top - box.top) - (visible.bottom - visible.top) / 3;
+    if (container.scrollTo) container.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+  }, []);
 
   // Detect when user manually scrolls
   const handleScroll = (e) => {
     const container = e.target;
-    const threshold = 50; // pixels from bottom
-    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
-    if (!isAtBottom && autoScroll) {
-      setUserHasScrolled(true);
-    } else if (isAtBottom) {
-      setUserHasScrolled(false);
+    if (isLive) {
+      const threshold = 50; // pixels from bottom
+      const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+      if (!isAtBottom && autoScroll) {
+        setUserHasScrolled(true);
+      } else if (isAtBottom) {
+        setUserHasScrolled(false);
+      }
+      return;
     }
+    // While a recording plays, scrolling away stops the transcript following
+    // it, until Resume or the next move of the recording.
+    if (Date.now() < programmaticUntilRef.current) return;
+    if (followPlayback && playback?.get().playing) setUserHasScrolled(true);
   };
 
   const scrollTranscriptToBottom = useCallback(() => {
@@ -963,17 +1207,12 @@ const CallInProgressTranscript = ({
     translateOn,
     updateFlag,
     speakerIdentities,
-    // The elements carry the inline-rename affordance, so they have to be
-    // rebuilt when it changes. isAdminUser resolves asynchronously, so readOnly
-    // flips from true to false shortly after first render; without it here an
-    // admin viewing someone else's ended meeting would keep elements built
-    // while the answer was still "no".
-    readOnly,
-    onRenameSpeaker,
   ]);
 
   // Move to the segment at a requested time (a key frame or a chapter was
-  // selected), and pause following the live end so the transcript stays there.
+  // selected). During a live meeting this pauses following the live end, so
+  // the transcript stays there; after it, the recording has been moved to the
+  // same time, so following it carries on from there.
   // The transcript is on its own tab, and a hidden element has no layout to
   // scroll by, so a request made while another tab is shown is kept and
   // carried out when the Transcript tab is opened.
@@ -981,15 +1220,17 @@ const CallInProgressTranscript = ({
   useEffect(() => {
     if (!scrollRequest || !active || appliedScrollRef.current === scrollRequest.at) return;
     appliedScrollRef.current = scrollRequest.at;
+    programmaticUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_MS;
     const row = scrollTranscriptToTime(containerRef.current, scrollRequest.seconds);
-    if (row && item.recordingStatusLabel === IN_PROGRESS_STATUS) setUserHasScrolled(true);
+    if (row && isLive) setUserHasScrolled(true);
+    if (!isLive) setUserHasScrolled(false);
   }, [scrollRequest, active]);
 
   useEffect(() => {
     // prettier-ignore
     if (
       active
-      && item.recordingStatusLabel === IN_PROGRESS_STATUS
+      && isLive
       && autoScroll
       && !userHasScrolled
       && containerRef.current
@@ -1008,54 +1249,121 @@ const CallInProgressTranscript = ({
     scrollTranscriptToBottom,
   ]);
 
+  // An explicit move of the recording (a click on a line, a chapter, the seek
+  // bar, the arrow keys) is where the reader wants to be: follow it again.
+  useEffect(() => {
+    if (seekCount) setUserHasScrolled(false);
+  }, [seekCount]);
+
+  // Keep the line being heard in view, unless the reader has scrolled away.
+  useEffect(() => {
+    if (!followPlayback || userHasScrolled || !active || !currentRowId) return;
+    const container = containerRef.current;
+    const row = findRow(container, currentRowId);
+    if (row && !rowInView(container, row)) scrollToRow(row);
+  }, [currentRowId, followPlayback, userHasScrolled, active, scrollToRow]);
+
+  // A new search starts at its first match.
+  useEffect(() => {
+    setActiveMatch(query.trim() && matchIds.length ? 0 : -1);
+  }, [query]);
+  useEffect(() => {
+    if (activeMatch >= matchIds.length) setActiveMatch(matchIds.length ? 0 : -1);
+  }, [matchIds.length]);
+  useEffect(() => {
+    if (!activeMatchId || !active) return;
+    scrollToRow(findRow(containerRef.current, activeMatchId));
+  }, [activeMatchId, active, scrollToRow]);
+
+  const stepSearch = (step) => {
+    if (!matchIds.length) return;
+    // Reading the matches is a move away from the line being heard.
+    if (followPlayback && playback?.get().playing) setUserHasScrolled(true);
+    setActiveMatch((index) => stepMatch(matchIds.length, index, step));
+  };
+
+  const resumeFollowing = () => {
+    setUserHasScrolled(false);
+    if (isLive) scrollTranscriptToBottom();
+  };
+
+  let pausedNotice = null;
+  if (userHasScrolled && autoScroll && isLive) pausedNotice = 'Auto-scroll paused - scroll to bottom to resume';
+  if (userHasScrolled && followPlayback) pausedNotice = 'Following the recording is paused';
+
   return (
-    <div
-      ref={containerRef}
-      onScroll={handleScroll}
-      data-testid="transcript-scroll"
-      style={{
-        overflowY: 'auto',
-        height: TRANSCRIPT_HEIGHT,
-        maxHeight: TRANSCRIPT_HEIGHT,
-        paddingLeft: '10px',
-        paddingTop: '5px',
-        paddingRight: '10px',
-      }}
-    >
-      {/* Visual indicator when auto-scroll is paused */}
-      {userHasScrolled && autoScroll && (
+    <>
+      <TranscriptToolbar
+        query={query}
+        onQueryChange={setQuery}
+        matchCount={matchIds.length}
+        activeMatch={activeMatch}
+        onStep={stepSearch}
+        speakerNames={speakerNames}
+        selectedSpeakers={activeSpeakers}
+        onSpeakersChange={setSelectedSpeakers}
+      />
+      {/* The notice lies over the lines rather than among them: shown and
+          hidden among them, it would move them, and the browser's scroll
+          anchoring would then scroll the box -- which reads as the reader
+          scrolling, and shows the notice again. */}
+      <div className="transcript-scroll-frame">
+        {pausedNotice && (
+          <div className="transcript-follow-paused" role="status">
+            {`⚠️ ${pausedNotice}`}
+            <Button
+              onClick={resumeFollowing}
+              variant="inline-link"
+              iconName="angle-down"
+              style={{ marginLeft: '10px', fontSize: '12px' }}
+            >
+              Resume
+            </Button>
+          </div>
+        )}
         <div
+          ref={containerRef}
+          onScroll={handleScroll}
+          data-testid="transcript-scroll"
           style={{
-            position: 'sticky',
-            top: 0,
-            background: '#ffeaa7',
-            padding: '5px 10px',
-            textAlign: 'center',
-            fontSize: '12px',
-            zIndex: 1000,
-            borderRadius: '4px',
-            margin: '0 0 10px 0',
-            border: '1px solid #fdcb6e',
+            overflowY: 'auto',
+            height: TRANSCRIPT_HEIGHT,
+            maxHeight: TRANSCRIPT_HEIGHT,
+            paddingLeft: '10px',
+            paddingTop: '5px',
+            paddingRight: '10px',
           }}
         >
-          ⚠️ Auto-scroll paused - scroll to bottom to resume
-          <Button
-            onClick={() => {
-              setUserHasScrolled(false);
-              scrollTranscriptToBottom();
-            }}
-            variant="inline-link"
-            iconName="angle-down"
-            style={{ marginLeft: '10px', fontSize: '12px' }}
-          >
-            Resume
-          </Button>
+          {visibleSegments.length === 0 && turnByTurnSegments.length > 0 && (
+            <Box color="text-body-secondary" padding="s">
+              No lines from the speakers chosen.
+            </Box>
+          )}
+          <ColumnLayout borders="horizontal" columns={1}>
+            {visibleSegments.map((s) => {
+              const rowId = rowIdFor(s);
+              let match = null;
+              if (matchSet.has(rowId)) match = rowId === activeMatchId ? 'active' : 'match';
+              return (
+                <TranscriptRow
+                  key={rowId}
+                  segment={s}
+                  current={rowId === currentRowId}
+                  match={match}
+                  query={query}
+                  translateCache={translateCache}
+                  enableSentimentAnalysis={enableSentimentAnalysis}
+                  participantName={item.callerPhoneNumber}
+                  onRenameSpeaker={onRenameSpeaker}
+                  readOnly={readOnly}
+                  onSeek={onSeek}
+                />
+              );
+            })}
+          </ColumnLayout>
         </div>
-      )}
-      <ColumnLayout borders="horizontal" columns={1}>
-        {turnByTurnSegments}
-      </ColumnLayout>
-    </div>
+      </div>
+    </>
   );
 };
 
@@ -1553,10 +1861,16 @@ const CallTranscriptContainer = ({
   readOnly,
   scrollRequest,
   active = true,
+  player = null,
+  playback = null,
+  onSeek = null,
 }) => {
-  // defaults to auto scroll when call is in progress
-  const [autoScroll, setAutoScroll] = useState(item.recordingStatusLabel === IN_PROGRESS_STATUS);
-  const [autoScrollDisabled, setAutoScrollDisabled] = useState(item.recordingStatusLabel !== IN_PROGRESS_STATUS);
+  // Auto-scroll follows the newest line while the meeting runs, and the line
+  // being heard once it has ended and there is a recording to play; it is on
+  // by default in both. With neither there is nothing for it to follow.
+  const canFollow = item.recordingStatusLabel === IN_PROGRESS_STATUS || Boolean(onSeek);
+  const [autoScroll, setAutoScroll] = useState(canFollow);
+  const [autoScrollDisabled, setAutoScrollDisabled] = useState(!canFollow);
 
   const [translateOn, setTranslateOn] = useState(false);
   const [targetLanguage, setTargetLanguage] = useState(localStorage.getItem('targetLanguage') || '');
@@ -1569,9 +1883,9 @@ const CallTranscriptContainer = ({
   };
 
   useEffect(() => {
-    setAutoScrollDisabled(item.recordingStatusLabel !== IN_PROGRESS_STATUS);
-    setAutoScroll(item.recordingStatusLabel === IN_PROGRESS_STATUS);
-  }, [item.recordingStatusLabel]);
+    setAutoScrollDisabled(!canFollow);
+    setAutoScroll(canFollow);
+  }, [canFollow]);
 
   const selectedLanguage = LANGUAGE_OPTIONS.find((option) => option.value === targetLanguage) || null;
 
@@ -1592,64 +1906,69 @@ const CallTranscriptContainer = ({
         },
       ]}
     >
-      <Container
-        fitHeight="true"
-        disableContentPaddings
-        header={
-          <Header
-            variant="h4"
-            info={<InfoLink onFollow={() => setToolsOpen(true)} />}
-            actions={
-              // The transcript's downloads are in the page header's Download menu.
-              <SpaceBetween direction="horizontal" size="m" alignItems="center">
-                <Toggle
-                  onChange={({ detail }) => setAutoScroll(detail.checked)}
-                  checked={autoScroll}
-                  disabled={autoScrollDisabled}
-                >
-                  Auto-scroll
-                </Toggle>
-                <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn}>
-                  Translate
-                </Toggle>
-                {translateOn && (
-                  <Select
-                    selectedOption={selectedLanguage}
-                    onChange={handleLanguageSelect}
-                    options={LANGUAGE_OPTIONS}
-                    placeholder="Choose a language"
-                    filteringType="auto"
-                    ariaLabel="Translation language"
-                    expandToViewport
-                  />
-                )}
-              </SpaceBetween>
-            }
-          >
-            Transcript
-          </Header>
-        }
-      >
-        <TranscriptDeletionNotice
-          deletedAt={item.transcriptDeletedAt}
-          scheduledFor={item.transcriptDeletionScheduledFor}
-        />
-        <CallInProgressTranscript
-          item={item}
-          callTranscriptPerCallId={callTranscriptPerCallId}
-          autoScroll={autoScroll}
-          scrollRequest={scrollRequest}
-          translateClient={translateClient}
-          targetLanguage={targetLanguage}
-          agentTranscript={agentTranscript}
-          translateOn={translateOn}
-          enableSentimentAnalysis={enableSentimentAnalysis}
-          speakerIdentities={speakerIdentities}
-          onRenameSpeaker={onRenameSpeaker}
-          readOnly={readOnly}
-          active={active}
-        />
-      </Container>
+      <div className="transcript-column">
+        {player}
+        <Container
+          fitHeight="true"
+          disableContentPaddings
+          header={
+            <Header
+              variant="h4"
+              info={<InfoLink onFollow={() => setToolsOpen(true)} />}
+              actions={
+                // The transcript's downloads are in the page header's Download menu.
+                <SpaceBetween direction="horizontal" size="m" alignItems="center">
+                  <Toggle
+                    onChange={({ detail }) => setAutoScroll(detail.checked)}
+                    checked={autoScroll}
+                    disabled={autoScrollDisabled}
+                  >
+                    Auto-scroll
+                  </Toggle>
+                  <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn}>
+                    Translate
+                  </Toggle>
+                  {translateOn && (
+                    <Select
+                      selectedOption={selectedLanguage}
+                      onChange={handleLanguageSelect}
+                      options={LANGUAGE_OPTIONS}
+                      placeholder="Choose a language"
+                      filteringType="auto"
+                      ariaLabel="Translation language"
+                      expandToViewport
+                    />
+                  )}
+                </SpaceBetween>
+              }
+            >
+              Transcript
+            </Header>
+          }
+        >
+          <TranscriptDeletionNotice
+            deletedAt={item.transcriptDeletedAt}
+            scheduledFor={item.transcriptDeletionScheduledFor}
+          />
+          <CallInProgressTranscript
+            item={item}
+            callTranscriptPerCallId={callTranscriptPerCallId}
+            autoScroll={autoScroll}
+            scrollRequest={scrollRequest}
+            translateClient={translateClient}
+            targetLanguage={targetLanguage}
+            agentTranscript={agentTranscript}
+            translateOn={translateOn}
+            enableSentimentAnalysis={enableSentimentAnalysis}
+            speakerIdentities={speakerIdentities}
+            onRenameSpeaker={onRenameSpeaker}
+            readOnly={readOnly}
+            active={active}
+            playback={playback}
+            onSeek={onSeek}
+          />
+        </Container>
+      </div>
       {getAgentAssistPanel(item, user, showVNCPreview, setShowVNCPreview, vpData, loadingVP)}
     </Grid>
   );
@@ -1949,64 +2268,166 @@ export const CallPanel = ({
   const [activeTab, setActiveTab] = useMeetingTab({ inUrl: tabInUrl, isLive, hasKeyframes });
   const timelineNode = useDetachedNode();
 
-  // Requests from the key frame strip and the chapters: move the transcript to
-  // a time, and play the recording from a time. `at` makes a repeated request
-  // distinct. `reveal` is an explicit "show me": it opens the tab the request
-  // is for. Without it the transcript is moved for when its tab is next opened,
-  // and the recording is only moved (play: false), since it is on the Details
-  // tab and would otherwise start playing out of sight.
+  // The meeting's one player, above the transcript (meeting-player/). It plays
+  // the video recording when there is one and the audio recording otherwise,
+  // and nothing while the meeting is live; the viewer can switch to the audio
+  // when there are both.
+  const [mediaPreference, setMediaPreference] = useState('video');
+  useEffect(() => {
+    setMediaPreference('video');
+  }, [item.callId]);
+  const media = chooseMeetingMedia({
+    recordingUrl: item.recordingUrl,
+    videoRecordingUrl: item.videoRecordingUrl,
+    isLive,
+    prefer: mediaPreference,
+  });
+  const mediaKind = media?.kind || null;
+  const canPlayRecording = Boolean(media);
+  const playerRef = useRef(null);
+  const playback = usePlaybackStore();
+
+  // The video recording's clock against the transcript's, from the key frames
+  // (each carries both); empty until the strip has loaded frames that do.
+  const [clockAnchors, setClockAnchors] = useState([]);
+  useEffect(() => {
+    setClockAnchors([]);
+  }, [item.callId]);
+  const onClockAnchors = useCallback((anchors) => {
+    setClockAnchors((previous) => (sameAnchors(previous, anchors) ? previous : anchors));
+  }, []);
+  const clock = useMemo(() => clockFor(mediaKind, clockAnchors), [mediaKind, clockAnchors]);
+  const clockRef = useRef(clock);
+  clockRef.current = clock;
+
+  /**
+   * Move the player to a time on the transcript's clock (or to a key frame's
+   * own place in the video recording), and play from there when `play`.
+   */
+  const seekPlayer = useCallback(
+    ({ transcriptSeconds = null, frame = null, play = false }) => {
+      const player = playerRef.current;
+      if (!player || !mediaKind) return;
+      const seconds = frame
+        ? recordingSecondsForFrame(frame, { kind: mediaKind, clock: clockRef.current })
+        : toRecordingSeconds(clockRef.current, transcriptSeconds);
+      player.seek(seconds, { play });
+    },
+    [mediaKind],
+  );
+
+  // Requests from the key frame strip, the chapters and the summary's slides:
+  // move the transcript to a time, and the player with it. `at` makes a
+  // repeated request distinct. `reveal` is an explicit "show me": it opens the
+  // Transcript tab, where the player is. Without it the transcript and the
+  // player are only moved, ready for when the tab is next opened, and nothing
+  // plays out of sight.
   const [transcriptScrollRequest, setTranscriptScrollRequest] = useState(null);
-  const [videoSeekRequest, setVideoSeekRequest] = useState(null);
   const [frameSelectRequest, setFrameSelectRequest] = useState(null);
   const showInTranscript = useCallback(
     (seconds, { reveal = false } = {}) => {
       setTranscriptScrollRequest({ seconds, at: Date.now() });
+      seekPlayer({ transcriptSeconds: seconds, play: false });
       if (reveal) setActiveTab(TAB_TRANSCRIPT);
     },
-    [setActiveTab],
+    [setActiveTab, seekPlayer],
   );
+  // "Play recording from here" on a key frame (reveal), or a frame selected in
+  // the strip (no reveal: positioned, not played).
   const playRecordingFrom = useCallback(
     (frame, { reveal = false } = {}) => {
-      setVideoSeekRequest({ seconds: recordingSecondsFor(frame), at: Date.now(), reveal, play: reveal });
-      if (reveal) setActiveTab(TAB_DETAILS);
+      if (reveal) {
+        setTranscriptScrollRequest({ seconds: Number(frame?.Timestamp) || 0, at: Date.now() });
+        setActiveTab(TAB_TRANSCRIPT);
+      }
+      seekPlayer({ frame, play: reveal });
     },
-    [setActiveTab],
+    [setActiveTab, seekPlayer],
   );
-  // A slide named in the summary: open the Screen share tab at its frame.
+  // A slide named in the summary: open the Screen share tab at its frame, and
+  // move the player to it for when the recording is played from there.
   const showKeyframe = useCallback(
     (frameId) => {
       setFrameSelectRequest({ frameId, at: Date.now() });
       setActiveTab(TAB_SCREEN_SHARE);
+      const seconds = frameIdSeconds(frameId);
+      if (seconds !== null) {
+        setTranscriptScrollRequest({ seconds, at: Date.now() });
+        seekPlayer({ transcriptSeconds: seconds, play: false });
+      }
     },
-    [setActiveTab],
+    [setActiveTab, seekPlayer],
   );
   const onFramesChange = useCallback(({ count, more }) => {
     setKeyframes((previous) => (previous.count === count && previous.more === more ? previous : { count, more }));
   }, []);
 
-  // Chapters from the summary, and the recording's clock against the
-  // transcript's, learnt from the key frames (null until a frame says).
+  // Chapters from the summary, on the transcript's clock.
   const chapters = useMemo(() => chaptersFromSummary(item.callSummaryText), [item.callSummaryText]);
-  const clockOffsetRef = useRef(null);
-  useEffect(() => {
-    clockOffsetRef.current = null;
-  }, [item.callId]);
-  const setClockOffset = useCallback((offset) => {
-    clockOffsetRef.current = offset;
-  }, []);
-  const canPlayRecording = Boolean(item.videoRecordingUrl) && !isLive;
+  // A chapter selected on the Overview: the Transcript tab at that time, the
+  // recording playing from it.
   const selectChapter = useCallback(
     (chapter) => {
       showInTranscript(chapter.seconds, { reveal: true });
-      if (!canPlayRecording) return;
-      const offset = clockOffsetRef.current;
-      playRecordingFrom({
-        Timestamp: chapter.seconds,
-        VideoOffset: offset === null ? null : Math.max(0, chapter.seconds - offset),
-      });
+      seekPlayer({ transcriptSeconds: chapter.seconds, play: true });
     },
-    [showInTranscript, playRecordingFrom, canPlayRecording],
+    [showInTranscript, seekPlayer],
   );
+  // A line of the transcript: play from its start.
+  const playFromTranscript = useCallback(
+    (seconds) => seekPlayer({ transcriptSeconds: seconds, play: true }),
+    [seekPlayer],
+  );
+  // The Details tab's "Play": the Transcript tab, playing from where the player is.
+  const playOnTranscriptTab = useCallback(() => {
+    setActiveTab(TAB_TRANSCRIPT);
+    playerRef.current?.seek(toRecordingSeconds(clockRef.current, playback.get().engaged ? playback.get().seconds : 0), {
+      play: true,
+    });
+  }, [setActiveTab, playback]);
+
+  // Switching between the video and the audio recording keeps the place.
+  const pendingSwitchRef = useRef(null);
+  const switchMedia = useCallback(
+    (kind) => {
+      const { seconds, playing, engaged } = playback.get();
+      pendingSwitchRef.current = engaged ? { seconds, playing } : null;
+      setMediaPreference(kind);
+    },
+    [playback],
+  );
+  useEffect(() => {
+    const pending = pendingSwitchRef.current;
+    pendingSwitchRef.current = null;
+    if (pending) seekPlayer({ transcriptSeconds: pending.seconds, play: pending.playing });
+  }, [media?.url]);
+
+  // Nothing plays out of sight: leaving the Transcript tab pauses the player.
+  useEffect(() => {
+    if (activeTab !== TAB_TRANSCRIPT) playerRef.current?.pause();
+  }, [activeTab]);
+
+  // Space plays or pauses, Left and Right move 5 seconds: on the Transcript
+  // tab, with a recording, while focus is on nothing in particular or within
+  // this panel and not in a field (playerShortcut). Within this panel, so the
+  // meeting list's split panel does not take the keys of the list beside it.
+  const panelRef = useRef(null);
+  useEffect(() => {
+    if (activeTab !== TAB_TRANSCRIPT || !mediaKind) return undefined;
+    const onKeyDown = (event) => {
+      const { target } = event;
+      const inPanel = target === document.body || panelRef.current?.contains(target);
+      const action = inPanel ? playerShortcut(event) : null;
+      const player = playerRef.current;
+      if (!action || !player) return;
+      event.preventDefault();
+      if (action === 'toggle') player.toggle();
+      if (action === 'back') player.nudge(-SEEK_STEP_SECONDS);
+      if (action === 'forward') player.nudge(SEEK_STEP_SECONDS);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [activeTab, mediaKind]);
 
   // The Virtual Participant that joined this meeting, if one did: for the
   // platform in the header and, once its browser can be watched, the live view.
@@ -2221,6 +2642,22 @@ export const CallPanel = ({
       )}
       <CallTranscriptContainer
         item={item}
+        player={
+          media ? (
+            <MeetingPlayer
+              controllerRef={playerRef}
+              kind={media.kind}
+              url={media.url}
+              clock={clock}
+              chapters={chapters}
+              store={playback}
+              alternative={media.alternative}
+              onSwitch={switchMedia}
+            />
+          ) : null
+        }
+        playback={media ? playback : null}
+        onSeek={media ? playFromTranscript : null}
         setToolsOpen={setToolsOpen}
         callTranscriptPerCallId={callTranscriptPerCallId}
         translateClient={translateClient}
@@ -2245,7 +2682,7 @@ export const CallPanel = ({
         item={item}
         durationMillis={durationMillis}
         platform={platform}
-        videoSeekRequest={videoSeekRequest}
+        onPlay={canPlayRecording ? playOnTranscriptTab : undefined}
       />
       <SpeakerIdentitiesPanel
         item={item}
@@ -2286,43 +2723,45 @@ export const CallPanel = ({
   ];
 
   return (
-    <SpaceBetween size="m">
-      <MeetingHeader
-        item={displayItem}
-        durationMillis={durationMillis}
-        platform={platform}
-        speakers={speakers}
-        cost={cost}
-        consent={meetingConsent.consent}
-        callTranscriptPerCallId={callTranscriptPerCallId}
-        getCallDetailsFromCallIds={getCallDetailsFromCallIds}
-        setToolsOpen={setToolsOpen}
-        onShowSpeakers={speakerNamesReadOnly ? undefined : () => setActiveTab(TAB_DETAILS)}
-      />
-      <Tabs
-        tabs={tabs}
-        activeTabId={activeTab}
-        onChange={({ detail }) => setActiveTab(detail.activeTabId)}
-        ariaLabel="Meeting"
-      />
-      {timelineNode &&
-        createPortal(
-          <VideoTimeline
-            key={item.callId}
-            callId={item.callId}
-            title={item.callId}
-            isLive={isLive}
-            canPlayRecording={canPlayRecording}
-            onShowInTranscript={showInTranscript}
-            onPlayFrom={playRecordingFrom}
-            chapters={chapters}
-            onClockOffset={setClockOffset}
-            onFramesChange={onFramesChange}
-            selectRequest={frameSelectRequest}
-          />,
-          timelineNode,
-        )}
-    </SpaceBetween>
+    <div ref={panelRef}>
+      <SpaceBetween size="m">
+        <MeetingHeader
+          item={displayItem}
+          durationMillis={durationMillis}
+          platform={platform}
+          speakers={speakers}
+          cost={cost}
+          consent={meetingConsent.consent}
+          callTranscriptPerCallId={callTranscriptPerCallId}
+          getCallDetailsFromCallIds={getCallDetailsFromCallIds}
+          setToolsOpen={setToolsOpen}
+          onShowSpeakers={speakerNamesReadOnly ? undefined : () => setActiveTab(TAB_DETAILS)}
+        />
+        <Tabs
+          tabs={tabs}
+          activeTabId={activeTab}
+          onChange={({ detail }) => setActiveTab(detail.activeTabId)}
+          ariaLabel="Meeting"
+        />
+        {timelineNode &&
+          createPortal(
+            <VideoTimeline
+              key={item.callId}
+              callId={item.callId}
+              title={item.callId}
+              isLive={isLive}
+              canPlayRecording={canPlayRecording}
+              onShowInTranscript={showInTranscript}
+              onPlayFrom={playRecordingFrom}
+              chapters={chapters}
+              onClockAnchors={onClockAnchors}
+              onFramesChange={onFramesChange}
+              selectRequest={frameSelectRequest}
+            />,
+            timelineNode,
+          )}
+      </SpaceBetween>
+    </div>
   );
 };
 

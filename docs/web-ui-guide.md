@@ -153,7 +153,8 @@ The meeting list and the MCP tools still read the stored value.
   of the summary still include every section. See
   [Transcript Summarization](transcript-summarization.md).
 - **Chapters** — the meeting's chapters; selecting one opens the **Transcript**
-  tab at its time and, after the meeting, moves the video recording there. See
+  tab at its time and, after the meeting, plays the recording from there in the
+  [player](#the-recording-player). See
   [Meeting Video and Key Frames](meeting-video.md#chapters).
 - **Agenda** — the meeting's agenda, who last changed it, and its coverage. A
   meeting without an agenda shows one line with **Derive agenda** and **Add
@@ -168,13 +169,111 @@ The tab a meeting opens on. Real-time transcription displayed with:
   voice (see [Naming the voices](transcription-and-translation.md#naming-the-voices))
 - Sentiment indicators per segment
 - Color-coded entries by channel for easy visual distinction between speakers
-- **Auto-scroll**, on while the meeting runs, keeps the newest segment in view;
-  scrolling up pauses it, and **Resume** returns to the newest segment
+- **Auto-scroll**: while the meeting runs it keeps the newest segment in view;
+  after the meeting, with a recording, it keeps the segment being played in
+  view. Scrolling away pauses it, and **Resume** returns to the newest segment
+  or to the one being played
 - **Translate**, with the language chosen beside it; see
   [Live Translation](#live-translation)
+- **Search the transcript** and the speaker filter; see
+  [Searching and filtering](#searching-and-filtering)
 
 The transcript keeps its own scroll area, sized to the window, so following a
 live meeting keeps the newest segment in view while you can still scroll back.
+
+#### The recording player
+
+Once a meeting has ended and its recording has been stored, a player sits above
+the transcript. It plays the video recording when the meeting has one (the video
+file carries the meeting's audio as well) and otherwise the audio recording; a
+meeting with both has a **Video** / **Audio only** switch, which keeps the
+place. During a live meeting there is no player, because neither recording
+exists until the meeting ends. The player stays at the top of the window when
+the page is scrolled.
+
+- **Controls** — play/pause, the time, the seek bar, the speed (0.75x to 2x),
+  mute and, for video, full screen. Each has an accessible name, and the seek
+  bar is a slider that the keyboard moves.
+- **Chapters on the seek bar** — each of the meeting's
+  [chapters](meeting-video.md#chapters) is a mark on the seek bar, with its
+  title shown on hover or focus; selecting a mark plays from that chapter. The
+  chapter being played is named under the bar.
+- **The transcript follows the recording** — the segment being heard is
+  highlighted, and kept in view while **Auto-scroll** is on. Scrolling the
+  transcript while it plays stops it following (a notice says so, with
+  **Resume**); playing from a segment, a chapter or the seek bar follows again.
+- **Playing from a segment** — after the meeting, each segment's time is a link:
+  selecting it plays the recording from the start of that segment. Only the
+  time is a link, so the segment's text can still be selected and copied and its
+  speaker renamed.
+- **Keyboard** — with the Transcript tab open and the focus not in a text field,
+  **Space** plays or pauses and **Left** / **Right** move 5 seconds. Space is
+  left to a focused button or link, which it presses, and the arrows to a
+  focused slider.
+- **Only one thing plays** — opening another tab pauses the player. The
+  **Details** tab has no player of its own: its recordings have **Play**, which
+  opens this tab and plays, and **Open file**.
+
+From the other tabs, a time selected moves the player as well as the
+transcript:
+
+| Selected | Tab shown | Player |
+|---|---|---|
+| A chapter in the Overview's **Chapters** list | Transcript | plays from the chapter |
+| A thumbnail on **Screen share** | stays on Screen share | moves to the frame, paused |
+| **Show in transcript** on Screen share | Transcript | moves to the frame, paused |
+| **Play recording from here** on Screen share | Transcript | plays from the frame |
+| A slide link in the summary's **SLIDES PRESENTED** | Screen share, at the frame | moves to the frame, paused |
+
+The ones that only move the player are for looking at something rather than
+listening to it; the player is then ready at that point when the Transcript tab
+is opened.
+
+##### Lining the recording up with the transcript
+
+Transcript times are on the transcript's clock, which starts when transcription
+of the meeting starts; a recording has its own, from the start of its file. The
+player converts between them:
+
+| Source | Audio recording | Video recording |
+|---|---|---|
+| Virtual Participant | Starts with transcription: the same clock | Starts before the Virtual Participant is admitted, so it is ahead of the transcript by the time spent joining and in the lobby, and by more after each pause or reconnection (the video records through them; the transcript skips them). Lined up from the key frames, as below |
+| Stream Audio, the browser extension | Starts with transcription | None |
+| Desktop Capture App | Starts with transcription | Its file is built with the audio recording as its sound and the video placed against it, so it starts on the same clock |
+| Upload Audio | The uploaded file itself, which is what was transcribed | None |
+
+Each [key frame](meeting-video.md) records both its time in the transcript and
+its place in the video recording, so the player lines the video up using the key
+frame nearest before each time; this follows a Virtual Participant's video
+across its pauses as well. A video recording with no key frames is played as if
+it started with transcription, which, for a Virtual Participant, plays each
+point earlier in the meeting than the transcript line it was started from, by
+the time it took to join; **Audio only**
+plays the recording that lines up. A video stored without sound (when a
+Virtual Participant's audio was not ready as its recording started, or when the
+desktop app's video could not be combined with the audio) plays silently, and
+**Audio only** plays the sound. With more than a hundred key frames, only the
+ones loaded so far (the first hundred, more as the Screen share strip is
+scrolled) are used. Small differences are expected: the transcript's times can
+drift from the recording after Amazon Transcribe reconnects during a long
+meeting.
+
+#### Searching and filtering
+
+- **Search the transcript** marks every segment that holds all the words typed,
+  in any order, ignoring case and accents (the same rule as the search of the
+  shared screen's text), and highlights the words. The first match is shown at
+  once; **Enter** or **Next match** moves to the next, **Shift+Enter** or
+  **Previous match** to the previous, and the count shows which match is shown.
+  Moving between matches while the recording plays stops the transcript
+  following it, as scrolling does. Matches are
+  marked rather than the other segments hidden, so each is read with what was
+  said around it. The search reads the segments as transcribed, not their
+  translations.
+- **Speaker chips** — **All** and one chip for each speaker, by the names shown
+  in the transcript. Choosing speakers shows only their segments (and hides the
+  assistant's answers); choosing **All** shows everything again. The search
+  works within the speakers chosen.
 
 Beside it is the **Meeting Assist Bot** chat:
 - Real-time token streaming responses from the Strands agent
@@ -191,9 +290,10 @@ assistant. You can see and control what the VP sees in the meeting.
 Shown for a meeting whose shared screen was captured, with the number of key
 frames in its label. A strip of thumbnails of the shared screen: one for each
 slide, page or view, with the time it went up, growing while the meeting runs.
-Selecting one shows it large; **Show in transcript** opens the **Transcript** tab
-at that time, and after the meeting **Play recording from here** opens the
-**Details** tab and plays the video recording from there. **Find text on the
+Selecting one shows it large and moves the transcript and the
+[player](#the-recording-player) to that time; **Show in transcript** opens the
+**Transcript** tab there, and after the meeting **Play recording from here**
+opens it and plays the recording from there. **Find text on the
 shared screen** searches the slides' text and **Export slides (PDF)** prints them
 as a deck. See [Meeting Video and Key Frames](meeting-video.md#on-the-meeting-page).
 
@@ -201,8 +301,10 @@ as a deck. See [Meeting Video and Key Frames](meeting-video.md#on-the-meeting-pa
 
 - **Meeting attributes** — the full Meeting ID, status, duration, the start and
   last-update times in UTC (with your local time under each), platform, owner,
-  who the meeting is shared with, and the audio and video recording players
-  once the meeting has ended.
+  who the meeting is shared with, and, once the meeting has ended, its audio
+  and video recordings: **Play** opens the **Transcript** tab and plays it in the
+  [player](#the-recording-player), and **Open file** opens the file in a new
+  browser tab, to watch or save.
 - **Speakers** — name each voice once and the whole transcript updates; see
   [Naming the voices](transcription-and-translation.md#naming-the-voices).
 - **Consent** — for a meeting whose consent was started: its mode and status,

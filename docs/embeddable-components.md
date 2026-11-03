@@ -170,7 +170,7 @@ Show the VNC live view and transcript for a virtual participant session:
 | `transcript` | Live meeting transcript only | `callId` |
 | `summary` | Meeting summary only | `callId` |
 | `chat` | Meeting Assist Bot chat only | `callId` |
-| `vp-details` | Virtual participant details with selectable panels | `vpId`, `show`, `layout` |
+| `vp-details` | Virtual participant details with selectable panels. Any of `transcript`, `summary` or `chat` in `show` renders the full meeting panel once the Virtual Participant has a meeting: the header and the tabs (Overview, Transcript, Screen share, Details), with the recording's player on the Transcript tab after the meeting. The selected tab is held in the embed and not written to the embedding page's URL | `vpId`, `show`, `layout` |
 | `vnc` | VNC live view of virtual participant only | `vpId` |
 | `meeting-loader` | Blank meeting starter page (for programmatic control) | `meetingTopic`, `participants`, `owner`, `autoStart` |
 | `vp-loader` | Programmatic Virtual Participant creator (accepts `LMA_CREATE_VP` postMessage) | `meetingName`, `meetingPlatform`, `meetingId`, `meetingPassword`, `autoStart` |
@@ -701,6 +701,10 @@ Use the `show` parameter to control which panels appear:
 |-----------|-----------------|
 | `call-details` | `transcript`, `summary`, `chat` |
 | `vp-details` | `vnc`, `transcript`, `summary`, `chat`, `details` |
+
+In `vp-details`, `transcript`, `summary` and `chat` are not separate panels: any
+of them shows the whole meeting panel (header and tabs), beside or under the
+`vnc` and `details` panels.
 
 > **Note**: For single-purpose components (`transcript`, `summary`, `chat`, `vnc`), the `show` parameter is automatically set. You only need `show` when using `call-details` or `vp-details` and want to customize which panels appear.
 

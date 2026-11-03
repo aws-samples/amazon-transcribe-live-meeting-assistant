@@ -14,8 +14,8 @@
  * handful of queries the page makes, and the contexts supply a signed-in user.
  */
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 
 const responses = vi.hoisted(() => ({ frames: [], cost: null, vps: [] }));
@@ -54,6 +54,8 @@ vi.mock('../common/generate-s3-presigned-url', () => ({
 import { CallPanel } from './CallPanel';
 // eslint-disable-next-line import/first
 import { DONE_STATUS, IN_PROGRESS_STATUS } from '../common/get-recording-status';
+// eslint-disable-next-line import/first
+import { installMediaElementStub, loadMedia } from '../meeting-player/media-element-stub';
 
 /* eslint-disable react/prop-types */
 
@@ -108,12 +110,12 @@ const LocationProbe = () => {
   return <div data-testid="location">{`${location.pathname}${location.search}`}</div>;
 };
 
-const renderPage = ({ item = ITEM, url = '/calls/m', tabInUrl = true } = {}) =>
+const renderPage = ({ item = ITEM, url = '/calls/m', tabInUrl = true, transcript = TRANSCRIPT } = {}) =>
   render(
     <MemoryRouter initialEntries={[url]}>
       <CallPanel
         item={item}
-        callTranscriptPerCallId={TRANSCRIPT}
+        callTranscriptPerCallId={transcript}
         setToolsOpen={vi.fn()}
         getCallDetailsFromCallIds={vi.fn()}
         tabInUrl={tabInUrl}
@@ -123,6 +125,8 @@ const renderPage = ({ item = ITEM, url = '/calls/m', tabInUrl = true } = {}) =>
   );
 
 const selectedTab = () => screen.getAllByRole('tab').find((tab) => tab.getAttribute('aria-selected') === 'true');
+
+beforeAll(installMediaElementStub);
 
 beforeEach(() => {
   // jsdom lays nothing out and has no scrolling.
@@ -245,5 +249,192 @@ describe('the Overview tab', () => {
     expect(screen.queryByText('CHAPTERS')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Budget review' }));
     expect(selectedTab().textContent).toBe('Transcript');
+  });
+});
+
+describe('the player kept in step with the transcript', () => {
+  const RECORDED = {
+    ...ITEM,
+    recordingUrl: 'https://bucket.s3.us-east-1.amazonaws.com/lma-audio-recordings/m.wav',
+    videoRecordingUrl: 'https://bucket.s3.us-east-1.amazonaws.com/lma-video-recordings/m.mp4',
+  };
+  const line = (id, channel, speaker, transcript, startTime, endTime) => ({
+    segmentId: id,
+    createdAt: `2026-11-03T14:05:${String(startTime % 60).padStart(2, '0')}.000Z`,
+    channel,
+    speaker,
+    transcript,
+    startTime,
+    endTime,
+    isPartial: false,
+  });
+  const LINES = {
+    [ITEM.callId]: {
+      REMOTE: {
+        segments: [
+          line('s1', 'REMOTE', 'Sarah Lee', 'Welcome to the budget review.', 0, 8),
+          line('s3', 'REMOTE', 'Sarah Lee', 'The budget is four percent under plan.', 330, 340),
+        ],
+      },
+      LOCAL: { segments: [line('s2', 'LOCAL', 'Bob Chen', 'Thanks, Sarah.', 20, 24)] },
+    },
+  };
+  const keyframe = (seconds, videoOffset) => ({ ...frame(seconds * 1000), VideoOffset: videoOffset });
+
+  const media = () =>
+    document.querySelector('[data-testid="meeting-player"] video, [data-testid="meeting-player"] audio');
+  const openRecording = async ({ item = RECORDED, ...options } = {}) => {
+    const view = renderPage({ item, transcript: LINES, ...options });
+    await waitFor(() => expect(media()?.getAttribute('src')).toBe('https://signed.example/x'));
+    loadMedia(media(), 1200);
+    return view;
+  };
+  // By the row's whole text: a search's marks split it into pieces.
+  const rowOf = (text) => [...document.querySelectorAll('[data-row-id]')].find((row) => row.textContent.includes(text));
+
+  it('is not shown while the meeting is live, and the times are not links', () => {
+    renderPage({
+      item: { ...RECORDED, recordingStatusLabel: IN_PROGRESS_STATUS, recordingStatusIcon: 'in-progress' },
+      transcript: LINES,
+    });
+    expect(screen.queryByTestId('meeting-player')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Play from/ })).toBeNull();
+  });
+
+  it('plays the video on the Transcript tab, and the Details tab has no player of its own', async () => {
+    await openRecording();
+    expect(media().tagName).toBe('VIDEO');
+    expect(media().closest('[role="tabpanel"]')).toBe(screen.getByText('Thanks, Sarah.').closest('[role="tabpanel"]'));
+    expect(document.querySelectorAll('video, audio')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('tab', { name: 'Details' }));
+    expect(screen.getByRole('button', { name: 'Play the video recording' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open the audio recording file in a new tab' })).toBeTruthy();
+  });
+
+  it('plays the audio when that is the only recording', async () => {
+    await openRecording({ item: { ...RECORDED, videoRecordingUrl: '' } });
+    expect(media().tagName).toBe('AUDIO');
+  });
+
+  it("plays from a line's time when it is clicked, and highlights the line", async () => {
+    await openRecording();
+    fireEvent.click(screen.getByRole('button', { name: 'Play from 00:20.0' }));
+    expect(media().currentTime).toBe(20);
+    expect(media().paused).toBe(false);
+    expect(rowOf('Thanks, Sarah.').getAttribute('aria-current')).toBe('true');
+    expect(rowOf('Welcome to the budget review.').getAttribute('aria-current')).toBeNull();
+  });
+
+  it('moves the highlight with the recording, on the clock the key frames give', async () => {
+    // The video started 30 s before transcription, as a Virtual Participant's does.
+    responses.frames = [keyframe(300, 330)];
+    await openRecording();
+    await screen.findByRole('tab', { name: 'Screen share (1)' });
+    fireEvent.click(screen.getByRole('button', { name: 'Play from 05:30.0' }));
+    expect(media().currentTime).toBe(360);
+    act(() => {
+      media().currentTime = 52;
+      fireEvent(media(), new Event('timeupdate'));
+    });
+    expect(rowOf('Thanks, Sarah.').getAttribute('aria-current')).toBe('true');
+  });
+
+  it('marks the chapters on the seek bar', async () => {
+    await openRecording();
+    expect(screen.getAllByTestId('meeting-player-marker').map((m) => m.getAttribute('aria-label'))).toEqual([
+      'Chapter at 00:00: Welcome',
+      'Chapter at 05:12: Budget review',
+    ]);
+  });
+
+  it('opens the Transcript tab and plays from a chapter selected on the Overview', async () => {
+    await openRecording({ url: '/calls/m?tab=overview' });
+    fireEvent.click(screen.getByRole('button', { name: 'Budget review' }));
+    expect(selectedTab().textContent).toBe('Transcript');
+    expect(media().currentTime).toBe(312);
+    expect(media().paused).toBe(false);
+  });
+
+  it('moves the player to a frame selected on Screen share without playing, and plays from it on request', async () => {
+    responses.frames = [keyframe(300, 330)];
+    await openRecording({ url: '/calls/m?tab=screen-share' });
+    fireEvent.click(await screen.findByTitle('Key frame at 5:00'));
+    expect(media().currentTime).toBe(330);
+    expect(media().paused).toBe(true);
+    expect(selectedTab().textContent).toBe('Screen share (1)');
+    fireEvent.click(screen.getByRole('button', { name: 'Play recording from here' }));
+    expect(selectedTab().textContent).toBe('Transcript');
+    expect(media().paused).toBe(false);
+  });
+
+  it('moves the player to a slide named in the summary', async () => {
+    responses.frames = [frame(30000)];
+    await openRecording({ url: '/calls/m?tab=overview' });
+    await screen.findByRole('tab', { name: 'Screen share (1)' });
+    fireEvent.click(screen.getByRole('button', { name: /Slide at 00:30/ }));
+    expect(selectedTab().textContent).toBe('Screen share (1)');
+    expect(media().currentTime).toBe(30);
+    expect(media().paused).toBe(true);
+  });
+
+  it('pauses when another tab is opened', async () => {
+    await openRecording();
+    fireEvent.click(screen.getByRole('button', { name: 'Play from 00:20.0' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    expect(media().paused).toBe(true);
+  });
+
+  it('plays and pauses on Space and moves 5 seconds on the arrows, but not while typing', async () => {
+    await openRecording();
+    fireEvent.keyDown(document.body, { key: ' ', code: 'Space' });
+    expect(media().paused).toBe(false);
+    fireEvent.keyDown(document.body, { key: ' ', code: 'Space' });
+    expect(media().paused).toBe(true);
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+    expect(media().currentTime).toBe(10);
+    fireEvent.keyDown(document.body, { key: 'ArrowLeft' });
+    expect(media().currentTime).toBe(5);
+    const search = screen.getByRole('searchbox', { name: 'Search the transcript' });
+    fireEvent.keyDown(search, { key: ' ', code: 'Space' });
+    fireEvent.keyDown(search, { key: 'ArrowLeft' });
+    expect(media().paused).toBe(true);
+    expect(media().currentTime).toBe(5);
+  });
+
+  it('leaves the keys alone on another tab', async () => {
+    await openRecording({ url: '/calls/m?tab=details' });
+    fireEvent.keyDown(document.body, { key: ' ', code: 'Space' });
+    expect(media().paused).toBe(true);
+  });
+
+  it('marks the lines holding a search and steps through them', async () => {
+    await openRecording();
+    const search = screen.getByRole('searchbox', { name: 'Search the transcript' });
+    fireEvent.change(search, { target: { value: 'budget' } });
+    expect(screen.getByTestId('transcript-search-count').textContent).toBe('1 of 2');
+    expect([...document.querySelectorAll('mark.transcript-search-match')].map((m) => m.textContent)).toEqual([
+      'budget',
+      'budget',
+    ]);
+    expect(rowOf('Thanks, Sarah.').className).not.toContain('transcript-row-match');
+    expect(rowOf('Welcome to the budget review.').className).toContain('transcript-row-match-active');
+    fireEvent.click(screen.getByRole('button', { name: 'Next match' }));
+    expect(screen.getByTestId('transcript-search-count').textContent).toBe('2 of 2');
+    expect(rowOf('The budget is four percent under plan.').className).toContain('transcript-row-match-active');
+    fireEvent.click(screen.getByRole('button', { name: 'Next match' }));
+    expect(screen.getByTestId('transcript-search-count').textContent).toBe('1 of 2');
+    fireEvent.change(search, { target: { value: 'nothing like it' } });
+    expect(screen.getByTestId('transcript-search-count').textContent).toBe('No matches');
+  });
+
+  it('shows only the speakers chosen', async () => {
+    await openRecording();
+    const filter = screen.getByRole('group', { name: 'Show speakers' });
+    fireEvent.click(within(filter).getByRole('button', { name: 'Bob Chen' }));
+    expect(screen.queryByText('Welcome to the budget review.')).toBeNull();
+    expect(screen.getByText('Thanks, Sarah.')).toBeTruthy();
+    fireEvent.click(within(filter).getByRole('button', { name: 'All speakers' }));
+    expect(screen.getByText('Welcome to the budget review.')).toBeTruthy();
   });
 });

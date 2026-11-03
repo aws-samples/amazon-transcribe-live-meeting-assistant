@@ -48,3 +48,92 @@
     box-shadow: inset 3px 0 0 transparent;
   }
 }
+
+/* The transcript column: the player above the transcript (meeting-player/). */
+.transcript-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Search and the speaker filter, above the transcript's lines. */
+.transcript-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e9ebed;
+}
+
+.transcript-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 280px;
+}
+
+.transcript-search-count {
+  font-size: 12px;
+  color: #5f6b7a;
+  white-space: nowrap;
+  min-width: 5em;
+}
+
+.transcript-speaker-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Shown when the transcript has stopped following the live end or the recording. */
+.transcript-scroll-frame {
+  position: relative;
+}
+
+.transcript-follow-paused {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: #ffeaa7;
+  padding: 5px 10px;
+  text-align: center;
+  font-size: 12px;
+  z-index: 1000;
+  border-radius: 4px;
+  border: 1px solid #fdcb6e;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+
+/* The line being heard while the recording plays. */
+.transcript-row-current {
+  background-color: #f2f8fd;
+  box-shadow: inset 3px 0 0 #0972d3;
+}
+
+/* A line holding the search, and the one moved to. */
+.transcript-row-match {
+  box-shadow: inset 3px 0 0 #f2cd54;
+}
+
+.transcript-row-match-active {
+  background-color: #fffbeb;
+  box-shadow: inset 3px 0 0 #b78c00;
+}
+
+.transcript-row-current.transcript-row-match {
+  box-shadow: inset 3px 0 0 #0972d3;
+}
+
+mark.transcript-search-match {
+  background-color: #fff3b0;
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+}
+
+.transcript-row-match-active mark.transcript-search-match {
+  background-color: #ffd75e;
+}
