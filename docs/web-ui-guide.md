@@ -149,8 +149,9 @@ The meeting list and the MCP tools still read the stored value.
 ### Overview tab
 
 - **Meeting Summary** — the summary from the configured prompt templates, with
-  **Regenerate**, **Edit** and the summary's own download menu. The slides
-  named in its **SLIDES PRESENTED** section are links rather than pictures:
+  **Regenerate**, **Edit** and the summary's own download menu. The key
+  frames named in its **SCREEN SHARE SUMMARY** section (**SLIDES PRESENTED** in
+  a summary written by a 0.4.0 pre-release) are links rather than pictures:
   selecting one opens the **Screen share** tab at that frame. The **CHAPTERS**
   section is shown once, as the **Chapters** list beside the summary, and the
   **AGENDA COVERAGE** section under the agenda it describes. Downloads and copies

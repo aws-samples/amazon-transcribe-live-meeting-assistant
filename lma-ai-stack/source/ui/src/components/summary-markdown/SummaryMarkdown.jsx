@@ -7,8 +7,11 @@
 /**
  * The meeting summary as markdown, with its pictures of the shared screen.
  *
- * The "Slides presented" section refers to each key frame as
- * `![Slide at 12:30](keyframe:<FrameId>)`. That reference is not a link anyone
+ * The screen share summary section (SCREEN SHARE SUMMARY, or SLIDES PRESENTED
+ * in a summary written before it was renamed) refers to each key frame as
+ * `![Slide at 12:30](keyframe:<FrameId>)`; nothing here depends on the section's
+ * title, so a picture in any section, or a summary of either age, is shown the
+ * same way. That reference is not a link anyone
  * can fetch: it is resolved here, for this meeting only, through
  * getVideoKeyframes -- the same access check as the meeting page's strip -- and
  * shown as the frame's thumbnail, which opens the full-size image. Every frame
@@ -23,9 +26,10 @@
  * gone), so that a summary of a long presentation is not a column of slides.
  * Neither reads any frame.
  *
- * Everything else renders as every other summary surface does: the shared
- * rehype chain, with the one addition that an image's src may use the
- * `keyframe:` scheme.
+ * Everything else renders as every other summary surface does, through the
+ * shared rehype chain, with one difference: the only picture a summary shows is
+ * a `keyframe:` one. Any other image, in any section, is shown as its alt text,
+ * so a summary never makes the browser fetch from an address its text names.
  */
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import PropTypes from 'prop-types';
@@ -61,18 +65,25 @@ export const frameIdsIn = (markdown) =>
  */
 const SummaryFrames = createContext(null);
 
-/** The shared chain's schema, allowing `keyframe:` as an image source and nowhere else. */
+/**
+ * The shared chain's schema, with `keyframe:` as the only image source. A
+ * source with no scheme at all passes a protocol check, so SummaryImage and
+ * summaryUrlTransform refuse it as well; <picture> and <source> are left out
+ * because a srcset is not checked for a protocol.
+ */
 export const summarySchema = {
   ...defaultSchema,
-  protocols: { ...defaultSchema.protocols, src: [...(defaultSchema.protocols?.src || []), 'keyframe'] },
+  tagNames: (defaultSchema.tagNames || []).filter((name) => name !== 'picture' && name !== 'source'),
+  protocols: { ...defaultSchema.protocols, src: ['keyframe'] },
 };
 
 export const summaryRehypePlugins = [rehypeRaw, [rehypeSanitize, summarySchema]];
 
-/** Keeps a `keyframe:` image source as it is; every other URL is treated as react-markdown treats it. */
+/** Keeps a `keyframe:` image source as it is and drops every other one; other URLs as react-markdown treats them. */
 export const summaryUrlTransform = (url, key, node) => {
-  if (key === 'src' && node?.tagName === 'img' && typeof url === 'string' && url.startsWith(KEYFRAME_SCHEME)) {
-    return FRAME_ID.test(url.slice(KEYFRAME_SCHEME.length)) ? url : '';
+  if (key === 'src' && node?.tagName === 'img') {
+    const isFrame = typeof url === 'string' && url.startsWith(KEYFRAME_SCHEME);
+    return isFrame && FRAME_ID.test(url.slice(KEYFRAME_SCHEME.length)) ? url : '';
   }
   return defaultUrlTransform(url);
 };
@@ -157,7 +168,7 @@ const componentsFor = (callId, loadFrame, keyframes, onKeyframeSelect) => {
   // the element's attributes.
   /* eslint-disable react/prop-types */
   // eslint-disable-next-line no-unused-vars
-  const SummaryImage = ({ node, src, alt, ...rest }) => {
+  const SummaryImage = ({ node, src, alt }) => {
     if (typeof src === 'string' && src.startsWith(KEYFRAME_SCHEME)) {
       const frameId = src.slice(KEYFRAME_SCHEME.length);
       if (!callId || !FRAME_ID.test(frameId) || keyframes === 'text') {
@@ -179,8 +190,8 @@ const componentsFor = (callId, loadFrame, keyframes, onKeyframeSelect) => {
       }
       return <KeyframeImage callId={callId} frameId={frameId} alt={alt} loadFrame={loadFrame} />;
     }
-    // eslint-disable-next-line jsx-a11y/alt-text, react/jsx-props-no-spreading
-    return <img src={src} alt={alt} {...rest} />;
+    // Not a frame of this meeting: never fetched, whatever its address.
+    return alt ? <span>{alt}</span> : null;
   };
   /* eslint-enable react/prop-types */
   return { img: SummaryImage };

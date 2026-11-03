@@ -33,9 +33,9 @@ get_summary = _load()
 
 
 def test_key_frame_pictures_become_their_alt_text():
-    text = '{"SLIDES PRESENTED": "**[00:30] Budget**\\n\\n![Slide at 00:30](keyframe:0000030000-ab12cd)"}'
+    text = '{"SCREEN SHARE SUMMARY": "**[00:30] Budget**\\n\\n![Slide at 00:30](keyframe:0000030000-ab12cd)"}'
     assert get_summary.keyframe_images_as_text(text) == (
-        '{"SLIDES PRESENTED": "**[00:30] Budget**\\n\\n(Slide at 00:30)"}'
+        '{"SCREEN SHARE SUMMARY": "**[00:30] Budget**\\n\\n(Slide at 00:30)"}'
     )
 
 

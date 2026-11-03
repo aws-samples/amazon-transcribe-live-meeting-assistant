@@ -212,7 +212,7 @@ def attach_said(frames, segments, condense, include_speaker, metadata):
     A frame is on screen from its Timestamp until the next frame's, and the last
     one until the end of the meeting; a segment belongs to the frame on screen
     when it began. The lines are formatted as the transcript is, speaker names
-    included, so the summary's "Slides presented" section can say what was
+    included, so the summary's screen share section can say what was
     said about each slide (docs/meeting-video.md).
     """
     starts = [frame["Timestamp"] for frame in frames]

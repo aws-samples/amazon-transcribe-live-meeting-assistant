@@ -5,7 +5,7 @@
  */
 import { consentAsText } from './meeting-consent';
 
-// A picture of a key frame in a summary (the "Slides presented" section), which
+// A picture of a key frame in a summary (the screen share summary section), which
 // the meeting page shows as the frame itself; see SummaryMarkdown.jsx.
 const KEYFRAME_IMAGE = /!\[([^\]\n]*)\]\(keyframe:[A-Za-z0-9_-]{1,64}\)/g;
 

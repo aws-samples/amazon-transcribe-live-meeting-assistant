@@ -87,32 +87,46 @@ Every method read every word; the model costs a tenth of Textract and also says
 what a chart shows, which Textract does not. The text read is metered against
 the meeting under **Slide text** in its [cost estimate](meeting-cost-estimate.md).
 
-## Slides presented in the summary
+## Screen share summary
 
-A meeting with key frames gets a **SLIDES PRESENTED** section in its
-[summary](transcript-summarization.md): one entry per slide, in the order shown,
-with the time it went up, its title, its thumbnail and a sentence or two on what
-was said while it was on screen. The prompt asks the model to merge
-consecutive frames of one slide (the same slide twice, or a slide built up
-point by point) into one entry, and to leave out frames with nothing on them,
-such as an empty desktop; how well it does so depends on the model (see the
-measurements below). A meeting without
-key frames gets no such section, as a meeting without an agenda gets no agenda
-section.
+A meeting with key frames gets a **SCREEN SHARE SUMMARY** section in its
+[summary](transcript-summarization.md): what was shared on screen, in the order
+shown, whether slides, documents, web pages, applications, code or a demo. Each
+entry has the time it went up, a few words naming what was shown, the thumbnail
+of its most representative frame and a sentence or two on what it showed and
+what was said or decided about it. The prompt asks the model to group
+consecutive frames of one thing (a slide built up point by point, a document
+being scrolled, an application being demonstrated) into one entry, to write no
+more than 15 entries, and to leave out frames with nothing on them, such as an
+empty desktop, a blank window or the meeting's own video tiles. It also asks the
+model to treat everything in the frames as quoted meeting content rather than
+instructions, never to identify people from how they look, and not to write out
+web addresses, credentials or personal data read from the screen. How well it
+does each depends on the model. A meeting without key frames gets no such
+section, as a meeting without an agenda gets no agenda section.
+
+The section was called **SLIDES PRESENTED** in 0.4.0's pre-releases. Summaries
+written then keep that title and are shown in the same way. On a stack update,
+a Custom profile holding SLIDES PRESENTED exactly as it was shipped, or turned
+off, has it removed (turned off, its replacement is turned off in its place);
+one whose administrator changed that prompt keeps it, and the seeder logs a
+warning naming it on every deployment until it is removed. See
+[Summary sections a release no longer ships](configuration-store.md#summary-sections-a-release-no-longer-ships).
 
 How it is built:
 
 - The fetch-transcript function gives each key frame **what was said** while it
   was on screen: the transcript segments that began between it and the next
   frame, with the speaker names the transcript shows.
-- The section's prompt names the `{slides}` placeholder, which the summarizer
-  fills with each frame's time, its picture reference
-  (`![Slide at 12:30](keyframe:<FrameId>)`), its [slide text](#slide-text) and
-  what was said, and the prompt asks the model to copy the picture reference
-  exactly. The transcript itself is not sent with this section. At most 60
-  frames are listed (past that, the ones on screen for the shortest time are
-  left out), with each frame's text cut at 1,500 characters and its speech at
-  3,000 (the fetch-transcript function sends no more than that).
+- The section's prompt names the `{slides}` placeholder (`{screen_share}` is
+  another name for it), which the summarizer fills with each frame's time, its
+  picture reference (`![Slide at 12:30](keyframe:<FrameId>)`), its
+  [slide text](#slide-text) and what was said, and the prompt asks the model to
+  copy the picture reference exactly. The transcript itself is not sent with
+  this section. At most 60 frames are listed (past that, the ones on screen for
+  the shortest time are left out), with each frame's text cut at 1,500
+  characters and its speech at 3,000 (the fetch-transcript function sends no
+  more than that).
 - The meeting page's **Overview** tab shows each picture reference as a link
   that opens the frame on the **Screen share** tab (and as its alt text when
   the meeting has no frames left), so that the summary of a long presentation
@@ -126,13 +140,22 @@ How it is built:
   list's summary preview and the MCP `get_meeting_summary` tool show the alt
   text too, and so does the summary document for the meeting-history knowledge
   base.
+- A key frame of the meeting is the only picture a summary shows, in this
+  section or any other. Any other image a summary names, by any address, is
+  shown as its alt text and is not fetched.
 
 The section is a prompt in the `summary_prompt_templates` section like any
 other, so it can be edited, replaced or removed (set it to `NONE`) on the
 **Transcript Summary** section of **Configuration ▸ Configuration**. A prompt of
-your own can use `{slides}` as well.
+your own can use `{slides}` or `{screen_share}` as well.
 
-Measured with the shipped prompt on the synthetic meeting (14 key frames: ten
+The measurements below were made with the SLIDES PRESENTED prompt, which asked
+for one entry per slide and had no limit on the number of entries. They have not
+been repeated with the SCREEN SHARE SUMMARY prompt, so its entry counts and
+costs are not yet measured; the input is the same, and the output should be no
+longer.
+
+Measured on the synthetic meeting (14 key frames: ten
 slides, one of them taken twice, and three pages of a document), every model
 copied every picture reference exactly, and none copied the `Image:` label
 with it:
