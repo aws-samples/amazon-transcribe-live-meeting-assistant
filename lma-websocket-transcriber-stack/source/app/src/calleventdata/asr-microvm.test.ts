@@ -169,7 +169,7 @@ test('a partial and its final land on one transcript row', async () => {
     assert.equal(rows[0].Transcript, 'hello');
     assert.equal(rows[1].IsPartial, false);
     assert.equal(rows[1].Transcript, 'Hello there.');
-    assert.equal(rows[1].Channel, 'AGENT');
+    assert.equal(rows[1].Channel, 'LOCAL');
     assert.equal(rows[1].StartTime, 0.5);
     assert.equal(rows[1].EndTime, 2.25);
     // The channel's name plus the engine's voice id.
@@ -209,7 +209,7 @@ test('a second voice on a channel gets its own suffix', async () => {
         rows.map((row) => row.SegmentId),
         ['ch_0-g0-s0', 'ch_0-g0-s1', 'ch_0-g0-s2']
     );
-    assert.equal(rows[0].Channel, 'CALLER');
+    assert.equal(rows[0].Channel, 'REMOTE');
 });
 
 test('a reconnect keeps segment ids unique and the timeline monotonic', async () => {

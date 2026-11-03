@@ -54,7 +54,7 @@ CALL_ID = "meeting-1"
 OWNER = "owner@example.com"
 
 
-def segment(speaker, start, text, channel="CALLER", segment_id=None):
+def segment(speaker, start, text, channel="REMOTE", segment_id=None):
     return {
         "PK": {"S": f"trs#{CALL_ID}"},
         "SK": {"S": f"{start}#{channel}"},
@@ -150,7 +150,7 @@ def run(monkeypatch, segments, name, *, meeting=None, basis="self-introduction",
     return result, written, model
 
 
-SPK0 = "CALLER#Other Participant (spk_0)"
+SPK0 = "REMOTE#Other Participant (spk_0)"
 
 
 # --------------------------------------------------------------------------
@@ -215,7 +215,7 @@ def test_the_name_reaches_the_llm_facing_transcript(
     _, written, _ = run(monkeypatch, segments, name)
     stored = written[-1]
     resolved = pure.parse_identities(json.dumps(stored))
-    row = {"Channel": "CALLER", "Speaker": "Other Participant (spk_0)", "SegmentId": "s0"}
+    row = {"Channel": "REMOTE", "Speaker": "Other Participant (spk_0)", "SegmentId": "s0"}
     target = pure.resolve_merge_target(
         pure.speaker_key(row["Channel"], row["Speaker"]), resolved["merges"]
     )
@@ -383,8 +383,8 @@ def test_being_addressed_by_name_still_produces_a_suggestion(
     assert written[-1]["identities"][SPK0]["status"] == "proposed"
 
 
-SPK1 = "CALLER#Other Participant (spk_1)"
-AGENT0 = "AGENT#Me (spk_0)"
+SPK1 = "REMOTE#Other Participant (spk_1)"
+LOCAL0 = "LOCAL#Me (spk_0)"
 
 
 def test_a_two_speaker_conference_room_names_both_people(
@@ -437,10 +437,10 @@ def test_a_voice_on_the_microphone_channel_is_named(
 ) -> None:
     """Every other test here is on the meeting-audio channel, so half of the
     nameable channels was untested."""
-    segments = [segment("Me (spk_0)", 0, "Hi, I'm Sarah Lee", channel="AGENT")]
+    segments = [segment("Me (spk_0)", 0, "Hi, I'm Sarah Lee", channel="LOCAL")]
     result, written, _ = run(monkeypatch, segments, "Sarah Lee")
     assert result["NamesApplied"] == 1
-    assert written[-1]["identities"][AGENT0]["name"] == "Sarah Lee"
+    assert written[-1]["identities"][LOCAL0]["name"] == "Sarah Lee"
 
 
 def test_a_stereo_meeting_names_a_voice_on_each_channel(
@@ -448,7 +448,7 @@ def test_a_stereo_meeting_names_a_voice_on_each_channel(
 ) -> None:
     segments = [
         segment("Other Participant (spk_0)", 0, "Hi, I'm Sarah Lee", segment_id="a"),
-        segment("Me (spk_0)", 10, "And I'm Priya Raman", channel="AGENT", segment_id="b"),
+        segment("Me (spk_0)", 10, "And I'm Priya Raman", channel="LOCAL", segment_id="b"),
     ]
     result, _, _ = run(monkeypatch, segments, ["Sarah Lee", "Priya Raman"])
     assert result["NamesApplied"] == 2

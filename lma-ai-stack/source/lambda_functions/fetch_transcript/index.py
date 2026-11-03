@@ -13,6 +13,14 @@ import boto3
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
+# The channel names and their older spellings (configuration layer).
+from lma_channels import (  # pylint: disable=import-error
+    REMOTE,
+    STORED_SPEECH_CHANNELS,
+    canonical_channel,
+    canonical_keyed,
+)
+
 # grab environment variables
 LCA_CALL_EVENTS_TABLE = os.environ["LCA_CALL_EVENTS_TABLE"]
 
@@ -68,7 +76,9 @@ def get_transcripts(callid):
     while pages < MAX_TRANSCRIPT_PAGES:
         query_args = {
             "KeyConditionExpression": Key("PK").eq(pk),
-            "FilterExpression": (Attr("Channel").eq("AGENT") | Attr("Channel").eq("CALLER"))
+            # Both spellings of the two speech channels: a meeting recorded
+            # before 0.4.0 stores CALLER and AGENT.
+            "FilterExpression": Attr("Channel").is_in(list(STORED_SPEECH_CHANNELS))
             & Attr("IsPartial").eq(False),
         }
         if start_key:
@@ -257,10 +267,14 @@ def parse_speaker_identities(raw):
         return empty
     if not isinstance(parsed, dict):
         return empty
-    return {
+    out = {
         key: parsed[key] if isinstance(parsed.get(key), dict) else {}
         for key in ("identities", "merges", "segmentOverrides")
     }
+    # A map written before 0.4.0 keys its voices under the older channel names.
+    out["identities"] = canonical_keyed(out["identities"])
+    out["merges"] = canonical_keyed(out["merges"], values_are_keys=True)
+    return out
 
 
 def speaker_key(channel, speaker):
@@ -269,7 +283,7 @@ def speaker_key(channel, speaker):
     Voice ids are numbered per channel and restart at spk_0, so including the
     stored base name is what keeps 'Alice (spk_0)' and 'Bob (spk_0)' apart.
     """
-    return f"{channel or ''}#{(speaker or '').strip()}"
+    return f"{canonical_channel(channel) or ''}#{(speaker or '').strip()}"
 
 
 def resolve_merge_target(key, merges):
@@ -294,7 +308,7 @@ def resolve_speaker_name(row, identities, fallback_name):
         return override
 
     stored = row.get("Speaker") or ""
-    channel = row.get("Channel")
+    channel = canonical_channel(row.get("Channel"))
     target = resolve_merge_target(speaker_key(channel, stored), identities["merges"])
     entry = identities["identities"].get(target)
     if isinstance(entry, dict) and entry.get("name"):
@@ -304,16 +318,16 @@ def resolve_speaker_name(row, identities, fallback_name):
     # so dropping it would read as one person in every summary.
     base, suffix = split_diarization_label(stored)
     # The participant name from the Stream Audio form is the REMOTE side's name,
-    # so it substitutes only on the caller channel; applying it to the local
+    # so it substitutes only on the REMOTE channel; applying it to the local
     # microphone channel would label that channel with the wrong person.
-    if base == DEFAULT_OTHER_SPEAKER_NAME and channel == "CALLER" and fallback_name:
+    if base == DEFAULT_OTHER_SPEAKER_NAME and channel == REMOTE and fallback_name:
         return f"{fallback_name}{suffix}"
     # A segment with no recorded speaker stays unlabelled, which is this
     # function's long-standing contract: better an unattributed line than an
     # invented one.
     #
     # This is the one place the UI resolver deliberately differs. There, an empty
-    # stored speaker takes the same branch as the placeholder, so a caller-channel
+    # stored speaker takes the same branch as the placeholder, so a REMOTE-channel
     # segment renders under the Stream Audio participant name (and otherwise under
     # the generic placeholder) -- a transcript row has to put something in its
     # speaker column, whereas a prompt line reads better with no attribution than

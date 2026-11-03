@@ -34,6 +34,8 @@ import {
     CHANNEL_SYSTEM
 } from './eventtypes';
 
+import { transcriptChannelFor } from './channels';
+
 import {
     DEFAULT_MAX_SEGMENT_SECONDS,
     DEFAULT_MIN_RUN_SECONDS,
@@ -1066,7 +1068,7 @@ export const writeTranscriptionSegment = async function (
                 await writeSegmentToKds(
                     {
                         SegmentId: segment.SegmentId,
-                        Channel: result.ChannelId === CHANNEL_SYSTEM ? 'CALLER' : 'AGENT',
+                        Channel: transcriptChannelFor(result.ChannelId),
                         StartTime: segment.StartTime,
                         EndTime: segment.EndTime,
                         Transcript: segment.Transcript,

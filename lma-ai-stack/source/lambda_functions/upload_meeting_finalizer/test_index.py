@@ -428,7 +428,7 @@ def test_a_segment_event_matches_what_the_live_transcriber_emits(h) -> None:
     assert first == {
         "EventType": "ADD_TRANSCRIPT_SEGMENT",
         "CallId": CALL_ID,
-        "Channel": "CALLER",
+        "Channel": "REMOTE",
         "SegmentId": "seg-00000",
         "StartTime": 0.0,
         "EndTime": 1.5,
@@ -608,8 +608,8 @@ def test_every_utterance_is_one_channel_when_diarization_was_not_requested(h) ->
     }
     h.run()
     assert [s["Channel"] for s in h.kinesis.of_type("ADD_TRANSCRIPT_SEGMENT")] == [
-        "CALLER",
-        "CALLER",
+        "REMOTE",
+        "REMOTE",
     ]
 
 
@@ -629,13 +629,13 @@ def test_the_first_diarized_speaker_is_the_caller_and_the_rest_are_the_agent(mon
     harness = Harness(monkeypatch, job_row(EnableDiarization=True), transcript)
     harness.run()
     segments = harness.kinesis.of_type("ADD_TRANSCRIPT_SEGMENT")
-    assert [s["Channel"] for s in segments] == ["CALLER", "AGENT", "AGENT"]
+    assert [s["Channel"] for s in segments] == ["REMOTE", "LOCAL", "LOCAL"]
     assert [s["Speaker"] for s in segments] == ["spk_0", "spk_1", "spk_3"]
 
 
 @pytest.mark.parametrize(
     ("label", "channel"),
-    [("spk_0", "CALLER"), ("ch_0", "CALLER"), ("spk_1", "AGENT"), ("spk_10", "AGENT")],
+    [("spk_0", "REMOTE"), ("ch_0", "REMOTE"), ("spk_1", "LOCAL"), ("spk_10", "LOCAL")],
 )
 def test_the_channel_mapping_is_by_exact_label(label, channel) -> None:
     """``spk_10`` starts with the same characters as ``spk_1`` and must not be
@@ -653,7 +653,7 @@ def test_an_unlabelled_diarized_segment_is_attributed_to_the_first_speaker(monke
     harness.run()
     segment = harness.kinesis.only("ADD_TRANSCRIPT_SEGMENT")
     assert segment["Speaker"] == "spk_0"
-    assert segment["Channel"] == "CALLER"
+    assert segment["Channel"] == "REMOTE"
 
 
 # ---------------------------------------------------------------------------
@@ -990,7 +990,7 @@ def test_a_row_written_by_stage_one_finalizes_end_to_end(monkeypatch) -> None:
     ]
     segments = harness.kinesis.of_type("ADD_TRANSCRIPT_SEGMENT")
     # EnableDiarization survived from Stage 1, so the second speaker is the agent.
-    assert [s["Channel"] for s in segments] == ["CALLER", "AGENT"]
+    assert [s["Channel"] for s in segments] == ["REMOTE", "LOCAL"]
     assert harness.s3.copies[0]["CopySource"] == {"Bucket": BUCKET, "Key": created["uploadKey"]}
     assert harness.s3.copies[0]["Key"] == f"lma-audio-recordings/{call_id}.mp4"
     # Owner, not the client-supplied agentId, attributes the finished meeting.

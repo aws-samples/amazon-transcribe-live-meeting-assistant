@@ -46,7 +46,7 @@ Your Lambda function receives an event with the following structure:
 ```json
 {
   "Transcript": "My personal identifier is ABCDEF.",
-  "Channel": "CALLER",
+  "Channel": "REMOTE",
   "TransactionId": "634b0a5d-...",
   "CallId": "888660e1-...",
   "SegmentId": "a71ca594-...",
@@ -58,6 +58,12 @@ Your Lambda function receives an event with the following structure:
   "ExpiresAfter": 1671313884
 }
 ```
+
+`Channel` is `REMOTE` for the meeting audio (everyone else in the meeting) and
+`LOCAL` for the local side: the user's microphone, or a Virtual Participant's
+voice assistant. LMA versions before 0.4.0 sent `CALLER` and `AGENT` instead,
+so a hook that compares `Channel` must be updated to the new names. If a hook
+returns a segment with `CALLER` or `AGENT`, LMA stores it as `REMOTE` or `LOCAL`.
 
 ### Return Value
 

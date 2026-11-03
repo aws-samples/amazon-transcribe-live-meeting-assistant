@@ -12,7 +12,7 @@
  * Complements src/calleventdata/diarization.test.ts, which unit-tests the pure
  * helpers offline. This script exercises the parts the unit tests cannot: the
  * turn splitting against labels Transcribe actually returned for real audio, the
- * ch_0 -> CALLER / ch_1 -> AGENT channel mapping, the interaction with the
+ * ch_0 -> REMOTE / ch_1 -> LOCAL channel mapping, the interaction with the
  * existing activeSpeaker/agentId base labels, and the [DIARIZATION] diagnostics.
  *
  * Transcribe is called ONCE with ShowSpeakerLabel on; the captured events are

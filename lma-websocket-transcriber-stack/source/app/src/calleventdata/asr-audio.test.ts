@@ -125,8 +125,8 @@ test('resampler handles a non-integer ratio and upsampling', () => {
 });
 
 test('channel identity maps to the existing transcript channels', () => {
-    assert.equal(channelToTranscriptChannel('ch_0'), 'CALLER');
-    assert.equal(channelToTranscriptChannel('ch_1'), 'AGENT');
+    assert.equal(channelToTranscriptChannel('ch_0'), 'REMOTE');
+    assert.equal(channelToTranscriptChannel('ch_1'), 'LOCAL');
 });
 
 test('the channel name carries a voice suffix once a speaker is identified', () => {

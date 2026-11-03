@@ -3,6 +3,7 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { canonicalSentiment } from './channels';
 import getRecordingStatus from './get-recording-status';
 import { getSentimentTrendLabel, getWeightedSentimentLabel } from './sentiment';
 
@@ -29,22 +30,25 @@ const mapCallsAttributes = (calls) => {
       RecordingUrl: recordingUrl,
       VideoRecordingUrl: videoRecordingUrl,
       TotalConversationDurationMillis: totalConversationDurationMillis = 0,
-      Sentiment: sentiment = {},
+      Sentiment: storedSentiment = {},
       Owner: owner,
       SharedWith: sharedWith,
       ListPK: listPK,
       ListSK: listSK,
     } = item;
     const recordingStatus = getRecordingStatus(item);
+    // Keyed REMOTE and LOCAL, also for a meeting stored before 0.4.0 under CALLER
+    // and AGENT. The caller*/agent* names below are the REMOTE and LOCAL values.
+    const sentiment = canonicalSentiment(storedSentiment);
 
-    const callerAverageSentiment = sentiment?.OverallSentiment?.CALLER || 0;
+    const callerAverageSentiment = sentiment?.OverallSentiment?.REMOTE || 0;
     const callerSentimentLabel = getWeightedSentimentLabel(callerAverageSentiment);
-    const agentAverageSentiment = sentiment?.OverallSentiment?.AGENT || 0;
+    const agentAverageSentiment = sentiment?.OverallSentiment?.LOCAL || 0;
     const agentSentimentLabel = getWeightedSentimentLabel(agentAverageSentiment);
 
-    const callerSentimentByQuarter = sentiment?.SentimentByPeriod?.QUARTER?.CALLER || [];
+    const callerSentimentByQuarter = sentiment?.SentimentByPeriod?.QUARTER?.REMOTE || [];
     const callerSentimentTrendLabel = getSentimentTrendLabel(callerSentimentByQuarter);
-    const agentSentimentByQuarter = sentiment?.SentimentByPeriod?.QUARTER?.AGENT || [];
+    const agentSentimentByQuarter = sentiment?.SentimentByPeriod?.QUARTER?.LOCAL || [];
     const agentSentimentTrendLabel = getSentimentTrendLabel(agentSentimentByQuarter);
 
     return {

@@ -30,8 +30,8 @@ test('the combined stream never reaches the engine; each session has its own sou
     const run = methodBody('private async runMicrovmTranscriptionOnce');
     assert.doesNotMatch(run, /pushPcm\(event/);
     assert.doesNotMatch(run, /AudioEvent\.AudioChunk/);
-    assert.match(run, /channel: 'CALLER'/);
-    assert.match(run, /channel: 'AGENT'/);
+    assert.match(run, /channel: REMOTE_CHANNEL/);
+    assert.match(run, /channel: LOCAL_CHANNEL/);
     assert.match(run, /diarize: false/);
     assert.match(run, /voiceAssistant\.isEnabled\(\)/);
     assert.match(methodBody('private startMeetingAudioFanout'), /meeting_audio\.monitor/);
@@ -60,7 +60,7 @@ test('meeting rows are attributed by start time and drive wake phrases; assistan
     assert.match(meeting, /rosterTimeline\.speakerFor\(segment\.startSec, segment\.endSec, rosterLagSeconds\(\)\)/);
     assert.match(meeting, /processTranscriptResult\(/);
     const agent = methodBody('private handleAgentAsrSegment');
-    assert.match(agent, /channel: 'AGENT'/);
+    assert.match(agent, /channel: LOCAL_CHANNEL/);
     assert.match(agent, /this\.vpName\(\)/);
     assert.match(methodBody('private vpName'), /lmaIdentity/);
     assert.doesNotMatch(agent, /processTranscriptResult/);

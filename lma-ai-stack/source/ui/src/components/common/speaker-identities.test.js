@@ -27,12 +27,12 @@ describe('speakerKey', () => {
     // Voice ids are numbered per channel and restart at spk_0, so a Virtual
     // Participant meeting names from the roster and can legitimately produce
     // 'Alice (spk_0)' and 'Bob (spk_0)' on the same channel. They are two people.
-    expect(speakerKey('CALLER', 'Alice (spk_0)')).not.toBe(speakerKey('CALLER', 'Bob (spk_0)'));
+    expect(speakerKey('REMOTE', 'Alice (spk_0)')).not.toBe(speakerKey('REMOTE', 'Bob (spk_0)'));
   });
 
   it('keeps the same voice id apart across channels', () => {
-    expect(speakerKey('CALLER', 'Other Participant (spk_0)')).not.toBe(
-      speakerKey('AGENT', 'Other Participant (spk_0)'),
+    expect(speakerKey('REMOTE', 'Other Participant (spk_0)')).not.toBe(
+      speakerKey('LOCAL', 'Other Participant (spk_0)'),
     );
   });
 });
@@ -51,15 +51,15 @@ describe('parseSpeakerIdentities', () => {
   });
 
   it('fills in missing sections so every reader can index them', () => {
-    const parsed = parseSpeakerIdentities('{"identities":{"CALLER#x":{"name":"Bob"}}}');
-    expect(parsed.identities['CALLER#x'].name).toBe('Bob');
+    const parsed = parseSpeakerIdentities('{"identities":{"REMOTE#x":{"name":"Bob"}}}');
+    expect(parsed.identities['REMOTE#x'].name).toBe('Bob');
     expect(parsed.merges).toEqual({});
     expect(parsed.segmentOverrides).toEqual({});
     expect(parsed.candidates).toEqual([]);
   });
 
   it('round-trips through serialize', () => {
-    const map = { ...emptyIdentities(), candidates: ['Bob'], identities: { 'CALLER#a': { name: 'Bob' } } };
+    const map = { ...emptyIdentities(), candidates: ['Bob'], identities: { 'REMOTE#a': { name: 'Bob' } } };
     expect(parseSpeakerIdentities(serializeSpeakerIdentities(map))).toEqual(map);
   });
 });
@@ -76,10 +76,10 @@ describe('resolveMergeTarget', () => {
 });
 
 describe('resolveSpeaker', () => {
-  const segment = { channel: 'CALLER', speaker: 'Other Participant (spk_0)', segmentId: 's1' };
+  const segment = { channel: 'REMOTE', speaker: 'Other Participant (spk_0)', segmentId: 's1' };
 
   it('returns the mapped name for a named voice', () => {
-    const map = withIdentity('CALLER#Other Participant (spk_0)', { name: 'Bob Strahan', status: 'confirmed' });
+    const map = withIdentity('REMOTE#Other Participant (spk_0)', { name: 'Bob Strahan', status: 'confirmed' });
     expect(resolveSpeaker(segment, map, 'Someone')).toEqual({
       name: 'Bob Strahan',
       status: 'confirmed',
@@ -95,23 +95,23 @@ describe('resolveSpeaker', () => {
   });
 
   it('preserves the participant name typed on the Stream Audio form', () => {
-    expect(resolveSpeakerName({ channel: 'CALLER', speaker: 'Other Participant' }, emptyIdentities(), 'Room 3')).toBe(
+    expect(resolveSpeakerName({ channel: 'REMOTE', speaker: 'Other Participant' }, emptyIdentities(), 'Room 3')).toBe(
       'Room 3',
     );
   });
 
   it('leaves a speaker that already has a real name alone', () => {
-    expect(resolveSpeakerName({ channel: 'CALLER', speaker: 'Alice (spk_1)' }, emptyIdentities(), 'Room 3')).toBe(
+    expect(resolveSpeakerName({ channel: 'REMOTE', speaker: 'Alice (spk_1)' }, emptyIdentities(), 'Room 3')).toBe(
       'Alice (spk_1)',
     );
   });
 
   it('reports a name through a merge', () => {
     const map = {
-      ...withIdentity('CALLER#Other Participant (spk_0)', { name: 'Bob Strahan' }),
-      merges: { 'CALLER#Other Participant (spk_3)': 'CALLER#Other Participant (spk_0)' },
+      ...withIdentity('REMOTE#Other Participant (spk_0)', { name: 'Bob Strahan' }),
+      merges: { 'REMOTE#Other Participant (spk_3)': 'REMOTE#Other Participant (spk_0)' },
     };
-    const split = { channel: 'CALLER', speaker: 'Other Participant (spk_3)' };
+    const split = { channel: 'REMOTE', speaker: 'Other Participant (spk_3)' };
     expect(resolveSpeakerName(split, map, 'Someone')).toBe('Bob Strahan');
   });
 
@@ -119,7 +119,7 @@ describe('resolveSpeaker', () => {
     // Diarization does occasionally attribute one turn to the wrong voice, and
     // no label-level rename can fix that one segment.
     const map = {
-      ...withIdentity('CALLER#Other Participant (spk_0)', { name: 'Bob Strahan' }),
+      ...withIdentity('REMOTE#Other Participant (spk_0)', { name: 'Bob Strahan' }),
       segmentOverrides: { s1: 'Sarah Lee' },
     };
     expect(resolveSpeaker(segment, map, 'Someone')).toEqual({
@@ -131,7 +131,7 @@ describe('resolveSpeaker', () => {
   });
 
   it('reports an inferred name as proposed so a caller can mark it', () => {
-    const map = withIdentity('CALLER#Other Participant (spk_0)', { name: 'Bob', status: 'proposed' });
+    const map = withIdentity('REMOTE#Other Participant (spk_0)', { name: 'Bob', status: 'proposed' });
     expect(resolveSpeaker(segment, map, 'Someone').status).toBe('proposed');
   });
 
@@ -151,8 +151,8 @@ describe('resolveSpeaker', () => {
 
 describe('identityKeyFor', () => {
   it('is the segment key when nothing is merged', () => {
-    expect(identityKeyFor({ channel: 'CALLER', speaker: 'Other Participant (spk_0)' }, emptyIdentities())).toBe(
-      'CALLER#Other Participant (spk_0)',
+    expect(identityKeyFor({ channel: 'REMOTE', speaker: 'Other Participant (spk_0)' }, emptyIdentities())).toBe(
+      'REMOTE#Other Participant (spk_0)',
     );
   });
 
@@ -161,28 +161,28 @@ describe('identityKeyFor', () => {
     // resolution never reads, so the rename would silently do nothing.
     const map = {
       ...emptyIdentities(),
-      merges: { 'CALLER#Other Participant (spk_1)': 'CALLER#Other Participant (spk_0)' },
+      merges: { 'REMOTE#Other Participant (spk_1)': 'REMOTE#Other Participant (spk_0)' },
     };
-    expect(identityKeyFor({ channel: 'CALLER', speaker: 'Other Participant (spk_1)' }, map)).toBe(
-      'CALLER#Other Participant (spk_0)',
+    expect(identityKeyFor({ channel: 'REMOTE', speaker: 'Other Participant (spk_1)' }, map)).toBe(
+      'REMOTE#Other Participant (spk_0)',
     );
   });
 });
 
 describe('buildSpeakerRoster', () => {
   const segments = [
-    { channel: 'CALLER', speaker: 'Other Participant (spk_0)', startTime: 0, endTime: 4, isPartial: false },
-    { channel: 'CALLER', speaker: 'Other Participant (spk_1)', startTime: 5, endTime: 7, isPartial: false },
-    { channel: 'CALLER', speaker: 'Other Participant (spk_0)', startTime: 8, endTime: 10, isPartial: false },
-    { channel: 'AGENT', speaker: 'Me', startTime: 11, endTime: 12, isPartial: false },
+    { channel: 'REMOTE', speaker: 'Other Participant (spk_0)', startTime: 0, endTime: 4, isPartial: false },
+    { channel: 'REMOTE', speaker: 'Other Participant (spk_1)', startTime: 5, endTime: 7, isPartial: false },
+    { channel: 'REMOTE', speaker: 'Other Participant (spk_0)', startTime: 8, endTime: 10, isPartial: false },
+    { channel: 'LOCAL', speaker: 'Me', startTime: 11, endTime: 12, isPartial: false },
   ];
 
   it('lists one row per voice with its turn count and talk time', () => {
     const roster = buildSpeakerRoster(segments, emptyIdentities(), 'Room 3');
     expect(roster.map((r) => r.key)).toEqual([
-      'CALLER#Other Participant (spk_0)',
-      'CALLER#Other Participant (spk_1)',
-      'AGENT#Me',
+      'REMOTE#Other Participant (spk_0)',
+      'REMOTE#Other Participant (spk_1)',
+      'LOCAL#Me',
     ]);
     expect(roster[0].turns).toBe(2);
     expect(roster[0].talkTimeSeconds).toBe(6);
@@ -198,12 +198,12 @@ describe('buildSpeakerRoster', () => {
   it('folds a merged voice into one row', () => {
     const map = {
       ...emptyIdentities(),
-      merges: { 'CALLER#Other Participant (spk_1)': 'CALLER#Other Participant (spk_0)' },
+      merges: { 'REMOTE#Other Participant (spk_1)': 'REMOTE#Other Participant (spk_0)' },
     };
     const roster = buildSpeakerRoster(segments, map, 'Room 3');
     expect(roster).toHaveLength(2);
     expect(roster[0].turns).toBe(3);
-    expect(roster[0].mergedKeys).toEqual(['CALLER#Other Participant (spk_1)']);
+    expect(roster[0].mergedKeys).toEqual(['REMOTE#Other Participant (spk_1)']);
   });
 
   it('labels a merged row with the target voice, whichever order the segments arrive', () => {
@@ -212,14 +212,14 @@ describe('buildSpeakerRoster', () => {
     // the name is stored against.
     const map = {
       ...emptyIdentities(),
-      merges: { 'CALLER#Other Participant (spk_1)': 'CALLER#Other Participant (spk_0)' },
+      merges: { 'REMOTE#Other Participant (spk_1)': 'REMOTE#Other Participant (spk_0)' },
     };
     const spk1First = [
-      { channel: 'CALLER', speaker: 'Other Participant (spk_1)', startTime: 5, endTime: 7, isPartial: false },
-      { channel: 'CALLER', speaker: 'Other Participant (spk_0)', startTime: 0, endTime: 4, isPartial: false },
+      { channel: 'REMOTE', speaker: 'Other Participant (spk_1)', startTime: 5, endTime: 7, isPartial: false },
+      { channel: 'REMOTE', speaker: 'Other Participant (spk_0)', startTime: 0, endTime: 4, isPartial: false },
     ];
     const [merged] = buildSpeakerRoster(spk1First, map, 'Room 3');
-    expect(merged.key).toBe('CALLER#Other Participant (spk_0)');
+    expect(merged.key).toBe('REMOTE#Other Participant (spk_0)');
     expect(merged.voiceId).toBe('(spk_0)');
     expect(merged.turns).toBe(2);
   });
@@ -229,7 +229,7 @@ describe('buildSpeakerRoster', () => {
     // row that then disappears when the final lands.
     const withPartial = [
       ...segments,
-      { channel: 'CALLER', speaker: 'Other Participant', startTime: 13, endTime: 14, isPartial: true },
+      { channel: 'REMOTE', speaker: 'Other Participant', startTime: 13, endTime: 14, isPartial: true },
     ];
     expect(buildSpeakerRoster(withPartial, emptyIdentities(), 'Room 3')).toHaveLength(3);
   });
@@ -240,7 +240,7 @@ describe('buildSpeakerRoster', () => {
   });
 
   it('carries an existing name and lock onto the row', () => {
-    const map = withIdentity('CALLER#Other Participant (spk_0)', { name: 'Bob', status: 'confirmed', locked: true });
+    const map = withIdentity('REMOTE#Other Participant (spk_0)', { name: 'Bob', status: 'confirmed', locked: true });
     const roster = buildSpeakerRoster(segments, map, 'Room 3');
     expect(roster[0].name).toBe('Bob');
     expect(roster[0].locked).toBe(true);
@@ -252,15 +252,15 @@ describe('buildSpeakerRoster', () => {
 
   it('treats a custom channel label split into several voices as waiting for names', () => {
     const custom = [
-      { channel: 'CALLER', speaker: 'Others (spk_0)', startTime: 0, endTime: 2, isPartial: false },
-      { channel: 'CALLER', speaker: 'Others (spk_1)', startTime: 3, endTime: 4, isPartial: false },
-      { channel: 'AGENT', speaker: 'me@example.com', startTime: 5, endTime: 6, isPartial: false },
+      { channel: 'REMOTE', speaker: 'Others (spk_0)', startTime: 0, endTime: 2, isPartial: false },
+      { channel: 'REMOTE', speaker: 'Others (spk_1)', startTime: 3, endTime: 4, isPartial: false },
+      { channel: 'LOCAL', speaker: 'me@example.com', startTime: 5, endTime: 6, isPartial: false },
     ];
     const roster = buildSpeakerRoster(custom, emptyIdentities(), 'Others');
     expect(roster.map((r) => [r.key, r.isPlaceholder])).toEqual([
-      ['CALLER#Others (spk_0)', true],
-      ['CALLER#Others (spk_1)', true],
-      ['AGENT#me@example.com', false],
+      ['REMOTE#Others (spk_0)', true],
+      ['REMOTE#Others (spk_1)', true],
+      ['LOCAL#me@example.com', false],
     ]);
     // The display is unchanged: the stored label still shows as itself.
     expect(roster[0].defaultName).toBe('Others');
@@ -269,9 +269,9 @@ describe('buildSpeakerRoster', () => {
   it('keeps Virtual Participant roster names out of naming even when they share voice ids', () => {
     const roster = buildSpeakerRoster(
       [
-        { channel: 'CALLER', speaker: 'Alice (spk_0)', startTime: 0, endTime: 2, isPartial: false },
-        { channel: 'CALLER', speaker: 'Alice (spk_1)', startTime: 3, endTime: 4, isPartial: false },
-        { channel: 'CALLER', speaker: 'Bob (spk_1)', startTime: 5, endTime: 6, isPartial: false },
+        { channel: 'REMOTE', speaker: 'Alice (spk_0)', startTime: 0, endTime: 2, isPartial: false },
+        { channel: 'REMOTE', speaker: 'Alice (spk_1)', startTime: 3, endTime: 4, isPartial: false },
+        { channel: 'REMOTE', speaker: 'Bob (spk_1)', startTime: 5, endTime: 6, isPartial: false },
       ],
       emptyIdentities(),
       undefined,
@@ -281,12 +281,12 @@ describe('buildSpeakerRoster', () => {
 
   it('treats an unseparated default-labelled channel as waiting for a name', () => {
     const roster = buildSpeakerRoster(segments, emptyIdentities(), 'Room 3');
-    expect(roster.find((r) => r.key === 'AGENT#Me').isPlaceholder).toBe(true);
+    expect(roster.find((r) => r.key === 'LOCAL#Me').isPlaceholder).toBe(true);
   });
 
   it('treats the desktop app default label as a placeholder', () => {
     const roster = buildSpeakerRoster(
-      [{ channel: 'CALLER', speaker: 'Other participants (spk_0)', startTime: 0, endTime: 2, isPartial: false }],
+      [{ channel: 'REMOTE', speaker: 'Other participants (spk_0)', startTime: 0, endTime: 2, isPartial: false }],
       emptyIdentities(),
       undefined,
     );
@@ -346,7 +346,7 @@ describe('hasMultipleVoicesOnAChannel', () => {
   // buildSpeakerRoster rather than hand-made, so this cannot pass against a row
   // shape the roster never actually produces -- which is how an earlier version
   // of these tests passed for the wrong reason.
-  const seg = (speaker, start_, channel = 'CALLER') => ({
+  const seg = (speaker, start_, channel = 'REMOTE') => ({
     channel,
     speaker,
     startTime: start_,
@@ -364,7 +364,7 @@ describe('hasMultipleVoicesOnAChannel', () => {
   it('is false for one voice per channel, however many channels', () => {
     expect(
       hasMultipleVoicesOnAChannel(
-        roster([seg('Other Participant (spk_0)', 0), seg('Other Participant (spk_0)', 5, 'AGENT')]),
+        roster([seg('Other Participant (spk_0)', 0), seg('Other Participant (spk_0)', 5, 'LOCAL')]),
       ),
     ).toBe(false);
   });
@@ -375,8 +375,8 @@ describe('hasMultipleVoicesOnAChannel', () => {
     const named = {
       ...emptyIdentities(),
       identities: {
-        'CALLER#Other Participant (spk_0)': { name: 'Bob' },
-        'CALLER#Other Participant (spk_1)': { name: 'Sarah' },
+        'REMOTE#Other Participant (spk_0)': { name: 'Bob' },
+        'REMOTE#Other Participant (spk_1)': { name: 'Sarah' },
       },
     };
     expect(
@@ -419,18 +419,18 @@ describe('hasMultipleVoicesOnAChannel', () => {
 describe('buildSpeakerRoster channel scoping', () => {
   it('does not offer the remote participant name as a local-channel placeholder', () => {
     // The Stream Audio form's name is the remote side's. Using it for an
-    // AGENT-channel voice would make the panel's placeholder disagree with the
+    // LOCAL-channel voice would make the panel's placeholder disagree with the
     // transcript beside it, which shows the generic placeholder there.
     const rows = buildSpeakerRoster(
       [
-        { channel: 'CALLER', speaker: 'Other Participant', startTime: 0, endTime: 3, isPartial: false },
-        { channel: 'AGENT', speaker: 'Other Participant', startTime: 5, endTime: 8, isPartial: false },
+        { channel: 'REMOTE', speaker: 'Other Participant', startTime: 0, endTime: 3, isPartial: false },
+        { channel: 'LOCAL', speaker: 'Other Participant', startTime: 5, endTime: 8, isPartial: false },
       ],
       emptyIdentities(),
       'Conference Room 3',
     );
-    expect(rows.find((r) => r.channel === 'CALLER').defaultName).toBe('Conference Room 3');
-    expect(rows.find((r) => r.channel === 'AGENT').defaultName).toBe('Other Participant');
+    expect(rows.find((r) => r.channel === 'REMOTE').defaultName).toBe('Conference Room 3');
+    expect(rows.find((r) => r.channel === 'LOCAL').defaultName).toBe('Other Participant');
   });
 });
 
@@ -443,5 +443,56 @@ describe('formatTalkTime', () => {
 
   it('tolerates a missing total', () => {
     expect(formatTalkTime(undefined)).toBe('0:00');
+  });
+});
+
+describe('a meeting stored under the older channel names', () => {
+  // LMA before 0.4.0 wrote the speech channels as CALLER and AGENT and keyed the
+  // identity map by them. Such a map must still name the meeting's voices.
+  const stored = JSON.stringify({
+    version: 1,
+    identities: {
+      'CALLER#Other Participant (spk_0)': { name: 'Bob', status: 'confirmed' },
+      'AGENT#Me': { name: 'Sam', status: 'confirmed' },
+    },
+    merges: { 'CALLER#Other Participant (spk_1)': 'CALLER#Other Participant (spk_0)' },
+    rejected: { 'AGENT#Me': ['Bobby'] },
+    segmentOverrides: { s9: 'Ann' },
+  });
+
+  it('is re-keyed under REMOTE and LOCAL when parsed', () => {
+    const parsed = parseSpeakerIdentities(stored);
+    expect(parsed.identities).toEqual({
+      'REMOTE#Other Participant (spk_0)': { name: 'Bob', status: 'confirmed' },
+      'LOCAL#Me': { name: 'Sam', status: 'confirmed' },
+    });
+    expect(parsed.merges).toEqual({ 'REMOTE#Other Participant (spk_1)': 'REMOTE#Other Participant (spk_0)' });
+    expect(parsed.rejected).toEqual({ 'LOCAL#Me': ['Bobby'] });
+    expect(parsed.segmentOverrides).toEqual({ s9: 'Ann' });
+  });
+
+  it('names segments stored under either spelling of the channel', () => {
+    const parsed = parseSpeakerIdentities(stored);
+    expect(resolveSpeakerName({ channel: 'CALLER', speaker: 'Other Participant (spk_0)' }, parsed)).toBe('Bob');
+    expect(resolveSpeakerName({ channel: 'REMOTE', speaker: 'Other Participant (spk_1)' }, parsed)).toBe('Bob');
+    expect(resolveSpeakerName({ channel: 'AGENT', speaker: 'Me' }, parsed)).toBe('Sam');
+  });
+
+  it('keys a voice the same way under either spelling', () => {
+    expect(speakerKey('CALLER', 'Alice (spk_0)')).toBe(speakerKey('REMOTE', 'Alice (spk_0)'));
+    expect(speakerKey('AGENT', 'Me')).toBe('LOCAL#Me');
+  });
+
+  it('lists a voice heard under both spellings as one row on the current channel', () => {
+    const roster = buildSpeakerRoster(
+      [
+        { channel: 'CALLER', speaker: 'Other Participant (spk_0)', segmentId: 'a', startTime: 0, endTime: 2 },
+        { channel: 'REMOTE', speaker: 'Other Participant (spk_0)', segmentId: 'b', startTime: 3, endTime: 4 },
+      ],
+      parseSpeakerIdentities(stored),
+      'Dana',
+    );
+    expect(roster).toHaveLength(1);
+    expect(roster[0]).toMatchObject({ channel: 'REMOTE', name: 'Bob', turns: 2 });
   });
 });

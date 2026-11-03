@@ -6,6 +6,7 @@
 import { ConsoleLogger } from 'aws-amplify/utils';
 import React from 'react';
 import { Box, LineChart } from '@cloudscape-design/components';
+import { channelLabel } from '../common/channels';
 import { getWeightedSentimentLabel } from '../common/sentiment';
 
 const logger = new ConsoleLogger('SentimentCharts');
@@ -18,8 +19,8 @@ export const VoiceToneFluctuationChart = ({ item, callTranscriptPerCallId }) => 
   const transcriptChannels = Object.keys(transcriptsForThisCallId)
     .slice(0, maxChannels)
     .filter((c) => c !== 'AGENT_ASSISTANT')
-    .filter((c) => c !== 'AGENT')
-    .filter((c) => c !== 'CALLER');
+    .filter((c) => c !== 'LOCAL')
+    .filter((c) => c !== 'REMOTE');
   const sentimentPerChannel = transcriptChannels
     .map((channel) => transcriptsForThisCallId[channel])
     .map((transcript) =>
@@ -38,13 +39,13 @@ export const VoiceToneFluctuationChart = ({ item, callTranscriptPerCallId }) => 
       hideFilter
       series={[
         {
-          title: transcriptChannels[0] ? transcriptChannels[0].replace('_VOICETONE', '') : 'n/a',
+          title: transcriptChannels[0] ? channelLabel(transcriptChannels[0].replace('_VOICETONE', '')) : 'n/a',
           type: 'line',
           data: sentimentPerChannel[0] || [],
           valueFormatter: (e) => e.toFixed(3),
         },
         {
-          title: transcriptChannels[1] ? transcriptChannels[1].replace('_VOICETONE', '') : 'n/a',
+          title: transcriptChannels[1] ? channelLabel(transcriptChannels[1].replace('_VOICETONE', '')) : 'n/a',
           type: 'line',
           data: sentimentPerChannel[1] || [],
           valueFormatter: (e) => e.toFixed(3),
@@ -102,13 +103,13 @@ export const SentimentFluctuationChart = ({ item, callTranscriptPerCallId }) => 
       hideFilter
       series={[
         {
-          title: transcriptChannels[0] || 'n/a',
+          title: transcriptChannels[0] ? channelLabel(transcriptChannels[0]) : 'n/a',
           type: 'line',
           data: sentimentPerChannel[0] || [],
           valueFormatter: (e) => e.toFixed(3),
         },
         {
-          title: transcriptChannels[1] || 'n/a',
+          title: transcriptChannels[1] ? channelLabel(transcriptChannels[1]) : 'n/a',
           type: 'line',
           data: sentimentPerChannel[1] || [],
           valueFormatter: (e) => e.toFixed(3),
@@ -164,13 +165,13 @@ export const SentimentPerQuarterChart = ({ item, callTranscriptPerCallId }) => {
       hideFilter
       series={[
         {
-          title: transcriptChannels[0] || 'n/a',
+          title: transcriptChannels[0] ? channelLabel(transcriptChannels[0]) : 'n/a',
           type: 'line',
           data: sentimentByQuarterPerChannel[0] || [],
           valueFormatter: (e) => e.toFixed(3),
         },
         {
-          title: transcriptChannels[1] || 'n/a',
+          title: transcriptChannels[1] ? channelLabel(transcriptChannels[1]) : 'n/a',
           type: 'line',
           data: sentimentByQuarterPerChannel[1] || [],
           valueFormatter: (e) => e.toFixed(3),

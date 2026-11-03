@@ -26,7 +26,8 @@ from statistics import fmean
 from typing import Any, Dict, List, Literal, Optional, Pattern, TypedDict
 
 SentimentLabelType = Literal["NEGATIVE", "MIXED", "NEUTRAL", "POSITIVE"]
-ChannelType = Literal["AGENT", "CALLER"]
+# The speech channels sentiment is aggregated for (lma_channels.SPEECH_CHANNELS).
+ChannelType = Literal["REMOTE", "LOCAL"]
 SentimentPeriodType = Literal["QUARTER"]
 
 # The meeting timeline is divided into this many equal periods.

@@ -604,8 +604,8 @@ const TranscriptContent = ({ segment, translateCache }) => {
       case 'MEETING_ASSISTANT':
         className = 'transcript-segment-agent-assist';
         break;
-      case 'AGENT':
-      case 'CALLER':
+      case 'LOCAL':
+      case 'REMOTE':
         break;
       default:
         break;
@@ -728,7 +728,7 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis, o
   let displayChannel = `${segment.channel}`;
   let channelClass = '';
 
-  if (channel === 'AGENT' || channel === 'CALLER') {
+  if (channel === 'LOCAL' || channel === 'REMOTE') {
     displayChannel = `${segment.speaker}`.trim();
   } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
     displayChannel = 'MEETING_ASSISTANT';
@@ -740,7 +740,7 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis, o
       {getSentimentImage(segment, enableSentimentAnalysis)}
       <SpaceBetween direction="vertical" size="xxs" className={channelClass}>
         <SpaceBetween direction="horizontal" size="xs">
-          {onRenameSpeaker && !readOnly && (channel === 'AGENT' || channel === 'CALLER') ? (
+          {onRenameSpeaker && !readOnly && (channel === 'LOCAL' || channel === 'REMOTE') ? (
             <SpeakerRenamePopover segment={segment} onRenameSpeaker={onRenameSpeaker} locked={segment.speakerLocked} />
           ) : (
             <TextContent>
@@ -827,7 +827,7 @@ const CallInProgressTranscript = ({
   const [updateFlag, setUpdateFlag] = useState(false);
   const [userHasScrolled, setUserHasScrolled] = useState(false);
 
-  // channels: AGENT, AGENT_ASSIST, CALLER, AGENT_VOICETONE, CALLER_VOICETONE
+  // channels: LOCAL, AGENT_ASSISTANT, REMOTE, AGENT_VOICETONE, CALLER_VOICETONE
   const maxChannels = 6;
   const { callId } = item;
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
@@ -1006,12 +1006,12 @@ const CallInProgressTranscript = ({
         // nothing reads.
         t.speakerKey = identityKeyFor(t, speakerIdentities);
         // callerPhoneNumber is the remote side's name, so it substitutes for the
-        // placeholder on the CALLER channel only. The download path has always
+        // placeholder on the REMOTE channel only. The download path has always
         // scoped it this way; the other readers now match.
         const resolved = resolveSpeaker(
           t,
           speakerIdentities,
-          t.channel === 'CALLER' ? item.callerPhoneNumber : undefined,
+          t.channel === 'REMOTE' ? item.callerPhoneNumber : undefined,
         );
         t.speaker = resolved.name;
         t.speakerLocked = resolved.locked;
@@ -1028,7 +1028,7 @@ const CallInProgressTranscript = ({
           s?.segmentId
           && s?.createdAt
           && (s.agentTranscript === undefined
-            || s.agentTranscript || s.channel !== 'AGENT')
+            || s.agentTranscript || s.channel !== 'LOCAL')
           && (s.channel !== 'AGENT_VOICETONE')
           && (s.channel !== 'CALLER_VOICETONE')
           && (s.channel !== 'CHAT_ASSISTANT')
@@ -1921,7 +1921,7 @@ const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, 
           <SpaceBetween size="xs">
             <div>
               <Box margin={{ bottom: 'xxxs' }} color="text-label">
-                <strong>Caller Avg Sentiment:</strong>
+                <strong>Remote Avg Sentiment:</strong>
               </Box>
               <div>
                 <SentimentIcon sentiment={item.callerSentimentLabel} />
@@ -1935,7 +1935,7 @@ const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, 
           <SpaceBetween size="xs">
             <div>
               <Box margin={{ bottom: 'xxxs' }} color="text-label">
-                <strong>Caller Sentiment Trend:</strong>
+                <strong>Remote Sentiment Trend:</strong>
               </Box>
               <div>
                 <SentimentTrendIcon trend={item.callerSentimentTrendLabel} />
@@ -1945,7 +1945,7 @@ const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, 
           <SpaceBetween size="xs">
             <div>
               <Box margin={{ bottom: 'xxxs' }} color="text-label">
-                <strong>Agent Avg Sentiment:</strong>
+                <strong>Local Avg Sentiment:</strong>
               </Box>
               <div>
                 <SentimentIcon sentiment={item.agentSentimentLabel} />
@@ -1959,7 +1959,7 @@ const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, 
           <SpaceBetween size="xs">
             <div>
               <Box margin={{ bottom: 'xxxs' }} color="text-label">
-                <strong>Agent Sentiment Trend:</strong>
+                <strong>Local Sentiment Trend:</strong>
               </Box>
               <div>
                 <SentimentTrendIcon trend={item.agentSentimentTrendLabel} />

@@ -21,7 +21,7 @@ const content = (
     <h3>Features</h3>
     <ul>
       <li>Transcribes native (non-browser) meeting apps</li>
-      <li>Captures your mic (AGENT) and system/meeting audio (CALLER) as separate channels</li>
+      <li>Captures your mic (LOCAL) and system/meeting audio (REMOTE) as separate channels</li>
       <li>Optional screen-video recording (a screen or a single window), saved as an MP4 in LMA</li>
       <li>No bot or extra attendee in the meeting</li>
       <li>Preconfigured for this deployment; sign in with your LMA username/password</li>

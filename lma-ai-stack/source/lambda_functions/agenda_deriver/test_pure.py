@@ -10,11 +10,15 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# lma_channels, from the configuration layer the deployed function carries.
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[2] / "lambda_layers" / "configuration_layer")
+)
 
 import pure  # noqa: E402
 
 
-def seg(start, text, speaker="Ann", channel="AGENT", partial=False):
+def seg(start, text, speaker="Ann", channel="LOCAL", partial=False):
     return {
         "StartTime": start,
         "EndTime": start + 2,
@@ -28,7 +32,7 @@ def seg(start, text, speaker="Ann", channel="AGENT", partial=False):
 STATED = [
     seg(1, "Morning everyone."),
     seg(5, "Today we have three things to get through: the budget, hiring, and the Q3 plan."),
-    seg(12, "Sounds good.", speaker="Bob", channel="CALLER"),
+    seg(12, "Sounds good.", speaker="Bob", channel="REMOTE"),
 ]
 TRANSCRIPT = pure.build_transcript(STATED)
 
@@ -42,13 +46,25 @@ def answer(**fields):
 
 def test_the_transcript_is_final_speech_in_order_with_times():
     segments = [
-        seg(65, "Second.", speaker="Bob", channel="CALLER"),
+        seg(65, "Second.", speaker="Bob", channel="REMOTE"),
         seg(3, "First."),
         seg(30, "draft words", partial=True),
         seg(40, "The assistant said this.", channel="AGENT_ASSISTANT"),
         seg(50, "   "),
     ]
     assert pure.build_transcript(segments) == "[00:03] Ann: First.\n[01:05] Bob: Second."
+
+
+def test_the_transcript_includes_speech_stored_under_the_older_channel_names():
+    """A meeting recorded before 0.4.0 holds CALLER and AGENT segments."""
+    segments = [
+        seg(3, "First.", channel="AGENT"),
+        seg(65, "Second.", speaker="Bob", channel="CALLER"),
+        seg(70, "Third.", speaker="Cy", channel="REMOTE"),
+    ]
+    assert pure.build_transcript(segments) == (
+        "[00:03] Ann: First.\n[01:05] Bob: Second.\n[01:10] Cy: Third."
+    )
 
 
 def test_a_long_meeting_keeps_its_opening():
@@ -160,7 +176,7 @@ def test_the_stored_form_is_one_item_per_line():
 def test_overlapping_channels_read_in_start_order():
     segments = [
         {**seg(10, "Long turn."), "EndTime": 30},
-        {**seg(20, "Short one.", speaker="Bob", channel="CALLER"), "EndTime": 22},
+        {**seg(20, "Short one.", speaker="Bob", channel="REMOTE"), "EndTime": 22},
     ]
     assert pure.build_transcript(segments) == "[00:10] Ann: Long turn.\n[00:20] Bob: Short one."
 

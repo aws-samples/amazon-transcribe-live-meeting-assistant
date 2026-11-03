@@ -28,6 +28,7 @@ import deriveCallAgenda from '../graphql/queries/deriveCallAgenda';
 
 import { DEFAULT_DATE_RANGE_HOURS, hoursToDateRange } from '../components/call-list/calls-table-config';
 import { serializeSummaryState } from '../components/common/summary-state';
+import { canonicalChannel } from '../components/common/channels';
 
 const client = generateClient();
 
@@ -39,6 +40,41 @@ const client = generateClient();
  */
 export const isRequestTimeout = (error) =>
   (error?.errors || []).some((e) => /timeout/i.test(e?.errorType || '') || /timed out/i.test(e?.message || ''));
+/** A transcript segment from the API, as the UI holds it. */
+export const mapTranscriptSegmentValue = (transcriptSegmentValue) => {
+  const {
+    CallId: callId,
+    SegmentId: segmentId,
+    StartTime: startTime,
+    EndTime: endTime,
+    Speaker: speaker,
+    Transcript: transcript,
+    IsPartial: isPartial,
+    Channel: channel,
+    CreatedAt: createdAt,
+    Sentiment: sentiment,
+    SentimentScore: sentimentScore,
+    SentimentWeighted: sentimentWeighted,
+  } = transcriptSegmentValue;
+
+  return {
+    callId,
+    segmentId,
+    startTime,
+    endTime,
+    speaker,
+    transcript,
+    isPartial,
+    // A meeting stored before 0.4.0 has its segments on CALLER and AGENT; they
+    // are held, rendered and exported under REMOTE and LOCAL.
+    channel: canonicalChannel(channel),
+    createdAt,
+    sentiment,
+    sentimentScore,
+    sentimentWeighted,
+  };
+};
+
 const logger = new ConsoleLogger('useCallsGraphQlApi');
 
 // Matches the `limit` used server-side by the ListCallsGsiResolver.  One
@@ -296,38 +332,6 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
       };
       return { ...current, [callId]: { ...entry } };
     });
-  };
-
-  const mapTranscriptSegmentValue = (transcriptSegmentValue) => {
-    const {
-      CallId: callId,
-      SegmentId: segmentId,
-      StartTime: startTime,
-      EndTime: endTime,
-      Speaker: speaker,
-      Transcript: transcript,
-      IsPartial: isPartial,
-      Channel: channel,
-      CreatedAt: createdAt,
-      Sentiment: sentiment,
-      SentimentScore: sentimentScore,
-      SentimentWeighted: sentimentWeighted,
-    } = transcriptSegmentValue;
-
-    return {
-      callId,
-      segmentId,
-      startTime,
-      endTime,
-      speaker,
-      transcript,
-      isPartial,
-      channel,
-      createdAt,
-      sentiment,
-      sentimentScore,
-      sentimentWeighted,
-    };
   };
 
   useEffect(() => {

@@ -16,6 +16,7 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { meterAsrMicrovm } from './metering.js';
 import { createLogger } from './logger.js';
+import { REMOTE_CHANNEL, type SpeechChannel } from './channels.js';
 
 const log = createLogger('asr-microvm-client');
 
@@ -310,7 +311,7 @@ export interface MicrovmAsrSessionOptions {
     /** False once the meeting is over, so a closed socket is not reconnected. */
     isMeetingLive: () => boolean;
     /** Transcript channel this session feeds; tags its segment ids and log lines. */
-    channel?: 'CALLER' | 'AGENT';
+    channel?: SpeechChannel;
     /** Ordinal of this run within the meeting, so a restart cannot reuse earlier segment ids. */
     run?: number;
     /** Meeting time already covered by earlier runs; rows continue from here. */
@@ -345,7 +346,7 @@ export class MicrovmAsrSession {
 
     constructor(private readonly options: MicrovmAsrSessionOptions) {
         this.lease = options.lease;
-        this.channel = options.channel ?? 'CALLER';
+        this.channel = options.channel ?? REMOTE_CHANNEL;
         this.logPrefix = `[ASR ${this.channel}]`;
         this.timeOffsetSeconds = options.timeBaseSeconds ?? 0;
         this.observedMaxEnd = this.timeOffsetSeconds;

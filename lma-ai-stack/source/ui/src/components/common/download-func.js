@@ -5,6 +5,7 @@
  */
 /* eslint-disable indent */
 import * as XLSX from 'xlsx';
+import { canonicalChannel, isSpeechChannel, REMOTE_CHANNEL } from './channels';
 import { parseSpeakerIdentities, resolveSpeakerName } from './speaker-identities';
 
 // eslint-disable-next-line prettier/prettier
@@ -179,13 +180,17 @@ const sortTranscriptByTime = (callTranscriptPerCallId, meeting) => {
       const { channel, startTime, endTime } = c;
       let { speaker, transcript } = c;
 
-      if (channel === 'CALLER' || channel === 'AGENT') {
+      if (isSpeechChannel(channel)) {
         // Resolve through the meeting's speaker identity map, which also covers
         // the older substitution of the participant name typed on the Stream
         // Audio form for the 'Other Participant' placeholder. That fallback is
-        // passed for the CALLER channel only -- it is the remote side's name, and
+        // passed for the REMOTE channel only -- it is the remote side's name, and
         // applying it to the local channel would mislabel it.
-        speaker = resolveSpeakerName(c, speakerIdentities, channel === 'CALLER' ? callerPhoneNumber : undefined);
+        speaker = resolveSpeakerName(
+          c,
+          speakerIdentities,
+          canonicalChannel(channel) === REMOTE_CHANNEL ? callerPhoneNumber : undefined,
+        );
       } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
         // The speaker for the assistant will just be "Other participant", override this
         speaker = 'MEETING ASSISTANT';

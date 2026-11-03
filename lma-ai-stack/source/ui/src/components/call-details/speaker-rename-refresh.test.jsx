@@ -97,7 +97,7 @@ const shouldReplace = (current, incoming) => {
 };
 
 describe('the meeting-refresh guard', () => {
-  const NAMED = '{"identities":{"CALLER#Other Participant (spk_0)":{"name":"Bob"}}}';
+  const NAMED = '{"identities":{"REMOTE#Other Participant (spk_0)":{"name":"Bob"}}}';
   const loaded = { updatedAt: '2026-10-17T12:00:00.000Z', speakerIdentities: NAMED };
 
   it('replaces the meeting when the names changed but the timestamp did not', () => {
@@ -211,7 +211,7 @@ describe('a renamed meeting still maps to a usable row', () => {
       Status: 'ENDED',
       CreatedAt: '2026-10-17T12:00:00.000Z',
       UpdatedAt: '2026-10-17T12:30:00.000Z',
-      SpeakerIdentities: '{"identities":{"CALLER#Other Participant (spk_0)":{"name":"Bob"}}}',
+      SpeakerIdentities: '{"identities":{"REMOTE#Other Participant (spk_0)":{"name":"Bob"}}}',
       TotalConversationDurationMillis: 1000,
     };
     const [mapped] = mapCallsAttributes([call]);

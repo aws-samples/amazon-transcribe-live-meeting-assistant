@@ -20,17 +20,24 @@ case below is dropped rather than applied.
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
 
-import pure
-import pytest
+# lma_channels, from the configuration layer the deployed function carries.
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[2] / "lambda_layers" / "configuration_layer")
+)
+
+import pure  # noqa: E402
+import pytest  # noqa: E402
 
 NOW = "2026-10-18T03:00:00Z"
-SPK0 = "CALLER#Other Participant (spk_0)"
-SPK1 = "CALLER#Other Participant (spk_1)"
-SPK2 = "CALLER#Other Participant (spk_2)"
+SPK0 = "REMOTE#Other Participant (spk_0)"
+SPK1 = "REMOTE#Other Participant (spk_1)"
+SPK2 = "REMOTE#Other Participant (spk_2)"
 
 
-def seg(speaker, start, text, channel="CALLER", segment_id=None, partial=False):
+def seg(speaker, start, text, channel="REMOTE", segment_id=None, partial=False):
     return {
         "Channel": channel,
         "Speaker": speaker,
@@ -135,13 +142,13 @@ def test_a_voice_merged_into_another_is_not_named_separately() -> None:
 def test_an_undiarized_channel_is_still_nameable() -> None:
     """With separation off the whole channel is one voice, and naming it is useful."""
     plain = [seg("Other Participant", 0, "hello there")]
-    assert pure.unresolved_voices(pure.build_turns(plain), empty()) == ["CALLER#Other Participant"]
+    assert pure.unresolved_voices(pure.build_turns(plain), empty()) == ["REMOTE#Other Participant"]
 
 
 # A Stream Audio meeting whose participant field was set to "Others", with voice
 # separation on: the shape of a live meeting where the button found nothing.
 CUSTOM_LABEL_MEETING = [
-    seg("me@example.com", 0, "Let's get you to introduce yourselves", channel="AGENT"),
+    seg("me@example.com", 0, "Let's get you to introduce yourselves", channel="LOCAL"),
     seg("Others", 2, "can you hear me"),
     seg("Others (spk_0)", 5, "I'll go first. My name is Chris."),
     seg("Others (spk_1)", 10, "My name is Jeremy"),
@@ -152,9 +159,9 @@ CUSTOM_LABEL_MEETING = [
 def test_a_custom_channel_label_split_into_several_voices_is_unresolved() -> None:
     """The label is the channel's, not a person's, once it carries two voice ids."""
     assert pure.unresolved_voices(pure.build_turns(CUSTOM_LABEL_MEETING), empty()) == [
-        "CALLER#Others",
-        "CALLER#Others (spk_0)",
-        "CALLER#Others (spk_1)",
+        "REMOTE#Others",
+        "REMOTE#Others (spk_0)",
+        "REMOTE#Others (spk_1)",
     ]
 
 
@@ -169,7 +176,7 @@ def test_a_self_introduction_on_a_custom_channel_label_is_applied() -> None:
         [
             {
                 "basis": pure.SELF_INTRODUCTION,
-                "label": "CALLER#Others (spk_1)",
+                "label": "REMOTE#Others (spk_1)",
                 "turn": 4,
                 "name": "Jeremy",
                 "quote": "My name is Jeremy",
@@ -178,25 +185,25 @@ def test_a_self_introduction_on_a_custom_channel_label_is_applied() -> None:
         meeting_turns,
         NOW,
     )
-    assert [entry["key"] for entry in applied] == ["CALLER#Others (spk_1)"]
-    assert updated["identities"]["CALLER#Others (spk_1)"]["status"] == "confirmed"
+    assert [entry["key"] for entry in applied] == ["REMOTE#Others (spk_1)"]
+    assert updated["identities"]["REMOTE#Others (spk_1)"]["status"] == "confirmed"
 
 
 def test_a_microphone_shared_by_several_voices_is_unresolved() -> None:
     """A conference room on one microphone: the user's address labels the channel."""
     room = [
-        seg("me@example.com (spk_0)", 0, "Hi, I'm Sam", channel="AGENT"),
-        seg("me@example.com (spk_1)", 5, "And I'm Priya", channel="AGENT"),
+        seg("me@example.com (spk_0)", 0, "Hi, I'm Sam", channel="LOCAL"),
+        seg("me@example.com (spk_1)", 5, "And I'm Priya", channel="LOCAL"),
     ]
     assert pure.unresolved_voices(pure.build_turns(room), empty()) == [
-        "AGENT#me@example.com (spk_0)",
-        "AGENT#me@example.com (spk_1)",
+        "LOCAL#me@example.com (spk_0)",
+        "LOCAL#me@example.com (spk_1)",
     ]
 
 
 def test_a_custom_label_with_one_voice_still_reads_as_a_person() -> None:
     """One voice under a client-supplied name may well be that person."""
-    single = [seg("me@example.com (spk_0)", 0, "Hi, I'm Sam", channel="AGENT")]
+    single = [seg("me@example.com (spk_0)", 0, "Hi, I'm Sam", channel="LOCAL")]
     assert pure.unresolved_voices(pure.build_turns(single), empty()) == []
 
 
@@ -223,14 +230,14 @@ def test_a_channel_label_is_judged_on_the_whole_transcript_not_the_trimmed_one()
     )
     trimmed = [whole[0], whole[2]]
     assert pure.unresolved_voices(trimmed, empty()) == []
-    assert pure.unresolved_voices(trimmed, empty(), whole) == ["CALLER#Others (spk_0)"]
+    assert pure.unresolved_voices(trimmed, empty(), whole) == ["REMOTE#Others (spk_0)"]
     assert pure.worth_a_model_call(trimmed, empty(), force=True, all_turns=whole)
 
 
 def test_the_desktop_app_default_label_is_a_placeholder() -> None:
     single = [seg("Other participants (spk_0)", 0, "My name is Chris")]
     assert pure.unresolved_voices(pure.build_turns(single), empty()) == [
-        "CALLER#Other participants (spk_0)"
+        "REMOTE#Other participants (spk_0)"
     ]
 
 
@@ -558,7 +565,7 @@ def test_the_same_name_on_different_channels_is_allowed() -> None:
     two_channels = pure.build_turns(
         [
             seg("Other Participant (spk_0)", 0, "Hi, I'm Sarah Lee"),
-            seg("Other Participant (spk_0)", 5, "Hi, I'm Sarah Lee", channel="AGENT"),
+            seg("Other Participant (spk_0)", 5, "Hi, I'm Sarah Lee", channel="LOCAL"),
         ]
     )
     updated, applied = pure.apply_proposals(
@@ -567,7 +574,7 @@ def test_the_same_name_on_different_channels_is_allowed() -> None:
             {"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"},
             {
                 "basis": pure.SELF_INTRODUCTION,
-                "label": "AGENT#Other Participant (spk_0)",
+                "label": "LOCAL#Other Participant (spk_0)",
                 "turn": 2,
                 "name": "Sarah Lee",
             },
@@ -585,7 +592,7 @@ def test_a_voice_that_already_reads_as_a_person_is_left_alone() -> None:
         [
             {
                 "basis": pure.SELF_INTRODUCTION,
-                "label": "CALLER#Alice (spk_0)",
+                "label": "REMOTE#Alice (spk_0)",
                 "turn": 1,
                 "name": "Bob",
             }
@@ -657,7 +664,7 @@ def test_a_hostile_response_changes_nothing() -> None:
 
 def test_the_prompt_carries_the_numbered_transcript_and_the_open_labels() -> None:
     prompt = pure.build_prompt(turns(), [SPK0, SPK1], [])
-    assert "[1] CALLER#Other Participant (spk_0): Hi everyone, I'm Sarah Lee" in prompt
+    assert "[1] REMOTE#Other Participant (spk_0): Hi everyone, I'm Sarah Lee" in prompt
     assert f"- {SPK0}" in prompt
     assert pure.SELF_INTRODUCTION in prompt
     assert pure.ADDRESSED_BY_NAME in prompt
@@ -1341,3 +1348,55 @@ def test_being_addressed_does_not_require_an_introduction_phrase() -> None:
 def test_a_placeholder_name_with_a_trailing_dot_is_still_rejected() -> None:
     assert pure.clean_name("n.a.") is None
     assert pure.clean_name("N.A.") is None
+
+
+# ── meetings stored under the older channel names ────────────────────────────
+
+
+def test_turns_on_the_older_channel_names_are_keyed_under_the_current_ones() -> None:
+    """A meeting recorded before 0.4.0 stores CALLER and AGENT segments."""
+    turns = pure.build_turns(
+        [
+            seg("Other Participant (spk_0)", 0, "Hello", channel="CALLER"),
+            seg("Me", 5, "Hi", channel="AGENT"),
+            seg("Other Participant (spk_0)", 10, "Again", channel="REMOTE"),
+        ]
+    )
+    assert [(t["channel"], t["key"]) for t in turns] == [
+        ("REMOTE", SPK0),
+        ("LOCAL", "LOCAL#Me"),
+        ("REMOTE", SPK0),
+    ]
+
+
+def test_a_stored_map_keyed_under_the_older_channel_names_is_rekeyed() -> None:
+    stored = {
+        "identities": {
+            "CALLER#Other Participant (spk_0)": {"name": "Sarah", "status": "confirmed"},
+            "AGENT#Me": {"name": "Sam", "status": "confirmed"},
+        },
+        "merges": {"CALLER#Other Participant (spk_1)": "CALLER#Other Participant (spk_0)"},
+        "rejected": {"AGENT#Me": ["Bob"]},
+        "segmentOverrides": {"s1": "Ann"},
+    }
+    parsed = pure.parse_identities(json.dumps(stored))
+    assert parsed["identities"] == {
+        SPK0: {"name": "Sarah", "status": "confirmed"},
+        "LOCAL#Me": {"name": "Sam", "status": "confirmed"},
+    }
+    assert parsed["merges"] == {SPK1: SPK0}
+    assert parsed["rejected"] == {"LOCAL#Me": ["Bob"]}
+    # Keyed by segment id, not by channel.
+    assert parsed["segmentOverrides"] == {"s1": "Ann"}
+
+
+def test_the_entry_under_the_current_channel_name_wins_over_the_older_one() -> None:
+    stored = {
+        "identities": {
+            SPK0: {"name": "Sarah Lee", "status": "confirmed"},
+            "CALLER#Other Participant (spk_0)": {"name": "Sarah", "status": "proposed"},
+        }
+    }
+    assert pure.parse_identities(stored)["identities"] == {
+        SPK0: {"name": "Sarah Lee", "status": "confirmed"}
+    }

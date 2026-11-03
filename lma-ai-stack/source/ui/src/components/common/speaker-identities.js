@@ -31,6 +31,7 @@
  * These helpers are pure and import no UI, so they stay unit-testable and usable
  * from the non-React embed path.
  */
+import { canonicalChannel, canonicalKeyed, isSpeechChannel, REMOTE_CHANNEL } from './channels';
 import { DEFAULT_DESKTOP_SYSTEM_LABEL, DEFAULT_LOCAL_SPEAKER_NAME, DEFAULT_OTHER_SPEAKER_NAME } from './constants';
 import { splitDiarizationLabel } from './utilities';
 
@@ -54,7 +55,7 @@ export const emptyIdentities = () => ({
 });
 
 /**
- * Key for one voice: its channel plus the speaker string AS STORED.
+ * Key for one voice: its channel, by its current name, plus the speaker string AS STORED.
  *
  * Keying on the channel and voice id alone would collide: ids are numbered per
  * channel and restart at spk_0, so on a Virtual Participant meeting -- where the
@@ -65,7 +66,7 @@ export const emptyIdentities = () => ({
  * A '#' inside a name does not need escaping: the key is only ever built and
  * looked up by this function, and nothing parses a name back out of it.
  */
-export const speakerKey = (channel, speaker) => `${channel ?? ''}#${(speaker ?? '').trim()}`;
+export const speakerKey = (channel, speaker) => `${canonicalChannel(channel) ?? ''}#${(speaker ?? '').trim()}`;
 
 /**
  * Parse the stored JSON, tolerating anything.
@@ -91,14 +92,16 @@ export const parseSpeakerIdentities = (raw) => {
   if (!source || typeof source !== 'object') {
     return emptyIdentities();
   }
+  // A map written before 0.4.0 keys its voices under the older channel names
+  // (CALLER#..., AGENT#...). Re-keyed here, so the next write stores the current ones.
   return {
     version: source.version ?? SPEAKER_IDENTITIES_VERSION,
     candidates: Array.isArray(source.candidates) ? source.candidates.filter((c) => typeof c === 'string') : [],
-    identities: source.identities && typeof source.identities === 'object' ? source.identities : {},
-    merges: source.merges && typeof source.merges === 'object' ? source.merges : {},
+    identities: canonicalKeyed(source.identities && typeof source.identities === 'object' ? source.identities : {}),
+    merges: canonicalKeyed(source.merges && typeof source.merges === 'object' ? source.merges : {}, true),
     segmentOverrides:
       source.segmentOverrides && typeof source.segmentOverrides === 'object' ? source.segmentOverrides : {},
-    rejected: source.rejected && typeof source.rejected === 'object' ? source.rejected : {},
+    rejected: canonicalKeyed(source.rejected && typeof source.rejected === 'object' ? source.rejected : {}),
     lastPass: source.lastPass && typeof source.lastPass === 'object' ? source.lastPass : undefined,
   };
 };
@@ -189,8 +192,8 @@ export const resolveSpeaker = ({ channel, speaker, segmentId }, identities, fall
 export const resolveSpeakerName = (segment, identities, fallbackName) =>
   resolveSpeaker(segment, identities, fallbackName).name;
 
-/** Channels that carry a nameable human voice. */
-const NAMEABLE_CHANNELS = ['CALLER', 'AGENT'];
+/** Whether a segment's channel carries a nameable human voice: the two speech channels. */
+const isNameable = (segment) => isSpeechChannel(segment.channel);
 
 /**
  * Stored base names that stand for "somebody not yet named". Mirrors
@@ -215,17 +218,18 @@ const channelLabelBases = (segments) => {
   const bases = {};
   const voiceIds = {};
   (segments ?? []).forEach((segment) => {
-    if (segment.isPartial || !NAMEABLE_CHANNELS.includes(segment.channel)) {
+    if (segment.isPartial || !isNameable(segment)) {
       return;
     }
     const { base, suffix } = splitDiarizationLabel(segment.speaker);
-    if (!bases[segment.channel]) {
-      bases[segment.channel] = new Set();
-      voiceIds[segment.channel] = new Set();
+    const channel = canonicalChannel(segment.channel);
+    if (!bases[channel]) {
+      bases[channel] = new Set();
+      voiceIds[channel] = new Set();
     }
-    bases[segment.channel].add(base);
+    bases[channel].add(base);
     if (suffix.trim()) {
-      voiceIds[segment.channel].add(suffix.trim());
+      voiceIds[channel].add(suffix.trim());
     }
   });
   const out = new Set();
@@ -252,19 +256,20 @@ export const buildSpeakerRoster = (segments, identities, fallbackName) => {
   const map = identities ?? emptyIdentities();
   const rows = new Map();
   // The participant name from the Stream Audio form is the REMOTE side's, so it
-  // substitutes for the placeholder on the caller channel only -- the same rule
+  // substitutes for the placeholder on the REMOTE channel only -- the same rule
   // every transcript reader applies. Without the channel test the panel's
   // placeholder for a local-channel voice would disagree with the transcript
   // beside it.
-  const fallbackFor = (channel) => (channel === 'CALLER' ? fallbackName : undefined);
+  const fallbackFor = (channel) => (canonicalChannel(channel) === REMOTE_CHANNEL ? fallbackName : undefined);
   const labels = channelLabelBases(segments);
   // Whether a voice is waiting for a name -- what the panel's automatic passes
   // and unnamed count act on. Distinct from `generic` below, which only decides
   // whether the Stream Audio participant name substitutes in the display.
-  const needsNaming = (channel, base) => PLACEHOLDER_BASES.includes(base) || labels.has(`${channel}#${base}`);
+  const needsNaming = (channel, base) =>
+    PLACEHOLDER_BASES.includes(base) || labels.has(`${canonicalChannel(channel)}#${base}`);
 
   (segments ?? []).forEach((segment) => {
-    if (segment.isPartial || !NAMEABLE_CHANNELS.includes(segment.channel)) {
+    if (segment.isPartial || !isNameable(segment)) {
       return;
     }
     const key = speakerKey(segment.channel, segment.speaker);
@@ -291,7 +296,7 @@ export const buildSpeakerRoster = (segments, identities, fallbackName) => {
         existing.baseName = fromTarget.base;
         existing.defaultName = generic ? fallbackFor(segment.channel) || DEFAULT_OTHER_SPEAKER_NAME : fromTarget.base;
         existing.isPlaceholder = needsNaming(segment.channel, fromTarget.base);
-        existing.channel = segment.channel;
+        existing.channel = canonicalChannel(segment.channel);
         existing.describesTarget = true;
       }
       return;
@@ -300,7 +305,7 @@ export const buildSpeakerRoster = (segments, identities, fallbackName) => {
     const { base, suffix } = splitDiarizationLabel(segment.speaker);
     rows.set(target, {
       key: target,
-      channel: segment.channel,
+      channel: canonicalChannel(segment.channel),
       storedSpeaker: segment.speaker,
       voiceId: suffix.trim(),
       // The channel's own name, with the engine's voice id stripped off.

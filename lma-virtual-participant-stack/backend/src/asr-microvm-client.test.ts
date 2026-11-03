@@ -79,7 +79,7 @@ const newSession = (
     rows: AsrSegment[],
     live = { value: true },
     diarize = true,
-    channel: 'CALLER' | 'AGENT' = 'CALLER',
+    channel: 'REMOTE' | 'LOCAL' = 'REMOTE',
 ) =>
     new MicrovmAsrSession({
         callId: 'vp-test-call',
@@ -312,15 +312,15 @@ test('two sessions on one engine never share a segment id', async () => {
     });
     const meeting: AsrSegment[] = [];
     const agent: AsrSegment[] = [];
-    const a = newSession(asr, meeting, { value: true }, true, 'CALLER');
-    const b = newSession(asr, agent, { value: true }, false, 'AGENT');
+    const a = newSession(asr, meeting, { value: true }, true, 'REMOTE');
+    const b = newSession(asr, agent, { value: true }, false, 'LOCAL');
     try {
         assert.deepEqual(await Promise.all([a.start(), b.start()]), [true, true]);
         a.pushPcm(Buffer.alloc(3200));
         b.pushPcm(Buffer.alloc(3200));
         await until(() => meeting.length === 1 && agent.length === 1);
-        assert.equal(meeting[0].segmentId, 'vp-caller-r0-g0-s1');
-        assert.equal(agent[0].segmentId, 'vp-agent-r0-g0-s1');
+        assert.equal(meeting[0].segmentId, 'vp-remote-r0-g0-s1');
+        assert.equal(agent[0].segmentId, 'vp-local-r0-g0-s1');
         await Promise.all([a.finish(), b.finish()]);
     } finally {
         await asr.close();
@@ -394,7 +394,7 @@ test('a later run continues the meeting timeline and never reuses an earlier seg
         diarize: false,
         onSegment: (segment) => rows.push(segment),
         isMeetingLive: () => true,
-        channel: 'CALLER',
+        channel: 'REMOTE',
         run: 1,
         timeBaseSeconds: 600,
     });
@@ -403,7 +403,7 @@ test('a later run continues the meeting timeline and never reuses an earlier seg
         assert.equal(await session.start(), true);
         session.pushPcm(Buffer.alloc(3200));
         await until(() => rows.length === 1);
-        assert.equal(rows[0].segmentId, 'vp-caller-r1-g0-s0');
+        assert.equal(rows[0].segmentId, 'vp-remote-r1-g0-s0');
         assert.equal(rows[0].startSec, 600.5);
         assert.equal(rows[0].endSec, 602);
         await session.finish();

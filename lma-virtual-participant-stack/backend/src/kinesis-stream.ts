@@ -4,6 +4,7 @@ import { details } from './details.js';
 import { VoiceLabelNames, buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
 import { agendaStartFields, type VpAgenda } from './meeting-agenda.js';
 import { createLogger } from './logger.js';
+import { REMOTE_CHANNEL } from './channels.js';
 
 const log = createLogger('kinesis-stream');
 
@@ -337,7 +338,7 @@ class KinesisStreamManager {
         const record: any = {
           EventType: 'ADD_TRANSCRIPT_SEGMENT',
           CallId: this.callId,
-          Channel: 'CALLER',
+          Channel: REMOTE_CHANNEL,
           SegmentId: (segment as any).SegmentId,
           StartTime: (segment as any).StartTime !== null ? (segment as any).StartTime : 0,
           EndTime: (segment as any).EndTime !== null ? (segment as any).EndTime : 0,
@@ -373,7 +374,7 @@ class KinesisStreamManager {
     const record: any = {
       EventType: 'ADD_TRANSCRIPT_SEGMENT',
       CallId: this.callId,
-      Channel: segment.channel || 'CALLER',
+      Channel: segment.channel || REMOTE_CHANNEL,
       SegmentId: segment.segmentId,
       StartTime: segment.startTime,
       EndTime: segment.endTime,
