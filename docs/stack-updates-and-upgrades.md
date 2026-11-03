@@ -323,7 +323,10 @@ now `LOCAL`.** `REMOTE` is the meeting audio, everyone else in the meeting;
 `LOCAL` is the local side, the user's microphone or a Virtual Participant's
 voice assistant. The old names came from the telephony solution LMA started
 from. Every producer LMA ships writes the new names, and the meeting page, the
-meeting list and the sentiment charts label the channels Remote and Local.
+meeting list and the sentiment charts label the channels Remote and Local. An
+[uploaded recording](upload-audio.md) puts every speaker on `REMOTE`, since it
+has no local microphone; with speaker identification on, earlier versions put
+the first speaker on `CALLER` and the others on `AGENT`.
 
 - Meetings recorded before the upgrade keep `CALLER` and `AGENT` on their
   transcript segments, in their sentiment and in the keys of their speaker
