@@ -66,4 +66,17 @@ describe('VideoPlayer', () => {
       Object.defineProperty(window.HTMLMediaElement.prototype, 'readyState', original);
     }
   });
+
+  it('only moves the recording for a request that does not ask it to play', async () => {
+    const play = vi.fn().mockResolvedValue(undefined);
+    window.HTMLMediaElement.prototype.play = play;
+    const url = 'https://bucket.s3.us-east-1.amazonaws.com/lma-video-recordings%2Fm.mp4';
+    const { container, rerender } = render(<VideoPlayer videoRecordingUrl={url} />);
+    await waitFor(() => expect(container.querySelector('video')).not.toBeNull());
+    const video = container.querySelector('video');
+    rerender(<VideoPlayer videoRecordingUrl={url} seekRequest={{ seconds: 75, at: 3, play: false }} />);
+    fireEvent(video, new Event('loadedmetadata'));
+    expect(video.currentTime).toBe(75);
+    expect(play).not.toHaveBeenCalled();
+  });
 });

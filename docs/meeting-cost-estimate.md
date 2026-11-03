@@ -23,9 +23,11 @@ lists what is left out, and the estimate itself carries the same list.
 
 ### On the meeting page
 
-The **Estimated cost** section of a meeting's page — collapsed by default, below the
-Speakers panel — shows the total in its header ("$0.1234 estimated", with
-"(incomplete)" when some line has no price) and, opened, the itemised table:
+The meeting page's header shows the total as **Est. cost** ("$0.1234", with
+"(incomplete)" when some line has no price); selecting it opens the itemised
+estimate. The same estimate is the **Estimated cost** section of the **Details**
+tab — collapsed by default, below the Speakers and Consent panels — which shows
+the total in its header ("$0.1234 estimated") and, opened, the itemised table:
 
 | Column | Shows |
 |---|---|

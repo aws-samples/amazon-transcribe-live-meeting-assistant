@@ -118,3 +118,39 @@ describe('AgendaPanel', () => {
     });
   });
 });
+
+describe('AgendaPanel on the Overview tab', () => {
+  it('is one line, with its actions, for a meeting with no agenda', () => {
+    const { container } = render(
+      <AgendaPanel item={{ callId: 'c1' }} onSave={vi.fn()} onDerive={vi.fn()} readOnly={false} compactWhenEmpty />,
+    );
+    expect(screen.getByTestId('agenda-compact')).toBeTruthy();
+    expect(screen.queryByText('No agenda for this meeting.')).toBeNull();
+    expect(screen.getByRole('button', { name: /Add agenda/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Derive agenda/ })).toBeTruthy();
+    expect(container.querySelector('textarea')).toBeNull();
+  });
+
+  it('opens the editor from the one line', () => {
+    const { container } = render(
+      <AgendaPanel item={{ callId: 'c1' }} onSave={vi.fn()} readOnly={false} compactWhenEmpty />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Add agenda/ }));
+    expect(container.querySelector('textarea')).not.toBeNull();
+    expect(screen.queryByTestId('agenda-compact')).toBeNull();
+  });
+
+  it('offers nothing to change to a viewer without write access', () => {
+    render(<AgendaPanel item={{ callId: 'c1' }} onSave={vi.fn()} onDerive={vi.fn()} readOnly compactWhenEmpty />);
+    expect(screen.getByTestId('agenda-compact')).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it("shows the summary's agenda coverage under the items", () => {
+    render(
+      <AgendaPanel item={ITEM} onSave={vi.fn()} readOnly={false} compactWhenEmpty coverage="- **Budget**: Covered" />,
+    );
+    expect(screen.getByText('Coverage')).toBeTruthy();
+    expect(screen.getByText(': Covered', { exact: false })).toBeTruthy();
+  });
+});

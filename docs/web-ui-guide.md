@@ -98,79 +98,126 @@ Click a VP from the list to open its detail page. The page shows:
 
 ## Meeting Detail Page
 
-Clicking a meeting from the list opens the meeting detail page, which contains several panels and sections.
+Clicking a meeting from the list opens the meeting detail page: a compact
+header with what the meeting was, and four tabs under it. The selected tab is
+part of the page's address (`#/calls/<Meeting ID>?tab=overview`), so a link or
+a reload opens the same tab; a link without one opens the **Transcript** tab.
+Switching tabs keeps each tab as it was, including a summary or agenda being
+edited, the transcript's translation and scroll position, and the assistant's
+conversation.
 
-### Transcript Panel
+### Meeting header
 
-Real-time transcription displayed with:
-- Speaker names and timestamps for each segment
+- **Title** — the meeting's name, without the date and time its source added to
+  the Meeting ID (for example `Weekly sync` for
+  `Weekly sync-2026-11-03-14-05-09-123`). The full Meeting ID is in the title's
+  tooltip, the copy button beside it copies it, and the **Details** tab shows it.
+  A Meeting ID without a recognised date and time is shown as it is.
+- **Status, start time and duration** — the start time is shown in your own time
+  zone, with the stored UTC value in its tooltip. The duration is the longer of
+  the meeting's stored duration and the time the loaded transcript reaches (see
+  [Duration](#duration)).
+- **Platform** — when a Virtual Participant joined the meeting, the platform it
+  joined (Zoom, Microsoft Teams, Amazon Chime, Webex).
+- **Owner** and **Speakers** — the people heard in the meeting, by the names
+  given to their voices. **Name speakers** opens the Speakers panel on the
+  **Details** tab.
+- **Est. cost** — the meeting's estimated cost. Select it to see the itemised
+  estimate; see [Meeting Cost Estimate](meeting-cost-estimate.md).
+- **Share**, **Download** and the **⋮** menu — **Download** offers the summary
+  (copy, text file, Word, email) and, once the meeting has ended, the transcript
+  (Excel, text, Word); see [Transcript Downloads](#transcript-downloads). **Delete
+  meeting** is in the **⋮** menu. Share and Delete open the same dialogs as on the
+  meeting list.
+
+#### Duration
+
+The stored duration (`TotalConversationDurationMillis`) is written as transcript
+segments are processed, and holds the end time of whichever final segment was
+written last rather than the latest one, so it can be shorter than the meeting.
+The page therefore shows the longer of that value and the end of the last final
+transcript segment it has loaded; when the two differ, the **Details** tab gives
+the stored value as well. Both are measured on the transcript's clock, from when
+transcription started, so a recording that began before transcription can be
+longer than either.
+The meeting list and the MCP tools still read the stored value.
+
+### Overview tab
+
+- **Meeting Summary** — the summary from the configured prompt templates, with
+  **Regenerate**, **Edit** and the summary's own download menu. The slides
+  named in its **SLIDES PRESENTED** section are links rather than pictures:
+  selecting one opens the **Screen share** tab at that frame. The **CHAPTERS**
+  section is shown once, as the **Chapters** list beside the summary, and the
+  **AGENDA COVERAGE** section under the agenda it describes. Downloads and copies
+  of the summary still include every section. See
+  [Transcript Summarization](transcript-summarization.md).
+- **Chapters** — the meeting's chapters; selecting one opens the **Transcript**
+  tab at its time and, after the meeting, moves the video recording there. See
+  [Meeting Video and Key Frames](meeting-video.md#chapters).
+- **Agenda** — the meeting's agenda, who last changed it, and its coverage. A
+  meeting without an agenda shows one line with **Derive agenda** and **Add
+  agenda** for those who can change it. See [Meeting Agenda](meeting-agenda.md).
+- **Sentiment and voice tone** charts, when those features are enabled; see
+  [Sentiment Analysis](#sentiment-analysis).
+
+### Transcript tab
+
+The tab a meeting opens on. Real-time transcription displayed with:
+- Speaker names and timestamps for each segment; select a name to rename that
+  voice (see [Naming the voices](transcription-and-translation.md#naming-the-voices))
 - Sentiment indicators per segment
 - Color-coded entries by channel for easy visual distinction between speakers
+- **Auto-scroll**, on while the meeting runs, keeps the newest segment in view;
+  scrolling up pauses it, and **Resume** returns to the newest segment
+- **Translate**, with the language chosen beside it; see
+  [Live Translation](#live-translation)
 
-### Chat Panel
+The transcript keeps its own scroll area, sized to the window, so following a
+live meeting keeps the newest segment in view while you can still scroll back.
 
-Interact with the meeting assistant by typing questions or requests:
+Beside it is the **Meeting Assist Bot** chat:
 - Real-time token streaming responses from the Strands agent
 - **Chat shortcut buttons** for common actions: Summary, Action Items, Topic, and more
 - Shortcut buttons re-appear after each response for quick follow-up actions
 
-### Summary Section
+During a live meeting with a Virtual Participant, the VP's **live view** (a
+real-time VNC viewer of the VP's browser) appears at the top of this tab when it
+is opened from the chat panel's settings menu (**Open VP Live View**) or by the
+assistant. You can see and control what the VP sees in the meeting.
 
-- On-demand summaries generated during the meeting
-- Post-meeting summaries generated automatically when the meeting ends
-- Multiple sections based on configured prompt templates
-- Copy to clipboard support for easy sharing
+### Screen share tab
 
-### Shared Screen
+Shown for a meeting whose shared screen was captured, with the number of key
+frames in its label. A strip of thumbnails of the shared screen: one for each
+slide, page or view, with the time it went up, growing while the meeting runs.
+Selecting one shows it large; **Show in transcript** opens the **Transcript** tab
+at that time, and after the meeting **Play recording from here** opens the
+**Details** tab and plays the video recording from there. **Find text on the
+shared screen** searches the slides' text and **Export slides (PDF)** prints them
+as a deck. See [Meeting Video and Key Frames](meeting-video.md#on-the-meeting-page).
 
-For a meeting whose video is recorded, a strip of thumbnails of the shared
-screen: one for each slide, page or view, with the time it went up, growing
-while the meeting runs. Selecting one shows it large and moves the transcript
-to that time; after the meeting it also plays the video recording from there.
-See [Meeting Video and Key Frames](meeting-video.md#on-the-meeting-page).
+### Details tab
 
-### Agenda
-
-The meeting's agenda as a numbered list, with where it came from and who last
-changed it. The owner, anyone the meeting is shared with, and an Admin can edit
-it while the meeting runs and after it ends, and **Derive agenda** reads the
-transcript for an agenda somebody stated. See
-[Meeting Agenda](meeting-agenda.md).
-
-### Consent
-
-For a meeting whose consent was started: its mode and status, whether it may be
-recorded and transcribed now, the notice posted, each participant's latest
-reply, the owner's attestation, the evidence screenshots with a vision model's
-check of each, and a timeline. The owner, anyone the meeting is shared with and
-an Admin can record an objection; the owner and Admins can check evidence; the
-owner can attest that everyone agreed, in an opt-in meeting whose rule is that
-the owner attests. The summary download includes the record. See
-[Meeting Consent](meeting-consent.md#on-the-meeting-page).
-
-### Estimated Cost
-
-A collapsed section showing an itemised estimate of what the meeting cost: Transcribe
-seconds, Bedrock tokens per feature, Nova Sonic, and the Virtual Participant's
-compute, priced at dated list prices. It is labelled as an estimate and lists the
-lines it could not price and what it leaves out. See
-[Meeting Cost Estimate](meeting-cost-estimate.md).
-
-### Audio Playback
-
-When recording is enabled, a WAV recording player is available for audio playback of the meeting.
-
-### VNC Viewer
-
-When a Virtual Participant (VP) is active, a real-time VNC viewer displays the VP's browser view. This allows you to see and control what the VP sees in the meeting.
-
-### Meeting Metadata
-
-Displays detailed meeting information including:
-- Call ID, status, and duration
-- Participants list
-- Owner and shared users
-- TTL (time-to-live) expiration
+- **Meeting attributes** — the full Meeting ID, status, duration, the start and
+  last-update times in UTC (with your local time under each), platform, owner,
+  who the meeting is shared with, and the audio and video recording players
+  once the meeting has ended.
+- **Speakers** — name each voice once and the whole transcript updates; see
+  [Naming the voices](transcription-and-translation.md#naming-the-voices).
+- **Consent** — for a meeting whose consent was started: its mode and status,
+  whether it may be recorded and transcribed now, the notice posted, each
+  participant's latest reply, the owner's attestation, the evidence screenshots
+  with a vision model's check of each, and a timeline. The owner, anyone the
+  meeting is shared with and an Admin can record an objection; the owner and
+  Admins can check evidence; the owner can attest that everyone agreed, in an
+  opt-in meeting whose rule is that the owner attests. The summary download
+  includes the record. See [Meeting Consent](meeting-consent.md#on-the-meeting-page).
+- **Estimated cost** — the itemised estimate the header's cost chip opens:
+  Transcribe seconds, Bedrock tokens per feature, Nova Sonic, and the Virtual
+  Participant's compute, priced at dated list prices. It is labelled as an
+  estimate and lists the lines it could not price and what it leaves out. See
+  [Meeting Cost Estimate](meeting-cost-estimate.md).
 
 ## Sentiment Analysis
 
@@ -182,7 +229,8 @@ LMA provides sentiment analysis at multiple levels:
 
 ## Transcript Downloads
 
-Export meeting transcripts in multiple formats:
+Export meeting transcripts in multiple formats, from **Download** in the meeting
+page's header once the meeting has ended:
 
 - **XLSX** — Spreadsheet format with structured columns
 - **DOCX** — Word document format
@@ -199,6 +247,8 @@ Share meetings with other LMA users:
 3. Enter recipient email addresses
 4. Click Submit
 
+On a meeting's own page, **Share** in its header opens the same dialog for that meeting.
+
 Only meeting owners can share meetings. Recipients receive read-only access to the shared meetings. For full details, see [User-Based Access Control](user-based-access-control.md).
 
 ## Meeting Deletion
@@ -210,13 +260,15 @@ Delete meetings you own:
 3. Type "confirm" in the confirmation dialog
 4. Click Delete
 
+On a meeting's own page, **Delete meeting** is in the **⋮** menu of its header.
+
 Shared users automatically lose access to deleted meetings. For full details, see [User-Based Access Control](user-based-access-control.md).
 
 ## Live Translation
 
 Translate meeting transcripts in real-time:
 
-- Select a target language from the language dropdown
+- On the **Transcript** tab, turn on **Translate** and choose the target language beside it
 - Choose from **75+ languages** powered by Amazon Translate
 - Translation is performed client-side for low latency
 

@@ -194,3 +194,41 @@ describe('SummaryMarkdown', () => {
     expect(loadFrames).not.toHaveBeenCalled();
   });
 });
+
+describe("SummaryMarkdown on the meeting page's Overview tab", () => {
+  it('shows a slide as a link to the Screen share tab, reading no frame', () => {
+    const loadFrames = framesLoader();
+    const loadFrame = vi.fn();
+    const onKeyframeSelect = vi.fn();
+    render(
+      <SummaryMarkdown
+        callId="m-1"
+        loadFrames={loadFrames}
+        loadFrame={loadFrame}
+        keyframes="link"
+        onKeyframeSelect={onKeyframeSelect}
+      >
+        {SLIDES}
+      </SummaryMarkdown>,
+    );
+    expect(screen.queryByRole('img')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Slide at 00:30/ }));
+    expect(onKeyframeSelect).toHaveBeenCalledWith('0000030000-ab12cd');
+    expect(loadFrames).not.toHaveBeenCalled();
+    expect(loadFrame).not.toHaveBeenCalled();
+    expect(screen.getByText('Bob covered Q3.')).toBeTruthy();
+  });
+
+  it('shows a slide as its alt text when the meeting has no frames to open', () => {
+    const loadFrames = framesLoader();
+    render(
+      <SummaryMarkdown callId="m-1" loadFrames={loadFrames} keyframes="text">
+        {SLIDES}
+      </SummaryMarkdown>,
+    );
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.getByText('Slide at 00:30')).toBeTruthy();
+    expect(loadFrames).not.toHaveBeenCalled();
+  });
+});

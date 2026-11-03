@@ -11,7 +11,13 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { chapterTitlesByFrame, chaptersFromSummary, parseChapters, parseClock } from './chapters';
+import {
+  chapterTitlesByFrame,
+  chaptersFromSummary,
+  parseChapters,
+  parseClock,
+  withoutChaptersSection,
+} from './chapters';
 
 describe('parseClock', () => {
   it('reads MM:SS and H:MM:SS, and nothing else', () => {
@@ -95,5 +101,26 @@ describe('chapterTitlesByFrame', () => {
     ];
     const titles = chapterTitlesByFrame(chapters, frames);
     expect(Object.fromEntries(titles)).toEqual({ a: ['Welcome'], b: ['Budget'], c: ['Hiring'] });
+  });
+});
+
+describe('withoutChaptersSection', () => {
+  it('drops the CHAPTERS heading and its lines from a hand-edited summary, and keeps the rest', () => {
+    const text = [
+      '## Summary',
+      'We met.',
+      '',
+      '## Chapters',
+      '- [00:00] Welcome',
+      '- [05:12] Budget',
+      '',
+      '## Actions',
+      'Ship it.',
+    ].join('\n');
+    expect(withoutChaptersSection(text)).toBe(['## Summary', 'We met.', '', '## Actions', 'Ship it.'].join('\n'));
+  });
+
+  it('leaves a summary without the section as it is', () => {
+    expect(withoutChaptersSection('## Summary\nWe met.')).toBe('## Summary\nWe met.');
   });
 });

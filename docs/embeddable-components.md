@@ -166,7 +166,7 @@ Show the VNC live view and transcript for a virtual participant session:
 | `stream-audio` | Stream-only: live meeting form + recording controls (mic / screen audio) | `meetingTopic`, `participants`, `owner`, `autoStart`, `diarizeSystem`, `diarizeMic` |
 | `upload-audio` | Upload-only: file-picker form for pre-recorded audio / video + diarization toggle | `meetingTopic`, `participants`, `owner` |
 | `select-audio` | Combined page with a top-of-page Stream / Upload mode switcher | `meetingTopic`, `participants`, `owner` |
-| `call-details` | Complete call details view (transcript + summary + chat) | `callId`, `show`, `layout` |
+| `call-details` | Complete call details view (transcript + summary + chat). With all three panels it is the meeting page itself, header and tabs included; the selected tab is not written to the embedding page's URL | `callId`, `show`, `layout` |
 | `transcript` | Live meeting transcript only | `callId` |
 | `summary` | Meeting summary only | `callId` |
 | `chat` | Meeting Assist Bot chat only | `callId` |

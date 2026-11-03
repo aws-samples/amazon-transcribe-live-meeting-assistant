@@ -203,13 +203,17 @@ export const shareModal = (props) => {
 
   return (
     <SpaceBetween size="xxs" direction="horizontal">
+      {/* The meeting page's header labels the button; the meeting list keeps the icon. */}
       <Button
         iconName="share"
         variant="normal"
         loading={props.loading}
         disabled={props.selectedItems.length === 0}
         onClick={openShareSettings}
-      />
+        ariaLabel={props.triggerText ? undefined : 'Share'}
+      >
+        {props.triggerText}
+      </Button>
       <Modal
         onDismiss={closeShareSettings}
         visible={share}
@@ -303,6 +307,13 @@ export const deleteModal = (props) => {
     setDeletedCallIds([]);
   };
 
+  // Opened from somewhere other than its own button -- the meeting page's
+  // actions menu, which hides the button (`hideTrigger`) and changes
+  // `openRequest` each time Delete is chosen.
+  useEffect(() => {
+    if (props.openRequest) openDeleteSettings();
+  }, [props.openRequest]);
+
   const closeDeleteSettings = () => {
     setDeleteDisabled(false);
     setVisible(false);
@@ -356,13 +367,16 @@ export const deleteModal = (props) => {
 
   return (
     <SpaceBetween size="xxs" direction="horizontal">
-      <Button
-        iconName="remove"
-        variant="normal"
-        loading={props.loading}
-        disabled={props.selectedItems.length === 0}
-        onClick={openDeleteSettings}
-      />
+      {!props.hideTrigger && (
+        <Button
+          iconName="remove"
+          variant="normal"
+          loading={props.loading}
+          disabled={props.selectedItems.length === 0}
+          onClick={openDeleteSettings}
+          ariaLabel="Delete"
+        />
+      )}
       {props.selectedItems.length > 0 ? (
         <Modal
           visible={visible}

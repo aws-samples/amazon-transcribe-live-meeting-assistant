@@ -69,6 +69,21 @@ const markdownSection = (text) => {
   return body.join('\n');
 };
 
+/**
+ * A hand-edited (Markdown) summary without its CHAPTERS heading and the lines
+ * under it, for a page that lists the chapters on their own. Returned as it is
+ * when it has no such section.
+ */
+export const withoutChaptersSection = (text) => {
+  if (typeof text !== 'string') return text;
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((line) => CHAPTERS_HEADING.test(line));
+  if (start < 0) return text;
+  let end = start + 1;
+  while (end < lines.length && !(HEADING.test(lines[end]) && !CHAPTER_LINE.test(lines[end]))) end += 1;
+  return [...lines.slice(0, start), ...lines.slice(end)].join('\n');
+};
+
 /** The meeting's chapters from its stored summary (JSON sections, or Markdown once edited). */
 export const chaptersFromSummary = (callSummaryText) => {
   if (!callSummaryText || typeof callSummaryText !== 'string') return [];

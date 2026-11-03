@@ -1,0 +1,273 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
+
+/**
+ * The top of the meeting page: what the meeting was, in one compact block,
+ * above the tabs.
+ *
+ * The title is the meeting's name, without the time stamp its source appended
+ * to the Meeting ID (common/meeting-header.js); the full ID is in the title's
+ * tooltip, one click away on the copy button, and on the Details tab. The line
+ * under it gives the status, the start time in the viewer's own time zone (the
+ * UTC value in its tooltip), the length, the platform when a Virtual
+ * Participant joined it, the owner, and a cost chip that opens the itemised
+ * estimate. Then the people heard in it, from the transcript and the names
+ * given to its voices.
+ *
+ * The actions are the meeting's: Share, Download (the summary and the
+ * transcript) and, under the "more" menu, Delete. Share and Delete are the
+ * meeting list's own dialogs (common/meeting-controls.js).
+ */
+import React, { useState } from 'react';
+import PropTypes from 'prop-types';
+import {
+  Badge,
+  Box,
+  Button,
+  ButtonDropdown,
+  Container,
+  CopyToClipboard,
+  Header,
+  Popover,
+  SpaceBetween,
+  StatusIndicator,
+} from '@cloudscape-design/components';
+
+import useCallsContext from '../../contexts/calls';
+import { shareModal, deleteModal } from '../common/meeting-controls';
+import { InfoLink } from '../common/info-link';
+import { DONE_STATUS } from '../common/get-recording-status';
+import { formatDuration, formatMeetingStart, meetingTitle } from '../common/meeting-header';
+import { CallCostBreakdown, costSummaryText } from './CallCostPanel';
+import {
+  SUMMARY_ACTION_ITEMS,
+  TRANSCRIPT_DOWNLOAD_ITEMS,
+  runSummaryAction,
+  runTranscriptDownload,
+} from './meeting-downloads';
+
+/** How many speakers are named in the header before the rest are counted. */
+export const MAX_SPEAKER_CHIPS = 6;
+
+const Meta = ({ label, children, title = undefined }) => (
+  <Box variant="span" fontSize="body-s">
+    <span title={title}>
+      <Box variant="span" color="text-body-secondary" fontSize="body-s">
+        {`${label} `}
+      </Box>
+      {children}
+    </span>
+  </Box>
+);
+
+Meta.propTypes = {
+  label: PropTypes.string.isRequired,
+  children: PropTypes.node.isRequired,
+  title: PropTypes.string,
+};
+
+const COST_SHAPE = PropTypes.shape({
+  // eslint-disable-next-line react/forbid-prop-types
+  estimate: PropTypes.object,
+  loading: PropTypes.bool,
+  error: PropTypes.string,
+  refresh: PropTypes.func,
+});
+
+const CostChip = ({ cost }) => {
+  const text = costSummaryText(cost, { short: true });
+  return (
+    <Box variant="span" fontSize="body-s">
+      <Box variant="span" color="text-body-secondary" fontSize="body-s">
+        {'Est. cost '}
+      </Box>
+      <Popover
+        header="Estimated cost"
+        size="large"
+        position="bottom"
+        triggerType="text"
+        content={
+          <SpaceBetween size="s">
+            <Box float="right">
+              <Button iconName="refresh" variant="inline-link" loading={cost.loading} onClick={cost.refresh}>
+                Refresh
+              </Button>
+            </Box>
+            <CallCostBreakdown estimate={cost.estimate} error={cost.error} />
+          </SpaceBetween>
+        }
+      >
+        <span data-testid="meeting-cost-chip">{text}</span>
+      </Popover>
+    </Box>
+  );
+};
+
+CostChip.propTypes = {
+  cost: COST_SHAPE.isRequired,
+};
+
+const MeetingHeader = ({
+  item,
+  durationMillis,
+  platform = '',
+  speakers = [],
+  cost,
+  consent = null,
+  callTranscriptPerCallId,
+  getCallDetailsFromCallIds = undefined,
+  setToolsOpen = undefined,
+  onShowSpeakers = undefined,
+}) => {
+  const { calls } = useCallsContext();
+  const [deleteRequest, setDeleteRequest] = useState(0);
+  const controls = { calls, selectedItems: [item], loading: false, getCallDetailsFromCallIds };
+
+  const title = meetingTitle(item.callId);
+  const started = formatMeetingStart(item.initiationTimeStamp);
+  const hasSummary = Boolean(item.callSummaryText);
+  // As before the move: a transcript is offered for download once the meeting
+  // has ended, and not after the Retention section has deleted it.
+  const canDownloadTranscript = item.recordingStatusLabel === DONE_STATUS && !item.transcriptDeletedAt;
+  let transcriptReason;
+  if (item.transcriptDeletedAt) transcriptReason = 'The transcript was deleted.';
+  else if (!canDownloadTranscript) transcriptReason = 'Available once the meeting has ended.';
+
+  const downloadItems = [
+    {
+      text: 'Summary',
+      items: SUMMARY_ACTION_ITEMS.map((entry) => ({
+        ...entry,
+        id: `summary:${entry.id}`,
+        disabled: !hasSummary,
+        disabledReason: hasSummary ? undefined : 'This meeting has no summary yet.',
+      })),
+    },
+    {
+      text: 'Transcript',
+      items: TRANSCRIPT_DOWNLOAD_ITEMS.map((entry) => ({
+        ...entry,
+        text: `Transcript as ${entry.text}`,
+        id: `transcript:${entry.id}`,
+        disabled: !canDownloadTranscript,
+        disabledReason: transcriptReason,
+      })),
+    },
+  ];
+
+  const onDownload = ({ detail }) => {
+    const [kind, id] = detail.id.split(':');
+    if (kind === 'summary') runSummaryAction(id, item, consent);
+    else if (kind === 'transcript') runTranscriptDownload(id, callTranscriptPerCallId, item);
+  };
+
+  const shownSpeakers = speakers.slice(0, MAX_SPEAKER_CHIPS);
+  const hiddenSpeakers = speakers.length - shownSpeakers.length;
+
+  return (
+    <Container
+      header={
+        <Header
+          variant="h2"
+          info={setToolsOpen ? <InfoLink onFollow={() => setToolsOpen(true)} /> : undefined}
+          actions={
+            <SpaceBetween size="xs" direction="horizontal">
+              {shareModal({ ...controls, triggerText: 'Share' })}
+              <ButtonDropdown items={downloadItems} onItemClick={onDownload}>
+                Download
+              </ButtonDropdown>
+              <ButtonDropdown
+                variant="icon"
+                ariaLabel="More actions"
+                items={[{ id: 'delete', text: 'Delete meeting', iconName: 'remove' }]}
+                onItemClick={({ detail }) => {
+                  if (detail.id === 'delete') setDeleteRequest(Date.now());
+                }}
+              />
+              {deleteModal({ ...controls, hideTrigger: true, openRequest: deleteRequest })}
+            </SpaceBetween>
+          }
+        >
+          <span title={item.callId} data-testid="meeting-title">
+            {title}
+          </span>{' '}
+          <CopyToClipboard
+            variant="icon"
+            textToCopy={item.callId}
+            copyButtonAriaLabel="Copy the Meeting ID"
+            copySuccessText="Meeting ID copied"
+            copyErrorText="The Meeting ID could not be copied"
+          />
+        </Header>
+      }
+    >
+      <SpaceBetween size="s">
+        <SpaceBetween size="l" direction="horizontal" alignItems="center">
+          <StatusIndicator type={item.recordingStatusIcon}>{item.recordingStatusLabel}</StatusIndicator>
+          {started && (
+            <Meta label="Started" title={`${item.initiationTimeStamp} (UTC)`}>
+              <span data-testid="meeting-start">{started}</span>
+            </Meta>
+          )}
+          <Meta label="Duration">
+            <span data-testid="meeting-duration">{formatDuration(durationMillis)}</span>
+          </Meta>
+          {platform && (
+            <Meta label="Platform">
+              <span>{platform}</span>
+            </Meta>
+          )}
+          {item.owner && (
+            <Meta label="Owner">
+              <span>{item.owner}</span>
+            </Meta>
+          )}
+          <CostChip cost={cost} />
+        </SpaceBetween>
+        {shownSpeakers.length > 0 && (
+          <SpaceBetween size="xxs" direction="horizontal" alignItems="center">
+            <Box variant="span" color="text-body-secondary" fontSize="body-s">
+              Speakers
+            </Box>
+            {shownSpeakers.map((speaker) => (
+              <Badge key={speaker.key} color="grey">
+                {speaker.label}
+              </Badge>
+            ))}
+            {hiddenSpeakers > 0 && (
+              <Box variant="span" color="text-body-secondary" fontSize="body-s">
+                {`+${hiddenSpeakers} more`}
+              </Box>
+            )}
+            {onShowSpeakers && (
+              <Button variant="inline-link" onClick={onShowSpeakers}>
+                Name speakers
+              </Button>
+            )}
+          </SpaceBetween>
+        )}
+      </SpaceBetween>
+    </Container>
+  );
+};
+
+MeetingHeader.propTypes = {
+  // eslint-disable-next-line react/forbid-prop-types
+  item: PropTypes.object.isRequired,
+  durationMillis: PropTypes.number.isRequired,
+  platform: PropTypes.string,
+  speakers: PropTypes.arrayOf(PropTypes.shape({ key: PropTypes.string, label: PropTypes.string })),
+  cost: COST_SHAPE.isRequired,
+  // eslint-disable-next-line react/forbid-prop-types
+  consent: PropTypes.object,
+  // eslint-disable-next-line react/forbid-prop-types
+  callTranscriptPerCallId: PropTypes.object.isRequired,
+  getCallDetailsFromCallIds: PropTypes.func,
+  setToolsOpen: PropTypes.func,
+  onShowSpeakers: PropTypes.func,
+};
+
+export default MeetingHeader;

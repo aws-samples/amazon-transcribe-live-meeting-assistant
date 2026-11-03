@@ -7,8 +7,9 @@
 /**
  * The meeting's estimated cost, itemised.
  *
- * A collapsed section on the meeting page, like the IDP Accelerator's
- * "Estimated cost" section on a document. The figure is computed by the backend
+ * A collapsed section on the meeting page's Details tab, like the IDP
+ * Accelerator's "Estimated cost" section on a document; the cost chip in the
+ * page header opens the same breakdown in a popover. The figure is computed by the backend
  * on each read (getCallCost) from the meeting's metering records and the price
  * table, so the panel only asks and renders; it never prices anything itself.
  *
@@ -16,10 +17,8 @@
  * prices, with the lines it could not price, the regions it priced at another
  * region's rates, and what it leaves out. See docs/meeting-cost-estimate.md.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import PropTypes from 'prop-types';
-import { generateClient } from 'aws-amplify/api';
-import { ConsoleLogger } from 'aws-amplify/utils';
 import {
   Alert,
   Box,
@@ -32,7 +31,7 @@ import {
   Table,
 } from '@cloudscape-design/components';
 
-import getCallCost from '../../graphql/queries/getCallCost';
+import useCallCost, { defaultLoadCost } from '../../hooks/use-call-cost';
 import {
   estimateCaveats,
   formatCost,
@@ -42,14 +41,6 @@ import {
   tableRows,
   unitLabel,
 } from '../common/call-cost';
-
-const logger = new ConsoleLogger('CallCostPanel');
-
-const defaultLoadCost = async (callId) => {
-  const client = generateClient();
-  const response = await client.graphql({ query: getCallCost, variables: { CallId: callId } });
-  return response?.data?.getCallCost || null;
-};
 
 const DOCS_URL =
   'https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/blob/main/docs/meeting-cost-estimate.md';
@@ -112,59 +103,110 @@ const buildColumns = (currency) => [
   { id: 'cost', header: 'Estimated cost', cell: (row) => renderCost(row, currency) },
 ];
 
-const CallCostPanel = ({ callId, refreshKey = '', loadCost = defaultLoadCost }) => {
-  const [estimate, setEstimate] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [expanded, setExpanded] = useState(false);
+/**
+ * The estimate in a few words: "$0.1234 estimated", "No metering data", and so
+ * on. `short` leaves out the word "estimated", for the header's cost chip.
+ */
+export const costSummaryText = ({ estimate, error }, { short = false } = {}) => {
+  if (error) return 'Unavailable';
+  if (!estimate) return 'Loading…';
+  if (!estimate.RecordCount) return 'No metering data';
+  const incomplete = estimate.UnpricedCount > 0 ? ' (incomplete)' : '';
+  return `${formatCost(estimate.TotalCost, estimate.Currency || 'USD')}${short ? '' : ' estimated'}${incomplete}`;
+};
 
-  // Only the latest request may update the panel: a refresh pressed while a
-  // reload is in flight, or a different meeting opened mid-request, must not be
-  // overwritten by the older answer arriving last.
-  const latestRequest = useRef(0);
-
-  const refresh = useCallback(async () => {
-    if (!callId) return;
-    latestRequest.current += 1;
-    const request = latestRequest.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await loadCost(callId);
-      if (request === latestRequest.current) setEstimate(result);
-    } catch (err) {
-      logger.error('could not load the cost estimate', err);
-      if (request === latestRequest.current) {
-        // Cleared, so a failed refresh is not shown above an older table as if
-        // that table were current.
-        setEstimate(null);
-        setError(err?.errors?.[0]?.message || err?.message || 'The estimate could not be loaded.');
-      }
-    } finally {
-      if (request === latestRequest.current) setLoading(false);
-    }
-  }, [callId, loadCost]);
-
-  // Loaded when the meeting changes and whenever refreshKey does. The page keys
-  // it on the meeting's status and on its summary, because most of a meeting's
-  // usage is recorded as it ends and the summary's own usage is written just
-  // before the summary appears. The Virtual Participant's runtime is written as
-  // it leaves, which can be after both; the refresh button picks that up.
-  useEffect(() => {
-    refresh();
-  }, [refresh, refreshKey]);
-
+/** The itemised estimate, its caveats and where its prices come from. */
+export const CallCostBreakdown = ({ estimate = null, error = null }) => {
   const currency = estimate?.Currency || 'USD';
   const unmetered = estimate && !estimate.RecordCount;
-  let headerDescription = 'Loading…';
-  if (error) {
-    headerDescription = 'Unavailable';
-  } else if (unmetered) {
-    headerDescription = 'No metering data';
-  } else if (estimate) {
-    const incomplete = estimate.UnpricedCount > 0 ? ' (incomplete)' : '';
-    headerDescription = `${formatCost(estimate.TotalCost, currency)} estimated${incomplete}`;
-  }
+  return (
+    <SpaceBetween size="m">
+      {error && <Alert type="error">{error}</Alert>}
+      {unmetered && (
+        <Box>
+          No usage has been recorded for this meeting. Meetings held before cost metering was deployed have none, and a
+          meeting that has only just started may not have written any yet.
+        </Box>
+      )}
+      {estimate && !unmetered && (
+        <>
+          <Alert type="info" header="This is an estimate">
+            {`Computed from usage recorded for this meeting, at public on-demand list prices as of ` +
+              `${estimate.PricesAsOf || 'an unrecorded date'}, first volume tier. Your bill can differ: free ` +
+              'tier, Savings Plans, volume discounts and private pricing are not applied, and resources that ' +
+              'run whether or not a meeting is in progress are not included.'}
+          </Alert>
+          {estimateCaveats(estimate).map((text) => (
+            <Alert key={text} type="warning">
+              {text}
+            </Alert>
+          ))}
+          <Table
+            variant="embedded"
+            wrapLines
+            items={tableRows(estimate)}
+            trackBy="id"
+            columnDefinitions={buildColumns(currency)}
+            footer={
+              <Box textAlign="right" fontWeight="bold" fontSize="heading-s">
+                {`Total: ${formatCost(estimate.TotalCost, currency)}`}
+              </Box>
+            }
+          />
+          <ExpandableSection headerText="What this estimate does not include" variant="footer">
+            <ul>
+              {(estimate.NotIncluded || []).map((text) => (
+                <li key={text}>{text}</li>
+              ))}
+            </ul>
+          </ExpandableSection>
+          <ColumnLayout columns={3} variant="text-grid">
+            <div>
+              <Box variant="awsui-key-label">Prices as of</Box>
+              <div>{estimate.PricesAsOf || '—'}</div>
+            </div>
+            <div>
+              <Box variant="awsui-key-label">Region</Box>
+              <div>{estimate.Region || '—'}</div>
+            </div>
+            <div>
+              <Box variant="awsui-key-label">Computed</Box>
+              <div>{estimate.ComputedAt ? new Date(estimate.ComputedAt).toLocaleString() : '—'}</div>
+            </div>
+          </ColumnLayout>
+          <Box variant="small" color="text-body-secondary">
+            {estimate.PriceSource}{' '}
+            <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">
+              How this is estimated
+            </a>
+          </Box>
+        </>
+      )}
+    </SpaceBetween>
+  );
+};
+
+CallCostBreakdown.propTypes = {
+  // eslint-disable-next-line react/forbid-prop-types
+  estimate: PropTypes.object,
+  error: PropTypes.string,
+};
+
+/**
+ * The estimate as a section of the page. Reads it itself, or shows `state`
+ * from a useCallCost the page already holds (the meeting page does, so the
+ * header's cost chip and this section share one read).
+ */
+const CallCostPanel = ({
+  callId,
+  refreshKey = '',
+  loadCost = defaultLoadCost,
+  state = null,
+  defaultExpanded = false,
+}) => {
+  const own = useCallCost(state ? null : callId, refreshKey, loadCost);
+  const { estimate, loading, error, refresh } = state || own;
+  const [expanded, setExpanded] = useState(defaultExpanded);
 
   return (
     <ExpandableSection
@@ -172,74 +214,12 @@ const CallCostPanel = ({ callId, refreshKey = '', loadCost = defaultLoadCost }) 
       expanded={expanded}
       onChange={({ detail }) => setExpanded(detail.expanded)}
       headerText="Estimated cost"
-      headerDescription={headerDescription}
+      headerDescription={costSummaryText({ estimate, error })}
       headerActions={
         <Button iconName="refresh" variant="icon" ariaLabel="Refresh estimate" loading={loading} onClick={refresh} />
       }
     >
-      <SpaceBetween size="m">
-        {error && <Alert type="error">{error}</Alert>}
-        {unmetered && (
-          <Box>
-            No usage has been recorded for this meeting. Meetings held before cost metering was deployed have none, and
-            a meeting that has only just started may not have written any yet.
-          </Box>
-        )}
-        {estimate && !unmetered && (
-          <>
-            <Alert type="info" header="This is an estimate">
-              {`Computed from usage recorded for this meeting, at public on-demand list prices as of ` +
-                `${estimate.PricesAsOf || 'an unrecorded date'}, first volume tier. Your bill can differ: free ` +
-                'tier, Savings Plans, volume discounts and private pricing are not applied, and resources that ' +
-                'run whether or not a meeting is in progress are not included.'}
-            </Alert>
-            {estimateCaveats(estimate).map((text) => (
-              <Alert key={text} type="warning">
-                {text}
-              </Alert>
-            ))}
-            <Table
-              variant="embedded"
-              wrapLines
-              items={tableRows(estimate)}
-              trackBy="id"
-              columnDefinitions={buildColumns(currency)}
-              footer={
-                <Box textAlign="right" fontWeight="bold" fontSize="heading-s">
-                  {`Total: ${formatCost(estimate.TotalCost, currency)}`}
-                </Box>
-              }
-            />
-            <ExpandableSection headerText="What this estimate does not include" variant="footer">
-              <ul>
-                {(estimate.NotIncluded || []).map((text) => (
-                  <li key={text}>{text}</li>
-                ))}
-              </ul>
-            </ExpandableSection>
-            <ColumnLayout columns={3} variant="text-grid">
-              <div>
-                <Box variant="awsui-key-label">Prices as of</Box>
-                <div>{estimate.PricesAsOf || '—'}</div>
-              </div>
-              <div>
-                <Box variant="awsui-key-label">Region</Box>
-                <div>{estimate.Region || '—'}</div>
-              </div>
-              <div>
-                <Box variant="awsui-key-label">Computed</Box>
-                <div>{estimate.ComputedAt ? new Date(estimate.ComputedAt).toLocaleString() : '—'}</div>
-              </div>
-            </ColumnLayout>
-            <Box variant="small" color="text-body-secondary">
-              {estimate.PriceSource}{' '}
-              <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">
-                How this is estimated
-              </a>
-            </Box>
-          </>
-        )}
-      </SpaceBetween>
+      <CallCostBreakdown estimate={estimate} error={error} />
     </ExpandableSection>
   );
 };
@@ -250,6 +230,15 @@ CallCostPanel.propTypes = {
   refreshKey: PropTypes.string,
   // Replaceable for tests.
   loadCost: PropTypes.func,
+  // A useCallCost result to show instead of reading the estimate here.
+  state: PropTypes.shape({
+    // eslint-disable-next-line react/forbid-prop-types
+    estimate: PropTypes.object,
+    loading: PropTypes.bool,
+    error: PropTypes.string,
+    refresh: PropTypes.func,
+  }),
+  defaultExpanded: PropTypes.bool,
 };
 
 export default CallCostPanel;

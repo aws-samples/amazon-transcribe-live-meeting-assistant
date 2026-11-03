@@ -111,11 +111,14 @@ After starting a stream or dispatching a Virtual Participant, your meeting appea
 
 ![Meeting appearing in the meetings list](../images/readme-stream-meeting-in-list.png)
 
-Each meeting in the list shows its current status (in progress, completed, etc.). Click on a meeting to open the detailed view, which includes:
+Each meeting in the list shows its current status (in progress, completed, etc.). Click on a meeting to open the detailed view: a header with the meeting's name, status, start time, length and estimated cost, and tabs under it:
 
-- The live or completed transcript with speaker labels and timestamps.
-- The meeting assistant chat panel.
-- Summary and action item sections.
+- **Transcript** (the tab it opens on) — the live or completed transcript with speaker labels and timestamps, and the meeting assistant chat panel beside it.
+- **Overview** — the summary, with its action items, the chapters and the agenda.
+- **Screen share** — the shared screen's slides, for a meeting whose screen was captured.
+- **Details** — speaker naming, consent, the cost breakdown, the recordings and the meeting's attributes.
+
+The screenshot below predates the tabs; see [Meeting Detail Page](web-ui-guide.md#meeting-detail-page) for the current layout.
 
 ![Meeting transcript view](../images/readme-transcription.png)
 

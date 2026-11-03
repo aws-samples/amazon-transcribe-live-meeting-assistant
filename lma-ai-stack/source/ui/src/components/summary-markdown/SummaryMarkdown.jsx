@@ -17,6 +17,12 @@
  * A frame that cannot be read (expired with the meeting's retention, or never
  * stored) shows as its alt text. See docs/meeting-video.md.
  *
+ * The meeting page's Overview tab asks for the pictures differently
+ * (`keyframes`): as a link that opens the frame on the page's Screen share tab
+ * ('link'), or as their alt text alone ('text', for a meeting whose frames are
+ * gone), so that a summary of a long presentation is not a column of slides.
+ * Neither reads any frame.
+ *
  * Everything else renders as every other summary surface does: the shared
  * rehype chain, with the one addition that an image's src may use the
  * `keyframe:` scheme.
@@ -27,6 +33,7 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { ConsoleLogger } from 'aws-amplify/utils';
+import { Button } from '@cloudscape-design/components';
 
 import { FRAME_ID, loadKeyframe, loadKeyframes } from '../../hooks/use-chat-keyframe-links';
 import './SummaryMarkdown.css';
@@ -145,7 +152,7 @@ KeyframeImage.propTypes = {
  * themselves are held by the summary's read (SummaryFrames), and a re-read after
  * a lapsed link by the picture.
  */
-const componentsFor = (callId, loadFrame) => {
+const componentsFor = (callId, loadFrame, keyframes, onKeyframeSelect) => {
   // react-markdown's own props: its hast `node`, which is not a DOM attribute, and
   // the element's attributes.
   /* eslint-disable react/prop-types */
@@ -153,7 +160,23 @@ const componentsFor = (callId, loadFrame) => {
   const SummaryImage = ({ node, src, alt, ...rest }) => {
     if (typeof src === 'string' && src.startsWith(KEYFRAME_SCHEME)) {
       const frameId = src.slice(KEYFRAME_SCHEME.length);
-      if (!callId || !FRAME_ID.test(frameId)) return <span className="summary-keyframe-text">{alt}</span>;
+      if (!callId || !FRAME_ID.test(frameId) || keyframes === 'text') {
+        return <span className="summary-keyframe-text">{alt}</span>;
+      }
+      if (keyframes === 'link') {
+        return (
+          <span className="summary-keyframe-link" data-keyframe-id={frameId}>
+            <Button
+              variant="inline-link"
+              iconName="file-open"
+              ariaLabel={`${alt || 'Shared screen'}: show it on the Screen share tab`}
+              onClick={() => onKeyframeSelect?.(frameId)}
+            >
+              {alt || 'Shared screen'}
+            </Button>
+          </span>
+        );
+      }
       return <KeyframeImage callId={callId} frameId={frameId} alt={alt} loadFrame={loadFrame} />;
     }
     // eslint-disable-next-line jsx-a11y/alt-text, react/jsx-props-no-spreading
@@ -163,9 +186,23 @@ const componentsFor = (callId, loadFrame) => {
   return { img: SummaryImage };
 };
 
-const SummaryMarkdown = ({ callId = '', children = '', loadFrame = loadKeyframe, loadFrames = loadKeyframes }) => {
-  const components = useMemo(() => componentsFor(callId, loadFrame), [callId, loadFrame]);
-  const frameIds = useMemo(() => frameIdsIn(children).filter((id) => FRAME_ID.test(id)), [children]);
+const SummaryMarkdown = ({
+  callId = '',
+  children = '',
+  loadFrame = loadKeyframe,
+  loadFrames = loadKeyframes,
+  keyframes = 'image',
+  onKeyframeSelect = undefined,
+}) => {
+  const components = useMemo(
+    () => componentsFor(callId, loadFrame, keyframes, onKeyframeSelect),
+    [callId, loadFrame, keyframes, onKeyframeSelect],
+  );
+  // Only pictures are read; a link or a caption needs no frame.
+  const frameIds = useMemo(
+    () => (keyframes === 'image' ? frameIdsIn(children).filter((id) => FRAME_ID.test(id)) : []),
+    [children, keyframes],
+  );
   const frameKey = frameIds.join(' ');
   const [frames, setFrames] = useState({});
 
@@ -208,6 +245,10 @@ SummaryMarkdown.propTypes = {
   children: PropTypes.string,
   loadFrame: PropTypes.func,
   loadFrames: PropTypes.func,
+  // How a key frame is shown: as the picture, as a link to the Screen share tab, or as its alt text.
+  keyframes: PropTypes.oneOf(['image', 'link', 'text']),
+  // Called with the FrameId when a 'link' is followed.
+  onKeyframeSelect: PropTypes.func,
 };
 
 export default SummaryMarkdown;
