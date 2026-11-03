@@ -121,15 +121,16 @@ enum CallStatus {
 	ENDED
 }
 
+# The two speech channels: REMOTE is everyone else in the meeting (the meeting
+# audio), LOCAL the local side (the user's microphone, or a Virtual Participant's
+# voice assistant). See lma_channels in the configuration layer. CALLER and AGENT
+# are deprecated: the names LMA before 0.4.0 wrote for REMOTE and LOCAL, kept so
+# that segments stored by those versions still serialize; nothing writes them,
+# and every reader treats them as REMOTE and LOCAL. (AppSync's schema parser
+# refuses a comment between enum values, so this one sits above the enum.)
 enum Channel {
-	# The two speech channels: REMOTE is everyone else in the meeting (the
-	# meeting audio), LOCAL the local side (the user's microphone, or a Virtual
-	# Participant's voice assistant). See lma_channels in the configuration layer.
 	REMOTE
 	LOCAL
-	# Deprecated: the names LMA before 0.4.0 wrote for REMOTE and LOCAL. Kept so
-	# that segments stored by those versions still serialize; nothing writes them,
-	# and every reader treats them as REMOTE and LOCAL.
 	CALLER
 	AGENT
 	AGENT_VOICETONE

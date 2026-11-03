@@ -153,14 +153,26 @@ def test_channel_enum_declares_the_channels_written_and_the_older_speech_names(s
 
 
 def test_the_older_speech_channel_names_are_marked_deprecated_in_the_schema() -> None:
+    """The comment above the enum names both old values as deprecated.
+
+    It sits above the enum, not between its values: AppSync refuses that.
+    """
     text = SCHEMA.read_text()
-    enum = text[text.index("enum Channel {") :]
-    enum = enum[: enum.index("}")]
-    deprecated_at = enum.index("Deprecated")
-    for name in SPEECH_CHANNELS:
-        assert enum.index(f"\t{name}\n") < deprecated_at, name
+    start = text.index("enum Channel {")
+    comment = text[text.rindex("\n\n", 0, start) : start]
+    assert "deprecated" in comment
     for name in DEPRECATED_SPEECH_CHANNELS:
-        assert enum.index(f"\t{name}\n") > deprecated_at, name
+        assert name in comment, name
+
+
+def test_no_enum_holds_a_comment_between_its_values() -> None:
+    """AppSync's schema parser refuses a `#` comment inside an enum body.
+
+    graphql-core accepts it, so only a deploy would find out: the schema update
+    fails with "Failed to parse schema document" and the stack rolls back.
+    """
+    for name, body in re.findall(r"\benum\s+(\w+)\s*\{([^}]*)\}", SCHEMA.read_text()):
+        assert "#" not in body, f"enum {name} has a comment between its values"
 
 
 def test_a_new_segment_may_carry_either_name_of_a_speech_channel(schema) -> None:
