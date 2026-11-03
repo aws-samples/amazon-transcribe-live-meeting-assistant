@@ -5,7 +5,7 @@
  */
 // The configuration as text, for the page's JSON and YAML views, and the
 // setting-by-setting comparison of two profiles.
-import { dump, JSON_SCHEMA, load } from 'js-yaml';
+import { CORE_SCHEMA, dump, load } from 'js-yaml';
 
 import { clone, deepEqual, effectiveSection, hasAt, isObject, offered, setAt } from './config-model';
 
@@ -42,7 +42,9 @@ export const configurationText = (sections, values, format, settings = {}) => {
 export const readConfigurationText = (text, format, sections, defaults = {}, settings = {}, current = {}) => {
   let parsed;
   try {
-    parsed = format === 'yaml' ? load(text, { schema: JSON_SCHEMA }) : JSON.parse(text);
+    // The YAML 1.2 core schema: booleans, nulls and numbers in their usual
+    // spellings, with no dates or other YAML-only types.
+    parsed = format === 'yaml' ? load(text, { schema: CORE_SCHEMA }) : JSON.parse(text);
   } catch (err) {
     const where = err.mark ? ` (line ${err.mark.line + 1}, column ${err.mark.column + 1})` : '';
     throw new Error(`It is not valid ${format === 'yaml' ? 'YAML' : 'JSON'}${where}: ${err.reason || err.message}`);
