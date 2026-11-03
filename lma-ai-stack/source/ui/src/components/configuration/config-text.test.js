@@ -68,6 +68,23 @@ describe('readConfigurationText', () => {
     });
   });
 
+  it('reads YAML core-schema scalars as their types, and dates and YAML 1.1 words as text', () => {
+    const result = readConfigurationText(
+      'language_models:\n  a: True\n  b: 0x1F\n  c: ~\n  d: 1.5\n  e: 2001-12-14\n  f: yes\n  g: on\n',
+      'yaml',
+      [{ name: 'language_models' }],
+    );
+    expect(result.values.language_models).toEqual({
+      a: true,
+      b: 31,
+      c: null,
+      d: 1.5,
+      e: '2001-12-14',
+      f: 'yes',
+      g: 'on',
+    });
+  });
+
   it('says where JSON that does not parse goes wrong', () => {
     expect(() => readConfigurationText('{"language_models": ', 'json', sections)).toThrow(/not valid JSON/);
   });
