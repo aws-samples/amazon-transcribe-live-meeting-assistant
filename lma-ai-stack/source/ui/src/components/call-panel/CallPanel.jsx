@@ -77,6 +77,7 @@ import {
   SEEK_STEP_SECONDS,
   chooseMeetingMedia,
   clockFor,
+  defaultMediaPreference,
   currentSegmentId,
   playerShortcut,
   recordingSecondsForFrame,
@@ -2260,39 +2261,53 @@ export const CallPanel = ({
 
   // How many key frames the strip has loaded. It decides whether the meeting
   // has a Screen share tab, and the tab's label.
-  const [keyframes, setKeyframes] = useState({ count: 0, more: false });
+  const [keyframes, setKeyframes] = useState({ count: 0, more: false, loaded: false });
   useEffect(() => {
-    setKeyframes({ count: 0, more: false });
+    setKeyframes({ count: 0, more: false, loaded: false });
   }, [item.callId]);
   const hasKeyframes = keyframes.count > 0;
   const [activeTab, setActiveTab] = useMeetingTab({ inUrl: tabInUrl, isLive, hasKeyframes });
   const timelineNode = useDetachedNode();
 
+  // The Virtual Participant that joined this meeting, if one did: for the
+  // platform in the header and, once its browser can be watched, the live view.
+  const [meetingVp, setMeetingVp] = useState(null);
+  const [loadingVP, setLoadingVP] = useState(false);
+  const vpData = meetingVp?.vncReady ? meetingVp : null;
+
   // The meeting's one player, above the transcript (meeting-player/). It plays
   // the video recording when there is one and the audio recording otherwise,
-  // and nothing while the meeting is live; the viewer can switch to the audio
-  // when there are both.
-  const [mediaPreference, setMediaPreference] = useState('video');
+  // and nothing while the meeting is live; the viewer can switch between them
+  // when there are both. The video recording's clock against the
+  // transcript's comes from the key frames (each carries both); empty until
+  // the strip has loaded frames that do.
+  const [clockAnchors, setClockAnchors] = useState([]);
+  // The viewer's own choice of recording; null until they make one.
+  const [chosenMedia, setChosenMedia] = useState(null);
   useEffect(() => {
-    setMediaPreference('video');
+    setClockAnchors([]);
+    setChosenMedia(null);
   }, [item.callId]);
+  // Without a choice, a Virtual Participant's video with no key frames to
+  // line it up gives way to the audio recording (defaultMediaPreference).
+  const mediaDefault = defaultMediaPreference({
+    hasBoth: Boolean(item.recordingUrl && item.videoRecordingUrl),
+    isVirtualParticipant: Boolean(meetingVp),
+    framesLoaded: keyframes.loaded,
+    hasAnchors: clockAnchors.length > 0,
+  });
   const media = chooseMeetingMedia({
     recordingUrl: item.recordingUrl,
     videoRecordingUrl: item.videoRecordingUrl,
     isLive,
-    prefer: mediaPreference,
+    prefer: chosenMedia || mediaDefault.prefer,
   });
+  const audioDefaultReason = !chosenMedia && media?.kind === 'audio' ? mediaDefault.reason : null;
   const mediaKind = media?.kind || null;
   const canPlayRecording = Boolean(media);
   const playerRef = useRef(null);
   const playback = usePlaybackStore();
 
-  // The video recording's clock against the transcript's, from the key frames
-  // (each carries both); empty until the strip has loaded frames that do.
-  const [clockAnchors, setClockAnchors] = useState([]);
-  useEffect(() => {
-    setClockAnchors([]);
-  }, [item.callId]);
   const onClockAnchors = useCallback((anchors) => {
     setClockAnchors((previous) => (sameAnchors(previous, anchors) ? previous : anchors));
   }, []);
@@ -2358,8 +2373,12 @@ export const CallPanel = ({
     },
     [setActiveTab, seekPlayer],
   );
-  const onFramesChange = useCallback(({ count, more }) => {
-    setKeyframes((previous) => (previous.count === count && previous.more === more ? previous : { count, more }));
+  const onFramesChange = useCallback(({ count, more, loaded }) => {
+    setKeyframes((previous) =>
+      previous.count === count && previous.more === more && previous.loaded === Boolean(loaded)
+        ? previous
+        : { count, more, loaded: Boolean(loaded) },
+    );
   }, []);
 
   // Chapters from the summary, on the transcript's clock.
@@ -2378,24 +2397,38 @@ export const CallPanel = ({
     (seconds) => seekPlayer({ transcriptSeconds: seconds, play: true }),
     [seekPlayer],
   );
-  // The Details tab's "Play": the Transcript tab, playing from where the player is.
-  const playOnTranscriptTab = useCallback(() => {
-    setActiveTab(TAB_TRANSCRIPT);
-    playerRef.current?.seek(toRecordingSeconds(clockRef.current, playback.get().engaged ? playback.get().seconds : 0), {
-      play: true,
-    });
-  }, [setActiveTab, playback]);
-
-  // Switching between the video and the audio recording keeps the place.
+  // The Details tab's "Play" on a recording: the Transcript tab, playing that
+  // recording from where the player is.
+  // A change of recording -- chosen, or the default settling -- keeps the
+  // place. Read here, while rendering: the player resets the position when
+  // its recording changes, and its effects run before this component's.
   const pendingSwitchRef = useRef(null);
-  const switchMedia = useCallback(
+  const playOnTranscriptTab = useCallback(
     (kind) => {
-      const { seconds, playing, engaged } = playback.get();
-      pendingSwitchRef.current = engaged ? { seconds, playing } : null;
-      setMediaPreference(kind);
+      setActiveTab(TAB_TRANSCRIPT);
+      const state = playback.get();
+      const seconds = state.engaged ? state.seconds : 0;
+      if (kind && kind !== mediaKind) {
+        // Played once the other recording has loaded, from the same place.
+        pendingSwitchRef.current = { seconds, playing: true };
+        setChosenMedia(kind);
+        return;
+      }
+      playerRef.current?.seek(toRecordingSeconds(clockRef.current, seconds), { play: true });
     },
-    [playback],
+    [setActiveTab, playback, mediaKind],
   );
+  const shownMediaRef = useRef({ callId: item.callId, url: media?.url });
+  if (shownMediaRef.current.url !== media?.url) {
+    const { seconds, playing, engaged } = playback.get();
+    const sameMeeting = shownMediaRef.current.callId === item.callId;
+    if (!sameMeeting) {
+      pendingSwitchRef.current = null;
+    } else if (!pendingSwitchRef.current && engaged && shownMediaRef.current.url) {
+      pendingSwitchRef.current = { seconds, playing };
+    }
+    shownMediaRef.current = { callId: item.callId, url: media?.url };
+  }
   useEffect(() => {
     const pending = pendingSwitchRef.current;
     pendingSwitchRef.current = null;
@@ -2428,12 +2461,6 @@ export const CallPanel = ({
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [activeTab, mediaKind]);
-
-  // The Virtual Participant that joined this meeting, if one did: for the
-  // platform in the header and, once its browser can be watched, the live view.
-  const [meetingVp, setMeetingVp] = useState(null);
-  const [loadingVP, setLoadingVP] = useState(false);
-  const vpData = meetingVp?.vncReady ? meetingVp : null;
 
   // Fetch Virtual Participant data for this call
   useEffect(() => {
@@ -2652,7 +2679,8 @@ export const CallPanel = ({
               chapters={chapters}
               store={playback}
               alternative={media.alternative}
-              onSwitch={switchMedia}
+              onSwitch={setChosenMedia}
+              hint={audioDefaultReason}
             />
           ) : null
         }
@@ -2683,6 +2711,7 @@ export const CallPanel = ({
         durationMillis={durationMillis}
         platform={platform}
         onPlay={canPlayRecording ? playOnTranscriptTab : undefined}
+        audioDefaultReason={audioDefaultReason}
       />
       <SpeakerIdentitiesPanel
         item={item}

@@ -402,7 +402,8 @@ describe('VideoTimeline', () => {
     render(
       <VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} onFramesChange={onFramesChange} />,
     );
-    await waitFor(() => expect(onFramesChange).toHaveBeenLastCalledWith({ count: 2, more: true }));
+    expect(onFramesChange).toHaveBeenCalledWith({ count: 0, more: false, loaded: false });
+    await waitFor(() => expect(onFramesChange).toHaveBeenLastCalledWith({ count: 2, more: true, loaded: true }));
   });
 
   it('asks for the transcript to be shown only from "Show in transcript"', async () => {

@@ -13,6 +13,7 @@ import {
   clockAnchorsFromFrames,
   clockFor,
   currentSegmentId,
+  defaultMediaPreference,
   formatClock,
   offsetAtTranscript,
   playerShortcut,
@@ -260,5 +261,23 @@ describe('playerShortcut', () => {
     expect(playerShortcut(key(' ', document.body, { ctrlKey: true }))).toBeNull();
     expect(playerShortcut(key('ArrowLeft', document.body, { altKey: true }))).toBeNull();
     expect(playerShortcut(key(' ', document.body, { defaultPrevented: true }))).toBeNull();
+  });
+});
+
+describe('defaultMediaPreference', () => {
+  const vp = { hasBoth: true, isVirtualParticipant: true, framesLoaded: true };
+
+  it('starts a Virtual Participant meeting whose video has no key frames on the audio, saying why', () => {
+    const choice = defaultMediaPreference({ ...vp, hasAnchors: false });
+    expect(choice.prefer).toBe('audio');
+    expect(choice.reason).toMatch(/no key frames/);
+  });
+
+  it('starts on the video otherwise', () => {
+    expect(defaultMediaPreference({ ...vp, hasAnchors: true })).toEqual({ prefer: 'video', reason: null });
+    expect(defaultMediaPreference({ ...vp, isVirtualParticipant: false }).prefer).toBe('video');
+    expect(defaultMediaPreference({ ...vp, hasBoth: false }).prefer).toBe('video');
+    // Not before the key frames have been read.
+    expect(defaultMediaPreference({ ...vp, framesLoaded: false }).prefer).toBe('video');
   });
 });

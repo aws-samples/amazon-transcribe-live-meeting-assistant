@@ -120,6 +120,29 @@ export const chooseMeetingMedia = ({ recordingUrl, videoRecordingUrl, isLive = f
   return null;
 };
 
+/** Why the player starts on the audio recording, said beside it. */
+export const AUDIO_DEFAULT_REASON =
+  "Playing the audio recording, which lines up with the transcript. This Virtual Participant meeting's video has " +
+  'no key frames to line it up with, and its video starts before transcription. Choose Video to watch it.';
+
+/**
+ * Which recording the player starts on when the viewer has not chosen: the
+ * video, except for a Virtual Participant meeting whose video has no key
+ * frame to line it up with -- that video starts before transcription by an
+ * unknown time, while the audio recording starts with it. Decided only once
+ * the key frames have loaded, so a meeting is not switched for frames still
+ * on their way. Returns { prefer, reason } (reason: why the audio, or null).
+ */
+export const defaultMediaPreference = ({
+  hasBoth = false,
+  isVirtualParticipant = false,
+  framesLoaded = false,
+  hasAnchors = false,
+} = {}) =>
+  hasBoth && isVirtualParticipant && framesLoaded && !hasAnchors
+    ? { prefer: 'audio', reason: AUDIO_DEFAULT_REASON }
+    : { prefer: 'video', reason: null };
+
 /** The clock of the recording a player plays: anchored on the key frames for video, the transcript's for audio. */
 export const clockFor = (kind, anchors) => (kind === 'video' && anchors?.length ? { anchors } : IDENTITY_CLOCK);
 

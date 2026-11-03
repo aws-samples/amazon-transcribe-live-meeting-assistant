@@ -245,11 +245,15 @@ player converts between them:
 Each [key frame](meeting-video.md) records both its time in the transcript and
 its place in the video recording, so the player lines the video up using the key
 frame nearest before each time; this follows a Virtual Participant's video
-across its pauses as well. A video recording with no key frames is played as if
-it started with transcription, which, for a Virtual Participant, plays each
-point earlier in the meeting than the transcript line it was started from, by
-the time it took to join; **Audio only**
-plays the recording that lines up. A video stored without sound (when a
+across its pauses as well. A Virtual Participant meeting whose video has no key
+frames therefore starts on the audio recording, which lines up with the
+transcript: the player says why, and so does the video recording on the
+**Details** tab. **Video** still plays the video, as if it started with
+transcription, which plays each point earlier in the meeting than the
+transcript line it was started from, by the time the Virtual Participant took
+to join. The choice is made once the key frames have loaded, so the player can
+change to the audio a moment after the page opens. The video of any other
+source has no such offset and plays without key frames. A video stored without sound (when a
 Virtual Participant's audio was not ready as its recording started, or when the
 desktop app's video could not be combined with the audio) plays silently, and
 **Audio only** plays the sound. With more than a hundred key frames, only the

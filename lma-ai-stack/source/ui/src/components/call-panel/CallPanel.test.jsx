@@ -311,6 +311,52 @@ describe('the player kept in step with the transcript', () => {
     expect(screen.getByRole('button', { name: 'Open the audio recording file in a new tab' })).toBeTruthy();
   });
 
+  describe('a Virtual Participant meeting', () => {
+    const vpJoined = () => {
+      responses.vps = [{ id: 'vp-1', CallId: ITEM.callId, meetingPlatform: 'ZOOM', vncReady: false }];
+    };
+
+    it('plays the audio when its video has no key frames, says why, and keeps the video selectable', async () => {
+      vpJoined();
+      renderPage({ item: RECORDED, transcript: LINES });
+      await waitFor(() => expect(media()?.tagName).toBe('AUDIO'));
+      expect(screen.getByTestId('meeting-player-hint').textContent).toMatch(/no key frames/);
+      fireEvent.click(screen.getByRole('tab', { name: 'Details' }));
+      expect(screen.getByText(/plays the audio recording for this meeting/)).toBeTruthy();
+      fireEvent.click(screen.getByRole('tab', { name: 'Transcript' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Video' }));
+      await waitFor(() => expect(media()?.tagName).toBe('VIDEO'));
+      expect(screen.queryByTestId('meeting-player-hint')).toBeNull();
+    });
+
+    it('plays the video when its key frames line it up', async () => {
+      vpJoined();
+      responses.frames = [keyframe(300, 330)];
+      renderPage({ item: RECORDED, transcript: LINES });
+      await screen.findByRole('tab', { name: 'Screen share (1)' });
+      await waitFor(() => expect(media()?.tagName).toBe('VIDEO'));
+      expect(screen.queryByTestId('meeting-player-hint')).toBeNull();
+    });
+
+    it('plays the video recording from the Details tab when asked', async () => {
+      vpJoined();
+      renderPage({ item: RECORDED, transcript: LINES, url: '/calls/m?tab=details' });
+      await waitFor(() => expect(media()?.tagName).toBe('AUDIO'));
+      fireEvent.click(screen.getByRole('button', { name: 'Play the video recording' }));
+      expect(selectedTab().textContent).toBe('Transcript');
+      await waitFor(() => expect(media()?.tagName).toBe('VIDEO'));
+      await waitFor(() => expect(media().getAttribute('src')).toBe('https://signed.example/x'));
+      loadMedia(media(), 1200);
+      expect(media().paused).toBe(false);
+    });
+  });
+
+  it('plays the video of a meeting without a Virtual Participant even with no key frames', async () => {
+    await openRecording();
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(3));
+    expect(media().tagName).toBe('VIDEO');
+  });
+
   it('plays the audio when that is the only recording', async () => {
     await openRecording({ item: { ...RECORDED, videoRecordingUrl: '' } });
     expect(media().tagName).toBe('AUDIO');

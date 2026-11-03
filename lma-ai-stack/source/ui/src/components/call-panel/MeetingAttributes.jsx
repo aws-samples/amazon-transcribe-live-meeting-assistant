@@ -100,7 +100,7 @@ RecordingActions.propTypes = {
   sign: PropTypes.func,
 };
 
-const MeetingAttributes = ({ item, durationMillis, platform = '', onPlay = undefined }) => {
+const MeetingAttributes = ({ item, durationMillis, platform = '', onPlay = undefined, audioDefaultReason = null }) => {
   const recordingsReady = item.recordingStatusLabel !== IN_PROGRESS_STATUS;
   const storedMillis = Number(item.totalConversationDurationMillis) || 0;
   const sharedWith = sharedWithEntries(item.sharedWith);
@@ -139,17 +139,23 @@ const MeetingAttributes = ({ item, durationMillis, platform = '', onPlay = undef
   if (item.videoRecordingUrl && recordingsReady) {
     items.push({
       label: 'Video recording',
-      value: <RecordingActions url={item.videoRecordingUrl} kind="video" onPlay={onPlay} />,
+      value: (
+        <>
+          <RecordingActions url={item.videoRecordingUrl} kind="video" onPlay={onPlay && (() => onPlay('video'))} />
+          {audioDefaultReason && (
+            <Box variant="small" color="text-body-secondary">
+              The Transcript tab plays the audio recording for this meeting: its video has no key frames to line it up
+              with the transcript, and starts before transcription.
+            </Box>
+          )}
+        </>
+      ),
     });
   }
   if (item.recordingUrl && recordingsReady) {
     items.push({
       label: 'Audio recording',
-      value: (
-        // The page's player plays the video when there is one; the audio is
-        // played from the player's Audio only switch.
-        <RecordingActions url={item.recordingUrl} kind="audio" onPlay={item.videoRecordingUrl ? undefined : onPlay} />
-      ),
+      value: <RecordingActions url={item.recordingUrl} kind="audio" onPlay={onPlay && (() => onPlay('audio'))} />,
     });
   }
 
@@ -166,6 +172,7 @@ MeetingAttributes.propTypes = {
   durationMillis: PropTypes.number.isRequired,
   platform: PropTypes.string,
   onPlay: PropTypes.func,
+  audioDefaultReason: PropTypes.string,
 };
 
 export default MeetingAttributes;

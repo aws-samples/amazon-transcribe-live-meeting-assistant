@@ -50,6 +50,7 @@ const MeetingPlayer = ({
   store = null,
   alternative = null,
   onSwitch = undefined,
+  hint = null,
   sign = generateS3PresignedUrl,
 }) => {
   const { currentCredentials } = useAppContext();
@@ -393,6 +394,11 @@ const MeetingPlayer = ({
           </Box>
         )}
       </SpaceBetween>
+      {hint && (
+        <Box variant="small" color="text-body-secondary">
+          <span data-testid="meeting-player-hint">{hint}</span>
+        </Box>
+      )}
     </section>
   );
 };
@@ -411,6 +417,8 @@ MeetingPlayer.propTypes = {
   // eslint-disable-next-line react/forbid-prop-types
   store: PropTypes.object,
   alternative: PropTypes.oneOf(['audio', 'video', null]),
+  // Why this recording is the one playing, when that is not the obvious one.
+  hint: PropTypes.string,
   onSwitch: PropTypes.func,
   sign: PropTypes.func,
 };

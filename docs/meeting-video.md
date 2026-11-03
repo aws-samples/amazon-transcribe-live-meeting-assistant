@@ -176,10 +176,10 @@ How it is built:
   from a chapter, the page converts the time to the recording's clock using the
   key frame nearest before it, as each frame carries both. A Virtual
   Participant's video starts before transcription and falls further ahead at
-  each pause or reconnection, which the frames follow. A video without key
-  frames plays from the transcript time, which for a Virtual Participant lands
-  earlier in the meeting than the chapter, by the time it took to join. The audio recording starts with
-  transcription, so it needs no conversion. See
+  each pause or reconnection, which the frames follow. A Virtual
+  Participant meeting whose video has no key frames plays the audio recording
+  by default for this reason. The audio recording starts with transcription,
+  so it needs no conversion. See
   [Lining the recording up with the transcript](web-ui-guide.md#lining-the-recording-up-with-the-transcript).
 - The page reads the section from a generated summary, or from under its
   **CHAPTERS** heading once the summary has been edited by hand. It accepts the

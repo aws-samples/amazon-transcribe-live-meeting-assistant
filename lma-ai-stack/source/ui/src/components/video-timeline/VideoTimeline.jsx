@@ -291,10 +291,11 @@ const VideoTimeline = ({
     if (onClockAnchors) onClockAnchors(clockAnchorsFromFrames(frames));
   }, [frames, onClockAnchors]);
 
-  // How many frames are loaded, and whether there are more, for the page's tab label.
+  // How many frames are loaded, whether there are more, and whether the first
+  // page has been read (`loaded`), for the page's tab label and its player.
   useEffect(() => {
-    if (onFramesChange) onFramesChange({ count: frames.length, more: Boolean(nextToken) });
-  }, [frames.length, nextToken, onFramesChange]);
+    if (onFramesChange) onFramesChange({ count: frames.length, more: Boolean(nextToken), loaded });
+  }, [frames.length, nextToken, loaded, onFramesChange]);
 
   // A frame selected from elsewhere: shown large, and its thumbnail brought into
   // view. Read by id when it is on a page not loaded yet.
