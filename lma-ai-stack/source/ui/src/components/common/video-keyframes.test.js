@@ -11,7 +11,7 @@ import {
   frameMatches,
   matchSnippet,
   mergeKeyframes,
-  recordingSecondsFor,
+  frameIdSeconds,
   scrollTranscriptToTime,
   segmentIndexForTime,
 } from './video-keyframes';
@@ -46,12 +46,15 @@ describe('formatFrameTime', () => {
   });
 });
 
-describe('recordingSecondsFor', () => {
-  it('prefers the position in the recording, and falls back to the transcript time', () => {
-    expect(recordingSecondsFor({ Timestamp: 30, VideoOffset: 41.5 })).toBe(41.5);
-    expect(recordingSecondsFor({ Timestamp: 30, VideoOffset: 0 })).toBe(0);
-    expect(recordingSecondsFor({ Timestamp: 30, VideoOffset: null })).toBe(30);
-    expect(recordingSecondsFor({ Timestamp: 30 })).toBe(30);
+describe('frameIdSeconds', () => {
+  it('reads the transcript time from the front of a FrameId', () => {
+    expect(frameIdSeconds('0000030000-ab12cd')).toBe(30);
+    expect(frameIdSeconds('0001234567-ab12cd')).toBe(1234.567);
+  });
+
+  it('gives null for an id without one', () => {
+    expect(frameIdSeconds('frame-1')).toBeNull();
+    expect(frameIdSeconds(undefined)).toBeNull();
   });
 });
 

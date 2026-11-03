@@ -316,13 +316,21 @@ describe('VideoTimeline', () => {
     expect(screen.queryByText('No new slide')).toBeNull();
   });
 
-  it('tells the page the recording clock from a frame that has both times', async () => {
-    const loadFrames = vi.fn().mockResolvedValue({ VideoKeyframes: [frame(30000)], nextToken: null });
-    const onClockOffset = vi.fn();
+  it('tells the page both clocks of every frame that has them, as anchors in time order', async () => {
+    const loadFrames = vi.fn().mockResolvedValue({
+      VideoKeyframes: [frame(90000), frame(30000), { ...frame(60000), VideoOffset: null }],
+      nextToken: null,
+    });
+    const onClockAnchors = vi.fn();
     render(
-      <VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} onClockOffset={onClockOffset} />,
+      <VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} onClockAnchors={onClockAnchors} />,
     );
-    await waitFor(() => expect(onClockOffset).toHaveBeenCalledWith(-10));
+    await waitFor(() =>
+      expect(onClockAnchors).toHaveBeenLastCalledWith([
+        { transcript: 30, recording: 40 },
+        { transcript: 90, recording: 100 },
+      ]),
+    );
   });
 
   it('exports every frame, read fresh, as a deck', async () => {
@@ -394,7 +402,8 @@ describe('VideoTimeline', () => {
     render(
       <VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} onFramesChange={onFramesChange} />,
     );
-    await waitFor(() => expect(onFramesChange).toHaveBeenLastCalledWith({ count: 2, more: true }));
+    expect(onFramesChange).toHaveBeenCalledWith({ count: 0, more: false, loaded: false });
+    await waitFor(() => expect(onFramesChange).toHaveBeenLastCalledWith({ count: 2, more: true, loaded: true }));
   });
 
   it('asks for the transcript to be shown only from "Show in transcript"', async () => {

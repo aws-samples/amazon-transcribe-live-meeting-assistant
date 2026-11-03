@@ -38,15 +38,14 @@ export const formatFrameTime = (seconds) => {
 };
 
 /**
- * Where to start the recording for a frame: its position in the recording when
- * known, and otherwise its transcript time, which is the recording's clock for
- * every source that records one.
+ * The transcript time of a frame from its FrameId alone, which starts with
+ * that time in zero-padded milliseconds ("0000030000-ab12cd" is 0:30); null
+ * for an id that does not. For a slide named in the summary, before its frame
+ * has been read.
  */
-export const recordingSecondsFor = (frame) => {
-  const offset = Number(frame?.VideoOffset);
-  if (frame?.VideoOffset !== null && frame?.VideoOffset !== undefined && Number.isFinite(offset)) return offset;
-  const t = Number(frame?.Timestamp);
-  return Number.isFinite(t) ? t : 0;
+export const frameIdSeconds = (frameId) => {
+  const match = /^(\d+)-/.exec(String(frameId || ''));
+  return match ? Number(match[1]) / 1000 : null;
 };
 
 /**

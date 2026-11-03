@@ -10,7 +10,9 @@
  * docs/meeting-video.md).
  *
  * Selecting a frame shows it large and moves the transcript to that time; when
- * the meeting has a video recording, it also plays the recording from there.
+ * the meeting has a recording, it also moves the page's player there (without
+ * playing: `onPlayFrom(frame)`), and "Play recording from here" plays it
+ * (`onPlayFrom(frame, { reveal: true })`).
  * While the meeting runs, new frames arrive through the onAddVideoKeyframe
  * subscription.
  *
@@ -41,6 +43,7 @@ import getVideoKeyframes from '../../graphql/queries/getVideoKeyframes';
 import onAddVideoKeyframe from '../../graphql/queries/onAddVideoKeyframe';
 import { formatFrameTime, frameMatches, matchSnippet, mergeKeyframes } from '../common/video-keyframes';
 import { chapterTitlesByFrame } from '../common/chapters';
+import { clockAnchorsFromFrames } from '../meeting-player/playback-sync';
 import { openDeckTab as defaultOpenDeckTab, printDeck as defaultPrintDeck } from '../common/slide-deck';
 import './VideoTimeline.css';
 
@@ -78,7 +81,7 @@ const VideoTimeline = ({
   onShowInTranscript = undefined,
   onPlayFrom = undefined,
   chapters = [],
-  onClockOffset = undefined,
+  onClockAnchors = undefined,
   onFramesChange = undefined,
   selectRequest = null,
   title = '',
@@ -281,19 +284,18 @@ const VideoTimeline = ({
     });
   };
 
-  // The difference between the transcript's clock and the recording's, from the
-  // first frame that has both, so a chapter (which has only a transcript time)
-  // plays from the right place.
+  // The transcript's clock against the video recording's, from every loaded
+  // frame that carries both, so the page's player can place a transcript time
+  // (a segment, a chapter) in the recording. See meeting-player/playback-sync.js.
   useEffect(() => {
-    if (!onClockOffset) return;
-    const timed = frames.find((f) => Number.isFinite(Number(f.VideoOffset)) && f.VideoOffset !== null);
-    if (timed) onClockOffset(Number(timed.Timestamp) - Number(timed.VideoOffset));
-  }, [frames, onClockOffset]);
+    if (onClockAnchors) onClockAnchors(clockAnchorsFromFrames(frames));
+  }, [frames, onClockAnchors]);
 
-  // How many frames are loaded, and whether there are more, for the page's tab label.
+  // How many frames are loaded, whether there are more, and whether the first
+  // page has been read (`loaded`), for the page's tab label and its player.
   useEffect(() => {
-    if (onFramesChange) onFramesChange({ count: frames.length, more: Boolean(nextToken) });
-  }, [frames.length, nextToken, onFramesChange]);
+    if (onFramesChange) onFramesChange({ count: frames.length, more: Boolean(nextToken), loaded });
+  }, [frames.length, nextToken, loaded, onFramesChange]);
 
   // A frame selected from elsewhere: shown large, and its thumbnail brought into
   // view. Read by id when it is on a page not loaded yet.
@@ -535,7 +537,7 @@ VideoTimeline.propTypes = {
   onShowInTranscript: PropTypes.func,
   onPlayFrom: PropTypes.func,
   chapters: PropTypes.arrayOf(PropTypes.shape({ seconds: PropTypes.number, title: PropTypes.string })),
-  onClockOffset: PropTypes.func,
+  onClockAnchors: PropTypes.func,
   onFramesChange: PropTypes.func,
   selectRequest: PropTypes.shape({ frameId: PropTypes.string, at: PropTypes.number }),
   title: PropTypes.string,

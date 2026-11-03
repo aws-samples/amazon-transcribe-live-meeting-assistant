@@ -9,17 +9,26 @@
  * the stored times as UTC (with the local time beside them), the length, who
  * owns it and who it is shared with, and the recordings.
  *
- * The audio and video players are here until the meeting page has a player
- * kept in step with the transcript. A key frame's "Play recording from here"
- * opens this tab and plays the video from that time; selecting a frame or a
- * chapter only moves the video there (VideoPlayer's `play: false`).
+ * The recordings are played by the one player on the Transcript tab, kept in
+ * step with the transcript; here each has a Play that opens that tab, and a
+ * link to the file itself. No second player, so only one thing ever plays.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import PropTypes from 'prop-types';
-import { Box, Container, CopyToClipboard, Header, KeyValuePairs, StatusIndicator } from '@cloudscape-design/components';
+import { ConsoleLogger } from 'aws-amplify/utils';
+import {
+  Box,
+  Button,
+  Container,
+  CopyToClipboard,
+  Header,
+  KeyValuePairs,
+  SpaceBetween,
+  StatusIndicator,
+} from '@cloudscape-design/components';
 
-import RecordingPlayer from '../recording-player';
-import VideoPlayer from '../video-player';
+import useAppContext from '../../contexts/app';
+import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
 import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 import { formatDuration, formatMeetingStart } from '../common/meeting-header';
 import { sharedWithEntries } from '../common/shared-with';
@@ -39,7 +48,59 @@ const timeValue = (iso) => {
   );
 };
 
-const MeetingAttributes = ({ item, durationMillis, platform = '', videoSeekRequest = null }) => {
+const logger = new ConsoleLogger('MeetingAttributes');
+
+/**
+ * A recording's actions: Play (on the Transcript tab) and Open, which opens
+ * the file in a new browser tab, to watch or save. The tab is opened within
+ * the click, before the link is signed, because a browser blocks one opened
+ * after an await; the signed link lasts minutes, so it is signed on demand.
+ */
+const RecordingActions = ({ url, kind, onPlay = undefined, sign = generateS3PresignedUrl }) => {
+  const { currentCredentials } = useAppContext();
+  const [error, setError] = useState(false);
+  const open = async () => {
+    setError(false);
+    const tab = window.open('', '_blank');
+    if (tab) tab.opener = null;
+    try {
+      const signed = await sign(url, currentCredentials);
+      if (tab) tab.location.href = signed;
+    } catch (e) {
+      logger.error('could not sign the recording link', e);
+      if (tab) tab.close();
+      setError(true);
+    }
+  };
+  return (
+    <SpaceBetween direction="horizontal" size="xs" alignItems="center">
+      {onPlay && (
+        <Button variant="inline-link" iconName="play" onClick={onPlay} ariaLabel={`Play the ${kind} recording`}>
+          Play
+        </Button>
+      )}
+      <Button
+        variant="inline-link"
+        iconName="external"
+        iconAlign="right"
+        onClick={open}
+        ariaLabel={`Open the ${kind} recording file in a new tab`}
+      >
+        Open file
+      </Button>
+      {error && <StatusIndicator type="error">Could not open the recording</StatusIndicator>}
+    </SpaceBetween>
+  );
+};
+
+RecordingActions.propTypes = {
+  url: PropTypes.string.isRequired,
+  kind: PropTypes.string.isRequired,
+  onPlay: PropTypes.func,
+  sign: PropTypes.func,
+};
+
+const MeetingAttributes = ({ item, durationMillis, platform = '', onPlay = undefined, audioDefaultReason = null }) => {
   const recordingsReady = item.recordingStatusLabel !== IN_PROGRESS_STATUS;
   const storedMillis = Number(item.totalConversationDurationMillis) || 0;
   const sharedWith = sharedWithEntries(item.sharedWith);
@@ -75,13 +136,26 @@ const MeetingAttributes = ({ item, durationMillis, platform = '', videoSeekReque
     { label: 'Shared with', value: sharedWith.length ? sharedWith.join(', ') : '—' },
   ];
 
-  if (item.recordingUrl && recordingsReady) {
-    items.push({ label: 'Audio recording', value: <RecordingPlayer recordingUrl={item.recordingUrl} /> });
-  }
   if (item.videoRecordingUrl && recordingsReady) {
     items.push({
       label: 'Video recording',
-      value: <VideoPlayer videoRecordingUrl={item.videoRecordingUrl} seekRequest={videoSeekRequest} />,
+      value: (
+        <>
+          <RecordingActions url={item.videoRecordingUrl} kind="video" onPlay={onPlay && (() => onPlay('video'))} />
+          {audioDefaultReason && (
+            <Box variant="small" color="text-body-secondary">
+              The Transcript tab plays the audio recording for this meeting: its video has no key frames to line it up
+              with the transcript, and starts before transcription.
+            </Box>
+          )}
+        </>
+      ),
+    });
+  }
+  if (item.recordingUrl && recordingsReady) {
+    items.push({
+      label: 'Audio recording',
+      value: <RecordingActions url={item.recordingUrl} kind="audio" onPlay={onPlay && (() => onPlay('audio'))} />,
     });
   }
 
@@ -97,12 +171,8 @@ MeetingAttributes.propTypes = {
   item: PropTypes.object.isRequired,
   durationMillis: PropTypes.number.isRequired,
   platform: PropTypes.string,
-  videoSeekRequest: PropTypes.shape({
-    seconds: PropTypes.number,
-    at: PropTypes.number,
-    reveal: PropTypes.bool,
-    play: PropTypes.bool,
-  }),
+  onPlay: PropTypes.func,
+  audioDefaultReason: PropTypes.string,
 };
 
 export default MeetingAttributes;

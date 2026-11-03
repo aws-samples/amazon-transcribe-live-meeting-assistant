@@ -26,11 +26,11 @@ loaded, including during a live meeting when the first frame is taken.
   **Transcript** tab is next opened; **Show in transcript** opens it there.
   During a live meeting this pauses following the newest segment, as scrolling
   up does; **Resume** in the transcript returns to it.
-- **After the meeting**, when it has a video recording, selecting a thumbnail
-  also moves the recording (on the **Details** tab) to that frame, without
-  playing it. **Play recording from here** opens the **Details** tab and plays
-  the recording from the frame selected, and **Open full size** opens the
-  picture in a new tab.
+- **After the meeting**, selecting a thumbnail also moves the meeting page's
+  [player](web-ui-guide.md#the-recording-player) to that frame, without playing
+  it. **Play recording from here** opens the **Transcript** tab and plays the
+  recording from the frame selected, and **Open full size** opens the picture
+  in a new tab.
 - **A slide named in the summary** is a link on the **Overview** tab; following
   it opens this tab with that frame selected.
 - **During the meeting**, new frames are added to the end of the strip as they
@@ -156,7 +156,8 @@ meeting, `- [MM:SS] Title`, at the time the topic was first discussed or a new
 slide started it. The meeting page reads that section and shows a **Chapters**
 list beside the summary on the **Overview** tab, in place of the section itself.
 Selecting a chapter opens the **Transcript** tab at its time and, after the
-meeting, moves the video recording there. In the **Screen share** strip, the frame that went up within
+meeting, plays the recording from there. The chapters are also marks on the
+seek bar of the page's [player](web-ui-guide.md#the-recording-player). In the **Screen share** strip, the frame that went up within
 30 seconds of a chapter's start is labelled with the chapter; a chapter that
 began without a change of slide labels no frame.
 
@@ -171,11 +172,15 @@ How it is built:
   with each time taken from a line of the transcript. Chapters therefore work
   for any meeting with a transcript, with or without video; the slide changes
   only help place them.
-- Chapter times are on the transcript's clock. To play the recording from a
-  chapter, the page converts the time to the recording's clock using the key
-  frames, which carry both. A meeting without key frames plays from the
-  transcript time, which can differ from the recording by the moments between
-  the start of the recording and the start of transcription.
+- Chapter times are on the transcript's clock. To play the video recording
+  from a chapter, the page converts the time to the recording's clock using the
+  key frame nearest before it, as each frame carries both. A Virtual
+  Participant's video starts before transcription and falls further ahead at
+  each pause or reconnection, which the frames follow. A Virtual
+  Participant meeting whose video has no key frames plays the audio recording
+  by default for this reason. The audio recording starts with transcription,
+  so it needs no conversion. See
+  [Lining the recording up with the transcript](web-ui-guide.md#lining-the-recording-up-with-the-transcript).
 - The page reads the section from a generated summary, or from under its
   **CHAPTERS** heading once the summary has been edited by hand. It accepts the
   usual variations of list mark, brackets and bold, and leaves out any line
