@@ -68,6 +68,15 @@ describe('readConfigurationText', () => {
     });
   });
 
+  it('reads YAML with the JSON schema, so only JSON-style scalars become other types', () => {
+    const result = readConfigurationText(
+      'language_models:\n  a: True\n  b: 0x1F\n  c: ~\n  d: .inf\n  e: 2001-12-14\n',
+      'yaml',
+      [{ name: 'language_models' }],
+    );
+    expect(result.values.language_models).toEqual({ a: 'True', b: '0x1F', c: '~', d: '.inf', e: '2001-12-14' });
+  });
+
   it('says where JSON that does not parse goes wrong', () => {
     expect(() => readConfigurationText('{"language_models": ', 'json', sections)).toThrow(/not valid JSON/);
   });

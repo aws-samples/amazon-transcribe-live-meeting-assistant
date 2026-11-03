@@ -5,7 +5,7 @@
  */
 // The configuration as text, for the page's JSON and YAML views, and the
 // setting-by-setting comparison of two profiles.
-import yaml from 'js-yaml';
+import { dump, JSON_SCHEMA, load } from 'js-yaml';
 
 import { clone, deepEqual, effectiveSection, hasAt, isObject, offered, setAt } from './config-model';
 
@@ -22,7 +22,7 @@ export const configurationText = (sections, values, format, settings = {}) => {
   const document = Object.fromEntries(
     sections.map((section) => [section.name, offered(section.schema, values[section.name] || {}, settings)]),
   );
-  if (format === 'yaml') return yaml.dump(document, { noRefs: true, lineWidth: -1, sortKeys: false });
+  if (format === 'yaml') return dump(document, { noRefs: true, lineWidth: -1, sortKeys: false });
   return `${JSON.stringify(document, null, 2)}\n`;
 };
 
@@ -42,7 +42,7 @@ export const configurationText = (sections, values, format, settings = {}) => {
 export const readConfigurationText = (text, format, sections, defaults = {}, settings = {}, current = {}) => {
   let parsed;
   try {
-    parsed = format === 'yaml' ? yaml.load(text, { schema: yaml.JSON_SCHEMA }) : JSON.parse(text);
+    parsed = format === 'yaml' ? load(text, { schema: JSON_SCHEMA }) : JSON.parse(text);
   } catch (err) {
     const where = err.mark ? ` (line ${err.mark.line + 1}, column ${err.mark.column + 1})` : '';
     throw new Error(`It is not valid ${format === 'yaml' ? 'YAML' : 'JSON'}${where}: ${err.reason || err.message}`);
