@@ -381,22 +381,42 @@ export default class GoogleMeet {
                 }
                 return;
             }
-            const isTextarea = await found.element.evaluate((el) => el.tagName === 'TEXTAREA').catch(() => false);
             const composerText = () =>
                 found.element
                     .evaluate((el) => ((el as HTMLTextAreaElement).value ?? el.textContent ?? '').trim())
                     .catch(() => '');
             for (const message of messages) {
-                // The whole message goes in at once. Typing it key by key costs a
-                // DevTools round trip per character, which made a long message
-                // crawl in visibly; keyboard.insertText is one input event, which
-                // a textarea and a contenteditable composer both take.
-                if (isTextarea) {
-                    await found.element.fill(message).catch(() => undefined);
-                } else {
-                    await found.element.evaluate((el) => (el as HTMLElement).focus()).catch(() => undefined);
-                    await page.keyboard.insertText(message);
-                }
+                // The whole message goes in at once, from inside the page. The
+                // browser runs with CloakBrowser's humanize layer, which turns
+                // Playwright's fill(), type() and insertText() into per-key
+                // typing; a ~250-character message then crawls in for most of a
+                // minute. execCommand('insertText') is one input event the
+                // composer handles like a paste, as on Zoom (zoom.ts).
+                await found.element
+                    .evaluate((el, text) => {
+                        const node = el as HTMLTextAreaElement | HTMLElement;
+                        node.focus();
+                        if (node instanceof HTMLTextAreaElement) {
+                            node.select();
+                        } else {
+                            const sel = window.getSelection();
+                            if (sel) {
+                                const range = document.createRange();
+                                range.selectNodeContents(node);
+                                sel.removeAllRanges();
+                                sel.addRange(range);
+                            }
+                        }
+                        if (document.execCommand('insertText', false, text as string)) return;
+                        // execCommand refused: set the value the way a framework
+                        // sees it, through the native setter and an input event.
+                        if (node instanceof HTMLTextAreaElement) {
+                            const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+                            setter?.call(node, text as string);
+                            node.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                    }, message)
+                    .catch(() => undefined);
                 const head = message.slice(0, Math.min(20, message.length));
                 if (!(await composerText()).includes(head)) {
                     log.info('Composer did not take the message in one step — typing it.');
