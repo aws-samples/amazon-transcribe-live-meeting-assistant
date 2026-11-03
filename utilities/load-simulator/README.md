@@ -12,6 +12,7 @@ CLI (or as a standalone `lma-load` binary):
 | `backfill`   | Fabricate X historical meetings spread over Y days, with **backdated timestamps** | Meeting-list paginator, `listCallsDateRange` GSI, date-range picker scalability |
 | `rbac`       | Provision N synthetic Cognito users + latency-sweep `listCalls`/`getCallCount` under RBAC | Per-user ownership filter, subscription fanout, role-gated queries |
 | `cleanup`    | Delete every synthetic resource tagged with a given run-id | Deterministic teardown of meetings, VPs, users, S3 orphans |
+| `asr-benchmark` | Play one recording through each ASR model bundle (and Amazon Transcribe) and compare | Cost and transcript quality of model configurations |
 
 Every synthetic resource is stamped with a `LoadTestRunId` / Owner-prefix
 so cleanup is deterministic. Running against stacks whose name contains
@@ -26,6 +27,7 @@ so cleanup is deterministic. Running against stacks whose name contains
     - [Backfill](#2-backfill--fabricate-historical-meetings)
     - [RBAC](#3-rbac--synthetic-user--latency-sweep)
     - [Cleanup](#4-cleanup--deterministic-teardown)
+    - [ASR benchmark](#5-asr-benchmark--compare-model-configurations)
 4. [Synthetic Cognito users](#synthetic-cognito-users)
 5. [Cost and quota awareness](#cost-and-quota-awareness)
 6. [CloudWatch observability](#cloudwatch-observability)
@@ -287,6 +289,32 @@ Deletes, in order:
 2. Virtual Participants whose `meetingName` contains the run-id
 3. Meeting rows in the EventSourcing table whose `Owner` starts with `loadtest-<runId>-`
 4. S3 orphans under `lma-uploads-pending/loadtest-<runId>-*`
+
+### 5. `asr-benchmark` — compare model configurations
+
+```bash
+lma load asr-benchmark -s LMA-dev-stack-2 --wav meeting.wav \
+    --bundles parakeet-tdt-v3-sortformer,parakeet-tdt-v3-titanet-small --transcribe --dry-run
+```
+
+A lab test of [MicroVM ASR](../../docs/microvm-asr.md) bundles on a dev stack. The
+recording (stereo 16-bit WAV: channel 0 meeting audio, channel 1 microphone) is
+streamed once, at real time, through each configuration: Amazon Transcribe first if
+`--transcribe` is given, then each bundle. Before a bundle's run the stack is updated
+with its own template and only the `AsrDefaults` `ModelBundle` line changed, every
+parameter kept; the ASR image rebuilds in about 20-25 minutes. The original bundle is
+restored at the end unless `--keep-bundle` is given.
+
+Each run is measured from the transcriber's log (the MicroVM and its lifetime, or the
+Transcribe requests) and the engine's log (CPU per minute, peak memory, the bundle it
+ran), priced at AWS Price List rates (`--prices-file` takes a `CallPricing.json`
+instead), and its final transcript is read back. Quality is scored as WER against
+`--reference <file>`, or without one as disagreement with the Transcribe run.
+
+Results go to `results/<run-id>/`: `asr-benchmark.md` (the comparison table),
+`asr-benchmark.json`, and `transcript-<config>.txt` for each run. The benchmark
+meetings (`asr-bench-<run-id>-<config>`) are kept so they can be opened in the UI; the
+temporary Cognito user is deleted. `make asr-benchmark` wraps the same command.
 
 ## Synthetic Cognito users
 

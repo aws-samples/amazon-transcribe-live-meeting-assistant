@@ -111,6 +111,8 @@ code_checks:
     - make test-integ-plumbing
     # ASR MicroVM runtime unit tests + ruff (no AWS, no model weights).
     - make test-asr
+    # Load simulator unit tests, including the ASR model benchmark (no AWS).
+    - make test-load-simulator
     # The advisory AI review's own machinery: the disclosure guard that decides
     # whether a model-written comment reaches the public repository, and the four
     # properties of the review job most likely to be deleted by accident.
