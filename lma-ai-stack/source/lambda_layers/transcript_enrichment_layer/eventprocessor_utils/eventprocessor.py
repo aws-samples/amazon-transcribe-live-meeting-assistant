@@ -7,7 +7,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 from os import getenv
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Dict, List
 
 import jwt
 from jwt import PyJWKClient
@@ -55,11 +55,6 @@ SENTIMENT_SCORE = dict(
     Neutral=0,
     Mixed=0,
 )
-
-# XXX workaround - this should be moved to the Tumbling Window state
-# Contact Lens sends individual Utterances (partials)
-# This map is used to concatenate the invididual Utterances
-UTTERANCES_MAP: Dict[str, str] = {}
 
 # Get value for DynamboDB TTL field
 
@@ -187,81 +182,6 @@ def verify_cognito_token(token):
         return None
 
 
-def transform_contact_lens_segment(segment: Dict) -> Dict[str, object]:
-    """Transforms Kinesis Stream Transcript Payload to addTranscript API"""
-    call_id: str = segment["CallId"]
-    contact_id: str = segment["CallId"]
-    is_partial: bool
-    segment_item: Dict[str, Any]
-    segment_id: str
-    transcript: str
-    utterance: Dict[str, Any] = segment.get("Utterance", None)
-    contact_lens_transcript: Dict[str, Any] = segment.get("Transcript", None)
-    sentiment_args = {}
-
-    # partial transcript
-    if "Utterance" in segment:
-        is_partial = True
-        segment_item = segment["Utterance"]
-        segment_id = segment_item["TranscriptId"]
-        content = segment_item["PartialContent"]
-        UTTERANCES_MAP[segment_id] = UTTERANCES_MAP.get(segment_id, "") + " " + content
-        transcript = UTTERANCES_MAP[segment_id]
-    # final transcript
-    elif "Transcript" in segment:
-        is_partial = False
-        segment_item = segment["Transcript"]
-        segment_id = segment_item["Id"]
-        transcript = segment_item["Content"]
-        # delete utterance concatenatin from global map
-        if segment_id in UTTERANCES_MAP:
-            del UTTERANCES_MAP[segment_id]
-        if "Sentiment" in segment_item:
-            sentiment = segment_item.get("Sentiment", "NEUTRAL")
-            sentiment_args = dict(
-                Sentiment=sentiment,
-                SentimentScore=SENTIMENT_SCORE,
-                SentimentWeighted=SENTIMENT_WEIGHT.get(sentiment, 0),
-            )
-    else:
-        raise ValueError("Invalid segment type")
-
-    channel = segment_item.get("ParticipantRole", "AGENT")
-    # contact lens uses "CUSTOMER" and LCA expects "CALLER"
-    if channel == "CUSTOMER":
-        channel = "CALLER"
-    created_at = datetime.utcnow().astimezone().isoformat()
-    # Contact Lens times are in Milliseconds
-    # Changing to seconds to normalize units used by the transcript state manager which uses
-    # seconds per the Transcribe streaming API
-    start_time: float = segment_item["BeginOffsetMillis"] / 1000
-    end_time: float = segment_item["EndOffsetMillis"] / 1000
-
-    transcript_segment = dict(
-        CallId=call_id,
-        ContactId=contact_id,
-        Channel=channel,
-        CreatedAt=created_at,
-        ExpiresAfter=get_transcription_ttl(),
-        EndTime=end_time,
-        IsPartial=is_partial,
-        SegmentId=segment_id,
-        StartTime=start_time,
-        Status="TRANSCRIBING",
-        Transcript=transcript,
-        OriginalTranscript=transcript,
-        **sentiment_args,
-    )
-
-    if utterance:
-        transcript_segment["Utterance"] = utterance
-
-    if contact_lens_transcript:
-        transcript_segment["ContactLensTranscript"] = contact_lens_transcript
-
-    return transcript_segment
-
-
 # Transform Transcript segment fields
 def normalize_transcript_segments(message: Dict) -> List[Dict]:
     """Transforms Kinesis Stream Transcript Payload to addTranscript API"""
@@ -282,7 +202,6 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
     segments = []
 
     transcriptEvent = message.get("TranscriptEvent", None)
-    contactLensEvent = message.get("ContactId", None)
 
     if transcriptEvent:  # Standard Transcribe streaming event in KDS
         call_id = message["CallId"]
@@ -315,17 +234,6 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
                 CreatedAt=created_at,
             )
         )
-    elif contactLensEvent:  # Contact Lens event
-        call_id = message["ContactId"]
-        for segment in message.get("Segments", []):
-            # only utterances and transcripts become transcript segments
-            if "Utterance" not in segment and "Transcript" not in segment:
-                continue
-            transcript_segment = {
-                **transform_contact_lens_segment({**segment, "CallId": call_id}),
-            }
-            segments.append(transcript_segment)
-
     else:  # custom event message in KDS
         call_id = message["CallId"]
         channel = "CALLER"

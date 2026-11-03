@@ -39,22 +39,6 @@ Parameters:
       the Recordings bucket."
     Default: 90
 
-  CallAudioSource:
-    Type: String
-    AllowedValues:
-      - Demo Asterisk PBX Server
-      - Amazon Chime SDK Voice Connector (SIPREC)
-      - Genesys Cloud Audiohook Web Socket
-      - Amazon Connect Contact Lens
-
-    Description: >
-      Choose whether to automatically install a demo Asterisk PBX server for easy
-      standalone testing, a
-      Amazon Chime SDK Voice Connector to use for standards based SIPREC/NBR integration
-      with your contact center,
-      or a Web Socket interface to use for Audiohook integration with your Genesys
-      Cloud CX contact center.
-
   S3BucketName:
     Type: String
     Default: ""
@@ -101,8 +85,7 @@ Parameters:
     MaxValue: 1
     Description: >-
       Minimum negative sentiment confidence required to declare a phrase as having
-      negative sentiment, in the range 0-1.  Not applicable when using Contact Lens
-      (as sentiment is pre-calculated).
+      negative sentiment, in the range 0-1.
 
   SentimentPositiveScoreThreshold:
     Type: Number
@@ -112,7 +95,6 @@ Parameters:
     Description: >-
       Minimum positive sentiment confidence required to declare a phrase as having
       positive sentiment, in the range 0-1.
-      Not applicable when using Contact Lens (as sentiment is pre-calculated).
   ComprehendLanguageCode:
     Type: String
     Description: >-
@@ -3017,7 +2999,6 @@ Resources:
           IS_SENTIMENT_ANALYSIS_ENABLED: !Ref IsSentimentAnalysisEnabled
           SENTIMENT_NEGATIVE_THRESHOLD: !Ref SentimentNegativeScoreThreshold
           SENTIMENT_POSITIVE_THRESHOLD: !Ref SentimentPositiveScoreThreshold
-          CALL_AUDIO_SOURCE: !Ref CallAudioSource
           # Lambda Agent Assist
           IS_LAMBDA_AGENT_ASSIST_ENABLED: !Ref IsLambdaAgentAssistEnabled
           MEETING_RECORD_EXPIRATION_IN_DAYS: !Ref MeetingRecordExpirationInDays

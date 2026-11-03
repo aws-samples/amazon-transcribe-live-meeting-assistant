@@ -292,9 +292,31 @@ categories and their alerts, or "issues detected". What this means on upgrade:
   and `addIssuesDetected` mutations. A client that selects or calls any of them
   gets a validation error and must drop them.
 - Meetings recorded before the upgrade keep any of these attributes they were
-  stored with; nothing reads or shows them. A category marker in an older
-  meeting's transcript is not shown, and is deleted with the rest of the
-  transcript when [transcript deletion](transcript-deletion.md) runs.
+  stored with; nothing reads or shows them.
+- The `CATEGORY_MATCH` value of the GraphQL `Channel` enum is removed. Older
+  meetings' transcripts may still hold category markers stored with that
+  channel. `getTranscriptSegments` and `getTranscriptSegmentsWithSentiment`
+  leave them out of their results, so an older meeting's transcript loads and
+  shares as before. The markers stay in the table until they expire with the
+  rest of the transcript, until [transcript deletion](transcript-deletion.md)
+  removes them with it, or until the meeting is deleted. A client that sends
+  `CATEGORY_MATCH` as a channel to `addTranscriptSegment` gets a validation
+  error.
+- Deleting a meeting removes every item stored under its transcript, whatever
+  its channel and including partial segments. Earlier versions deleted only the
+  final segments the transcript query returned, and left the rest to expire.
+
+**The Amazon Connect Contact Lens transcript ingestion is removed.** LMA never
+receives Contact Lens events, so the call event processor no longer accepts the
+Contact Lens record shape: records that identify the meeting by `ContactId`,
+with Contact Lens `Segments`, and the Amazon Connect contact-attribute lookup
+that filled in phone numbers for them. Every producer LMA ships (the WebSocket
+transcriber, the Virtual Participant and the ASR MicroVM engine) identifies the
+meeting by `CallId` and is unaffected. The AI stack's `CallAudioSource`
+parameter, which only ever selected among Live Call Analytics telephony sources
+and which nothing read, is removed too. The main stack never exposed it, so a
+deployment made from the main template needs no change; one that deploys the
+nested AI stack template on its own must stop passing it.
 
 **One new parameter.** `VPSchedulerStateMachineLogsExpirationInDays` (default 7)
 sets retention for the scheduled Virtual Participant state machine's execution
