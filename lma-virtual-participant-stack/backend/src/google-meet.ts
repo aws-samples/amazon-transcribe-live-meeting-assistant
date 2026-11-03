@@ -382,13 +382,25 @@ export default class GoogleMeet {
                 return;
             }
             const isTextarea = await found.element.evaluate((el) => el.tagName === 'TEXTAREA').catch(() => false);
+            const composerText = () =>
+                found.element
+                    .evaluate((el) => ((el as HTMLTextAreaElement).value ?? el.textContent ?? '').trim())
+                    .catch(() => '');
             for (const message of messages) {
+                // The whole message goes in at once. Typing it key by key costs a
+                // DevTools round trip per character, which made a long message
+                // crawl in visibly; keyboard.insertText is one input event, which
+                // a textarea and a contenteditable composer both take.
                 if (isTextarea) {
-                    // fill() replaces the value and raises the input event, so
-                    // the composer's own state sees the text in one step.
-                    await found.element.fill(message);
+                    await found.element.fill(message).catch(() => undefined);
                 } else {
-                    await found.element.evaluate((el) => (el as HTMLElement).focus());
+                    await found.element.evaluate((el) => (el as HTMLElement).focus()).catch(() => undefined);
+                    await page.keyboard.insertText(message);
+                }
+                const head = message.slice(0, Math.min(20, message.length));
+                if (!(await composerText()).includes(head)) {
+                    log.info('Composer did not take the message in one step — typing it.');
+                    await found.element.evaluate((el) => (el as HTMLElement).focus()).catch(() => undefined);
                     await page.keyboard.type(message, { delay: 0 });
                 }
                 await found.element.press('Enter');
@@ -516,6 +528,37 @@ export default class GoogleMeet {
      * class names found in each tile, for the one diagnostic line; it is left
      * off the once-a-second reads.
      */
+    /**
+     * Once per meeting, at debug level: the structure of the first two tiles
+     * (tag, class, data-* and aria attributes, and leaf text), so a live run can
+     * confirm which element holds the name and which shows the speaking state.
+     */
+    private async logTileStructure(page: Page): Promise<void> {
+        const outline = await page
+            .evaluate((tileSel: string) => {
+                const describe = (el: Element, depth: number): string[] => {
+                    if (depth > 9) return [];
+                    const attrs = Array.from(el.attributes)
+                        .filter((a) => a.name === 'class' || a.name.startsWith('data-') || a.name.startsWith('aria-') || a.name === 'role')
+                        .map((a) => `${a.name}="${a.value.slice(0, 60)}"`)
+                        .join(' ');
+                    const own = Array.from(el.childNodes)
+                        .filter((n) => n.nodeType === Node.TEXT_NODE)
+                        .map((n) => (n.textContent || '').trim())
+                        .filter(Boolean)
+                        .join(' ')
+                        .slice(0, 40);
+                    const line = `${'  '.repeat(depth)}<${el.tagName.toLowerCase()} ${attrs}>${own ? ` "${own}"` : ''}`;
+                    return [line, ...Array.from(el.children).flatMap((c) => describe(c, depth + 1))];
+                };
+                return Array.from(document.querySelectorAll(tileSel))
+                    .slice(0, 2)
+                    .map((t) => describe(t, 0).slice(0, 120).join('\n'));
+            }, MEET_IN_PAGE_SELECTORS.participantTile)
+            .catch(() => [] as string[]);
+        outline.forEach((tile, i) => log.debug(`[meet] tile ${i} structure:\n${tile}`));
+    }
+
     private async readTiles(page: Page, withClasses = false): Promise<Array<MeetTileReading & { classes?: string }>> {
         return page
             .evaluate(
@@ -687,6 +730,11 @@ export default class GoogleMeet {
                 log.info('No guest name field (the profile is signed in to Google) — joining with the account name.');
             }
         }
+        // Meet shows a "Sign in with your Google account … Got it" callout beside
+        // the guest name field. It is a tip, not a sign-in wall; dismissing it
+        // before the dialog watchdog reads the page keeps the VP from being
+        // marked as needing a sign-in.
+        await this.dismissTips(page);
         if (nameField) {
             // fill() replaces whatever a restored profile pre-filled, so the name
             // is never doubled; checked, and typed once by keyboard if it did not land.
@@ -895,6 +943,7 @@ export default class GoogleMeet {
                     if (!tilesLogged && tiles.length > 0) {
                         tilesLogged = true;
                         log.info(`[meet] participant tiles: ${JSON.stringify(tiles.slice(0, 3))}`);
+                        void this.logTileStructure(page);
                     }
                     const speaker = pickMeetActiveSpeaker(tiles, this.ownIdentities(), lastMeetingSpeaker);
                     if (speaker && speaker !== lastMeetingSpeaker) {

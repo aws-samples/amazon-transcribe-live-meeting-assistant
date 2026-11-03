@@ -203,6 +203,13 @@ test("Meet's decorations are stripped from a participant name", () => {
     assert.equal(cleanMeetParticipantName('(You)'), null);
 });
 
+test('the text of an icon in a tile is not taken for a participant name', () => {
+    assert.equal(cleanMeetParticipantName('visual_effects'), null);
+    assert.equal(cleanMeetParticipantName('mic_off'), null);
+    assert.equal(cleanMeetParticipantName('bob'), 'bob');
+    assert.equal(cleanMeetParticipantName('Mary_Ann'), 'Mary_Ann');
+});
+
 test('a chat group header gives its sender', () => {
     assert.equal(senderFromMeetGroupHeader('Alice Smith 10:32 AM'), 'Alice Smith');
     assert.equal(senderFromMeetGroupHeader('Alice Smith 14:05'), 'Alice Smith');

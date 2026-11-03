@@ -375,6 +375,9 @@ export function cleanMeetParticipantName(raw: string | null | undefined): string
         .replace(/\s*\(presentation\)/i, '')
         .trim();
     if (!name || name.length > 100) return null;
+    // A Material icon ligature ("visual_effects", "mic_off") is the text of an
+    // icon inside the tile, not a person's name.
+    if (/^[a-z0-9]+(?:_[a-z0-9]+)+$/.test(name)) return null;
     return name;
 }
 
