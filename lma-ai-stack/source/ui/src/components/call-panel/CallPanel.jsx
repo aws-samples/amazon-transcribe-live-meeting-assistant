@@ -6,6 +6,7 @@
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Alert,
   Badge,
@@ -22,6 +23,7 @@ import {
   Link,
   Modal,
   Popover,
+  Select,
   SpaceBetween,
   StatusIndicator,
   Tabs,
@@ -33,7 +35,7 @@ import ReactMarkdown from 'react-markdown';
 import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate';
 import { StandardRetryStrategy } from '@aws-sdk/middleware-retry';
 import markdownRehypePlugins from '../common/markdown-plugins';
-import { getEmailFormattedSummary, getMarkdownSummary, getTextFileFormattedMeetingDetails } from '../common/summary';
+import { getMarkdownSummary, getMarkdownSummaryWithout, getSummarySection } from '../common/summary';
 import {
   SOURCE_MANUAL,
   STATUS_IDLE,
@@ -44,6 +46,7 @@ import {
 } from '../common/summary-state';
 import { COMPREHEND_PII_TYPES, LANGUAGE_CODES } from '../common/constants';
 import {
+  buildSpeakerRoster,
   identityKeyFor,
   parseSpeakerIdentities,
   resolveSpeaker,
@@ -55,16 +58,23 @@ import ConsentPanel from './ConsentPanel';
 import TranscriptDeletionNotice from './TranscriptDeletionNotice';
 import useMeetingConsent from '../../hooks/use-meeting-consent';
 import CallCostPanel from './CallCostPanel';
+import MeetingHeader from './MeetingHeader';
+import MeetingAttributes from './MeetingAttributes';
+import { NodeSlot, useDetachedNode } from './NodeSlot';
+import { SUMMARY_ACTION_ITEMS, runSummaryAction } from './meeting-downloads';
+import { TAB_DETAILS, TAB_OVERVIEW, TAB_SCREEN_SHARE, TAB_TRANSCRIPT } from './meeting-tabs';
+import useMeetingTab from '../../hooks/use-meeting-tab';
+import useCallCost from '../../hooks/use-call-cost';
 
-import RecordingPlayer from '../recording-player';
-import VideoPlayer from '../video-player';
 import VideoTimeline from '../video-timeline';
 import MeetingChapters from '../meeting-chapters/MeetingChapters';
-import { chaptersFromSummary } from '../common/chapters';
+import { chaptersFromSummary, withoutChaptersSection } from '../common/chapters';
+import { parseAgendaItems } from '../common/agenda';
+import { formatDurationClock, meetingDurationMillis, platformLabel } from '../common/meeting-header';
 import { recordingSecondsFor, scrollTranscriptToTime } from '../common/video-keyframes';
 import useSettingsContext from '../../contexts/settings';
 
-import { DONE_STATUS, IN_PROGRESS_STATUS } from '../common/get-recording-status';
+import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 import { InfoLink } from '../common/info-link';
 import { getWeightedSentimentLabel } from '../common/sentiment';
 
@@ -78,15 +88,7 @@ import useUserGroups from '../../hooks/use-user-groups';
 import { AccessDenied } from '../common/AdminOnly';
 import { isConflict } from '../common/config-conflict';
 import awsExports from '../../aws-exports';
-import {
-  downloadTranscriptAsExcel,
-  downloadTranscriptAsText,
-  exportToTextFile,
-  downloadTranscriptAsDocx,
-  exportToDocxFile,
-} from '../common/download-func';
 import useCallsContext from '../../contexts/calls';
-import { shareModal, deleteModal } from '../common/meeting-controls';
 import VNCViewer from '../virtual-participant-layout/VNCViewer';
 import { listVirtualParticipants, onUpdateVirtualParticipant } from '../../graphql/queries/virtualParticipantQueries';
 import useChatKeyframeLinks from '../../hooks/use-chat-keyframe-links';
@@ -106,102 +108,18 @@ const MAXIMUM_RETRY_DELAY = 1000;
 
 const PAUSE_TO_MERGE_IN_SECONDS = 1;
 
+/**
+ * The height of the transcript and of the assistant beside it: the viewport
+ * less the page chrome above them (navigation, breadcrumbs, the meeting header,
+ * the tabs and the transcript's own header), and never less than a readable
+ * box. The transcript keeps its own scroll, rather than using the page's,
+ * because following a live meeting means holding the newest line in view while
+ * the reader can still scroll back, and that is a property of one scrolling
+ * box; the assistant's frame needs a fixed height beside it in any case.
+ */
+const TRANSCRIPT_HEIGHT = 'max(360px, calc(100vh - 420px))';
+
 /* eslint-disable react/prop-types, react/destructuring-assignment */
-const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds, videoSeekRequest }) => {
-  const { calls } = useCallsContext();
-  const props = {
-    calls,
-    selectedItems: [item],
-    loading: false,
-    getCallDetailsFromCallIds,
-  };
-
-  return (
-    <Container
-      header={
-        <Header
-          variant="h4"
-          info={<InfoLink onFollow={() => setToolsOpen(true)} />}
-          actions={
-            <SpaceBetween size="xxxs" direction="horizontal">
-              {shareModal(props)} {deleteModal(props)}
-            </SpaceBetween>
-          }
-        >
-          Meeting Attributes
-        </Header>
-      }
-    >
-      <ColumnLayout columns={6} variant="text-grid">
-        <SpaceBetween size="xs">
-          <div>
-            <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              <strong>Meeting ID</strong>
-            </Box>
-            <div>{item.callId}</div>
-          </div>
-        </SpaceBetween>
-
-        <SpaceBetween size="xs">
-          <div>
-            <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              <strong>Initiation Timestamp</strong>
-            </Box>
-            <div>{item.initiationTimeStamp}</div>
-          </div>
-        </SpaceBetween>
-
-        <SpaceBetween size="xs">
-          <div>
-            <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              <strong>Last Update Timestamp</strong>
-            </Box>
-            <div>{item.updatedAt}</div>
-          </div>
-        </SpaceBetween>
-
-        <SpaceBetween size="xs">
-          <div>
-            <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              <strong>Duration</strong>
-            </Box>
-            <div>{item.conversationDurationTimeStamp}</div>
-          </div>
-        </SpaceBetween>
-
-        <SpaceBetween size="xs">
-          <div>
-            <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              <strong>Status</strong>
-            </Box>
-            <StatusIndicator type={item.recordingStatusIcon}>{` ${item.recordingStatusLabel} `}</StatusIndicator>
-          </div>
-        </SpaceBetween>
-        {item?.recordingUrl?.length && item?.recordingStatusLabel !== IN_PROGRESS_STATUS && (
-          <SpaceBetween size="xs">
-            <div>
-              <Box margin={{ bottom: 'xxxs' }} color="text-label">
-                <strong>Recording Audio</strong>
-              </Box>
-              <RecordingPlayer recordingUrl={item.recordingUrl} />
-            </div>
-          </SpaceBetween>
-        )}
-        {item?.videoRecordingUrl?.length && item?.recordingStatusLabel !== IN_PROGRESS_STATUS && (
-          <SpaceBetween size="xs">
-            <div>
-              <Box margin={{ bottom: 'xxxs' }} color="text-label">
-                <strong>Recording Video</strong>
-              </Box>
-              <VideoPlayer videoRecordingUrl={item.videoRecordingUrl} seekRequest={videoSeekRequest} />
-            </div>
-          </SpaceBetween>
-        )}
-      </ColumnLayout>
-    </Container>
-  );
-};
-
 /**
  * How long the local "starting" state bridges the gap to the backend's own mark.
  *
@@ -220,9 +138,16 @@ const EDIT_AFTER_MEETING_REASON =
 // progress and failure are read back from the meeting rather than from the
 // mutation's answer, and that handover is worth driving directly.
 // eslint-disable-next-line arrow-body-style
-export const CallSummary = ({ item, onSave, onRegenerate, readOnly, consent = null }) => {
-  const [setCopySuccess] = useState(false);
-
+export const CallSummary = ({
+  item,
+  onSave,
+  onRegenerate,
+  readOnly,
+  consent = null,
+  omitSections = [],
+  keyframes = 'image',
+  onKeyframeSelect = undefined,
+}) => {
   const summaryState = useMemo(() => parseSummaryState(item.callSummaryState), [item.callSummaryState]);
   // Local, and deliberately not the only source of progress: a second browser
   // tab, or another user, learns that a run is going from the stored state.
@@ -333,45 +258,13 @@ export const CallSummary = ({ item, onSave, onRegenerate, readOnly, consent = nu
     }
   };
 
-  const copyToClipboard = async () => {
-    try {
-      const summaryText = getTextFileFormattedMeetingDetails(item, consent);
-      await navigator.clipboard.writeText(summaryText);
-      setCopySuccess(true);
-      // Reset the success state after 2 seconds
-      setTimeout(() => setCopySuccess(false), 2000);
-    } catch (err) {
-      logger.error('Failed to copy to clipboard:', err);
-      // Fallback for older browsers
-      try {
-        const textArea = document.createElement('textarea');
-        textArea.value = getTextFileFormattedMeetingDetails(item, consent);
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textArea);
-        setCopySuccess(true);
-        setTimeout(() => setCopySuccess(false), 2000);
-      } catch (fallbackErr) {
-        logger.error('Fallback copy failed:', fallbackErr);
-      }
-    }
-  };
-
-  const downloadCallSummary = async (option) => {
-    if (option.detail.id === 'download') {
-      await exportToTextFile(getTextFileFormattedMeetingDetails(item, consent), `Summary-${item.callId}`);
-    } else if (option.detail.id === 'email') {
-      // Both halves are encoded: a meeting name is free text, and
-      // getEmailFormattedSummary returns an encoded body.
-      const subject = encodeURIComponent(item.callId ?? '');
-      window.open(`mailto:?subject=${subject}&body=${getEmailFormattedSummary(item.callSummaryText)}`);
-    } else if (option.detail.id === 'docx') {
-      await exportToDocxFile(getTextFileFormattedMeetingDetails(item, consent), `Summary-${item.callId}`);
-    } else if (option.detail.id === 'copy') {
-      await copyToClipboard();
-    }
-  };
+  // The meeting page shows some sections in their own place -- the chapters as
+  // a list, the agenda coverage under the agenda -- and leaves them out here.
+  const omitKey = omitSections.join('|');
+  const displayedSummary = useMemo(() => {
+    const markdown = getMarkdownSummaryWithout(item.callSummaryText, omitSections);
+    return omitSections.includes('CHAPTERS') ? withoutChaptersSection(markdown) : markdown;
+  }, [item.callSummaryText, omitKey]);
 
   return (
     <Container
@@ -433,14 +326,10 @@ export const CallSummary = ({ item, onSave, onRegenerate, readOnly, consent = nu
               )}
               {item.callSummaryText && (
                 <ButtonDropdown
-                  items={[
-                    { text: 'Copy to clipboard', id: 'copy', disabled: false, iconName: 'copy' },
-                    { text: 'Download summary', id: 'download', disabled: false, iconName: 'download' },
-                    { text: 'Email summary (beta)', id: 'email', disabled: false, iconName: 'envelope' },
-                    { text: 'Download as Word', id: 'docx', disabled: false, iconName: 'file' },
-                  ]}
+                  items={SUMMARY_ACTION_ITEMS}
                   variant="normal"
-                  onItemClick={(option) => downloadCallSummary(option)}
+                  ariaLabel="Download the summary"
+                  onItemClick={({ detail }) => runSummaryAction(detail.id, item, consent)}
                 >
                   <Icon name="download" variant="primary" />
                 </ButtonDropdown>
@@ -475,40 +364,27 @@ export const CallSummary = ({ item, onSave, onRegenerate, readOnly, consent = nu
           cannot be recovered.
         </Modal>
       )}
-      <Grid gridDefinition={[{ colspan: { default: 12 } }]}>
-        <Tabs
-          tabs={[
-            {
-              label: 'Transcript Summary',
-              id: 'summary',
-              content: editing ? (
-                <FormField
-                  label="Meeting summary"
-                  description="Markdown. Saving replaces the summary everywhere it is read, the download included."
-                  stretch
-                >
-                  <Textarea
-                    value={draft}
-                    onChange={({ detail }) => setDraft(detail.value)}
-                    rows={16}
-                    disabled={saving}
-                    ariaLabel="Meeting summary text"
-                  />
-                </FormField>
-              ) : (
-                <div>
-                  <div>
-                    {/* eslint-disable-next-line react/no-array-index-key */}
-                    <TextContent color="gray">
-                      <SummaryMarkdown callId={item.callId}>{getMarkdownSummary(item.callSummaryText)}</SummaryMarkdown>
-                    </TextContent>
-                  </div>
-                </div>
-              ),
-            },
-          ]}
-        />
-      </Grid>
+      {editing ? (
+        <FormField
+          label="Meeting summary"
+          description="Markdown. Saving replaces the summary everywhere it is read, the download included."
+          stretch
+        >
+          <Textarea
+            value={draft}
+            onChange={({ detail }) => setDraft(detail.value)}
+            rows={16}
+            disabled={saving}
+            ariaLabel="Meeting summary text"
+          />
+        </FormField>
+      ) : (
+        <TextContent color="gray">
+          <SummaryMarkdown callId={item.callId} keyframes={keyframes} onKeyframeSelect={onKeyframeSelect}>
+            {displayedSummary}
+          </SummaryMarkdown>
+        </TextContent>
+      )}
     </Container>
   );
 };
@@ -616,9 +492,10 @@ const TranscriptContent = ({ segment, translateCache }) => {
       // eslint-disable-next-line react/no-array-index-key
       <TextContent key={`${segmentId}-text-${i}`} color="red" className={className}>
         <ReactMarkdown rehypePlugins={markdownRehypePlugins}>{text.trim()}</ReactMarkdown>
-        <ReactMarkdown className="translated-text" rehypePlugins={markdownRehypePlugins}>
-          {translatedText.trim()}
-        </ReactMarkdown>
+        {/* react-markdown 9 and later take no className: wrapped, so the translation keeps its colour. */}
+        <div className="translated-text">
+          <ReactMarkdown rehypePlugins={markdownRehypePlugins}>{translatedText.trim()}</ReactMarkdown>
+        </div>
       </TextContent>
     );
   });
@@ -812,11 +689,11 @@ const CallInProgressTranscript = ({
   targetLanguage,
   agentTranscript,
   translateOn,
-  collapseSentiment,
   enableSentimentAnalysis,
   speakerIdentities,
   onRenameSpeaker,
   readOnly,
+  active = true,
 }) => {
   const bottomRef = useRef();
   const containerRef = useRef();
@@ -1095,18 +972,24 @@ const CallInProgressTranscript = ({
     onRenameSpeaker,
   ]);
 
-  // Move to the segment at a requested time (a key frame was selected), and
-  // pause following the live end so the transcript stays there.
+  // Move to the segment at a requested time (a key frame or a chapter was
+  // selected), and pause following the live end so the transcript stays there.
+  // The transcript is on its own tab, and a hidden element has no layout to
+  // scroll by, so a request made while another tab is shown is kept and
+  // carried out when the Transcript tab is opened.
+  const appliedScrollRef = useRef(null);
   useEffect(() => {
-    if (!scrollRequest) return;
+    if (!scrollRequest || !active || appliedScrollRef.current === scrollRequest.at) return;
+    appliedScrollRef.current = scrollRequest.at;
     const row = scrollTranscriptToTime(containerRef.current, scrollRequest.seconds);
     if (row && item.recordingStatusLabel === IN_PROGRESS_STATUS) setUserHasScrolled(true);
-  }, [scrollRequest]);
+  }, [scrollRequest, active]);
 
   useEffect(() => {
     // prettier-ignore
     if (
-      item.recordingStatusLabel === IN_PROGRESS_STATUS
+      active
+      && item.recordingStatusLabel === IN_PROGRESS_STATUS
       && autoScroll
       && !userHasScrolled
       && containerRef.current
@@ -1114,6 +997,7 @@ const CallInProgressTranscript = ({
       scrollTranscriptToBottom();
     }
   }, [
+    active,
     turnByTurnSegments,
     autoScroll,
     userHasScrolled,
@@ -1128,10 +1012,11 @@ const CallInProgressTranscript = ({
     <div
       ref={containerRef}
       onScroll={handleScroll}
+      data-testid="transcript-scroll"
       style={{
         overflowY: 'auto',
-        height: collapseSentiment ? '34vh' : '68vh',
-        maxHeight: collapseSentiment ? '34vh' : '68vh',
+        height: TRANSCRIPT_HEIGHT,
+        maxHeight: TRANSCRIPT_HEIGHT,
         paddingLeft: '10px',
         paddingTop: '5px',
         paddingRight: '10px',
@@ -1182,7 +1067,7 @@ const CHAT_BUTTON_CONFLICT_MESSAGE =
   'Someone else saved the configuration while this dialog was open. Close and reopen it to see ' +
   'their version, then apply your changes again.';
 
-const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setShowVNCPreview, vpData, loadingVP) => {
+const getAgentAssistPanel = (item, user, showVNCPreview, setShowVNCPreview, vpData, loadingVP) => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showMCPModal, setShowMCPModal] = useState(false);
   const [buttonConfig, setButtonConfig] = useState(null);
@@ -1533,7 +1418,7 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
             </Header>
           }
         >
-          <Box style={{ height: collapseSentiment ? '34vh' : '68vh' }}>
+          <Box style={{ height: TRANSCRIPT_HEIGHT }}>
             {/*
               The `sandbox` list is deliberately exactly these two tokens.
 
@@ -1564,7 +1449,7 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
               window.open and no downloads of its own.
             */}
             <iframe
-              style={{ border: '0px', height: collapseSentiment ? '34vh' : '68vh', margin: '0' }}
+              style={{ border: '0px', height: TRANSCRIPT_HEIGHT, margin: '0' }}
               title="Meeting Assist"
               src={iframeSrc}
               sandbox="allow-scripts allow-same-origin"
@@ -1650,51 +1535,13 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
   }
   return null;
 };
-const getTranscriptContent = ({
-  item,
-  callTranscriptPerCallId,
-  autoScroll,
-  scrollRequest,
-  translateClient,
-  targetLanguage,
-  agentTranscript,
-  translateOn,
-  collapseSentiment,
-  enableSentimentAnalysis,
-  speakerIdentities,
-  onRenameSpeaker,
-  readOnly,
-}) => {
-  switch (item.recordingStatusLabel) {
-    case DONE_STATUS:
-    case IN_PROGRESS_STATUS:
-    default:
-      return (
-        <CallInProgressTranscript
-          item={item}
-          callTranscriptPerCallId={callTranscriptPerCallId}
-          autoScroll={autoScroll}
-          scrollRequest={scrollRequest}
-          translateClient={translateClient}
-          targetLanguage={targetLanguage}
-          agentTranscript={agentTranscript}
-          translateOn={translateOn}
-          collapseSentiment={collapseSentiment}
-          enableSentimentAnalysis={enableSentimentAnalysis}
-          speakerIdentities={speakerIdentities}
-          onRenameSpeaker={onRenameSpeaker}
-          readOnly={readOnly}
-        />
-      );
-  }
-};
+const LANGUAGE_OPTIONS = LANGUAGE_CODES.filter(({ value }) => value).map(({ value, label }) => ({ value, label }));
 
 const CallTranscriptContainer = ({
   setToolsOpen,
   item,
   callTranscriptPerCallId,
   translateClient,
-  collapseSentiment,
   enableSentimentAnalysis,
   user,
   showVNCPreview,
@@ -1705,52 +1552,28 @@ const CallTranscriptContainer = ({
   onRenameSpeaker,
   readOnly,
   scrollRequest,
+  active = true,
 }) => {
   // defaults to auto scroll when call is in progress
   const [autoScroll, setAutoScroll] = useState(item.recordingStatusLabel === IN_PROGRESS_STATUS);
   const [autoScrollDisabled, setAutoScrollDisabled] = useState(item.recordingStatusLabel !== IN_PROGRESS_STATUS);
-  const [showDownloadTranscript, setShowDownloadTranscripts] = useState(item.recordingStatusLabel === DONE_STATUS);
 
   const [translateOn, setTranslateOn] = useState(false);
   const [targetLanguage, setTargetLanguage] = useState(localStorage.getItem('targetLanguage') || '');
   const [agentTranscript] = useState(true);
 
-  const handleLanguageSelect = (event) => {
-    setTargetLanguage(event.target.value);
-    localStorage.setItem('targetLanguage', event.target.value);
+  const handleLanguageSelect = ({ detail }) => {
+    const value = detail.selectedOption?.value || '';
+    setTargetLanguage(value);
+    localStorage.setItem('targetLanguage', value);
   };
 
   useEffect(() => {
     setAutoScrollDisabled(item.recordingStatusLabel !== IN_PROGRESS_STATUS);
     setAutoScroll(item.recordingStatusLabel === IN_PROGRESS_STATUS);
-    setShowDownloadTranscripts(item.recordingStatusLabel === DONE_STATUS);
   }, [item.recordingStatusLabel]);
 
-  const languageChoices = () => {
-    if (translateOn) {
-      return (
-        // prettier-ignore
-        // eslint-disable-jsx-a11y/control-has-associated-label
-        <div>
-          <select value={targetLanguage} onChange={handleLanguageSelect}>
-            {LANGUAGE_CODES.map(({ value, label }) => <option value={value}>{label}</option>)}
-          </select>
-        </div>
-      );
-    }
-    return translateOn;
-  };
-
-  const downloadTranscript = (option) => {
-    console.log('option', option);
-    if (option.detail.id === 'text') {
-      downloadTranscriptAsText(callTranscriptPerCallId, item);
-    } else if (option.detail.id === 'excel') {
-      downloadTranscriptAsExcel(callTranscriptPerCallId, item);
-    } else if (option.detail.id === 'docx') {
-      downloadTranscriptAsDocx(callTranscriptPerCallId, item);
-    }
-  };
+  const selectedLanguage = LANGUAGE_OPTIONS.find((option) => option.value === targetLanguage) || null;
 
   return (
     <Grid
@@ -1777,43 +1600,33 @@ const CallTranscriptContainer = ({
             variant="h4"
             info={<InfoLink onFollow={() => setToolsOpen(true)} />}
             actions={
-              <SpaceBetween direction="vertical" size="xs">
-                <SpaceBetween direction="horizontal" size="xs">
-                  <Toggle
-                    onChange={({ detail }) => setAutoScroll(detail.checked)}
-                    checked={autoScroll}
-                    disabled={autoScrollDisabled}
+              // The transcript's downloads are in the page header's Download menu.
+              <SpaceBetween direction="horizontal" size="m" alignItems="center">
+                <Toggle
+                  onChange={({ detail }) => setAutoScroll(detail.checked)}
+                  checked={autoScroll}
+                  disabled={autoScrollDisabled}
+                >
+                  Auto-scroll
+                </Toggle>
+                <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn}>
+                  Translate
+                </Toggle>
+                {translateOn && (
+                  <Select
+                    selectedOption={selectedLanguage}
+                    onChange={handleLanguageSelect}
+                    options={LANGUAGE_OPTIONS}
+                    placeholder="Choose a language"
+                    filteringType="auto"
+                    ariaLabel="Translation language"
+                    expandToViewport
                   />
-                  <span>Auto Scroll</span>
-                  <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn} />
-                  <span>Enable Translation</span>
-                  {languageChoices()}
-                  {showDownloadTranscript && !item.transcriptDeletedAt && (
-                    <SpaceBetween direction="horizontal" size="xs">
-                      <ButtonDropdown
-                        items={[
-                          {
-                            text: 'Download as',
-                            iconName: 'download',
-                            items: [
-                              { text: 'Excel', id: 'excel', disabled: false },
-                              { text: 'Text', id: 'text' },
-                              { text: 'Word', id: 'docx' },
-                            ],
-                          },
-                        ]}
-                        variant="normal"
-                        onItemClick={(option) => downloadTranscript(option)}
-                      >
-                        <Icon name="download" variant="primary" />
-                      </ButtonDropdown>
-                    </SpaceBetween>
-                  )}
-                </SpaceBetween>
+                )}
               </SpaceBetween>
             }
           >
-            Meeting Transcript
+            Transcript
           </Header>
         }
       >
@@ -1821,23 +1634,23 @@ const CallTranscriptContainer = ({
           deletedAt={item.transcriptDeletedAt}
           scheduledFor={item.transcriptDeletionScheduledFor}
         />
-        {getTranscriptContent({
-          item,
-          callTranscriptPerCallId,
-          autoScroll,
-          scrollRequest,
-          translateClient,
-          targetLanguage,
-          agentTranscript,
-          translateOn,
-          collapseSentiment,
-          enableSentimentAnalysis,
-          speakerIdentities,
-          onRenameSpeaker,
-          readOnly,
-        })}
+        <CallInProgressTranscript
+          item={item}
+          callTranscriptPerCallId={callTranscriptPerCallId}
+          autoScroll={autoScroll}
+          scrollRequest={scrollRequest}
+          translateClient={translateClient}
+          targetLanguage={targetLanguage}
+          agentTranscript={agentTranscript}
+          translateOn={translateOn}
+          enableSentimentAnalysis={enableSentimentAnalysis}
+          speakerIdentities={speakerIdentities}
+          onRenameSpeaker={onRenameSpeaker}
+          readOnly={readOnly}
+          active={active}
+        />
       </Container>
-      {getAgentAssistPanel(item, collapseSentiment, user, showVNCPreview, setShowVNCPreview, vpData, loadingVP)}
+      {getAgentAssistPanel(item, user, showVNCPreview, setShowVNCPreview, vpData, loadingVP)}
     </Grid>
   );
 };
@@ -1972,7 +1785,13 @@ const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, 
   </>
 );
 
-export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCallDetailsFromCallIds }) => {
+export const CallPanel = ({
+  item,
+  callTranscriptPerCallId,
+  setToolsOpen,
+  getCallDetailsFromCallIds,
+  tabInUrl = false,
+}) => {
   const { currentCredentials, user } = useAppContext();
   const { isAdmin: isAdminUser } = useUserGroups();
 
@@ -2115,19 +1934,56 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
   useStrandsChatBridge(item.callId);
   useChatKeyframeLinks(item.callId);
 
+  const isLive = item.recordingStatusLabel === IN_PROGRESS_STATUS;
+
   // VNC Preview state at CallPanel level
   const [showVNCPreview, setShowVNCPreview] = useState(false);
 
-  // Requests from the key frame strip: move the transcript to a time, and
-  // play the recording from a time. `at` makes a repeated request distinct.
+  // How many key frames the strip has loaded. It decides whether the meeting
+  // has a Screen share tab, and the tab's label.
+  const [keyframes, setKeyframes] = useState({ count: 0, more: false });
+  useEffect(() => {
+    setKeyframes({ count: 0, more: false });
+  }, [item.callId]);
+  const hasKeyframes = keyframes.count > 0;
+  const [activeTab, setActiveTab] = useMeetingTab({ inUrl: tabInUrl, isLive, hasKeyframes });
+  const timelineNode = useDetachedNode();
+
+  // Requests from the key frame strip and the chapters: move the transcript to
+  // a time, and play the recording from a time. `at` makes a repeated request
+  // distinct. `reveal` is an explicit "show me": it opens the tab the request
+  // is for. Without it the transcript is moved for when its tab is next opened,
+  // and the recording is only moved (play: false), since it is on the Details
+  // tab and would otherwise start playing out of sight.
   const [transcriptScrollRequest, setTranscriptScrollRequest] = useState(null);
   const [videoSeekRequest, setVideoSeekRequest] = useState(null);
-  const showInTranscript = useCallback((seconds) => setTranscriptScrollRequest({ seconds, at: Date.now() }), []);
-  const playRecordingFrom = useCallback(
-    (frame, { reveal = false } = {}) =>
-      setVideoSeekRequest({ seconds: recordingSecondsFor(frame), at: Date.now(), reveal }),
-    [],
+  const [frameSelectRequest, setFrameSelectRequest] = useState(null);
+  const showInTranscript = useCallback(
+    (seconds, { reveal = false } = {}) => {
+      setTranscriptScrollRequest({ seconds, at: Date.now() });
+      if (reveal) setActiveTab(TAB_TRANSCRIPT);
+    },
+    [setActiveTab],
   );
+  const playRecordingFrom = useCallback(
+    (frame, { reveal = false } = {}) => {
+      setVideoSeekRequest({ seconds: recordingSecondsFor(frame), at: Date.now(), reveal, play: reveal });
+      if (reveal) setActiveTab(TAB_DETAILS);
+    },
+    [setActiveTab],
+  );
+  // A slide named in the summary: open the Screen share tab at its frame.
+  const showKeyframe = useCallback(
+    (frameId) => {
+      setFrameSelectRequest({ frameId, at: Date.now() });
+      setActiveTab(TAB_SCREEN_SHARE);
+    },
+    [setActiveTab],
+  );
+  const onFramesChange = useCallback(({ count, more }) => {
+    setKeyframes((previous) => (previous.count === count && previous.more === more ? previous : { count, more }));
+  }, []);
+
   // Chapters from the summary, and the recording's clock against the
   // transcript's, learnt from the key frames (null until a frame says).
   const chapters = useMemo(() => chaptersFromSummary(item.callSummaryText), [item.callSummaryText]);
@@ -2138,10 +1994,10 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
   const setClockOffset = useCallback((offset) => {
     clockOffsetRef.current = offset;
   }, []);
-  const canPlayRecording = Boolean(item.videoRecordingUrl) && item.recordingStatusLabel !== IN_PROGRESS_STATUS;
+  const canPlayRecording = Boolean(item.videoRecordingUrl) && !isLive;
   const selectChapter = useCallback(
     (chapter) => {
-      showInTranscript(chapter.seconds);
+      showInTranscript(chapter.seconds, { reveal: true });
       if (!canPlayRecording) return;
       const offset = clockOffsetRef.current;
       playRecordingFrom({
@@ -2151,8 +2007,12 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     },
     [showInTranscript, playRecordingFrom, canPlayRecording],
   );
-  const [vpData, setVpData] = useState(null);
+
+  // The Virtual Participant that joined this meeting, if one did: for the
+  // platform in the header and, once its browser can be watched, the live view.
+  const [meetingVp, setMeetingVp] = useState(null);
   const [loadingVP, setLoadingVP] = useState(false);
+  const vpData = meetingVp?.vncReady ? meetingVp : null;
 
   // Fetch Virtual Participant data for this call
   useEffect(() => {
@@ -2165,16 +2025,11 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
 
         const vps = result.data.listVirtualParticipants || [];
         const matchingVP = vps.find((vp) => vp.CallId === item.callId);
-
-        if (matchingVP && matchingVP.vncReady) {
-          setVpData(matchingVP);
-          logger.info('Found VP for call:', matchingVP);
-        } else {
-          setVpData(null);
-        }
+        setMeetingVp(matchingVP || null);
+        if (matchingVP) logger.info('Found VP for call:', matchingVP);
       } catch (error) {
         logger.error('Error fetching VP data:', error);
-        setVpData(null);
+        setMeetingVp(null);
       } finally {
         setLoadingVP(false);
       }
@@ -2185,13 +2040,13 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
 
   // Subscribe to VP updates
   useEffect(() => {
-    if (!vpData?.id) return undefined;
+    if (!meetingVp?.id) return undefined;
 
     const subscription = client.graphql({ query: onUpdateVirtualParticipant }).subscribe({
       next: (message) => {
         const updated = message?.data?.onUpdateVirtualParticipant;
-        if (updated && updated.id === vpData.id) {
-          setVpData((prev) => ({
+        if (updated && updated.id === meetingVp.id) {
+          setMeetingVp((prev) => ({
             ...prev,
             ...updated,
           }));
@@ -2202,7 +2057,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     });
 
     return () => subscription.unsubscribe();
-  }, [vpData?.id]);
+  }, [meetingVp?.id]);
 
   // Subscribe to VNC preview control from agent
   useEffect(() => {
@@ -2243,32 +2098,61 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     };
   }, [item.callId]);
 
-  return (
-    <SpaceBetween size="s">
-      <CallAttributes
-        item={item}
-        setToolsOpen={setToolsOpen}
-        getCallDetailsFromCallIds={getCallDetailsFromCallIds}
-        videoSeekRequest={videoSeekRequest}
-      />
+  // The header's figures. The length is read from the transcript as well as
+  // from the stored value (see meetingDurationMillis), and the downloads carry
+  // the same figure the page shows.
+  const durationMillis = meetingDurationMillis(item, transcriptSegmentsForCall);
+  const displayItem = useMemo(
+    () => ({ ...item, conversationDurationTimeStamp: formatDurationClock(durationMillis) }),
+    [item, durationMillis],
+  );
+  const platform = platformLabel(meetingVp?.meetingPlatform);
+  const speakers = buildSpeakerRoster(transcriptSegmentsForCall, speakerIdentities, item.callerPhoneNumber).map(
+    (row) => ({
+      key: row.key,
+      label: row.name || (row.voiceId ? `${row.defaultName} ${row.voiceId}` : row.defaultName),
+    }),
+  );
+  const cost = useCallCost(
+    item.callId,
+    `${item.recordingStatusLabel || ''}|${(item.callSummaryText || '').length}|${item.callSummaryState || ''}`,
+  );
 
-      {/* Show VNC Preview in place of Summary during active meeting if VP is available */}
-      {showVNCPreview && vpData && vpData.vncReady && item.recordingStatusLabel === IN_PROGRESS_STATUS ? (
-        <VNCViewer
-          vpId={vpData.id}
-          vncEndpoint={vpData.vncEndpoint}
-          status={vpData.status}
-          manualActionType={vpData.manualActionType}
-          manualActionMessage={vpData.manualActionMessage}
-          manualActionTimeoutSeconds={vpData.manualActionTimeoutSeconds}
-          manualActionStartTime={vpData.manualActionStartTime}
-          compact
-          onOpenNewTab={() => window.open(`#/virtual-participant/${vpData.id}`, '_blank')}
-          showHeader
-        />
-      ) : (
+  // The summary's sections that the Overview shows in their own place: the
+  // chapters as the clickable list, and the agenda coverage under the agenda.
+  // Each is left in the summary when there is nothing to show it in instead.
+  const agendaItems = parseAgendaItems(item.agenda);
+  const agendaCoverage = getSummarySection(item.callSummaryText, 'AGENDA COVERAGE');
+  const coverageSaysNoAgenda = /^\s*no agenda was set/i.test(agendaCoverage || '');
+  const omitSections = [
+    ...(chapters.length ? ['CHAPTERS'] : []),
+    ...(agendaCoverage !== null && (agendaItems.length || coverageSaysNoAgenda) ? ['AGENDA COVERAGE'] : []),
+  ];
+
+  const showVnc = showVNCPreview && vpData && vpData.vncReady && isLive;
+  const sideColumn = chapters.length > 0 || agendaItems.length > 0;
+
+  const agendaPanel = (
+    <AgendaPanel
+      item={item}
+      onSave={sendUpdateCallAgenda ? (text) => sendUpdateCallAgenda(item.callId, text, user?.username) : undefined}
+      onDerive={sendDeriveCallAgenda ? () => sendDeriveCallAgenda(item.callId) : undefined}
+      readOnly={speakerNamesReadOnly}
+      compactWhenEmpty
+      coverage={agendaItems.length && !coverageSaysNoAgenda ? agendaCoverage : null}
+    />
+  );
+
+  const overview = (
+    <SpaceBetween size="l">
+      {!agendaItems.length && agendaPanel}
+      <Grid
+        gridDefinition={
+          sideColumn ? [{ colspan: { default: 12, m: 8 } }, { colspan: { default: 12, m: 4 } }] : [{ colspan: 12 }]
+        }
+      >
         <CallSummary
-          item={item}
+          item={displayItem}
           // Conditional on the context actually supplying the writer. Three
           // separate components build the calls context by enumerating its
           // fields, and a control wired to a missing one would render and then
@@ -2277,37 +2161,19 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           onRegenerate={sendRegenerateCallSummary ? regenerateCallSummaryForItem : undefined}
           readOnly={speakerNamesReadOnly}
           consent={meetingConsent.consent}
+          omitSections={omitSections}
+          // The slides the summary names open on the Screen share tab rather
+          // than filling the summary with pictures of them.
+          keyframes={hasKeyframes ? 'link' : 'text'}
+          onKeyframeSelect={showKeyframe}
         />
-      )}
-
-      <MeetingChapters chapters={chapters} onSelect={selectChapter} canPlayRecording={canPlayRecording} />
-
-      <VideoTimeline
-        key={item.callId}
-        callId={item.callId}
-        title={item.callId}
-        isLive={item.recordingStatusLabel === IN_PROGRESS_STATUS}
-        canPlayRecording={canPlayRecording}
-        onShowInTranscript={showInTranscript}
-        onPlayFrom={playRecordingFrom}
-        chapters={chapters}
-        onClockOffset={setClockOffset}
-      />
-
-      <AgendaPanel
-        item={item}
-        onSave={sendUpdateCallAgenda ? (text) => sendUpdateCallAgenda(item.callId, text, user?.username) : undefined}
-        onDerive={sendDeriveCallAgenda ? () => sendDeriveCallAgenda(item.callId) : undefined}
-        readOnly={speakerNamesReadOnly}
-      />
-
-      <ConsentPanel
-        state={meetingConsent}
-        canEdit={!speakerNamesReadOnly}
-        isOwner={!!user?.username && item.owner === user.username}
-        isAdmin={!!isAdminUser}
-      />
-
+        {sideColumn && (
+          <SpaceBetween size="l">
+            <MeetingChapters chapters={chapters} onSelect={selectChapter} canPlayRecording={canPlayRecording} />
+            {agendaItems.length > 0 && agendaPanel}
+          </SpaceBetween>
+        )}
+      </Grid>
       {(enableSentimentAnalysis || enableVoiceTone) && (
         <Grid
           gridDefinition={[
@@ -2333,27 +2199,31 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           )}
         </Grid>
       )}
-      <SpeakerIdentitiesPanel
-        item={item}
-        segments={transcriptSegmentsForCall}
-        setToolsOpen={setToolsOpen}
-        onSave={saveSpeakerIdentities}
-        onIdentify={identifySpeakers}
-        readOnly={speakerNamesReadOnly}
-        isLive={item.recordingStatusLabel === IN_PROGRESS_STATUS}
-      />
-      <CallCostPanel
-        callId={item.callId}
-        refreshKey={`${item.recordingStatusLabel || ''}|${(item.callSummaryText || '').length}|${
-          item.callSummaryState || ''
-        }`}
-      />
+    </SpaceBetween>
+  );
+
+  const transcript = (
+    <SpaceBetween size="l">
+      {/* The Virtual Participant's live view, while the meeting runs and it has been opened. */}
+      {showVnc && (
+        <VNCViewer
+          vpId={vpData.id}
+          vncEndpoint={vpData.vncEndpoint}
+          status={vpData.status}
+          manualActionType={vpData.manualActionType}
+          manualActionMessage={vpData.manualActionMessage}
+          manualActionTimeoutSeconds={vpData.manualActionTimeoutSeconds}
+          manualActionStartTime={vpData.manualActionStartTime}
+          compact
+          onOpenNewTab={() => window.open(`#/virtual-participant/${vpData.id}`, '_blank')}
+          showHeader
+        />
+      )}
       <CallTranscriptContainer
         item={item}
         setToolsOpen={setToolsOpen}
         callTranscriptPerCallId={callTranscriptPerCallId}
         translateClient={translateClient}
-        collapseSentiment={collapseSentiment}
         enableSentimentAnalysis={enableSentimentAnalysis}
         user={user}
         showVNCPreview={showVNCPreview}
@@ -2364,7 +2234,94 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
         onRenameSpeaker={handleRenameSpeaker}
         readOnly={speakerNamesReadOnly}
         scrollRequest={transcriptScrollRequest}
+        active={activeTab === TAB_TRANSCRIPT}
       />
+    </SpaceBetween>
+  );
+
+  const details = (
+    <SpaceBetween size="l">
+      <MeetingAttributes
+        item={item}
+        durationMillis={durationMillis}
+        platform={platform}
+        videoSeekRequest={videoSeekRequest}
+      />
+      <SpeakerIdentitiesPanel
+        item={item}
+        segments={transcriptSegmentsForCall}
+        setToolsOpen={setToolsOpen}
+        onSave={saveSpeakerIdentities}
+        onIdentify={identifySpeakers}
+        readOnly={speakerNamesReadOnly}
+        isLive={isLive}
+      />
+      <ConsentPanel
+        state={meetingConsent}
+        canEdit={!speakerNamesReadOnly}
+        isOwner={!!user?.username && item.owner === user.username}
+        isAdmin={!!isAdminUser}
+      />
+      <CallCostPanel callId={item.callId} state={cost} />
+    </SpaceBetween>
+  );
+
+  // Every tab stays mounted while another is shown ('eager'): switching tabs
+  // keeps the transcript's translations and scroll position, a summary or
+  // agenda being edited, and the assistant's conversation.
+  const tabs = [
+    { id: TAB_OVERVIEW, label: 'Overview', content: overview, contentRenderStrategy: 'eager' },
+    { id: TAB_TRANSCRIPT, label: 'Transcript', content: transcript, contentRenderStrategy: 'eager' },
+    ...(hasKeyframes
+      ? [
+          {
+            id: TAB_SCREEN_SHARE,
+            label: `Screen share (${keyframes.count}${keyframes.more ? '+' : ''})`,
+            content: <NodeSlot node={timelineNode} />,
+            contentRenderStrategy: 'eager',
+          },
+        ]
+      : []),
+    { id: TAB_DETAILS, label: 'Details', content: details, contentRenderStrategy: 'eager' },
+  ];
+
+  return (
+    <SpaceBetween size="m">
+      <MeetingHeader
+        item={displayItem}
+        durationMillis={durationMillis}
+        platform={platform}
+        speakers={speakers}
+        cost={cost}
+        consent={meetingConsent.consent}
+        callTranscriptPerCallId={callTranscriptPerCallId}
+        getCallDetailsFromCallIds={getCallDetailsFromCallIds}
+        setToolsOpen={setToolsOpen}
+        onShowSpeakers={speakerNamesReadOnly ? undefined : () => setActiveTab(TAB_DETAILS)}
+      />
+      <Tabs
+        tabs={tabs}
+        activeTabId={activeTab}
+        onChange={({ detail }) => setActiveTab(detail.activeTabId)}
+        ariaLabel="Meeting"
+      />
+      {timelineNode &&
+        createPortal(
+          <VideoTimeline
+            key={item.callId}
+            callId={item.callId}
+            title={item.callId}
+            isLive={isLive}
+            canPlayRecording={canPlayRecording}
+            onShowInTranscript={showInTranscript}
+            onPlayFrom={playRecordingFrom}
+            chapters={chapters}
+            onClockOffset={setClockOffset}
+            onFramesChange={onFramesChange}
+            selectRequest={frameSelectRequest}
+          />,
+          timelineNode,
+        )}
     </SpaceBetween>
   );
 };

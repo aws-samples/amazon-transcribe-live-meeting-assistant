@@ -387,4 +387,73 @@ describe('VideoTimeline', () => {
     expect(await screen.findByText('The key frames could not be exported.')).toBeTruthy();
     expect(tab.close).toHaveBeenCalledTimes(1);
   });
+
+  it('tells the page how many frames it has loaded', async () => {
+    const onFramesChange = vi.fn();
+    const loadFrames = vi.fn().mockResolvedValue({ VideoKeyframes: [frame(1000), frame(2000)], nextToken: 't1' });
+    render(
+      <VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} onFramesChange={onFramesChange} />,
+    );
+    await waitFor(() => expect(onFramesChange).toHaveBeenLastCalledWith({ count: 2, more: true }));
+  });
+
+  it('asks for the transcript to be shown only from "Show in transcript"', async () => {
+    const onShowInTranscript = vi.fn();
+    const loadFrames = vi.fn().mockResolvedValue({ VideoKeyframes: [frame(30000)], nextToken: null });
+    render(
+      <VideoTimeline
+        callId="m-1"
+        loadFrames={loadFrames}
+        subscribe={noSubscribe}
+        onShowInTranscript={onShowInTranscript}
+      />,
+    );
+    fireEvent.click(await screen.findByTitle('Key frame at 0:30'));
+    expect(onShowInTranscript).toHaveBeenLastCalledWith(30);
+    fireEvent.click(screen.getByText('Show in transcript'));
+    expect(onShowInTranscript).toHaveBeenLastCalledWith(30, { reveal: true });
+  });
+
+  it('selects a frame asked for from elsewhere, reading it by id when its page is not loaded', async () => {
+    const onShowInTranscript = vi.fn();
+    const loadFrames = vi.fn(async (variables) =>
+      variables.frameId
+        ? { VideoKeyframes: [frame(900000)], nextToken: null }
+        : { VideoKeyframes: [frame(30000)], nextToken: 't1' },
+    );
+    const { rerender } = render(
+      <VideoTimeline
+        callId="m-1"
+        loadFrames={loadFrames}
+        subscribe={noSubscribe}
+        onShowInTranscript={onShowInTranscript}
+      />,
+    );
+    await screen.findByTitle('Key frame at 0:30');
+
+    rerender(
+      <VideoTimeline
+        callId="m-1"
+        loadFrames={loadFrames}
+        subscribe={noSubscribe}
+        onShowInTranscript={onShowInTranscript}
+        selectRequest={{ frameId: '0000030000-ab12cd', at: 1 }}
+      />,
+    );
+    expect(await screen.findByAltText('Shared screen at 0:30, full size')).toBeTruthy();
+
+    rerender(
+      <VideoTimeline
+        callId="m-1"
+        loadFrames={loadFrames}
+        subscribe={noSubscribe}
+        onShowInTranscript={onShowInTranscript}
+        selectRequest={{ frameId: '0000900000-ab12cd', at: 2 }}
+      />,
+    );
+    expect(await screen.findByAltText('Shared screen at 15:00, full size')).toBeTruthy();
+    expect(loadFrames).toHaveBeenCalledWith({ callId: 'm-1', frameId: '0000900000-ab12cd' });
+    // Shown, not acted on: the transcript is not moved by a selection made elsewhere.
+    expect(onShowInTranscript).not.toHaveBeenCalled();
+  });
 });

@@ -18,6 +18,8 @@ import { describe, it, expect } from 'vitest';
 import {
   getEmailFormattedSummary,
   getMarkdownSummary,
+  getMarkdownSummaryWithout,
+  getSummarySection,
   getTextFileFormattedSummary,
   getTextOnlySummary,
   keyframeImagesAsText,
@@ -105,5 +107,32 @@ describe('a summary with pictures of the shared screen', () => {
     expect(getMarkdownSummary(SLIDES)).toContain('![Slide at 00:30](keyframe:0000030000-ab12cd)');
     const other = '![chart](https://example.com/c.png) [keyframe:x](keyframe:x)';
     expect(keyframeImagesAsText(other)).toBe(other);
+  });
+});
+
+describe('the sections the meeting page shows in their own place', () => {
+  const FULL = JSON.stringify({
+    SUMMARY: 'We met.',
+    'Agenda Coverage': '- **Budget**: Covered',
+    CHAPTERS: '- [00:00] Welcome',
+  });
+
+  it('reads one section, by name in any case', () => {
+    expect(getSummarySection(FULL, 'AGENDA COVERAGE')).toBe('- **Budget**: Covered');
+    expect(getSummarySection(FULL, 'chapters')).toBe('- [00:00] Welcome');
+    expect(getSummarySection(FULL, 'ACTIONS')).toBeNull();
+    expect(getSummarySection('A hand-written summary.', 'CHAPTERS')).toBeNull();
+  });
+
+  it('renders the summary without the sections named', () => {
+    const shown = getMarkdownSummaryWithout(FULL, ['CHAPTERS', 'AGENDA COVERAGE']);
+    expect(shown).toBe('**SUMMARY**\n\nWe met.\n\n');
+    expect(getMarkdownSummaryWithout(FULL, [])).toBe(getMarkdownSummary(FULL));
+  });
+
+  it('keeps a hand-written summary, and a summary that would be left empty, whole', () => {
+    expect(getMarkdownSummaryWithout('## Notes\nWe met.', ['CHAPTERS'])).toBe('## Notes\nWe met.');
+    const onlyChapters = JSON.stringify({ CHAPTERS: '- [00:00] Welcome' });
+    expect(getMarkdownSummaryWithout(onlyChapters, ['CHAPTERS'])).toBe(getMarkdownSummary(onlyChapters));
   });
 });

@@ -22,6 +22,14 @@
  * A frame that begins one of the meeting's chapters (from its summary) is
  * labelled with the chapter, and **Export slides (PDF)** prints every frame as
  * a deck (common/slide-deck.js).
+ *
+ * On the meeting page the strip is the Screen share tab. `onFramesChange` tells
+ * the page how many frames it has loaded (which is what decides whether the
+ * tab is offered at all), and `selectRequest` ({ frameId, at }) selects a frame
+ * from elsewhere -- a slide named in the summary -- reading it by id when its
+ * page has not been loaded yet. "Show in transcript" passes `{ reveal: true }`
+ * to onShowInTranscript, asking for the transcript to be shown; selecting a
+ * frame does not, so browsing the strip leaves the page where it is.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
@@ -71,6 +79,8 @@ const VideoTimeline = ({
   onPlayFrom = undefined,
   chapters = [],
   onClockOffset = undefined,
+  onFramesChange = undefined,
+  selectRequest = null,
   title = '',
   loadFrames = defaultLoadFrames,
   subscribe = defaultSubscribe,
@@ -280,6 +290,47 @@ const VideoTimeline = ({
     if (timed) onClockOffset(Number(timed.Timestamp) - Number(timed.VideoOffset));
   }, [frames, onClockOffset]);
 
+  // How many frames are loaded, and whether there are more, for the page's tab label.
+  useEffect(() => {
+    if (onFramesChange) onFramesChange({ count: frames.length, more: Boolean(nextToken) });
+  }, [frames.length, nextToken, onFramesChange]);
+
+  // A frame selected from elsewhere: shown large, and its thumbnail brought into
+  // view. Read by id when it is on a page not loaded yet.
+  const revealSelectedRef = useRef(false);
+  useEffect(() => {
+    const frameId = selectRequest?.frameId;
+    if (!frameId) return undefined;
+    if (framesRef.current.some((f) => f.FrameId === frameId)) {
+      revealSelectedRef.current = true;
+      setSelectedId(frameId);
+      return undefined;
+    }
+    const generation = generationRef.current;
+    let current = true;
+    loadFrames({ callId, frameId })
+      .then((page) => {
+        if (!current || generation !== generationRef.current) return;
+        const incoming = (page?.VideoKeyframes || []).filter((f) => f?.FrameId === frameId);
+        if (!incoming.length) return;
+        framesRef.current = mergeKeyframes(framesRef.current, incoming);
+        setFrames(framesRef.current);
+        revealSelectedRef.current = true;
+        setSelectedId(frameId);
+      })
+      .catch((e) => logger.debug('could not read the requested key frame', e));
+    return () => {
+      current = false;
+    };
+  }, [selectRequest]);
+
+  useEffect(() => {
+    if (!revealSelectedRef.current || !selectedId) return;
+    revealSelectedRef.current = false;
+    const button = stripRef.current?.querySelector(`[data-frame-id="${selectedId}"]`);
+    if (button?.scrollIntoView) button.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+  }, [selectedId, frames]);
+
   const chapterTitles = useMemo(() => chapterTitlesByFrame(chapters, frames), [chapters, frames]);
 
   /**
@@ -363,7 +414,7 @@ const VideoTimeline = ({
         <Header
           variant="h4"
           counter={`(${frames.length}${nextToken ? '+' : ''})`}
-          description="The shared screen each time it changed. Select one to move the transcript to that time."
+          description="The shared screen each time it changed. Select one to see it full size."
           actions={
             <Button iconName="download" loading={exporting} onClick={exportDeck}>
               Export slides (PDF)
@@ -396,6 +447,7 @@ const VideoTimeline = ({
             <button
               type="button"
               key={frame.FrameId}
+              data-frame-id={frame.FrameId}
               className={`video-timeline-frame${frame.FrameId === selectedId ? ' video-timeline-frame-selected' : ''}`}
               onClick={() => select(frame)}
               aria-pressed={frame.FrameId === selectedId}
@@ -431,7 +483,7 @@ const VideoTimeline = ({
             <SpaceBetween size="xs" direction="horizontal">
               <Box variant="strong">{formatFrameTime(selected.Timestamp)}</Box>
               {onShowInTranscript && (
-                <Button variant="inline-link" onClick={() => onShowInTranscript(selected.Timestamp)}>
+                <Button variant="inline-link" onClick={() => onShowInTranscript(selected.Timestamp, { reveal: true })}>
                   Show in transcript
                 </Button>
               )}
@@ -484,6 +536,8 @@ VideoTimeline.propTypes = {
   onPlayFrom: PropTypes.func,
   chapters: PropTypes.arrayOf(PropTypes.shape({ seconds: PropTypes.number, title: PropTypes.string })),
   onClockOffset: PropTypes.func,
+  onFramesChange: PropTypes.func,
+  selectRequest: PropTypes.shape({ frameId: PropTypes.string, at: PropTypes.number }),
   title: PropTypes.string,
   loadFrames: PropTypes.func,
   subscribe: PropTypes.func,

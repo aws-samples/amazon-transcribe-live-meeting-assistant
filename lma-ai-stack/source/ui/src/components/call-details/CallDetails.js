@@ -99,6 +99,8 @@ const CallDetails = () => {
         setToolsOpen={setToolsOpen}
         callTranscriptPerCallId={callTranscriptPerCallId}
         getCallDetailsFromCallIds={getCallDetailsFromCallIds}
+        // The meeting's own page keeps the selected tab in the URL (?tab=...).
+        tabInUrl
       />
     )
   );

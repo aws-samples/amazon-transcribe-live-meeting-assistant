@@ -231,9 +231,10 @@ const TranscriptContent = ({ segment, translateCache }) => {
       // eslint-disable-next-line react/no-array-index-key
       <TextContent key={`${segmentId}-text-${i}`} color="red" className={className}>
         <ReactMarkdown rehypePlugins={markdownRehypePlugins}>{text.trim()}</ReactMarkdown>
-        <ReactMarkdown className="translated-text" rehypePlugins={markdownRehypePlugins}>
-          {translatedText.trim()}
-        </ReactMarkdown>
+        {/* react-markdown 9 and later take no className: wrapped, so the translation keeps its colour. */}
+        <div className="translated-text">
+          <ReactMarkdown rehypePlugins={markdownRehypePlugins}>{translatedText.trim()}</ReactMarkdown>
+        </div>
       </TextContent>
     );
   });

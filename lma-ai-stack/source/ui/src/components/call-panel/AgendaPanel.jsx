@@ -11,6 +11,12 @@
  * pipeline replaces a summary when the meeting ends, while a stored agenda is
  * replaced only by somebody saving a new one or pressing Derive agenda. The
  * automatic derivation pass writes only while a meeting has no agenda.
+ *
+ * On the meeting page's Overview tab a meeting with no agenda gets one line
+ * (`compactWhenEmpty`) -- "No agenda", with Add agenda and Derive agenda --
+ * rather than a whole panel saying so; the panel opens once there is something
+ * to edit or show. The summary's AGENDA COVERAGE section (`coverage`) is shown
+ * under the items it is about.
  */
 import React, { useEffect, useState } from 'react';
 import {
@@ -26,6 +32,7 @@ import {
 } from '@cloudscape-design/components';
 
 import { describeAgendaSource, MAX_AGENDA_CHARS, parseAgendaItems } from '../common/agenda';
+import SummaryMarkdown from '../summary-markdown/SummaryMarkdown';
 
 /* eslint-disable react/prop-types */
 
@@ -59,7 +66,7 @@ export const deriveStatus = (result) => {
   return { type: 'info', text: result.Message || 'no agenda was stated in the meeting' };
 };
 
-const AgendaPanel = ({ item, onSave, onDerive, readOnly }) => {
+const AgendaPanel = ({ item, onSave, onDerive, readOnly, compactWhenEmpty = false, coverage = null }) => {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
@@ -120,50 +127,60 @@ const AgendaPanel = ({ item, onSave, onDerive, readOnly }) => {
     derive();
   };
 
+  const actions = (
+    <SpaceBetween size="xxs" direction="horizontal" alignItems="center">
+      {sourceLabel && !editing && <Badge color="grey">{sourceLabel}</Badge>}
+      {saving && <StatusIndicator type="loading">Saving</StatusIndicator>}
+      {deriving && <StatusIndicator type="loading">Reading the transcript</StatusIndicator>}
+      {!deriving && status && (
+        // Announced, because the outcome -- especially "no agenda was
+        // stated" -- is the whole feedback for pressing the button.
+        <Box nativeAttributes={{ role: 'status', 'aria-live': 'polite' }}>
+          <StatusIndicator type={status.type}>{status.text}</StatusIndicator>
+        </Box>
+      )}
+      {editing ? (
+        <SpaceBetween size="xxs" direction="horizontal">
+          <Button onClick={() => setEditing(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={() => save(draft.trim())} loading={saving} disabled={tooLong}>
+            Save agenda
+          </Button>
+        </SpaceBetween>
+      ) : (
+        <SpaceBetween size="xxs" direction="horizontal">
+          {canDerive && (
+            <Button iconName="search" onClick={handleDeriveClick} loading={deriving} disabled={saving}>
+              Derive agenda
+            </Button>
+          )}
+          {canEdit && (
+            <Button iconName="edit" onClick={beginEditing} disabled={saving || deriving}>
+              {items.length ? 'Edit' : 'Add agenda'}
+            </Button>
+          )}
+        </SpaceBetween>
+      )}
+    </SpaceBetween>
+  );
+
+  if (compactWhenEmpty && !items.length && !editing && !confirmReplace) {
+    return (
+      <Box data-testid="agenda-compact">
+        <SpaceBetween size="xs" direction="horizontal" alignItems="center">
+          <Box variant="awsui-key-label">Agenda</Box>
+          <Box color="text-body-secondary">None</Box>
+          {actions}
+        </SpaceBetween>
+      </Box>
+    );
+  }
+
   return (
     <Container
       header={
-        <Header
-          variant="h4"
-          description={updated}
-          actions={
-            <SpaceBetween size="xxs" direction="horizontal" alignItems="center">
-              {sourceLabel && !editing && <Badge color="grey">{sourceLabel}</Badge>}
-              {saving && <StatusIndicator type="loading">Saving</StatusIndicator>}
-              {deriving && <StatusIndicator type="loading">Reading the transcript</StatusIndicator>}
-              {!deriving && status && (
-                // Announced, because the outcome -- especially "no agenda was
-                // stated" -- is the whole feedback for pressing the button.
-                <Box nativeAttributes={{ role: 'status', 'aria-live': 'polite' }}>
-                  <StatusIndicator type={status.type}>{status.text}</StatusIndicator>
-                </Box>
-              )}
-              {editing ? (
-                <SpaceBetween size="xxs" direction="horizontal">
-                  <Button onClick={() => setEditing(false)} disabled={saving}>
-                    Cancel
-                  </Button>
-                  <Button variant="primary" onClick={() => save(draft.trim())} loading={saving} disabled={tooLong}>
-                    Save agenda
-                  </Button>
-                </SpaceBetween>
-              ) : (
-                <SpaceBetween size="xxs" direction="horizontal">
-                  {canDerive && (
-                    <Button iconName="search" onClick={handleDeriveClick} loading={deriving} disabled={saving}>
-                      Derive agenda
-                    </Button>
-                  )}
-                  {canEdit && (
-                    <Button iconName="edit" onClick={beginEditing} disabled={saving || deriving}>
-                      {items.length ? 'Edit' : 'Add agenda'}
-                    </Button>
-                  )}
-                </SpaceBetween>
-              )}
-            </SpaceBetween>
-          }
-        >
+        <Header variant="h4" description={updated} actions={actions}>
           Agenda
         </Header>
       }
@@ -210,6 +227,14 @@ const AgendaPanel = ({ item, onSave, onDerive, readOnly }) => {
           </ol>
         )}
         {!editing && items.length === 0 && <Box color="text-body-secondary">No agenda for this meeting.</Box>}
+        {!editing && items.length > 0 && coverage && (
+          <SpaceBetween size="xxs">
+            <Box variant="awsui-key-label">Coverage</Box>
+            <Box color="text-body-secondary">
+              <SummaryMarkdown callId={item.callId}>{coverage}</SummaryMarkdown>
+            </Box>
+          </SpaceBetween>
+        )}
       </SpaceBetween>
     </Container>
   );

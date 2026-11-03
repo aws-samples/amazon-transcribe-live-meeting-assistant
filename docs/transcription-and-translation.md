@@ -101,7 +101,8 @@ the Amazon Transcribe section of the [Configuration page](configuration-guide.md
 
 Speaker separation can tell voices apart but cannot know who they are, so a
 conference-room transcript reads `Other Participant (spk_0)`. The **Speakers**
-panel on the meeting page turns those voice ids into names. It works the same way
+panel, on the meeting page's **Details** tab, turns those voice ids into names
+(**Name speakers** in the page header opens it). It works the same way
 whichever engine produced the labels -- Amazon Transcribe speaker partitioning or
 the [on-demand MicroVM engine](microvm-asr.md) -- and on a meeting with no
 separation at all, where it names the channel.

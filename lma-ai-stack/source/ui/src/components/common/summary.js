@@ -52,6 +52,52 @@ export const getMarkdownSummary = (callSummaryText) => {
   return summary;
 };
 
+/** A section name compared as the summary's prompt template names are: case and spacing aside. */
+const sectionName = (name) =>
+  String(name || '')
+    .trim()
+    .toUpperCase();
+
+/**
+ * One section of a summary produced from several prompt templates (stored as a
+ * JSON object keyed by template name), or null: absent, or a summary written by
+ * hand, which is a single Markdown document.
+ */
+export const getSummarySection = (callSummaryText, name) => {
+  if (!callSummaryText) return null;
+  let sections;
+  try {
+    sections = JSON.parse(callSummaryText);
+  } catch (e) {
+    return null;
+  }
+  if (!sections || typeof sections !== 'object') return null;
+  const key = Object.keys(sections).find((k) => sectionName(k) === sectionName(name));
+  return key === undefined ? null : String(sections[key] ?? '');
+};
+
+/**
+ * The summary as Markdown, as getMarkdownSummary renders it, without the
+ * sections named in `omit` -- for the meeting page, which shows some sections
+ * in their own place (the chapters as a list, the agenda coverage beside the
+ * agenda). A hand-written summary has no sections and is returned whole, as
+ * is a summary that would be left with nothing.
+ */
+export const getMarkdownSummaryWithout = (callSummaryText, omit = []) => {
+  if (!callSummaryText || !omit.length) return getMarkdownSummary(callSummaryText);
+  let sections;
+  try {
+    sections = JSON.parse(callSummaryText);
+  } catch (e) {
+    return getMarkdownSummary(callSummaryText);
+  }
+  if (!sections || typeof sections !== 'object') return getMarkdownSummary(callSummaryText);
+  const left = new Set(omit.map(sectionName));
+  const kept = Object.entries(sections).filter(([key]) => !left.has(sectionName(key)));
+  if (!kept.length) return getMarkdownSummary(callSummaryText);
+  return getMarkdownSummary(JSON.stringify(Object.fromEntries(kept)));
+};
+
 /**
  * The summary as a percent-encoded `mailto:` body.
  *

@@ -21,11 +21,12 @@ const logger = new ConsoleLogger('VideoPlayer');
  * exact URL with the user's Cognito credentials and hand it to a native
  * <video> element. No S3 listing or filename guessing.
  *
- * `seekRequest` ({ seconds, at, reveal }) plays the recording from a time -- the
- * meeting page's key frame strip sends one when a frame is selected. `at` makes
- * two requests for the same time distinct; `reveal` scrolls the player into
- * view, which only an explicit "play from here" asks for, so that selecting a
- * frame leaves the page where the transcript was moved to.
+ * `seekRequest` ({ seconds, at, reveal, play }) plays the recording from a time
+ * -- the meeting page sends one for "Play recording from here" on a key frame.
+ * `at` makes two requests for the same time distinct; `reveal` scrolls the
+ * player into view. `play: false` only moves the recording to that time, for a
+ * frame or chapter selected while the player is on another tab: it is ready
+ * there when the viewer presses play, and nothing starts playing out of sight.
  */
 /* eslint-disable react/prop-types, react/destructuring-assignment */
 export const VideoPlayer = ({ videoRecordingUrl, seekRequest }) => {
@@ -44,6 +45,7 @@ export const VideoPlayer = ({ videoRecordingUrl, seekRequest }) => {
     const play = () => {
       appliedRef.current = seekRequest.at;
       video.currentTime = Math.max(0, seekRequest.seconds);
+      if (seekRequest.play === false) return;
       video.play()?.catch((error) => logger.debug('video play was not allowed', error));
     };
     if (seekRequest.reveal && video.scrollIntoView) video.scrollIntoView({ block: 'nearest', behavior: 'smooth' });

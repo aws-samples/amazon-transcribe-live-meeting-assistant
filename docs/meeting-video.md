@@ -16,18 +16,23 @@ was on screen. The meeting page shows them as a strip of thumbnails, below.
 
 ## On the meeting page
 
-A meeting with key frames has a **Shared screen** section on its page, below the
-summary: a strip of thumbnails in time order, each labelled with the time it
-went up.
+A meeting with key frames has a **Screen share** tab on its page, with the
+number of frames in its label: a strip of thumbnails in time order, each
+labelled with the time it went up. The tab appears once the first frames have
+loaded, including during a live meeting when the first frame is taken.
 
 - **Selecting a thumbnail** shows the picture large and moves the transcript to
-  that time, highlighting the segment that was under way. During a live meeting
-  this pauses following the newest segment, as scrolling up does; **Resume** in
-  the transcript returns to it.
+  that time, highlighting the segment that was under way, for when the
+  **Transcript** tab is next opened; **Show in transcript** opens it there.
+  During a live meeting this pauses following the newest segment, as scrolling
+  up does; **Resume** in the transcript returns to it.
 - **After the meeting**, when it has a video recording, selecting a thumbnail
-  also plays the recording from that frame. **Play recording from here** does
-  the same for the frame already selected, and **Open full size** opens the
+  also moves the recording (on the **Details** tab) to that frame, without
+  playing it. **Play recording from here** opens the **Details** tab and plays
+  the recording from the frame selected, and **Open full size** opens the
   picture in a new tab.
+- **A slide named in the summary** is a link on the **Overview** tab; following
+  it opens this tab with that frame selected.
 - **During the meeting**, new frames are added to the end of the strip as they
   are taken, and the strip follows them unless it has been scrolled back.
 - **Long meetings** load a hundred frames at a time; the next hundred load as
@@ -108,7 +113,10 @@ How it is built:
   frames are listed (past that, the ones on screen for the shortest time are
   left out), with each frame's text cut at 1,500 characters and its speech at
   3,000 (the fetch-transcript function sends no more than that).
-- The meeting page and the embeddable summary panel show each picture
+- The meeting page's **Overview** tab shows each picture reference as a link
+  that opens the frame on the **Screen share** tab (and as its alt text when
+  the meeting has no frames left), so that the summary of a long presentation
+  is not a column of slides. The embeddable summary panel shows each picture
   reference as the frame's thumbnail, read through `getVideoKeyframes` for that
   meeting with the same access check as the strip, in one request for every
   frame the summary names; selecting it opens the full picture. A picture whose
@@ -146,9 +154,9 @@ summary, under **Summary**.
 The summary has a **CHAPTERS** section: one line per main topic of the
 meeting, `- [MM:SS] Title`, at the time the topic was first discussed or a new
 slide started it. The meeting page reads that section and shows a **Chapters**
-list below the summary. Selecting a chapter moves the transcript to its time
-and, after the meeting, plays the video recording from there, as selecting a
-key frame does. In the **Shared screen** strip, the frame that went up within
+list beside the summary on the **Overview** tab, in place of the section itself.
+Selecting a chapter opens the **Transcript** tab at its time and, after the
+meeting, moves the video recording there. In the **Screen share** strip, the frame that went up within
 30 seconds of a chapter's start is labelled with the chapter; a chapter that
 began without a change of slide labels no frame.
 
@@ -193,7 +201,7 @@ to be less reliable on real meetings.
 
 ## Exporting the slides
 
-**Export slides (PDF)**, in the **Shared screen** section, opens the meeting's
+**Export slides (PDF)**, on the **Screen share** tab, opens the meeting's
 key frames in a new tab as a deck, one landscape page per frame in time order,
 each with its picture at full size (1568 pixels wide), its time, the chapter it
 begins, and its [slide text](#slide-text). It then opens the browser's print

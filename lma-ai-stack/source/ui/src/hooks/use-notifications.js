@@ -61,12 +61,27 @@ const useNotifications = () => {
       return;
     }
 
+    // Shown on the first visit only. Recorded as seen as soon as it is shown,
+    // not only when it is dismissed: a welcome that comes back on every page
+    // and every visit until somebody finds its close button is noise, and it
+    // sits above the page content it pushes down. It stays for the rest of this
+    // visit until dismissed.
+    const seenIds = getDissmissedNotificationIdsFromStorage();
+    const unseenIds = initialNotificationsNotDismissed.map((n) => n.id).filter((nId) => !seenIds.includes(nId));
+    if (unseenIds.length) {
+      try {
+        localStorage.setItem(dismissedInitialNotificationsStorageKey, JSON.stringify([...seenIds, ...unseenIds]));
+      } catch {
+        logger.warn('failed to record the initial notifications as seen');
+      }
+    }
+
     // add dismiss handler to notifications
     const initialNotificationsToShow = initialNotificationsNotDismissed.map((n) => ({
       ...n,
       onDismiss: () => {
         setNotifications((current) => current.filter((i) => i.id !== n.id));
-        const storedIds = getDissmissedNotificationIdsFromStorage();
+        const storedIds = getDissmissedNotificationIdsFromStorage().filter((i) => i !== n.id);
         localStorage.setItem(dismissedInitialNotificationsStorageKey, JSON.stringify([...storedIds, n.id]));
       },
     }));

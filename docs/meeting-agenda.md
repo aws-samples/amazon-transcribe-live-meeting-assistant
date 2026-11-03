@@ -54,9 +54,12 @@ meeting page at any time.
 
 ## The Agenda panel
 
-The meeting page has an **Agenda** panel, below the summary. It shows the items
-as a numbered list, with a badge for where the agenda came from and a line
-saying who last changed it and when. A meeting with no agenda says so.
+The meeting page's **Overview** tab has an **Agenda** panel, beside the summary.
+It shows the items as a numbered list, with a badge for where the agenda came
+from and a line saying who last changed it and when, and under them the
+summary's agenda coverage once the summary has been written. A meeting with no
+agenda shows a single line, **Agenda: None**, with **Derive agenda** and **Add
+agenda** for those who can change it.
 
 **Edit** (or **Add agenda** on a meeting without one) opens the text for
 editing, one item per line; **Save agenda** stores it. Editing is available
@@ -127,6 +130,10 @@ section: one line per agenda item, in agenda order, marked **Covered**,
 **Partly covered** or **Not covered**, with a few words on what was discussed
 or decided. A meeting without an agenda has no such section; it is left out
 rather than generated empty.
+
+On the meeting page the section is shown under the agenda on the **Overview**
+tab rather than in the summary; the summary's downloads and copies still
+include it.
 
 The section is one of the shipped summary prompts, so deployments that have not
 removed it get it, after an upgrade too. Its prompt names the agenda with the
