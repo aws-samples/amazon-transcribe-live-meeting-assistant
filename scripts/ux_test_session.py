@@ -69,6 +69,7 @@ import secrets
 import string
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -195,21 +196,30 @@ def create_cognito_user(ctx: dict, email: str, group: str | None, password: str)
                 "--email-domain <that domain>."
             ) from err
         raise
-    aws(
-        "cognito-idp",
-        "admin-set-user-password",
-        "--cli-input-json",
-        "file:///dev/stdin",
-        region=ctx["region"],
-        stdin=json.dumps(
-            {
-                "UserPoolId": ctx["user_pool"],
-                "Username": email,
-                "Password": password,
-                "Permanent": True,
-            }
-        ),
-    )
+    # The password reaches the CLI in a file only this user can read, not in
+    # its arguments, so it never appears in the process list. (The CLI reads a
+    # --cli-input-json file more than once, so standard input cannot carry it.)
+    with tempfile.TemporaryDirectory(prefix="ux-session-") as private_dir:
+        request = Path(private_dir) / "set-password.json"
+        request.touch(mode=0o600)
+        request.write_text(
+            json.dumps(
+                {
+                    "UserPoolId": ctx["user_pool"],
+                    "Username": email,
+                    "Password": password,
+                    "Permanent": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        aws(
+            "cognito-idp",
+            "admin-set-user-password",
+            "--cli-input-json",
+            f"file://{request}",
+            region=ctx["region"],
+        )
     if group:
         aws(
             "cognito-idp",

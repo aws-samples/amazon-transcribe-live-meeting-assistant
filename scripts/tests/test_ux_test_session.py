@@ -154,24 +154,40 @@ class TestThrowawayCredentials:
     def test_passwords_are_not_reused_between_sessions(self):
         assert len({uts._password() for _ in range(50)}) == 50
 
-    def test_invitation_is_suppressed_and_the_password_set_permanent(self):
+    def _calls_with_request_files(self):
+        """Run create_cognito_user, recording each call and any request file's content."""
         calls = []
-        with patch.object(uts, "aws", side_effect=lambda *a, **k: calls.append((a, k))):
+
+        def fake_aws(*args, **kwargs):
+            request = None
+            if "--cli-input-json" in args:
+                path = Path(args[args.index("--cli-input-json") + 1].removeprefix("file://"))
+                request = (json.loads(path.read_text()), oct(path.stat().st_mode & 0o777))
+            calls.append((args, request))
+
+        with patch.object(uts, "aws", side_effect=fake_aws):
             uts.create_cognito_user(CTX, "ux-test-1@example.invalid", "Admin", "Ux!pw9aZ")
-        (create, _), (set_password, set_kwargs), (add_to_group, _) = calls
+        return calls
+
+    def test_invitation_is_suppressed_and_the_password_set_permanent(self):
+        (create, _), (set_password, request), (add_to_group, _) = self._calls_with_request_files()
         assert create[1] == "admin-create-user" and "SUPPRESS" in create
         assert set_password[1] == "admin-set-user-password"
-        assert json.loads(set_kwargs["stdin"])["Permanent"] is True
+        assert request[0]["Permanent"] is True
         assert add_to_group[1] == "admin-add-user-to-group" and "Admin" in add_to_group
 
-    def test_the_password_is_passed_on_standard_input_not_in_the_arguments(self):
-        calls = []
-        with patch.object(uts, "aws", side_effect=lambda *a, **k: calls.append((a, k))):
-            uts.create_cognito_user(CTX, "ux-test-1@example.invalid", "Admin", "Ux!pw9aZ")
-        set_password, set_kwargs = calls[1]
-        assert "Ux!pw9aZ" not in set_password
-        assert "file:///dev/stdin" in set_password
-        assert json.loads(set_kwargs["stdin"])["Password"] == "Ux!pw9aZ"
+    def test_the_password_is_passed_in_an_owner_only_file_not_in_the_arguments(self):
+        set_password, (body, mode) = self._calls_with_request_files()[1]
+        assert "Ux!pw9aZ" not in " ".join(set_password)
+        assert body["Password"] == "Ux!pw9aZ"
+        assert mode == "0o600"
+
+    def test_the_request_file_is_removed_afterwards(self):
+        set_password, _ = self._calls_with_request_files()[1]
+        path = Path(
+            set_password[set_password.index("--cli-input-json") + 1].removeprefix("file://")
+        )
+        assert not path.exists()
 
     def test_a_cli_failure_never_repeats_the_password(self):
         """An error message names only the service and operation."""
