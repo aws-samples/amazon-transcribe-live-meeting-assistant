@@ -124,15 +124,16 @@ enum CallStatus {
 # The two speech channels: REMOTE is everyone else in the meeting (the meeting
 # audio), LOCAL the local side (the user's microphone, or a Virtual Participant's
 # voice assistant). See lma_channels in the configuration layer. CALLER and AGENT
-# are deprecated: the names LMA before 0.4.0 wrote for REMOTE and LOCAL, kept so
-# that segments stored by those versions still serialize; nothing writes them,
-# and every reader treats them as REMOTE and LOCAL. (AppSync's schema parser
-# refuses a comment between enum values, so this one sits above the enum.)
+# are the names LMA before 0.4.0 wrote for REMOTE and LOCAL, kept (and marked
+# @deprecated) so that segments stored by those versions still serialize;
+# addTranscriptSegment stores them under the new names, and every reader treats
+# them as REMOTE and LOCAL. (AppSync's schema parser refuses a comment between
+# enum values, so this one sits above the enum.)
 enum Channel {
 	REMOTE
 	LOCAL
-	CALLER
-	AGENT
+	CALLER @deprecated(reason: "Stored by LMA before 0.4.0; read as REMOTE.")
+	AGENT @deprecated(reason: "Stored by LMA before 0.4.0; read as LOCAL.")
 	AGENT_VOICETONE
 	CALLER_VOICETONE
 	AGENT_ASSISTANT
@@ -322,9 +323,8 @@ type OverallSentiment @aws_cognito_user_pools
 @aws_iam {
 	REMOTE: Float
 	LOCAL: Float
-	# CALLER and AGENT are deprecated: older meetings' values for REMOTE and LOCAL.
-	AGENT: Float
-	CALLER: Float
+	AGENT: Float @deprecated(reason: "Older meetings' value for LOCAL.")
+	CALLER: Float @deprecated(reason: "Older meetings' value for REMOTE.")
 	AGENT_VOICETONE: Float
 	CALLER_VOICETONE: Float
 }
@@ -625,9 +625,8 @@ type SentimentByChannel @aws_cognito_user_pools
 @aws_iam {
 	REMOTE: [SentimentByChannelEntry]
 	LOCAL: [SentimentByChannelEntry]
-	# CALLER and AGENT are deprecated: older meetings' values for REMOTE and LOCAL.
-	AGENT: [SentimentByChannelEntry]
-	CALLER: [SentimentByChannelEntry]
+	AGENT: [SentimentByChannelEntry] @deprecated(reason: "Older meetings' value for LOCAL.")
+	CALLER: [SentimentByChannelEntry] @deprecated(reason: "Older meetings' value for REMOTE.")
 	AGENT_VOICETONE: [SentimentByChannelEntry]
 	CALLER_VOICETONE: [SentimentByChannelEntry]
 }

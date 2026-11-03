@@ -36,8 +36,10 @@ LOCAL = "LOCAL"
 # The two speech channels, as written.
 SPEECH_CHANNELS = (REMOTE, LOCAL)
 
-# Older spellings, still read. CUSTOMER is the participant role Amazon
-# Transcribe uses for the non-agent side of a call.
+# Older spellings, still read. CALLER and AGENT are what LMA stored before 0.4.0.
+# CUSTOMER is only ever an incoming name -- the participant role Amazon Transcribe
+# uses for the non-agent side of a call -- and was never stored, which is why
+# STORED_SPEECH_CHANNELS leaves it out.
 CHANNEL_ALIASES: Dict[str, str] = {
     "CALLER": REMOTE,
     "CUSTOMER": REMOTE,

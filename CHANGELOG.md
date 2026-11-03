@@ -121,6 +121,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A meeting's stored duration is now how long it ran.** The duration was written from the end time of whichever final transcript segment's batch was processed last, and final segments arrive in more than one batch and out of order, so a meeting could be stored as a few minutes long when it ran for many more. It is now the latest end of all the meeting's final speech segments. The meeting list, the summary download and the MCP tools read the corrected value for meetings recorded from now on; older meetings keep the value they have.
 - **A meeting's duration could read far shorter than the meeting.** The stored duration is the end time of whichever final transcript segment was processed last, not the latest one, so a segment written late with an earlier time leaves it short. The meeting page now shows the longer of the stored value and the end of the transcript it has loaded, says so on the **Details** tab when they differ, and uses the same figure in the summary download. The meeting list and the MCP tools still read the stored value. See [Duration](docs/web-ui-guide.md#duration).
 - **Translated transcript lines had lost their colour.** Since the move to react-markdown 10, which takes no `className`, the translation under each segment was drawn like the original text; it is blue again, on the meeting page and in the embeddable transcript.
 
