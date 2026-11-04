@@ -38,6 +38,25 @@ const client = generateClient();
  * AppSync reports that as errorType "ExecutionTimeout" with the message
  * "Execution timed out."; both are checked, since the type is not always set.
  */
+/**
+ * Every stored segment of a meeting. A long meeting's segments span several
+ * pages of the table, and a page can come back empty with a nextToken (the
+ * resolver leaves out what the caller may not read), so pages are read until
+ * there is no nextToken.
+ */
+export const fetchAllTranscriptSegments = async (graphql, callId) => {
+  const segments = [];
+  let nextToken = null;
+  do {
+    // eslint-disable-next-line no-await-in-loop
+    const response = await graphql({ query: getTranscriptSegments, variables: { callId, nextToken } });
+    const page = response?.data?.getTranscriptSegments;
+    segments.push(...(page?.TranscriptSegments || []).filter(Boolean));
+    nextToken = page?.nextToken || null;
+  } while (nextToken);
+  return segments;
+};
+
 export const isRequestTimeout = (error) =>
   (error?.errors || []).some((e) => /timeout/i.test(e?.errorType || '') || /timed out/i.test(e?.message || ''));
 /** A transcript segment from the API, as the UI holds it. */
@@ -477,8 +496,7 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
 
   const sendGetTranscriptSegmentsRequest = async (callId) => {
     try {
-      const response = await client.graphql({ query: getTranscriptSegments, variables: { callId } });
-      const transcriptSegments = response?.data?.getTranscriptSegments?.TranscriptSegments;
+      const transcriptSegments = await fetchAllTranscriptSegments((request) => client.graphql(request), callId);
       if (transcriptSegments?.length > 0) {
         const transcriptSegmentsReduced = transcriptSegments
           .map((t) => mapTranscriptSegmentValue(t))

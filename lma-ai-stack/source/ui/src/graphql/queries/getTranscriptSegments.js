@@ -5,8 +5,8 @@
  */
 
 export default /* GraphQL */ `
-  query Query($callId: ID!, $isPartial: Boolean) {
-    getTranscriptSegments(callId: $callId, isPartial: $isPartial) {
+  query Query($callId: ID!, $isPartial: Boolean, $nextToken: String) {
+    getTranscriptSegments(callId: $callId, isPartial: $isPartial, nextToken: $nextToken) {
       TranscriptSegments {
         Channel
         CallId

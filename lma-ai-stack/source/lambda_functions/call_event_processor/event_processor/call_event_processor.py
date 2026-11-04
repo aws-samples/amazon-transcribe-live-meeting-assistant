@@ -538,36 +538,58 @@ async def execute_get_transcript_segments_query(
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
 
-    # get_transcript_segments_input = {
-    #     "CallId": call_id
-    # }
-    query = dsl_gql(
-        DSLQuery(
-            schema.Query.getTranscriptSegmentsWithSentiment.args(callId=call_id).select(
-                schema.TranscriptSegmentsWithSentimentList.TranscriptSegmentsWithSentiment.select(
-                    schema.TranscriptSegmentWithSentiment.PK,
-                    schema.TranscriptSegmentWithSentiment.SK,
-                    schema.TranscriptSegmentWithSentiment.CallId,
-                    schema.TranscriptSegmentWithSentiment.Channel,
-                    schema.TranscriptSegmentWithSentiment.SegmentId,
-                    schema.TranscriptSegmentWithSentiment.StartTime,
-                    schema.TranscriptSegmentWithSentiment.EndTime,
-                    schema.TranscriptSegmentWithSentiment.Sentiment,
-                    schema.TranscriptSegmentWithSentiment.SentimentWeighted,
+    # A long meeting's segments span several pages of the table, and a page can
+    # come back empty with a nextToken, so pages are read until there is none.
+    # The pages are returned as one response of the query's shape. A page that
+    # does not carry the list is returned as it came, for the caller to treat
+    # as no answer.
+    segments: List[Any] = []
+    next_token: Optional[str] = None
+    while True:
+        query = dsl_gql(
+            DSLQuery(
+                schema.Query.getTranscriptSegmentsWithSentiment.args(
+                    callId=call_id, nextToken=next_token
+                ).select(
+                    schema.TranscriptSegmentsWithSentimentList.TranscriptSegmentsWithSentiment.select(
+                        schema.TranscriptSegmentWithSentiment.PK,
+                        schema.TranscriptSegmentWithSentiment.SK,
+                        schema.TranscriptSegmentWithSentiment.CallId,
+                        schema.TranscriptSegmentWithSentiment.Channel,
+                        schema.TranscriptSegmentWithSentiment.SegmentId,
+                        schema.TranscriptSegmentWithSentiment.StartTime,
+                        schema.TranscriptSegmentWithSentiment.EndTime,
+                        schema.TranscriptSegmentWithSentiment.Sentiment,
+                        schema.TranscriptSegmentWithSentiment.SentimentWeighted,
+                    ),
+                    schema.TranscriptSegmentsWithSentimentList.nextToken,
                 )
             )
         )
-    )
-    result = await execute_gql_query_with_retries(
-        query,
-        client_session=appsync_session,
-        logger=LOGGER,
-    )
+        result = await execute_gql_query_with_retries(
+            query,
+            client_session=appsync_session,
+            logger=LOGGER,
+        )
+        LOGGER.debug(
+            "get transcript segments result", extra=dict(query=print_ast(query), result=result)
+        )
+        page = (result or {}).get("getTranscriptSegmentsWithSentiment")
+        if not isinstance(page, dict) or not isinstance(
+            page.get("TranscriptSegmentsWithSentiment"), list
+        ):
+            return result
+        segments.extend(page["TranscriptSegmentsWithSentiment"])
+        next_token = page.get("nextToken")
+        if not next_token:
+            break
 
-    query_string = print_ast(query)
-    LOGGER.debug("get transcript segments result", extra=dict(query=query_string, result=result))
-
-    return result
+    return {
+        "getTranscriptSegmentsWithSentiment": {
+            "TranscriptSegmentsWithSentiment": segments,
+            "nextToken": None,
+        }
+    }
 
 
 def latest_speech_end_seconds(segments: List[Any]) -> float:

@@ -382,3 +382,37 @@ def test_the_evaluated_request_excludes_the_retired_channels(field_name: str) ->
     for placeholder, channel in zip(RETIRED_PLACEHOLDERS, RETIRED_CHANNELS):
         assert query_filter["expressionValues"][placeholder] == {"S": channel}
     assert query_filter["expressionValues"][":isPartial"] == {"BOOL": False}
+
+
+@pytest.mark.parametrize(
+    "field_name", ["getTranscriptSegments", "getTranscriptSegmentsWithSentiment"]
+)
+def test_each_segment_query_reads_the_page_its_nextToken_names(schema, field_name: str) -> None:
+    """A meeting's segments can span more than one page of the table."""
+    field = schema.query_type.fields[field_name]
+    assert field.args["nextToken"].type.name == "String"
+    assert field.type.fields["nextToken"].type.name == "String"
+    text = _request_template(field_name).read_text()
+    assert '"nextToken": $util.toJson($util.defaultIfNullOrEmpty($ctx.args.nextToken, null))' in text
+
+
+@pytest.mark.skipif(
+    os.environ.get("LMA_EVALUATE_APPSYNC") != "1",
+    reason="evaluates templates with the AppSync API; set LMA_EVALUATE_APPSYNC=1 to run",
+)
+@pytest.mark.parametrize(
+    "field_name", ["getTranscriptSegments", "getTranscriptSegmentsWithSentiment"]
+)
+@pytest.mark.parametrize("arguments, expected", [({}, None), ({"nextToken": "t1"}, "t1")])
+def test_the_evaluated_request_reads_the_page_its_nextToken_names(
+    field_name: str, arguments: dict, expected
+) -> None:
+    import boto3  # imported here so the module collects without boto3 when skipped
+
+    client = boto3.client("appsync", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+    response = client.evaluate_mapping_template(
+        template=_request_template(field_name).read_text(),
+        context=json.dumps({"arguments": {"callId": "c1", **arguments}}),
+    )
+    assert not response.get("error"), response.get("error")
+    assert _evaluated_request(response)["nextToken"] == expected
