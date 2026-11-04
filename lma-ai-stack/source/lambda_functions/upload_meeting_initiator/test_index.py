@@ -141,7 +141,7 @@ def make_event(identity: dict | None = None, field_name: str = "createUploadMeet
     """Build an AppSync direct-Lambda resolver event with sensible defaults."""
     payload = {
         "meetingTopic": "Weekly Sync",
-        "agentId": "bob@example.com",
+        "localSpeakerName": "bob@example.com",
         "filename": "recording.mp3",
         "contentType": "audio/mpeg",
     }
@@ -366,7 +366,7 @@ def test_the_row_carries_every_field_the_later_stages_read(env) -> None:
     meeting that uploads, then silently never transcribes."""
     table, _ = env
     call_id = invoke(
-        fromNumber="+15550001111",
+        remoteSpeakerName="+15550001111",
         toNumber="+15550002222",
         languageCode="es-US",
         meetingDateTime="2025-01-01T10:00:00Z",
@@ -538,8 +538,8 @@ def test_presigned_urls_are_signed_with_sigv4(env) -> None:
         ({"meetingTopic": "   "}, "meetingTopic is required"),
         ({"meetingTopic": None}, "meetingTopic is required"),
         ({"meetingTopic": "t" * 201}, "200 characters or fewer"),
-        ({"agentId": ""}, "agentId is required"),
-        ({"agentId": "a" * 201}, "200 characters or fewer"),
+        ({"localSpeakerName": ""}, "localSpeakerName is required"),
+        ({"localSpeakerName": "a" * 201}, "200 characters or fewer"),
         ({"contentType": ""}, "contentType is required"),
         ({"contentType": "application/pdf"}, "contentType must start with"),
         ({"contentType": "text/plain"}, "contentType must start with"),
@@ -633,6 +633,32 @@ def test_a_numeric_string_file_size_is_stored_as_a_number(env) -> None:
 def test_surrounding_whitespace_is_trimmed_from_the_topic_and_agent(env) -> None:
     """The topic becomes a slug and part of a key; the agent becomes the Owner."""
     table, _ = env
-    invoke(meetingTopic="  Weekly Sync  ", agentId="  bob@example.com  ")
+    invoke(meetingTopic="  Weekly Sync  ", localSpeakerName="  bob@example.com  ")
     assert table.item["MeetingTopic"] == "Weekly Sync"
     assert table.item["AgentId"] == "bob@example.com"
+
+
+def test_the_older_speaker_names_are_still_accepted(env) -> None:
+    table, _ = env
+    invoke(localSpeakerName=None, agentId="carol@example.com", fromNumber="Room 3")
+    assert table.item["AgentId"] == "carol@example.com"
+    assert table.item["FromNumber"] == "Room 3"
+
+
+def test_a_documented_speaker_name_wins_over_its_older_name(env) -> None:
+    table, _ = env
+    invoke(
+        localSpeakerName="dana@example.com",
+        agentId="older@example.com",
+        remoteSpeakerName="Room 4",
+        fromNumber="older room",
+    )
+    assert table.item["AgentId"] == "dana@example.com"
+    assert table.item["FromNumber"] == "Room 4"
+
+
+def test_a_local_speaker_name_is_required_under_one_name_or_the_other(env) -> None:
+    table, _ = env
+    with pytest.raises(index.ValidationError, match="localSpeakerName is required"):
+        invoke(localSpeakerName=None, agentId="  ")
+    assert table.calls == []

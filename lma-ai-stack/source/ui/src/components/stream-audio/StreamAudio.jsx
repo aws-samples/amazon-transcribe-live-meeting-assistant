@@ -688,9 +688,8 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       const meetingPrefix = (meetingTopic || 'Uploaded Meeting').replace(/[\/?#%\+&]/g, '|');
       const input = {
         meetingTopic: meetingPrefix,
-        agentId: callMetaData.agentId || DEFAULT_LOCAL_SPEAKER_NAME,
-        fromNumber: callMetaData.fromNumber || DEFAULT_OTHER_SPEAKER_NAME,
-        toNumber: callMetaData.toNumber || SYSTEM,
+        localSpeakerName: callMetaData.agentId || DEFAULT_LOCAL_SPEAKER_NAME,
+        remoteSpeakerName: callMetaData.fromNumber || DEFAULT_OTHER_SPEAKER_NAME,
         filename: file.name,
         contentType: file.type || 'application/octet-stream',
         fileSize: file.size,

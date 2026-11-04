@@ -205,7 +205,15 @@ type DeleteMeetingsOutput {
 input CreateUploadMeetingInput {
 	callId: String
 	meetingTopic: String!
-	agentId: String!
+	# The name the transcript shows for the uploading user's side. Required,
+	# here or as agentId.
+	localSpeakerName: String
+	# The name for the other participants; "Other Participant" when not given.
+	remoteSpeakerName: String
+	# Older names of localSpeakerName and remoteSpeakerName, still accepted. A
+	# documented name wins when both are sent. toNumber is accepted and stored
+	# as before; nothing shows it.
+	agentId: String
 	fromNumber: String
 	toNumber: String
 	filename: String!

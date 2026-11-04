@@ -8,10 +8,10 @@
  * A control frame for the WebSocket streaming API (docs/websocket-streaming-api.md),
  * from the Stream Audio form's state.
  *
- * The form keeps the two speaker names as `agentId` and `fromNumber` because the
- * same state also fills the createUploadMeeting input, which takes those names.
- * The streaming API documents them as `localSpeakerName` (the microphone) and
- * `remoteSpeakerName` (the meeting audio), so the frame carries those instead.
+ * The form keeps the two speaker names under their older names, `agentId` and
+ * `fromNumber`. The streaming API and the createUploadMeeting input document
+ * them as `localSpeakerName` (the microphone) and `remoteSpeakerName` (the
+ * meeting audio), so the frame carries those instead.
  * `toNumber` is left out: the transcriber does not use it.
  */
 export const toStreamingFrame = ({ agentId, fromNumber, toNumber, ...frame }) => ({

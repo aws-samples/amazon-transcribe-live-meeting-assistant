@@ -84,9 +84,8 @@ async def _upload_one(
     input_obj = {
         "callId": call_id,
         "meetingTopic": f"LoadTest Upload {idx:05d}",
-        "agentId": agent_label,
-        "fromNumber": "LoadSim-Customer",
-        "toNumber": "LoadSim-System",
+        "localSpeakerName": agent_label,
+        "remoteSpeakerName": "LoadSim-Customer",
         "filename": filename,
         "contentType": "audio/wav",
         "fileSize": len(wav_bytes),
