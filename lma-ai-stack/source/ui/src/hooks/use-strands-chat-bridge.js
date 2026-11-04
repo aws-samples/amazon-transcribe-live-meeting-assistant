@@ -102,9 +102,12 @@ const userContextMessage = ({ user, userGroups, isAdmin }) => ({
 /**
  * @param {string} callId the meeting the chat is about; the frame's first
  *   push of the user context is repeated when it changes.
- * @param {{ client?: object }} [options] the GraphQL client, for tests.
+ * @param {{ client?: object, onAnswerComplete?: Function }} [options] the
+ *   GraphQL client, for tests; and a function called each time an answer has
+ *   finished streaming (its last token has been passed to the frame), which
+ *   the meeting page uses to mark the Assistant button while the panel is closed.
  */
-const useStrandsChatBridge = (callId, { client } = {}) => {
+const useStrandsChatBridge = (callId, { client, onAnswerComplete } = {}) => {
   const { user } = useAppContext();
   const { userGroups, isAdmin } = useUserGroups();
 
@@ -114,6 +117,8 @@ const useStrandsChatBridge = (callId, { client } = {}) => {
   contextRef.current = { user, userGroups, isAdmin };
   const clientRef = useRef(client);
   if (!clientRef.current) clientRef.current = generateClient();
+  const onAnswerCompleteRef = useRef(onAnswerComplete);
+  onAnswerCompleteRef.current = onAnswerComplete;
 
   // Send the user context to the frame once it has had time to load.
   useEffect(() => {
@@ -221,7 +226,10 @@ const useStrandsChatBridge = (callId, { client } = {}) => {
                 if (!token) return;
                 reply({ type: 'STRANDS_TOKEN_MESSAGE', token });
                 // One subscription per answer: close it once the answer is complete.
-                if (token.IsComplete) close();
+                if (token.IsComplete) {
+                  close();
+                  onAnswerCompleteRef.current?.();
+                }
               },
               error: (error) => logger.error('Token subscription error', error),
             });

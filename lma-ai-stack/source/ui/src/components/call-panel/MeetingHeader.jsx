@@ -17,9 +17,10 @@
  * estimate. Then the people heard in it, from the transcript and the names
  * given to its voices.
  *
- * The actions are the meeting's: Share, Download (the summary and the
- * transcript) and, under the "more" menu, Delete. Share and Delete are the
- * meeting list's own dialogs (common/meeting-controls.js).
+ * The actions are the meeting's: Assistant, which opens and closes the
+ * meeting assistant's panel (when the assistant is enabled), Share, Download
+ * (the summary and the transcript) and, under the "more" menu, Delete. Share
+ * and Delete are the meeting list's own dialogs (common/meeting-controls.js).
  */
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
@@ -34,6 +35,7 @@ import {
   Popover,
   SpaceBetween,
   StatusIndicator,
+  ToggleButton,
 } from '@cloudscape-design/components';
 
 import useCallsContext from '../../contexts/calls';
@@ -42,6 +44,7 @@ import { InfoLink } from '../common/info-link';
 import { DONE_STATUS } from '../common/get-recording-status';
 import { formatDuration, formatMeetingStart, meetingTitle } from '../common/meeting-header';
 import { CallCostBreakdown, costSummaryText } from './CallCostPanel';
+import { ASSISTANT_PANEL_ID } from './MeetingAssistantPanel';
 import {
   SUMMARY_ACTION_ITEMS,
   TRANSCRIPT_DOWNLOAD_ITEMS,
@@ -121,6 +124,7 @@ const MeetingHeader = ({
   getCallDetailsFromCallIds = undefined,
   setToolsOpen = undefined,
   onShowSpeakers = undefined,
+  assistant = undefined,
 }) => {
   const { calls } = useCallsContext();
   const [deleteRequest, setDeleteRequest] = useState(0);
@@ -175,6 +179,23 @@ const MeetingHeader = ({
           info={setToolsOpen ? <InfoLink onFollow={() => setToolsOpen(true)} /> : undefined}
           actions={
             <SpaceBetween size="xs" direction="horizontal">
+              {assistant && (
+                <ToggleButton
+                  ref={assistant.buttonRef}
+                  iconName="contact"
+                  pressed={assistant.open}
+                  onChange={({ detail }) => assistant.onToggle(detail.pressed)}
+                  ariaControls={ASSISTANT_PANEL_ID}
+                >
+                  Assistant
+                  {assistant.unread && (
+                    <>
+                      <span className="meeting-assistant-unread" aria-hidden="true" />
+                      <span className="meeting-assistant-visually-hidden">, new answer</span>
+                    </>
+                  )}
+                </ToggleButton>
+              )}
               {shareModal({ ...controls, triggerText: 'Share' })}
               <ButtonDropdown items={downloadItems} onItemClick={onDownload}>
                 Download
@@ -268,6 +289,14 @@ MeetingHeader.propTypes = {
   getCallDetailsFromCallIds: PropTypes.func,
   setToolsOpen: PropTypes.func,
   onShowSpeakers: PropTypes.func,
+  /** The Assistant button: absent when the meeting assistant is not enabled. */
+  assistant: PropTypes.shape({
+    open: PropTypes.bool.isRequired,
+    unread: PropTypes.bool,
+    onToggle: PropTypes.func.isRequired,
+    // eslint-disable-next-line react/forbid-prop-types
+    buttonRef: PropTypes.object,
+  }),
 };
 
 export default MeetingHeader;

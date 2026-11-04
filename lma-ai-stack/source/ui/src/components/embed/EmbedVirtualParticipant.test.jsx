@@ -11,7 +11,7 @@
  * player on the Transcript tab once the meeting has ended.
  */
 import React from 'react';
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 
@@ -107,5 +107,34 @@ describe('the vp-details embed', () => {
     expect(screen.getByTestId('location').textContent).toBe(
       '/embed?component=vp-details&vpId=vp-1&show=transcript,chat',
     );
+  });
+
+  describe('with the meeting assistant enabled', () => {
+    beforeEach(() => {
+      vi.stubEnv('VITE_ENABLE_AGENT_ASSIST', 'true');
+      window.localStorage.clear();
+    });
+    afterEach(() => vi.unstubAllEnvs());
+
+    const renderEmbed = (show) =>
+      render(
+        <MemoryRouter initialEntries={[`/embed?component=vp-details&vpId=vp-1&show=${show.join(',')}`]}>
+          <EmbedVirtualParticipant params={{ vpId: 'vp-1', show, layout: 'vertical' }} sendToParent={vi.fn()} />
+        </MemoryRouter>,
+      );
+
+    it('opens the assistant panel when the embed asks for the chat', async () => {
+      renderEmbed(['transcript', 'chat']);
+      const button = await screen.findByRole('button', { name: /^Assistant/ });
+      expect(button.getAttribute('aria-pressed')).toBe('true');
+      expect(document.querySelector('iframe[src*="strands-chat.html"]')).not.toBeNull();
+    });
+
+    it('offers it behind the Assistant button when the embed does not', async () => {
+      renderEmbed(['transcript']);
+      const button = await screen.findByRole('button', { name: /^Assistant/ });
+      expect(button.getAttribute('aria-pressed')).toBe('false');
+      expect(document.querySelector('iframe[src*="strands-chat.html"]')).toBeNull();
+    });
   });
 });
