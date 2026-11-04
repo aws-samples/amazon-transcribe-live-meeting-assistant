@@ -463,8 +463,8 @@ def rbac_cmd(
 @click.option("--transcribe/--no-transcribe", default=False,
               help="Also run the recording through Amazon Transcribe.")
 @click.option("--reference", "reference_path", default=None, type=click.Path(exists=True, dir_okay=False),
-              help="Reference transcript (plain text) to score WER against; default compares with the "
-              "Transcribe run.")
+              help="Ground-truth transcript to score WER against: an STM file (channel 0/1 or meeting/mic, "
+              "speaker, start, end, text) for per-channel WER, or plain text for both channels together.")
 @click.option("--diarize-system/--no-diarize-system", default=True,
               help="Separate speakers on the meeting channel (default on).")
 @click.option("--diarize-mic/--no-diarize-mic", default=False,

@@ -96,7 +96,7 @@ def run(ctx: RunContext, stack: LMAStackInfo, params: AsrBenchmarkParams) -> lis
         )
     wav_seconds = len(wav.frames) / (wav.sample_rate * wav.channels * 2)
     runs = plan_runs(params)
-    reference = Path(params.reference_path).read_text() if params.reference_path else None
+    reference = quality.load_reference(params.reference_path) if params.reference_path else None
 
     session = boto3.Session(profile_name=ctx.profile, region_name=ctx.region)
     cfn = session.client("cloudformation")
@@ -182,7 +182,7 @@ def run(ctx: RunContext, stack: LMAStackInfo, params: AsrBenchmarkParams) -> lis
 
     compare(results, reference)
     ctx.write_json("asr-benchmark.json", results)
-    table = render_table(results, rates, reference is not None)
+    table = render_table(results, rates, reference)
     (ctx.results_dir / "asr-benchmark.md").write_text(table + "\n")
     print(table)
     return results
@@ -260,21 +260,48 @@ def _one_run(
     return result
 
 
-def compare(results: list[dict[str, Any]], reference: str | None) -> None:
-    baseline = reference
-    if baseline is None:
-        transcribe = next(
-            (r for r in results if r["engine"] == "transcribe" and r.get("segments")), None
-        )
-        if transcribe:
-            baseline = " ".join(s["text"] for s in transcribe["segments"])
+def compare(results: list[dict[str, Any]], reference: quality.Reference | None) -> None:
+    transcribe = next(
+        (r for r in results if r["engine"] == "transcribe" and r.get("segments")), None
+    )
+    baseline = (
+        quality.Reference([quality.Segment(**s) for s in transcribe["segments"]], by_channel=True)
+        if transcribe
+        else None
+    )
     for result in results:
         segments = [quality.Segment(**s) for s in result.get("segments", [])]
-        result["quality"] = quality.summarise(segments, baseline)
+        result["quality"] = quality.summarise(segments, reference)
+        if baseline is not None and result is not transcribe:
+            result["agreement_with_transcribe"] = quality.score(segments, baseline)
 
 
-def render_table(results: list[dict[str, Any]], rates: measure.Rates, have_reference: bool) -> str:
-    wer_label = "WER" if have_reference else "vs Transcribe"
+def _wer_cell(accuracy: dict[str, Any], channel: str) -> str:
+    entry = accuracy.get(channel)
+    if not entry:
+        return ""
+    return f"{entry['wer']:.1%} ({entry['swapped']:.1%} / {entry['missing']:.1%} / {entry['extra']:.1%})"
+
+
+def _speaker_cell(q: dict[str, Any]) -> str:
+    accuracy = q.get("accuracy") or {}
+    cells = []
+    for channel, labels in (q.get("speakers") or {}).items():
+        expected = (accuracy.get(channel) or {}).get("reference_speakers")
+        cells.append(f"{channel} {len(labels)}" + (f" of {expected}" if expected else ""))
+    return ", ".join(cells)
+
+
+def render_table(
+    results: list[dict[str, Any]], rates: measure.Rates, reference: quality.Reference | None = None
+) -> str:
+    wer_channels = (
+        []
+        if reference is None
+        else [("CALLER", "WER meeting (swapped / missing / extra)"), ("AGENT", "WER microphone")]
+        if reference.by_channel
+        else [("all", "WER both channels (swapped / missing / extra)")]
+    )
     columns = [
         "Config",
         "Audio",
@@ -289,14 +316,12 @@ def render_table(results: list[dict[str, Any]], rates: measure.Rates, have_refer
         "Transcribe $",
         "Rows",
         "Speakers",
-        wer_label,
     ]
+    columns += [label for _, label in wer_channels]
     lines = ["| " + " | ".join(columns) + " |", "|" + "---|" * len(columns)]
     for r in results:
         m = r.get("measurement") or {}
         q = r.get("quality") or {}
-        speakers = ", ".join(f"{ch} {len(v)}" for ch, v in (q.get("speakers") or {}).items())
-        wer = q.get("wer")
         cells = [
             r["label"],
             _minutes(m.get("audio_seconds")),
@@ -310,11 +335,10 @@ def render_table(results: list[dict[str, Any]], rates: measure.Rates, have_refer
             _money(m.get("cost_at_used_cores_per_audio_hour")),
             _money(m.get("transcribe_equivalent")),
             str(q.get("rows", "")),
-            speakers,
-            ""
-            if wer is None or (r["engine"] == "transcribe" and not have_reference)
-            else f"{wer:.1%}",
+            _speaker_cell(q),
         ]
+        accuracy = q.get("accuracy") or {}
+        cells += [_wer_cell(accuracy, channel) for channel, _ in wer_channels]
         lines.append("| " + " | ".join(cells) + " |")
         if r.get("error") or r.get("warning"):
             lines.append(f"| ↳ {r.get('error') or r.get('warning')} |" + " |" * (len(columns) - 1))
@@ -325,6 +349,11 @@ def render_table(results: list[dict[str, Any]], rates: measure.Rates, have_refer
         "(memory / 2 GiB) and the cores in use, as MicroVMs are billed; Cost, used cores bills only the "
         "cores the engine measured, with memory unchanged."
     )
+    if reference is not None:
+        lines.append(
+            "WER is scored per channel against the reference after normalisation (case, punctuation, "
+            "fillers, okay/ok, numbers up to 999, -isation/-ization)."
+        )
     return "\n".join(lines)
 
 

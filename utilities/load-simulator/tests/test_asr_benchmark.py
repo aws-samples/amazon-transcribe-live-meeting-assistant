@@ -352,9 +352,59 @@ def test_a_summary_counts_rows_words_and_speakers_per_channel() -> None:
         quality.Segment("CALLER", "Other (spk_1)", 1, 2, "hi"),
         quality.Segment("AGENT", "Me", 2, 3, "good morning"),
     ]
-    summary = quality.summarise(segments, "hello there hi good morning")
-    assert summary["rows"] == 3 and summary["words"] == 5 and summary["wer"] == 0.0
+    reference = quality.Reference(
+        [quality.Segment("", "", 0, 0, "hello there hi good morning")], False
+    )
+    summary = quality.summarise(segments, reference)
+    assert summary["rows"] == 3 and summary["words"] == 5
+    assert summary["accuracy"]["all"]["wer"] == 0.0
     assert summary["speakers"] == {"AGENT": ["Me"], "CALLER": ["Other (spk_0)", "Other (spk_1)"]}
+
+
+def test_normalisation_ignores_fillers_spelling_variants_and_number_forms() -> None:
+    assert quality.normalise("Um, OK so 21 people... uh, organisation") == quality.normalise(
+        "okay so twenty one people organization"
+    )
+    assert quality.normalise("105") == ["one", "hundred", "five"]
+
+
+def test_alignment_splits_errors_into_swapped_missing_and_extra() -> None:
+    result = quality.align(["a", "b", "c", "d"], ["a", "x", "c", "d", "e"])
+    assert result["wer"] == pytest.approx(2 / 4)
+    assert (result["swapped"], result["missing"], result["extra"]) == (0.25, 0.0, 0.25)
+    assert quality.align(["a", "b", "c", "d"], ["a", "c", "d"])["missing"] == 0.25
+
+
+def test_an_stm_reference_is_read_per_channel() -> None:
+    reference = quality.parse_stm(
+        ";; comment\n"
+        "meeting 0 alice 0.0 2.0 <o,f0,female> hello there\n"
+        "meeting 0 bob 2.0 3.0 hi\n"
+        "meeting mic me 1.0 2.0 good morning\n"
+    )
+    assert reference.by_channel
+    assert reference.words("CALLER") == ["hello", "there", "hi"]
+    assert reference.words("AGENT") == ["good", "morning"]
+    assert reference.speakers("CALLER") == 2
+
+
+def test_an_stm_reference_with_an_unknown_channel_is_refused() -> None:
+    with pytest.raises(ValueError, match="channel"):
+        quality.parse_stm("meeting 7 alice 0 1 hello\n")
+
+
+def test_scoring_against_an_stm_reference_is_per_channel() -> None:
+    reference = quality.parse_stm(
+        "m 0 alice 0 2 hello there\nm 0 bob 2 3 hi\nm 1 me 1 2 good morning\n"
+    )
+    segments = [
+        quality.Segment("AGENT", "Me", 1, 2, "good morning"),
+        quality.Segment("CALLER", "Other (spk_0)", 2, 3, "hi"),
+        quality.Segment("CALLER", "Other (spk_0)", 0, 1, "hello there"),
+    ]
+    scored = quality.score(segments, reference)
+    assert scored["CALLER"]["wer"] == 0.0 and scored["AGENT"]["wer"] == 0.0
+    assert scored["CALLER"]["reference_speakers"] == 2
 
 
 def test_runs_put_transcribe_first_and_name_each_meeting() -> None:
@@ -379,33 +429,40 @@ def test_an_empty_plan_is_refused() -> None:
         bench.plan_runs(bench.AsrBenchmarkParams(wav_path="x.wav"))
 
 
-def test_without_a_reference_each_run_is_compared_with_transcribe() -> None:
-    results = [
+def _two_runs() -> list[dict]:
+    return [
         {
+            "label": "transcribe",
             "engine": "transcribe",
             "segments": [quality.Segment("CALLER", "A", 0, 1, "one two three").__dict__],
         },
         {
+            "label": "b",
             "engine": "microvm",
+            "measurement": {"cost": 0.5},
             "segments": [quality.Segment("CALLER", "A", 0, 1, "one too three").__dict__],
         },
     ]
+
+
+def test_without_a_reference_the_table_has_no_wer_and_the_json_keeps_the_agreement() -> None:
+    results = _two_runs()
     bench.compare(results, None)
-    assert results[1]["quality"]["wer"] == pytest.approx(1 / 3)
-    table = bench.render_table(
-        [
-            {
-                "label": "b",
-                "engine": "microvm",
-                "measurement": {"cost": 0.5},
-                "quality": results[1]["quality"],
-            }
-        ],
-        RATES,
-        have_reference=False,
-    )
-    assert "vs Transcribe" in table and "33.3%" in table and "$0.500" in table
-    assert "$/audio h, used cores" in table
+    assert "accuracy" not in results[1]["quality"]
+    assert results[1]["agreement_with_transcribe"]["CALLER"]["wer"] == pytest.approx(1 / 3)
+    table = bench.render_table(results, RATES)
+    assert "WER" not in table and "vs Transcribe" not in table
+    assert "$0.500" in table and "$/audio h, used cores" in table
+
+
+def test_with_a_reference_the_table_shows_wer_per_channel_and_speakers_against_it() -> None:
+    results = _two_runs()
+    reference = quality.parse_stm("m 0 alice 0 1 one two three\nm 0 bob 1 2 four\n")
+    bench.compare(results, reference)
+    table = bench.render_table(results, RATES, reference)
+    assert "WER meeting" in table and "WER microphone" in table
+    assert "50.0% (25.0% / 25.0% / 0.0%)" in table
+    assert "CALLER 1 of 2" in table
 
 
 class _FakeSocket:
