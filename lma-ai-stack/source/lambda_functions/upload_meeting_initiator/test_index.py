@@ -538,7 +538,7 @@ def test_presigned_urls_are_signed_with_sigv4(env) -> None:
         ({"meetingTopic": "   "}, "meetingTopic is required"),
         ({"meetingTopic": None}, "meetingTopic is required"),
         ({"meetingTopic": "t" * 201}, "200 characters or fewer"),
-        ({"localSpeakerName": ""}, "localSpeakerName is required"),
+        ({"localSpeakerName": ""}, r"localSpeakerName \(or agentId\) is required"),
         ({"localSpeakerName": "a" * 201}, "200 characters or fewer"),
         ({"contentType": ""}, "contentType is required"),
         ({"contentType": "application/pdf"}, "contentType must start with"),
@@ -659,6 +659,6 @@ def test_a_documented_speaker_name_wins_over_its_older_name(env) -> None:
 
 def test_a_local_speaker_name_is_required_under_one_name_or_the_other(env) -> None:
     table, _ = env
-    with pytest.raises(index.ValidationError, match="localSpeakerName is required"):
+    with pytest.raises(index.ValidationError, match=r"localSpeakerName \(or agentId\) is required"):
         invoke(localSpeakerName=None, agentId="  ")
     assert table.calls == []
