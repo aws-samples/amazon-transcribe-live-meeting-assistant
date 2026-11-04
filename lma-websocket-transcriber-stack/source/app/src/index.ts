@@ -326,8 +326,8 @@ const registerHandlers = (
                     error
                 )}`
             );
-            // A START that failed part-way registered nothing: its held consent
-            // frames and audio are not waiting for anything any more.
+            // Whatever the START was holding, its consent frames and audio, is
+            // not waiting for anything any more.
             pendingConsentFrames.drop(ws);
             sessions.dropAudio(ws);
             // A START that failed after registering a session on a connection
