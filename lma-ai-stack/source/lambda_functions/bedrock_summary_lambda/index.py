@@ -62,17 +62,21 @@ PROMPT_KEY_PATTERN = re.compile(r"^\d+#")
 # left out of the summary rather than generated empty. See docs/meeting-agenda.md.
 AGENDA_PLACEHOLDER = "{agenda}"
 
-# A prompt that names the slides shown in the meeting: each key frame of the
-# shared screen with its time, its picture reference, its text and what was said
-# while it was up. Run only for a meeting that has key frames, as the agenda
-# section is run only for a meeting that has an agenda. See docs/meeting-video.md.
+# A prompt that names what was shared on screen in the meeting: each key frame
+# of the shared screen with its time, its picture reference, its text and what
+# was said while it was up. Run only for a meeting that has key frames, as the
+# agenda section is run only for a meeting that has an agenda. `{screen_share}`
+# is another name for the same text. See docs/meeting-video.md.
 SLIDES_PLACEHOLDER = "{slides}"
+SCREEN_SHARE_PLACEHOLDER = "{screen_share}"
 
 # The transcript with the time of each line, and a line at each change of the
 # shared screen: what the shipped CHAPTERS section divides into chapters, whose
 # times the meeting page reads (docs/meeting-video.md).
 TIMED_TRANSCRIPT_PLACEHOLDER = "{timed_transcript}"
-PLACEHOLDERS = re.compile(r"\{transcript\}|\{agenda\}|\{slides\}|\{timed_transcript\}")
+PLACEHOLDERS = re.compile(
+    r"\{transcript\}|\{agenda\}|\{slides\}|\{screen_share\}|\{timed_transcript\}"
+)
 
 #: Bounds on what one meeting's slides add to the prompt. A meeting keeps at
 #: most 1,000 frames; past MAX_SLIDES, the frames on screen for the shortest
@@ -302,9 +306,10 @@ def clip(text, limit):
 def slides_for_prompt(keyframes):
     """The meeting's key frames as the {slides} text, or "" when it has none.
 
-    Each entry carries the picture as ready-made markdown, which the prompt
-    asks the model to copy unchanged, so the summary refers to the frame by its
-    real id rather than one the model wrote.
+    The same text fills {screen_share}. Each entry carries the picture as
+    ready-made markdown, which the prompt asks the model to copy unchanged, so
+    the summary refers to the frame by its real id rather than one the model
+    wrote.
     """
     frames = [
         frame
@@ -365,7 +370,7 @@ def generate_summary(
             if not agenda_text:
                 print(f"Skipping summary section '{key}': the meeting has no agenda.")
                 continue
-        if SLIDES_PLACEHOLDER in prompt:
+        if SLIDES_PLACEHOLDER in prompt or SCREEN_SHARE_PLACEHOLDER in prompt:
             if slides_text is None:
                 slides_text = slides_for_prompt(keyframes)
             if not slides_text:
@@ -380,6 +385,7 @@ def generate_summary(
             "{transcript}": transcript,
             AGENDA_PLACEHOLDER: agenda_text,
             SLIDES_PLACEHOLDER: slides_text or "",
+            SCREEN_SHARE_PLACEHOLDER: slides_text or "",
             TIMED_TRANSCRIPT_PLACEHOLDER: timed_transcript or "",
         }
         prompt = PLACEHOLDERS.sub(lambda match: values[match.group(0)], prompt)

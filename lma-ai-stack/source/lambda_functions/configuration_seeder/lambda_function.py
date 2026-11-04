@@ -56,6 +56,12 @@ previous table and added to the profile; once it holds the section -- an empty
 one included -- nothing is read again. The outcome of each is reported as
 ``SectionAdoption``.
 
+A summary section a release stops shipping (a rename, say) is removed from
+every Custom profile that holds it as some release shipped it
+(``retire_shipped_prompts``): a profile is a full copy, so it would otherwise
+keep the old section and run it beside the new one. A changed one is kept, and
+named in a warning on every run. Reported as ``RetiredPrompts``.
+
 Given the revision bucket, it also makes sure the operator's profile has a
 revision history. A profile this run creates starts at revision 1, holding
 everything carried across; a profile that exists with no history yet has its
@@ -69,6 +75,8 @@ never re-invoked, and a new release's prompts would never reach the table.
 
 from __future__ import annotations
 
+import functools
+import hashlib
 import json
 import logging
 import os
@@ -894,6 +902,133 @@ def settle_profiles(store: ConfigurationStore, adoption: Mapping[str, str]) -> s
     return "converted" if converted else "full"
 
 
+class RetiredPrompt(NamedTuple):
+    """A summary section a release stopped shipping, and the one it ships instead.
+
+    A NamedTuple for the reason given on :class:`LegacySection`.
+
+    Attributes:
+        title: The retired section's title, the part of its key after "N#".
+        successor: The title of the section that replaces it, or "" for none.
+        shipped: :func:`prompt_digest` of every text a release shipped the
+            section with. A profile holding one of these never changed it.
+    """
+
+    title: str
+    successor: str
+    shipped: frozenset
+
+
+#: Shipped summary sections that are no longer shipped. A Custom profile is a
+#: full copy, so it holds the shipped sections as they were when it was made;
+#: merged over a baseline that ships a renamed section, it would run both. A new
+#: section needs no entry here: the merge gives it to every profile.
+RETIRED_SUMMARY_PROMPTS = (
+    RetiredPrompt(
+        title="SLIDES PRESENTED",
+        successor="SCREEN SHARE SUMMARY",
+        shipped=frozenset({"999e6d4f0b4902bbcf0a270f5ea8c06130bda044fa3a100cb99e8077b7dcf895"}),
+    ),
+)
+
+#: The summary prompts' value for a section an administrator turned off.
+PROMPT_OFF = "NONE"
+
+
+def prompt_digest(text: str) -> str:
+    """A prompt's SHA-256, ignoring how its line breaks are written and surrounding space."""
+    normalised = text.replace("<br>", "\n").replace("\r\n", "\n").strip()
+    return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
+
+
+def _without_retired(
+    prompts: Dict[str, Any], baseline: Mapping[str, Any], found: Dict[str, str]
+) -> Dict[str, Any]:
+    """``prompts`` without the retired sections nobody changed; each key's outcome in ``found``.
+
+    A retired section holding a shipped text is removed. One turned off is
+    removed too, and its successor turned off in its place unless the profile
+    holds the successor already, so the administrator's choice carries over. One
+    holding any other text was written by an administrator: it is kept, and runs
+    beside its successor until they remove one.
+    """
+    successor_keys = {key.split("#", 1)[1]: key for key in baseline if "#" in key}
+    revised = dict(prompts)
+    for key, value in prompts.items():
+        title = key.split("#", 1)[1] if "#" in key else key
+        retired = next((r for r in RETIRED_SUMMARY_PROMPTS if r.title == title), None)
+        if retired is None or not isinstance(value, str):
+            continue
+        if value.strip() == PROMPT_OFF:
+            del revised[key]
+            successor = successor_keys.get(retired.successor)
+            if successor and successor not in revised:
+                revised[successor] = PROMPT_OFF
+                found[key] = "removed-successor-off"
+            else:
+                found[key] = "removed"
+        elif prompt_digest(value) in retired.shipped:
+            del revised[key]
+            found[key] = "removed"
+        else:
+            found[key] = "kept-changed"
+    return revised
+
+
+def retire_shipped_prompts(store: ConfigurationStore) -> str:
+    """Remove the summary sections a release no longer ships from every Custom profile.
+
+    See :data:`RETIRED_SUMMARY_PROMPTS`. Only a section nobody changed is
+    removed; a changed one is kept and named in a warning, every run, until an
+    administrator removes it. Idempotent: a profile with nothing to remove is
+    not written. Reported as ``profile/key=outcome`` pairs, or "none".
+    """
+    baseline = store.read_profile("default", consistent_read=True).body.get(
+        SUMMARY_PROMPT_TEMPLATES.name, {}
+    )
+    outcomes: Dict[str, str] = {}
+    for profile in store.list_profiles():
+        if profile.managed or profile.name == "default":
+            continue
+        found: Dict[str, str] = {}
+        for _attempt in range(ADOPTION_ATTEMPTS):
+            found = {}
+            try:
+                store.revise_section(
+                    profile.name,
+                    SUMMARY_PROMPT_TEMPLATES.name,
+                    functools.partial(_without_retired, baseline=baseline, found=found),
+                    comment="removed summary sections this release no longer ships",
+                )
+            except ConcurrentModification:
+                # An administrator saved it meanwhile: read again, decide again.
+                continue
+            except (RevisionHistoryUnavailable, InvalidConfiguration, ClientError):
+                LOGGER.warning(
+                    "could not remove retired summary sections from the %s profile now; "
+                    "the next deployment retries",
+                    profile.name,
+                    exc_info=True,
+                )
+                found = {key: "deferred" for key in found}
+            break
+        else:
+            found = {key: "deferred" for key in found}
+        for key, outcome in sorted(found.items()):
+            outcomes[f"{profile.name}/{key}"] = outcome
+            if outcome == "kept-changed":
+                LOGGER.warning(
+                    "the %s profile holds a changed %r summary prompt, a section this "
+                    "release no longer ships; it is kept and still runs. Remove it in the "
+                    "Transcript Summary section of the Configuration page if it is not wanted.",
+                    profile.name,
+                    key,
+                )
+            else:
+                LOGGER.info("%s profile, summary prompt %r: %s", profile.name, key, outcome)
+    return ",".join(f"{name}={outcome}" for name, outcome in sorted(outcomes.items())) or "none"
+
+
 def handler(event: Dict[str, Any], context: Any) -> None:
     """CloudFormation custom resource entry point."""
     LOGGER.info("seeding the configuration table: %s", json.dumps(event, default=str))
@@ -941,6 +1076,13 @@ def handler(event: Dict[str, Any], context: Any) -> None:
             ),
         )
         outcome["ProfileFormat"] = settle_profiles(store, _adoption_outcomes(outcome))
+        # After the conversion, so a profile it has just made a full copy is
+        # cleaned too.
+        try:
+            outcome["RetiredPrompts"] = retire_shipped_prompts(store)
+        except ClientError:
+            LOGGER.warning("could not remove retired summary sections now", exc_info=True)
+            outcome["RetiredPrompts"] = "deferred"
         try:
             outcome["ManagedProfiles"] = write_managed_profiles(
                 store,

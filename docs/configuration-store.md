@@ -834,6 +834,9 @@ across the sections of stores that moved in after the profile existed:
   as the `ConfigurationBucketName` property, and reports what it found as
   `ConfigurationRevisionHistory`. See
   [Upgrading an existing deployment](#upgrading-an-existing-deployment-history-starts-at-revision-1).
+- **Summary sections a release no longer ships** — removed from each Custom
+  profile that holds them unchanged. See
+  [Summary sections a release no longer ships](#summary-sections-a-release-no-longer-ships).
 
 ### Choosing the default configuration at deploy time
 
@@ -878,7 +881,8 @@ release whose only change there was to a test still shows `SeedConfiguration`
 updating in the stack events. That is deliberate: the alternative — a filter
 that decides what counts — can exclude a real change, and that failure is the
 silent one. A re-run rewrites the baseline with identical content and leaves
-every profile untouched.
+every profile untouched, except to remove a
+[summary section a release no longer ships](#summary-sections-a-release-no-longer-ships).
 
 ### Carrying a later store across
 
@@ -919,6 +923,54 @@ published as the **`ConfigurationSectionAdoption`** stack output: one
 | `previous-table-unreadable` | **Act on this one**, or wait for the next deployment that runs the seeder: the settings were not carried across, and the shipped ones apply until they are. Saving the settings from their page also settles it |
 | `no-previous-table` | The stack was given no previous table, so there is nothing to carry; nothing is recorded |
 | `revision-history-unavailable` | The settings were read but not added, because the profile's current state could not be recorded in its [revision history](#revisions-and-audit) first, and a profile is not changed until it is. The deployment still succeeds, the section is left unset and the shipped settings apply, and the next deployment that runs the seeder tries again. `ConfigurationRevisionHistory` reads `custom=not-started` on the same run; check the seeder's log |
+
+### Summary sections a release no longer ships
+
+A Custom profile is a full copy, so it holds every summary section the baseline
+shipped when it was made, and it is merged over the baseline when it is read. A
+section a later release *adds* therefore reaches every profile through the
+merge, with nothing for the seeder to do. A section a release *renames* does
+not: the profile keeps the old key, the baseline brings the new one, and the
+summary would run both.
+
+The seeder keeps a list of the summary sections that are no longer shipped
+(`RETIRED_SUMMARY_PROMPTS` in its handler), each with the section that replaces
+it and a SHA-256 digest of every text a release shipped it with. The digest is
+taken with `<br>` read as a line break and surrounding space ignored, so a
+prompt saved with either form of line break still matches. On every run, after
+`settle_profiles`, it looks at each Custom profile (not the baseline or a
+Managed profile, which every run rewrites from the baseline):
+
+- A retired section whose text matches a shipped digest was never changed, and
+  is removed.
+- A retired section set to `NONE` is removed, and the section replacing it is
+  set to `NONE` in its place unless the profile already holds that section, so
+  an administrator who turned the old section off does not find its replacement
+  on. A profile copied from the healthcare preset, which turns off the sections
+  it does not use, is such a profile.
+- A retired section holding any other text was written by an administrator. It
+  is kept, and keeps running beside its replacement; the seeder logs a warning
+  naming the profile and the section on every run until an administrator
+  removes one of them from the **Transcript Summary** section of the
+  Configuration page.
+
+The write is recorded as a revision by the deployment, conditional on the
+profile as it was read: an administrator's save landing in between makes the
+seeder read again and decide again. A run that finds nothing to remove writes
+nothing, so the clean-up happens once. What each run found is the
+`RetiredPrompts` attribute of the custom resource, `profile/key=outcome` pairs
+such as `team/5#SLIDES PRESENTED=removed`, or `none`:
+
+| Outcome | Meaning |
+|---|---|
+| `removed` | The section was removed: it held a shipped text, or was turned off and the profile already holds its replacement |
+| `removed-successor-off` | The section was turned off; it was removed and its replacement turned off |
+| `kept-changed` | The section holds an administrator's own prompt and was kept. Reported, and warned about, on every run |
+| `deferred` | The profile could not be written now (its revision history could not be recorded, or it kept changing); the next deployment that runs the seeder tries again |
+
+The one retired section today is **SLIDES PRESENTED**, replaced by **SCREEN
+SHARE SUMMARY** in the same position (`5#`). Both were introduced during 0.4.0's
+pre-releases, so only a deployment of one of those has a profile holding it.
 
 ## What is served from the store today
 

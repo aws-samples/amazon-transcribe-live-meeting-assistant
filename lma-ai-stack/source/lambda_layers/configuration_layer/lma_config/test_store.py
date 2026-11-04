@@ -600,6 +600,64 @@ def test_seeding_a_section_into_a_missing_profile_writes_nothing() -> None:
     assert "Config#custom" not in dynamo.items
 
 
+def _admin_prompts(store: ConfigurationStore) -> None:
+    store.write_section(
+        "custom",
+        "summary_prompt_templates",
+        {"1#SUMMARY": "mine", "5#OLD": "shipped"},
+        updated_by="admin@example.com",
+        expected_version=None,
+    )
+
+
+def test_a_section_revised_by_the_deployment_is_stored_as_returned() -> None:
+    store, dynamo, _ = build()
+    seed(store)
+    _admin_prompts(store)
+
+    def drop_old(section: Dict[str, Any]) -> Dict[str, Any]:
+        return {key: value for key, value in section.items() if key != "5#OLD"}
+
+    assert store.revise_section("custom", "summary_prompt_templates", drop_old) is True
+    assert dynamo.body("Config#custom")["summary_prompt_templates"] == {"1#SUMMARY": "mine"}
+    assert dynamo.metadata("Config#custom")["UpdatedBy"] == "cloudformation"
+
+
+def test_a_revision_that_changes_nothing_writes_nothing() -> None:
+    store, dynamo, _ = build()
+    seed(store)
+    _admin_prompts(store)
+    version = dynamo.metadata("Config#custom")["Version"]
+    assert store.revise_section("custom", "summary_prompt_templates", lambda _s: None) is False
+    assert store.revise_section("custom", "summary_prompt_templates", dict) is False
+    # A section the profile does not hold, and a profile that is not there.
+    assert store.revise_section("custom", "nova_sonic_config", lambda _s: {}) is False
+    assert store.revise_section("absent", "summary_prompt_templates", lambda _s: {}) is False
+    assert dynamo.metadata("Config#custom")["Version"] == version
+
+
+def test_a_revised_section_is_checked_against_its_schema() -> None:
+    store, _, _ = build()
+    seed(store)
+    _admin_prompts(store)
+    with pytest.raises(InvalidConfiguration):
+        store.revise_section("custom", "summary_prompt_templates", lambda _s: {"no number": "x"})
+
+
+def test_a_save_landing_during_a_revision_refuses_it() -> None:
+    store, dynamo, _ = build()
+    seed(store)
+    _admin_prompts(store)
+
+    def revise_while_an_admin_saves(section: Dict[str, Any]) -> Dict[str, Any]:
+        _admin_prompts(store)
+        return {"1#SUMMARY": "mine"}
+
+    with pytest.raises(ConcurrentModification):
+        store.revise_section("custom", "summary_prompt_templates", revise_while_an_admin_saves)
+    assert "5#OLD" in dynamo.body("Config#custom")["summary_prompt_templates"]
+
+
 def test_seeding_a_section_is_conditional_on_the_record_it_read() -> None:
     """A save landing between the read and the write must not be overwritten."""
     store, dynamo, _ = build()

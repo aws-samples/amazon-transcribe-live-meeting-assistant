@@ -69,11 +69,16 @@ import { installMediaElementStub, loadMedia } from '../meeting-player/media-elem
 
 /* eslint-disable react/prop-types */
 
-const SUMMARY = JSON.stringify({
-  SUMMARY: 'Sarah walked through the plan.',
-  'SLIDES PRESENTED': '**[00:30] Budget**\n\n![Slide at 00:30](keyframe:0000030000-ab12cd)\n\nSarah covered Q3.',
-  CHAPTERS: '- [00:00] Welcome\n- [05:12] Budget review',
-});
+const SCREEN_SHARE = '**[00:30] Budget**\n\n![Slide at 00:30](keyframe:0000030000-ab12cd)\n\nSarah covered Q3.';
+// `title` is the screen share section's title: SLIDES PRESENTED in a summary
+// written before it was renamed.
+const summaryWith = (title) =>
+  JSON.stringify({
+    SUMMARY: 'Sarah walked through the plan.',
+    [title]: SCREEN_SHARE,
+    CHAPTERS: '- [00:00] Welcome\n- [05:12] Budget review',
+  });
+const SUMMARY = summaryWith('SCREEN SHARE SUMMARY');
 
 const ITEM = {
   callId: 'Weekly sync-2026-11-03-14-05-09-123',
@@ -249,16 +254,19 @@ describe('the tabs', () => {
 });
 
 describe('the Overview tab', () => {
-  it('shows the slides the summary names as links, not as pictures, and opens one on Screen share', async () => {
-    responses.frames = [frame(30000)];
-    renderPage({ url: '/calls/m?tab=overview' });
-    await screen.findByRole('tab', { name: 'Screen share (1)' });
-    const overview = screen.getByText('Sarah walked through the plan.').closest('[role="tabpanel"]');
-    expect(within(overview).queryAllByRole('img')).toHaveLength(0);
-    fireEvent.click(within(overview).getByRole('button', { name: /Slide at 00:30/ }));
-    expect(selectedTab().textContent).toBe('Screen share (1)');
-    expect(await screen.findByAltText('Shared screen at 0:30, full size')).toBeTruthy();
-  });
+  it.each(['SCREEN SHARE SUMMARY', 'SLIDES PRESENTED'])(
+    'shows the frames its %s section names as links, not as pictures, and opens one on Screen share',
+    async (title) => {
+      responses.frames = [frame(30000)];
+      renderPage({ item: { ...ITEM, callSummaryText: summaryWith(title) }, url: '/calls/m?tab=overview' });
+      await screen.findByRole('tab', { name: 'Screen share (1)' });
+      const overview = screen.getByText('Sarah walked through the plan.').closest('[role="tabpanel"]');
+      expect(within(overview).queryAllByRole('img')).toHaveLength(0);
+      fireEvent.click(within(overview).getByRole('button', { name: /Slide at 00:30/ }));
+      expect(selectedTab().textContent).toBe('Screen share (1)');
+      expect(await screen.findByAltText('Shared screen at 0:30, full size')).toBeTruthy();
+    },
+  );
 
   it('lists the chapters once, as the list that moves the transcript', () => {
     renderPage({ url: '/calls/m?tab=overview' });

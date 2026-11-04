@@ -190,7 +190,7 @@ def test_the_baseline_document_holds_the_shipped_prompts_under_its_section(seede
         "2#DETAILS",
         "3#ACTIONS",
         "4#AGENDA COVERAGE",
-        "5#SLIDES PRESENTED",
+        "5#SCREEN SHARE SUMMARY",
         "6#CHAPTERS",
     }
     assert "{transcript}" in body["summary_prompt_templates"]["1#SUMMARY"]
@@ -989,7 +989,7 @@ def test_adoption_lines_a_prompt_up_with_the_baseline_by_its_title(seeder) -> No
         "2#DETAILS",
         "3#ACTIONS",
         "4#AGENDA COVERAGE",
-        "5#SLIDES PRESENTED",
+        "5#SCREEN SHARE SUMMARY",
         "6#CHAPTERS",
     ]
     assert merged["2#DETAILS"] == "my details prompt"
@@ -1803,3 +1803,186 @@ def test_a_configuration_preset_the_deployment_cannot_run_fails_the_deployment(s
         deployment_settings={"AsrEngineAvailable": "true"},
     )
     assert "Config#default" in dynamo.items
+
+
+# ── summary sections a release no longer ships ─────────────────────────────
+
+#: The SLIDES PRESENTED prompt exactly as 0.4.0's pre-releases shipped it, the
+#: one text that section was ever shipped with.
+SLIDES_PRESENTED_AS_SHIPPED = (
+    "The following are the slides, pages and views shared on screen during a meeting, in "
+    "the order they were shown. Each has the time it went up, an Image line that shows its "
+    "picture, the text read from it, and what was said while it was on screen.<br><slides>"
+    "<br>{slides}<br></slides><br><br>Write one entry for each slide that was presented, in "
+    "the order shown, in the following Markdown format, without preamble or additional "
+    "explanation:<br><br>**[Time] [The slide's title, or a few words naming it]**<br><br>"
+    '[The picture reference after "Image:" for the slide, copied exactly, without the word '
+    "Image]<br><br>[One or two sentences on what was said about it. Where possible "
+    "reference speaker names, but only use gender neutral pronouns.]<br><br><br>When "
+    "consecutive slides are the same slide, or one slide being built up, write one entry "
+    "for them, with the Time of the first and the picture reference of the last. Leave out "
+    "entries that show no content, such as an empty desktop or a blank window. Each picture "
+    "reference must be copied exactly from a slide above, never changed or made up. "
+    "Describe what was shown and said; never identify or describe people from how they look."
+)
+PROMPTS = "summary_prompt_templates"
+
+
+def _with_a_profile_from_the_previous_release(seeder, name: str = "team", prompt: str = ""):
+    """A deployment whose Custom profile was copied from a baseline shipping SLIDES PRESENTED.
+
+    Then seeded by this release, as a stack update would.
+    """
+    store, dynamo = build_store()
+    previous = seeder.shipped_default_body("default")
+    previous[PROMPTS] = {
+        **{key: value for key, value in previous[PROMPTS].items() if key[0] != "5"},
+        "5#SLIDES PRESENTED": SLIDES_PRESENTED_AS_SHIPPED,
+    }
+    store.write_default(previous)
+    store.create_profile(name, updated_by="admin@example.com")
+    if prompt:
+        store.write_section(
+            name,
+            PROMPTS,
+            {"5#SLIDES PRESENTED": prompt},
+            updated_by="admin@example.com",
+            expected_version=None,
+        )
+    store.activate_profile(name)
+    seeder.seed(store, domain="default")
+    return store, dynamo
+
+
+def test_every_text_slides_presented_shipped_with_is_recognised(seeder) -> None:
+    (retired,) = [r for r in seeder.RETIRED_SUMMARY_PROMPTS if r.title == "SLIDES PRESENTED"]
+    assert seeder.prompt_digest(SLIDES_PRESENTED_AS_SHIPPED) in retired.shipped
+    # However its line breaks were written when it was saved.
+    as_lines = SLIDES_PRESENTED_AS_SHIPPED.replace("<br>", "\n") + "\n"
+    assert seeder.prompt_digest(as_lines) in retired.shipped
+
+
+@pytest.mark.parametrize("domain", ["default", "healthcare"])
+def test_no_retired_section_is_shipped_and_each_successor_is(seeder, domain) -> None:
+    titles = {key.split("#", 1)[1] for key in seeder.shipped_default_body(domain)[PROMPTS]}
+    for retired in seeder.RETIRED_SUMMARY_PROMPTS:
+        assert retired.title not in titles
+        if domain == "default":
+            assert retired.successor in titles
+
+
+def test_a_profile_copied_before_the_rename_runs_the_new_section_only(seeder) -> None:
+    store, dynamo = _with_a_profile_from_the_previous_release(seeder)
+    # Merged over this release's baseline, the full copy would run both.
+    assert "5#SLIDES PRESENTED" in store.get_section(PROMPTS).values
+
+    assert seeder.retire_shipped_prompts(store) == "team/5#SLIDES PRESENTED=removed"
+
+    store.invalidate()
+    merged = store.get_section(PROMPTS).values
+    assert "5#SLIDES PRESENTED" not in merged
+    assert (
+        merged["5#SCREEN SHARE SUMMARY"]
+        == dynamo.body("Config#default")[PROMPTS]["5#SCREEN SHARE SUMMARY"]
+    )
+    # The profile's other prompts are as it held them.
+    assert dynamo.body("Config#team")[PROMPTS]["1#SUMMARY"] == merged["1#SUMMARY"]
+    assert dynamo.metadata("Config#team")["UpdatedBy"] == "cloudformation"
+
+
+def test_removing_retired_sections_is_done_once(seeder) -> None:
+    store, dynamo = _with_a_profile_from_the_previous_release(seeder)
+    seeder.retire_shipped_prompts(store)
+    version = dynamo.metadata("Config#team")["Version"]
+    assert seeder.retire_shipped_prompts(store) == "none"
+    assert dynamo.metadata("Config#team")["Version"] == version
+
+
+def test_a_changed_retired_section_is_kept_and_named_on_every_run(seeder, caplog) -> None:
+    store, dynamo = _with_a_profile_from_the_previous_release(seeder, prompt="my slides prompt")
+    version = dynamo.metadata("Config#team")["Version"]
+    for _run in range(2):
+        caplog.clear()
+        assert seeder.retire_shipped_prompts(store) == "team/5#SLIDES PRESENTED=kept-changed"
+        assert any("5#SLIDES PRESENTED" in r.getMessage() for r in caplog.records)
+    assert dynamo.body("Config#team")[PROMPTS]["5#SLIDES PRESENTED"] == "my slides prompt"
+    assert dynamo.metadata("Config#team")["Version"] == version
+
+
+def test_a_retired_section_turned_off_turns_its_successor_off(seeder) -> None:
+    store, dynamo = _with_a_profile_from_the_previous_release(seeder, prompt="NONE")
+    assert seeder.retire_shipped_prompts(store) == ("team/5#SLIDES PRESENTED=removed-successor-off")
+    held = dynamo.body("Config#team")[PROMPTS]
+    assert "5#SLIDES PRESENTED" not in held
+    assert held["5#SCREEN SHARE SUMMARY"] == "NONE"
+
+
+def test_a_retired_section_turned_off_leaves_a_successor_the_profile_holds(seeder) -> None:
+    store, dynamo = _with_a_profile_from_the_previous_release(seeder, prompt="NONE")
+    store.write_section(
+        "team",
+        PROMPTS,
+        {**dynamo.body("Config#team")[PROMPTS], "5#SCREEN SHARE SUMMARY": "my screen prompt"},
+        updated_by="admin@example.com",
+        expected_version=None,
+    )
+    assert seeder.retire_shipped_prompts(store) == "team/5#SLIDES PRESENTED=removed"
+    assert dynamo.body("Config#team")[PROMPTS]["5#SCREEN SHARE SUMMARY"] == "my screen prompt"
+
+
+def test_a_retired_section_under_another_number_is_found_by_its_title(seeder) -> None:
+    store, dynamo = _with_a_profile_from_the_previous_release(seeder)
+    held = dict(dynamo.body("Config#team")[PROMPTS])
+    held["9#SLIDES PRESENTED"] = held.pop("5#SLIDES PRESENTED")
+    store.write_section("team", PROMPTS, held, updated_by="a", expected_version=None)
+    assert "5#SLIDES PRESENTED" not in dynamo.body("Config#team")[PROMPTS]
+    assert seeder.retire_shipped_prompts(store) == "team/9#SLIDES PRESENTED=removed"
+    assert "9#SLIDES PRESENTED" not in dynamo.body("Config#team")[PROMPTS]
+
+
+def test_managed_profiles_and_the_baseline_are_not_revised(seeder) -> None:
+    store, dynamo = _with_a_profile_from_the_previous_release(seeder)
+    seeder.write_managed_profiles(store, store.read_profile("default").body, {})
+    managed = list(_managed(dynamo))
+    assert managed
+    before = {key: dynamo.items[key] for key in [f"Config#{name}" for name in managed]}
+    before["Config#default"] = dynamo.items["Config#default"]
+    seeder.retire_shipped_prompts(store)
+    assert {key: dynamo.items[key] for key in before} == before
+
+
+def test_a_save_landing_during_the_removal_is_kept_and_the_removal_retried(
+    seeder, monkeypatch
+) -> None:
+    store, dynamo = _with_a_profile_from_the_previous_release(seeder)
+    revise = store.revise_section
+    calls = []
+
+    def an_admin_saves_first(name, section, change, **kwargs):
+        if not calls:
+            calls.append(name)
+            store.write_section(
+                name,
+                "language_models",
+                {"summaryModelId": "amazon.nova-pro-v1:0"},
+                updated_by="admin@example.com",
+                expected_version=None,
+            )
+            raise seeder.ConcurrentModification("moved")
+        return revise(name, section, change, **kwargs)
+
+    monkeypatch.setattr(store, "revise_section", an_admin_saves_first)
+    assert seeder.retire_shipped_prompts(store) == "team/5#SLIDES PRESENTED=removed"
+    body = dynamo.body("Config#team")
+    assert body["language_models"]["summaryModelId"] == "amazon.nova-pro-v1:0"
+    assert "5#SLIDES PRESENTED" not in body[PROMPTS]
+
+
+def test_the_handler_reports_the_retired_sections(seeder, monkeypatch) -> None:
+    dynamo = FakeDynamo()
+    monkeypatch.setattr(
+        seeder, "ConfigurationStore", lambda name, **_: ConfigurationStore(name, client=dynamo)
+    )
+    seeder.handler(_event("Create"), _Context())
+    assert seeder.recorder.sent[-1]["status"] == "SUCCESS"
+    assert seeder.recorder.sent[-1]["data"]["RetiredPrompts"] == "none"

@@ -1062,6 +1062,60 @@ class ConfigurationStore:
         )
         return True
 
+    def revise_section(
+        self,
+        name: str,
+        section: str,
+        revise: Callable[[Dict[str, Any]], Optional[Dict[str, Any]]],
+        *,
+        comment: Optional[str] = None,
+    ) -> bool:
+        """Rewrite one section of a stored Custom profile as the deployment.
+
+        For a seeder that has to change what a profile holds when a release
+        changes what it ships -- a shipped entry it no longer ships, say.
+        ``revise`` receives the section as the profile holds it and returns the
+        section to store, or ``None`` to leave the profile as it is. The write is
+        recorded as the deployment's (``UpdatedBy`` and the revision's source),
+        not an administrator's, and is stored as returned: unlike
+        :meth:`write_sections`, nothing is completed from the baseline.
+
+        Returns:
+            True when this call wrote the section; False when the profile is
+            absent, Managed, does not hold the section, or ``revise`` changed
+            nothing.
+
+        Raises:
+            InvalidConfiguration: the revised section does not match its schema.
+            ConcurrentModification: the profile changed between the read and
+                the write. Nothing is written; a caller can read again and
+                revise what landed.
+            RevisionHistoryUnavailable: the profile's current state could not be
+                recorded, so nothing was written.
+        """
+        spec = section_spec(section)
+        current = self.read_record(profile_key(name), consistent_read=True)
+        if not current.exists or current.metadata.get("Managed"):
+            return False
+        held = current.body.get(spec.name)
+        if not isinstance(held, Mapping):
+            return False
+        revised = revise(dict(held))
+        if revised is None or revised == dict(held):
+            return False
+        _validate_sections({spec.name: revised})
+        self._commit(
+            name,
+            current,
+            {**current.body, spec.name: dict(revised)},
+            updated_by=_SEEDER,
+            # Pinned to the read above, as for seed_section.
+            condition=self._condition_for(current),
+            comment=comment,
+            source=SOURCE_DEPLOY,
+        )
+        return True
+
     def set_active_profile(self, name: str, *, only_if_absent: bool = False) -> bool:
         """Point the active-profile sentinel at ``name``.
 

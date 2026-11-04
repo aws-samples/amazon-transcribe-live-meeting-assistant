@@ -85,12 +85,12 @@ describe('the other formatters still read a hand-edited summary as itself', () =
 
 describe('a summary with pictures of the shared screen', () => {
   const SLIDES = JSON.stringify({
-    'SLIDES PRESENTED': '**[00:30] Budget**\n\n![Slide at 00:30](keyframe:0000030000-ab12cd)\n\nBob covered Q3.',
+    'SCREEN SHARE SUMMARY': '**[00:30] Budget**\n\n![Slide at 00:30](keyframe:0000030000-ab12cd)\n\nBob covered Q3.',
   });
 
   it('names each picture in words wherever the summary leaves the page', () => {
     expect(getTextFileFormattedSummary(SLIDES)).toBe(
-      'SLIDES PRESENTED\n\n[00:30] Budget\n\n(Slide at 00:30)\n\nBob covered Q3.\n\n',
+      'SCREEN SHARE SUMMARY\n\n[00:30] Budget\n\n(Slide at 00:30)\n\nBob covered Q3.\n\n',
     );
     expect(decodeURIComponent(getEmailFormattedSummary(SLIDES))).toContain('(Slide at 00:30)');
     expect(decodeURIComponent(getEmailFormattedSummary(SLIDES))).not.toContain('keyframe:');

@@ -182,15 +182,24 @@ describe('SummaryMarkdown', () => {
     expect(loadFrame).not.toHaveBeenCalled();
   });
 
-  it('renders an ordinary image as it is', () => {
+  it('shows every other image as its alt text, in any form, and fetches nothing', () => {
     const loadFrames = vi.fn();
-    render(
+    const { container } = render(
       <SummaryMarkdown callId="m-1" loadFrames={loadFrames}>
-        ![chart](https://example.com/c.png)
+        {[
+          '![chart](https://example.com/c.png)',
+          '![relative](/images/c.png)',
+          '![no scheme](//example.com/c.png)',
+          '<img alt="raw" src="https://example.com/r.png">',
+          '<picture><source srcset="https://example.com/s.png"><img alt="pictured" src="https://example.com/p.png"></picture>',
+        ].join('\n\n')}
       </SummaryMarkdown>,
     );
-    expect(screen.getByRole('img', { name: 'chart' }).getAttribute('src')).toBe('https://example.com/c.png');
-    // A summary with no slides reads no frames.
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('source')).toBeNull();
+    expect(container.innerHTML).not.toContain('example.com');
+    ['chart', 'relative', 'no scheme', 'raw', 'pictured'].forEach((alt) => expect(screen.getByText(alt)).toBeTruthy());
+    // A summary with no key frames reads none.
     expect(loadFrames).not.toHaveBeenCalled();
   });
 });
