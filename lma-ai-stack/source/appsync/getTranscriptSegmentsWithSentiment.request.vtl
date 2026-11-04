@@ -10,6 +10,9 @@
 {
   "version" : "2018-05-29",
   "operation" : "Query",
+  ## A meeting's segments can span more than one 1 MB page of the table; the
+  ## caller passes back the nextToken of each page until there is none.
+  "nextToken": $util.toJson($util.defaultIfNullOrEmpty($ctx.args.nextToken, null)),
   "query" : {
     "expression": "#PK = :PK",
     "expressionNames": {

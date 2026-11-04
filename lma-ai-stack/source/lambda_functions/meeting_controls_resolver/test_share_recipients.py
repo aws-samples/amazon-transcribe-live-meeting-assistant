@@ -44,3 +44,35 @@ def test_a_recipient_that_is_not_a_plain_address_is_refused(monkeypatch, recipie
     monkeypatch.setattr(index, "share_meeting", no_appsync)
     result = index.share_meetings([{"CallId": "c1", "ListPK": "l", "ListSK": "s"}], "o", recipients)
     assert result == {"Result": "Invalid email address provided"}
+
+
+def test_sharing_reads_every_page_of_the_meeting_transcript(monkeypatch) -> None:
+    """A long meeting's segments span pages, one of which can be empty."""
+    from unittest import mock
+
+    tokens = []
+
+    class Field:
+        def args(self, **kwargs):
+            tokens.append(kwargs["nextToken"])
+            return self
+
+        def select(self, *_fields):
+            return tokens[-1]
+
+    schema = mock.MagicMock()
+    schema.Query.getTranscriptSegments = Field()
+    monkeypatch.setattr(index, "DSLQuery", lambda token: token, raising=False)
+    monkeypatch.setattr(index, "dsl_gql", lambda token: token, raising=False)
+    pages = {
+        None: {"TranscriptSegments": [{"PK": "trs#c1", "SK": "a"}], "nextToken": "t1"},
+        "t1": {"TranscriptSegments": [], "nextToken": "t2"},
+        "t2": {"TranscriptSegments": [{"PK": "trs#c1", "SK": "b"}, None], "nextToken": None},
+    }
+    session = mock.MagicMock()
+    session.execute.side_effect = lambda token: {"getTranscriptSegments": pages[token]}
+
+    segments = index.get_transcript_segments(session, schema, "c1")
+
+    assert [segment["SK"] for segment in segments] == ["a", "b"]
+    assert tokens == [None, "t1", "t2"]

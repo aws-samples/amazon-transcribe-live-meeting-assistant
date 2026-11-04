@@ -209,37 +209,39 @@ def get_call_details(appsync_session, schema, callid):
 
 
 def get_transcript_segments(appsync_session, schema, callid):
-    try:
+    """Every final segment of the meeting, read a page at a time.
+
+    A long meeting's segments span several pages of the table, and a page can
+    come back empty with a nextToken, so pages are read until there is none.
+    """
+    segments = []
+    next_token = None
+    while True:
         query = dsl_gql(
             DSLQuery(
-                schema.Query.getTranscriptSegments.args(callId=callid).select(
+                schema.Query.getTranscriptSegments.args(callId=callid, nextToken=next_token).select(
                     schema.TranscriptSegmentList.TranscriptSegments.select(
                         schema.TranscriptSegment.PK,
                         schema.TranscriptSegment.SK,
-                        schema.TranscriptSegment.CreatedAt,
-                        schema.TranscriptSegment.CallId,
-                        schema.TranscriptSegment.SegmentId,
-                        schema.TranscriptSegment.StartTime,
-                        schema.TranscriptSegment.EndTime,
-                        schema.TranscriptSegment.Transcript,
-                        schema.TranscriptSegment.IsPartial,
-                        schema.TranscriptSegment.Channel,
-                        schema.TranscriptSegment.Speaker,
-                    )
+                    ),
+                    schema.TranscriptSegmentList.nextToken,
                 )
             )
         )
-
-        result = appsync_session.execute(query)
-    except ClientError as err:
-        logger.error(
-            "Error deleting meetings %s: %s",
-            err.response["Error"]["Code"],
-            err.response["Error"]["Message"],
-        )
-        raise
-    else:
-        return result
+        try:
+            result = appsync_session.execute(query)
+        except ClientError as err:
+            logger.error(
+                "Error reading transcript segments %s: %s",
+                err.response["Error"]["Code"],
+                err.response["Error"]["Message"],
+            )
+            raise
+        page = result.get("getTranscriptSegments") or {}
+        segments.extend(segment for segment in page.get("TranscriptSegments") or [] if segment)
+        next_token = page.get("nextToken")
+        if not next_token:
+            return segments
 
 
 def get_call_metadata(callid):
@@ -346,8 +348,7 @@ def share_meeting(appsync_session, schema, callid, listPK, listSK, recipients, o
         new_recipients = None
 
     try:
-        result = get_transcript_segments(appsync_session, schema, callid)
-        for transcript_segment in result.get("getTranscriptSegments").get("TranscriptSegments"):
+        for transcript_segment in get_transcript_segments(appsync_session, schema, callid):
             update_transcript_segment(
                 appsync_session,
                 schema,

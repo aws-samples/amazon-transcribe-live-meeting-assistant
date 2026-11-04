@@ -7,7 +7,9 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('aws-amplify/api', () => ({ generateClient: () => ({ graphql: vi.fn() }) }));
 
-const { isRequestTimeout, mapTranscriptSegmentValue } = await import('./use-calls-graphql-api');
+const { fetchAllTranscriptSegments, isRequestTimeout, mapTranscriptSegmentValue } = await import(
+  './use-calls-graphql-api'
+);
 
 describe('isRequestTimeout', () => {
   it("recognises AppSync's execution timeout", () => {
@@ -34,5 +36,25 @@ describe('mapTranscriptSegmentValue', () => {
     ['REMOTE', 'LOCAL', 'AGENT_ASSISTANT', 'CHAT_ASSISTANT'].forEach((channel) =>
       expect(mapTranscriptSegmentValue({ SegmentId: 's', Channel: channel }).channel).toBe(channel),
     );
+  });
+});
+
+describe('fetchAllTranscriptSegments', () => {
+  it('reads every page, including an empty one that carries a nextToken', async () => {
+    const pages = {
+      null: { TranscriptSegments: [{ SegmentId: 'a' }], nextToken: 't1' },
+      t1: { TranscriptSegments: [], nextToken: 't2' },
+      t2: { TranscriptSegments: [{ SegmentId: 'b' }, null], nextToken: null },
+    };
+    const graphql = vi.fn(async ({ variables }) => ({ data: { getTranscriptSegments: pages[variables.nextToken] } }));
+
+    const segments = await fetchAllTranscriptSegments(graphql, 'c1');
+
+    expect(segments.map((s) => s.SegmentId)).toEqual(['a', 'b']);
+    expect(graphql.mock.calls.map(([request]) => request.variables)).toEqual([
+      { callId: 'c1', nextToken: null },
+      { callId: 'c1', nextToken: 't1' },
+      { callId: 'c1', nextToken: 't2' },
+    ]);
   });
 });

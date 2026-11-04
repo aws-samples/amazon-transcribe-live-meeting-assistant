@@ -1575,3 +1575,83 @@ def test_get_call_details_returns_the_meetings_owner(schema):
     session = FakeSession(schema, _meeting_record(Owner=MEETING_OWNER))
     details = run(cep.get_call_details(message={"CallId": "call-1"}, appsync_session=session))
     assert details["Owner"] == MEETING_OWNER
+
+
+class PagedSession(FakeSession):
+    """Answers each getTranscriptSegmentsWithSentiment query with the page its nextToken names."""
+
+    def __init__(self, schema: Any, pages: Dict[Any, Any]) -> None:
+        super().__init__(schema, None)
+        self.pages = pages
+
+    async def execute(self, query: Any) -> Any:
+        from graphql import print_ast  # noqa: E402
+
+        self.queries.append(query)
+        token = re.search(r'nextToken: "([^"]*)"', print_ast(query))
+        return self.pages[token.group(1) if token else None]
+
+
+def _scored(segment_id: str, end: float) -> Dict[str, Any]:
+    return {
+        "PK": "trs#call-1",
+        "SK": segment_id,
+        "CallId": "call-1",
+        "Channel": "REMOTE",
+        "SegmentId": segment_id,
+        "StartTime": end - 1.0,
+        "EndTime": end,
+        "Sentiment": "POSITIVE",
+        "SentimentWeighted": 2.5,
+    }
+
+
+def test_aggregated_sentiment_reads_every_page_of_the_meeting(schema):
+    """A long meeting's segments span pages, one of which can be empty."""
+
+    def page(segments, token):
+        return {
+            "getTranscriptSegmentsWithSentiment": {
+                "TranscriptSegmentsWithSentiment": segments,
+                "nextToken": token,
+            }
+        }
+
+    session = PagedSession(
+        schema,
+        {
+            None: page([_scored("s1", 10.0)], "t1"),
+            "t1": page([], "t2"),
+            "t2": page([_scored("s2", 3600.0)], None),
+        },
+    )
+    result = run(
+        cep.execute_get_transcript_segments_query(
+            message={"CallId": "call-1"}, appsync_session=session
+        )
+    )
+    listed = result["getTranscriptSegmentsWithSentiment"]["TranscriptSegmentsWithSentiment"]
+    assert [s["SegmentId"] for s in listed] == ["s1", "s2"]
+    assert len(session.queries) == 3
+    assert cep.latest_speech_end_seconds(listed) == 3600.0
+
+
+def test_a_page_without_the_list_is_returned_as_no_answer(schema):
+    session = PagedSession(
+        schema,
+        {
+            None: {
+                "getTranscriptSegmentsWithSentiment": {
+                    "TranscriptSegmentsWithSentiment": [_scored("s1", 10.0)],
+                    "nextToken": "t1",
+                }
+            },
+            "t1": {"getTranscriptSegmentsWithSentiment": None},
+        },
+    )
+    result = run(
+        cep.execute_get_transcript_segments_query(
+            message={"CallId": "call-1"}, appsync_session=session
+        )
+    )
+    assert result == {"getTranscriptSegmentsWithSentiment": None}

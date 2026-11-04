@@ -345,8 +345,10 @@ type Query @aws_cognito_user_pools
 	# What the enrollment portal shows its visitor about their own enrollment,
 	# including the terms text whose hash is stored with a consent.
 	voiceEnrollmentTerms: VoiceEnrollmentState @aws_cognito_user_pools
-	getTranscriptSegments(callId: ID!, isPartial: Boolean): TranscriptSegmentList
-	getTranscriptSegmentsWithSentiment(callId: ID!): TranscriptSegmentsWithSentimentList
+	# A meeting's segments a page at a time: pass each page's nextToken back
+	# until it is null. A page can hold no segments and still carry a nextToken.
+	getTranscriptSegments(callId: ID!, isPartial: Boolean, nextToken: String): TranscriptSegmentList
+	getTranscriptSegmentsWithSentiment(callId: ID!, nextToken: String): TranscriptSegmentsWithSentimentList
 	# The meeting's key frames in time order, a page at a time, with short-lived
 	# signed links to their images. Answered to the callers getCall answers: the
 	# meeting's owner, the people it is shared with, admins and backend roles.
