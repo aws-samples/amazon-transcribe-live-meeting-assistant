@@ -391,6 +391,16 @@ or renamed.**
   and stores "System" as `SystemPhoneNumber` when it has no `toNumber` (it used
   "System Phone"). An uploaded recording with no participant name uses "Other
   Participant" too (it used "Customer").
+- The `createUploadMeeting` GraphQL input takes the same two names,
+  `localSpeakerName` (required, here or as `agentId`) and `remoteSpeakerName`.
+  `agentId`, `fromNumber` and `toNumber` are still accepted, so existing upload
+  clients need no change; when both spellings are sent, the documented one is
+  used. `agentId` is no longer a non-null field of the input.
+- `getTranscriptSegments` and `getTranscriptSegmentsWithSentiment` take an
+  optional `nextToken` and return a meeting's transcript a page at a time. A
+  client that reads only the first page gets what it got before; one that needs
+  a whole long meeting (past about 2,300 segments) passes each page's
+  `nextToken` back until it is null.
 
 **One new parameter.** `VPSchedulerStateMachineLogsExpirationInDays` (default 7)
 sets retention for the scheduled Virtual Participant state machine's execution

@@ -116,9 +116,9 @@ def _parse_and_validate_input(arguments: dict) -> dict:
     # and fromNumber are their older names, still accepted.
     agent_id = (raw.get("localSpeakerName") or "").strip() or (raw.get("agentId") or "").strip()
     if not agent_id:
-        raise ValidationError("localSpeakerName is required")
+        raise ValidationError("localSpeakerName (or agentId) is required")
     if len(agent_id) > 200:
-        raise ValidationError("localSpeakerName must be 200 characters or fewer")
+        raise ValidationError("localSpeakerName (or agentId) must be 200 characters or fewer")
 
     # The name the transcript shows for the other participants when none is given:
     # the placeholder the UI and the WebSocket server use.
