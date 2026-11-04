@@ -1288,8 +1288,6 @@ Resources:
               - Effect: Allow
                 Action:
                   - kinesis:PutRecord
-                  - kinesis:PutRecords
-                  - kinesis:DescribeStream
                 Resource:
                   - !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${CallDataStreamName}"
         - PolicyName: TranscribePolicy
