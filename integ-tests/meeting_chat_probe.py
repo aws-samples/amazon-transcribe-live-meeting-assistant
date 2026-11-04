@@ -96,21 +96,18 @@ class ChatProbe:
             PartitionKey=self.call_id,
         )
 
-    def owner(self) -> str:
-        """The meeting's Owner: the identity this probe's AppSync reads run as.
+    def reads_every_meeting(self) -> bool:
+        """Whether this probe's AppSync reads see every meeting's transcript.
 
-        getTranscriptSegments returns a non-Admin caller only the segments of
-        meetings it owns or that are shared with it, and AppSync names an IAM
-        caller that is not an assumed role (an IAM user, as on a developer's
-        machine) by its IAM user id. So the meeting is owned by that id, and
-        the read below sees its segment whichever credentials run the suite.
-        An assumed role (CI) reads every meeting, so the owner does not matter.
+        getTranscriptSegments returns a non-Admin caller only segments whose
+        Owner or SharedWith names it, and the CallEventProcessor writes a
+        segment's SharedWith but not its Owner. AppSync treats an assumed role
+        (the CI runner, a Lambda function) as the backend and returns every
+        segment; an IAM user (a developer's machine) is treated as a user, so
+        it cannot read back a synthetic meeting's segments.
         """
-        if not getattr(self, "_owner", None):
-            identity = self.session.client("sts").get_caller_identity()
-            arn = identity.get("Arn", "")
-            self._owner = identity["UserId"] if ":user/" in arn else OWNER
-        return self._owner
+        arn = self.session.client("sts").get_caller_identity().get("Arn", "")
+        return ":assumed-role/" in arn
 
     def send_start(self) -> None:
         self._put(
@@ -119,7 +116,7 @@ class ChatProbe:
                 "CallId": self.call_id,
                 "CustomerPhoneNumber": "Virtual Participant",
                 "SystemPhoneNumber": "LMA Integ Test",
-                "AgentId": self.owner(),
+                "AgentId": OWNER,
                 "CreatedAt": datetime.now(timezone.utc).isoformat(),
                 "AccessToken": "",
                 "IdToken": "",
