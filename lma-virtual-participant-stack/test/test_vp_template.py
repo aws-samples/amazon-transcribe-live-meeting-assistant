@@ -1764,3 +1764,14 @@ def test_both_launch_paths_lma_uses_tell_the_container_its_vp_id(raw: str, launc
     assert "{'Name': 'VIRTUAL_PARTICIPANT_ID', 'Value': vp_id}," in raw
     assert '"VIRTUAL_PARTICIPANT_ID": ("virtualParticipantId", "id"),' in launcher
     assert '"no virtualParticipantId in payload"' in launcher
+
+
+def test_task_role_grants_only_the_kinesis_action_the_vp_calls(template: dict) -> None:
+    """The VP writes its events one PutRecord at a time (backend/src/kinesis-stream.ts)."""
+    actions: list[str] = []
+    for policy in template["Resources"]["TaskRole"]["Properties"]["Policies"]:
+        for statement in policy.get("PolicyDocument", {}).get("Statement", []):
+            granted = statement.get("Action", [])
+            granted = [granted] if isinstance(granted, str) else granted
+            actions += [a for a in granted if isinstance(a, str) and a.startswith("kinesis:")]
+    assert actions == ["kinesis:PutRecord"]
