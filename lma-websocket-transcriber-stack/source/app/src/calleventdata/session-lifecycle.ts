@@ -5,8 +5,9 @@
  */
 
 /**
- * Which audio connection carries which meeting, and how a meeting's session
- * ends: when its client sends END, when its connection closes and nobody
+ * Which audio connection carries which meeting, where its audio goes while
+ * the START that opens a session is still being handled, and how a meeting's
+ * session ends: when its client sends END, when its connection closes and nobody
  * reconnects in time, when its client reconnects on a new connection, and when
  * the task shuts down.
  *
@@ -21,6 +22,7 @@ import { pcmSeconds } from '../metering';
 import { runWithLogContext } from '../utils/log-context';
 import { DetachedSessions } from './detached-sessions';
 import { CallMetaData, SocketCallData } from './eventtypes';
+import { PendingAudioFrames, pendingAudioLimitBytes } from './pending-audio';
 
 /** How long a meeting waits for its client to reconnect, unless the task's environment says otherwise. */
 export const DEFAULT_AUDIO_RECONNECT_GRACE_MS = 60_000;
@@ -74,6 +76,8 @@ export interface SessionLifecycleDeps {
     stopEngine: (session: SocketCallData) => Promise<void>;
     /** Start the session's transcription engine. */
     startTranscription: (session: SocketCallData) => Promise<void>;
+    /** One frame of the session's audio: to its recording and its transcription engine. */
+    writeAudio: (session: SocketCallData, frame: Uint8Array) => void;
     noteSessionEnded: (callMetaData: CallMetaData) => void;
     describe: (callMetaData: CallMetaData) => string;
     describeError: (error: unknown) => string;
@@ -90,6 +94,8 @@ export class SessionLifecycle<W extends SessionSocket> {
     private readonly connections = new WeakMap<SocketCallData, { ws: W }>();
     // Sessions whose connection closed without an END, waiting for their client.
     private readonly detached: DetachedSessions<SocketCallData>;
+    // Audio for connections whose START is still being handled (pending-audio.ts).
+    private readonly pendingAudio = new PendingAudioFrames<W>();
 
     constructor(private readonly deps: SessionLifecycleDeps) {
         this.detached = new DetachedSessions<SocketCallData>(deps.graceMs, (session) => this.onExpire(session));
@@ -104,6 +110,73 @@ export class SessionLifecycle<W extends SessionSocket> {
         this.connections.set(session, connection);
         this.sockets.set(ws, session);
         return connection;
+    }
+
+    /**
+     * A START began on this connection: its audio is held from here until the
+     * START has a session for it (`releaseAudio`) or is refused (`dropAudio`).
+     * Called before the START handler's first await, so no frame sent behind
+     * the START can reach the connection's previous session, if it has one,
+     * or find none.
+     */
+    holdAudio(ws: W, samplingRate: number | undefined): void {
+        this.pendingAudio.begin(ws, pendingAudioLimitBytes(samplingRate));
+    }
+
+    /**
+     * A frame of audio on a connection: held while its START is in progress,
+     * otherwise written to the session the connection carries. False when
+     * there is neither, and the frame is dropped.
+     */
+    onAudio(ws: W, frame: Uint8Array): boolean {
+        if (this.pendingAudio.hold(ws, frame)) {
+            return true;
+        }
+        const session = this.sockets.get(ws);
+        if (!session) {
+            return false;
+        }
+        this.deps.writeAudio(session, frame);
+        return true;
+    }
+
+    /**
+     * The START on this connection has its session: the audio held for it is
+     * written to the session in the order it arrived, and later frames go
+     * straight to it. Nothing awaits between the two, so a later frame cannot
+     * overtake a held one. A START whose session has ended or gone meanwhile
+     * (its consent check discarded it) has its audio discarded.
+     */
+    releaseAudio(ws: W): void {
+        const held = this.pendingAudio.release(ws);
+        const session = this.sockets.get(ws);
+        if (!session || session.ended) {
+            if (held.frames.length > 0) {
+                this.deps.log.debug(`[START]: Discarding ${held.bytes} bytes of audio held for a START with no session.`);
+            }
+            return;
+        }
+        if (held.droppedBytes > 0) {
+            this.deps.log.warn(
+                `[START]: [${session.callMetadata.callId}] - ${held.droppedFrames} audio frame(s) (${held.droppedBytes} bytes) arrived while START was handled and did not fit in the hold; the oldest were dropped.`
+            );
+        }
+        for (const frame of held.frames) {
+            this.deps.writeAudio(session, frame);
+        }
+    }
+
+    /** The START on this connection was refused or failed: the audio held for it is discarded. */
+    dropAudio(ws: W): void {
+        const bytes = this.pendingAudio.drop(ws);
+        if (bytes > 0) {
+            this.deps.log.debug(`[START]: Discarding ${bytes} bytes of audio held for a START that did not start a session.`);
+        }
+    }
+
+    /** Connections whose START is holding audio now. */
+    get pendingAudioCount(): number {
+        return this.pendingAudio.size;
     }
 
     /** The session a connection carries, if any. */
@@ -147,7 +220,9 @@ export class SessionLifecycle<W extends SessionSocket> {
      * alike, so the two stay in step.
      *
      * `beforeTranscription` runs once the session is on the new connection,
-     * before a session that had not started transcribing yet is started.
+     * before a session that had not started transcribing yet is started. The
+     * audio held while the START was handled is written to the session after
+     * it, and before the engine is started.
      * Undefined when there is nothing to resume: the caller starts a new session.
      */
     async resume(
@@ -177,6 +252,7 @@ export class SessionLifecycle<W extends SessionSocket> {
             `[START]: [${callId}] - The client reconnected after ${detachedForMs} ms; continuing the meeting's session (${session.recordingFileSize ?? 0} bytes recorded so far).`
         );
         await beforeTranscription?.();
+        this.releaseAudio(ws);
         if (!session.ended && !session.transcriptionStarted && (!session.consent || session.consent.gateOpen)) {
             session.transcriptionStarted = true;
             await this.deps.startTranscription(session);
@@ -190,6 +266,8 @@ export class SessionLifecycle<W extends SessionSocket> {
      * meeting ends now.
      */
     async onConnectionClosed(ws: W): Promise<void> {
+        // A START still in progress on it will find its audio gone.
+        this.dropAudio(ws);
         const session = this.sockets.get(ws);
         if (!session) {
             return;

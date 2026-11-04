@@ -151,6 +151,7 @@ const sessions = new SessionLifecycle<WebSocket>({
         noteStreamingSessionStarted(socketData.callMetadata);
         await startTranscription(socketData, server);
     },
+    writeAudio: (socketData, frame) => writeSessionAudio(socketData, frame),
     noteSessionEnded: noteStreamingSessionEnded,
     describe: stringifyCallMetaData,
     describeError: normalizeErrorForLogging,
@@ -326,8 +327,9 @@ const registerHandlers = (
                 )}`
             );
             // A START that failed part-way registered nothing: its held consent
-            // frames are not waiting for anything any more.
+            // frames and audio are not waiting for anything any more.
             pendingConsentFrames.drop(ws);
+            sessions.dropAudio(ws);
             try {
                 ws.close(1011, 'internal error processing message');
             } catch (closeErr) {
@@ -376,20 +378,28 @@ const onBinaryMessage = async (
         return;
     }
 
-    const socketData = sessions.sessionOf(ws);
+    // Held while the connection's START is handled, otherwise written to its
+    // session (writeSessionAudio).
+    if (!sessions.onAudio(ws, data)) {
+        server.log.error(
+            `[ON BINARY MESSAGE]: [${clientIP}] - Error: received audio data before metadata. Check logs for errors in START event.`
+        );
+    }
+};
 
+/** One frame of a session's audio: to its recording and its transcription engine. */
+const writeSessionAudio = (socketData: SocketCallData, data: Uint8Array): void => {
     // Audio a meeting's consent does not allow is neither transcribed nor
     // recorded: an opt-in meeting before its consent is recorded, and any
     // meeting after an objection.
-    if (socketData?.consent && !socketData.consent.gateOpen) {
+    if (socketData.consent && !socketData.consent.gateOpen) {
         return;
     }
 
     if (
-        socketData !== undefined &&
-    socketData.audioInputStream !== undefined &&
-    socketData.writeRecordingStream !== undefined &&
-    socketData.recordingFileSize !== undefined
+        socketData.audioInputStream !== undefined &&
+        socketData.writeRecordingStream !== undefined &&
+        socketData.recordingFileSize !== undefined
     ) {
         socketData.audioInputStream.write(data);
         socketData.writeRecordingStream.write(data);
@@ -397,7 +407,7 @@ const onBinaryMessage = async (
         pushAsrAudio(socketData, data);
     } else {
         server.log.error(
-            `[ON BINARY MESSAGE]: [${clientIP}] - Error: received audio data before metadata. Check logs for errors in START event.`
+            `[ON BINARY MESSAGE]: [${socketData.callMetadata.callId}] - Error: the session has no audio streams; dropping audio.`
         );
     }
 };
@@ -485,10 +495,11 @@ const onTextMessage = async (
     }
     // Synchronously, before this handler's first await: the socket hands each
     // frame to its handler as it arrives without waiting for the previous one,
-    // so consent frames sent right behind a START are held from here until the
-    // START has registered its meeting on the connection.
+    // so consent frames and audio sent right behind a START are held from here
+    // until the START has registered its meeting on the connection.
     if (callMetaData.callEvent === 'START') {
         pendingConsentFrames.begin(ws);
+        sessions.holdAudio(ws, callMetaData.samplingRate);
     }
     if (!match) {
         server.log.error(
@@ -497,6 +508,7 @@ const onTextMessage = async (
             )}`
         );
         pendingConsentFrames.drop(ws);
+        sessions.dropAudio(ws);
         return;
     }
 
@@ -557,6 +569,7 @@ const onTextMessage = async (
                 message: consentDecision.message,
             });
             pendingConsentFrames.drop(ws);
+            sessions.dropAudio(ws);
             ws.close(1008, 'meeting consent required');
             return;
         }
@@ -585,6 +598,7 @@ const onTextMessage = async (
                     message: MEETING_NOT_OWNED_MESSAGE,
                 });
                 pendingConsentFrames.drop(ws);
+                sessions.dropAudio(ws);
                 ws.close(1008, 'meeting consent required');
                 return;
             }
@@ -686,6 +700,10 @@ const onTextMessage = async (
         for (const frame of pendingConsentFrames.release(ws)) {
             await onConsentFrame(clientIP, ws, frame);
         }
+        // Then the audio sent behind it, through the consent gate those frames
+        // left, into the recording and the engine's buffer before the engine
+        // starts; audio from here on goes straight to the session.
+        sessions.releaseAudio(ws);
         // An opt-in meeting starts transcribing when its consent record allows
         // it (onConsentGate); every other meeting starts now.
         if (

@@ -38,18 +38,29 @@ interface Effects {
     engineStops: string[];
     transcriptionStarts: string[];
     errors: string[];
+    warnings: string[];
+    /** Audio written to a session, as `callId:frame`, interleaved with `start:callId` when an engine starts. */
+    audio: string[];
 }
 
 const lifecycle = (
     overrides: Partial<SessionLifecycleDeps> = {}
 ): { sessions: SessionLifecycle<FakeSocket>, effects: Effects, shutDown: () => void } => {
-    const effects: Effects = { ends: [], recordings: [], engineStops: [], transcriptionStarts: [], errors: [] };
+    const effects: Effects = {
+        ends: [],
+        recordings: [],
+        engineStops: [],
+        transcriptionStarts: [],
+        errors: [],
+        warnings: [],
+        audio: [],
+    };
     let shuttingDown = false;
     const deps: SessionLifecycleDeps = {
         graceMs: 60_000,
         log: {
             info: () => undefined,
-            warn: () => undefined,
+            warn: (message) => effects.warnings.push(message),
             debug: () => undefined,
             error: (message) => effects.errors.push(message),
         },
@@ -65,6 +76,10 @@ const lifecycle = (
         },
         startTranscription: async (session) => {
             effects.transcriptionStarts.push(session.callMetadata.callId);
+            effects.audio.push(`start:${session.callMetadata.callId}`);
+        },
+        writeAudio: (session, frame) => {
+            effects.audio.push(`${session.callMetadata.callId}:${Buffer.from(frame).toString()}`);
         },
         noteSessionEnded: () => undefined,
         describe: (meta) => meta.callId,
@@ -326,4 +341,135 @@ test('the timeline position is the duration of the audio received', () => {
     assert.equal(recordedAudioSeconds(meeting), 90);
     meeting.recordingFileSize = undefined;
     assert.equal(recordedAudioSeconds(meeting), 0);
+});
+
+// Audio sent right behind a START, while the START is still being handled.
+
+const frame = (text: string): Uint8Array => Buffer.from(text);
+
+test('audio sent at once behind a START is written to the new session in order once it exists', () => {
+    const { sessions, effects } = lifecycle();
+    const ws = new FakeSocket('ws');
+    sessions.holdAudio(ws, 16000);
+    assert.equal(sessions.onAudio(ws, frame('a')), true, 'held, not dropped');
+    assert.equal(sessions.onAudio(ws, frame('b')), true);
+    // The START registers its session, then finishes its consent frames; audio
+    // arriving meanwhile is still held, behind the earlier frames.
+    sessions.register(ws, session());
+    sessions.onAudio(ws, frame('c'));
+    assert.deepEqual(effects.audio, [], 'nothing is written while the START is in progress');
+
+    sessions.releaseAudio(ws);
+    assert.deepEqual(effects.audio, ['meeting-1:a', 'meeting-1:b', 'meeting-1:c']);
+    assert.equal(sessions.pendingAudioCount, 0);
+});
+
+test('audio after the session exists is written after the held audio, not before it', () => {
+    const { sessions, effects } = lifecycle();
+    const ws = new FakeSocket('ws');
+    sessions.holdAudio(ws, 16000);
+    sessions.onAudio(ws, frame('held-1'));
+    sessions.onAudio(ws, frame('held-2'));
+    sessions.register(ws, session());
+    sessions.releaseAudio(ws);
+    sessions.onAudio(ws, frame('live-1'));
+    sessions.onAudio(ws, frame('live-2'));
+    assert.deepEqual(effects.audio, ['meeting-1:held-1', 'meeting-1:held-2', 'meeting-1:live-1', 'meeting-1:live-2']);
+});
+
+test('a resumed session gets the audio held behind its START before its engine starts', async () => {
+    const { sessions, effects } = lifecycle();
+    const first = new FakeSocket('first');
+    const second = new FakeSocket('second');
+    const meeting = session();
+    meeting.transcriptionStarted = false;
+    sessions.register(first, meeting);
+    await sessions.onConnectionClosed(first);
+
+    sessions.holdAudio(second, 16000);
+    sessions.onAudio(second, frame('replayed'));
+    const resumed = await sessions.resume(second, 'meeting-1', 'user-a', newTokens, async () => {
+        // The session is on the new connection now, and audio is still held.
+        sessions.onAudio(second, frame('live-during-start'));
+        assert.deepEqual(effects.audio, []);
+    });
+    assert.equal(resumed?.session, meeting);
+    sessions.onAudio(second, frame('live-after'));
+    assert.deepEqual(effects.audio, [
+        'meeting-1:replayed',
+        'meeting-1:live-during-start',
+        'start:meeting-1',
+        'meeting-1:live-after',
+    ]);
+});
+
+test('audio beyond the hold\'s bound drops the oldest frames and reports how many', () => {
+    const { sessions, effects } = lifecycle();
+    const ws = new FakeSocket('ws');
+    // 8 kHz stereo 16-bit for 8 s: 256,000 bytes.
+    sessions.holdAudio(ws, 8000);
+    const chunk = Buffer.alloc(1000);
+    for (let i = 0; i < 300; i += 1) {
+        sessions.onAudio(ws, Buffer.concat([Buffer.from(String(i).padStart(4, '0')), chunk.subarray(4)]));
+    }
+    sessions.register(ws, session());
+    sessions.releaseAudio(ws);
+    assert.equal(effects.audio.length, 256);
+    assert.ok(effects.audio[0].startsWith('meeting-1:0044'), 'the 44 oldest frames are dropped');
+    assert.ok(effects.audio[255].startsWith('meeting-1:0299'), 'the newest frame is kept');
+    assert.equal(effects.warnings.length, 1);
+    assert.match(effects.warnings[0], /44 audio frame\(s\) \(44000 bytes\)/);
+});
+
+test('a refused START discards the audio held for it', () => {
+    const { sessions, effects } = lifecycle();
+    const ws = new FakeSocket('ws');
+    sessions.holdAudio(ws, 16000);
+    sessions.onAudio(ws, frame('a'));
+    sessions.dropAudio(ws);
+    assert.equal(sessions.pendingAudioCount, 0);
+    assert.equal(sessions.onAudio(ws, frame('b')), false, 'with no START and no session the frame is dropped');
+    // A release that follows a refusal has nothing to write.
+    sessions.releaseAudio(ws);
+    assert.deepEqual(effects.audio, []);
+});
+
+test('a START whose session ended while it was handled discards its held audio', () => {
+    const { sessions, effects } = lifecycle();
+    const ws = new FakeSocket('ws');
+    const meeting = session();
+    sessions.holdAudio(ws, 16000);
+    sessions.onAudio(ws, frame('a'));
+    sessions.register(ws, meeting);
+    // The consent check found the meeting is somebody else's.
+    meeting.ended = true;
+    sessions.discard(ws, meeting);
+    sessions.releaseAudio(ws);
+    assert.deepEqual(effects.audio, []);
+    assert.equal(sessions.pendingAudioCount, 0);
+});
+
+test('a connection that closes while its START is in progress releases its held audio', async () => {
+    const { sessions, effects } = lifecycle();
+    const ws = new FakeSocket('ws');
+    sessions.holdAudio(ws, 16000);
+    sessions.onAudio(ws, frame('a'));
+    await sessions.onConnectionClosed(ws);
+    assert.equal(sessions.pendingAudioCount, 0, 'nothing is held for a closed connection');
+    // The START finishing afterwards finds nothing to write.
+    sessions.register(ws, session());
+    sessions.releaseAudio(ws);
+    assert.deepEqual(effects.audio, []);
+});
+
+test('a second START on a connection holds its audio away from the session it already carries', () => {
+    const { sessions, effects } = lifecycle();
+    const ws = new FakeSocket('ws');
+    sessions.register(ws, session('meeting-1'));
+    sessions.onAudio(ws, frame('first'));
+    sessions.holdAudio(ws, 16000);
+    sessions.onAudio(ws, frame('second'));
+    sessions.register(ws, session('meeting-2'));
+    sessions.releaseAudio(ws);
+    assert.deepEqual(effects.audio, ['meeting-1:first', 'meeting-2:second']);
 });

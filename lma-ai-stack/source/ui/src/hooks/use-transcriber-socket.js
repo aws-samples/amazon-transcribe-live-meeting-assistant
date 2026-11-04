@@ -10,7 +10,13 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 
 import { createTranscriberStream } from '../components/stream-audio/transcriber-stream';
 
-// See StreamAudio.jsx: unwrap the double-wrapped CJS default for Vite 8 interop.
+// react-use-websocket ships a CJS bundle. Vite 8 / rolldown exports the CJS
+// module.exports OBJECT as the ESM default (a "double-wrapped default"), so the
+// hook is not the default itself but one level in. Unwrap to whichever level is
+// actually the function, so this works whichever interop the bundler applies.
+// Getting it wrong leaves useWebSocket undefined, and calling it throws during
+// render, which blanks the page. This hook is the only place the library is
+// imported.
 const useWebSocket =
   typeof ReactUseWebSocket.default === 'function' ? ReactUseWebSocket.default : ReactUseWebSocket.default.default;
 
