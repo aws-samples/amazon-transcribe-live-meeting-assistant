@@ -97,6 +97,9 @@ export class SessionLifecycle<W extends SessionSocket> {
     // Audio for connections whose START is still being handled (pending-audio.ts).
     private readonly pendingAudio = new PendingAudioFrames<W>();
 
+    /** Connections seen to close, so a START still handled on one can tell. */
+    private readonly closedSockets = new WeakSet<W>();
+
     constructor(private readonly deps: SessionLifecycleDeps) {
         this.detached = new DetachedSessions<SocketCallData>(deps.graceMs, (session) => this.onExpire(session));
     }
@@ -266,6 +269,7 @@ export class SessionLifecycle<W extends SessionSocket> {
      * meeting ends now.
      */
     async onConnectionClosed(ws: W): Promise<void> {
+        this.closedSockets.add(ws);
         // A START still in progress on it will find its audio gone.
         this.dropAudio(ws);
         const session = this.sockets.get(ws);
@@ -283,6 +287,18 @@ export class SessionLifecycle<W extends SessionSocket> {
             `[ON WSCLOSE]: [${session.callMetadata.callId}] - Writing call end event due to websocket close event ${this.deps.describe(session.callMetadata)}`
         );
         await this.end(ws, session);
+    }
+
+    /**
+     * Called when a START has finished with the connection. A connection that
+     * closed while its START was handled had no session yet for the close to
+     * hold or end, and no further close will arrive for it; the session the
+     * START put on it is now held or ended as that close would have done.
+     */
+    async afterStart(ws: W): Promise<void> {
+        if (this.closedSockets.has(ws) && this.sockets.has(ws)) {
+            await this.onConnectionClosed(ws);
+        }
     }
 
     /**
