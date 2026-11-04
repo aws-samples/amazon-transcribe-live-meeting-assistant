@@ -35,6 +35,7 @@ import {
 } from './eventtypes';
 
 import { transcriptChannelFor } from './channels';
+import { DEFAULT_REMOTE_SPEAKER_NAME, DEFAULT_SYSTEM_LABEL } from './speaker-fields';
 
 import {
     DEFAULT_MAX_SEGMENT_SECONDS,
@@ -185,8 +186,8 @@ export const writeCallStartEvent = async (
     const callStartEvent: CallStartEvent = {
         EventType: 'START',
         CallId: callMetaData.callId,
-        CustomerPhoneNumber: callMetaData.fromNumber || 'Customer Phone',
-        SystemPhoneNumber: callMetaData.toNumber || 'System Phone',
+        CustomerPhoneNumber: callMetaData.fromNumber || DEFAULT_REMOTE_SPEAKER_NAME,
+        SystemPhoneNumber: callMetaData.toNumber || DEFAULT_SYSTEM_LABEL,
         AgentId: callMetaData.agentId,
         CreatedAt: new Date().toISOString(),
         AccessToken: callMetaData.accessToken,
@@ -203,8 +204,8 @@ export const writeCallEndEvent = async (
     const callEndEvent: CallEndEvent = {
         EventType: 'END',
         CallId: callMetaData.callId,
-        CustomerPhoneNumber: callMetaData.fromNumber || 'Customer Phone',
-        SystemPhoneNumber: callMetaData.toNumber || 'System Phone',
+        CustomerPhoneNumber: callMetaData.fromNumber || DEFAULT_REMOTE_SPEAKER_NAME,
+        SystemPhoneNumber: callMetaData.toNumber || DEFAULT_SYSTEM_LABEL,
         AccessToken: callMetaData.accessToken,
         IdToken: callMetaData.idToken,
         RefreshToken: callMetaData.refreshToken,

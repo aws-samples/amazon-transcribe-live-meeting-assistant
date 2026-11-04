@@ -107,7 +107,7 @@ def run_probe(stack_name: str, region: str | None = None, timeout_s: float = 90.
     put({
         "EventType": "START",
         "CallId": call_id,
-        "CustomerPhoneNumber": "Integ Test Caller",
+        "CustomerPhoneNumber": "Integ Test Participant",
         "SystemPhoneNumber": "LMA Integ Test",
         "AgentId": owner,
         "CreatedAt": now_iso,

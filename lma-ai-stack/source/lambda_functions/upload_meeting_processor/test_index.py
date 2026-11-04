@@ -194,7 +194,7 @@ def job_row(**overrides) -> dict:
         "Status": "PENDING_UPLOAD",
         "Owner": "bob@example.com",
         "AgentId": "bob@example.com",
-        "FromNumber": "Customer",
+        "FromNumber": "Other Participant",
         "ToNumber": "System",
         "Filename": "recording.mp3",
         "ContentType": "audio/mpeg",
@@ -443,7 +443,7 @@ def test_the_start_event_matches_what_the_live_transcriber_emits(env) -> None:
         {
             "EventType": "START",
             "CallId": CALL_ID,
-            "CustomerPhoneNumber": "Customer",
+            "CustomerPhoneNumber": "Other Participant",
             "SystemPhoneNumber": "System",
             "AgentId": "bob@example.com",
             "CreatedAt": FROZEN_NOW.isoformat(),
@@ -510,11 +510,11 @@ def test_the_upload_time_is_used_when_no_meeting_time_was_given(env) -> None:
 
 
 def test_the_party_labels_fall_back_when_the_row_omits_them(env, monkeypatch) -> None:
-    """These render directly in the meetings list, which has no empty state."""
+    """CustomerPhoneNumber is the name the transcript gives the other participants."""
     monkeypatch.setattr(index, "job_table", FakeTable(job_row(FromNumber=None, ToNumber=None)))
     _, kinesis, _ = env
     index.lambda_handler(s3_event(), None)
-    assert kinesis.payloads[0]["CustomerPhoneNumber"] == "Customer"
+    assert kinesis.payloads[0]["CustomerPhoneNumber"] == "Other Participant"
     assert kinesis.payloads[0]["SystemPhoneNumber"] == "System"
 
 

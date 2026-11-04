@@ -275,7 +275,7 @@ def _emit_end_event(call_row: Dict[str, Any]) -> None:
     payload = {
         "EventType": "END",
         "CallId": call_id,
-        "CustomerPhoneNumber": call_row.get("CustomerPhoneNumber") or "Customer",
+        "CustomerPhoneNumber": call_row.get("CustomerPhoneNumber") or "Other Participant",
         "SystemPhoneNumber": call_row.get("SystemPhoneNumber") or "System",
         "AgentId": call_row.get("Owner") or call_row.get("AgentId") or DEFAULT_OWNER,
         "CreatedAt": _now().isoformat(),

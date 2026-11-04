@@ -189,8 +189,8 @@ const SpeakerRow = ({
 const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, onIdentify, readOnly, isLive }) => {
   const identities = useMemo(() => parseSpeakerIdentities(item.speakerIdentities), [item.speakerIdentities]);
   const roster = useMemo(
-    () => buildSpeakerRoster(segments, identities, item.callerPhoneNumber),
-    [segments, identities, item.callerPhoneNumber],
+    () => buildSpeakerRoster(segments, identities, item.remoteParticipantName),
+    [segments, identities, item.remoteParticipantName],
   );
 
   const [saving, setSaving] = useState(false);

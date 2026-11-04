@@ -34,6 +34,7 @@ import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
 import createUploadMeeting from '../../graphql/queries/createUploadMeeting';
 import useTranscriberSocket from '../../hooks/use-transcriber-socket';
+import { toStreamingFrame } from '../common/streaming-frame';
 import ConsentStep from './ConsentStep';
 import {
   captureEvidenceScreenshot,
@@ -375,7 +376,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
         DEBUG - [${new Date().toISOString()}]: Send Call END msg: ${JSON.stringify(callMetaData)}
       `);
       // Nothing is sent if the transcriber already ended the meeting.
-      transcriber.end(callMetaData);
+      transcriber.end(toStreamingFrame(callMetaData));
       setStreamingStarted(false);
       resetConsentStep();
       setCallMetaData({
@@ -449,7 +450,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       // were not known -- so the transcriber refuses an opt-in meeting this page
       // did not ask about rather than taking it for a client without the step.
       const startFrame = {
-        ...recordingCallMetaData,
+        ...toStreamingFrame(recordingCallMetaData),
         consent: consentPayload(consentRequired(consentSettings) ? consentSettings : { mode: 'off' }, consentStep, {
           lmaUser: recordingCallMetaData.agentId,
           meetingName: meetingTopic,

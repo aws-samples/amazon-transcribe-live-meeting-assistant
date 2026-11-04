@@ -190,7 +190,7 @@ const oneLine = (text) =>
  * "<sender> (chat)", on one line.
  */
 export const transcriptDownloadRows = (callTranscriptPerCallId, meeting) => {
-  const { callId, callerPhoneNumber } = meeting;
+  const { callId, remoteParticipantName } = meeting;
   // An exported transcript has to carry the same speaker names the UI shows, or
   // a shared download contradicts the screen it was taken from.
   const speakerIdentities = parseSpeakerIdentities(meeting.speakerIdentities);
@@ -219,7 +219,7 @@ export const transcriptDownloadRows = (callTranscriptPerCallId, meeting) => {
         speaker = resolveSpeakerName(
           c,
           speakerIdentities,
-          canonicalChannel(channel) === REMOTE_CHANNEL ? callerPhoneNumber : undefined,
+          canonicalChannel(channel) === REMOTE_CHANNEL ? remoteParticipantName : undefined,
         );
       } else if (isChatChannel(channel)) {
         // Under the sender the meeting's chat gave, marked as chat, on one line.

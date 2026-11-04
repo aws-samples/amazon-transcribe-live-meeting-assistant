@@ -11,11 +11,12 @@ import { useUserContext } from './UserContext';
 import { WebSocketHook } from 'react-use-websocket/dist/lib/types';
 import { applyMuteAndPause, formatTimestamp, MeetingMetadata, MetadataForTab, mergeMetadataForTab, platformFromBaseUrl, ReportSource, UNKNOWN_PLATFORM } from '../lib/capture';
 
+// A control frame of the WebSocket streaming API (docs/websocket-streaming-api.md).
+// The meeting-audio speaker is reported as it changes, by SPEAKER_CHANGE, so the
+// frame names only the local one.
 type Call = {
   callEvent: string,
-  agentId: string,
-  fromNumber: string,
-  toNumber: string,
+  localSpeakerName: string,
   callId: string,
   samplingRate: number,
   activeSpeaker: string,
@@ -182,9 +183,7 @@ function IntegrationProvider({ children }: any) {
     setShouldConnect(true);
     const callMetadata = {
       callEvent: 'START',
-      agentId: userName,
-      fromNumber: '+9165551234',
-      toNumber: '+8001112222',
+      localSpeakerName: userName,
       callId: `${meetingTopic} - ${formatTimestamp(new Date())}`,
       samplingRate: 8000,
       activeSpeaker: 'n/a'

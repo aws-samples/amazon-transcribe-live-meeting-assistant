@@ -444,8 +444,8 @@ def stream_meeting(stack: Stack, tokens: dict, username: str, *, label: str, con
     # No `channels` field: see ws_stream_probe._stream_wav.
     start = {
         "callEvent": "START", "callId": call_id,
-        "fromNumber": "Consent Probe", "toNumber": "LMA System",
-        "agentId": username, "samplingRate": rate,
+        "remoteSpeakerName": "Consent Probe",
+        "localSpeakerName": username, "samplingRate": rate,
     }
     if consent is not None:
         start["consent"] = consent

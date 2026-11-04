@@ -367,18 +367,11 @@ const EmbedTranscriptPanel = ({ item, callTranscriptPerCallId }) => {
         t.speaker = resolveSpeakerName(
           t,
           speakerIdentities,
-          t.channel === 'REMOTE' ? item.callerPhoneNumber : undefined,
+          t.channel === 'REMOTE' ? item.remoteParticipantName : undefined,
         );
         return t;
       })
-      .filter(
-        (s) =>
-          s?.segmentId &&
-          s?.createdAt &&
-          s.channel !== 'AGENT_VOICETONE' &&
-          s.channel !== 'CALLER_VOICETONE' &&
-          s.channel !== 'CHAT_ASSISTANT',
-      )
+      .filter((s) => s?.segmentId && s?.createdAt && s.channel !== 'CHAT_ASSISTANT')
       .map((s) => (
         <TranscriptSegment
           key={`${s.segmentId}-${s.createdAt}`}

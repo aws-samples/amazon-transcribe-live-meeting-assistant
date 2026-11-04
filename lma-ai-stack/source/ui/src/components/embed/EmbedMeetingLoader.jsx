@@ -35,7 +35,7 @@ import {
   Alert,
 } from '@cloudscape-design/components';
 import '@cloudscape-design/global-styles/index.css';
-import { DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, SYSTEM } from '../common/constants';
+import { DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME } from '../common/constants';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
@@ -134,9 +134,8 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
     if (callId) {
       const endMeta = {
         callId,
-        agentId: owner || DEFAULT_LOCAL_SPEAKER_NAME,
-        fromNumber: participants || DEFAULT_OTHER_SPEAKER_NAME,
-        toNumber: SYSTEM,
+        localSpeakerName: owner || DEFAULT_LOCAL_SPEAKER_NAME,
+        remoteSpeakerName: participants || DEFAULT_OTHER_SPEAKER_NAME,
         callEvent: 'END',
       };
       // Nothing is sent if the transcriber already ended the meeting.
@@ -176,9 +175,8 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
 
       const callMetaData = {
         callId: newCallId,
-        agentId: owner || DEFAULT_LOCAL_SPEAKER_NAME,
-        fromNumber: participants || DEFAULT_OTHER_SPEAKER_NAME,
-        toNumber: SYSTEM,
+        localSpeakerName: owner || DEFAULT_LOCAL_SPEAKER_NAME,
+        remoteSpeakerName: participants || DEFAULT_OTHER_SPEAKER_NAME,
         samplingRate: SOURCE_SAMPLING_RATE,
         callEvent: 'START',
       };

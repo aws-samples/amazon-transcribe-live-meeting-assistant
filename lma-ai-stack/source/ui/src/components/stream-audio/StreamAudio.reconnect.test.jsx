@@ -122,6 +122,10 @@ describe('StreamAudio reconnect', () => {
     const start = first.sent.find((f) => f.callEvent === 'START');
     expect(second.sent[0]).toEqual(start);
     expect(start.samplingRate).toBe(16000);
+    // The speaker names travel under the names the streaming API documents.
+    expect(start.localSpeakerName).toEqual(expect.any(String));
+    expect(start.remoteSpeakerName).toEqual(expect.any(String));
+    ['agentId', 'fromNumber', 'toNumber'].forEach((name) => expect(start).not.toHaveProperty(name));
     expect(kinds(first)).toEqual(['CONSENT_SETTINGS', 'START', 'audio']);
   });
 

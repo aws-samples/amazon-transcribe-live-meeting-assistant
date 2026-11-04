@@ -126,10 +126,24 @@ export const CHANNEL_MIC = 'ch_1';
 
 export type CallMetaData = {
     callId: Uuid,
+    /**
+     * The meeting-audio (ch_0) speaker label. A client sends it as
+     * `remoteSpeakerName`, or as `fromNumber` if written for LMA before 0.4.0;
+     * see speaker-fields.ts.
+     */
     fromNumber?: string,
+    /** Stored as the meeting's SystemPhoneNumber; nothing else reads it. */
     toNumber?: string,
     shouldRecordCall?: boolean,
+    /**
+     * The microphone (ch_1) speaker label. A client sends it as
+     * `localSpeakerName`, or as `agentId` if written for LMA before 0.4.0.
+     */
     agentId?: string,
+    /** The documented spelling of `agentId`; copied onto it when the frame is read. */
+    localSpeakerName?: string,
+    /** The documented spelling of `fromNumber`; copied onto it when the frame is read. */
+    remoteSpeakerName?: string,
     samplingRate: number,
     callEvent: string,
     activeSpeaker: string,

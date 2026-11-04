@@ -118,7 +118,9 @@ def _parse_and_validate_input(arguments: dict) -> dict:
     if len(agent_id) > 200:
         raise ValidationError("agentId must be 200 characters or fewer")
 
-    from_number = (raw.get("fromNumber") or "").strip() or "Customer"
+    # The name the transcript shows for the other participants when none is given:
+    # the placeholder the UI and the WebSocket server use.
+    from_number = (raw.get("fromNumber") or "").strip() or "Other Participant"
     to_number = (raw.get("toNumber") or "").strip() or "System"
 
     filename = _sanitize_filename(raw.get("filename") or "")

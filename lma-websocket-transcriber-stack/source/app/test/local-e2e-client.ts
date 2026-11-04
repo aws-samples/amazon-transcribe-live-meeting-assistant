@@ -54,8 +54,8 @@ async function main(): Promise<void> {
 
     // START frames.
     audio.send(JSON.stringify({
-        callId: CALL_ID, agentId: 'me@example.com', fromNumber: 'Other participants',
-        toNumber: 'System', samplingRate: SR, callEvent: 'START',
+        callId: CALL_ID, localSpeakerName: 'me@example.com', remoteSpeakerName: 'Other participants',
+        samplingRate: SR, callEvent: 'START',
     }));
     video.send(JSON.stringify({ callId: CALL_ID, callEvent: 'START_VIDEO', videoTimeOffsetMs: 120 }));
     await sleep(200);

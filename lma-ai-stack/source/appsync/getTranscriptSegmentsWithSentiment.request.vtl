@@ -1,11 +1,12 @@
 #set( $PK = "trs#${ctx.args.callId}" )
 #set( $isPartial = false )
 
-## A segment stored by LMA before 0.4.0 may have the Channel CATEGORY_MATCH,
-## which the schema's Channel enum no longer declares. Such an item cannot be
-## returned as a TranscriptSegment, so the query leaves it out; it expires with
-## the rest of the meeting's transcript. An item without a Channel is unaffected.
-## test_transcript_segment_channels.py holds this filter in place.
+## A segment stored by LMA before 0.4.0 may have a Channel the schema's Channel
+## enum no longer declares: CATEGORY_MATCH, AGENT_VOICETONE or CALLER_VOICETONE.
+## Such an item cannot be returned as a TranscriptSegment, so the query leaves it
+## out; it expires with the rest of the meeting's transcript. An item without a
+## Channel is unaffected. test_transcript_segment_channels.py holds this filter
+## in place, and lists the retired channels.
 {
   "version" : "2018-05-29",
   "operation" : "Query",
@@ -19,14 +20,16 @@
     },
   },
   "filter": {
-    "expression": "#IsPartial = :isPartial AND (attribute_not_exists(#Channel) OR #Channel <> :retiredChannel)",
+    "expression": "#IsPartial = :isPartial AND (attribute_not_exists(#Channel) OR NOT (#Channel IN (:retiredChannel0, :retiredChannel1, :retiredChannel2)))",
     "expressionNames": {
       "#IsPartial": "IsPartial",
       "#Channel": "Channel",
     },
     "expressionValues": {
       ":isPartial": $util.dynamodb.toDynamoDBJson($isPartial),
-      ":retiredChannel": $util.dynamodb.toDynamoDBJson("CATEGORY_MATCH"),
+      ":retiredChannel0": $util.dynamodb.toDynamoDBJson("CATEGORY_MATCH"),
+      ":retiredChannel1": $util.dynamodb.toDynamoDBJson("AGENT_VOICETONE"),
+      ":retiredChannel2": $util.dynamodb.toDynamoDBJson("CALLER_VOICETONE"),
     },
   },
 }

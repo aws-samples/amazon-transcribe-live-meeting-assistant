@@ -334,7 +334,10 @@ async def _stream(ws_ep: str, tokens: dict, call_id: str, agent_id: str, media: 
     chunk_bytes = SAMPLE_RATE * chunk_ms // 1000 * 4
 
     async with websockets.connect(url, max_size=None, open_timeout=25) as audio_ws:
-        # No `channels` field: see ws_stream_probe._stream_wav.
+        # No `channels` field: see ws_stream_probe._stream_wav. The speaker
+        # labels use the older names agentId/fromNumber, as the desktop apps
+        # send them, so the suite covers the server reading those as well as
+        # localSpeakerName/remoteSpeakerName (docs/websocket-streaming-api.md).
         await audio_ws.send(json.dumps({
             "callEvent": "START", "callId": call_id,
             "fromNumber": "Desktop Video Probe", "toNumber": "LMA System",

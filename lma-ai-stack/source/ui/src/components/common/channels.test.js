@@ -41,7 +41,7 @@ describe('isSpeechChannel', () => {
   });
 
   it('is false for the assistants, the meeting chat and anything else', () => {
-    ['AGENT_ASSISTANT', 'CHAT_ASSISTANT', 'AGENT_VOICETONE', 'MEETING_CHAT', '', undefined].forEach((c) =>
+    ['AGENT_ASSISTANT', 'CHAT_ASSISTANT', 'CATEGORY_MATCH', 'MEETING_CHAT', '', undefined].forEach((c) =>
       expect(isSpeechChannel(c)).toBe(false),
     );
   });

@@ -268,15 +268,6 @@ Parameters:
       Artifacts version (semver). Used to point to a specific release in the S3
       bootstrap bucket
 
-  EnableVoiceToneAnalysis:
-    Type: String
-    Default: "false"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: >
-      Whether or not to show the voice tone analysis panel in the UI
-
   LLMPromptTemplateTableName:
     Type: String
     Description: >
@@ -745,8 +736,8 @@ Outputs:
     Value: !Ref EventSourcingTable
   EventSourcingTableArn:
     Description: >-
-      The ARN of the DynamoDB table created to store events and the contact
-      details used in this solution
+      The ARN of the DynamoDB table created to store the meetings, their
+      transcripts and the events used in this solution
     Value: !GetAtt EventSourcingTable.Arn
   CallEventProcessorFunctionRoleName:
     Description: The Name of the IAM role used by CallEventProcessorFunction
@@ -2215,7 +2206,6 @@ Resources:
     Properties:
       ServiceToken: !GetAtt LambdaCodeBuildStartBuild.Arn
       BuildProjectName: !Ref LMAUICodeBuildProject
-      EnableVoiceToneAnalysis: !Ref EnableVoiceToneAnalysis
       IsSentimentAnalysisEnabled: !Ref IsSentimentAnalysisEnabled
       LMASettingsParameterName: !Ref LMASettingsParameterName
       # Makefile calculates and substitute code hash in the filename here during package build

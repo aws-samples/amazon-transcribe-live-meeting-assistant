@@ -4,12 +4,13 @@
 """The transcript `Channel` enum and the queries that return stored segments.
 
 LMA before 0.4.0 stored call-category markers in a meeting's transcript with the
-channel `CATEGORY_MATCH`. 0.4.0 removes that value from the GraphQL `Channel`
-enum, but the markers stay in DynamoDB until they expire. AppSync cannot return
-an item whose `Channel` is not an enum value, and the error would cost a whole
-older meeting its transcript, along with the sharing and deletion that read it
-through the same query. So every query that returns stored transcript segments
-leaves those items out in its DynamoDB filter.
+channel `CATEGORY_MATCH`, and its schema also declared the voice-tone channels
+`AGENT_VOICETONE` and `CALLER_VOICETONE`. 0.4.0 removes those values from the
+GraphQL `Channel` enum, but any item that carries one stays in DynamoDB until it
+expires. AppSync cannot return an item whose `Channel` is not an enum value, and
+the error would cost a whole older meeting its transcript, along with the
+sharing that reads it through the same query. So every query that returns
+stored transcript segments leaves those items out in its DynamoDB filter.
 
 The tests find those queries from the schema rather than from a list kept here:
 any Query field whose result reaches a type with a `Channel` field must have a
@@ -53,15 +54,16 @@ TEMPLATE = AI_STACK / "deployment" / "lma-ai-stack.yaml"
 APPSYNC_DIR = AI_STACK / "source" / "appsync"
 SCHEMA = APPSYNC_DIR / "schema.graphql"
 
-RETIRED_CHANNEL = "CATEGORY_MATCH"
+# The channels the enum no longer declares, in the order the request templates
+# bind them to :retiredChannel0, :retiredChannel1, ...
+RETIRED_CHANNELS = ("CATEGORY_MATCH", "AGENT_VOICETONE", "CALLER_VOICETONE")
+RETIRED_PLACEHOLDERS = tuple(f":retiredChannel{i}" for i in range(len(RETIRED_CHANNELS)))
 SPEECH_CHANNELS = {"REMOTE", "LOCAL"}
 # The names LMA before 0.4.0 wrote for REMOTE and LOCAL, still stored and read.
 DEPRECATED_SPEECH_CHANNELS = {"CALLER", "AGENT"}
 CHANNELS = {
     *SPEECH_CHANNELS,
     *DEPRECATED_SPEECH_CHANNELS,
-    "AGENT_VOICETONE",
-    "CALLER_VOICETONE",
     "AGENT_ASSISTANT",
     "CHAT_ASSISTANT",
     # Messages typed in the meeting chat (lma_channels.MEETING_CHAT).
@@ -154,6 +156,15 @@ def test_channel_enum_declares_the_channels_written_and_the_older_speech_names(s
     assert set(schema.get_type("Channel").values) == CHANNELS
 
 
+def test_channel_enum_declares_no_retired_channel(schema) -> None:
+    assert not set(RETIRED_CHANNELS) & set(schema.get_type("Channel").values)
+
+
+@pytest.mark.parametrize("type_name", SENTIMENT_BY_CHANNEL_TYPES)
+def test_sentiment_is_keyed_by_no_retired_channel(schema, type_name) -> None:
+    assert not set(RETIRED_CHANNELS) & set(schema.get_type(type_name).fields)
+
+
 def test_the_older_speech_channel_names_are_marked_deprecated_in_the_schema() -> None:
     """The comment above the enum names both old values as deprecated.
 
@@ -228,7 +239,7 @@ def test_every_sentiment_selection_reads_both_names(path: Path) -> None:
     "field_name", ["getTranscriptSegments", "getTranscriptSegmentsWithSentiment"]
 )
 def test_each_segment_query_keeps_both_names_of_the_speech_channels(field_name: str) -> None:
-    """The only channel the filter excludes is the retired one."""
+    """The only channels the filter excludes are the retired ones."""
     text = _request_template(field_name).read_text()
     filter_block = text[text.index('"filter"') :]
     # The meeting chat is returned with the speech: the meeting page shows both.
@@ -236,7 +247,7 @@ def test_each_segment_query_keeps_both_names_of_the_speech_channels(field_name: 
         assert f'"{name}"' not in filter_block, name
     assert re.findall(r":\w+", filter_block.split('"expression"')[1].split("\n")[0]) == [
         ":isPartial",
-        ":retiredChannel",
+        *RETIRED_PLACEHOLDERS,
     ]
 
 
@@ -251,20 +262,26 @@ def test_the_queries_returning_stored_segments_are_the_two_transcript_reads(sche
 @pytest.mark.parametrize(
     "field_name", ["getTranscriptSegments", "getTranscriptSegmentsWithSentiment"]
 )
-def test_each_segment_query_filters_out_the_retired_channel(field_name: str) -> None:
+def test_each_segment_query_filters_out_the_retired_channels(field_name: str) -> None:
     text = _request_template(field_name).read_text()
     filter_block = text[text.index('"filter"') :]
     expression = re.search(r'"expression":\s*"([^"]*)"', filter_block).group(1)
-    assert "attribute_not_exists(#Channel) OR #Channel <> :retiredChannel" in expression
+    retired = ", ".join(RETIRED_PLACEHOLDERS)
+    assert f"attribute_not_exists(#Channel) OR NOT (#Channel IN ({retired}))" in expression
     # The filter the query already applied is kept.
     assert "#IsPartial = :isPartial" in expression
     assert '"#Channel": "Channel"' in filter_block
-    assert f'":retiredChannel": $util.dynamodb.toDynamoDBJson("{RETIRED_CHANNEL}")' in filter_block
+    for placeholder, channel in zip(RETIRED_PLACEHOLDERS, RETIRED_CHANNELS):
+        assert f'"{placeholder}": $util.dynamodb.toDynamoDBJson("{channel}")' in filter_block
+    # Every retired channel is bound, and nothing else is.
+    assert set(re.findall(r'"(:retiredChannel\d+)":', filter_block)) == set(RETIRED_PLACEHOLDERS)
 
 
 def test_every_query_returning_stored_segments_is_filtered(schema) -> None:
     for field_name in _queries_returning_channels(schema):
-        assert ":retiredChannel" in _request_template(field_name).read_text(), field_name
+        text = _request_template(field_name).read_text()
+        for placeholder in RETIRED_PLACEHOLDERS:
+            assert placeholder in text, (field_name, placeholder)
 
 
 def test_a_new_segment_carries_a_channel_of_the_enum(schema) -> None:
@@ -350,7 +367,7 @@ def test_the_evaluated_segment_write_stores_the_current_channel_name(sent: str) 
 @pytest.mark.parametrize(
     "field_name", ["getTranscriptSegments", "getTranscriptSegmentsWithSentiment"]
 )
-def test_the_evaluated_request_excludes_the_retired_channel(field_name: str) -> None:
+def test_the_evaluated_request_excludes_the_retired_channels(field_name: str) -> None:
     import boto3  # imported here so the module collects without boto3 when skipped
 
     client = boto3.client("appsync", region_name=os.environ.get("AWS_REGION", "us-east-1"))
@@ -362,5 +379,6 @@ def test_the_evaluated_request_excludes_the_retired_channel(field_name: str) -> 
     request = _evaluated_request(response)
     query_filter = request["filter"]
     assert query_filter["expressionNames"]["#Channel"] == "Channel"
-    assert query_filter["expressionValues"][":retiredChannel"] == {"S": RETIRED_CHANNEL}
+    for placeholder, channel in zip(RETIRED_PLACEHOLDERS, RETIRED_CHANNELS):
+        assert query_filter["expressionValues"][placeholder] == {"S": channel}
     assert query_filter["expressionValues"][":isPartial"] == {"BOOL": False}

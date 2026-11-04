@@ -460,8 +460,6 @@ describe('a message typed in the meeting chat', () => {
   it('keeps every channel the meeting has, however many', () => {
     const many = {
       [ITEM.callId]: {
-        AGENT_VOICETONE: { segments: [] },
-        CALLER_VOICETONE: { segments: [] },
         CHAT_ASSISTANT: { segments: [] },
         AGENT_ASSISTANT: { segments: [] },
         MEETING_ASSISTANT: { segments: [] },

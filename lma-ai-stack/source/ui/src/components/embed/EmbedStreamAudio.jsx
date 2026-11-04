@@ -36,6 +36,7 @@ import { DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, SYSTEM } from '
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
+import { toStreamingFrame } from '../common/streaming-frame';
 import useTranscriberSocket from '../../hooks/use-transcriber-socket';
 import { CONNECTION_LOST_MESSAGE } from '../stream-audio/transcriber-stream';
 
@@ -153,7 +154,7 @@ const EmbedStreamAudio = ({ params, sendToParent }) => {
     if (streamingStarted && !recording) {
       callMetaData.callEvent = 'END';
       // Nothing is sent if the transcriber already ended the meeting.
-      transcriber.end(callMetaData);
+      transcriber.end(toStreamingFrame(callMetaData));
       setStreamingStarted(false);
 
       // Notify parent
@@ -206,7 +207,7 @@ const EmbedStreamAudio = ({ params, sendToParent }) => {
       recordingCallMetaData.callEvent = 'START';
 
       setConnectionLost(false);
-      transcriber.begin(recordingCallMetaData);
+      transcriber.begin(toStreamingFrame(recordingCallMetaData));
       setStreamingStarted(true);
 
       // Notify parent

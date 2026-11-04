@@ -22,6 +22,7 @@ import {
   SELECTION_LABELS,
   DEFAULT_PREFERENCES,
   DEFAULT_SORT_COLUMN,
+  withKnownColumns,
 } from './calls-table-config';
 
 import { getFilterCounterText, TableEmptyState, TableNoMatchState } from '../common/table';
@@ -46,7 +47,8 @@ const CallList = () => {
     totalCallCountTruncated,
   } = useCallsContext();
 
-  const [preferences, setPreferences] = useLocalStorage('call-list-preferences', DEFAULT_PREFERENCES);
+  const [savedPreferences, setPreferences] = useLocalStorage('call-list-preferences', DEFAULT_PREFERENCES);
+  const preferences = withKnownColumns(savedPreferences);
 
   // prettier-ignore
   const {
