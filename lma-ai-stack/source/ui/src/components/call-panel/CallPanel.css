@@ -86,6 +86,22 @@
   gap: 4px;
 }
 
+/* The Chat chip, set apart from the speakers': it shows or hides the meeting
+   chat whichever speakers are chosen. */
+.transcript-chat-filter {
+  display: inline-flex;
+}
+
+.transcript-speaker-filter > * + .transcript-chat-filter {
+  margin-left: 4px;
+  padding-left: 8px;
+  border-left: 1px solid #c6c6cd;
+}
+
+.awsui-dark-mode .transcript-speaker-filter > * + .transcript-chat-filter {
+  border-left-color: #414d5c;
+}
+
 /* Shown when the transcript has stopped following the live end or the recording. */
 .transcript-scroll-frame {
   position: relative;

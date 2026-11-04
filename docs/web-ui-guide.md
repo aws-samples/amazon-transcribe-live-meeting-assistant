@@ -186,6 +186,8 @@ The tab a meeting opens on. Real-time transcription displayed with:
   [Live Translation](#live-translation)
 - **Search the transcript** and the speaker filter; see
   [Searching and filtering](#searching-and-filtering)
+- Messages typed in the meeting chat, where a Virtual Participant added them;
+  see [Meeting chat messages](#meeting-chat-messages)
 
 The transcript keeps its own scroll area, sized to the window, so following a
 live meeting keeps the newest segment in view while you can still scroll back.
@@ -232,7 +234,7 @@ transcript:
 | A thumbnail on **Screen share** | stays on Screen share | moves to the frame, paused |
 | **Show in transcript** on Screen share | Transcript | moves to the frame, paused |
 | **Play recording from here** on Screen share | Transcript | plays from the frame |
-| A slide link in the summary's **SLIDES PRESENTED** | Screen share, at the frame | moves to the frame, paused |
+| A key-frame link in the summary's **SCREEN SHARE SUMMARY** | Screen share, at the frame | moves to the frame, paused |
 
 The ones that only move the player are for looking at something rather than
 listening to it; the player is then ready at that point when the Transcript tab
@@ -274,6 +276,31 @@ or that reconnected to a different transcriber task, has a second transcript
 session that starts again from zero; see
 [Reconnection](websocket-streaming-api.md#reconnection).
 
+#### Meeting chat messages
+
+When a Virtual Participant adds the meeting chat to the transcript (see
+[Meeting Chat in the Transcript](virtual-participant.md#meeting-chat-in-the-transcript)),
+each message is its own line among the speech, at the time the VP read it. It
+is set apart from what was said by a chat icon, a tinted background, and the
+label *Alice · chat* in place of a speaker's name. Two messages in a row from
+one sender are never joined into one line, as two spoken segments can be.
+
+A message is shown exactly as it was typed, line breaks included. Nothing in it
+is formatted: `**bold**` stays as typed, and HTML is shown as text. Each web
+address in it (one starting `http://`, `https://` or `www.`) is shown as code
+with a copy button beside it, and is never a link the page follows; copy it and
+paste it where you choose. Other kinds of address, such as `javascript:` or
+`data:`, are left as plain text.
+
+The sender is the name the meeting's chat showed, or *Unknown sender*. Naming a
+voice does not rename a chat sender, and a chat sender is not offered as a
+speaker to name. Chat messages have no sentiment and are left out of the
+sentiment charts.
+
+With a recording, a chat message's time plays the recording from there, as a
+spoken line's does. The highlight and the scrolling that follow the recording
+pass over chat messages, since they were typed rather than heard.
+
 #### Searching and filtering
 
 - **Search the transcript** marks every segment that holds all the words typed,
@@ -286,10 +313,16 @@ session that starts again from zero; see
   marked rather than the other segments hidden, so each is read with what was
   said around it. The search reads the segments as transcribed, not their
   translations.
+  Chat messages are searched too, and their matching words highlighted.
 - **Speaker chips** — **All** and one chip for each speaker, by the names shown
   in the transcript. Choosing speakers shows only their segments (and hides the
   assistant's answers); choosing **All** shows everything again. The search
   works within the speakers chosen.
+- **Chat** — shown when the transcript holds meeting chat messages. On by
+  default; turning it off hides every chat message, and turning it on shows
+  them again. It works on its own, whichever speakers are chosen: with a
+  speaker chosen and **Chat** on, the transcript shows that speaker's segments
+  and all the chat.
 
 During a live meeting with a Virtual Participant, the VP's **live view** (a
 real-time VNC viewer of the VP's browser) appears at the top of this tab when it
@@ -384,7 +417,12 @@ page's header once the meeting has ended:
 - **DOCX** — Word document format
 - **TXT** — Plain text format
 
-All export formats include speaker attribution and timestamps for each segment.
+All export formats include speaker attribution and timestamps for each segment,
+and every channel the meeting has. A meeting chat message is under its sender
+marked as chat, *Alice (chat)*, on one line: its line breaks become ` / `. In the
+spreadsheet every value is stored as text exactly as typed, so a message that
+starts with `=`, `+`, `-` or `@` is shown as written and is never treated as a
+formula.
 
 ## Meeting Sharing
 

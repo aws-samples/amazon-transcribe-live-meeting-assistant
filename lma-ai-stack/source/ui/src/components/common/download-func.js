@@ -5,7 +5,7 @@
  */
 /* eslint-disable indent */
 import * as XLSX from 'xlsx';
-import { canonicalChannel, isSpeechChannel, REMOTE_CHANNEL } from './channels';
+import { canonicalChannel, isChatChannel, isSpeechChannel, REMOTE_CHANNEL } from './channels';
 import { parseSpeakerIdentities, resolveSpeakerName } from './speaker-identities';
 
 // eslint-disable-next-line prettier/prettier
@@ -40,16 +40,24 @@ export const onImportExcelAsync = (file) =>
     fileReader.readAsBinaryString(files[0]);
   });
 
+// A value as a cell. Text is written as a text cell, holding exactly the
+// characters given: a value that starts with "=", "+", "-" or "@" (a chat
+// message, a meeting name) is shown as typed, and is never a formula.
+const asCell = (value) => (typeof value === 'string' ? { t: 's', v: value } : value);
+
+/** The workbook exportToExcel writes: one sheet, a row per object in `data`. */
+export const buildWorkbook = (data) => {
+  const wb = XLSX.utils.book_new();
+  const rows = data.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, asCell(value)])));
+  const ws = XLSX.utils.json_to_sheet(rows, { origin: 'A2' });
+  XLSX.utils.sheet_add_aoa(ws, []); // heading: array of arrays
+  XLSX.utils.book_append_sheet(wb, ws);
+  return wb;
+};
+
 export const exportToExcel = async (data, nameFile) => {
   if (data.length > 0) {
-    const wb = XLSX.utils.book_new();
-
-    const ws = XLSX.utils.json_to_sheet(data, { origin: 'A2' });
-    XLSX.utils.sheet_add_aoa(ws, []); // heading: array of arrays
-
-    XLSX.utils.book_append_sheet(wb, ws);
-
-    XLSX.writeFile(wb, `${nameFile}.xlsx`);
+    XLSX.writeFile(buildWorkbook(data), `${nameFile}.xlsx`);
   }
 };
 
@@ -61,6 +69,17 @@ export const exportToTextFile = async (text, nameFile) => {
   link.download = `${nameFile}.txt`;
   link.click();
   URL.revokeObjectURL(url);
+};
+
+/**
+ * One line of the text transcript, "Speaker [time]: text", as
+ * { speaker, timestamp, content }; null for a line of another shape.
+ */
+export const parseTranscriptLine = (line) => {
+  const match = line.match(/^(.*?)\s+\[(.*?)\]:\s+(.*)$/);
+  if (!match) return null;
+  const [, speaker, timestamp, content] = match;
+  return { speaker, timestamp, content };
 };
 
 // Function to export transcript as DOCX
@@ -84,9 +103,9 @@ export const exportToDocxFile = async (text, nameFile) => {
 
     // Process each line of the transcript
     lines.forEach((line) => {
-      const match = line.match(/^(.*?)\s+\[(.*?)\]:\s+(.*)$/);
-      if (match) {
-        const [, speaker, timestamp, content] = match;
+      const parsed = parseTranscriptLine(line);
+      if (parsed) {
+        const { speaker, timestamp, content } = parsed;
 
         // Create a paragraph with different text runs for speaker, timestamp, and content
         paragraphs.push(
@@ -158,15 +177,26 @@ const getTimestampFromSeconds = (secs) => {
   return iso.substr(14, 7); // MM:SS.s
 };
 
-const sortTranscriptByTime = (callTranscriptPerCallId, meeting) => {
+// A chat message on one line of a download: its line breaks become " / ".
+const oneLine = (text) =>
+  String(text ?? '')
+    .trim()
+    .replace(/\s*[\r\n]+\s*/g, ' / ');
+
+/**
+ * The transcript's segments as a download writes them, in time order:
+ * [{ startTimestamp, endTimestamp, speaker, transcript }]. Every channel the
+ * meeting has is included. A message typed in the meeting chat is under
+ * "<sender> (chat)", on one line.
+ */
+export const transcriptDownloadRows = (callTranscriptPerCallId, meeting) => {
   const { callId, callerPhoneNumber } = meeting;
   // An exported transcript has to carry the same speaker names the UI shows, or
   // a shared download contradicts the screen it was taken from.
   const speakerIdentities = parseSpeakerIdentities(meeting.speakerIdentities);
 
-  const maxChannels = 6;
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
-  const transcriptChannels = Object.keys(transcriptsForThisCallId).slice(0, maxChannels);
+  const transcriptChannels = Object.keys(transcriptsForThisCallId);
 
   const currentTurnByTurnSegments = transcriptChannels
     .map((c) => {
@@ -191,6 +221,10 @@ const sortTranscriptByTime = (callTranscriptPerCallId, meeting) => {
           speakerIdentities,
           canonicalChannel(channel) === REMOTE_CHANNEL ? callerPhoneNumber : undefined,
         );
+      } else if (isChatChannel(channel)) {
+        // Under the sender the meeting's chat gave, marked as chat, on one line.
+        speaker = `${`${speaker ?? ''}`.trim() || 'Unknown sender'} (chat)`;
+        transcript = oneLine(transcript);
       } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
         // The speaker for the assistant will just be "Other participant", override this
         speaker = 'MEETING ASSISTANT';
@@ -227,28 +261,24 @@ const sortTranscriptByTime = (callTranscriptPerCallId, meeting) => {
   return currentTurnByTurnSegments;
 };
 
+/** The transcript as the text and Word downloads write it: "Speaker [start]: text", a line per segment. */
+export const transcriptDownloadText = (callTranscriptPerCallId, meeting) =>
+  transcriptDownloadRows(callTranscriptPerCallId, meeting)
+    .map((c) => `${c.speaker} [${c.startTimestamp}]: ${c.transcript}`)
+    .join('\n');
+
 export const downloadTranscriptAsExcel = async (callTranscriptPerCallId, meeting) => {
   const { callId } = meeting;
-  const currentTurnByTurnSegments = sortTranscriptByTime(callTranscriptPerCallId, meeting);
+  const currentTurnByTurnSegments = transcriptDownloadRows(callTranscriptPerCallId, meeting);
   await exportToExcel(currentTurnByTurnSegments, `Transcript-${callId}`);
 };
 
 export const downloadTranscriptAsText = async (callTranscriptPerCallId, meeting) => {
   const { callId } = meeting;
-  const currentTurnByTurnSegments = sortTranscriptByTime(callTranscriptPerCallId, meeting);
-
-  // convert json to text lines of Speaker [start_timestamp]: transcript segment text
-  const text = currentTurnByTurnSegments.map((c) => `${c.speaker} [${c.startTimestamp}]: ${c.transcript}`).join('\n');
-
-  await exportToTextFile(text, `Transcript-${callId}`);
+  await exportToTextFile(transcriptDownloadText(callTranscriptPerCallId, meeting), `Transcript-${callId}`);
 };
 
 export const downloadTranscriptAsDocx = async (callTranscriptPerCallId, meeting) => {
   const { callId } = meeting;
-  const currentTurnByTurnSegments = sortTranscriptByTime(callTranscriptPerCallId, meeting);
-
-  // convert json to text lines of Speaker [start_timestamp]: transcript segment text
-  const text = currentTurnByTurnSegments.map((c) => `${c.speaker} [${c.startTimestamp}]: ${c.transcript}`).join('\n');
-
-  await exportToDocxFile(text, `Transcript-${callId}`);
+  await exportToDocxFile(transcriptDownloadText(callTranscriptPerCallId, meeting), `Transcript-${callId}`);
 };

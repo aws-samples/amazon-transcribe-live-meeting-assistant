@@ -708,8 +708,9 @@ was typed. Its time is the point in the meeting at which the VP read the
 message, on the same clock as the speech: no platform gives a message time that
 can be placed on the recording's timeline. A link in a message whose address is
 not in its text is added after the text as `(link: <address>)`. The meeting
-page shows these lines among the speech, labelled *<name> (chat)*, as plain
-text.
+page shows these lines among the speech, labelled *<name> · chat*, as plain
+text with any web address shown as code to copy rather than as a link; see
+[Meeting chat messages](web-ui-guide.md#meeting-chat-messages).
 
 It is on by default. Turn it off with **Virtual Participant › Add the meeting
 chat to the transcript** on the Configuration page; like the section's other

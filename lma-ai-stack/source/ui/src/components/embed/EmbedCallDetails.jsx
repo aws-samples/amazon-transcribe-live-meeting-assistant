@@ -53,6 +53,7 @@ import { getWeightedSentimentLabel } from '../common/sentiment';
 import onCreateCall from '../../graphql/queries/onCreateCall';
 import onUpdateCall from '../../graphql/queries/onUpdateCall';
 import { isChatChannel } from '../common/channels';
+import ChatSegment from '../chat-segment/ChatSegment';
 
 const gqlClient = generateClient();
 const logger = new ConsoleLogger('EmbedCallDetails');
@@ -193,18 +194,6 @@ const getSentimentImage = (segment, enableSentimentAnalysis) => {
 
 const TranscriptContent = ({ segment, translateCache }) => {
   const { transcript, segmentId, channel, targetLanguage, translateOn } = segment;
-
-  // A message typed in the meeting chat is shown as it was typed, as plain
-  // text: it is not rendered as markdown, so nothing in it becomes a link.
-  if (isChatChannel(channel)) {
-    return (
-      <TextContent>
-        <span className="transcript-chat-text" style={{ whiteSpace: 'pre-wrap' }}>
-          {transcript}
-        </span>
-      </TextContent>
-    );
-  }
   const k = segmentId.concat('-', targetLanguage);
 
   // prettier-ignore
@@ -262,6 +251,18 @@ const TranscriptContent = ({ segment, translateCache }) => {
 const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis }) => {
   const { channel } = segment;
 
+  // A message typed in the meeting chat, shown as on the meeting page.
+  if (isChatChannel(channel)) {
+    const k = `${segment.segmentId}-${segment.targetLanguage}`;
+    const translation = segment.translateOn && segment.targetLanguage ? translateCache[k]?.translated ?? '' : '';
+    return (
+      <Grid className="transcript-segment" disableGutters gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}>
+        <div className="sentiment-image" />
+        <ChatSegment segment={segment} time={getTimestampFromSeconds(segment.startTime)} translation={translation} />
+      </Grid>
+    );
+  }
+
   let displayChannel = `${segment.channel}`;
   let channelClass = '';
 
@@ -270,9 +271,6 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
   } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
     displayChannel = 'MEETING_ASSISTANT';
     channelClass = 'transcript-segment-agent-assist';
-  } else if (isChatChannel(channel)) {
-    // A message typed in the meeting chat, under its sender.
-    displayChannel = `${segment.speaker} (chat)`.trim();
   }
 
   return (
@@ -323,10 +321,10 @@ const EmbedTranscriptPanel = ({ item, callTranscriptPerCallId }) => {
   const translateCache = {};
   const [userHasScrolled, setUserHasScrolled] = useState(false);
 
-  const maxChannels = 6;
+  // Every channel the meeting has; which are shown is decided below.
   const { callId } = item;
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
-  const transcriptChannels = Object.keys(transcriptsForThisCallId).slice(0, maxChannels);
+  const transcriptChannels = Object.keys(transcriptsForThisCallId);
   const speakerIdentities = parseSpeakerIdentities(item.speakerIdentities);
 
   const handleLanguageSelect = (event) => {
@@ -364,6 +362,8 @@ const EmbedTranscriptPanel = ({ item, callTranscriptPerCallId }) => {
         // speaker string never fired once a voice id was appended, and assigning
         // the bare name would have dropped the id that keeps two voices on one
         // channel apart.
+        // A chat message stays under the sender the meeting's chat gave.
+        if (isChatChannel(t.channel)) return t;
         t.speaker = resolveSpeakerName(
           t,
           speakerIdentities,
@@ -841,5 +841,5 @@ EmbedCallDetails.propTypes = {
   sendToParent: PropTypes.func.isRequired,
 };
 
-export { EmbedChatPanel };
+export { EmbedChatPanel, EmbedTranscriptPanel };
 export default EmbedCallDetails;

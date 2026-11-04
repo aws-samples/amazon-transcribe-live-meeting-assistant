@@ -88,7 +88,7 @@ import {
 import { usePlaybackSelector, usePlaybackStore } from '../meeting-player/playback-store';
 import MeetingPlayer from '../meeting-player';
 import {
-  passesSpeakerFilter,
+  passesTranscriptFilter,
   rehypeMarkMatches,
   speakerFilterOptions,
   stepMatch,
@@ -115,7 +115,8 @@ import useChatKeyframeLinks from '../../hooks/use-chat-keyframe-links';
 import { isSharedWith } from '../common/shared-with';
 import useStrandsChatBridge from '../../hooks/use-strands-chat-bridge';
 import SummaryMarkdown from '../summary-markdown/SummaryMarkdown';
-import { isChatChannel } from '../common/channels';
+import { isChatChannel, isSpeechChannel } from '../common/channels';
+import ChatSegment from '../chat-segment/ChatSegment';
 
 const client = generateClient();
 const logger = new ConsoleLogger('CallPanel');
@@ -474,37 +475,21 @@ const getTimestampFromSeconds = (secs) => {
   return iso.substr(14, 7); // MM:SS.s
 };
 
+// The translation of a segment's text, once it has one; '' until then.
+const translationOf = ({ segmentId, targetLanguage, translateOn }, translateCache) => {
+  if (!translateOn || !targetLanguage) return '';
+  return translateCache?.[segmentId.concat('-', targetLanguage)]?.translated ?? '';
+};
+
 const TranscriptContent = ({ segment, translateCache, query = '' }) => {
-  const { transcript, segmentId, channel, targetLanguage, translateOn } = segment;
+  const { transcript, segmentId, channel } = segment;
   // The search's words marked in the segment's own text (not its translation).
   const transcriptPlugins = useMemo(
     () => (query ? [...markdownRehypePlugins, rehypeMarkMatches(query)] : markdownRehypePlugins),
     [query],
   );
 
-  // A message typed in the meeting chat is shown as it was typed, as plain
-  // text: it is not rendered as markdown, so nothing in it becomes a link.
-  if (isChatChannel(channel)) {
-    return (
-      <TextContent>
-        <span className="transcript-chat-text" style={{ whiteSpace: 'pre-wrap' }}>
-          {transcript}
-        </span>
-      </TextContent>
-    );
-  }
-
-  const k = segmentId.concat('-', targetLanguage);
-
-  // prettier-ignore
-  const currTranslated = translateOn
-    && targetLanguage !== ''
-    && translateCache[k] !== undefined
-    && translateCache[k].translated !== undefined
-    ? translateCache[k].translated
-    : '';
-
-  const result = currTranslated !== undefined ? currTranslated : '';
+  const result = translationOf(segment, translateCache);
 
   const transcriptPiiSplit = transcript.split(piiTypesSplitRegEx);
 
@@ -652,6 +637,23 @@ const TranscriptSegment = ({
   query = '',
 }) => {
   const { channel } = segment;
+
+  // A message typed in the meeting chat: at one moment, the one it was read.
+  if (isChatChannel(channel)) {
+    return (
+      <Grid className="transcript-segment" disableGutters gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}>
+        <div className="sentiment-image" />
+        <ChatSegment
+          segment={segment}
+          time={getTimestampFromSeconds(segment.startTime)}
+          onSeek={onSeek}
+          query={query}
+          translation={translationOf(segment, translateCache)}
+        />
+      </Grid>
+    );
+  }
+
   const times = `${getTimestampFromSeconds(segment.startTime)} - ${getTimestampFromSeconds(segment.endTime)}`;
 
   let displayChannel = `${segment.channel}`;
@@ -662,9 +664,6 @@ const TranscriptSegment = ({
   } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
     displayChannel = 'MEETING_ASSISTANT';
     channelClass = 'transcript-segment-agent-assist';
-  } else if (isChatChannel(channel)) {
-    // A message typed in the meeting chat, under its sender.
-    displayChannel = `${segment.speaker} (chat)`.trim();
   }
 
   return (
@@ -745,12 +744,9 @@ const appendToPreviousSegment = ({ previous, current }) => {
   previous.mergedSegmentIds = [...(previous.mergedSegmentIds || [previous.segmentId]), current.segmentId];
 };
 
-// Channels that are not somebody speaking: the assistants' answers, and the
-// meeting chat. Kept as a
-// list of what is excluded, so it holds whatever the two speech channels are
-// called.
-const NON_SPEECH_CHANNELS = ['AGENT_ASSISTANT', 'MEETING_ASSISTANT', 'CHAT_ASSISTANT', 'MEETING_CHAT'];
-const isSpeechSegment = (segment) => !NON_SPEECH_CHANNELS.includes(segment?.channel);
+// Whether a segment is somebody speaking: not the assistants' answers, and not
+// a message typed in the meeting chat.
+const isSpeechSegment = (segment) => isSpeechChannel(segment?.channel);
 
 // The segments the transcript shows, of those it holds: not the voice-tone
 // readings, not the chat assistant's (it has its own panel), and only complete
@@ -852,6 +848,9 @@ const TranscriptToolbar = ({
   speakerNames,
   selectedSpeakers,
   onSpeakersChange,
+  hasChat = false,
+  showChat = true,
+  onShowChatChange = () => {},
 }) => {
   let countText = '';
   if (query.trim()) {
@@ -890,24 +889,41 @@ const TranscriptToolbar = ({
           {countText}
         </span>
       </div>
-      {speakerNames.length > 1 && (
+      {(speakerNames.length > 1 || hasChat) && (
         <div className="transcript-speaker-filter" role="group" aria-label="Show speakers">
-          <ToggleButton
-            pressed={!selectedSpeakers.length}
-            onChange={() => onSpeakersChange([])}
-            ariaLabel="All speakers"
-          >
-            All
-          </ToggleButton>
-          {speakerNames.map((name) => (
-            <ToggleButton
-              key={name}
-              pressed={selectedSpeakers.includes(name)}
-              onChange={({ detail }) => toggleSpeaker(name, detail.pressed)}
-            >
-              {name}
-            </ToggleButton>
-          ))}
+          {speakerNames.length > 1 && (
+            <>
+              <ToggleButton
+                pressed={!selectedSpeakers.length}
+                onChange={() => onSpeakersChange([])}
+                ariaLabel="All speakers"
+              >
+                All
+              </ToggleButton>
+              {speakerNames.map((name) => (
+                <ToggleButton
+                  key={name}
+                  pressed={selectedSpeakers.includes(name)}
+                  onChange={({ detail }) => toggleSpeaker(name, detail.pressed)}
+                >
+                  {name}
+                </ToggleButton>
+              ))}
+            </>
+          )}
+          {/* The meeting chat is shown or hidden on its own, whichever speakers are chosen. */}
+          {hasChat && (
+            <span className="transcript-chat-filter">
+              <ToggleButton
+                iconName="contact"
+                pressed={showChat}
+                onChange={({ detail }) => onShowChatChange(detail.pressed)}
+                ariaLabel="Chat messages"
+              >
+                Chat
+              </ToggleButton>
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -941,6 +957,7 @@ const CallInProgressTranscript = ({
   const [query, setQuery] = useState('');
   const [activeMatch, setActiveMatch] = useState(-1);
   const [selectedSpeakers, setSelectedSpeakers] = useState([]);
+  const [showChat, setShowChat] = useState(true);
   // Until when a scroll event is the page's own scrolling, not the reader's.
   const programmaticUntilRef = useRef(0);
 
@@ -949,11 +966,11 @@ const CallInProgressTranscript = ({
   // being heard in view; during it, the newest line.
   const followPlayback = Boolean(playback && onSeek && autoScroll && !isLive);
 
-  // channels: LOCAL, AGENT_ASSISTANT, REMOTE, AGENT_VOICETONE, CALLER_VOICETONE
-  const maxChannels = 6;
+  // Every channel the meeting has: REMOTE, LOCAL, the assistants, the voice-tone
+  // readings and MEETING_CHAT. Which of them are shown is isDisplayedSegment's call.
   const { callId } = item;
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
-  const transcriptChannels = Object.keys(transcriptsForThisCallId).slice(0, maxChannels);
+  const transcriptChannels = Object.keys(transcriptsForThisCallId);
 
   const getSegments = () => {
     const currentTurnByTurnSegments = transcriptChannels
@@ -1126,6 +1143,9 @@ const CallInProgressTranscript = ({
         // The key a name is stored under, resolved THROUGH any merge -- writing
         // to the segment's own key once it has been merged would store an entry
         // nothing reads.
+        // A chat message stays under the sender the meeting's chat gave: it is
+        // not a voice, so the names given to voices do not apply to it.
+        if (isChatChannel(t.channel)) return t;
         t.speakerKey = identityKeyFor(t, speakerIdentities);
         // callerPhoneNumber is the remote side's name, so it substitutes for the
         // placeholder on the REMOTE channel only. The download path has always
@@ -1153,9 +1173,13 @@ const CallInProgressTranscript = ({
     () => selectedSpeakers.filter((name) => speakerNames.includes(name)),
     [selectedSpeakers, speakerNames],
   );
+  const hasChat = useMemo(() => turnByTurnSegments.some((s) => isChatChannel(s.channel)), [turnByTurnSegments]);
   const visibleSegments = useMemo(
-    () => turnByTurnSegments.filter((s) => passesSpeakerFilter(s, activeSpeakers, isSpeechSegment)),
-    [turnByTurnSegments, activeSpeakers],
+    () =>
+      turnByTurnSegments.filter((s) =>
+        passesTranscriptFilter(s, { speakers: activeSpeakers, showChat }, isSpeechSegment),
+      ),
+    [turnByTurnSegments, activeSpeakers, showChat],
   );
   const matchIds = useMemo(
     () => (query.trim() ? visibleSegments.filter((s) => textMatches(s.transcript, query)).map(rowIdFor) : []),
@@ -1165,9 +1189,14 @@ const CallInProgressTranscript = ({
   const activeMatchId = activeMatch >= 0 ? matchIds[activeMatch] : null;
 
   // The line being heard, from the player's position. Re-renders the
-  // transcript only when that line changes.
+  // transcript only when that line changes. A chat message is never what is
+  // being heard: it was typed, not said, so the highlight and the scrolling
+  // that follow the recording pass over it.
   const playbackRows = useMemo(
-    () => visibleSegments.map((s) => ({ id: rowIdFor(s), startTime: s.startTime, endTime: s.endTime })),
+    () =>
+      visibleSegments
+        .filter((s) => !isChatChannel(s.channel))
+        .map((s) => ({ id: rowIdFor(s), startTime: s.startTime, endTime: s.endTime })),
     [visibleSegments],
   );
   const selectCurrent = useCallback(
@@ -1326,6 +1355,9 @@ const CallInProgressTranscript = ({
         speakerNames={speakerNames}
         selectedSpeakers={activeSpeakers}
         onSpeakersChange={setSelectedSpeakers}
+        hasChat={hasChat}
+        showChat={showChat}
+        onShowChatChange={setShowChat}
       />
       {/* The notice lies over the lines rather than among them: shown and
           hidden among them, it would move them, and the browser's scroll
@@ -1360,7 +1392,9 @@ const CallInProgressTranscript = ({
         >
           {visibleSegments.length === 0 && turnByTurnSegments.length > 0 && (
             <Box color="text-body-secondary" padding="s">
-              No lines from the speakers chosen.
+              {!showChat && !activeSpeakers.length
+                ? 'No lines to show with the chat hidden.'
+                : 'No lines from the speakers chosen.'}
             </Box>
           )}
           <ColumnLayout borders="horizontal" columns={1}>

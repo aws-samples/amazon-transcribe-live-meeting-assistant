@@ -6,21 +6,19 @@
 import { ConsoleLogger } from 'aws-amplify/utils';
 import React from 'react';
 import { Box, LineChart } from '@cloudscape-design/components';
-import { channelLabel, isChatChannel } from '../common/channels';
+import { channelLabel, isSpeechChannel } from '../common/channels';
 import { getWeightedSentimentLabel } from '../common/sentiment';
 
 const logger = new ConsoleLogger('SentimentCharts');
 
+const VOICETONE_CHANNELS = ['AGENT_VOICETONE', 'CALLER_VOICETONE'];
+
 /* eslint-disable react/prop-types, react/destructuring-assignment */
 export const VoiceToneFluctuationChart = ({ item, callTranscriptPerCallId }) => {
-  const maxChannels = 6;
   const { callId } = item;
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
-  const transcriptChannels = Object.keys(transcriptsForThisCallId)
-    .slice(0, maxChannels)
-    .filter((c) => c !== 'AGENT_ASSISTANT')
-    .filter((c) => c !== 'LOCAL')
-    .filter((c) => c !== 'REMOTE');
+  // The voice-tone readings, of every channel the meeting has.
+  const transcriptChannels = Object.keys(transcriptsForThisCallId).filter((c) => VOICETONE_CHANNELS.includes(c));
   const sentimentPerChannel = transcriptChannels
     .map((channel) => transcriptsForThisCallId[channel])
     .map((transcript) =>
@@ -76,16 +74,11 @@ export const VoiceToneFluctuationChart = ({ item, callTranscriptPerCallId }) => 
 
 /* eslint-disable react/prop-types, react/destructuring-assignment */
 export const SentimentFluctuationChart = ({ item, callTranscriptPerCallId }) => {
-  const maxChannels = 6;
   const { callId } = item;
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
-  const transcriptChannels = Object.keys(transcriptsForThisCallId)
-    .slice(0, maxChannels)
-    .filter((c) => c !== 'AGENT_ASSISTANT')
-    .filter((c) => c !== 'AGENT_VOICETONE')
-    .filter((c) => c !== 'CALLER_VOICETONE')
-    // The meeting chat has no sentiment.
-    .filter((c) => !isChatChannel(c));
+  // The speech channels, of every channel the meeting has: the assistants and
+  // the meeting chat have no sentiment.
+  const transcriptChannels = Object.keys(transcriptsForThisCallId).filter(isSpeechChannel);
 
   const sentimentPerChannel = transcriptChannels
     .map((channel) => transcriptsForThisCallId[channel])
@@ -141,16 +134,11 @@ export const SentimentFluctuationChart = ({ item, callTranscriptPerCallId }) => 
 };
 
 export const SentimentPerQuarterChart = ({ item, callTranscriptPerCallId }) => {
-  const maxChannels = 6;
   const { callId } = item;
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
-  const transcriptChannels = Object.keys(transcriptsForThisCallId)
-    .slice(0, maxChannels)
-    .filter((c) => c !== 'AGENT_ASSISTANT')
-    .filter((c) => c !== 'AGENT_VOICETONE')
-    .filter((c) => c !== 'CALLER_VOICETONE')
-    // The meeting chat has no sentiment.
-    .filter((c) => !isChatChannel(c));
+  // The speech channels, of every channel the meeting has: the assistants and
+  // the meeting chat have no sentiment.
+  const transcriptChannels = Object.keys(transcriptsForThisCallId).filter(isSpeechChannel);
 
   const sentimentByQuarterPerChannel = transcriptChannels
     .map((channel) => item?.sentiment?.SentimentByPeriod?.QUARTER[channel] || [])
