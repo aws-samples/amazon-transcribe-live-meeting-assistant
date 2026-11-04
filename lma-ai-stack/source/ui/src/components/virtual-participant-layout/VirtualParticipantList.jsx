@@ -116,6 +116,11 @@ const VirtualParticipantList = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   // Why a parsed invitation left the meeting ID empty, shown on the field itself.
   const [meetingIdNote, setMeetingIdNote] = useState('');
+  // The note belongs to the invitation just parsed: it goes when the form
+  // closes (cancel, dismiss or create), and when another platform is chosen.
+  useEffect(() => {
+    if (!showCreateModal) setMeetingIdNote('');
+  }, [showCreateModal]);
   const [createForm, setCreateForm] = useState({
     meetingName: '',
     meetingPlatform: 'ZOOM',
@@ -880,9 +885,10 @@ const VirtualParticipantList = () => {
             <FormField label="Meeting Platform" stretch>
               <Select
                 selectedOption={platformOptions.find((opt) => opt.value === createForm.meetingPlatform)}
-                onChange={({ detail }) =>
-                  setCreateForm((prev) => ({ ...prev, meetingPlatform: detail.selectedOption.value }))
-                }
+                onChange={({ detail }) => {
+                  setMeetingIdNote('');
+                  setCreateForm((prev) => ({ ...prev, meetingPlatform: detail.selectedOption.value }));
+                }}
                 options={platformOptions}
               />
             </FormField>
@@ -899,7 +905,8 @@ const VirtualParticipantList = () => {
                     'someone in it may need to admit the participant.'
                   : undefined
               }
-              errorText={meetingIdError || (!createForm.meetingId && meetingIdNote) || undefined}
+              errorText={meetingIdError || undefined}
+              constraintText={(!createForm.meetingId && meetingIdNote) || undefined}
               stretch
             >
               <Input
