@@ -330,6 +330,15 @@ const registerHandlers = (
             // frames and audio are not waiting for anything any more.
             pendingConsentFrames.drop(ws);
             sessions.dropAudio(ws);
+            // A START that failed after registering a session on a connection
+            // that had already closed: no close event is coming to hold or end it.
+            try {
+                await sessions.afterStart(ws);
+            } catch (settleErr) {
+                server.log.error(
+                    `[ON MESSAGE]: [${clientIP}] - Error ending the session of a closed connection: ${normalizeErrorForLogging(settleErr)}`
+                );
+            }
             try {
                 ws.close(1011, 'internal error processing message');
             } catch (closeErr) {
