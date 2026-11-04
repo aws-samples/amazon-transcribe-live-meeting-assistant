@@ -1762,12 +1762,16 @@ export const CallPanel = ({
   // live meeting opens with it open the first time (use-assistant-panel.js).
   // Read here rather than once at load, so a test can set the flag.
   const assistantEnabled = import.meta.env.VITE_ENABLE_AGENT_ASSIST === 'true';
+  // Whether the panel lies over the tabs (a narrow page) rather than beside
+  // them; null until the page has been measured (see the layout effect below).
+  const [assistantOverlays, setAssistantOverlays] = useState(null);
   const assistant = useAssistantPanel({
     enabled: assistantEnabled,
     callId: item.callId,
     isLive,
     username: user?.username,
     defaultOpen: assistantDefaultOpen,
+    besideTabs: assistantOverlays === null ? null : !assistantOverlays,
   });
   const setAssistantOpen = assistant.setOpen;
   // A new value each time the viewer opens the panel: the focus goes into the composer.
@@ -1939,7 +1943,6 @@ export const CallPanel = ({
   // action on the Screen share tab, from the time in the frame's id. Where the
   // panel lies over the page, it is closed so the transcript can be seen; the
   // remembered choice is left as it was.
-  const [assistantOverlays, setAssistantOverlays] = useState(false);
   const assistantOverlaysRef = useRef(assistantOverlays);
   assistantOverlaysRef.current = assistantOverlays;
   const showChatFrameInTranscript = useCallback(
@@ -2330,16 +2333,21 @@ export const CallPanel = ({
   // Measured on the page's own width rather than the window's, because the
   // same page is shown full width, in the split panel and in embeds. Sticky
   // below the application's top navigation, as the player is, and as tall as
-  // the window leaves below where it starts, so the composer at its foot is in
-  // view without scrolling.
+  // the window leaves below where it starts on the page, so the composer at
+  // its foot is in view without scrolling. Measured again when the page, the
+  // header above it (speaker names arriving) or the window change size.
+  // Measured before the first paint, because with no choice made the width
+  // decides whether the panel starts open.
   const bodyRef = useRef(null);
+  const headerRef = useRef(null);
   useLayoutEffect(() => {
     const body = bodyRef.current;
-    if (!body || !assistant.mounted) return undefined;
+    if (!body || !assistantEnabled) return undefined;
     const nav = document.getElementById('top-navigation');
     const measure = () => {
       const navHeight = nav ? nav.offsetHeight : 0;
-      const top = Math.max(body.getBoundingClientRect().top, navHeight + ASSISTANT_GAP_PX);
+      const pageTop = body.getBoundingClientRect().top + window.scrollY;
+      const top = Math.max(pageTop, navHeight + ASSISTANT_GAP_PX);
       setAssistantOverlays(body.clientWidth > 0 && body.clientWidth < ASSISTANT_OVERLAY_BELOW_PX);
       body.style.setProperty('--meeting-assistant-top', `${navHeight}px`);
       body.style.setProperty(
@@ -2351,12 +2359,13 @@ export const CallPanel = ({
     window.addEventListener('resize', measure);
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
     observer?.observe(body);
+    if (headerRef.current) observer?.observe(headerRef.current);
     if (nav) observer?.observe(nav);
     return () => {
       window.removeEventListener('resize', measure);
       observer?.disconnect();
     };
-  }, [assistant.mounted]);
+  }, [assistantEnabled]);
 
   const bodyClass = [
     'meeting-body',
@@ -2369,28 +2378,30 @@ export const CallPanel = ({
   return (
     <div ref={panelRef}>
       <SpaceBetween size="m">
-        <MeetingHeader
-          item={displayItem}
-          durationMillis={durationMillis}
-          platform={platform}
-          speakers={speakers}
-          cost={cost}
-          consent={meetingConsent.consent}
-          callTranscriptPerCallId={callTranscriptPerCallId}
-          getCallDetailsFromCallIds={getCallDetailsFromCallIds}
-          setToolsOpen={setToolsOpen}
-          onShowSpeakers={speakerNamesReadOnly ? undefined : () => setActiveTab(TAB_DETAILS)}
-          assistant={
-            assistantEnabled
-              ? {
-                  open: assistant.open,
-                  unread: assistantUnread,
-                  onToggle: toggleAssistant,
-                  buttonRef: assistantButtonRef,
-                }
-              : undefined
-          }
-        />
+        <div ref={headerRef}>
+          <MeetingHeader
+            item={displayItem}
+            durationMillis={durationMillis}
+            platform={platform}
+            speakers={speakers}
+            cost={cost}
+            consent={meetingConsent.consent}
+            callTranscriptPerCallId={callTranscriptPerCallId}
+            getCallDetailsFromCallIds={getCallDetailsFromCallIds}
+            setToolsOpen={setToolsOpen}
+            onShowSpeakers={speakerNamesReadOnly ? undefined : () => setActiveTab(TAB_DETAILS)}
+            assistant={
+              assistantEnabled
+                ? {
+                    open: assistant.open,
+                    unread: assistantUnread,
+                    onToggle: toggleAssistant,
+                    buttonRef: assistantButtonRef,
+                  }
+                : undefined
+            }
+          />
+        </div>
         <div ref={bodyRef} className={bodyClass}>
           <div className="meeting-main">
             <Tabs

@@ -11,7 +11,7 @@
  * player on the Transcript tab once the meeting has ended.
  */
 import React from 'react';
-import { describe, it, expect, vi, afterEach, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll, beforeEach, onTestFinished } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 
@@ -130,7 +130,9 @@ describe('the vp-details embed', () => {
       expect(document.querySelector('iframe[src*="strands-chat.html"]')).not.toBeNull();
     });
 
-    it('offers it behind the Assistant button when the embed does not', async () => {
+    it('otherwise behaves as on the meeting page: closed where it would lie over the tabs', async () => {
+      const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600);
+      onTestFinished(() => width.mockRestore());
       renderEmbed(['transcript']);
       const button = await screen.findByRole('button', { name: /^Assistant/ });
       expect(button.getAttribute('aria-pressed')).toBe('false');

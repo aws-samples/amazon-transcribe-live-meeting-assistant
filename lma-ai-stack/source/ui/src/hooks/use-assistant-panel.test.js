@@ -17,6 +17,7 @@ import useAssistantPanel, {
   SEEN_LIVE_STORAGE_KEY,
   initialAssistantOpen,
   rememberLiveMeeting,
+  resolveAssistantOpen,
   storeAssistantOpen,
   storedAssistantOpen,
 } from './use-assistant-panel';
@@ -49,15 +50,26 @@ describe('initialAssistantOpen', () => {
 
   it('follows the remembered choice for a live meeting already seen', () => {
     rememberLiveMeeting('alice', 'm-1');
+    expect(initialAssistantOpen({ callId: 'm-1', isLive: true, username: 'alice' })).toBeNull();
+    storeAssistantOpen('alice', false);
     expect(initialAssistantOpen({ callId: 'm-1', isLive: true, username: 'alice' })).toBe(false);
     storeAssistantOpen('alice', true);
     expect(initialAssistantOpen({ callId: 'm-1', isLive: true, username: 'alice' })).toBe(true);
   });
 
-  it('keeps an ended meeting closed until the user has chosen to have it open', () => {
-    expect(initialAssistantOpen({ callId: 'm-1', isLive: false, username: 'alice' })).toBe(false);
+  it('leaves an ended meeting undecided until the user has made a choice', () => {
+    expect(initialAssistantOpen({ callId: 'm-1', isLive: false, username: 'alice' })).toBeNull();
     storeAssistantOpen('alice', true);
     expect(initialAssistantOpen({ callId: 'm-1', isLive: false, username: 'alice' })).toBe(true);
+  });
+
+  it('with no choice made, is open only where the panel sits beside the tabs', () => {
+    expect(resolveAssistantOpen(null, true)).toBe(true);
+    expect(resolveAssistantOpen(null, false)).toBe(false);
+    // Not measured yet.
+    expect(resolveAssistantOpen(null, null)).toBe(false);
+    expect(resolveAssistantOpen(false, true)).toBe(false);
+    expect(resolveAssistantOpen(true, false)).toBe(true);
   });
 
   it('remembers a bounded number of live meetings, forgetting the oldest', () => {
@@ -78,6 +90,18 @@ describe('useAssistantPanel', () => {
   it('is closed and never created when the assistant is not enabled', () => {
     const { result } = render({ enabled: false, isLive: true });
     expect(result.current).toMatchObject({ open: false, mounted: false });
+  });
+
+  it('follows the page width until the user chooses, creating the frame the first time it is open', () => {
+    const { result, rerender } = render({ besideTabs: false });
+    expect(result.current).toMatchObject({ open: false, mounted: false });
+    rerender({ enabled: true, callId: 'm-1', isLive: false, username: 'alice', besideTabs: true });
+    expect(result.current).toMatchObject({ open: true, mounted: true });
+    rerender({ enabled: true, callId: 'm-1', isLive: false, username: 'alice', besideTabs: false });
+    expect(result.current).toMatchObject({ open: false, mounted: true });
+    act(() => result.current.setOpen(true));
+    rerender({ enabled: true, callId: 'm-1', isLive: false, username: 'alice', besideTabs: false });
+    expect(result.current.open).toBe(true);
   });
 
   it('remembers the choice the user makes', () => {

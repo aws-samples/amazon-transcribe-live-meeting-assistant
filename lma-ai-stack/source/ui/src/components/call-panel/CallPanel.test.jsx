@@ -512,12 +512,22 @@ describe('the meeting assistant panel', () => {
       window.dispatchEvent(new MessageEvent('message', { data, origin: window.location.origin, source }));
     });
 
+  // The page's measured width: wide enough for the panel beside the tabs
+  // unless a test narrows it.
+  let pageWidth;
+  // A user who has closed the panel before, for tests that start from closed.
+  const chooseClosed = () => window.localStorage.setItem('lma-meeting-assistant-open:alice', 'false');
+
   beforeEach(() => {
     vi.stubEnv('VITE_ENABLE_AGENT_ASSIST', 'true');
     window.localStorage.clear();
     bridge.options = null;
+    pageWidth = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1200);
   });
-  afterEach(() => vi.unstubAllEnvs());
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    pageWidth.mockRestore();
+  });
 
   it('has no button and no panel when the assistant is not enabled', () => {
     vi.stubEnv('VITE_ENABLE_AGENT_ASSIST', 'false');
@@ -527,20 +537,43 @@ describe('the meeting assistant panel', () => {
     expect(chatFrame()).toBeNull();
   });
 
-  it('starts closed on an ended meeting, the tabs at full width, and opens from the header', () => {
+  it('starts open beside the tabs when the user has made no choice, and closes to give the tabs the full width', () => {
+    renderPage();
+    const body = document.querySelector('.meeting-body');
+    expect(assistantButton().getAttribute('aria-pressed')).toBe('true');
+    expect(panel().hidden).toBe(false);
+    expect(chatFrame()).not.toBeNull();
+    expect(body.classList.contains('meeting-body-assistant-open')).toBe(true);
+    expect(body.classList.contains('meeting-body-assistant-overlay')).toBe(false);
+    // Opening by itself does not take the focus.
+    expect(document.activeElement).toBe(document.body);
+
+    fireEvent.click(assistantButton());
+    expect(assistantButton().getAttribute('aria-pressed')).toBe('false');
+    expect(panel().hidden).toBe(true);
+    expect(body.classList.contains('meeting-body-assistant-open')).toBe(false);
+  });
+
+  it('starts closed where it would lie over the tabs, when the user has made no choice', () => {
+    pageWidth.mockReturnValue(600);
+    renderPage();
+    expect(assistantButton().getAttribute('aria-pressed')).toBe('false');
+    expect(chatFrame()).toBeNull();
+    fireEvent.click(assistantButton());
+    expect(panel().hidden).toBe(false);
+    expect(document.querySelector('.meeting-body').classList.contains('meeting-body-assistant-overlay')).toBe(true);
+  });
+
+  it('starts closed for a user who closed it, even on a wide page', () => {
+    chooseClosed();
     renderPage();
     expect(assistantButton().getAttribute('aria-pressed')).toBe('false');
     expect(chatFrame()).toBeNull();
     expect(document.querySelector('.meeting-body').classList.contains('meeting-body-assistant-open')).toBe(false);
-
-    fireEvent.click(assistantButton());
-    expect(assistantButton().getAttribute('aria-pressed')).toBe('true');
-    expect(panel().hidden).toBe(false);
-    expect(chatFrame()).not.toBeNull();
-    expect(document.querySelector('.meeting-body').classList.contains('meeting-body-assistant-open')).toBe(true);
   });
 
   it('remembers whether the user left it open', () => {
+    chooseClosed();
     const first = renderPage();
     fireEvent.click(assistantButton());
     first.unmount();
@@ -555,6 +588,8 @@ describe('the meeting assistant panel', () => {
   });
 
   it('opens by itself the first time a live meeting is viewed, without taking the focus', () => {
+    chooseClosed();
+    pageWidth.mockReturnValue(600);
     const first = renderPage({ item: LIVE });
     expect(assistantButton().getAttribute('aria-pressed')).toBe('true');
     expect(panel().hidden).toBe(false);
@@ -568,6 +603,7 @@ describe('the meeting assistant panel', () => {
   });
 
   it('keeps the same chat frame across tab changes and closing and reopening', () => {
+    chooseClosed();
     renderPage();
     fireEvent.click(assistantButton());
     const chat = chatFrame();
@@ -587,6 +623,7 @@ describe('the meeting assistant panel', () => {
   });
 
   it('puts the focus in the composer when opened', () => {
+    chooseClosed();
     renderPage();
     fireEvent.click(assistantButton());
     const chat = chatFrame();
@@ -598,6 +635,7 @@ describe('the meeting assistant panel', () => {
   });
 
   it('closes on Escape from within the panel, returning the focus to the Assistant button', () => {
+    chooseClosed();
     renderPage();
     fireEvent.click(assistantButton());
     const close = within(panel()).getByRole('button', { name: 'Close the assistant' });
@@ -609,6 +647,7 @@ describe('the meeting assistant panel', () => {
   });
 
   it('closes on Escape pressed in the chat frame, and ignores the message from any other window', () => {
+    chooseClosed();
     renderPage();
     fireEvent.click(assistantButton());
     fromFrame({ type: 'STRANDS_ESCAPE' }, window);
@@ -618,6 +657,7 @@ describe('the meeting assistant panel', () => {
   });
 
   it('leaves Escape alone when the focus is elsewhere on the page', () => {
+    chooseClosed();
     renderPage();
     fireEvent.click(assistantButton());
     fireEvent.keyDown(screen.getByRole('tab', { name: 'Transcript' }), { key: 'Escape' });
@@ -625,6 +665,7 @@ describe('the meeting assistant panel', () => {
   });
 
   it("opens the Transcript tab at a frame the assistant showed, from the frame's Show in transcript", () => {
+    chooseClosed();
     renderPage();
     fireEvent.click(assistantButton());
     fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
@@ -636,24 +677,64 @@ describe('the meeting assistant panel', () => {
   });
 
   it('lies over the tabs on a narrow page, and makes way when it shows a moment in the transcript', () => {
-    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600);
+    pageWidth.mockReturnValue(600);
+    renderPage();
+    fireEvent.click(assistantButton());
+    const body = document.querySelector('.meeting-body');
+    expect(body.classList.contains('meeting-body-assistant-overlay')).toBe(true);
+    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    fromFrame({ type: 'STRANDS_SHOW_IN_TRANSCRIPT', frameId: '0000030000-ab12cd' });
+    expect(selectedTab().textContent).toBe('Transcript');
+    expect(panel().hidden).toBe(true);
+    // Closed for the viewer, not by them: the choice to have it open is kept.
+    expect(window.localStorage.getItem('lma-meeting-assistant-open:alice')).toBe('true');
+  });
+
+  it('is sized again to the window when the header above it changes height', () => {
+    const observers = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback) {
+          this.callback = callback;
+          this.targets = [];
+          observers.push(this);
+        }
+
+        observe(target) {
+          this.targets.push(target);
+        }
+
+        disconnect() {
+          this.targets = [];
+        }
+      },
+    );
+    let top = 200;
+    const rect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(() => ({ top, left: 0, right: 0, bottom: 0, width: 0, height: 0 }));
     try {
       renderPage();
-      fireEvent.click(assistantButton());
       const body = document.querySelector('.meeting-body');
-      expect(body.classList.contains('meeting-body-assistant-overlay')).toBe(true);
-      fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
-      fromFrame({ type: 'STRANDS_SHOW_IN_TRANSCRIPT', frameId: '0000030000-ab12cd' });
-      expect(selectedTab().textContent).toBe('Transcript');
-      expect(panel().hidden).toBe(true);
-      // Closed for the viewer, not by them: the choice to have it open is kept.
-      expect(window.localStorage.getItem('lma-meeting-assistant-open:alice')).toBe('true');
+      const height = () => body.style.getPropertyValue('--meeting-assistant-height');
+      expect(height()).toBe(`${window.innerHeight - 200 - 12}px`);
+      const observer = observers.find((o) => o.targets.includes(body));
+      // The same observer watches the header.
+      const title = screen.getByTestId('meeting-title');
+      expect(observer.targets.some((target) => target !== body && target.contains(title))).toBe(true);
+      // Speaker names arrive and the header grows: the panel starts lower.
+      top = 260;
+      act(() => observer.callback());
+      expect(height()).toBe(`${window.innerHeight - 260 - 12}px`);
     } finally {
-      width.mockRestore();
+      rect.mockRestore();
+      vi.unstubAllGlobals();
     }
   });
 
   it('marks the Assistant button when an answer finishes while the panel is closed', () => {
+    chooseClosed();
     renderPage();
     act(() => bridge.options.onAnswerComplete());
     expect(assistantButton().textContent).toContain('new answer');
@@ -677,12 +758,15 @@ describe('the meeting assistant panel', () => {
   });
 
   it("opens as an embed asks, without changing the user's remembered choice", () => {
+    chooseClosed();
+    pageWidth.mockReturnValue(600);
     const embed = renderPage({ tabInUrl: false, assistantDefaultOpen: true });
     expect(panel().hidden).toBe(false);
+    fireEvent.click(assistantButton());
     fireEvent.click(assistantButton());
     embed.unmount();
     renderPage();
     expect(assistantButton().getAttribute('aria-pressed')).toBe('false');
-    expect(window.localStorage.getItem('lma-meeting-assistant-open:alice')).toBeNull();
+    expect(window.localStorage.getItem('lma-meeting-assistant-open:alice')).toBe('false');
   });
 });

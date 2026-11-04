@@ -114,7 +114,7 @@ Each meeting in the list shows its current status (in progress, completed, etc.)
 
 - **Transcript** (the tab it opens on) — the live or completed transcript with speaker labels and timestamps.
 
-The meeting assistant's chat is a panel on the right, on every tab: **Assistant** in the header opens and closes it, and it starts open the first time you open a live meeting.
+The meeting assistant's chat is a panel on the right, on every tab: **Assistant** in the header opens and closes it. It starts open on a wide enough page until you close it, and the first time you open a live meeting.
 - **Overview** — the summary, with its action items, the chapters and the agenda.
 - **Screen share** — the shared screen's slides, for a meeting whose screen was captured.
 - **Details** — speaker naming, consent, the cost breakdown, the recordings and the meeting's attributes.
@@ -129,7 +129,7 @@ The meeting assistant is an AI-powered chat interface that can answer questions 
 
 ### Text Chat
 
-In the meeting detail view, open the assistant panel with **Assistant** in the header (it is already open the first time you view a live meeting) and type questions. For example:
+In the meeting detail view, open the assistant panel with **Assistant** in the header if it is not already open, and type questions. For example:
 
 - "What decisions have been made so far?"
 - "Summarize the last 5 minutes."

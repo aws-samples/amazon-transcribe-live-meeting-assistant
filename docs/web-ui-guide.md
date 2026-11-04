@@ -300,9 +300,11 @@ panel. Opening it puts the focus in the box where you type a question.
   full width. Where the page is narrow (a small window, the meeting list's
   split panel at the side, a narrow embed) the panel lies over the right of
   the tabs instead of beside them. It stays in view while the page scrolls.
-- **Open or closed is remembered** for you in this browser, for every meeting.
-  A live meeting you have not opened before starts with the panel open; after
-  that it is as you last left it.
+- **Open or closed is remembered** for you in this browser, for every meeting,
+  once you have opened or closed it. Until then it is open where the page is
+  wide enough for it to sit beside the tabs, and closed where it would lie over
+  them. A live meeting you have not opened before starts with the panel open;
+  after that it is as you last left it.
 - **The conversation is kept** when you switch tabs or close and reopen the
   panel. Opening another meeting starts a conversation about that meeting.
 - **What it offers:** answers streamed as the Strands agent writes them, and

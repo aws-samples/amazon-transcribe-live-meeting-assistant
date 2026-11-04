@@ -11,7 +11,11 @@
  * and applies to every meeting. A live meeting this user has not looked at
  * before opens with the panel open whatever the remembered choice, because a
  * running meeting is where the assistant is most used; from then on that
- * meeting follows the remembered choice like any other. A host that asks for
+ * meeting follows the remembered choice like any other. Until the user has
+ * made a choice, the panel is open where it can sit beside the tabs and
+ * closed where it would lie over them (`besideTabs`, measured by CallPanel),
+ * so a wide page shows the chat as the Transcript tab always did and a narrow
+ * one is not covered by it. A host that asks for
  * the panel explicitly (the embeddable components, through `defaultOpen`)
  * gets it, and its toggles are not remembered, so an embed does not change
  * the user's choice in the application.
@@ -76,32 +80,41 @@ export const rememberLiveMeeting = (username, callId, storage = window.localStor
 
 /**
  * Whether the panel starts open for a meeting: open for a live meeting not
- * seen before, otherwise the remembered choice, and closed when there is none.
+ * seen before, otherwise the remembered choice, and null when there is none
+ * (see resolveAssistantOpen).
  */
 export const initialAssistantOpen = ({ callId, isLive, username, storage = window.localStorage }) => {
   if (isLive && callId && !seenLiveMeetings(storage, username).includes(callId)) return true;
-  return storedAssistantOpen(username, storage) === true;
+  return storedAssistantOpen(username, storage);
 };
 
-const useAssistantPanel = ({ enabled, callId, isLive, username, defaultOpen = undefined }) => {
+/**
+ * Whether the panel is open: as decided (true or false), or, with no decision
+ * yet, open only where it sits beside the tabs. `besideTabs` is null until the
+ * page has been measured, and the panel is closed until then.
+ */
+export const resolveAssistantOpen = (decided, besideTabs) => (decided === null ? besideTabs === true : decided);
+
+const useAssistantPanel = ({ enabled, callId, isLive, username, defaultOpen = undefined, besideTabs = null }) => {
   const remembers = defaultOpen === undefined;
   const decide = () => {
-    if (!enabled) return false;
     if (!remembers) return Boolean(defaultOpen);
     return initialAssistantOpen({ callId, isLive, username });
   };
 
-  const [state, setState] = useState(() => {
-    const open = decide();
-    return { callId, open, mounted: open };
-  });
+  const [state, setState] = useState(() => ({ callId, decided: decide(), mounted: false }));
 
   // Another meeting shown in the same panel (the meeting list's split panel):
   // decided again for that meeting. The frame, once created, is kept.
   let current = state;
   if (state.callId !== callId) {
-    const open = decide();
-    current = { callId, open, mounted: state.mounted || open };
+    current = { callId, decided: decide(), mounted: state.mounted };
+    setState(current);
+  }
+  const isOpen = enabled && resolveAssistantOpen(current.decided, besideTabs);
+  // Latched: the frame is created the first time the panel is open and kept.
+  if (isOpen && !current.mounted) {
+    current = { ...current, mounted: true };
     setState(current);
   }
 
@@ -113,13 +126,13 @@ const useAssistantPanel = ({ enabled, callId, isLive, username, defaultOpen = un
   // panel making way for the transcript where it lies over the page).
   const setOpen = useCallback(
     (open, { remember = true } = {}) => {
-      setState((previous) => ({ ...previous, open, mounted: previous.mounted || open }));
+      setState((previous) => ({ ...previous, decided: open, mounted: previous.mounted || open }));
       if (remembers && remember) storeAssistantOpen(username, open);
     },
     [remembers, username],
   );
 
-  return { open: enabled && current.open, mounted: enabled && current.mounted, setOpen };
+  return { open: isOpen, mounted: enabled && current.mounted, setOpen };
 };
 
 export default useAssistantPanel;
