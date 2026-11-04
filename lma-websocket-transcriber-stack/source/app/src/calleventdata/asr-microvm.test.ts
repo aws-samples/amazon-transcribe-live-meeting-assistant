@@ -178,6 +178,30 @@ test('a partial and its final land on one transcript row', async () => {
     assert.equal(rows[1].Speaker, 'Alex (spk_0)');
 });
 
+test('rows sit after the audio recorded before the session was created', async () => {
+    const asr = await startFakeAsr((socket) => {
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (isBinary || (JSON.parse(data.toString()) as { type: string }).type !== 'config') {
+                return;
+            }
+            send(socket, ready(false));
+            send(socket, { type: 'final', segment: 0, text: 'Hello.', start: 0.5, end: 1.5 });
+        });
+    });
+
+    // Two seconds of 16 kHz stereo 16-bit audio already written to the recording.
+    const socketData = { ...makeSocketData(), recordingFileSize: 2 * 16000 * 2 * 2 };
+    const rows: TranscriptSegmentRecord[] = [];
+    const session = newSession(asr, rows, 'ch_1', socketData, false);
+    assert.equal(await session.start(), true);
+    await waitFor(() => rows.length === 1);
+    await session.finish();
+    await asr.close();
+
+    assert.equal(rows[0].StartTime, 2.5);
+    assert.equal(rows[0].EndTime, 3.5);
+});
+
 test('a second voice on a channel gets its own suffix', async () => {
     const asr = await startFakeAsr((socket) => {
         socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {

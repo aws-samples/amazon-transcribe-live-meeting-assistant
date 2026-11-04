@@ -29,6 +29,7 @@ import { diarizationEnabledFor } from './diarization';
 import { fetchEnrolledVoices } from './voice-enrollment';
 import { normalizeErrorForLogging } from '../utils/common';
 import { meterMicrovm } from '../metering';
+import { recordedAudioSeconds } from './session-lifecycle';
 import {
     ASR_CHANNEL_IDS,
     ASR_SAMPLE_RATE,
@@ -470,6 +471,11 @@ export class AsrChannelSession {
             socketData.callMetadata.samplingRate || ASR_SAMPLE_RATE
         );
         this.runTag = options.runTag ?? Date.now().toString(36);
+        // Audio already in the recording when the session is created (what the
+        // client sent while START was handled, or while the engine was chosen)
+        // never reaches this engine, so the first connection's clock starts
+        // after it rather than at 0. Counted at this engine's rate and width.
+        this.consumedBytes = Math.round(recordedAudioSeconds(socketData) * ASR_SAMPLE_RATE) * 2;
     }
 
     private get callId(): string {
