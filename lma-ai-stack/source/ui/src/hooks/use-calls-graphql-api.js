@@ -38,11 +38,15 @@ const client = generateClient();
  * AppSync reports that as errorType "ExecutionTimeout" with the message
  * "Execution timed out."; both are checked, since the type is not always set.
  */
+export const isRequestTimeout = (error) =>
+  (error?.errors || []).some((e) => /timeout/i.test(e?.errorType || '') || /timed out/i.test(e?.message || ''));
+
 /**
  * Every stored segment of a meeting. A long meeting's segments span several
  * pages of the table, and a page can come back empty with a nextToken (the
- * resolver leaves out what the caller may not read), so pages are read until
- * there is no nextToken.
+ * query's filters apply after each page is read: partial segments, and the
+ * segments the caller may not read), so pages are read until there is no
+ * nextToken.
  */
 export const fetchAllTranscriptSegments = async (graphql, callId) => {
   const segments = [];
@@ -57,8 +61,6 @@ export const fetchAllTranscriptSegments = async (graphql, callId) => {
   return segments;
 };
 
-export const isRequestTimeout = (error) =>
-  (error?.errors || []).some((e) => /timeout/i.test(e?.errorType || '') || /timed out/i.test(e?.message || ''));
 /** A transcript segment from the API, as the UI holds it. */
 export const mapTranscriptSegmentValue = (transcriptSegmentValue) => {
   const {
