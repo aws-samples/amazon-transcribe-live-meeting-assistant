@@ -1,5 +1,5 @@
 {
-  "description": "Meeting chat text and the web addresses found in it, in order. Read by lma_chat_links' tests (lma-ai-stack/source/lambda_layers/configuration_layer/lma_chat_links) and by the UI twin's tests (ui/src/components/common/chat-links.js), so the two apply the same rules.",
+  "description": "Meeting chat text and the web addresses found in it, in order. Read by lma_chat_links' tests (lma-ai-stack/source/lambda_layers/configuration_layer/lma_chat_links) and by the tests of its UI twin, chat-links.js (lma-ai-stack/source/ui/src/components/common/chat-links.test.js), so the two apply the same rules.",
   "cases": [
     {"name": "plain https", "input": "see https://example.com/a for it", "urls": ["https://example.com/a"]},
     {"name": "plain http", "input": "http://example.com", "urls": ["http://example.com"]},
@@ -18,6 +18,12 @@
     {"name": "duplicates kept once, first", "input": "https://example.com/a https://example.com/b https://example.com/a", "urls": ["https://example.com/a", "https://example.com/b"]},
     {"name": "www and https forms of one address are one", "input": "www.example.com then https://www.example.com", "urls": ["https://www.example.com"]},
     {"name": "backtick percent-encoded", "input": "https://example.com/a`b", "urls": ["https://example.com/a%60b"]},
+    {"name": "curly double quotes trimmed", "input": "“https://example.com/curly”", "urls": ["https://example.com/curly"]},
+    {"name": "curly single quotes trimmed", "input": "‘https://example.com/single’", "urls": ["https://example.com/single"]},
+    {"name": "curly quote then full stop", "input": "the deck is at “www.example.com/deck.”", "urls": ["https://www.example.com/deck"]},
+    {"name": "code span backticks trimmed", "input": "see `https://example.com/code`.", "urls": ["https://example.com/code"]},
+    {"name": "trailing backtick run trimmed", "input": "``https://example.com/x```", "urls": ["https://example.com/x"]},
+    {"name": "embedded backtick kept, trailing one trimmed", "input": "`https://example.com/a`b`", "urls": ["https://example.com/a%60b"]},
     {"name": "other schemes ignored", "input": "ftp://example.com/f javascript:alert(1) mailto:a@example.com file:///etc/passwd", "urls": []},
     {"name": "no host", "input": "https:// and http:///path", "urls": []},
     {"name": "bare www. is not an address", "input": "www. alone", "urls": []},

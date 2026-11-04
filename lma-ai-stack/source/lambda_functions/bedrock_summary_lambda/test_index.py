@@ -1691,12 +1691,18 @@ def test_the_shipped_chat_section_names_the_chat_and_asks_for_no_links() -> None
     assert list(shipped)[-1] == "CHAT & SHARED LINKS"
 
 
-@pytest.mark.parametrize("title", ["SUMMARY", "DETAILS", "ACTIONS"])
-def test_the_shipped_transcript_sections_say_what_a_chat_line_is(title) -> None:
-    assert (
-        "Lines that begin with [chat] were typed in the meeting chat rather than spoken."
-        in _shipped_prompts()[title]
-    )
+def test_every_shipped_section_that_reads_the_transcript_says_what_a_chat_line_is() -> None:
+    reading = {
+        title: prompt
+        for title, prompt in _shipped_prompts().items()
+        if "{transcript}" in prompt or "{timed_transcript}" in prompt
+    }
+    assert {"SUMMARY", "DETAILS", "ACTIONS", "AGENDA COVERAGE", "CHAPTERS"} <= set(reading)
+    for title, prompt in reading.items():
+        assert (
+            "Lines that begin with [chat] were typed in the meeting chat rather than spoken."
+            in prompt
+        ), title
 
 
 def test_the_knowledge_base_transcript_leaves_the_chat_out(monkeypatch) -> None:

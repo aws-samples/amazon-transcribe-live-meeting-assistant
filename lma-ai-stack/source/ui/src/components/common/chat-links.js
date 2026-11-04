@@ -7,19 +7,21 @@
 /**
  * Finding the web addresses in a message typed in the meeting chat.
  *
- * The twin of lma_chat_links in the configuration Lambda layer, which lists
- * the links shared in a meeting's chat for its summary. Both apply the rules
- * below, and test-fixtures/chat-links.json at the repository root holds both
- * to them: extractChatLinks returns exactly what extract_links does.
+ * The twin of extract_links in lma_chat_links, the configuration Lambda
+ * layer's module that FetchTranscript uses to list the links shared in a
+ * meeting's chat for its summary. Both apply the rules below, and
+ * test-fixtures/chat-links.json at the repository root holds both to them:
+ * extractChatLinks returns exactly what extract_links does.
  *
  * - A candidate starts with `http://`, `https://` or `www.` (any case), not
  *   directly after an ASCII letter or digit or one of `@ . / : -`, and runs to
  *   the next whitespace, `<`, `>` or `"`.
- * - Trailing punctuation is trimmed (`. , ; : ! ? ' " * _ ~` and the
- *   ellipsis), and so is a trailing `)`, `]` or `}` with no opening partner in
- *   the address, repeatedly.
+ * - Trailing punctuation is trimmed (`. , ; : ! ? ' " * _ ~`, the curly
+ *   quotes ‘ ’ “ ” that chat and mail clients put in place of straight ones,
+ *   the backtick and the ellipsis), and so is a trailing `)`, `]` or `}` with
+ *   no opening partner in the address, repeatedly.
  * - The address is the candidate with `https://` before a `www.` one, the
- *   scheme in lower case and each backtick written `%60`.
+ *   scheme in lower case and each backtick left inside it written `%60`.
  * - Only an http or https address with a host is kept, and none longer than
  *   MAX_CHAT_LINK_LENGTH characters.
  *
@@ -45,7 +47,7 @@ const CANDIDATE = new RegExp(`(?<![A-Za-z0-9@./:\\-])(?:https?://|www\\.)[^${SPA
 // \p{Nd} is what Python's \d matches.
 const VALID = new RegExp(`^https?://(?:[^/?#@${SPACE}]*@)?[^/?#@:${SPACE}]+(?::\\p{Nd}*)?(?:[/?#]|$)`, 'iu');
 
-const TRAILING_PUNCTUATION = new Set([...'.,;:!?\'"*_~…']);
+const TRAILING_PUNCTUATION = new Set([...'.,;:!?\'"*_~…‘’“”`']);
 const CLOSING = { ')': '(', ']': '[', '}': '{' };
 
 const count = (text, char) => text.split(char).length - 1;

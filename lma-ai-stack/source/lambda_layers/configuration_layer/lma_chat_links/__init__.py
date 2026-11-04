@@ -10,22 +10,25 @@ it to. ``extract_links`` finds them, and ``strip_links`` takes every address out
 of a model's text so that the only links a summary carries are the ones listed
 from this module.
 
-The rules, which the UI's twin (``ui/src/components/common/chat-links.js``)
-applies too, and which ``test-fixtures/chat-links.json`` at the repository root
-holds both to:
+The rules for ``extract_links``, which the UI's twin
+(``lma-ai-stack/source/ui/src/components/common/chat-links.js``) applies too,
+and which ``test-fixtures/chat-links.json`` at the repository root holds both
+to:
 
 * A candidate starts with ``http://``, ``https://`` or ``www.`` (any case), not
-  directly after a letter, digit or one of ``@ . / : -``, and runs to the next
-  whitespace, ``<``, ``>`` or ``"``.
-* Trailing punctuation is trimmed (``. , ; : ! ? ' " * _ ~`` and the ellipsis),
-  and so is a trailing ``)``, ``]`` or ``}`` that has no opening partner in the
-  address, repeatedly, so ``(see https://example.com/a_(b)).`` gives
-  ``https://example.com/a_(b)``.
+  directly after an ASCII letter or digit or one of ``@ . / : -``, and runs to
+  the next whitespace, ``<``, ``>`` or ``"``.
+* Trailing punctuation is trimmed (``. , ; : ! ? ' " * _ ~``, the curly quotes
+  ``‘ ’ “ ”`` that chat and mail clients put in place of straight ones, the
+  backtick and the ellipsis), and so is a trailing ``)``, ``]`` or ``}`` that
+  has no opening partner in the address, repeatedly, so
+  ``(see https://example.com/a_(b)).`` gives ``https://example.com/a_(b)``.
 * A ``www.`` address is given ``https://``, and the scheme is written in lower
   case; the rest is kept as typed.
 * Only an ``http`` or ``https`` address with a host is kept, and one longer than
   2,048 characters is dropped.
-* A backtick is written ``%60``, so an address can sit in a Markdown code span.
+* A backtick left inside the address is written ``%60``, so an address can sit
+  in a Markdown code span.
 * Each address is listed once, where it first appears.
 
 Pure Python with no dependencies, like the rest of this layer.
@@ -43,7 +46,7 @@ MAX_LINK_CHARS = 2048
 # middle of another word from starting one.
 _CANDIDATE = re.compile(r"(?<![A-Za-z0-9@./:\-])(?:https?://|www\.)[^\s<>\"]+", re.IGNORECASE)
 
-_TRAILING_PUNCTUATION = set(".,;:!?'\"*_~…")
+_TRAILING_PUNCTUATION = set(".,;:!?'\"*_~…‘’“”`")
 _CLOSERS = {")": "(", "]": "[", "}": "{"}
 
 # An http or https address with a host: optional user part, then at least one
@@ -112,22 +115,41 @@ _MARKDOWN_TARGET = r"\((?:[^()\n]|\([^()\n]*\))*\)"
 _MARKDOWN_IMAGE = re.compile(r"!\[([^\]\n]*)\]" + _MARKDOWN_TARGET)
 _MARKDOWN_LINK = re.compile(r"\[([^\]\n]*)\]" + _MARKDOWN_TARGET)
 _REFERENCE_LINK = re.compile(r"\[([^\]\n]*)\]\[[^\]\n]*\]")
+# An address in one of the schemes written without "//", only when what follows
+# the colon has that scheme's shape, so a bold label such as "**Data:** Q3" or
+# "**File:** budget.xlsx" is left alone: a data: address has an optional MIME
+# type and then "," or ";", a mailto: address an "@", a file: address a path,
+# and a script address does not start with the "*" or "_" of Markdown emphasis.
+_INLINE_ADDRESS = (
+    r"(?:data:(?:[\w.+\-]+/[\w.+\-]+)?[;,]"
+    r"|mailto:[^\s<>\"@]*@"
+    r"|file:(?:[/\\]|[A-Za-z]:[/\\])"
+    r"|(?:javascript|vbscript):(?=[^\s<>\"*_]))"
+)
 # Only a definition whose target is an address: "[00:30]: Introduction" in a
 # section's text is a time, not a link definition.
 _REFERENCE_DEFINITION = re.compile(
     r"^[ \t]{0,3}\[[^\]\n]+\]:[ \t]*<?"
-    r"(?:[A-Za-z][A-Za-z0-9+.\-]*://|www\.|(?:javascript|data|vbscript|mailto|file):)\S*.*$",
+    r"(?:[A-Za-z][A-Za-z0-9+.\-]*://|www\.|" + _INLINE_ADDRESS + r")\S*.*$",
     re.MULTILINE | re.IGNORECASE,
 )
 _HTML_TAG = re.compile(r"</?[A-Za-z!][^<>]*>")
 _ANY_SCHEME_ADDRESS = re.compile(r"\b[A-Za-z][A-Za-z0-9+.\-]*://[^\s<>\"]*")
+# A host and a path with no scheme, such as "docs.example.com/path" or
+# "example.com/path". A technology name followed by a slash ("Node.js/TypeScript",
+# "ASP.NET/C#") has the same shape, so the last label of the host must be in
+# lower case and either follow at least two dots or be a common top-level domain.
+_COMMON_TLDS = (
+    "com|org|net|edu|gov|mil|int|io|co|ai|app|dev|info|biz|me|ly|gl|tv|us|uk|ca|de|fr"
+    "|jp|au|eu|in|ch|nl|se|es|it|cloud|xyz|site|tech|page|link"
+)
 _SCHEMELESS_ADDRESS = re.compile(
-    r"(?<![A-Za-z0-9@./\-])(?:www\.[^\s<>\"]+|(?:[A-Za-z0-9\-]+\.)+[A-Za-z]{2,}/[^\s<>\"]*)",
+    r"(?<![A-Za-z0-9@./\-])(?:www\.[^\s<>\"]+|"
+    r"(?:(?:[A-Za-z0-9\-]+\.){2,}(?-i:[a-z]{2,})"
+    r"|[A-Za-z0-9\-]+\.(?-i:(?:" + _COMMON_TLDS + r")))/[^\s<>\"]*)",
     re.IGNORECASE,
 )
-_INLINE_SCHEMES = re.compile(
-    r"\b(?:javascript|data|vbscript|mailto|file):[^\s<>\"]+", re.IGNORECASE
-)
+_INLINE_SCHEMES = re.compile(r"\b" + _INLINE_ADDRESS + r"[^\s<>\"]*", re.IGNORECASE)
 
 #: What a removed address is replaced with.
 LINK_REMOVED = "(link)"
@@ -156,7 +178,7 @@ def strip_links(text: object) -> str:
     out = _HTML_TAG.sub("", out)
     out = _ANY_SCHEME_ADDRESS.sub(_removed, out)
     out = _SCHEMELESS_ADDRESS.sub(_removed, out)
-    out = _INLINE_SCHEMES.sub(LINK_REMOVED, out)
+    out = _INLINE_SCHEMES.sub(_removed, out)
     return out
 
 

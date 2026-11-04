@@ -66,6 +66,15 @@ def test_addresses_across_several_messages_are_listed_once() -> None:
         ("- [04:30] Budget review", None),
         ("ftp://files.example/f and javascript:alert(1)", "(link) and (link)"),
         ("- **Budget**: Alice asked about Node.js and e.g. costs", None),
+        ("- **Stack**: Node.js/TypeScript, Vue.js/React and ASP.NET/C#", None),
+        ("- **Data:** Q3 numbers\n- **File:** budget.xlsx", None),
+        ("__Mailto:__ the team, **JavaScript:** the client", None),
+        ("[Data]: file: budget.xlsx", None),
+        ("example.com/a and github.com/org/repo", "(link) and (link)"),
+        ("“https://evil.example/q” or `https://evil.example/c`", "“(link)” or `(link)`"),
+        ("data:text/html;base64,PHA+ and data:,hi", "(link) and (link)"),
+        ("mailto:bob@example.com, file:///etc/hosts", "(link), (link)"),
+        ("[1]: mailto:bob@example.com", ""),
     ],
 )
 def test_links_and_pictures_are_taken_out_of_a_models_text(text, expected) -> None:

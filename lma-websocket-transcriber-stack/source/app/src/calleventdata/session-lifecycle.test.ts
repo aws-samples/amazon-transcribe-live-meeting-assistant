@@ -130,7 +130,7 @@ test('close, hold, START on a new connection, END: one meeting, one END, nothing
     assert.equal(sessions.heldCount, 0);
 });
 
-test('an END that arrives on the old connection after a resume still clears the new one', async () => {
+test('ending a resumed meeting without naming a connection clears the connection it resumed on', async () => {
     const { sessions, effects } = lifecycle();
     const first = new FakeSocket('first');
     const second = new FakeSocket('second');
