@@ -9,6 +9,7 @@
  * started, how long it ran and where it was held. Kept free of React so it can
  * be tested directly.
  */
+import { isSpeechChannel } from './channels';
 
 /**
  * The time stamps the meeting sources append to the name they were given, as
@@ -27,6 +28,7 @@
  * A Meeting ID supplied by an MCP client or typed by hand matches none of them
  * and is shown as it is.
  */
+
 const MEETING_ID_SUFFIXES = [
   /-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-\d{3}$/,
   /\s+-\s+\d{4}-\d{2}-\d{2}[-T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?Z?$/,
@@ -78,14 +80,15 @@ export const formatDurationClock = (millis) => {
   return `${pad(Math.floor(total / 3600))}:${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}`;
 };
 
-// The channels whose times are on the meeting's clock. Assistant answers carry
-// the time of the line that asked; chat messages carry a wall-clock time.
-const SPEECH_CHANNELS = ['AGENT', 'CALLER'];
+// Only speech lines are on the meeting's clock: assistant answers carry the
+// time of the line that asked, and some assistant rows a wall-clock time. The
+// segments arrive with their channel already renamed (REMOTE/LOCAL);
+// isSpeechChannel also accepts the names older meetings stored.
 
 /** How far into the meeting its transcript reaches: the latest end of a final line, in milliseconds. */
 export const transcriptExtentMillis = (segments) =>
   (segments || []).reduce((latest, segment) => {
-    if (!segment || segment.isPartial || !SPEECH_CHANNELS.includes(segment.channel)) return latest;
+    if (!segment || segment.isPartial || !isSpeechChannel(segment.channel)) return latest;
     const end = Number(segment.endTime);
     return Number.isFinite(end) && end * 1000 > latest ? end * 1000 : latest;
   }, 0);

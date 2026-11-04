@@ -114,6 +114,8 @@ const VirtualParticipantList = () => {
   const [filteredParticipants, setFilteredParticipants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  // Why a parsed invitation left the meeting ID empty, shown on the field itself.
+  const [meetingIdNote, setMeetingIdNote] = useState('');
   const [createForm, setCreateForm] = useState({
     meetingName: '',
     meetingPlatform: 'ZOOM',
@@ -444,10 +446,12 @@ const VirtualParticipantList = () => {
         setInvitationText('');
         setShowCreateModal(true);
 
-        // The parser leaves out a meeting ID the form cannot use, and says why.
+        // The parser leaves out a meeting ID the form cannot use, and says why;
+        // the reason is shown on the Meeting ID field, inside the form.
+        setMeetingIdNote(data.meetingIdNote || '');
         setNotification(
           data.meetingIdNote
-            ? { type: 'warning', content: `Meeting invitation parsed. ${data.meetingIdNote}` }
+            ? null
             : {
                 type: 'success',
                 content: 'Meeting invitation parsed successfully! Please review and verify the details.',
@@ -895,12 +899,15 @@ const VirtualParticipantList = () => {
                     'someone in it may need to admit the participant.'
                   : undefined
               }
-              errorText={meetingIdError}
+              errorText={meetingIdError || (!createForm.meetingId && meetingIdNote) || undefined}
               stretch
             >
               <Input
                 value={createForm.meetingId}
-                onChange={({ detail }) => setCreateForm((prev) => ({ ...prev, meetingId: detail.value }))}
+                onChange={({ detail }) => {
+                  setMeetingIdNote('');
+                  setCreateForm((prev) => ({ ...prev, meetingId: detail.value }));
+                }}
                 placeholder={meetingIdPlaceholder}
               />
             </FormField>

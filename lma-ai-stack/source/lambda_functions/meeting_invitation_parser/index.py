@@ -279,7 +279,7 @@ MEET_NICKNAME_NOTE = (
     "(for example abc-defg-hij) instead."
 )
 MEET_NOT_A_CODE_NOTE = (
-    "The invitation's Google Meet link does not contain a meeting code. Enter the "
+    "The invitation's Google Meet details do not include a meeting code. Enter the "
     "meeting code (for example abc-defg-hij) or a https://meet.google.com/ link to it."
 )
 

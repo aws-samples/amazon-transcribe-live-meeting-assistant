@@ -75,17 +75,21 @@ describe('durations', () => {
 
   it('reads how far the transcript reaches from its final speech lines only', () => {
     const segments = [
-      segment('CALLER', 120),
-      segment('AGENT', 1036),
-      segment('CALLER', 1200, true), // partial
+      segment('REMOTE', 120),
+      segment('LOCAL', 1036),
+      segment('REMOTE', 1200, true), // partial
       segment('CHAT_ASSISTANT', 1762180000), // a wall-clock time
       segment('MEETING_ASSISTANT', 1500),
     ];
     expect(transcriptExtentMillis(segments)).toBe(1036000);
   });
 
+  it('still reads the speech channel names older meetings stored', () => {
+    expect(transcriptExtentMillis([segment('CALLER', 90), segment('AGENT', 95)])).toBe(95000);
+  });
+
   it('shows the longer of the stored length and the transcript', () => {
-    const segments = [segment('CALLER', 1036)];
+    const segments = [segment('REMOTE', 1036)];
     // The stored figure is the end of whichever line was written last.
     expect(meetingDurationMillis({ totalConversationDurationMillis: 177000 }, segments)).toBe(1036000);
     expect(meetingDurationMillis({ totalConversationDurationMillis: 2000000 }, segments)).toBe(2000000);
