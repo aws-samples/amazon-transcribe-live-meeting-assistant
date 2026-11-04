@@ -109,7 +109,8 @@ export const CONTENT_REDACTION_VARIABLE = 'ENABLE_CONTENT_REDACTION';
  * The redaction flag as saved, whatever the language: the meeting chat is not
  * added to the transcript while it is on (meeting-chat.ts), because chat text
  * is not redacted in any language. Not set when the configuration holds no
- * value; its reader then falls back to CONTENT_REDACTION_VARIABLE.
+ * value or cannot be read; its reader then treats the saved choice as not
+ * known, and the chat is not added.
  */
 export const CONTENT_REDACTION_REQUESTED_VARIABLE = 'CONTENT_REDACTION_REQUESTED';
 const REDACTED_LANGUAGES: ReadonlySet<string> = new Set(['en-US']);

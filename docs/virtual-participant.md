@@ -725,14 +725,21 @@ What is not added:
 - replies to a consent notice, and everything the VP itself posts (its
   introduction, status messages, answers and help);
 - private messages: on Zoom (the browser join and the Meeting SDK join), a
-  message sent to anyone but everyone. Teams and Google Meet meeting chats
-  have no private messages;
+  message sent to anyone but everyone, and a message whose recipient the VP
+  could not read (a chat label in a language other than English, or a Meeting
+  SDK message that names no receiver). Only a message the VP read as sent to
+  everyone is added. Teams and Google Meet meeting chats have no private
+  messages;
 - what the chat panel already held when the VP first read it (the Teams
   browser join reads the whole panel once it is in), and anything sent while the
   transcript is paused (`LMA pause`) or while consent is withheld. Those
   messages are not kept for later: resuming does not add them;
 - everything while **Amazon Transcribe › Redact personal information** is on,
-  whatever the meeting's language, because chat text is not redacted;
+  whatever the meeting's language, because chat text is not redacted. If the
+  VP could not read the Configuration page's values when it started, it does
+  not know the saved choice and adds no chat for that meeting
+  (`outcome=redaction-unknown`; the `[SETTINGS]` line at start says why the
+  values were not applied);
 - more than 60 messages a minute, or 3,000 in a meeting;
 - edits and deletions made after a message was sent: the line keeps the text
   the VP first read;
@@ -765,8 +772,8 @@ measured in a live meeting yet:
 
 | Platform | Sender | Message id | Private messages |
 | --- | --- | --- | --- |
-| Zoom (browser) | From the message's label (English labels) | The message element's id | Left out |
-| Zoom (Meeting SDK) | From the SDK | From the SDK, where it sends one | Left out, where the SDK names the receiver |
+| Zoom (browser) | From the message's label (English labels) | The message element's id | Left out, as is a message whose label shows no recipient |
+| Zoom (Meeting SDK) | From the SDK | From the SDK, where it sends one | Left out, as is a message that names no receiver |
 | Teams (browser) | The message's author, where the row shows it | The message element's id, else the text | None in a meeting chat |
 | Teams (Azure Communication Services) | From the chat service | From the chat service | None in a meeting chat |
 | Webex | Not added to the transcript (see above) | | |
