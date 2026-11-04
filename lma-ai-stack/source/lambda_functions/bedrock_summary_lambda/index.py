@@ -449,6 +449,36 @@ def links_list(chat_links):
     return "\n".join(lines)
 
 
+def without_links(text):
+    """A section's text with every link and address taken out, key-frame pictures kept.
+
+    For every section of a meeting whose transcript holds chat: a participant
+    can type an address, and the only addresses a summary carries are the ones
+    code lists under "Links shared". A key-frame picture refers to a frame by
+    its id, not by an address, and the meeting page shows nothing else as a
+    picture, so it stays, its alt text stripped like the rest.
+    """
+    if not isinstance(text, str):
+        return text
+    frames = []
+
+    def hold(match):
+        frames.append(match)
+        return f"\x00{len(frames) - 1}\x00"
+
+    # A NUL never reaches a stored summary, so one already in the model's text
+    # is dropped rather than read as a held picture.
+    held = KEYFRAME_IMAGE.sub(hold, text.replace("\x00", ""))
+    stripped = strip_links(held)
+
+    def restore(match):
+        frame = frames[int(match.group(1))]
+        alt = strip_links(frame.group(1))
+        return f"![{alt}]({frame.group(0)[frame.group(0).rindex('(') + 1 : -1]})"
+
+    return re.sub(r"\x00(\d+)\x00", restore, stripped)
+
+
 def chat_section(text, links_text):
     """A section written from the chat, with its links as code found them.
 
@@ -456,7 +486,7 @@ def chat_section(text, links_text):
     appended under "Links shared", so every address a reader sees in the section
     is one a participant typed, unchanged.
     """
-    prose = strip_links(text).strip()
+    prose = without_links(text).strip()
     tail = f"**Links shared**\n{links_text}" if links_text else NO_LINKS_SHARED
     return f"{prose}\n\n{tail}" if prose else tail
 
@@ -520,7 +550,13 @@ def generate_summary(
         logger.debug("Prompt: %s", prompt)
         response = call_bedrock(prompt, call_id, model_id)
         logger.debug("API Response: %s", response)
-        result[key] = chat_section(response, links_text) if from_chat else response
+        if from_chat:
+            result[key] = chat_section(response, links_text)
+        elif chat_text:
+            # The transcript this section read holds the chat's "[chat]" lines.
+            result[key] = without_links(response)
+        else:
+            result[key] = response
     if len(result.keys()) == 1:
         # there's only one summary in here, so let's return just that.
         # this may contain json or a string.

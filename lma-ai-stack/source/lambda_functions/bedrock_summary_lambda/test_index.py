@@ -1712,3 +1712,76 @@ def test_the_knowledge_base_transcript_leaves_the_chat_out(monkeypatch) -> None:
     index.handler({"CallId": CALL_ID}, None)
     body = s3.objects[f"{PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt"]["Body"]
     assert body == "\nBob: we ship\nAlice: ok"
+
+
+# ── no section of a meeting with chat carries a link ────────────────────────
+
+
+def test_every_section_of_a_meeting_with_chat_loses_the_links_the_model_wrote(monkeypatch) -> None:
+    install(
+        monkeypatch,
+        bedrock=FakeBedrock(
+            texts=[
+                "Alice said to sign in at [the portal](https://evil.example/login).",
+                "- **Plan**: see www.evil.example/plan and <https://evil.example/a>",
+            ]
+        ),
+        templates=ddb_item(**{"1#Summary": "S {transcript}", "2#Actions": "A {transcript}"}),
+        custom=ddb_item(),
+    )
+    result = json.loads(index.generate_summary("T", None, chat=CHAT, chat_links=CHAT_LINKS))
+    assert result == {
+        "Summary": "Alice said to sign in at the portal.",
+        "Actions": "- **Plan**: see (link) and ",
+    }
+
+
+def test_a_meeting_without_chat_keeps_its_sections_as_the_model_wrote_them(monkeypatch) -> None:
+    text = "See [the doc](https://example.com/doc)."
+    for chat in (None, "", "  \n"):
+        install(
+            monkeypatch,
+            bedrock=FakeBedrock(texts=[text, text]),
+            templates=ddb_item(**{"1#Summary": "S {transcript}", "2#Actions": "A {transcript}"}),
+            custom=ddb_item(),
+        )
+        result = json.loads(index.generate_summary("T", None, chat=chat, chat_links=[]))
+        assert result == {"Summary": text, "Actions": text}
+
+
+def test_key_frame_pictures_are_kept_when_links_are_taken_out() -> None:
+    text = (
+        "**[00:30] Budget**\n\n![Slide at 00:30](keyframe:0000030000-ab12cd)\n"
+        "![pixel](https://evil.example/p.png) [x](https://evil.example)"
+    )
+    assert index.without_links(text) == (
+        "**[00:30] Budget**\n\n![Slide at 00:30](keyframe:0000030000-ab12cd)\npixel x"
+    )
+
+
+def test_an_address_in_a_key_frame_pictures_alt_text_is_taken_out() -> None:
+    assert index.without_links("![see https://evil.example/x](keyframe:abc_1)") == (
+        "![see (link)](keyframe:abc_1)"
+    )
+
+
+def test_a_held_picture_marker_the_model_wrote_is_dropped() -> None:
+    assert index.without_links("a \x007\x00 b ![s](keyframe:k1)") == "a 7 b ![s](keyframe:k1)"
+
+
+def test_chapter_lines_survive_link_removal() -> None:
+    text = "- [00:00] Introductions\n- [04:30] Budget review\n[12:05]: Hiring"
+    assert index.without_links(text) == text
+
+
+def test_a_slides_section_of_a_meeting_with_chat_keeps_its_pictures(monkeypatch) -> None:
+    frames = [{"FrameId": "f1", "Timestamp": 30, "SlideText": "Budget", "Said": "ok"}]
+    install(
+        monkeypatch,
+        bedrock=FakeBedrock(texts=["**[00:30] Budget**\n\n![Slide at 00:30](keyframe:f1)"]),
+        templates=ddb_item(**{"1#Slides": "{slides}"}),
+        custom=ddb_item(),
+    )
+    assert index.generate_summary("T", None, keyframes=frames, chat=CHAT, chat_links=[]) == (
+        "**[00:30] Budget**\n\n![Slide at 00:30](keyframe:f1)"
+    )

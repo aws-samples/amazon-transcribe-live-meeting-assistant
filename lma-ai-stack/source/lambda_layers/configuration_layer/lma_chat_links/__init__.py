@@ -112,7 +112,13 @@ _MARKDOWN_TARGET = r"\((?:[^()\n]|\([^()\n]*\))*\)"
 _MARKDOWN_IMAGE = re.compile(r"!\[([^\]\n]*)\]" + _MARKDOWN_TARGET)
 _MARKDOWN_LINK = re.compile(r"\[([^\]\n]*)\]" + _MARKDOWN_TARGET)
 _REFERENCE_LINK = re.compile(r"\[([^\]\n]*)\]\[[^\]\n]*\]")
-_REFERENCE_DEFINITION = re.compile(r"^[ \t]{0,3}\[[^\]\n]+\]:[ \t]*\S+.*$", re.MULTILINE)
+# Only a definition whose target is an address: "[00:30]: Introduction" in a
+# section's text is a time, not a link definition.
+_REFERENCE_DEFINITION = re.compile(
+    r"^[ \t]{0,3}\[[^\]\n]+\]:[ \t]*<?"
+    r"(?:[A-Za-z][A-Za-z0-9+.\-]*://|www\.|(?:javascript|data|vbscript|mailto|file):)\S*.*$",
+    re.MULTILINE | re.IGNORECASE,
+)
 _HTML_TAG = re.compile(r"</?[A-Za-z!][^<>]*>")
 _ANY_SCHEME_ADDRESS = re.compile(r"\b[A-Za-z][A-Za-z0-9+.\-]*://[^\s<>\"]*")
 _SCHEMELESS_ADDRESS = re.compile(
