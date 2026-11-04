@@ -227,5 +227,13 @@ export type SocketCallData = {
      */
     consent?: ConsentSession
     /** Whether transcription was started, which an opt-in meeting defers until its consent allows it. */
-    transcriptionStarted?: boolean
+    transcriptionStarted?: boolean,
+    /**
+     * This session's local recording files: the raw PCM it writes as audio
+     * arrives, and the WAV built from it when the meeting ends. Named per
+     * session, so a later session of the same meeting on this task cannot
+     * write into a file an earlier one is still uploading.
+     */
+    recordingTempPath?: string,
+    recordingWavPath?: string
 };

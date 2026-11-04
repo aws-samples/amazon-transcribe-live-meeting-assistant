@@ -283,6 +283,61 @@ export const frameAudioChunk = (
     return frames;
 };
 
+/**
+ * One Transcribe request's view of the meeting's shared audio stream.
+ *
+ * Each request reads the shared source through a sink of its own, so closing a
+ * request never destroys the source the WebSocket handler keeps writing into.
+ * The tap also counts every byte that left the source for this request, which
+ * is the request's share of the meeting's audio: bytes it sent, and bytes still
+ * in its sink when it ended, which no later request will see either. The next
+ * request's audio starts right after them, so that count, not the last word
+ * Transcribe returned, is where the next request's clock starts.
+ */
+export interface AudioTap {
+    readonly sink: stream.PassThrough;
+    /** Detach from the source (idempotent) and return the bytes this tap took from it. */
+    close(): number;
+}
+
+export const openAudioTap = (source: stream.Readable): AudioTap => {
+    const sink = new stream.PassThrough();
+    let bytes = 0;
+    let closed = false;
+    // Sees each chunk as the source hands it to the pipe below. Removed along
+    // with the pipe, which leaves the source paused, so audio that arrives
+    // between two requests waits in the source for the next one.
+    const count = (chunk: Buffer): void => {
+        bytes += chunk.length;
+    };
+    source.on('data', count);
+    source.pipe(sink, { end: false });
+    return {
+        sink,
+        close: (): number => {
+            if (!closed) {
+                closed = true;
+                source.unpipe(sink);
+                source.off('data', count);
+                sink.destroy();
+            }
+            return bytes;
+        },
+    };
+};
+
+/**
+ * Where the next Transcribe request's clock starts on the meeting's timeline:
+ * this request's start plus the duration of the audio it took. Transcribe's
+ * item times restart at 0 with every request, and the audio recording holds
+ * every byte, so this is what keeps the two in step.
+ */
+export const nextRequestTimeOffset = (
+    timeOffsetSeconds: number,
+    bytesTaken: number,
+    sampleRate: number
+): number => timeOffsetSeconds + pcmSeconds(bytesTaken, sampleRate, TRANSCRIBE_CHANNELS);
+
 // True when a Transcribe streaming error indicates the SessionId we tried to
 // resume is no longer valid (expired / closed / unknown), so the next attempt
 // must start a fresh session rather than reuse the stale id. Kept in sync with
@@ -403,14 +458,18 @@ export const startTranscribe = async (
     // rapid clean-close/reopen cycle can never become a 0ms hot loop.
     const MIN_BACKOFF_MS = 500;
     let sessionId: string | undefined;
+    let transcriptClockStarted = false;
 
     // Amazon Transcribe streaming timestamps (Item.StartTime / EndTime) are
     // relative to the audio sent in EACH StartStreamTranscription request and
     // reset to 0 on every (re)connect — reusing SessionId does NOT resume the
     // timeline (it is only an identifier). So each time we reconnect we carry a
-    // cumulative offset (seconds) equal to the highest segment EndTime seen so
-    // far, keeping the meeting transcript timeline monotonic instead of
-    // restarting at 0 and overlapping earlier segments (GitHub #292).
+    // cumulative offset (seconds): the duration of the audio the earlier
+    // requests took (see openAudioTap). That keeps the transcript monotonic
+    // (GitHub #292) and on the audio recording's clock. The last segment's end
+    // time would not: it leaves out the silence after the last word and the
+    // audio still in flight when a request ended, so every reconnect would put
+    // the rest of the transcript earlier than the recording.
     const startTranscribeSession = async (retryCount = 0, timeOffsetSeconds = 0): Promise<void> => {
         // Stop retrying once the call has legitimately ended (socket closed /
         // end event) — otherwise we'd spin forever after a normal hang-up.
@@ -448,10 +507,14 @@ export const startTranscribe = async (
                 }
             );
         };
-        // Highest absolute segment EndTime observed during this attempt; seeds
-        // the next reconnect's offset. Starts at the incoming offset so an
-        // attempt that produces nothing still carries the timeline forward.
+        // Highest absolute segment EndTime observed during this attempt, for the
+        // reconnect log line only; the next offset comes from the audio taken.
         let observedMaxEndTime = timeOffsetSeconds;
+        // This attempt's own reader of the shared audio stream. Opened before
+        // the request so its byte count covers everything this attempt takes.
+        const tap = audioInputStream ? openAudioTap(audioInputStream) : undefined;
+        const nextOffset = (): number =>
+            nextRequestTimeOffset(timeOffsetSeconds, tap?.close() ?? 0, callMetaData.samplingRate);
         // Recompute retryCount for the *next* attempt: reset to 0 if this
         // attempt was healthy (ran long enough), otherwise increment.
         // Centralised so both the clean-close and the error paths stay
@@ -479,7 +542,7 @@ export const startTranscribe = async (
             );
 
             const transcribeInput = async function* () {
-                if (audioInputStream == undefined) {
+                if (tap == undefined) {
                     server.log.error(
                         `[TRANSCRIBING]: [${callMetaData.callId}] - audioInputStream undefined`
                     );
@@ -492,16 +555,13 @@ export const startTranscribe = async (
                 // result stream and we reconnect. That would destroy the single
                 // audioInputStream the WebSocket handler keeps writing into,
                 // throwing "Cannot call write after a stream was destroyed" and
-                // breaking every subsequent reconnect. Instead pipe the shared
-                // source into a per-session sink we own, iterate that, and on
-                // teardown detach + destroy only the sink; the shared source
-                // survives for the next session. Audio that arrives during the
-                // brief reconnect gap buffers in the source and flows once the
-                // next session re-pipes.
-                const audioSink = new stream.PassThrough();
-                audioInputStream.pipe(audioSink, { end: false });
+                // breaking every subsequent reconnect. Instead iterate this
+                // session's own sink (openAudioTap), and on teardown detach and
+                // destroy only the sink; the shared source survives for the next
+                // session. Audio that arrives during the brief reconnect gap
+                // buffers in the source and flows to the next session.
                 try {
-                    for await (const chunk of audioSink) {
+                    for await (const chunk of tap.sink) {
                         // Never yield a chunk Transcribe would reject as too big
                         // (see frameAudioChunk): audio queued while this consumer
                         // was starting arrives as one large buffer.
@@ -511,8 +571,7 @@ export const startTranscribe = async (
                         }
                     }
                 } finally {
-                    audioInputStream.unpipe(audioSink);
-                    audioSink.destroy();
+                    tap.close();
                 }
             };
 
@@ -572,7 +631,13 @@ export const startTranscribe = async (
             const outputTranscriptStream: AsyncIterable<TranscriptResultStream> | undefined =
                 response.TranscriptResultStream;
 
-            socketCallMap.startStreamTime = new Date();
+            // The wall-clock start of the transcript's clock, which a video
+            // stream's key frames are placed against. Only the first request
+            // starts that clock; a reconnect continues it from the audio taken.
+            if (!transcriptClockStarted) {
+                transcriptClockStarted = true;
+                socketCallMap.startStreamTime = new Date();
+            }
 
             if (outputTranscriptStream) {
                 tsStream = stream.Readable.from(outputTranscriptStream);
@@ -605,13 +670,14 @@ export const startTranscribe = async (
             // transcription stopped permanently while the client kept streaming
             // audio into a dead pipe (GitHub #292). Unless the call has ended,
             // treat an unexpected clean close as a reconnect.
+            const offset = nextOffset();
             if (!socketCallMap.ended) {
                 const next = nextRetryCount();
                 server.log.info(
-                    `[TRANSCRIBING]: [${callMetaData.callId}] - Transcribe result stream closed unexpectedly; reconnecting. Retry count: ${next}, timeOffset: ${observedMaxEndTime.toFixed(2)}s`
+                    `[TRANSCRIBING]: [${callMetaData.callId}] - Transcribe result stream closed unexpectedly; reconnecting. Retry count: ${next}, timeOffset: ${offset.toFixed(2)}s (last segment ended at ${observedMaxEndTime.toFixed(2)}s)`
                 );
                 await backoff(next);
-                await startTranscribeSession(next, observedMaxEndTime);
+                await startTranscribeSession(next, offset);
             }
         } catch (error) {
             server.log.error(
@@ -632,10 +698,11 @@ export const startTranscribe = async (
                 );
                 sessionId = undefined;
             }
+            const offset = nextOffset();
             const next = nextRetryCount();
-            server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Attempting to restart session. Retry count: ${next}, timeOffset: ${observedMaxEndTime.toFixed(2)}s`);
+            server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Attempting to restart session. Retry count: ${next}, timeOffset: ${offset.toFixed(2)}s (last segment ended at ${observedMaxEndTime.toFixed(2)}s)`);
             await backoff(next);
-            await startTranscribeSession(next, observedMaxEndTime);
+            await startTranscribeSession(next, offset);
         }
     };
 
@@ -1032,8 +1099,8 @@ function addItemToSegment(
 }
 
 // Returns the highest absolute segment EndTime (seconds) written by this call,
-// so the caller can advance the cumulative reconnect offset. Returns
-// timeOffsetSeconds unchanged when nothing was written.
+// which the caller logs when it reconnects. Returns timeOffsetSeconds unchanged
+// when nothing was written.
 export const writeTranscriptionSegment = async function (
     transcribeMessageJson: TranscriptEvent,
     callMetadata: CallMetaData,

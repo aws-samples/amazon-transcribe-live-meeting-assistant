@@ -49,7 +49,7 @@ test('the recording is written from the combined-audio stream', () => {
     // agent, which is what a meeting recording has to contain.
     const body = methodBody('private async *audioStream');
     assert.match(body, /combined_audio\.monitor/);
-    assert.match(body, /recordingStream\.write\(chunk\)/);
+    assert.match(body, /recordingStream\.write\(recordedAudio\(chunk, details\.start\)\)/);
 });
 
 test('the recording is NOT written from the meeting-only stream', () => {
@@ -83,12 +83,13 @@ test('writeAudio no longer takes a recording stream at all', () => {
     assert.doesNotMatch(src, /this\.writeAudio\(response, recordingStream\)/);
 });
 
-test('the recording only captures audio once the meeting has started', () => {
-    // audioStream runs before details.start to keep the Transcribe stream alive
-    // with silence; recording that would prepend the pre-join period to every file.
+test('the recording gets silence, not audio and not nothing, while capture is off', () => {
+    // audioStream feeds the engines silence while details.start is off, so the
+    // transcript's clock runs on; the recording must run on with it (as
+    // silence) or every later line plays ahead of its audio.
     const body = methodBody('private async *audioStream');
-    const guard = body.slice(0, body.indexOf('recordingStream.write(chunk)'));
-    assert.match(guard.split('\n').slice(-4).join('\n'), /details\.start && recordingStream/);
+    assert.match(body, /recordingStream\.write\(recordedAudio\(chunk, details\.start\)\)/);
+    assert.doesNotMatch(body, /details\.start && recordingStream/);
 });
 
 test('the recording tees the pre-framing chunk, not each frame', () => {
@@ -96,7 +97,7 @@ test('the recording tees the pre-framing chunk, not each frame', () => {
     // would produce an identical file with more syscalls — and if the split ever
     // changed, a subtly different one.
     const body = methodBody('private async *audioStream');
-    const writeIdx = body.indexOf('recordingStream.write(chunk)');
+    const writeIdx = body.indexOf('recordingStream.write(recordedAudio(chunk');
     const frameIdx = body.indexOf('frameAudioChunk(chunk)');
     assert.ok(writeIdx > 0 && frameIdx > 0);
     assert.ok(writeIdx < frameIdx, 'the recording write should precede framing');

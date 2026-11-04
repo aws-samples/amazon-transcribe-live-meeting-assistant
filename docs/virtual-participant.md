@@ -670,7 +670,7 @@ Anyone in the meeting can control the VP by typing one of these commands in the 
 | --- | --- |
 | `LMA leave`, `LMA end`, `LMA stop`, `LMA quit`, `LMA exit` | The VP says goodbye and leaves the meeting. |
 | `Goodbye LMA`, `bye LMA` | Same as above. |
-| `LMA pause` | Stops transcription and recording without leaving the meeting. |
+| `LMA pause` | Stops transcription and recording without leaving the meeting. The audio recording keeps the paused time as silence, so it stays in step with the transcript. |
 | `LMA start` | Resumes a paused session. |
 | `LMA help` | The VP posts the list of chat commands in the meeting chat. |
 | `LMA ask <question>`, `@LMA <question>` | The meeting assistant answers the question in the meeting chat, using the meeting's transcript. See [Asking the Meeting Assistant from Chat](#asking-the-meeting-assistant-from-chat). |

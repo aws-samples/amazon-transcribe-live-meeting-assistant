@@ -123,6 +123,13 @@ interface AsrSessionOptions {
      * code that reads them, not here.
      */
     enrolledVoices?: EnrolledVoice[];
+    /**
+     * Part of every SegmentId this session writes, so a later session for the
+     * same meeting (a client that reconnects to another task, or after this one
+     * ended the meeting) cannot overwrite this one's rows. Defaults to the time
+     * the session was created.
+     */
+    runTag?: string;
 }
 
 /** One known voice and the name to label it with. */
@@ -401,7 +408,10 @@ export const coalesceBacklog = (
  * The engine restarts its segment numbering and its clock on every connection,
  * so a reconnect bumps a generation counter (keeping SegmentIds unique) and
  * carries a cumulative time offset (keeping the meeting timeline monotonic) —
- * the same approach the Amazon Transcribe path takes for its reconnects.
+ * the same approach the Amazon Transcribe path takes for its reconnects. The
+ * offset is the duration of the audio this channel has handed on so far (sent
+ * on an earlier connection, or dropped while disconnected), which is where the
+ * next connection's audio sits in the meeting's audio recording.
  */
 export class AsrChannelSession {
     private ws: WebSocket | null = null;
@@ -424,7 +434,14 @@ export class AsrChannelSession {
 
     private timeOffsetSeconds = 0;
 
-    private observedMaxEnd = 0;
+    /**
+     * Bytes of this channel's audio no later connection will hear: sent on a
+     * connection, or dropped from the backlog. Read as the new connection's
+     * time offset when it opens.
+     */
+    private consumedBytes = 0;
+
+    private readonly runTag: string;
 
     private attempt = 0;
 
@@ -452,6 +469,7 @@ export class AsrChannelSession {
         this.resampler = new ChannelResampler(
             socketData.callMetadata.samplingRate || ASR_SAMPLE_RATE
         );
+        this.runTag = options.runTag ?? Date.now().toString(36);
     }
 
     private get callId(): string {
@@ -507,6 +525,9 @@ export class AsrChannelSession {
 
     private send(frame: Buffer): void {
         if (this.open && this.ws?.readyState === WebSocket.OPEN) {
+            // Counted whether or not the send succeeds: either way no later
+            // connection hears these bytes, and they are in the recording.
+            this.consumedBytes += frame.length;
             try {
                 this.ws.send(frame);
             } catch (error) {
@@ -518,12 +539,18 @@ export class AsrChannelSession {
         }
         // Not connected yet (the MicroVM is still starting) or reconnecting.
         // Buffering here is what stops the opening seconds of a meeting being
-        // lost while the MicroVM boots.
-        if (this.pendingBytes + frame.length <= ASR_MAX_PENDING_BYTES) {
-            this.pending.push(frame);
-            this.pendingBytes += frame.length;
-        } else {
-            this.droppedBytes += frame.length;
+        // lost while the MicroVM boots. Past the cap the OLDEST audio goes, so
+        // what is kept is one unbroken stretch ending now: the next connection
+        // then starts at a known point (consumedBytes) on the recording's clock.
+        // Dropping the newest instead would leave a hole in the middle of what
+        // the engine hears, and every row after it would sit too early.
+        this.pending.push(frame);
+        this.pendingBytes += frame.length;
+        while (this.pendingBytes > ASR_MAX_PENDING_BYTES && this.pending.length > 1) {
+            const dropped = this.pending.shift() as Buffer;
+            this.pendingBytes -= dropped.length;
+            this.droppedBytes += dropped.length;
+            this.consumedBytes += dropped.length;
         }
     }
 
@@ -607,6 +634,9 @@ export class AsrChannelSession {
 
         socket.on('open', () => {
             this.open = true;
+            // This connection's clock starts at the first byte it is sent: the
+            // backlog below, then live audio.
+            this.timeOffsetSeconds = this.consumedBytes / (ASR_SAMPLE_RATE * 2);
             const config = {
                 type: 'config',
                 sample_rate: ASR_SAMPLE_RATE,
@@ -626,6 +656,8 @@ export class AsrChannelSession {
                 // behaviour are the bundle's calibrated operating point baked
                 // into the image; omitting them here is what keeps that in force.
             };
+            // The backlog is this connection's, sent or not, from here on.
+            this.consumedBytes += this.pendingBytes;
             try {
                 socket.send(JSON.stringify(config));
                 for (const frame of coalesceBacklog(this.pending)) {
@@ -695,9 +727,9 @@ export class AsrChannelSession {
             return;
         }
 
-        // Segment numbering and the engine clock restart on a new connection.
+        // Segment numbering and the engine clock restart on a new connection;
+        // the clock's new offset is set when it opens (see connect()).
         this.generation += 1;
-        this.timeOffsetSeconds = this.observedMaxEnd;
 
         // Mint a fresh token rather than reasoning about its remaining TTL: a
         // long meeting outlives the token that opened the first connection.
@@ -766,12 +798,9 @@ export class AsrChannelSession {
         const isPartial = message.type !== 'final';
         const start = (message.start ?? 0) + this.timeOffsetSeconds;
         const end = (message.end ?? message.start ?? 0) + this.timeOffsetSeconds;
-        if (end > this.observedMaxEnd) {
-            this.observedMaxEnd = end;
-        }
         // SegmentId deliberately excludes the speaker: a partial's provisional
         // speaker can be corrected by its final, and both must land on one row.
-        const segmentId = `${this.channelId}-g${this.generation}-s${message.segment ?? 0}`;
+        const segmentId = `${this.channelId}-${this.runTag}-g${this.generation}-s${message.segment ?? 0}`;
         const speaker = this.registry.nameFor(
             this.channelId,
             message.speaker,

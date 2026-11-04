@@ -23,8 +23,10 @@
  * video, the offset is 0: the file starts with transcription. A Virtual
  * Participant starts its screen recording before it is admitted to the
  * meeting, so its video runs ahead of the transcript by the time it waited,
- * and by more after each pause or reconnection, which the video records
- * through and the transcript skips. Each key frame records both clocks at the
+ * and by more after each reconnection of its transcription, which the video
+ * records through and the transcript skips. (A pause does not move them apart:
+ * the transcript's clock runs on through it, and the audio recording keeps it
+ * as silence.) Each key frame records both clocks at the
  * moment it was taken (Timestamp and VideoOffset), so the frames are the
  * anchors: a time is converted with the offset of the nearest anchor before
  * it. See docs/web-ui-guide.md (Meeting Detail Page) for each source.

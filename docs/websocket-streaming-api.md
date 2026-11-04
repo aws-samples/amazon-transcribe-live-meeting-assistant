@@ -690,17 +690,38 @@ speaking on both channels therefore gets a different number on each.
 | END received without START | Server logs an error and ignores the message. |
 | Duplicate END messages | Server logs a warning; second END is ignored. |
 | WebSocket error (network) | Server logs the error and forces a close, triggering automatic end-of-call cleanup. |
-| Client disconnects unexpectedly | Server detects the close event and automatically writes a call end event and cleans up resources. |
+| Client disconnects unexpectedly | Server holds the meeting for 60 seconds for the client to reconnect (see [Reconnection](#reconnection)); if it does not, the server writes the call end event and cleans up resources. |
 | Meeting consent refuses the meeting, or stops it | Server sends a `CONSENT_STATE` frame with `captureAllowed: false` and closes the connection with code `1008`. See [Meeting Consent Frames](#615-meeting-consent-frames). |
 
 ### Reconnection
 
-The server does not support session resumption. If a connection drops, the client must:
+If a connection drops without an END, the server holds the meeting for 60
+seconds (the transcriber task's `AUDIO_RECONNECT_GRACE_MS` environment variable;
+`0` turns holding off). To continue the meeting, the client must:
 1. Open a new WebSocket connection
-2. Send a new START message (optionally with a new `callId`)
+2. Send START again with the **same `callId`**, authenticated as the same user
 3. Begin streaming audio again
 
-The previous session will be finalized automatically by the server.
+The server then continues the same meeting on the new connection: the audio
+recording carries on in the same file, and the transcript carries on from where
+the audio recording is, so the two stay in step for the meeting page's player.
+Audio the client could not send while it was disconnected is missing from both.
+The meeting gets one END, when the client sends it or the connection closes
+for good. A START for the same meeting from the same user while its old
+connection is still open (the client noticed the drop first) moves the meeting
+to the new connection and closes the old one.
+
+A meeting nobody reconnects to within the 60 seconds is ended as if its
+connection had closed for good. A START with a new `callId` starts a new
+meeting.
+
+The held meeting lives on the transcriber task that served it. With more than
+one task (`TranscriberDesiredTaskCount` above 1), a reconnection can reach a
+different task, which starts a second session for the same `callId`: its
+transcript starts again from zero, and its audio recording is stored beside the
+meeting's first one (`<callId>_<timestamp>.wav` under the recordings prefix)
+rather than replacing it, while the meeting keeps its first recording. The same
+happens to a reconnection after the 60 seconds.
 
 ---
 
