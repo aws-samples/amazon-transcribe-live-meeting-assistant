@@ -29,6 +29,10 @@ If processTranscript is set to true, the following processing will occur:
 
 This is the maximum number of words and symbols that will be returned. This can be used if your summarization model has a max token count.  If `0`, the entire transcript will be returned. 
 
+### IncludeChat (bool)
+
+When `true`, the messages typed in the meeting chat (channel `MEETING_CHAT`) are interleaved with the speech as `[chat] <sender>: <message>` lines, each message on one line with `<` and `>` replaced, and the response also carries `chat` (one `[MM:SS] <sender>: <message>` line per message) and `chatLinks` (`[{"url", "sender", "time"}]`). Off by default: without it the transcript is speech only. See [Transcript Summarization](../../../../docs/transcript-summarization.md#fetchtranscript-utility-lambda).
+
 ## Example event payload:
 
 ```

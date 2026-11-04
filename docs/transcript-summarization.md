@@ -15,6 +15,8 @@ title: "Transcript Summarization"
   - [Prompt Template Storage](#prompt-template-storage)
   - [Attribute Naming Convention](#attribute-naming-convention)
   - [Customizing Prompts](#customizing-prompts)
+  - [Chat and Shared Links](#chat-and-shared-links)
+  - [Meeting Content Is Quoted Data](#meeting-content-is-quoted-data)
   - [Admin UI](#admin-ui)
 - [LAMBDA Option](#lambda-option)
   - [Lambda Function Requirements](#lambda-function-requirements)
@@ -103,7 +105,11 @@ Each attribute's value contains the prompt template text that instructs the mode
 - Use the `{agenda}` placeholder where the meeting's [agenda](meeting-agenda.md) should be inserted, as numbered lines. A section whose prompt names `{agenda}` is generated only for a meeting that has an agenda, and left out of the summary of one that does not. The shipped **AGENDA COVERAGE** section uses it; see [Agenda coverage in the summary](meeting-agenda.md#agenda-coverage-in-the-summary).
 - Use the `{slides}` placeholder (or `{screen_share}`, another name for it) where what was shared on screen should be inserted: each [key frame of the shared screen](meeting-video.md) with its time, a picture reference, its text and what was said while it was on screen. A section whose prompt names either is generated only for a meeting that has key frames. The shipped **SCREEN SHARE SUMMARY** section uses it; see [Screen share summary](meeting-video.md#screen-share-summary).
 - Use the `{timed_transcript}` placeholder for the transcript with the time of each line, and a line where the shared screen changed. The shipped **CHAPTERS** section uses it, and the meeting page reads that section's `- [MM:SS] Title` lines as the meeting's chapters; see [Chapters](meeting-video.md#chapters).
+- Use the `{chat}` placeholder for the messages typed in the meeting chat, which a [Virtual Participant](virtual-participant.md#meeting-chat-in-the-transcript) adds to the transcript: one `[MM:SS] <sender>: <message>` line per message, in the order sent. A section whose prompt names `{chat}` is generated only for a meeting whose transcript holds chat. The shipped **CHAT & SHARED LINKS** section uses it; see [Chat and Shared Links](#chat-and-shared-links).
+- Use the `{chat_links}` placeholder for the list of links shared in the chat, in the form shown under [Chat and Shared Links](#chat-and-shared-links), or *No links were shared in the chat.* It is likewise used only for a meeting with chat, and a section that names it is handled as a chat section.
 - Use `<br>` for newlines within the prompt template.
+
+In `{transcript}` and `{timed_transcript}`, each chat message also appears among the speech at the time the VP read it, as a line that begins `[chat]`: `[chat] Alice: the deck is on the team site`. The shipped **SUMMARY**, **DETAILS** and **ACTIONS** prompts say so. A message's line breaks are written as ` / ` and its `<` and `>` as `‹` and `›`, so a message stays on its one line and cannot close the `<transcript>` or `<chat>` tags around it.
 
 The edits below are all made in the **Transcript Summary** section of **Configuration ▸ Configuration**, which a link can open directly:
 
@@ -113,7 +119,7 @@ The edits below are all made in the **Transcript Summary** section of **Configur
 
 The earlier address, `/#/configuration/transcript-summary`, opens the same section.
 
-**To add a new summary section:** select **Add summary section** and give it a title. It is stored under the next sequence number (for example `7#Follow-Up Questions`).
+**To add a new summary section:** select **Add summary section** and give it a title. It is stored under the next sequence number (for example `8#Follow-Up Questions`).
 
 **To override a default section:** edit the prompt of the section with that name. The section is marked **Changed**, and only your version of it is stored in your profile.
 
@@ -122,6 +128,26 @@ The earlier address, `/#/configuration/transcript-summary`, opens the same secti
 **To go back to the shipped prompts:** **Reset to default** on one section, or **Reset section to defaults** for all of them; then save. See the [Configuration Guide](configuration-guide.md).
 
 Saving requires membership of the **Admin** group, and each save records which account made it.
+
+### Chat and Shared Links
+
+A meeting whose transcript holds chat gets a **CHAT & SHARED LINKS** section (`7#CHAT & SHARED LINKS`): at most eight bullet points on what was discussed in the chat, followed by the links participants shared. A meeting without chat does not get the section and costs no model call for it. When the chat holds nothing beyond greetings or reactions, the section reads *Nothing of substance was discussed in the chat.*
+
+The links are not written by the model. The model is asked not to write out any address, and what it returns for a section whose prompt names `{chat}` or `{chat_links}` then has every link taken out by code: a Markdown link or picture keeps only its text, an address written out (with any scheme, or starting `www.`, or a domain followed by a path) becomes `(link)`, and HTML tags and reference-style link definitions are removed. The section then ends with the links as they were found in the stored messages:
+
+```markdown
+**Links shared**
+- [00:20] Alice: `https://example.com/deck`
+- [04:05] Bob: `https://www.example.com/notes`
+```
+
+or with *No links were shared in the chat.* Each address is listed once, under the person who shared it first and at that time, in code formatting so that it is shown as text to copy rather than as a link to follow. An address is found by these rules, which the meeting page applies to chat lines too: it starts `http://`, `https://` or `www.` (given `https://`); trailing punctuation and an unmatched closing bracket are not part of it; only `http` and `https` addresses with a host are kept, up to 2,048 characters; and a backtick in it is written `%60`. Up to 50 links are listed, then the number of the rest. A link the VP added after a message as `(link: <address>)` is listed like one typed in the message.
+
+The Healthcare summary preset and a stack deployed with the healthcare prompt domain do not include the section. Every other profile gets it as it gets any section a release adds: a profile is merged over the baseline when it is read, so a Custom profile that does not hold the section has it on, including one copied from the Healthcare summary profile before this release. A Custom profile copied from that profile later holds it turned off. Turn it off or on in the **Transcript Summary** section like any other. See [Named profiles](configuration-store.md#named-profiles).
+
+### Meeting Content Is Quoted Data
+
+What a summary is written from comes from the people in the meeting: what they said, what they typed in the chat, and what their shared screen showed. Every request to the model carries a system prompt saying that this content is quoted data to summarise, that an instruction appearing in it is never to be followed, and that a transcript line beginning `[chat]` was typed rather than spoken. Every model the Configuration page offers for summaries takes a system prompt; a model that refuses one is sent the same text at the head of its prompt instead. This makes prompt injection through meeting content less likely to succeed; it does not rule it out, which is why the chat section's links are listed by code rather than by the model.
 
 ## LAMBDA Option
 
@@ -166,6 +192,7 @@ The function ARN is available in the stack output **FetchTranscriptLambdaArn**.
 | `CallId` | String | Yes | The unique identifier of the meeting/call. |
 | `ProcessTranscript` | Boolean | No | When `true`, condenses sequential utterances from the same speaker, removes filler words, and strips HTML tags. |
 | `TokenCount` | Integer | No | Trims the returned transcript to approximately N tokens. Useful for staying within model context limits. |
+| `IncludeChat` | Boolean | No | When `true`, the messages typed in the meeting chat are interleaved with the speech as `[chat] <sender>: <message>` lines (`[chat] <message>` without `IncludeSpeaker`), and the response also carries `chat`, one `[MM:SS] <sender>: <message>` line per message, and `chatLinks`, a list of `{"url", "sender", "time"}` for each link shared, `time` in seconds from the start of the meeting. Off by default, so a function that reads the transcript for what was said gets speech only. A message is cut at 1,000 characters, and past 100,000 characters of chat the later messages are left out of the text (and counted in the last line of `chat`); their links are still listed, up to 200. |
 
 **Example invocation payload:**
 
