@@ -75,6 +75,12 @@ def test_addresses_across_several_messages_are_listed_once() -> None:
         ("data:text/html;base64,PHA+ and data:,hi", "(link) and (link)"),
         ("mailto:bob@example.com, file:///etc/hosts", "(link), (link)"),
         ("[1]: mailto:bob@example.com", ""),
+        # The boundary of the scheme-less rule: one dot needs a listed,
+        # lower-case top-level domain; two or more dots need only lower case.
+        ("example.ru/page and Example.COM/page", None),
+        ("example.community/x", None),
+        ("docs.example.ru/page", "(link)"),
+        ("www.example.shop/x", "(link)"),
     ],
 )
 def test_links_and_pictures_are_taken_out_of_a_models_text(text, expected) -> None:
