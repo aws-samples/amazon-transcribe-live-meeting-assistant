@@ -425,6 +425,10 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
               setToolsOpen={setToolsOpen}
               callTranscriptPerCallId={callTranscriptPerCallId}
               getCallDetailsFromCallIds={getCallDetailsFromCallIds}
+              // Open from the start when the embed asked for the chat;
+              // otherwise as on the meeting page (open on a live meeting the
+              // first time, then as the user last left it).
+              assistantDefaultOpen={showChat ? true : undefined}
             />
           </div>
         )}

@@ -5,10 +5,9 @@
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Alert,
   Badge,
   Box,
   Button,
@@ -61,6 +60,8 @@ import useMeetingConsent from '../../hooks/use-meeting-consent';
 import CallCostPanel from './CallCostPanel';
 import MeetingHeader from './MeetingHeader';
 import MeetingAttributes from './MeetingAttributes';
+import MeetingAssistantPanel from './MeetingAssistantPanel';
+import useAssistantPanel from '../../hooks/use-assistant-panel';
 import { NodeSlot, useDetachedNode } from './NodeSlot';
 import { SUMMARY_ACTION_ITEMS, runSummaryAction } from './meeting-downloads';
 import { TAB_DETAILS, TAB_OVERVIEW, TAB_SCREEN_SHARE, TAB_TRANSCRIPT } from './meeting-tabs';
@@ -106,8 +107,6 @@ import { SentimentTrendIcon } from '../sentiment-trend-icon/SentimentTrendIcon';
 import { SentimentIcon } from '../sentiment-icon/SentimentIcon';
 import useAppContext from '../../contexts/app';
 import useUserGroups from '../../hooks/use-user-groups';
-import { AccessDenied } from '../common/AdminOnly';
-import { isConflict } from '../common/config-conflict';
 import awsExports from '../../aws-exports';
 import useCallsContext from '../../contexts/calls';
 import VNCViewer from '../virtual-participant-layout/VNCViewer';
@@ -116,7 +115,6 @@ import useChatKeyframeLinks from '../../hooks/use-chat-keyframe-links';
 import { isSharedWith } from '../common/shared-with';
 import useStrandsChatBridge from '../../hooks/use-strands-chat-bridge';
 import SummaryMarkdown from '../summary-markdown/SummaryMarkdown';
-import MCPServersModal from '../mcp-servers';
 
 const client = generateClient();
 const logger = new ConsoleLogger('CallPanel');
@@ -139,6 +137,12 @@ const PAUSE_TO_MERGE_IN_SECONDS = 1;
  * box; the assistant's frame needs a fixed height beside it in any case.
  */
 const TRANSCRIPT_HEIGHT = 'max(360px, calc(100vh - 420px))';
+
+/** Below this width of the page, the assistant panel lies over the tabs instead of beside them. */
+export const ASSISTANT_OVERLAY_BELOW_PX = 900;
+/** The assistant panel's least height, and its distance from the top navigation and the window's foot. */
+const ASSISTANT_MIN_HEIGHT_PX = 420;
+const ASSISTANT_GAP_PX = 12;
 
 /* eslint-disable react/prop-types, react/destructuring-assignment */
 /**
@@ -1368,482 +1372,6 @@ const CallInProgressTranscript = ({
   );
 };
 
-// Shown when the stored profile moved on while the Edit Chat Buttons dialog was
-// open -- another administrator saved it, from this dialog or a configuration
-// page, since they share one profile. The save is refused rather than replacing
-// their edit, so the way forward is to reopen the dialog and reapply.
-const CHAT_BUTTON_CONFLICT_MESSAGE =
-  'Someone else saved the configuration while this dialog was open. Close and reopen it to see ' +
-  'their version, then apply your changes again.';
-
-const getAgentAssistPanel = (item, user, showVNCPreview, setShowVNCPreview, vpData, loadingVP) => {
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [showMCPModal, setShowMCPModal] = useState(false);
-  const [buttonConfig, setButtonConfig] = useState(null);
-  // The version of the stored profile the dialog loaded, sent back on save so a
-  // save against a profile someone else has since saved is refused rather than
-  // replacing their edit.
-  const [buttonConfigVersion, setButtonConfigVersion] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [alertMessage, setAlertMessage] = useState(null);
-  const [alertType, setAlertType] = useState('success');
-
-  // Check if user is admin (Amplify v6 pattern). `isAdminLoading` distinguishes
-  // "not yet known" from "not an admin": the session resolves asynchronously, so
-  // acting on isAdmin before then would show an admin the denial on first render.
-  const { isAdmin, isLoading: isAdminLoading } = useUserGroups();
-
-  const loadButtonConfiguration = async () => {
-    setIsLoading(true);
-    setAlertMessage(null);
-
-    try {
-      const query = `
-        query GetChatButtonConfig($defaultId: ID!, $customId: ID!) {
-          default: getChatButtonConfig(ChatButtonConfigId: $defaultId) {
-            ChatButtonConfigId
-          }
-          custom: getChatButtonConfig(ChatButtonConfigId: $customId) {
-            ChatButtonConfigId
-          }
-        }
-      `;
-
-      const variables = {
-        defaultId: 'DefaultChatButtonConfig',
-        customId: 'CustomChatButtonConfig',
-      };
-
-      const result = await client.graphql({ query, variables });
-
-      // Parse the JSON strings returned from the resolver
-      const defaultData = result?.data?.default?.ChatButtonConfigId
-        ? JSON.parse(result.data.default.ChatButtonConfigId)
-        : {};
-      const customData = result?.data?.custom?.ChatButtonConfigId
-        ? JSON.parse(result.data.custom.ChatButtonConfigId)
-        : {};
-
-      // Filter to only include button fields (format: N#LABEL)
-      const buttonPattern = /^\d+#/;
-      const filterButtons = (config) => {
-        const filtered = {};
-        Object.keys(config).forEach((key) => {
-          if (buttonPattern.test(key)) {
-            filtered[key] = config[key];
-          }
-        });
-        return filtered;
-      };
-
-      const defaultButtons = filterButtons(defaultData);
-      const customButtons = filterButtons(customData);
-
-      // If custom buttons exist, use those; otherwise use defaults
-      const hasCustomButtons = Object.keys(customButtons).length > 0;
-      setButtonConfig(hasCustomButtons ? customButtons : defaultButtons);
-      setButtonConfigVersion(typeof customData.Version === 'number' ? customData.Version : null);
-    } catch (error) {
-      console.error('Failed to load button configuration:', error);
-      setAlertType('error');
-      setAlertMessage('Failed to load button configuration');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Load button configuration when modal opens
-  useEffect(() => {
-    if (showEditModal && isAdmin) {
-      loadButtonConfiguration();
-    }
-  }, [showEditModal, isAdmin]);
-
-  const handleSave = async () => {
-    setIsLoading(true);
-    setAlertMessage(null);
-
-    try {
-      const mutation = `
-        mutation UpdateChatButtonConfig($input: UpdateChatButtonConfigInput!) {
-          updateChatButtonConfig(input: $input) {
-            ChatButtonConfigId
-            Success
-            Version
-          }
-        }
-      `;
-
-      const variables = {
-        input: {
-          ChatButtonConfigId: 'CustomChatButtonConfig',
-          ButtonConfig: JSON.stringify(buttonConfig),
-          ExpectedVersion: buttonConfigVersion,
-        },
-      };
-
-      const saved = await client.graphql({ query: mutation, variables });
-      // So a second save from the same dialog is checked against this one.
-      setButtonConfigVersion(saved?.data?.updateChatButtonConfig?.Version ?? null);
-
-      setAlertType('success');
-      setAlertMessage('Button configuration saved successfully!');
-
-      // Notify iframe to reload button configuration
-      const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
-      if (iframe && iframe.contentWindow) {
-        const iframeOrigin = new URL(iframe.src).origin;
-        iframe.contentWindow.postMessage(
-          {
-            type: 'STRANDS_RELOAD_BUTTONS',
-          },
-          iframeOrigin,
-        );
-      }
-
-      // Close modal after short delay
-      setTimeout(() => {
-        setShowEditModal(false);
-      }, 1500);
-    } catch (error) {
-      console.error('Failed to save button configuration:', error);
-      setAlertType('error');
-      setAlertMessage(isConflict(error) ? CHAT_BUTTON_CONFLICT_MESSAGE : 'Failed to save button configuration');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleReset = async () => {
-    if (
-      !window.confirm('Are you sure you want to reset to default buttons? This will delete all custom configurations.')
-    ) {
-      return;
-    }
-
-    setIsLoading(true);
-    setAlertMessage(null);
-
-    try {
-      const mutation = `
-        mutation UpdateChatButtonConfig($input: UpdateChatButtonConfigInput!) {
-          updateChatButtonConfig(input: $input) {
-            ChatButtonConfigId
-            Success
-            Version
-          }
-        }
-      `;
-
-      const variables = {
-        input: {
-          ChatButtonConfigId: 'CustomChatButtonConfig',
-          ButtonConfig: JSON.stringify({}),
-          ExpectedVersion: buttonConfigVersion,
-        },
-      };
-
-      const saved = await client.graphql({ query: mutation, variables });
-      setButtonConfigVersion(saved?.data?.updateChatButtonConfig?.Version ?? null);
-
-      setAlertType('success');
-      setAlertMessage('Reset to defaults successfully!');
-
-      // Notify iframe to reload button configuration
-      const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
-      if (iframe && iframe.contentWindow) {
-        const iframeOrigin = new URL(iframe.src).origin;
-        iframe.contentWindow.postMessage(
-          {
-            type: 'STRANDS_RELOAD_BUTTONS',
-          },
-          iframeOrigin,
-        );
-      }
-
-      // Reload to show default config
-      setTimeout(() => {
-        loadButtonConfiguration();
-      }, 1500);
-    } catch (error) {
-      console.error('Failed to reset button configuration:', error);
-      setAlertType('error');
-      setAlertMessage(isConflict(error) ? CHAT_BUTTON_CONFLICT_MESSAGE : 'Failed to reset to defaults');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleButtonChange = (key, field, value) => {
-    if (field === 'label') {
-      // Update the key when label changes
-      const match = key.match(/^(\d+)#/);
-      if (match) {
-        const sequence = parseInt(match[1], 10);
-        const newKey = `${sequence}#${value}`;
-        const newConfig = { ...buttonConfig };
-        const oldPrompt = newConfig[key];
-        delete newConfig[key];
-        newConfig[newKey] = oldPrompt;
-        setButtonConfig(newConfig);
-      }
-    } else {
-      // Update prompt
-      setButtonConfig({
-        ...buttonConfig,
-        [key]: value,
-      });
-    }
-  };
-
-  const handleDeleteButton = (key) => {
-    const newConfig = { ...buttonConfig };
-    delete newConfig[key];
-
-    // Re-sequence remaining buttons to keep numbering contiguous
-    const sortedEntries = Object.entries(newConfig).sort((a, b) => {
-      const getSeq = (k) => {
-        const m = k.match(/^(\d+)#/);
-        return m ? parseInt(m[1], 10) : 999;
-      };
-      return getSeq(a[0]) - getSeq(b[0]);
-    });
-
-    const resequenced = {};
-    sortedEntries.forEach(([k, v], idx) => {
-      const label = k.replace(/^\d+#/, '');
-      resequenced[`${idx + 1}#${label}`] = v;
-    });
-
-    setButtonConfig(resequenced);
-  };
-
-  const handleAddButton = () => {
-    // Find the next sequence number
-    const existingSequences = Object.keys(buttonConfig || {}).map((k) => {
-      const m = k.match(/^(\d+)#/);
-      return m ? parseInt(m[1], 10) : 0;
-    });
-    const nextSequence = existingSequences.length > 0 ? Math.max(...existingSequences) + 1 : 1;
-    const newKey = `${nextSequence}#NEW BUTTON`;
-    setButtonConfig({
-      ...buttonConfig,
-      [newKey]: 'Enter prompt here',
-    });
-  };
-
-  const renderButtonEditors = () => {
-    if (!buttonConfig) return null;
-
-    // Sort by sequence number
-    const sortedEntries = Object.entries(buttonConfig).sort((a, b) => {
-      const getSequence = (key) => {
-        const match = key.match(/^(\d+)#/);
-        return match ? parseInt(match[1], 10) : 999;
-      };
-      return getSequence(a[0]) - getSequence(b[0]);
-    });
-
-    return sortedEntries.map(([key, prompt]) => {
-      const match = key.match(/^(\d+)#(.*)$/);
-      if (!match) return null;
-
-      const [, sequence, label] = match;
-
-      return (
-        <Box key={`button-${sequence}`} padding={{ vertical: 's' }}>
-          <SpaceBetween size="s">
-            <SpaceBetween direction="horizontal" size="xs">
-              <Box variant="h4">Button {sequence}</Box>
-              <Button
-                variant="icon"
-                iconName="remove"
-                onClick={() => handleDeleteButton(key)}
-                ariaLabel={`Delete button ${sequence}`}
-              />
-            </SpaceBetween>
-            <FormField label="Label">
-              <Input value={label} onChange={(e) => handleButtonChange(key, 'label', e.detail.value)} />
-            </FormField>
-            <FormField label='Prompt (set to "NONE" to hide button)'>
-              <Textarea value={prompt} onChange={(e) => handleButtonChange(key, 'prompt', e.detail.value)} rows={3} />
-            </FormField>
-          </SpaceBetween>
-        </Box>
-      );
-    });
-  };
-
-  if (import.meta.env.VITE_ENABLE_AGENT_ASSIST === 'true') {
-    // Use STRANDS chat UI
-    // Note: encodeURIComponent is required because callId may contain characters like '+'
-    // which URLSearchParams.get() would otherwise decode as a space.
-    const iframeSrc = `/strands-chat.html?callId=${encodeURIComponent(item.callId)}`;
-
-    console.log(`DEBUG: Agent Assist Mode: ${import.meta.env.VITE_AGENT_ASSIST_MODE}, Using iframe: ${iframeSrc}`);
-
-    return (
-      <>
-        <Container
-          disableContentPaddings
-          header={
-            <Header
-              variant="h4"
-              info={
-                <Link variant="info" target="_blank" href="https://amazon.com/live-meeting-assistant">
-                  Info
-                </Link>
-              }
-              actions={
-                isAdmin && import.meta.env.VITE_AGENT_ASSIST_MODE === 'LAMBDA' ? (
-                  <ButtonDropdown
-                    items={[
-                      { text: 'Edit Chat Buttons', id: 'edit-buttons' },
-                      {
-                        text: showVNCPreview ? 'Close VP Live View' : 'Open VP Live View',
-                        id: 'live-view',
-                        disabled: !vpData || !vpData.vncReady || loadingVP,
-                      },
-                      { text: 'MCP Servers', id: 'mcp-servers', disabled: false },
-                    ]}
-                    variant="normal"
-                    onItemClick={(e) => {
-                      if (e.detail.id === 'edit-buttons') {
-                        setShowEditModal(true);
-                      } else if (e.detail.id === 'live-view') {
-                        setShowVNCPreview((prev) => !prev);
-                      } else if (e.detail.id === 'mcp-servers') {
-                        setShowMCPModal(true);
-                      }
-                    }}
-                    ariaLabel="Settings"
-                  >
-                    <Icon name="settings" />
-                  </ButtonDropdown>
-                ) : null
-              }
-            >
-              Meeting Assist Bot
-            </Header>
-          }
-        >
-          <Box style={{ height: TRANSCRIPT_HEIGHT }}>
-            {/*
-              The `sandbox` list is deliberately exactly these two tokens.
-
-              What it buys: the frame renders agent output. The omitted tokens
-              mean nothing in that output can submit a form, open a popup, raise
-              a modal, or navigate the top-level page. Those are capabilities of
-              the inert markup that reaches the DOM, not of script, so removing
-              them is worth having on its own. This is the outer of three layers
-              for the form case in particular -- renderMarkdownSafe in
-              strands-chat.html strips form controls before they are rendered,
-              and `form-action 'self'` in the distribution's CSP bounds where a
-              submission could go -- and it is the layer that does not depend on
-              the sanitizer having run.
-
-              What it does not buy: `allow-scripts` plus `allow-same-origin` lets
-              a script already running in the frame remove the sandbox attribute
-              from its own frame element, so this is not a boundary against code
-              executing inside the frame. It is a restriction on inert content.
-
-              Why `allow-same-origin` stays: the parent/frame postMessage channel
-              is pinned in both directions -- the parent only acts on messages
-              whose `event.origin` equals its own, and addresses the frame with
-              an explicit targetOrigin rather than '*'. Dropping the token would
-              move the frame to an opaque origin and force both ends back to
-              '*'/"null", trading a precise channel for a vaguer one.
-
-              Cost: none. strands-chat.html has no form, no target="_blank", no
-              window.open and no downloads of its own.
-            */}
-            <iframe
-              style={{ border: '0px', height: TRANSCRIPT_HEIGHT, margin: '0' }}
-              title="Meeting Assist"
-              src={iframeSrc}
-              sandbox="allow-scripts allow-same-origin"
-              width="100%"
-            />
-          </Box>
-        </Container>
-
-        {/*
-          Edit Buttons Modal.
-
-          The chat buttons are shared by everyone in the account, so saving them
-          is an Admin operation, enforced on the AppSync field and in the
-          resolver behind it.
-
-          The !isAdmin branches below are a backstop, not a path a user takes
-          today: the only thing that opens this dialog is the actions dropdown
-          above, which is itself rendered only for an Admin, so a non-admin
-          cannot reach it. They are here because this panel is built in one
-          function and reused, and an entry point added later without that gate
-          is exactly the mistake worth surviving -- the dialog then explains
-          itself instead of offering a form whose save the resolver refuses.
-          Nothing user-facing should be documented as reachable through it.
-        */}
-        <Modal
-          visible={showEditModal}
-          onDismiss={() => setShowEditModal(false)}
-          size="large"
-          header="Edit Chat Buttons"
-          footer={
-            <Box float="right">
-              <SpaceBetween direction="horizontal" size="xs">
-                {isAdmin && (
-                  <Button variant="normal" onClick={handleReset} disabled={isLoading}>
-                    Reset to Defaults
-                  </Button>
-                )}
-                <Button variant="link" onClick={() => setShowEditModal(false)}>
-                  {isAdmin ? 'Cancel' : 'Close'}
-                </Button>
-                {isAdmin && (
-                  <Button variant="primary" onClick={handleSave} disabled={isLoading}>
-                    Save Changes
-                  </Button>
-                )}
-              </SpaceBetween>
-            </Box>
-          }
-        >
-          <SpaceBetween size="m">
-            <Alert type={alertType} visible={!!alertMessage}>
-              {alertMessage}
-            </Alert>
-
-            {!isAdminLoading && !isAdmin ? (
-              <AccessDenied feature="the chat buttons" />
-            ) : (
-              <>
-                <Box>
-                  Customize the suggestion buttons that appear in the chat. Changes will apply to all users. Set prompt
-                  to &quot;NONE&quot; to hide a button.
-                </Box>
-
-                {isLoading || isAdminLoading ? (
-                  <Box textAlign="center">Loading...</Box>
-                ) : (
-                  <SpaceBetween size="m">
-                    {renderButtonEditors()}
-                    <Button variant="normal" iconName="add-plus" onClick={handleAddButton}>
-                      Add Button
-                    </Button>
-                  </SpaceBetween>
-                )}
-              </>
-            )}
-          </SpaceBetween>
-        </Modal>
-
-        {/* MCP Servers Modal */}
-        <MCPServersModal visible={showMCPModal} onDismiss={() => setShowMCPModal(false)} vpData={vpData} />
-      </>
-    );
-  }
-  return null;
-};
 const LANGUAGE_OPTIONS = LANGUAGE_CODES.filter(({ value }) => value).map(({ value, label }) => ({ value, label }));
 
 const CallTranscriptContainer = ({
@@ -1852,11 +1380,6 @@ const CallTranscriptContainer = ({
   callTranscriptPerCallId,
   translateClient,
   enableSentimentAnalysis,
-  user,
-  showVNCPreview,
-  setShowVNCPreview,
-  vpData,
-  loadingVP,
   speakerIdentities,
   onRenameSpeaker,
   readOnly,
@@ -1891,87 +1414,69 @@ const CallTranscriptContainer = ({
   const selectedLanguage = LANGUAGE_OPTIONS.find((option) => option.value === targetLanguage) || null;
 
   return (
-    <Grid
-      gridDefinition={[
-        {
-          colspan: {
-            default: 12,
-            xs: import.meta.env.VITE_ENABLE_AGENT_ASSIST === 'true' ? 8 : 12,
-          },
-        },
-        {
-          colspan: {
-            default: 12,
-            xs: import.meta.env.VITE_ENABLE_AGENT_ASSIST === 'true' ? 4 : 0,
-          },
-        },
-      ]}
-    >
-      <div className="transcript-column">
-        {player}
-        <Container
-          fitHeight="true"
-          disableContentPaddings
-          header={
-            <Header
-              variant="h4"
-              info={<InfoLink onFollow={() => setToolsOpen(true)} />}
-              actions={
-                // The transcript's downloads are in the page header's Download menu.
-                <SpaceBetween direction="horizontal" size="m" alignItems="center">
-                  <Toggle
-                    onChange={({ detail }) => setAutoScroll(detail.checked)}
-                    checked={autoScroll}
-                    disabled={autoScrollDisabled}
-                  >
-                    Auto-scroll
-                  </Toggle>
-                  <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn}>
-                    Translate
-                  </Toggle>
-                  {translateOn && (
-                    <Select
-                      selectedOption={selectedLanguage}
-                      onChange={handleLanguageSelect}
-                      options={LANGUAGE_OPTIONS}
-                      placeholder="Choose a language"
-                      filteringType="auto"
-                      ariaLabel="Translation language"
-                      expandToViewport
-                    />
-                  )}
-                </SpaceBetween>
-              }
-            >
-              Transcript
-            </Header>
-          }
-        >
-          <TranscriptDeletionNotice
-            deletedAt={item.transcriptDeletedAt}
-            scheduledFor={item.transcriptDeletionScheduledFor}
-          />
-          <CallInProgressTranscript
-            item={item}
-            callTranscriptPerCallId={callTranscriptPerCallId}
-            autoScroll={autoScroll}
-            scrollRequest={scrollRequest}
-            translateClient={translateClient}
-            targetLanguage={targetLanguage}
-            agentTranscript={agentTranscript}
-            translateOn={translateOn}
-            enableSentimentAnalysis={enableSentimentAnalysis}
-            speakerIdentities={speakerIdentities}
-            onRenameSpeaker={onRenameSpeaker}
-            readOnly={readOnly}
-            active={active}
-            playback={playback}
-            onSeek={onSeek}
-          />
-        </Container>
-      </div>
-      {getAgentAssistPanel(item, user, showVNCPreview, setShowVNCPreview, vpData, loadingVP)}
-    </Grid>
+    <div className="transcript-column">
+      {player}
+      <Container
+        fitHeight="true"
+        disableContentPaddings
+        header={
+          <Header
+            variant="h4"
+            info={<InfoLink onFollow={() => setToolsOpen(true)} />}
+            actions={
+              // The transcript's downloads are in the page header's Download menu.
+              <SpaceBetween direction="horizontal" size="m" alignItems="center">
+                <Toggle
+                  onChange={({ detail }) => setAutoScroll(detail.checked)}
+                  checked={autoScroll}
+                  disabled={autoScrollDisabled}
+                >
+                  Auto-scroll
+                </Toggle>
+                <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn}>
+                  Translate
+                </Toggle>
+                {translateOn && (
+                  <Select
+                    selectedOption={selectedLanguage}
+                    onChange={handleLanguageSelect}
+                    options={LANGUAGE_OPTIONS}
+                    placeholder="Choose a language"
+                    filteringType="auto"
+                    ariaLabel="Translation language"
+                    expandToViewport
+                  />
+                )}
+              </SpaceBetween>
+            }
+          >
+            Transcript
+          </Header>
+        }
+      >
+        <TranscriptDeletionNotice
+          deletedAt={item.transcriptDeletedAt}
+          scheduledFor={item.transcriptDeletionScheduledFor}
+        />
+        <CallInProgressTranscript
+          item={item}
+          callTranscriptPerCallId={callTranscriptPerCallId}
+          autoScroll={autoScroll}
+          scrollRequest={scrollRequest}
+          translateClient={translateClient}
+          targetLanguage={targetLanguage}
+          agentTranscript={agentTranscript}
+          translateOn={translateOn}
+          enableSentimentAnalysis={enableSentimentAnalysis}
+          speakerIdentities={speakerIdentities}
+          onRenameSpeaker={onRenameSpeaker}
+          readOnly={readOnly}
+          active={active}
+          playback={playback}
+          onSeek={onSeek}
+        />
+      </Container>
+    </div>
   );
 };
 
@@ -2111,6 +1616,7 @@ export const CallPanel = ({
   setToolsOpen,
   getCallDetailsFromCallIds,
   tabInUrl = false,
+  assistantDefaultOpen = undefined,
 }) => {
   const { currentCredentials, user } = useAppContext();
   const { isAdmin: isAdminUser } = useUserGroups();
@@ -2249,14 +1755,64 @@ export const CallPanel = ({
     });
   }, [currentCredentials]);
 
-  // Answers the meeting assistant chat frame, and its requests for frames of
-  // the shared screen; the embeddable chat panel uses the same two hooks.
-  useStrandsChatBridge(item.callId);
-  useChatKeyframeLinks(item.callId);
-
   const isLive = item.recordingStatusLabel === IN_PROGRESS_STATUS;
 
-  // VNC Preview state at CallPanel level
+  // The meeting assistant, in a panel beside the tabs on every tab
+  // (MeetingAssistantPanel). Whether it is open is remembered per user, and a
+  // live meeting opens with it open the first time (use-assistant-panel.js).
+  // Read here rather than once at load, so a test can set the flag.
+  const assistantEnabled = import.meta.env.VITE_ENABLE_AGENT_ASSIST === 'true';
+  // Whether the panel lies over the tabs (a narrow page) rather than beside
+  // them; null until the page has been measured (see the layout effect below).
+  const [assistantOverlays, setAssistantOverlays] = useState(null);
+  const assistant = useAssistantPanel({
+    enabled: assistantEnabled,
+    callId: item.callId,
+    isLive,
+    username: user?.username,
+    defaultOpen: assistantDefaultOpen,
+    besideTabs: assistantOverlays === null ? null : !assistantOverlays,
+  });
+  const setAssistantOpen = assistant.setOpen;
+  // A new value each time the viewer opens the panel: the focus goes into the composer.
+  const [assistantFocusRequest, setAssistantFocusRequest] = useState(0);
+  // An answer finished while the panel was closed; shown on the header button.
+  const [assistantUnread, setAssistantUnread] = useState(false);
+  const assistantOpenRef = useRef(assistant.open);
+  assistantOpenRef.current = assistant.open;
+  const assistantButtonRef = useRef(null);
+  useEffect(() => {
+    if (assistant.open) setAssistantUnread(false);
+  }, [assistant.open]);
+  useEffect(() => {
+    setAssistantUnread(false);
+  }, [item.callId]);
+  const toggleAssistant = useCallback(
+    (open) => {
+      setAssistantOpen(open);
+      if (open) setAssistantFocusRequest((previous) => previous + 1);
+    },
+    [setAssistantOpen],
+  );
+  const closeAssistant = useCallback(
+    ({ returnFocus = false } = {}) => {
+      setAssistantOpen(false);
+      if (returnFocus) assistantButtonRef.current?.focus();
+    },
+    [setAssistantOpen],
+  );
+  const onAnswerComplete = useCallback(() => {
+    if (!assistantOpenRef.current) setAssistantUnread(true);
+  }, []);
+
+  // Answers the meeting assistant chat frame, and its requests for frames of
+  // the shared screen; the embeddable chat panel uses the same two hooks.
+  useStrandsChatBridge(item.callId, { onAnswerComplete });
+  useChatKeyframeLinks(item.callId);
+
+  // Whether the Virtual Participant's live view is shown, at the top of the
+  // Transcript tab. Opened and closed from the assistant's settings menu and
+  // by the assistant itself (the VNC preview subscription below).
   const [showVNCPreview, setShowVNCPreview] = useState(false);
 
   // How many key frames the strip has loaded. It decides whether the meeting
@@ -2267,6 +1823,16 @@ export const CallPanel = ({
   }, [item.callId]);
   const hasKeyframes = keyframes.count > 0;
   const [activeTab, setActiveTab] = useMeetingTab({ inUrl: tabInUrl, isLive, hasKeyframes });
+  // Opening the live view also opens the tab it is on, wherever it was asked for.
+  const setVncPreview = useCallback(
+    (show) => {
+      setShowVNCPreview(show);
+      if (show) setActiveTab(TAB_TRANSCRIPT);
+    },
+    [setActiveTab],
+  );
+  const setVncPreviewRef = useRef(setVncPreview);
+  setVncPreviewRef.current = setVncPreview;
   const timelineNode = useDetachedNode();
 
   // The Virtual Participant that joined this meeting, if one did: for the
@@ -2372,6 +1938,21 @@ export const CallPanel = ({
       }
     },
     [setActiveTab, seekPlayer],
+  );
+  // "Show in transcript" under a frame the assistant showed: as the same
+  // action on the Screen share tab, from the time in the frame's id. Where the
+  // panel lies over the page, it is closed so the transcript can be seen; the
+  // remembered choice is left as it was.
+  const assistantOverlaysRef = useRef(assistantOverlays);
+  assistantOverlaysRef.current = assistantOverlays;
+  const showChatFrameInTranscript = useCallback(
+    (frameId) => {
+      const seconds = frameIdSeconds(frameId);
+      if (seconds === null) return;
+      showInTranscript(seconds, { reveal: true });
+      if (assistantOverlaysRef.current) setAssistantOpen(false, { remember: false });
+    },
+    [showInTranscript, setAssistantOpen],
   );
   const onFramesChange = useCallback(({ count, more, loaded }) => {
     setKeyframes((previous) =>
@@ -2531,7 +2112,7 @@ export const CallPanel = ({
           if (control) {
             if (control.Success) {
               const shouldShow = control.Action === 'open';
-              setShowVNCPreview(shouldShow);
+              setVncPreviewRef.current(shouldShow);
               logger.info(`VNC preview ${control.Action} by ${control.RequestedBy || 'agent'}`);
             }
           }
@@ -2690,11 +2271,6 @@ export const CallPanel = ({
         callTranscriptPerCallId={callTranscriptPerCallId}
         translateClient={translateClient}
         enableSentimentAnalysis={enableSentimentAnalysis}
-        user={user}
-        showVNCPreview={showVNCPreview}
-        setShowVNCPreview={setShowVNCPreview}
-        vpData={vpData}
-        loadingVP={loadingVP}
         speakerIdentities={speakerIdentities}
         onRenameSpeaker={handleRenameSpeaker}
         readOnly={speakerNamesReadOnly}
@@ -2751,27 +2327,105 @@ export const CallPanel = ({
     { id: TAB_DETAILS, label: 'Details', content: details, contentRenderStrategy: 'eager' },
   ];
 
+  // The assistant panel's place: a column beside the tabs, or, where the page
+  // is narrower than ASSISTANT_OVERLAY_BELOW_PX (a phone, the meeting list's
+  // split panel at the side, a narrow embed), over the right of the tabs.
+  // Measured on the page's own width rather than the window's, because the
+  // same page is shown full width, in the split panel and in embeds. Sticky
+  // below the application's top navigation, as the player is, and as tall as
+  // the window leaves below where it starts on the page, so the composer at
+  // its foot is in view without scrolling. Measured again when the page, the
+  // header above it (speaker names arriving) or the window change size.
+  // Measured before the first paint, because with no choice made the width
+  // decides whether the panel starts open.
+  const bodyRef = useRef(null);
+  const headerRef = useRef(null);
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!body || !assistantEnabled) return undefined;
+    const nav = document.getElementById('top-navigation');
+    const measure = () => {
+      const navHeight = nav ? nav.offsetHeight : 0;
+      const pageTop = body.getBoundingClientRect().top + window.scrollY;
+      const top = Math.max(pageTop, navHeight + ASSISTANT_GAP_PX);
+      setAssistantOverlays(body.clientWidth > 0 && body.clientWidth < ASSISTANT_OVERLAY_BELOW_PX);
+      body.style.setProperty('--meeting-assistant-top', `${navHeight}px`);
+      body.style.setProperty(
+        '--meeting-assistant-height',
+        `${Math.max(ASSISTANT_MIN_HEIGHT_PX, window.innerHeight - top - ASSISTANT_GAP_PX)}px`,
+      );
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(body);
+    if (headerRef.current) observer?.observe(headerRef.current);
+    if (nav) observer?.observe(nav);
+    return () => {
+      window.removeEventListener('resize', measure);
+      observer?.disconnect();
+    };
+  }, [assistantEnabled]);
+
+  const bodyClass = [
+    'meeting-body',
+    assistant.open ? 'meeting-body-assistant-open' : '',
+    assistantOverlays ? 'meeting-body-assistant-overlay' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
     <div ref={panelRef}>
       <SpaceBetween size="m">
-        <MeetingHeader
-          item={displayItem}
-          durationMillis={durationMillis}
-          platform={platform}
-          speakers={speakers}
-          cost={cost}
-          consent={meetingConsent.consent}
-          callTranscriptPerCallId={callTranscriptPerCallId}
-          getCallDetailsFromCallIds={getCallDetailsFromCallIds}
-          setToolsOpen={setToolsOpen}
-          onShowSpeakers={speakerNamesReadOnly ? undefined : () => setActiveTab(TAB_DETAILS)}
-        />
-        <Tabs
-          tabs={tabs}
-          activeTabId={activeTab}
-          onChange={({ detail }) => setActiveTab(detail.activeTabId)}
-          ariaLabel="Meeting"
-        />
+        <div ref={headerRef}>
+          <MeetingHeader
+            item={displayItem}
+            durationMillis={durationMillis}
+            platform={platform}
+            speakers={speakers}
+            cost={cost}
+            consent={meetingConsent.consent}
+            callTranscriptPerCallId={callTranscriptPerCallId}
+            getCallDetailsFromCallIds={getCallDetailsFromCallIds}
+            setToolsOpen={setToolsOpen}
+            onShowSpeakers={speakerNamesReadOnly ? undefined : () => setActiveTab(TAB_DETAILS)}
+            assistant={
+              assistantEnabled
+                ? {
+                    open: assistant.open,
+                    unread: assistantUnread,
+                    onToggle: toggleAssistant,
+                    buttonRef: assistantButtonRef,
+                  }
+                : undefined
+            }
+          />
+        </div>
+        <div ref={bodyRef} className={bodyClass}>
+          <div className="meeting-main">
+            <Tabs
+              tabs={tabs}
+              activeTabId={activeTab}
+              onChange={({ detail }) => setActiveTab(detail.activeTabId)}
+              ariaLabel="Meeting"
+            />
+          </div>
+          {/* Created on first opening, then hidden rather than removed, so the chat keeps its conversation. */}
+          {assistant.mounted && (
+            <MeetingAssistantPanel
+              callId={item.callId}
+              open={assistant.open}
+              onClose={closeAssistant}
+              focusRequest={assistantFocusRequest}
+              onShowInTranscript={showChatFrameInTranscript}
+              showVNCPreview={showVNCPreview}
+              setShowVNCPreview={setVncPreview}
+              vpData={vpData}
+              loadingVP={loadingVP}
+            />
+          )}
+        </div>
         {timelineNode &&
           createPortal(
             <VideoTimeline

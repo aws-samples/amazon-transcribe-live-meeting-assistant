@@ -103,8 +103,9 @@ header with what the meeting was, and four tabs under it. The selected tab is
 part of the page's address (`#/calls/<Meeting ID>?tab=overview`), so a link or
 a reload opens the same tab; a link without one opens the **Transcript** tab.
 Switching tabs keeps each tab as it was, including a summary or agenda being
-edited, the transcript's translation and scroll position, and the assistant's
-conversation.
+edited and the transcript's translation and scroll position. The meeting
+assistant is a panel beside the tabs, on every tab; see
+[Meeting assistant panel](#meeting-assistant-panel).
 
 ### Meeting header
 
@@ -124,6 +125,9 @@ conversation.
   **Details** tab.
 - **Est. cost** — the meeting's estimated cost. Select it to see the itemised
   estimate; see [Meeting Cost Estimate](meeting-cost-estimate.md).
+- **Assistant** — opens and closes the [meeting assistant panel](#meeting-assistant-panel),
+  when the deployment has the meeting assistant enabled. A dot on the button
+  means an answer finished while the panel was closed.
 - **Share**, **Download** and the **⋮** menu — **Download** offers the summary
   (copy, text file, Word, email) and, once the meeting has ended, the transcript
   (Excel, text, Word); see [Transcript Downloads](#transcript-downloads). **Delete
@@ -279,15 +283,45 @@ meeting.
   assistant's answers); choosing **All** shows everything again. The search
   works within the speakers chosen.
 
-Beside it is the **Meeting Assist Bot** chat:
-- Real-time token streaming responses from the Strands agent
-- **Chat shortcut buttons** for common actions: Summary, Action Items, Topic, and more
-- Shortcut buttons re-appear after each response for quick follow-up actions
-
 During a live meeting with a Virtual Participant, the VP's **live view** (a
 real-time VNC viewer of the VP's browser) appears at the top of this tab when it
-is opened from the chat panel's settings menu (**Open VP Live View**) or by the
-assistant. You can see and control what the VP sees in the meeting.
+is opened from the assistant panel's settings menu (**Open VP Live View**) or by
+the assistant. Opening it from another tab switches to this one. You can see and
+control what the VP sees in the meeting.
+
+### Meeting assistant panel
+
+The meeting assistant's chat, in a panel on the right of the page, available on
+every tab. **Assistant** in the header opens and closes it, and the panel's
+**✕** closes it too, as does **Escape** while the keyboard focus is in the
+panel. Opening it puts the focus in the box where you type a question.
+
+- **While it is open** the tabs are narrower; when it is closed they have the
+  full width. Where the page is narrow (a small window, the meeting list's
+  split panel at the side, a narrow embed) the panel lies over the right of
+  the tabs instead of beside them. It stays in view while the page scrolls.
+- **Open or closed is remembered** for you in this browser, for every meeting,
+  once you have opened or closed it. Until then it is open where the page is
+  wide enough for it to sit beside the tabs, and closed where it would lie over
+  them. A live meeting you have not opened before starts with the panel open;
+  after that it is as you last left it.
+- **The conversation is kept** when you switch tabs or close and reopen the
+  panel. Opening another meeting starts a conversation about that meeting.
+- **What it offers:** answers streamed as the Strands agent writes them, and
+  [chat shortcut buttons](#chat-buttons) for common requests (Summary, Action
+  Items, Topic and more), shown again after each answer.
+- **Frames of the shared screen** in an answer open full size when selected.
+  Under the full-size frame, **Show in transcript** opens the **Transcript**
+  tab at that moment and moves the [player](#the-recording-player) there,
+  paused. Where the panel lies over the page, it closes to show the transcript.
+- **Settings menu** (administrators, in the Lambda assistant mode): **Edit Chat
+  Buttons**, **Open VP Live View** / **Close VP Live View**, and **MCP
+  Servers**.
+
+The panel is shown only when the deployment has the meeting assistant enabled;
+otherwise there is no **Assistant** button. In the embeddable components, a
+`call-details` embed and a `vp-details` embed whose `show` includes `chat` start
+with the panel open; see [Embeddable Components](embeddable-components.md).
 
 ### Screen share tab
 
@@ -462,7 +496,8 @@ See [User Management](user-management.md) for full documentation.
 ### Chat Buttons
 
 Customize the chat shortcut buttons that appear in the meeting chat panel:
-- Open the **Edit Chat Buttons** modal from the meeting detail page
+- Open the **Edit Chat Buttons** modal from the settings menu of the meeting
+  detail page's [assistant panel](#meeting-assistant-panel)
 - Add new shortcut buttons with custom labels and prompts
 - Edit existing button labels and prompts
 - Delete buttons you no longer need

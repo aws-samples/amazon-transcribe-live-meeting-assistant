@@ -115,7 +115,7 @@ const EmbedChatPanel = ({ item }) => {
       }
     >
       <div className="embed-chat-panel">
-        {/* Same sandbox rationale as the CallPanel frame; see the comment there. */}
+        {/* Same sandbox rationale as the meeting page's frame; see the comment in MeetingAssistantPanel.jsx. */}
         <iframe
           style={{ border: '0px', height: '60vh', margin: '0' }}
           title="Meeting Assist"
@@ -780,6 +780,8 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
             setToolsOpen={setToolsOpen}
             callTranscriptPerCallId={callTranscriptPerCallId}
             getCallDetailsFromCallIds={getCallDetailsFromCallIds}
+            // The embed asked for the chat, so its panel starts open.
+            assistantDefaultOpen
           />
         </div>
       </CallsContext.Provider>

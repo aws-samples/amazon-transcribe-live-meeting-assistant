@@ -346,6 +346,23 @@
             max-height: 96vh;
             border-radius: 4px;
         }
+        .lma-keyframe-overlay.with-actions {
+            flex-direction: column;
+            gap: 10px;
+        }
+        .lma-keyframe-overlay.with-actions img {
+            max-height: calc(96vh - 48px);
+        }
+        .lma-keyframe-overlay button {
+            padding: 6px 14px;
+            border: 0;
+            border-radius: 16px;
+            background: #ffffff;
+            color: #0f141a;
+            font: inherit;
+            font-weight: 600;
+            cursor: pointer;
+        }
         /* A frame of the shared screen in an answer (see resolveKeyframes). */
         img.lma-keyframe {
             display: block;
@@ -432,9 +449,15 @@
             return renderMarkdownSafe(withKeyframePlaceholders(text));
         }
 
+        // What the page hosting this frame can do with a frame of the shared
+        // screen, from its STRANDS_HOST_FEATURES message. The meeting page can
+        // show the moment in its transcript; the embeddable chat panel cannot,
+        // and never sends the message.
+        const hostFeatures = { showInTranscript: false };
+
         // The full-size picture is shown in this frame: the page frames it with
         // a sandbox that allows no popups, so window.open would be dropped.
-        function openKeyframeOverlay(url, alt) {
+        function openKeyframeOverlay(url, alt, frameId) {
             const overlay = document.createElement('div');
             overlay.className = 'lma-keyframe-overlay';
             overlay.setAttribute('role', 'dialog');
@@ -450,6 +473,18 @@
             const onKey = (event) => {
                 if (event.key === 'Escape') close();
             };
+            if (hostFeatures.showInTranscript && frameId) {
+                overlay.classList.add('with-actions');
+                const show = document.createElement('button');
+                show.type = 'button';
+                show.textContent = 'Show in transcript';
+                show.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    close();
+                    window.parent.postMessage({ type: 'STRANDS_SHOW_IN_TRANSCRIPT', frameId }, PARENT_ORIGIN);
+                });
+                overlay.appendChild(show);
+            }
             overlay.addEventListener('click', close);
             document.addEventListener('keydown', onKey);
             document.body.appendChild(overlay);
@@ -470,7 +505,7 @@
             };
             img.onclick = () => {
                 const current = freshLink(img.dataset.lmaKeyframe);
-                if (current) openKeyframeOverlay(current.image || current.thumbnail, img.alt);
+                if (current) openKeyframeOverlay(current.image || current.thumbnail, img.alt, img.dataset.lmaKeyframe);
                 else resolveKeyframes(img.parentElement);
             };
         }
@@ -507,13 +542,27 @@
             );
         }
 
-        // Listen for reload message from parent
+        // Messages from the page that hosts this frame.
         window.addEventListener('message', (event) => {
             if (!isFromParent(event)) return;
             if (event.data?.type === 'STRANDS_RELOAD_BUTTONS') {
                 // Reload button configuration when admin saves changes
                 loadButtonConfiguration();
+            } else if (event.data?.type === 'STRANDS_FOCUS_INPUT') {
+                // The meeting page's assistant panel was opened.
+                messageInput.focus();
+            } else if (event.data?.type === 'STRANDS_HOST_FEATURES') {
+                hostFeatures.showInTranscript = event.data.showInTranscript === true;
             }
+        });
+
+        // Escape in this frame closes the meeting page's assistant panel. Keys
+        // pressed in a frame do not reach the page that hosts it, so it is told.
+        // A picture open full size takes Escape for itself (openKeyframeOverlay).
+        document.addEventListener('keydown', (event) => {
+            if (event.key !== 'Escape' || event.defaultPrevented) return;
+            if (document.querySelector('.lma-keyframe-overlay')) return;
+            window.parent.postMessage({ type: 'STRANDS_ESCAPE' }, PARENT_ORIGIN);
         });
         
         // Thinking process functions

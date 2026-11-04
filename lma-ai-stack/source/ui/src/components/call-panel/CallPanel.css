@@ -137,3 +137,95 @@ mark.transcript-search-match {
 .transcript-row-match-active mark.transcript-search-match {
   background-color: #ffd75e;
 }
+
+/*
+ * The tabs and the meeting assistant's panel (MeetingAssistantPanel): a column
+ * beside the tabs while it is open, and nothing when it is closed, so the tabs
+ * have the full width. Where the page is narrow (CallPanel measures it and adds
+ * meeting-body-assistant-overlay) the panel lies over the right of the tabs
+ * instead. Both ways it is sticky below the application's top navigation, so
+ * it stays in view while a long tab scrolls.
+ */
+.meeting-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.meeting-main {
+  grid-row: 1;
+  grid-column: 1;
+  min-width: 0;
+}
+
+.meeting-body-assistant-open:not(.meeting-body-assistant-overlay) {
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 30%, 440px);
+}
+
+.meeting-assistant {
+  grid-row: 1;
+  grid-column: 2;
+  position: sticky;
+  top: calc(var(--meeting-assistant-top, 0px) + 12px);
+  /* Set by CallPanel from where the panel starts; the fallback is for before it has measured. */
+  height: var(--meeting-assistant-height, max(420px, calc(100vh - 300px)));
+  min-width: 0;
+}
+
+.meeting-assistant[hidden] {
+  display: none;
+}
+
+.meeting-body-assistant-overlay .meeting-assistant {
+  grid-column: 1;
+  justify-self: end;
+  width: min(420px, 100%);
+  z-index: 850;
+  border-radius: 16px;
+  box-shadow: -4px 0 16px rgba(0, 7, 22, 0.18);
+}
+
+.meeting-assistant-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #c6c6cd;
+  border-radius: 16px;
+}
+
+.meeting-assistant-header {
+  padding: 8px 12px 6px 20px;
+  border-bottom: 1px solid #e9ebed;
+}
+
+.meeting-assistant-chat {
+  display: block;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+}
+
+/* On the header's Assistant button: an answer arrived while the panel was closed. */
+.meeting-assistant-unread {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #0972d3;
+  vertical-align: middle;
+}
+
+.meeting-assistant-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

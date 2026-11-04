@@ -166,11 +166,11 @@ Show the VNC live view and transcript for a virtual participant session:
 | `stream-audio` | Stream-only: live meeting form + recording controls (mic / screen audio) | `meetingTopic`, `participants`, `owner`, `autoStart`, `diarizeSystem`, `diarizeMic` |
 | `upload-audio` | Upload-only: file-picker form for pre-recorded audio / video + diarization toggle | `meetingTopic`, `participants`, `owner` |
 | `select-audio` | Combined page with a top-of-page Stream / Upload mode switcher | `meetingTopic`, `participants`, `owner` |
-| `call-details` | Complete call details view (transcript + summary + chat). With all three panels it is the meeting page itself, header and tabs included; the selected tab is not written to the embedding page's URL | `callId`, `show`, `layout` |
+| `call-details` | Complete call details view (transcript + summary + chat). With all three panels it is the meeting page itself, header and tabs included, with the meeting assistant's panel open beside the tabs; the selected tab is not written to the embedding page's URL | `callId`, `show`, `layout` |
 | `transcript` | Live meeting transcript only | `callId` |
 | `summary` | Meeting summary only | `callId` |
 | `chat` | Meeting Assist Bot chat only | `callId` |
-| `vp-details` | Virtual participant details with selectable panels. Any of `transcript`, `summary` or `chat` in `show` renders the full meeting panel once the Virtual Participant has a meeting: the header and the tabs (Overview, Transcript, Screen share, Details), with the recording's player on the Transcript tab after the meeting. The selected tab is held in the embed and not written to the embedding page's URL | `vpId`, `show`, `layout` |
+| `vp-details` | Virtual participant details with selectable panels. Any of `transcript`, `summary` or `chat` in `show` renders the full meeting panel once the Virtual Participant has a meeting: the header and the tabs (Overview, Transcript, Screen share, Details), with the recording's player on the Transcript tab after the meeting, and the meeting assistant's panel, open from the start when `show` includes `chat` and otherwise behind the header's **Assistant** button. The selected tab is held in the embed and not written to the embedding page's URL | `vpId`, `show`, `layout` |
 | `vnc` | VNC live view of virtual participant only | `vpId` |
 | `meeting-loader` | Blank meeting starter page (for programmatic control) | `meetingTopic`, `participants`, `owner`, `autoStart` |
 | `vp-loader` | Programmatic Virtual Participant creator (accepts `LMA_CREATE_VP` postMessage) | `meetingName`, `meetingPlatform`, `meetingId`, `meetingPassword`, `autoStart` |
