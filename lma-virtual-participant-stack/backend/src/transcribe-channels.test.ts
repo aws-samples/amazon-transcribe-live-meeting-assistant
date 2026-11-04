@@ -226,7 +226,8 @@ test('the two-channel stream is used exactly when a voice assistant is configure
 test('the channels come from the meeting-only and assistant-only sources; the recording stays combined', () => {
     const stream = methodBody('private async *audioStream');
     assert.match(stream, /combined_audio\.monitor/);
-    assert.match(stream, /recordingStream\.write\(chunk\)/);
+    // The recording takes the combined chunk (silence while paused, see recorded-audio.ts).
+    assert.match(stream, /recordingStream\.write\(recordedAudio\(chunk, details\.start\)\)/);
     assert.match(stream, /this\.startMeetingAudioFanout\(\(chunk\) => queue\.push\(stereoPcm\.pushLeft\(chunk\)\)\)/);
     assert.match(stream, /this\.startAgentAudioCapture\(\(chunk\) => queue\.push\(stereoPcm\.pushRight\(chunk\)\)\)/);
     // The fan-out is started once per session: by audioStream on two channels,
