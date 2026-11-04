@@ -10819,10 +10819,10 @@ Resources:
                         Description: "Name/title of the meeting"
                       meetingPlatform:
                         Type: string
-                        Description: "Platform (Zoom, Teams, Chime, Webex)"
+                        Description: "Platform (Zoom, Teams, Chime, Webex, Google Meet)"
                       meetingId:
                         Type: string
-                        Description: "Meeting ID (numeric ID only)"
+                        Description: "Meeting ID (numeric ID only; for Google Meet the meeting code, e.g. abc-defg-hij)"
                       scheduledTime:
                         Type: string
                         Description: "ISO 8601 datetime when meeting should start"
@@ -10860,10 +10860,10 @@ Resources:
                         Description: "Name/title of the meeting"
                       meetingPlatform:
                         Type: string
-                        Description: "Platform (Zoom, Teams, Chime, Webex)"
+                        Description: "Platform (Zoom, Teams, Chime, Webex, Google Meet)"
                       meetingId:
                         Type: string
-                        Description: "Meeting ID (numeric ID only)"
+                        Description: "Meeting ID (numeric ID only; for Google Meet the meeting code, e.g. abc-defg-hij)"
                       meetingPassword:
                         Type: string
                         Description: "Optional meeting password"

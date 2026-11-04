@@ -333,7 +333,7 @@ function readSource(file: string): string {
 }
 
 test('every platform handler matches pause, resume and help with matchesChatCommand', () => {
-    for (const file of ['zoom.ts', 'zoom-sdk.ts', 'teams.ts', 'teams-sdk.ts', 'webex.ts', 'chime.ts']) {
+    for (const file of ['zoom.ts', 'zoom-sdk.ts', 'teams.ts', 'teams-sdk.ts', 'webex.ts', 'chime.ts', 'google-meet.ts']) {
         const src = readSource(file);
         assert.match(
             src,
@@ -364,6 +364,7 @@ test('every platform handler answers chat questions with startChatAnswer under i
         ['teams-sdk.ts', 'teams-sdk'],
         ['webex.ts', 'webex'],
         ['chime.ts', 'chime'],
+        ['google-meet.ts', 'google-meet'],
     ]) {
         const src = readSource(file);
         assert.match(src, /parseChatQuestion\(/, `${file} does not parse chat questions`);

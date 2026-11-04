@@ -220,7 +220,7 @@ lma vp list --json
 | Option | Description |
 |--------|-------------|
 | `--name TEXT` | Meeting name (required) |
-| `--platform [ZOOM\|TEAMS\|CHIME\|WEBEX]` | Meeting platform (required, case-insensitive) |
+| `--platform [ZOOM\|TEAMS\|CHIME\|WEBEX\|GOOGLE_MEET]` | Meeting platform (required, case-insensitive). For `GOOGLE_MEET`, `--id` is the meeting code (`abc-defg-hij`) or the meeting link. |
 | `--id TEXT` | Meeting ID (required) |
 | `--password TEXT` | Meeting password (default: empty) |
 | `--user-name TEXT` | Display name the scribe reports (default: the `--as-user` email, otherwise `lma-cli@lma`) |

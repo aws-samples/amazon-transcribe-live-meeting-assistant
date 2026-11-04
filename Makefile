@@ -735,7 +735,7 @@ endif
 
 ##@ Virtual Participant Development
 # Usage:
-#   make vp-start STACK_NAME=<stack> PLATFORM=<WEBEX|ZOOM|TEAMS|CHIME> MEETING_ID=<id> \
+#   make vp-start STACK_NAME=<stack> PLATFORM=<WEBEX|ZOOM|TEAMS|CHIME|GOOGLE_MEET> MEETING_ID=<id> \
 #                 [MEETING_PASSWORD=<pw>] [DEV=1] [REUSE_ENV=1]
 #
 # Runs the Virtual Participant Docker container locally against a deployed LMA
@@ -746,7 +746,7 @@ ifndef STACK_NAME
 	$(error STACK_NAME is not set. Usage: make vp-start STACK_NAME=<stack> PLATFORM=<platform> MEETING_ID=<id> [MEETING_PASSWORD=<pw>] [DEV=1] [REUSE_ENV=1])
 endif
 ifndef PLATFORM
-	$(error PLATFORM is not set. Must be one of: WEBEX, ZOOM, TEAMS, CHIME)
+	$(error PLATFORM is not set. Must be one of: WEBEX, ZOOM, TEAMS, CHIME, GOOGLE_MEET)
 endif
 ifndef MEETING_ID
 	$(error MEETING_ID is not set)

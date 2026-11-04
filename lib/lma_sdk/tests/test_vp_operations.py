@@ -92,6 +92,31 @@ class TestLaunchWithoutUser:
         services["appsync"].graphql.assert_not_called()
 
 
+class TestGoogleMeet:
+    def test_a_meet_link_is_launched_as_its_meeting_code(self, client, services):
+        client.vp.create(
+            meeting_name="m", platform="google_meet",
+            meeting_id="https://meet.google.com/ABC-DEFG-HIJ?authuser=0", wait=False,
+        )
+        assert _vp_input(services)["meetingPlatform"] == "GOOGLE_MEET"
+        assert _vp_input(services)["meetingId"] == "abc-defg-hij"
+        assert _sfn_data(services)["meetingID"] == "abc-defg-hij"
+
+    def test_meets_own_redirect_form_is_accepted(self, client, services):
+        client.vp.create(
+            meeting_name="m", platform="GOOGLE_MEET",
+            meeting_id="meet.google.com/meet/abcdefghij", wait=False,
+        )
+        assert _vp_input(services)["meetingId"] == "abc-defg-hij"
+
+    def test_a_meeting_id_that_is_not_meet_is_rejected_before_anything_is_written(self, client, services):
+        with pytest.raises(LMAVirtualParticipantError, match="not a Google Meet meeting code"):
+            client.vp.create(
+                meeting_name="m", platform="GOOGLE_MEET", meeting_id="96187501703", wait=False,
+            )
+        services["appsync"].graphql.assert_not_called()
+
+
 class TestLaunchAsUser:
     def test_sets_owner_and_user_sub_like_the_ui(self, client, services):
         services["cognito"].admin_get_user.return_value = _cognito_user()

@@ -50,6 +50,7 @@ import {
 } from './vp-table-config';
 import ZoomCredentialsManager from './ZoomCredentialsManager';
 import ChromeProfileManager from './ChromeProfileManager';
+import { googleMeetCode, googleMeetIdError } from './google-meet';
 import { MAX_AGENDA_CHARS } from '../common/agenda';
 import {
   MEETING_CONSENT_OPTIONS,
@@ -543,14 +544,19 @@ const VirtualParticipantList = () => {
 
       // A join URL carries its password server-side and the password field is
       // hidden, so never submit a (possibly stale) separate password with one.
+      // Google Meet has no meeting password, and is stored as its meeting code.
+      const isGoogleMeet = createForm.meetingPlatform === 'GOOGLE_MEET';
       const submittingUrl = /^\s*https?:\/\//i.test(createForm.meetingId || '');
-      const effectivePassword = submittingUrl ? '' : createForm.meetingPassword || '';
+      const effectivePassword = submittingUrl || isGoogleMeet ? '' : createForm.meetingPassword || '';
+      const effectiveMeetingId = isGoogleMeet
+        ? googleMeetCode(createForm.meetingId) || createForm.meetingId.replace(/ /g, '')
+        : createForm.meetingId.replace(/ /g, '');
 
       // Create VP record with scheduling information
       const vpInput = {
         meetingName: createForm.meetingName,
         meetingPlatform: createForm.meetingPlatform,
-        meetingId: createForm.meetingId.replace(/ /g, ''),
+        meetingId: effectiveMeetingId,
         meetingPassword: effectivePassword,
         status: isScheduled ? 'SCHEDULED' : 'INITIALIZING',
         // Persisted on the row so the VPScheduler Lambda can plumb
@@ -601,7 +607,7 @@ const VirtualParticipantList = () => {
             apiInfo: { httpMethod: 'POST' },
             data: {
               meetingPlatform: createForm.meetingPlatform,
-              meetingID: createForm.meetingId.replace(/ /g, ''),
+              meetingID: effectiveMeetingId,
               meetingPassword: effectivePassword,
               meetingName: createForm.meetingName,
               meetingTime: '',
@@ -740,12 +746,22 @@ const VirtualParticipantList = () => {
   // A meetingId that is a full join URL (http/https) carries its own password
   // server-side, so the UI relabels the field and hides the password input.
   const meetingIdIsUrl = /^\s*https?:\/\//i.test(createForm.meetingId || '');
+  // Google Meet: a meeting code or link, and never a password.
+  const isGoogleMeetForm = createForm.meetingPlatform === 'GOOGLE_MEET';
+  const meetingIdError = isGoogleMeetForm ? googleMeetIdError(createForm.meetingId) : '';
+  let meetingIdLabel = meetingIdIsUrl ? 'Meeting URL' : 'Meeting ID';
+  let meetingIdPlaceholder = meetingIdIsUrl ? 'Enter meeting URL' : 'Enter meeting ID or paste a meeting URL';
+  if (isGoogleMeetForm) {
+    meetingIdLabel = 'Meeting code or link';
+    meetingIdPlaceholder = 'abc-defg-hij or https://meet.google.com/abc-defg-hij';
+  }
 
   // The resolver refuses a longer agenda, so the form does not offer to submit one.
   const agendaTooLong = (createForm.agenda || '').trim().length > MAX_AGENDA_CHARS;
 
   // Check if form is ready for immediate execution
-  const isFormValidForImmediate = createForm.meetingName && createForm.meetingId && consentChecked && !agendaTooLong;
+  const isFormValidForImmediate =
+    createForm.meetingName && createForm.meetingId && !meetingIdError && consentChecked && !agendaTooLong;
 
   // Check if form is ready for scheduling
   const isFormValidForScheduling =
@@ -756,7 +772,7 @@ const VirtualParticipantList = () => {
     { label: 'Chime', value: 'CHIME', disabled: false },
     { label: 'Teams', value: 'TEAMS', disabled: false },
     { label: 'WebEx', value: 'WEBEX', disabled: false },
-    { label: 'Google Meet', value: 'GOOGLE_MEET', disabled: true },
+    { label: 'Google Meet', value: 'GOOGLE_MEET', disabled: false },
   ];
 
   /* eslint-disable react/jsx-props-no-spreading */
@@ -866,15 +882,25 @@ const VirtualParticipantList = () => {
                 the meeting and password server-side, so relabel the field "Meeting
                 URL" and hide the separate password input when a URL is entered. A
                 bare numeric ID keeps the "Meeting ID" + password layout. */}
-            <FormField label={meetingIdIsUrl ? 'Meeting URL' : 'Meeting ID'} stretch>
+            <FormField
+              label={meetingIdLabel}
+              description={
+                isGoogleMeetForm
+                  ? 'The meeting has to accept guests who join from a browser without a Google account, and ' +
+                    'someone in it may need to admit the participant.'
+                  : undefined
+              }
+              errorText={meetingIdError}
+              stretch
+            >
               <Input
                 value={createForm.meetingId}
                 onChange={({ detail }) => setCreateForm((prev) => ({ ...prev, meetingId: detail.value }))}
-                placeholder={meetingIdIsUrl ? 'Enter meeting URL' : 'Enter meeting ID or paste a meeting URL'}
+                placeholder={meetingIdPlaceholder}
               />
             </FormField>
 
-            {!meetingIdIsUrl && (
+            {!meetingIdIsUrl && !isGoogleMeetForm && (
               <FormField label="Meeting Password (Optional)" stretch>
                 <Input
                   value={createForm.meetingPassword}

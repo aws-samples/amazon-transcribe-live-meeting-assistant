@@ -21,7 +21,7 @@ This guide walks you through your first meeting with the Live Meeting Assistant 
 LMA provides two ways to capture meeting audio:
 
 1. **Stream Audio** -- Share a browser tab's audio directly from Chrome. Works with any audio source including meeting applications, YouTube, and other media.
-2. **Virtual Participant** -- Send an AI-powered bot that joins the meeting on your behalf. Supports Zoom, Microsoft Teams, Amazon Chime, and WebEx.
+2. **Virtual Participant** -- Send an AI-powered bot that joins the meeting on your behalf. Supports Zoom, Microsoft Teams, Amazon Chime, WebEx and Google Meet.
 
 Choose whichever option fits your workflow. Both produce real-time transcripts and support the full set of LMA features.
 
@@ -83,8 +83,7 @@ Enter the meeting URL or joining details. The Virtual Participant supports the f
 - **Microsoft Teams**
 - **Amazon Chime**
 - **WebEx**
-
-Google Meet is not supported by the Virtual Participant; use the [Chrome extension](browser-extension.md) for Meet meetings.
+- **Google Meet** (the meeting has to accept guests from a browser; see [Google Meet](virtual-participant.md#google-meet))
 
 Provide the meeting link and any other required information such as the meeting topic.
 

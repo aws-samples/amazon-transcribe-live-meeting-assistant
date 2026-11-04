@@ -18,7 +18,7 @@ import { createLogger } from './logger.js';
 
 const log = createLogger('ai-dom-resolver');
 
-export type Platform = 'ZOOM' | 'TEAMS' | 'WEBEX' | 'CHIME';
+export type Platform = 'ZOOM' | 'TEAMS' | 'WEBEX' | 'CHIME' | 'GOOGLE_MEET';
 
 export interface ResolveOptions {
   intent: string;

@@ -339,7 +339,7 @@ Common parameters for the most-used tools.
 
 ### `schedule_meeting`
 
-- `meetingName`, `meetingPlatform` (Zoom/Teams/Chime/Webex), `meetingId`
+- `meetingName`, `meetingPlatform` (Zoom/Teams/Chime/Webex/Google Meet), `meetingId`
   (numeric), `scheduledTime` (ISO 8601), `meetingPassword` (optional)
 - `agenda` (optional) — the meeting agenda, one item per line, for example the
   agenda from the calendar invite. It is stored on the meeting record when the
@@ -457,8 +457,8 @@ For `schedule_meeting` / `start_meeting_now`, the `meetingId` is the
 
 - Confirm the Virtual Participant stack is deployed (look for
   `LMA-VIRTUALPARTICIPANTSTACK` in CloudFormation)
-- Supported platforms (case-sensitive): `Zoom`, `Teams`, `Chime`, `Webex`
-- Numeric meeting ID only — no platform prefixes
+- Supported platforms (case-insensitive): `Zoom`, `Teams`, `Chime`, `Webex`, `Google Meet`
+- Numeric meeting ID only — no platform prefixes (for Google Meet, the meeting code such as `abc-defg-hij`, or the meeting link)
 
 ### Custom HTTP headers not supported (Quick Suite)
 

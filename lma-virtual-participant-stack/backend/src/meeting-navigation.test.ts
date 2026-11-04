@@ -60,6 +60,10 @@ test('each platform pattern accepts its own hosts and redirect targets', () => {
         ],
         [MEETING_HOST_PATTERNS.webex, ['https://signin.webex.com/join', 'https://acme.webex.com/x']],
         [MEETING_HOST_PATTERNS.chime, ['https://app.chime.aws/meetings/1']],
+        [
+            MEETING_HOST_PATTERNS.googleMeet,
+            ['https://meet.google.com/abc-defg-hij', 'https://meet.google.com/meet/abc-defg-hij', 'https://consent.google.com/m?continue=x'],
+        ],
     ];
     for (const [pattern, urls] of cases) {
         for (const url of urls) {
@@ -73,6 +77,9 @@ test('platform patterns do not accept each other', () => {
     // treated as success, hiding a real failure.
     assert.equal(arrivedAtExpectedHost('https://teams.microsoft.com/v2/', MEETING_HOST_PATTERNS.zoom), false);
     assert.equal(arrivedAtExpectedHost('https://app.zoom.us/wc/1/join', MEETING_HOST_PATTERNS.teams), false);
+    // Meet refuses a guest by sending it to Meet's product page, which is not Meet.
+    assert.equal(arrivedAtExpectedHost('https://workspace.google.com/products/meet/', MEETING_HOST_PATTERNS.googleMeet), false);
+    assert.equal(arrivedAtExpectedHost('https://meet.google.com.example.org/abc', MEETING_HOST_PATTERNS.googleMeet), false);
 });
 
 test('about:blank and empty are NOT treated as arrived', () => {
@@ -94,7 +101,7 @@ test('a lookalike host is rejected', () => {
 test('no platform handler still uses a bare page.goto for a meeting URL', () => {
     // The defect was spread across four handlers; this asserts the whole class is
     // fixed rather than just the Zoom instance that was reported.
-    for (const file of ['zoom.ts', 'teams.ts', 'webex.ts', 'chime.ts']) {
+    for (const file of ['zoom.ts', 'teams.ts', 'webex.ts', 'chime.ts', 'google-meet.ts']) {
         const src = readFileSync(new URL(`./${file}`, import.meta.url).pathname.replace('/dist/', '/src/'), 'utf8');
         const bare = src
             .split('\n')

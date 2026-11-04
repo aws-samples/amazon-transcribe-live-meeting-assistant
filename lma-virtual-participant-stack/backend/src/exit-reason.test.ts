@@ -89,6 +89,17 @@ test('the never-joined message does not read as a successful meeting', () => {
     assert.match(message, /could not join/i);
 });
 
+test('a Google Meet refusal says so instead of the generic never-joined message', () => {
+    const generic = formatExitMessage({ reason: 'never-joined' });
+    assert.equal(formatExitMessage({ reason: 'never-joined', trigger: 'pre-join:not-admitted' }), generic);
+    for (const trigger of ['pre-join:meet-refused', 'pre-join:meet-denied', 'pre-join:meet-invalid-code', 'pre-join:meet-ended']) {
+        const message = formatExitMessage({ reason: 'never-joined', trigger });
+        assert.notEqual(message, generic, trigger);
+        assert.match(message, /Google Meet/, trigger);
+        assert.ok(message.endsWith('.'), `not a sentence: ${message}`);
+    }
+});
+
 // ---------------------------------------------------------------------------
 // Bounding the trigger before it is stored
 // ---------------------------------------------------------------------------
@@ -309,7 +320,7 @@ test('a trigger with no colon is still bounded', () => {
 // The handlers' pre-join branches
 // ---------------------------------------------------------------------------
 
-const HANDLERS = ['chime', 'webex', 'zoom', 'zoom-sdk', 'teams', 'teams-sdk'];
+const HANDLERS = ['chime', 'webex', 'zoom', 'zoom-sdk', 'teams', 'teams-sdk', 'google-meet'];
 
 /** Source of one handler, comments stripped. */
 const handlerSource = (name: string): string => {

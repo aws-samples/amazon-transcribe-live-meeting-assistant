@@ -122,7 +122,7 @@ export interface ProfileHandle {
 }
 
 // Normalize a meeting platform label to a stable S3 path segment. Mirrors the
-// values the UI / scheduler send ('ZOOM' | 'CHIME' | 'TEAMS' | 'WEBEX', with
+// values the UI / scheduler send ('ZOOM' | 'CHIME' | 'TEAMS' | 'WEBEX' | 'GOOGLE_MEET', with
 // older mixed-case variants) so the key matches between writer and reader.
 // Falls back to 'unknown' so a missing/garbage platform still gets an isolated
 // (never shared) profile rather than colliding with a real one.
@@ -148,6 +148,15 @@ export async function acquireProfile(opts: { cognitoSub: string; platform?: stri
     }
 
     const platform = normalizePlatform(opts.platform);
+    // Google Meet joins as a guest, so a saved profile has no sign-in to carry,
+    // and measured on a live meeting it did harm: every join that reused the
+    // saved profile was refused by Meet's guest check ("You can't join this
+    // video call"), and the first join after the profile was deleted got in.
+    // So a Meet join always starts from a fresh profile and saves nothing.
+    if (platform === 'googlemeet') {
+        log.info('[profile-store] Google Meet joins as a guest: using a fresh profile, not saving it.');
+        return handle;
+    }
     const userHash = createHash('sha256').update(sub.toLowerCase()).digest('hex');
     handle.enabled = true;
     handle.s3Key = `${S3_PREFIX}${userHash}/${platform}/${TAR_NAME}`;

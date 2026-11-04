@@ -44,7 +44,7 @@ import { createLogger } from './logger.js';
 const log = createLogger('chat-ask');
 
 /** The meeting platforms, as the chat handlers name themselves. */
-export type ChatPlatform = 'zoom' | 'zoom-sdk' | 'teams' | 'teams-sdk' | 'webex' | 'chime';
+export type ChatPlatform = 'zoom' | 'zoom-sdk' | 'teams' | 'teams-sdk' | 'webex' | 'chime' | 'google-meet';
 
 /**
  * The longest message LMA posts on each platform, in characters.
@@ -62,6 +62,9 @@ export const CHAT_MESSAGE_LIMITS: Readonly<Record<ChatPlatform, number>> = {
     'teams-sdk': 1000,
     webex: 500,
     chime: 500,
+    // Meet's own limit on one chat message is believed to be 500 characters
+    // (not confirmed in a live meeting), so LMA stays at it.
+    'google-meet': 500,
 };
 
 /** At most this many messages per answer; the rest is cut with an ellipsis. */

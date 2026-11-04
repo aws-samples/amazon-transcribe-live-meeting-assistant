@@ -15,7 +15,7 @@
  *
  * Query params (for URL-driven flows):
  *   meetingName     - Pre-fill meeting name
- *   meetingPlatform - Pre-fill platform: ZOOM | TEAMS | CHIME | WEBEX
+ *   meetingPlatform - Pre-fill platform: ZOOM | TEAMS | CHIME | WEBEX | GOOGLE_MEET
  *   meetingId       - Pre-fill meeting id
  *   meetingPassword - Pre-fill meeting password
  *   autoStart       - When true, auto-create the VP from URL params on load
@@ -60,6 +60,7 @@ import { SFNClient, StartSyncExecutionCommand } from '@aws-sdk/client-sfn';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import awsExports from '../../aws-exports';
+import { googleMeetCode } from '../virtual-participant-layout/google-meet';
 import {
   StatusDetails as VPStatusDetails,
   ConnectionDetails as VPConnectionDetails,
@@ -158,6 +159,7 @@ const PLATFORM_OPTIONS = [
   { label: 'Microsoft Teams', value: 'TEAMS' },
   { label: 'Amazon Chime', value: 'CHIME' },
   { label: 'Cisco Webex', value: 'WEBEX' },
+  { label: 'Google Meet', value: 'GOOGLE_MEET' },
 ];
 
 const EmbedVpLoader = ({ params, sendToParent }) => {
@@ -216,11 +218,17 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
           user?.username ||
           'embed-user@example.com';
 
+        // Google Meet is stored as its meeting code, as the Virtual Participant
+        // page's form does, and has no password.
+        const isGoogleMeet = effectivePlatform === 'GOOGLE_MEET';
+        const submittedMeetingId =
+          (isGoogleMeet && googleMeetCode(effectiveId)) || String(effectiveId).replace(/ /g, '');
+        const submittedPassword = isGoogleMeet ? '' : effectivePassword || '';
         const vpInput = {
           meetingName: effectiveName,
           meetingPlatform: effectivePlatform,
-          meetingId: String(effectiveId).replace(/ /g, ''),
-          meetingPassword: effectivePassword || '',
+          meetingId: submittedMeetingId,
+          meetingPassword: submittedPassword,
           status: 'INITIALIZING',
         };
 
@@ -268,8 +276,8 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
             apiInfo: { httpMethod: 'POST' },
             data: {
               meetingPlatform: effectivePlatform,
-              meetingID: String(effectiveId).replace(/ /g, ''),
-              meetingPassword: effectivePassword || '',
+              meetingID: submittedMeetingId,
+              meetingPassword: submittedPassword,
               meetingName: effectiveName,
               meetingTime: '',
               userName,

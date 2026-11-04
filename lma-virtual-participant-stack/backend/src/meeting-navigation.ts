@@ -104,4 +104,6 @@ export const MEETING_HOST_PATTERNS = {
     teams: /https:\/\/teams\.(microsoft|live)\.com\//,
     webex: /https:\/\/([a-z0-9-]+\.)*webex\.com\//,
     chime: /https:\/\/([a-z0-9-]+\.)*chime\.aws\//,
+    // Meet, and Google's cookie-consent page that some regions see before it.
+    googleMeet: /https:\/\/(meet|consent)\.google\.com\//,
 } as const;

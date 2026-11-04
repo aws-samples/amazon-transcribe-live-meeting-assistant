@@ -28,7 +28,7 @@ import { DEFAULT_CONSENT_SETTINGS, effectiveConsentSettings } from './meeting-co
 const source = (name: string): string =>
     readFileSync(new URL(`./${name}`, import.meta.url).pathname.replace('/dist/', '/src/'), 'utf8');
 
-const HANDLERS = ['chime.ts', 'zoom.ts', 'zoom-sdk.ts', 'teams.ts', 'teams-sdk.ts', 'webex.ts'];
+const HANDLERS = ['chime.ts', 'zoom.ts', 'zoom-sdk.ts', 'teams.ts', 'teams-sdk.ts', 'webex.ts', 'google-meet.ts'];
 
 /** The handler's own "start transcription if enabled" block: the last top-level `if (details.start) {`. */
 function startBlockIndex(text: string): number {

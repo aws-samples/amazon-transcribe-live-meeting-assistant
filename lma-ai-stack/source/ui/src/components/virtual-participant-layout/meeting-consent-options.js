@@ -21,7 +21,8 @@ const EACH_PARTICIPANT = 'opt_in:each_participant';
 
 // What the Virtual Participant can see on each platform decides whether the
 // each-participant rule can be met there (docs/meeting-consent.md, "What each
-// platform supports"). Webex shows no attendee count, so it never can. The
+// platform supports"). Webex shows no attendee count, so it never can, and on
+// Google Meet the VP reads consent replies without a sender. The
 // Teams browser join shows no chat sender; the Teams join through Azure
 // Communication Services does, and which one a VP uses is decided by the
 // deployment, so the option stays available for Teams with a note.
@@ -34,6 +35,15 @@ export const meetingConsentOptionsFor = (platform) =>
         disabled: true,
         description:
           'Not available on Webex, which does not show who is present. ' +
+          'Use "Opt-in: wait until I confirm that everyone agreed".',
+      };
+    }
+    if (platform === 'GOOGLE_MEET') {
+      return {
+        ...option,
+        disabled: true,
+        description:
+          'Not yet available on Google Meet, where LMA does not use the chat sender to record consent. ' +
           'Use "Opt-in: wait until I confirm that everyone agreed".',
       };
     }

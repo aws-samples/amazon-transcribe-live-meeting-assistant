@@ -86,7 +86,7 @@ lines written before the participant used this format.
 | `msg` | The human-readable message. The bracket markers this guide and the feature guides refer to, such as `[stop-request]` or `VP exit:`, are in this text. |
 | `vpId` | The Virtual Participant's id, from the moment the participant starts. |
 | `callId` | The meeting's call id, from the point the participant has one. |
-| `meetingPlatform` | `CHIME`, `ZOOM`, `TEAMS` or `WEBEX`. |
+| `meetingPlatform` | `CHIME`, `ZOOM`, `TEAMS`, `WEBEX` or `GOOGLE_MEET`. |
 
 A part of the participant may add fields of its own for a narrower scope.
 

@@ -125,6 +125,7 @@ const WARMUP_MEETING_PLATFORMS = [
     'https://app.chime.aws/',
     'https://teams.microsoft.com/',
     'https://web.webex.com/',
+    'https://meet.google.com/',
 ];
 
 // Cookies file is created on first navigation; survives the profile tar

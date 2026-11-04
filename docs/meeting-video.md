@@ -319,6 +319,7 @@ thresholds.
 | Microsoft Teams (Azure Communication Services SDK) | The call's state: a remote screen share or a PowerPoint Live presentation | While a share is on screen |
 | Webex | None | Always, with the stricter thresholds |
 | Amazon Chime | None | Always, with the stricter thresholds |
+| Google Meet | None | Always, with the stricter thresholds |
 
 | Thresholds | Share on screen | No share signal |
 |---|---|---|

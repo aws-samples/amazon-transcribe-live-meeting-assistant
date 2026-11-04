@@ -6,6 +6,7 @@ import ZoomSdk from './zoom-sdk.js';
 import Teams from './teams.js';
 import TeamsSdk from './teams-sdk.js';
 import Webex from './webex.js';
+import GoogleMeet from './google-meet.js';
 import { details, ExitInfo, formatExitMessage, didJoinMeeting, normalizeExitTrigger } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager, beginShutdown } from './status-manager.js';
@@ -682,7 +683,7 @@ const main = async (): Promise<void> => {
             if (!simliAvatar.isConnected()) return;
             try {
                 // 1. Grant camera+mic permissions at context level for all meeting domains
-                for (const origin of ['https://zoom.us', 'https://app.zoom.us', 'https://app.chime.aws', 'https://teams.microsoft.com', 'https://web.webex.com']) {
+                for (const origin of ['https://zoom.us', 'https://app.zoom.us', 'https://app.chime.aws', 'https://teams.microsoft.com', 'https://web.webex.com', 'https://meet.google.com']) {
                     await context.grantPermissions(['camera', 'microphone'], { origin }).catch(() => {});
                 }
                 log.info('✓ Camera and microphone permissions granted for meeting platforms');
@@ -706,7 +707,7 @@ const main = async (): Promise<void> => {
         return avatarPrepared;
     };
 
-    let meeting: Chime | Zoom | ZoomSdk | Teams | TeamsSdk | Webex;
+    let meeting: Chime | Zoom | ZoomSdk | Teams | TeamsSdk | Webex | GoogleMeet;
     let success = false;
     let exitInfo: ExitInfo | null = null;
 
@@ -736,6 +737,9 @@ const main = async (): Promise<void> => {
                 break;
             case 'WEBEX':
                 meeting = new Webex();
+                break;
+            case 'GOOGLE_MEET':
+                meeting = new GoogleMeet();
                 break;
             default:
                 throw new Error(`Unsupported meeting platform: ${details.invite.meetingPlatform}`);

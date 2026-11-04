@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -46,6 +47,29 @@ if TYPE_CHECKING:
     from lma_sdk.client import LMAClient
 
 logger = logging.getLogger(__name__)
+
+#: The platforms the Virtual Participant can join, as it names them.
+VP_PLATFORMS = ("ZOOM", "TEAMS", "CHIME", "WEBEX", "GOOGLE_MEET")
+
+_MEET_CODE = re.compile(r"^([a-z]{3})-?([a-z]{4})-?([a-z]{3})$")
+_MEET_LINK = re.compile(
+    r"^(?:https?://)?meet\.google\.com/(?:meet/)?([a-z]{3}-?[a-z]{4}-?[a-z]{3})/?(?:[?#].*)?$"
+)
+
+
+def google_meet_code(value: str) -> str | None:
+    """The Google Meet meeting code in a code or meet.google.com link, or None.
+
+    ``abc-defg-hij``, ``ABCDEFGHIJ``, ``https://meet.google.com/abc-defg-hij``
+    and Meet's own ``/meet/abc-defg-hij`` redirect form all give
+    ``abc-defg-hij``; the Virtual Participant parses the same forms.
+    """
+    text = "".join((value or "").split()).lower()
+    link = _MEET_LINK.match(text)
+    code = _MEET_CODE.match(link.group(1) if link else text)
+    if not code:
+        return None
+    return f"{code.group(1)}-{code.group(2)}-{code.group(3)}"
 
 
 # ── GraphQL documents (copied verbatim from EmbedVpLoader.jsx) ────
@@ -217,8 +241,11 @@ class VirtualParticipantOperations:
 
         Args:
             meeting_name: Display name of the meeting (e.g. "Weekly sync").
-            platform: ``ZOOM`` | ``TEAMS`` | ``CHIME`` | ``WEBEX``.
-            meeting_id: Meeting ID (spaces stripped automatically).
+            platform: ``ZOOM`` | ``TEAMS`` | ``CHIME`` | ``WEBEX`` |
+                ``GOOGLE_MEET``.
+            meeting_id: Meeting ID (spaces stripped automatically). For
+                ``GOOGLE_MEET``, the meeting code (``abc-defg-hij``) or a
+                meet.google.com link to it, which is stored as the code.
             meeting_password: Meeting password (empty string if none).
             user_name: Display name the scribe reports as (shows up
                 as the Zoom/Teams participant name). Defaults to the
@@ -251,13 +278,21 @@ class VirtualParticipantOperations:
                 failure to launch within the timeout.
         """
         platform = (platform or "").upper().strip()
-        if platform not in {"ZOOM", "TEAMS", "CHIME", "WEBEX"}:
+        if platform not in VP_PLATFORMS:
             raise LMAVirtualParticipantError(
                 f"Invalid platform {platform!r}. "
-                f"Must be one of: ZOOM, TEAMS, CHIME, WEBEX."
+                f"Must be one of: {', '.join(VP_PLATFORMS)}."
             )
 
         meeting_id_stripped = "".join((meeting_id or "").split())
+        if platform == "GOOGLE_MEET" and meeting_id_stripped:
+            code = google_meet_code(meeting_id_stripped)
+            if code is None:
+                raise LMAVirtualParticipantError(
+                    f"{meeting_id!r} is not a Google Meet meeting code "
+                    "(abc-defg-hij) or a meet.google.com link to one."
+                )
+            meeting_id_stripped = code
         if not meeting_name or not meeting_id_stripped:
             raise LMAVirtualParticipantError(
                 "meeting_name and meeting_id are required."

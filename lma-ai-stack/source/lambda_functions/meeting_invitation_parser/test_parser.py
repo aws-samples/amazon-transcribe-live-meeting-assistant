@@ -114,96 +114,114 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestUnsupportedPlatformRejection(unittest.TestCase):
-    """The handler must not auto-fill the form with a platform that cannot launch.
+class TestGoogleMeetId(unittest.TestCase):
+    """normalize_google_meet_id, which mirrors the Virtual Participant's own parser."""
 
-    Before this, a pasted Google Meet invitation parsed "successfully", populated
-    the create form with GOOGLE_MEET and then failed at launch with "Unsupported
-    meeting platform" — after the user had reviewed and submitted everything else.
-    See GitHub #661.
-    """
+    def test_codes_and_links_reduce_to_the_code(self):
+        for value in (
+            "abc-defg-hij",
+            "ABCDEFGHIJ",
+            " abc defg hij ",
+            "https://meet.google.com/abc-defg-hij",
+            "meet.google.com/abc-defg-hij",
+            "https://meet.google.com/abc-defg-hij?authuser=1",
+            "https://meet.google.com/meet/abc-defg-hij",
+            "http://meet.google.com/abcdefghij/",
+        ):
+            self.assertEqual(index.normalize_google_meet_id(value), "abc-defg-hij", value)
 
-    def test_supported_platforms_are_the_ones_with_handlers(self):
-        # Kept in step with the platform switch in the Virtual Participant's
-        # index.ts. GOOGLE_MEET must stay out until a handler exists.
-        self.assertEqual(sorted(index.VP_SUPPORTED_PLATFORMS), ["CHIME", "TEAMS", "WEBEX", "ZOOM"])
+    def test_a_meet_link_that_is_not_a_code_is_kept(self):
+        link = "https://meet.google.com/lookup/team-standup"
+        self.assertEqual(index.normalize_google_meet_id(link), link)
 
-    def test_google_meet_is_still_recognized_by_the_prompt(self):
-        """Rejecting Meet requires identifying it first.
+    def test_anything_else_is_not_meet(self):
+        for value in (
+            None,
+            "",
+            "96187501703",
+            "abc-defg-hi",
+            "https://zoom.us/j/96187501703",
+            "https://meet.google.com.example.org/abc-defg-hij",
+            "https://example.org/?u=meet.google.com/abc-defg-hij",
+            12345,
+        ):
+            self.assertIsNone(index.normalize_google_meet_id(value), value)
 
-        Dropping it from the prompt's platform list would make a Meet invitation
-        fall through to the "default to Zoom" branch, which is worse: the launch
-        would fail for a reason that has nothing to do with Meet.
-        """
-        prompt = index.create_parsing_prompt("Join at https://meet.google.com/abc-defg-hij")
-        self.assertIn("GOOGLE_MEET", prompt)
 
-    def test_a_meet_invitation_is_rejected_with_an_actionable_message(self):
+class TestPlatformSupport(unittest.TestCase):
+    """The handler fills the form only with platforms the Virtual Participant can join."""
+
+    def _handle(self, data):
         original = index.parse_meeting_invitation
-        index.parse_meeting_invitation = lambda _text: {
-            "success": True,
-            "data": {
-                "meetingName": "Design review",
-                "meetingPlatform": "GOOGLE_MEET",
-                "meetingId": "https://meet.google.com/abc-defg-hij",
-            },
-        }
+        index.parse_meeting_invitation = lambda _text: {"success": True, "data": data}
         try:
-            result = json.loads(
-                index.handler({"arguments": {"invitationText": "Join at meet.google.com"}}, None)
-            )
+            return json.loads(index.handler({"arguments": {"invitationText": "invite"}}, None))
         finally:
             index.parse_meeting_invitation = original
 
+    def test_supported_platforms_are_the_ones_with_handlers(self):
+        # Kept in step with the platform switch in the Virtual Participant's index.ts.
+        self.assertEqual(
+            sorted(index.VP_SUPPORTED_PLATFORMS), ["CHIME", "GOOGLE_MEET", "TEAMS", "WEBEX", "ZOOM"]
+        )
+
+    def test_google_meet_is_named_in_the_prompt(self):
+        prompt = index.create_parsing_prompt("Join at https://meet.google.com/abc-defg-hij")
+        self.assertIn("GOOGLE_MEET", prompt)
+        self.assertIn("abc-defg-hij", prompt)
+
+    def test_a_meet_invitation_fills_the_form_with_the_meeting_code(self):
+        result = self._handle(
+            {
+                "meetingName": "Design review",
+                "meetingPlatform": "GOOGLE_MEET",
+                "meetingId": "https://meet.google.com/abc-defg-hij?authuser=0",
+                # The dial-in PIN a Meet invitation lists is not a password.
+                "meetingPassword": "123 456 789#",
+            }
+        )
+        self.assertTrue(result["success"])
+        self.assertEqual(result["data"]["meetingPlatform"], "GOOGLE_MEET")
+        self.assertEqual(result["data"]["meetingId"], "abc-defg-hij")
+        self.assertIsNone(result["data"]["meetingPassword"])
+
+    def test_a_meet_link_with_no_platform_is_recognised_as_meet(self):
+        """The UI falls back to ZOOM when the parser gives no platform.
+
+        A Zoom form holding a Meet link would fail for a reason that has nothing
+        to do with Meet, so the link alone identifies the platform.
+        """
+        for platform in (None, "", "MEET", "HANGOUTS"):
+            result = self._handle(
+                {
+                    "meetingName": "Sync",
+                    "meetingPlatform": platform,
+                    "meetingId": "https://MEET.GOOGLE.com/abc-defg-hij",
+                }
+            )
+            self.assertTrue(result["success"], platform)
+            self.assertEqual(result["data"]["meetingPlatform"], "GOOGLE_MEET", platform)
+            self.assertEqual(result["data"]["meetingId"], "abc-defg-hij", platform)
+
+    def test_an_unsupported_platform_is_refused(self):
+        original = index.VP_SUPPORTED_PLATFORMS
+        index.VP_SUPPORTED_PLATFORMS = ["ZOOM"]
+        try:
+            result = self._handle({"meetingPlatform": "TEAMS", "meetingId": "243574196567966"})
+        finally:
+            index.VP_SUPPORTED_PLATFORMS = original
         self.assertFalse(result["success"])
-        # The message has to tell the user what to do instead, not just say no.
-        self.assertIn("Google Meet", result["error"])
-        self.assertIn("Chrome extension", result["error"])
+        self.assertIn("TEAMS", result["error"])
         self.assertNotIn("data", result)
 
     def test_a_supported_platform_still_parses(self):
-        original = index.parse_meeting_invitation
-        index.parse_meeting_invitation = lambda _text: {
-            "success": True,
-            "data": {
-                "meetingName": "Standup",
-                "meetingPlatform": "ZOOM",
-                "meetingId": "961 8750 1703",
-            },
-        }
-        try:
-            result = json.loads(index.handler({"arguments": {"invitationText": "Join Zoom"}}, None))
-        finally:
-            index.parse_meeting_invitation = original
-
+        result = self._handle(
+            {"meetingName": "Standup", "meetingPlatform": "ZOOM", "meetingId": "961 8750 1703"}
+        )
         self.assertTrue(result["success"])
         self.assertEqual(result["data"]["meetingPlatform"], "ZOOM")
         # ...and the existing cleanup still runs on it.
         self.assertEqual(result["data"]["meetingId"], "96187501703")
-
-    def test_a_meet_link_with_no_platform_is_still_rejected(self):
-        """A missing platform would otherwise skip the check.
-
-        The UI falls back to its own ZOOM default when the parser returns no
-        platform, so the user would get a Zoom form holding a Meet link and a
-        launch failure with nothing to do with Meet. The link is enough to tell.
-        """
-        original = index.parse_meeting_invitation
-        index.parse_meeting_invitation = lambda _text: {
-            "success": True,
-            "data": {
-                "meetingName": "Sync",
-                "meetingPlatform": None,
-                "meetingId": "https://MEET.GOOGLE.com/abc-defg-hij",
-            },
-        }
-        try:
-            result = json.loads(index.handler({"arguments": {"invitationText": "join"}}, None))
-        finally:
-            index.parse_meeting_invitation = original
-
-        self.assertFalse(result["success"])
-        self.assertIn("Google Meet", result["error"])
 
     def test_a_null_platform_and_null_meeting_id_do_not_raise(self):
         """A free-text invitation with nothing extractable must still parse.

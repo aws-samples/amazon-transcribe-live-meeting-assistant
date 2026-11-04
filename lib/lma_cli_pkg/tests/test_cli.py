@@ -120,6 +120,22 @@ class TestVpCreateCommand:
         assert kwargs["use_zoom_credentials"] is None
         assert kwargs["user_name"] == "lma-cli@lma"
 
+    def test_google_meet_is_a_platform_choice(self, runner):
+        from lma_sdk.models.virtual_participant import VpLaunchResult
+
+        mock_client = MagicMock()
+        mock_client.vp.create.return_value = VpLaunchResult(
+            id="vp-1", status="INITIALIZING", meeting_name="m",
+            meeting_platform="GOOGLE_MEET", meeting_id="abc-defg-hij",
+        )
+        result = runner.invoke(
+            main,
+            ["vp", "create", "--name", "m", "--platform", "google_meet", "--id", "abc-defg-hij", "--no-wait"],
+            obj={"client_factory": lambda **kw: mock_client},
+        )
+        assert result.exit_code == 0, result.output
+        assert mock_client.vp.create.call_args.kwargs["platform"] == "GOOGLE_MEET"
+
     def test_as_user_is_passed_through(self, runner):
         result, mock_client = self._invoke(runner, ["--as-user", "alice@example.com"])
         assert result.exit_code == 0, result.output

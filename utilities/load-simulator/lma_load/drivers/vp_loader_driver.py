@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class MeetingInvite:
     name: str
-    platform: str      # ZOOM | TEAMS | CHIME | WEBEX
+    platform: str      # ZOOM | TEAMS | CHIME | WEBEX | GOOGLE_MEET
     id: str
     password: str = ""
 

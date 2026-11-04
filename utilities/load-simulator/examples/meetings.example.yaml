@@ -6,7 +6,7 @@
 # lived Zoom / Chime meeting with waiting-room disabled so hundreds of
 # VPs can join the same room at once.
 #
-# Supported platforms: ZOOM, TEAMS, CHIME, WEBEX
+# Supported platforms: ZOOM, TEAMS, CHIME, WEBEX, GOOGLE_MEET
 
 meetings:
   - name: "LoadSim Sandbox — Zoom A"

@@ -300,9 +300,15 @@ MCP_TOOLS = [
                 "meetingName": {"type": "string", "description": "Name/title of the meeting"},
                 "meetingPlatform": {
                     "type": "string",
-                    "description": "Platform (Zoom, Teams, Chime, Webex)",
+                    "description": "Platform (Zoom, Teams, Chime, Webex, Google Meet)",
                 },
-                "meetingId": {"type": "string", "description": "Meeting ID (numeric ID only)"},
+                "meetingId": {
+                    "type": "string",
+                    "description": (
+                        "Meeting ID (numeric ID only; for Google Meet the meeting code, "
+                        "e.g. abc-defg-hij)"
+                    ),
+                },
                 "scheduledTime": {"type": "string", "description": "ISO 8601 datetime"},
                 "meetingPassword": {"type": "string", "description": "Optional meeting password"},
                 "agenda": {
@@ -336,9 +342,15 @@ MCP_TOOLS = [
                 "meetingName": {"type": "string", "description": "Name/title of the meeting"},
                 "meetingPlatform": {
                     "type": "string",
-                    "description": "Platform (Zoom, Teams, Chime, Webex)",
+                    "description": "Platform (Zoom, Teams, Chime, Webex, Google Meet)",
                 },
-                "meetingId": {"type": "string", "description": "Meeting ID (numeric ID only)"},
+                "meetingId": {
+                    "type": "string",
+                    "description": (
+                        "Meeting ID (numeric ID only; for Google Meet the meeting code, "
+                        "e.g. abc-defg-hij)"
+                    ),
+                },
                 "meetingPassword": {"type": "string", "description": "Optional meeting password"},
                 "agenda": {
                     "type": "string",

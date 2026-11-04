@@ -10,6 +10,7 @@ title: "Virtual Participant"
 - [When to use Virtual Participant](#when-to-use-virtual-participant)
 - [Several people behind one attendee](#several-people-behind-one-attendee)
 - [Supported Platforms](#supported-platforms)
+  - [Google Meet](#google-meet)
 - [Joining a Meeting](#joining-a-meeting)
 - [Status Lifecycle](#status-lifecycle)
   - [The status detail line](#the-status-detail-line)
@@ -162,7 +163,7 @@ back by an allowance before rows are matched to it:
 |---|---|---|
 | Zoom, web client | 0 s | The page reports the change as it happens. On a three-person Zoom meeting it showed the Virtual Participant as speaking 0.08–0.36 s (median 0.16 s) after the Virtual Participant's own audio started, and other attendees' changes landed in the pause before their first transcribed word. |
 | Zoom, Meeting SDK | 2 s | The SDK monitor polls every 3 seconds. |
-| Teams, Chime, Webex | 0.75 s | The default for the other platforms. |
+| Teams, Chime, Webex, Google Meet | 0.75 s | The default for the other platforms. |
 
 The `ASR_ROSTER_LAG_SECONDS` environment variable on the Virtual Participant task
 overrides the allowance for every platform.
@@ -197,8 +198,29 @@ The on-demand engine appends its voice id to the platform's name as before.
 - Microsoft Teams
 - Amazon Chime
 - WebEx
+- Google Meet (see [Google Meet](#google-meet) for what the meeting's organiser has to allow)
 
-**Google Meet is not supported by the Virtual Participant.** It is supported by the [Chrome extension](browser-extension.md), which captures a meeting you are in yourself — so Meet meetings can be transcribed, but not attended unattended or scheduled in advance. Adding Virtual Participant support is tracked in [#661](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/issues/661).
+### Google Meet
+
+The VP joins a Google Meet meeting as a guest from its browser, without a Google account, under its display name (`LMA (<your user name>)` by default). On the create form choose **Google Meet** and enter the meeting code (`abc-defg-hij`) or paste the meeting link (`https://meet.google.com/abc-defg-hij`); Meet meetings have no password, so the form does not ask for one, and a link is stored as its code. Pasting a Meet calendar invitation into **Paste Invitation** fills the form in the same way. The `lma vp create --platform GOOGLE_MEET` command, the SDK, and the meeting assistant's `start_meeting_now` and `schedule_meeting` tools accept Meet too.
+
+On the pre-join screen the VP types its name under *What's your name?*, turns the microphone off (unless a voice assistant needs it) and the camera off (unless the Simli avatar is its camera), and presses **Ask to join**, or **Join now** when Meet lets it straight in. It then waits, for up to five minutes, until it is in the meeting, posts its introduction in the meeting chat (*In-call messages*) and starts transcribing.
+
+**What the meeting's organiser has to allow.**
+
+- **Guests from a browser.** Meet has to accept a guest who is not signed in to a Google account. Google offers this for meetings organised from a Google Workspace account whose administrator allows participants from outside the organisation and without a Google account; a meeting organised from a personal Google account may not accept such guests at all. When Meet does not accept the VP, it shows *"You can't join this video call"* before any name field, and the VP stops at once with **FAILED** and the detail *"Google Meet did not let the participant join"* (`endTrigger` `pre-join:meet-refused`). It does not try again.
+- **Being let in.** Somebody in the meeting has to admit the VP when it asks to join, unless the meeting lets guests in without asking. With a Google Workspace organiser, setting the meeting's **Meeting access** to **Open** is meant to let anyone with the link join without being admitted. Whether that applies to a guest with no Google account has not been confirmed yet. A request that is declined ends the join with `pre-join:meet-denied`, and one that nobody answers within five minutes with `pre-join:not-admitted`.
+- **Chat.** The chat commands (`LMA leave`, `LMA pause` and the rest) and the introduction need the meeting chat. If the organiser has turned chat off for participants, the VP posts nothing and cannot be dismissed from the chat; remove it from the meeting from Meet's People panel instead, or end it from LMA.
+
+In the one live attempt so far, from a browser on an Amazon EC2 host and not signed in, Meet refused the guest with *"You can't join this video call"* even though the organiser had set Meeting access to Open. The cause has not been established; the likeliest explanations are the network the browser connects from and the organiser's policy on guests. Until that is understood, treat Google Meet as working only where a test meeting shows it does.
+
+**What is not available, or not yet confirmed, on Google Meet.**
+
+- The selectors and the page wording the VP relies on were written from Meet's English web client and have not yet been exercised in a live meeting end to end. The VP opens Meet in English (`hl=en`) whatever the browser's language, and falls back to the [AI resolver](#ai-driven-self-healing) for the join controls and the chat button.
+- **Speaker names** come from Meet's speaking indicator on the participant tiles. If it does not match the page Meet serves, transcript rows are not given participants' names. The VP logs the class names of the first tiles it reads (`[meet] participant tiles:`) so this can be checked.
+- **Meeting consent:** Notify, Opt-in with the owner-attests rule, and objections work. The each-participant rule is not offered for Meet meetings, because LMA does not yet use the chat sender it reads on Meet to record a person's consent; see [Meeting Consent](meeting-consent.md#what-each-platform-supports).
+- **Screen-share key frames:** Meet gives the VP no share signal it reads, so key frames are sampled all the time with the stricter thresholds, as on Webex and Chime.
+- The Simli avatar has not been tested on Meet. Joining with a Google account signed in to the VP's browser profile is not supported; the VP joins as a guest.
 
 ## Joining a Meeting
 
@@ -246,12 +268,12 @@ Most values are one of these fixed strings:
 
 | Group | Values |
 | --- | --- |
-| Never got in | `pre-join:not-admitted`, `pre-join:no-join-button`, `pre-join:no-name-input`, `pre-join:goto-failed`, `pre-join:ai-error-screen`, `acs-not-admitted`, `sdk-not-admitted`, `enterprise-login-timeout` |
+| Never got in | `pre-join:not-admitted`, `pre-join:no-join-button`, `pre-join:no-name-input`, `pre-join:goto-failed`, `pre-join:ai-error-screen`, `pre-join:meet-refused`, `pre-join:meet-denied`, `pre-join:meet-invalid-code`, `pre-join:meet-ended`, `acs-not-admitted`, `sdk-not-admitted`, `enterprise-login-timeout` |
 | Asked to leave in chat | `chat` |
 | Left after a participant objected to recording ([Meeting Consent](meeting-consent.md#objections)) | `consent-objection` |
-| The meeting ended | `post-meeting-screen`, `meeting-ended-text`, `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |
-| Everyone else left, or the VP was removed | `attendees-left`, `acs-participants`, `sdk-participants`, `participants-watchdog`, `participants-ui:counter-gone`, `participants-ui:page-dead`, `attendee-badge-missing` |
-| Ran out of time, or lost the page | `meetingTimeout`, `renderer-crash`, `navigated-away`, `URL_CHANGE_BLANK`, `ZOOM_END_DIALOG_ABORTED` |
+| The meeting ended | `post-meeting-screen`, `meeting-ended-text`, `meet-ended-screen`, `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |
+| Everyone else left, or the VP was removed | `meet-removed-screen`, `attendees-left`, `acs-participants`, `sdk-participants`, `participants-watchdog`, `participants-ui:counter-gone`, `participants-ui:page-dead`, `attendee-badge-missing` |
+| Ran out of time, or lost the page | `meetingTimeout`, `renderer-crash`, `navigated-away`, `meet-left-screen`, `URL_CHANGE_BLANK`, `ZOOM_END_DIALOG_ABORTED` |
 | The join threw, and the message matched one of the container's six classes | `error:renderer-crashed`, `error:password`, `error:meeting-not-found`, `error:meeting-ended`, `error:permission-denied`, `error:unclassified` |
 
 The rest are a fixed prefix plus a detail that came from the platform, so the prefix is what groups and what follows the colon varies:
@@ -277,6 +299,8 @@ The VP leaves on its own so an abandoned meeting is not recorded (or billed) ind
 2. **A positive end-of-meeting signal from the platform** — on Teams, the post-meeting screen ("You left the meeting", "The meeting has ended") or a post-meeting URL, checked before anything else on every poll, so a meeting Teams announces as over is detected on the first poll. The hang-up button disappearing is a second such signal, watched continuously rather than on the poll cycle.
 3. **A sustained empty roster** — the participant count is present and reads one or fewer for several consecutive polls.
 4. **A sustained absence of the whole meeting UI** — neither a readable participant count nor any in-meeting controls. This is the backstop for the case where none of the above fires.
+
+On Google Meet the same four signals are read from Meet's page. The end-of-meeting signal is Meet's own screen once its **Leave call** button has gone (*"You've been removed from the meeting"*, *"The call has ended"*, *"You left the meeting"*), or the page leaving meet.google.com; the screen's wording is only read once the button has gone, so chat text that happens to contain it is not mistaken for the end of the meeting. The participant count is the number on the **People** button, and an unreadable count with the Leave call button still on screen does not count towards leaving, as with Teams below. Meet uses the default bounds below; the three Teams settings do not apply to it.
 
 The distinction between the third and fourth signals matters, and getting it wrong is what caused [#660](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/issues/660). Teams removes the roster button, and with it the participant-count badge, whenever the meeting toolbar collapses — most commonly during a content share or in full-screen layouts. An unreadable badge therefore says nothing on its own: it is equally the signature of a meeting that ended and of a meeting where someone is presenting. So before an unreadable count counts towards leaving at all, the VP checks whether the rest of the in-meeting interface (the stage, the calling screen, the call controls) is still present, and while it is, the VP stays. That matters because nothing in the VP moves the pointer, so a toolbar that auto-hides during a share can stay hidden for the whole presentation.
 
@@ -310,7 +334,7 @@ The banner is dismissible — dismissed alerts are remembered in `localStorage` 
 
 ## AI-driven self-healing
 
-Every platform handler (Zoom, Teams, Webex, Chime) wraps its hard-coded CSS selectors in an AI fallback resolver. When a primary selector misses (because the meeting platform shipped a UI change), the resolver asks Claude (Bedrock, vision-capable) to find the right element by reading a compact DOM summary plus a screenshot of the current page. Successful resolutions are cached in a shared `DomSelectorCache` DynamoDB table (30-day TTL on `lastUsedAt`) so the cost is paid only once per platform UI change.
+Every platform handler (Zoom, Teams, Webex, Chime, Google Meet) wraps its hard-coded CSS selectors in an AI fallback resolver. When a primary selector misses (because the meeting platform shipped a UI change), the resolver asks Claude (Bedrock, vision-capable) to find the right element by reading a compact DOM summary plus a screenshot of the current page. Successful resolutions are cached in a shared `DomSelectorCache` DynamoDB table (30-day TTL on `lastUsedAt`) so the cost is paid only once per platform UI change.
 
 The same resolver classifies unknown popup dialogs:
 - `CONSENT` / `RECORDING_NOTICE` → auto-clicked by the VP.
@@ -640,7 +664,7 @@ The VP posts a customizable introduction message in the meeting chat when it joi
 
 ## In-meeting Chat Commands
 
-Anyone in the meeting can control the VP by typing one of these commands in the meeting chat. Commands work across Zoom, Microsoft Teams, Webex, and Chime. Every command is addressed to `LMA` by name.
+Anyone in the meeting can control the VP by typing one of these commands in the meeting chat. Commands work across Zoom, Microsoft Teams, Webex, Chime and Google Meet. Every command is addressed to `LMA` by name.
 
 | Command (typed in chat) | What it does |
 | --- | --- |
@@ -657,7 +681,7 @@ When a Nova Sonic voice assistant is configured, the assistant-mode commands (`L
 Notes:
 
 - Every command requires the literal token `LMA` in the message. For the dismissal commands that means bare words like `END` or `LEAVE` are ignored so that prose like *"the meeting will end at 3pm"* or *"I'll leave at 3"* never trips a false dismissal. The `LMA` and verb tokens are matched case-insensitively and word-bounded (so `endless` or `ENDPOINT` don't match either).
-- When the chat platform exposes the sender name (Zoom, Chime, Webex), the goodbye message acknowledges who asked the VP to leave: *"Thanks Alice — I'll head out now."*
+- When the chat platform exposes the sender name (Zoom, Chime, Webex, Google Meet), the goodbye message acknowledges who asked the VP to leave: *"Thanks Alice — I'll head out now."*
 - The default introduction message tells participants to type `LMA leave` to dismiss the bot and `LMA help` to see the other commands. Customize via the `IntroMessage` CloudFormation parameter of the Virtual Participant stack or the `INTRO_MESSAGE` env var; a customized message is used as it is.
 - `LMA pause`, `LMA start` and `LMA help` must be the whole chat message: the `LMA` addressee (or `@LMA`, before or after the command) plus the command word, matched case-insensitively with punctuation ignored, so *"@LMA, pause!"* and *"start LMA"* count as the command. A bare `PAUSE` or `START` without the addressee is ordinary chat, as is a message that merely contains the command — *"LMA PAUSED"*, *"please LMA pause now"*, or an introduction message that explains the commands.
 - The help reply is posted as one to three single-line chat messages, listing each command in one canonical form. It is answered whether or not transcription is paused.
@@ -668,7 +692,7 @@ Notes:
 
 - **Availability.** It needs a Strands meeting assistant (**MeetingAssistService** set to one of the `STRANDS_BEDROCK` options); it does not need a voice assistant. `LMA help` lists `LMA ask` only when one is configured. Without one, an explicit `LMA ask` is answered with a note saying so and `@LMA` asides are ignored. **For operators:** on a Strands deployment any participant, including a guest, can ask, and each question is a meeting-assistant (Bedrock) request billed like any other. There is no separate switch to turn chat questions off; open an issue if your deployment needs one.
 - **What the agent can use.** A chat sender is known to the VP only by the display name the meeting shows, so a chat question is treated as any participant's question. Because the answer is read by everyone in the meeting, it is answered from the current meeting's transcript, its [agenda](meeting-agenda.md) and web search (where configured) only. Anyone in the meeting, including a guest, can therefore ask about the agenda of the meeting they are in (`LMA ask what's left on the agenda?`). The document knowledge base, the owner's past meetings, MCP servers, and the VNC and browser-control tools are not offered for chat questions; ask through the LMA meeting page for answers that use them. **For operators:** an answer can draw on anything in the meeting's transcript so far — including what was said before the person asking joined — and is posted where everyone in the meeting can read it.
-- **How answers are posted.** The answer is reduced to plain text on a single line, starting `Live Meeting Assistant:`. Markdown is removed; a link is shown as its text followed by its full address in parentheses, and a bare address is left whole, so it can be followed from the chat. Long answers are split at sentence ends into at most three messages, numbered `(1/3)`, `(2/3)`, ..., and the rest is cut with an ellipsis. LMA keeps each message to 1,000 characters on Zoom and Teams and 500 on Webex and Chime, which post by typing; these are LMA's own conservative limits, not the platforms' maximums.
+- **How answers are posted.** The answer is reduced to plain text on a single line, starting `Live Meeting Assistant:`. Markdown is removed; a link is shown as its text followed by its full address in parentheses, and a bare address is left whole, so it can be followed from the chat. Long answers are split at sentence ends into at most three messages, numbered `(1/3)`, `(2/3)`, ..., and the rest is cut with an ellipsis. LMA keeps each message to 1,000 characters on Zoom and Teams, 500 on Webex and Chime, which post by typing, and 500 on Google Meet; these are LMA's own conservative limits, not the platforms' maximums.
 - **Limits.** Each participant may ask once every 20 seconds (told once if they ask sooner), questions over 500 characters are declined, and one question is answered at a time. On the Teams web client the sender is not visible, so everyone there shares one 20-second limit. Answers usually take a few seconds and can take longer when the agent searches; other commands are not held up meanwhile. If no answer arrives within 90 seconds the VP says so and takes the next question. While `LMA pause` is in effect questions are not sent to the meeting assistant; an explicit `LMA ask` is told to wait for `LMA start`. An answer that becomes ready while the VP is posting another message (a help or mode reply, say) can interleave with it on any platform; it is most likely on Webex and Chime, which post by typing.
 - **The VP never answers itself.** Its answers begin `Live Meeting Assistant`, which cannot be read as a question; its configured introduction, recording-start, recording-stop and exit messages are recognised and ignored; and messages from the VP's own display name are ignored.
 - The Virtual Participant logs each question and answer as `[chat-ask] question ...` and `[chat-ask] answered platform=<platform> chars=<n> messages=<n> ms=<n>`, without the question text. The meeting-assistant function's own log records the request it receives, question included, as it does for every meeting-assistant request.
