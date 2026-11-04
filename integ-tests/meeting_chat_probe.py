@@ -96,6 +96,22 @@ class ChatProbe:
             PartitionKey=self.call_id,
         )
 
+    def owner(self) -> str:
+        """The meeting's Owner: the identity this probe's AppSync reads run as.
+
+        getTranscriptSegments returns a non-Admin caller only the segments of
+        meetings it owns or that are shared with it, and AppSync names an IAM
+        caller that is not an assumed role (an IAM user, as on a developer's
+        machine) by its IAM user id. So the meeting is owned by that id, and
+        the read below sees its segment whichever credentials run the suite.
+        An assumed role (CI) reads every meeting, so the owner does not matter.
+        """
+        if not getattr(self, "_owner", None):
+            identity = self.session.client("sts").get_caller_identity()
+            arn = identity.get("Arn", "")
+            self._owner = identity["UserId"] if ":user/" in arn else OWNER
+        return self._owner
+
     def send_start(self) -> None:
         self._put(
             {
@@ -103,7 +119,7 @@ class ChatProbe:
                 "CallId": self.call_id,
                 "CustomerPhoneNumber": "Virtual Participant",
                 "SystemPhoneNumber": "LMA Integ Test",
-                "AgentId": OWNER,
+                "AgentId": self.owner(),
                 "CreatedAt": datetime.now(timezone.utc).isoformat(),
                 "AccessToken": "",
                 "IdToken": "",
