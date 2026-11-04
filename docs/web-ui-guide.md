@@ -234,7 +234,7 @@ transcript:
 | A thumbnail on **Screen share** | stays on Screen share | moves to the frame, paused |
 | **Show in transcript** on Screen share | Transcript | moves to the frame, paused |
 | **Play recording from here** on Screen share | Transcript | plays from the frame |
-| A slide link in the summary's **SLIDES PRESENTED** | Screen share, at the frame | moves to the frame, paused |
+| A key-frame link in the summary's **SCREEN SHARE SUMMARY** | Screen share, at the frame | moves to the frame, paused |
 
 The ones that only move the player are for looking at something rather than
 listening to it; the player is then ready at that point when the Transcript tab
