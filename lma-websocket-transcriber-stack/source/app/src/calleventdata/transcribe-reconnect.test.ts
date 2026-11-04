@@ -22,7 +22,7 @@ import { FastifyInstance } from 'fastify';
 import { KinesisClient } from '@aws-sdk/client-kinesis';
 import { TranscribeStreamingClient } from '@aws-sdk/client-transcribe-streaming';
 
-import { nextRequestTimeOffset, openAudioTap, startTranscribe } from './transcribe';
+import { nextRequestTimeOffset, openAudioTap, startTranscribe, waitForAudio } from './transcribe';
 import { SocketCallData } from './eventtypes';
 import { sessionSettingsFrom } from './session-settings';
 
@@ -170,4 +170,57 @@ test('after a reconnect the transcript continues from the audio sent, not from t
     // The last segment's end would have put it at 5 s.
     assert.equal(segments[1].StartTime, 11);
     assert.equal(segments[1].EndTime, 12);
+});
+
+test('waiting for audio resolves once audio arrives, and not at all for a meeting that ends', async () => {
+    const sink = new stream.PassThrough();
+    let ended = false;
+    const waiting = waitForAudio(sink, () => ended, 5);
+    setTimeout(() => sink.write(Buffer.alloc(4, 1)), 20);
+    assert.equal(await waiting, true);
+
+    const idle = new stream.PassThrough();
+    const endedWaiting = waitForAudio(idle, () => ended, 5);
+    setTimeout(() => (ended = true), 20);
+    assert.equal(await endedWaiting, false);
+});
+
+test('no Transcribe request is opened while no audio arrives, and none once the meeting ends', async (t) => {
+    const source = new stream.PassThrough();
+    const socketData: SocketCallData = {
+        callMetadata: {
+            callId: 'held-call',
+            callEvent: 'START',
+            activeSpeaker: 'Meeting audio',
+            agentId: 'Alex',
+            samplingRate: 16000,
+            channels: {},
+            diarizeSystemChannel: false,
+            diarizeMicChannel: false,
+        },
+        audioInputStream: source,
+        startStreamTime: new Date(),
+        speakerEvents: [],
+        ended: false,
+        sessionSettings: sessionSettingsFrom({}, {}),
+    };
+    source.write(Buffer.alloc(BYTES_PER_SECOND, 1));
+
+    let requests = 0;
+    t.mock.method(TranscribeStreamingClient.prototype, 'send', async (command: { input: Record<string, unknown> }) => {
+        requests += 1;
+        const iterator = (command.input['AudioStream'] as AsyncIterable<unknown>)[Symbol.asyncIterator]();
+        await readBytes(iterator, BYTES_PER_SECOND);
+        // Transcribe closes the request: the client's connection has gone quiet.
+        async function* results() {}
+        return { SessionId: 'session-1', TranscriptResultStream: results() };
+    });
+
+    const done = startTranscribe(socketData, fakeServer);
+    // Past the reconnect backoff, with no audio sent since the first request.
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    assert.equal(requests, 1, 'the next request waits for audio');
+    socketData.ended = true;
+    await done;
+    assert.equal(requests, 1);
 });
