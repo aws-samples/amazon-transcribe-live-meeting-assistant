@@ -44,7 +44,7 @@ import {
 } from './utils';
 import { buildLoggerOptions } from './utils/logger-options';
 import { s3RecordingStore, uploadRecording } from './utils/recording-upload';
-import { DetachedSessions } from './calleventdata/detached-sessions';
+import { SessionLifecycle, parseReconnectGraceMs, recordedAudioSeconds } from './calleventdata/session-lifecycle';
 import { bindLogContext, runWithLogContext, LogContext } from './utils/log-context';
 
 import { jwtVerifier, getAuthenticatedCaller } from './utils/jwt-verifier';
@@ -89,8 +89,9 @@ const LOG_FORMAT = process.env['LOG_FORMAT'] || 'json';
 const WS_LOG_INTERVAL = parseInt(process.env['WS_LOG_INTERVAL'] || '120', 10);
 // How long a meeting whose audio connection closed without an END waits for its
 // client to reconnect and continue it (see calleventdata/detached-sessions.ts).
-// 0 ends the meeting as soon as the connection closes.
-const AUDIO_RECONNECT_GRACE_MS = parseInt(process.env['AUDIO_RECONNECT_GRACE_MS'] || '60000', 10);
+// 0 ends the meeting as soon as the connection closes; a value that is not a
+// number leaves the default.
+const AUDIO_RECONNECT_GRACE_MS = parseReconnectGraceMs(process.env['AUDIO_RECONNECT_GRACE_MS']);
 // Whether a meeting is recorded when its client says nothing is the Meeting
 // Recording section's setting, read per meeting with this task's
 // SHOULD_RECORD_CALL as the fallback: see calleventdata/session-settings.ts.
@@ -127,23 +128,27 @@ const putConsentEvidence = async (key: string, bytes: Buffer, contentType: strin
     );
 };
 
-const socketMap = new Map<WebSocket, SocketCallData>();
-// The connection a meeting's session is currently streaming on. Changes when a
-// client reconnects and resumes the session, so whatever the session sends the
-// client (consent frames) goes to the connection that is open now.
-const sessionConnection = new WeakMap<SocketCallData, { ws: WebSocket }>();
-// Sessions whose connection closed without an END, waiting for their client.
-const detachedSessions = new DetachedSessions<SocketCallData>(AUDIO_RECONNECT_GRACE_MS, (socketData) => {
-    runWithLogContext({ sessionId: randomUUID(), callId: socketData.callMetadata.callId }, () => {
-        server.log.info(
-            `[ON WSCLOSE]: [${socketData.callMetadata.callId}] - The client did not reconnect within ${AUDIO_RECONNECT_GRACE_MS} ms; ending the meeting.`
-        );
-        endCall(undefined, socketData).catch((error) => {
-            server.log.error(
-                `[ON WSCLOSE]: [${socketData.callMetadata.callId}] - Error ending the meeting: ${normalizeErrorForLogging(error)}`
-            );
-        });
-    });
+// Which connection carries which meeting, and how each meeting's session ends
+// (calleventdata/session-lifecycle.ts).
+const sessions = new SessionLifecycle<WebSocket>({
+    graceMs: AUDIO_RECONNECT_GRACE_MS,
+    log: {
+        info: (message) => server.log.info(message),
+        warn: (message) => server.log.warn(message),
+        error: (message) => server.log.error(message),
+        debug: (message) => server.log.debug(message),
+    },
+    isShuttingDown: () => shuttingDown,
+    writeCallEndEvent: (callMetaData) => writeCallEndEvent(callMetaData, server),
+    finishRecording: (socketData, callMetaData) => finishRecording(socketData, callMetaData),
+    stopEngine: (socketData) => stopMicrovmAsr(socketData, server),
+    startTranscription: async (socketData) => {
+        noteStreamingSessionStarted(socketData.callMetadata);
+        await startTranscription(socketData, server);
+    },
+    noteSessionEnded: noteStreamingSessionEnded,
+    describe: stringifyCallMetaData,
+    describeError: normalizeErrorForLogging,
 });
 const recordingStore = s3RecordingStore(s3Client, RECORDINGS_BUCKET_NAME, {
     info: (message) => server.log.info(message),
@@ -159,22 +164,11 @@ const videoSocketMap = new Map<WebSocket, VideoSession>();
  * a video stream may only join a call that is currently streaming audio, and
  * only for the user who started it.
  *
- * Linear scan over socketMap — one entry per concurrent call on this task, so
- * a handful to low hundreds, and this runs once per video stream (not per
- * frame).
+ * Linear scan over the connected sessions — one per concurrent call on this
+ * task, so a handful to low hundreds, and this runs once per video stream (not
+ * per frame).
  */
-const findAudioSessionByCallId = (
-    callId: string
-): SocketCallData | undefined => {
-    for (const data of socketMap.values()) {
-        if (!data.ended && data.callMetadata?.callId === callId) {
-            return data;
-        }
-    }
-    // A meeting waiting for its audio connection to come back is still live:
-    // its video stream may reconnect first.
-    return detachedSessions.find(callId);
-};
+const findAudioSessionByCallId = (callId: string): SocketCallData | undefined => sessions.findLive(callId);
 
 // create fastify server (with logging enabled for non-PROD environments)
 const server = fastify({
@@ -377,7 +371,7 @@ const onBinaryMessage = async (
         return;
     }
 
-    const socketData = socketMap.get(ws);
+    const socketData = sessions.sessionOf(ws);
 
     // Audio a meeting's consent does not allow is neither transcribed nor
     // recorded: an opt-in meeting before its consent is recorded, and any
@@ -606,17 +600,24 @@ const onTextMessage = async (
         // Its old connection may not have been seen to close yet (a dropped
         // network is noticed by the client first), so a live session of the
         // same meeting and user is taken over the same way.
-        const callerSub = getAuthenticatedCaller(request)?.sub;
-        const resumed =
-            detachedSessions.resume(callMetaData.callId, callerSub) ?? takeOverLiveSession(callMetaData.callId, callerSub, ws);
+        const resumed = await sessions.resume(
+            ws,
+            callMetaData.callId,
+            getAuthenticatedCaller(request)?.sub,
+            callMetaData,
+            async () => {
+                for (const frame of pendingConsentFrames.release(ws)) {
+                    await onConsentFrame(clientIP, ws, frame);
+                }
+            }
+        );
         if (resumed) {
-            await resumeSession(clientIP, ws, resumed.session, callMetaData, resumed.detachedForMs);
             return;
         }
 
         await writeCallStartEvent(callMetaData, server);
         // Local files named per session (see SocketCallData.recordingTempPath);
-        // the S3 key is the meeting's, from its callId (see endCall).
+        // the S3 key is the meeting's, from its callId (see finishRecording).
         const sessionFileTag = randomUUID().slice(0, 8);
         const recordingTempPath = localRecordingPath(callMetaData, sessionFileTag, 'raw');
         const recordingWavPath = localRecordingPath(callMetaData, sessionFileTag, 'wav');
@@ -660,8 +661,9 @@ const onTextMessage = async (
             // later authorizes START_VIDEO for the same callId.
             ownerSub: getAuthenticatedCaller(request)?.sub,
         };
-        const connection = { ws };
-        sessionConnection.set(socketCallMap, connection);
+        // The consent session sends to connection.ws, which follows the
+        // meeting to the connection its client reconnects with.
+        const connection = sessions.register(ws, socketCallMap);
         if (consentDecision.kind === 'consent' && clientConsent) {
             socketCallMap.consent = new ConsentSession(callMetaData.callId, consentDecision, clientConsent, {
                 api: consentApi,
@@ -673,7 +675,6 @@ const onTextMessage = async (
                 log: server.log,
             });
         }
-        socketMap.set(ws, socketCallMap);
         void socketCallMap.consent?.begin();
         // Consent frames sent right behind this START, before transcription
         // starts: a held objection closes the gate before the engine is started.
@@ -697,7 +698,7 @@ const onTextMessage = async (
             await startTranscription(socketCallMap, server);
         }
     } else if (callMetaData.callEvent === 'SPEAKER_CHANGE') {
-        const socketData = socketMap.get(ws);
+        const socketData = sessions.sessionOf(ws);
         server.log.debug(
             `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Received speaker change. Active speaker = ${callMetaData.activeSpeaker}`
         );
@@ -770,11 +771,10 @@ const onTextMessage = async (
             ws.close(1008, 'meeting consent does not allow capture');
             return;
         }
-        const session = startVideoSession(
-            callMetaData,
-            server,
-            audioSession.startStreamTime.getTime()
-        );
+        // Where the meeting's timeline is now, by the audio received: a video
+        // stream that restarts is placed there, which leaves out any time the
+        // audio connection was down, as the recording and transcript do.
+        const session = startVideoSession(callMetaData, server, recordedAudioSeconds(audioSession));
         videoSocketMap.set(ws, session);
     } else if (callMetaData.callEvent === 'END_VIDEO') {
         const session = videoSocketMap.get(ws);
@@ -787,7 +787,7 @@ const onTextMessage = async (
         videoSocketMap.delete(ws);
         await endVideoSession(session.callId, server);
     } else if (callMetaData.callEvent === 'END') {
-        const socketData = socketMap.get(ws);
+        const socketData = sessions.sessionOf(ws);
         if (!socketData || !socketData.callMetadata) {
             server.log.error(
                 `[${callMetaData.callEvent}]: [${
@@ -811,76 +811,7 @@ const onTextMessage = async (
             socketData.callMetadata.shouldRecordCall ??
                 (socketData.sessionSettings ?? (await getSessionSettings(server.log))).recording.recordAudio
         );
-        await endCall(ws, socketData, callMetaData);
-    }
-};
-
-/**
- * The live session of a meeting on another connection of the same verified
- * user, detached from that connection, which is closed: its client has
- * reconnected and the new connection carries the meeting from now on.
- */
-const takeOverLiveSession = (
-    callId: string,
-    callerSub: string | undefined,
-    ws: WebSocket
-): { session: SocketCallData; detachedForMs: number } | undefined => {
-    if (!callerSub) {
-        return undefined;
-    }
-    for (const [other, data] of socketMap) {
-        if (other !== ws && !data.ended && data.callMetadata.callId === callId && data.ownerSub === callerSub) {
-            socketMap.delete(other);
-            try {
-                other.close(1000, 'the meeting continues on a newer connection');
-            } catch {
-                // already closing
-            }
-            return { session: data, detachedForMs: 0 };
-        }
-    }
-    return undefined;
-};
-
-/**
- * Continue a held session on the connection its client reconnected with: the
- * same recording file, the same transcription engine and transcript clock, and
- * no second START or END for the meeting. The audio the client could not send
- * while it was disconnected is missing from the recording and the transcript
- * alike, so the two stay in step.
- */
-const resumeSession = async (
-    clientIP: string,
-    ws: WebSocket,
-    socketData: SocketCallData,
-    callMetaData: CallMetaData,
-    detachedForMs: number
-): Promise<void> => {
-    // The new connection's tokens: the events written from here on carry them.
-    socketData.callMetadata.accessToken = callMetaData.accessToken;
-    socketData.callMetadata.idToken = callMetaData.idToken;
-    socketData.callMetadata.refreshToken = callMetaData.refreshToken;
-    const connection = sessionConnection.get(socketData);
-    if (connection) {
-        connection.ws = ws;
-    } else {
-        sessionConnection.set(socketData, { ws });
-    }
-    socketMap.set(ws, socketData);
-    server.log.info(
-        `[START]: [${clientIP}][${socketData.callMetadata.callId}] - The client reconnected after ${detachedForMs} ms; continuing the meeting's session (${socketData.recordingFileSize ?? 0} bytes recorded so far).`
-    );
-    for (const frame of pendingConsentFrames.release(ws)) {
-        await onConsentFrame(clientIP, ws, frame);
-    }
-    if (
-        !socketData.ended &&
-        !socketData.transcriptionStarted &&
-        (!socketData.consent || socketData.consent.gateOpen)
-    ) {
-        socketData.transcriptionStarted = true;
-        noteStreamingSessionStarted(socketData.callMetadata);
-        await startTranscription(socketData, server);
+        await sessions.end(ws, socketData, callMetaData);
     }
 };
 
@@ -916,7 +847,7 @@ const onConsentFrame = async (
     // used to find one.
     // An ended meeting still on the connection (its recording uploading) is not
     // the one a frame is for: the frame waits for the START that follows it.
-    const registered = socketMap.get(ws);
+    const registered = sessions.sessionOf(ws);
     const socketData = registered && !registered.ended ? registered : undefined;
     if (!socketData) {
         const held = pendingConsentFrames.hold(ws, frame);
@@ -1010,17 +941,14 @@ const discardCaptureForConsent = async (ws: WebSocket, socketData: SocketCallDat
                 `[CONSENT]: [${callMetaData.callId}] - Error stopping the MicroVM ASR engine: ${normalizeErrorForLogging(error)}`
             );
         }
-        detachedSessions.forget(socketData);
+        sessions.discard(ws, socketData);
         if (socketData.recordingTempPath) {
             await deleteTempFile(callMetaData, socketData.recordingTempPath);
-        }
-        if (socketMap.get(ws) === socketData) {
-            socketMap.delete(ws);
         }
         // This connection's video of the meeting, if it streamed any, is
         // discarded too -- unless another live session on this task streams the
         // same meeting, whose video it would be.
-        const sharedWithAnother = [...socketMap.values()].some(
+        const sharedWithAnother = sessions.connectedSessions().some(
             (other) => other !== socketData && !other.ended && other.callMetadata.callId === callMetaData.callId
         );
         const video = getVideoSession(callMetaData.callId);
@@ -1046,7 +974,7 @@ const stopCaptureForConsent = async (ws: WebSocket, socketData: SocketCallData, 
     server.log.info(`[CONSENT]: [${callId}] - Ending the meeting: ${reason}.`);
     try {
         await endVideoSession(callId, server);
-        await endCall(ws, socketData);
+        await sessions.end(ws, socketData);
     } catch (error) {
         server.log.error(`[CONSENT]: [${callId}] - Error ending the meeting: ${normalizeErrorForLogging(error)}`);
     }
@@ -1072,209 +1000,116 @@ const onWsClose = async (ws: WebSocket, code: number): Promise<void> => {
         videoSocketDropped(videoSession.callId, server);
         return;
     }
-    const socketData = socketMap.get(ws);
-    if (socketData) {
-        // A connection that closed without an END: unless the meeting is over,
-        // hold its session for the client to reconnect to (see
-        // calleventdata/detached-sessions.ts).
-        if (!shuttingDown && !socketData.ended && detachedSessions.detach(socketData)) {
-            socketMap.delete(ws);
-            server.log.info(
-                `[ON WSCLOSE]: [${socketData.callMetadata.callId}] - Connection closed without END; holding the meeting for ${AUDIO_RECONNECT_GRACE_MS} ms for the client to reconnect.`
-            );
-            return;
-        }
-        server.log.debug(
-            `[ON WSCLOSE]: [${
-                socketData.callMetadata.callId
-            }] - Writing call end event due to websocket close event ${stringifyCallMetaData(
-                socketData.callMetadata
-            )}`
-        );
-        await endCall(ws, socketData);
-    }
+    await sessions.onConnectionClosed(ws);
 };
 
-const endCall = async (
-    ws: WebSocket | undefined,
-    socketData: SocketCallData,
-    callMetaData?: CallMetaData
-): Promise<void> => {
-    if (callMetaData === undefined) {
-        callMetaData = socketData.callMetadata;
-    }
+/**
+ * A meeting's recording once its END event is written: the WAV built from the
+ * session's raw file and uploaded, or the raw file discarded when the meeting
+ * is not recorded. Either way any video stream of the meeting is told the
+ * audio is done.
+ */
+const finishRecording = async (socketData: SocketCallData, callMetaData: CallMetaData): Promise<void> => {
+    // The raw file is complete only once its stream has flushed: the
+    // WAV below is built by reading it back.
+    const rawFlushed = finishWriting(socketData.writeRecordingStream);
+    if (socketData.writeRecordingStream && socketData.recordingFileSize) {
 
-    if (socketData !== undefined && socketData.ended === false) {
-        socketData.ended = true;
-        // Ended some other way (consent) while it waited for its client.
-        detachedSessions.forget(socketData);
-
-        // Inside the ran-once guard, so a second close does not count the same
-        // meeting twice. Emits only when the session produced no transcript at
-        // all, which is the one ending nothing else reports.
-        noteStreamingSessionEnded(socketData.callMetadata);
-
-        if (callMetaData !== undefined && callMetaData != null) {
-            await writeCallEndEvent(callMetaData, server);
-            // The raw file is complete only once its stream has flushed: the
-            // WAV below is built by reading it back.
-            const rawFlushed = finishWriting(socketData.writeRecordingStream);
-            if (socketData.writeRecordingStream && socketData.recordingFileSize) {
-
-                if (callMetaData.shouldRecordCall) {
-                    server.log.debug(
-                        `[${callMetaData.callEvent}]: [${
-                            callMetaData.callId
-                        }] - Audio Recording enabled. Writing to S3.: ${stringifyCallMetaData(
-                            callMetaData
-                        )}`
-                    );
-                    const header = createWavHeader(
-                        callMetaData.samplingRate,
-                        socketData.recordingFileSize
-                    );
-                    const rawPath =
-                        socketData.recordingTempPath ?? localRecordingPath(callMetaData, 'session', 'raw');
-                    const wavPath =
-                        socketData.recordingWavPath ?? localRecordingPath(callMetaData, 'session', 'wav');
-                    await rawFlushed;
-
-                    const readStream = fs.createReadStream(rawPath);
-                    const writeStream = fs.createWriteStream(wavPath);
-                    writeStream.write(header);
-                    for await (const chunk of readStream) {
-                        writeStream.write(chunk);
-                    }
-                    // Await the flush: the file is read back for the S3 upload
-                    // and (when video was recorded) by the ffmpeg mux.
-                    await new Promise<void>((resolve) =>
-                        writeStream.end(() => resolve())
-                    );
-
-                    const upload = await uploadRecording(
-                        recordingStore,
-                        {
-                            prefix: RECORDING_FILE_PREFIX,
-                            baseName: posixifyFilename(callMetaData.callId),
-                            wavPath,
-                            rawPath,
-                        },
-                        server.log
-                    );
-                    await deleteTempFile(callMetaData, rawPath);
-
-                    // If a video stream was recorded for this call, hand the
-                    // WAV over so it can be muxed into the video MP4 (the
-                    // video session deletes it when done). Otherwise delete.
-                    const wavAdopted = notifyAudioRecordingDone(
-                        callMetaData.callId,
-                        wavPath,
-                        server
-                    );
-                    if (!wavAdopted) {
-                        await deleteTempFile(callMetaData, wavPath);
-                    }
-
-                    server.log.info(
-                        `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Recording ${upload.outcome}: ${upload.wavKey} (${socketData.recordingFileSize} bytes)`
-                    );
-                    // A meeting that already has a recording keeps it: this
-                    // session's audio is stored beside it, not in its place.
-                    if (!upload.storedSeparately) {
-                        const recordingUrl = `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${upload.wavKey}`;
-                        await writeCallRecordingEvent(callMetaData, recordingUrl, server);
-                    }
-                } else {
-                    // No audio WAV to mux; let any video session finalize
-                    // video-only. The raw audio is not kept either.
-                    notifyAudioRecordingDone(callMetaData.callId, undefined, server);
-                    await rawFlushed;
-                    if (socketData.recordingTempPath) {
-                        await deleteTempFile(callMetaData, socketData.recordingTempPath);
-                    }
-                    server.log.info(
-                        `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Recording NOT uploaded: shouldRecordCall=${callMetaData.shouldRecordCall}.`
-                    );
-                    server.log.debug(
-                        `[${callMetaData.callEvent}]: [${
-                            callMetaData.callId
-                        }] - Audio Recording disabled. Add s3 url event is not written to KDS. : ${stringifyCallMetaData(
-                            callMetaData
-                        )}`
-                    );
-                }
-            } else {
-                // No audio recording was produced (e.g. no audio bytes ever
-                // arrived); let any video session finalize video-only.
-                notifyAudioRecordingDone(callMetaData.callId, undefined, server);
-                await rawFlushed;
-                if (socketData.recordingTempPath) {
-                    await deleteTempFile(callMetaData, socketData.recordingTempPath);
-                }
-                server.log.info(
-                    `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Recording NOT uploaded: no audio was written (${socketData.recordingFileSize ?? 0} bytes).`
-                );
-            }
-
-            if (socketData.audioInputStream) {
-                server.log.debug(
-                    `[${callMetaData.callEvent}]: [${
-                        callMetaData.callId
-                    }] - Closing audio input stream:  ${stringifyCallMetaData(callMetaData)}`
-                );
-                socketData.audioInputStream.end();
-                socketData.audioInputStream.destroy();
-            }
-
-            // Flushes the tail utterance on each channel, then terminates the
-            // MicroVM. No-op for meetings transcribed by Amazon Transcribe.
-            try {
-                await stopMicrovmAsr(socketData, server);
-            } catch (error) {
-                server.log.error(
-                    `[${callMetaData.callEvent}]: [${
-                        callMetaData.callId
-                    }] - Error stopping the MicroVM ASR engine: ${normalizeErrorForLogging(error)}`
-                );
-            }
-
-            if (socketData) {
-                server.log.debug(
-                    `[${callMetaData.callEvent}]: [${
-                        callMetaData.callId
-                    }] - Deleting websocket from map: ${stringifyCallMetaData(callMetaData)}`
-                );
-                // Only this meeting's entry: a client that reuses the connection
-                // may have started its next meeting while this one finished.
-                if (ws && socketMap.get(ws) === socketData) {
-                    socketMap.delete(ws);
-                }
-                // And wherever else it streams now, after a reconnect.
-                const current = sessionConnection.get(socketData)?.ws;
-                if (current && socketMap.get(current) === socketData) {
-                    socketMap.delete(current);
-                }
-            }
-        } else {
-            server.log.error('[END]: Missing Call Meta Data in END event');
-        }
-    } else {
-        if (callMetaData !== undefined && callMetaData != null) {
-            server.log.error(
+        if (callMetaData.shouldRecordCall) {
+            server.log.debug(
                 `[${callMetaData.callEvent}]: [${
                     callMetaData.callId
-                }] - Duplicate End call event. Already received the end call event: ${stringifyCallMetaData(
+                }] - Audio Recording enabled. Writing to S3.: ${stringifyCallMetaData(
                     callMetaData
                 )}`
             );
+            const header = createWavHeader(
+                callMetaData.samplingRate,
+                socketData.recordingFileSize
+            );
+            const rawPath =
+                socketData.recordingTempPath ?? localRecordingPath(callMetaData, 'session', 'raw');
+            const wavPath =
+                socketData.recordingWavPath ?? localRecordingPath(callMetaData, 'session', 'wav');
+            await rawFlushed;
+
+            const readStream = fs.createReadStream(rawPath);
+            const writeStream = fs.createWriteStream(wavPath);
+            writeStream.write(header);
+            for await (const chunk of readStream) {
+                writeStream.write(chunk);
+            }
+            // Await the flush: the file is read back for the S3 upload
+            // and (when video was recorded) by the ffmpeg mux.
+            await new Promise<void>((resolve) =>
+                writeStream.end(() => resolve())
+            );
+
+            const upload = await uploadRecording(
+                recordingStore,
+                {
+                    prefix: RECORDING_FILE_PREFIX,
+                    baseName: posixifyFilename(callMetaData.callId),
+                    wavPath,
+                    rawPath,
+                },
+                server.log
+            );
+            await deleteTempFile(callMetaData, rawPath);
+
+            // If a video stream was recorded for this call, hand the
+            // WAV over so it can be muxed into the video MP4 (the
+            // video session deletes it when done). Otherwise delete.
+            const wavAdopted = notifyAudioRecordingDone(
+                callMetaData.callId,
+                wavPath,
+                server
+            );
+            if (!wavAdopted) {
+                await deleteTempFile(callMetaData, wavPath);
+            }
+
+            server.log.info(
+                `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Recording ${upload.outcome}: ${upload.wavKey} (${socketData.recordingFileSize} bytes)`
+            );
+            // A meeting that already has a recording keeps it: this
+            // session's audio is stored beside it, not in its place.
+            if (!upload.storedSeparately) {
+                const recordingUrl = `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${upload.wavKey}`;
+                await writeCallRecordingEvent(callMetaData, recordingUrl, server);
+            }
         } else {
-            server.log.error(
-                '[END]: Duplicate End call event. Missing Call Meta Data in END event'
+            // No audio WAV to mux; let any video session finalize
+            // video-only. The raw audio is not kept either.
+            notifyAudioRecordingDone(callMetaData.callId, undefined, server);
+            await rawFlushed;
+            if (socketData.recordingTempPath) {
+                await deleteTempFile(callMetaData, socketData.recordingTempPath);
+            }
+            server.log.info(
+                `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Recording NOT uploaded: shouldRecordCall=${callMetaData.shouldRecordCall}.`
+            );
+            server.log.debug(
+                `[${callMetaData.callEvent}]: [${
+                    callMetaData.callId
+                }] - Audio Recording disabled. Add s3 url event is not written to KDS. : ${stringifyCallMetaData(
+                    callMetaData
+                )}`
             );
         }
+    } else {
+        // No audio recording was produced (e.g. no audio bytes ever
+        // arrived); let any video session finalize video-only.
+        notifyAudioRecordingDone(callMetaData.callId, undefined, server);
+        await rawFlushed;
+        if (socketData.recordingTempPath) {
+            await deleteTempFile(callMetaData, socketData.recordingTempPath);
+        }
+        server.log.info(
+            `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Recording NOT uploaded: no audio was written (${socketData.recordingFileSize ?? 0} bytes).`
+        );
     }
 };
-
 /** End a write stream and wait for it to flush; resolves at once when there is none. */
 const finishWriting = (writable: fs.WriteStream | undefined): Promise<void> =>
     new Promise<void>((resolve) => {
@@ -1373,20 +1208,12 @@ const shutdown = async (signal: string): Promise<void> => {
 
     // Meetings waiting for their client to reconnect will not get one from this
     // task: end them now, so their recordings are uploaded before it exits.
-    for (const socketData of detachedSessions.drain()) {
-        try {
-            await endCall(undefined, socketData);
-        } catch (err) {
-            server.log.error(
-                `[SHUTDOWN]: Error ending ${socketData.callMetadata.callId}: ${normalizeErrorForLogging(err)}`
-            );
-        }
-    }
+    await sessions.endHeldSessions();
 
     // Release ASR MicroVMs explicitly. Their maximumDurationInSeconds is only a
     // backstop, so without this a deploy or scale-in would leave one running
     // (and billing) per in-flight meeting until that ceiling expired.
-    for (const socketData of socketMap.values()) {
+    for (const socketData of sessions.connectedSessions()) {
         if (socketData.asr) {
             try {
                 await stopMicrovmAsr(socketData, server);
