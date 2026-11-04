@@ -16,6 +16,7 @@ import argparse
 import hashlib
 import json
 import re
+import tempfile
 import urllib.request
 import wave
 from pathlib import Path
@@ -266,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     pack.add_argument("host", help="AMI speaker letter to put on the microphone channel")
     pack.add_argument("--annotations", type=Path, required=True)
     pack.add_argument("--headsets", type=Path, required=True)
-    pack.add_argument("--scratch", type=Path, default=Path("/tmp/ami-stereo"))
+    pack.add_argument("--scratch", type=Path, default=Path(tempfile.gettempdir()) / "ami-stereo")
     build = sub.add_parser("build", help="download and mix a packaged meeting")
     build.add_argument("meeting")
     build.add_argument(
