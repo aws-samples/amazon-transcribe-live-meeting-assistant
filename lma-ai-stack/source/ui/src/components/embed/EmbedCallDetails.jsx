@@ -52,6 +52,7 @@ import { SentimentIcon } from '../sentiment-icon/SentimentIcon';
 import { getWeightedSentimentLabel } from '../common/sentiment';
 import onCreateCall from '../../graphql/queries/onCreateCall';
 import onUpdateCall from '../../graphql/queries/onUpdateCall';
+import { isChatChannel } from '../common/channels';
 
 const gqlClient = generateClient();
 const logger = new ConsoleLogger('EmbedCallDetails');
@@ -192,6 +193,18 @@ const getSentimentImage = (segment, enableSentimentAnalysis) => {
 
 const TranscriptContent = ({ segment, translateCache }) => {
   const { transcript, segmentId, channel, targetLanguage, translateOn } = segment;
+
+  // A message typed in the meeting chat is shown as it was typed, as plain
+  // text: it is not rendered as markdown, so nothing in it becomes a link.
+  if (isChatChannel(channel)) {
+    return (
+      <TextContent>
+        <span className="transcript-chat-text" style={{ whiteSpace: 'pre-wrap' }}>
+          {transcript}
+        </span>
+      </TextContent>
+    );
+  }
   const k = segmentId.concat('-', targetLanguage);
 
   // prettier-ignore
@@ -257,6 +270,9 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
   } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
     displayChannel = 'MEETING_ASSISTANT';
     channelClass = 'transcript-segment-agent-assist';
+  } else if (isChatChannel(channel)) {
+    // A message typed in the meeting chat, under its sender.
+    displayChannel = `${segment.speaker} (chat)`.trim();
   }
 
   return (
@@ -281,6 +297,8 @@ const shouldAppendToPreviousSegment = ({ previous, current }) =>
   // prettier-ignore
   previous.speaker === current.speaker
   && previous.channel === current.channel
+  // Each chat message is its own row.
+  && !isChatChannel(current.channel)
   && current.startTime - previous.endTime < PAUSE_TO_MERGE_IN_SECONDS;
 
 const appendToPreviousSegment = ({ previous, current }) => {

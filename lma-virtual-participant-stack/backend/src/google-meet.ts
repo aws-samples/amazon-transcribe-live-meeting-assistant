@@ -36,6 +36,8 @@ import { allChatHelpMessages, chatHelpMessages } from './chat-help.js';
 import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { toolbarPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
+import { noteSentChat } from './meeting-chat.js';
+import { meetingChat } from './meeting-chat-runtime.js';
 import { simliAvatar } from './simli-avatar.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { classifyJoinState, findElementWithFallback, isResolverEnabled } from './ai-dom-resolver.js';
@@ -61,6 +63,7 @@ import {
     parseMeetParticipantCount,
     pickMeetActiveSpeaker,
     senderFromMeetGroupHeader,
+    timeFromMeetGroupHeader,
 } from './google-meet-page.js';
 import { createLogger } from './logger.js';
 
@@ -91,6 +94,11 @@ interface MeetPageReading {
 interface MeetChatReading {
     sender: string | null;
     text: string;
+    /** Meet's data-message-id. */
+    id: string | null;
+    /** The time the message's group header shows. */
+    time: string | null;
+    links: string[];
 }
 
 /**
@@ -366,6 +374,8 @@ export default class GoogleMeet {
      * messages"), in which case the composer is disabled and nothing is posted.
      */
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
+        // So the meeting chat capture knows these when it reads them back.
+        noteSentChat(messages);
         try {
             await this.openChatPanel(page);
             const found = await findElementWithFallback(
@@ -460,11 +470,11 @@ export default class GoogleMeet {
      * sender is null rather than borrowed from a neighbouring message.
      */
     private async readNewChatMessages(page: Page): Promise<MeetChatReading[]> {
-        const raw: Array<{ header: string | null; text: string }> = await page.evaluate(
+        const raw: Array<{ header: string | null; text: string; id: string | null; links: string[] }> = await page.evaluate(
             (sels: { message: string; group: string }) => {
                 const w = window as any;
                 const seen: Set<string> = (w.__lmaMeetSeen ||= new Set<string>());
-                const out: Array<{ header: string | null; text: string }> = [];
+                const out: Array<{ header: string | null; text: string; id: string | null; links: string[] }> = [];
                 for (const node of Array.from(document.querySelectorAll(sels.message))) {
                     // A message nested in another (a reply or quote) is read as part of it.
                     if (node.parentElement?.closest(sels.message)) continue;
@@ -487,16 +497,30 @@ export default class GoogleMeet {
                         }
                         header = parts.join(' ');
                     }
-                    out.push({ header, text });
+                    const links = Array.from(node.querySelectorAll('a[href]'))
+                        .map((a) => (a as HTMLAnchorElement).href)
+                        .filter(Boolean);
+                    out.push({ header, text, id: node.getAttribute('data-message-id'), links });
                 }
                 return out;
             },
             { message: MEET_IN_PAGE_SELECTORS.chatMessage, group: MEET_IN_PAGE_SELECTORS.chatGroup },
         );
-        return raw.map(({ header, text }) => ({ sender: senderFromMeetGroupHeader(header), text }));
+        return raw.map(({ header, text, id, links }) => ({
+            sender: senderFromMeetGroupHeader(header),
+            text,
+            id: id || null,
+            time: timeFromMeetGroupHeader(header),
+            links,
+        }));
     }
 
-    private async handleIncomingMessage(page: Page, sender: string | null, message: string): Promise<void> {
+    private async handleIncomingMessage(
+        page: Page,
+        sender: string | null,
+        message: string,
+        reading: Partial<MeetChatReading> = {},
+    ): Promise<void> {
         if (isOwnMeetName(sender, this.ownIdentities()) || isOwnMeetMessage(message)) return;
         // The consent flow gets no sender on Meet. The sender reading has not
         // been confirmed against a live meeting, and a consent recorded for the
@@ -544,11 +568,18 @@ export default class GoogleMeet {
             log.info(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
             transcriptionService.startTranscription();
-        } else if (details.start) {
-            const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-            const formatted = sender ? `[${timestamp}] ${sender}: ${message}` : `[${timestamp}] ${message}`;
-            details.messages.push(formatted);
-            log.info('New message:', formatted);
+        } else {
+            // Meeting chat, for the transcript (meeting-chat.ts decides). Meet
+            // has no private messages in a meeting's chat.
+            meetingChat.offer({
+                platform: 'google-meet',
+                text: message,
+                sender,
+                id: reading.id ?? null,
+                platformTime: reading.time ?? null,
+                audience: 'everyone',
+                links: reading.links,
+            });
         }
     }
 
@@ -1124,8 +1155,8 @@ export default class GoogleMeet {
                         lastReopen = Date.now();
                         await this.openChatPanel(page);
                     }
-                    for (const { sender, text } of await this.readNewChatMessages(page)) {
-                        await this.handleIncomingMessage(page, sender, text);
+                    for (const reading of await this.readNewChatMessages(page)) {
+                        await this.handleIncomingMessage(page, reading.sender, reading.text, reading);
                     }
                 } catch {
                     /* the page is navigating; read again next tick */

@@ -57,6 +57,15 @@ test('a value the configuration holds replaces the variable, as text', () => {
     assert.deepEqual(result.notes, []);
 });
 
+test('the meeting chat switch is applied as text, and left unset when the configuration has no value', () => {
+    const env = started();
+    applySections({ virtual_participant: { captureMeetingChat: false } }, env);
+    assert.equal(env['CAPTURE_MEETING_CHAT'], 'false');
+    const untouched = started();
+    applySections({ virtual_participant: {} }, untouched);
+    assert.equal(untouched['CAPTURE_MEETING_CHAT'], undefined);
+});
+
 test('a setting the configuration does not hold keeps the task value', () => {
     const env = started();
     const result = applySections({ virtual_participant: {}, recording: {}, transcription: {} }, env);

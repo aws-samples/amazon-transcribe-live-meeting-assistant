@@ -286,30 +286,10 @@ export default class Chime {
                     await this.sendMessages(page, details.startMessages);
                     // Restart transcription if needed
                     transcriptionService.startTranscription();
-                } else if (
-                    details.start &&
-                    sender !== 'Amazon Chime' &&
-                    !sender?.includes(details.scribeName)
-                ) {
-                    const timestamp = new Date().toLocaleTimeString('en-US', {
-                        hour12: false,
-                        hour: '2-digit',
-                        minute: '2-digit',
-                    });
-                    let message = `[${timestamp}] ${sender}: `;
-
-                    if (attachmentTitle && attachmentHref) {
-                        details.attachments[attachmentTitle] = attachmentHref;
-                        message += text
-                            ? `${text} | ${attachmentTitle}`
-                            : attachmentTitle;
-                    } else if (text) {
-                        message += text;
-                    }
-
-                    details.messages.push(message);
-                    log.info('New message:', message);
                 }
+                // Other Amazon Chime chat is read for the commands above only,
+                // and is not added to the transcript: the meeting chat capture
+                // (meeting-chat.ts) does not cover Amazon Chime.
             }
         );
 

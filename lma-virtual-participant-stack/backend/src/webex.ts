@@ -13,6 +13,8 @@ import { allChatHelpMessages, chatHelpMessages } from './chat-help.js';
 import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { toolbarPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
+import { noteSentChat } from './meeting-chat.js';
+import { meetingChat } from './meeting-chat-runtime.js';
 import { simliAvatar } from './simli-avatar.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
@@ -241,6 +243,8 @@ export default class Webex {
         messages: string[],
         isEnterprise: boolean | null = false
     ): Promise<void> {
+        // So the meeting chat capture knows these when it reads them back.
+        noteSentChat(messages);
         // Cap the input lookup so a stale/missing chat editor selector can't hang
         // the caller forever (the goodbye-on-exit path is time-sensitive).
         const messageElement = await frame.waitForSelector(
@@ -251,7 +255,7 @@ export default class Webex {
             await messageElement?.type(message);
             await messageElement?.press('Enter');
         }
-        log.info('Sent messages:', messages);
+        log.info(`Sent ${messages.length} chat message(s).`);
     }
 
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {
@@ -853,7 +857,12 @@ export default class Webex {
         // and the body as separate arguments (as chime.ts does) rather than packing
         // them into one string: a body that happens to contain the delimiter would
         // otherwise be split into a bogus sender and a truncated message.
-        await page.exposeFunction('messageChange', async (rawSender: string | null, message: string) => {
+        await page.exposeFunction('messageChange', async (
+            rawSender: string | null,
+            message: string,
+            messageId?: string | null,
+            links?: string[],
+        ) => {
             const sender = normalizeWebexSender(rawSender);
             // Never act on, or transcribe, our own chat messages. The sender is
             // the primary test, but it cannot fire when no label resolves — a
@@ -931,16 +940,11 @@ export default class Webex {
                 await this.sendMessages(frame, details.startMessages);
                 // Restart transcription if needed
                 transcriptionService.startTranscription();
-            } else if (details.start) {
-                // Process meeting messages (LMA feature)
-                const timestamp = new Date().toLocaleTimeString('en-US', {
-                    hour12: false,
-                    hour: '2-digit',
-                    minute: '2-digit',
-                });
-                const formattedMessage = `[${timestamp}] ${message}`;
-                details.messages.push(formattedMessage);
-                log.info('New message:', formattedMessage);
+            } else {
+                // Meeting chat, for the transcript (meeting-chat.ts decides).
+                // Webex's private messages are not told apart from the rest
+                // in the panel markup this reads, so the recipient is unknown.
+                meetingChat.offer({ platform: 'webex', text: message, sender, id: messageId, links });
             }
         });
 
@@ -968,7 +972,7 @@ export default class Webex {
 
                 // Bodies can be delivered more than once (a virtualized list
                 // re-inserting a node, or two mutations touching the same row), and
-                // details.messages has no idempotence of its own. Keyed on the BODY
+                // the node side has no idempotence of its own. Keyed on the BODY
                 // element, not the row: chat UIs commonly group a run of messages
                 // from one sender into a single row, and keying on the row would
                 // drop every message in such a group after the first.
@@ -1083,7 +1087,24 @@ export default class Webex {
                                 //
                                 // Sender as a separate argument so a body containing
                                 // the delimiter cannot be mistaken for one.
-                                (window as any).messageChange(sender ?? null, message);
+                                //
+                                // The message's id, where the markup gives one
+                                // (ASSUMPTION, verify live: an id or a
+                                // data-message-id on the body or its row),
+                                // keys the transcript segment; meeting-chat.ts
+                                // logs whether one was found. A row id is
+                                // qualified by the body's place in the row,
+                                // since one row can hold several messages.
+                                const rowId = scope?.getAttribute('data-message-id') || scope?.id || '';
+                                const place = scope ? Array.from(scope.querySelectorAll(bodies)).indexOf(bodyEl) : -1;
+                                const messageId =
+                                    bodyEl.getAttribute('data-message-id') ||
+                                    bodyEl.id ||
+                                    (rowId ? `${rowId}#${place}` : null);
+                                const links = Array.from(bodyEl.querySelectorAll('a[href]'))
+                                    .map((a) => (a as HTMLAnchorElement).href)
+                                    .filter(Boolean);
+                                (window as any).messageChange(sender ?? null, message, messageId, links);
                             }
                         }
                     }

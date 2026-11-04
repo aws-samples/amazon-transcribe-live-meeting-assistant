@@ -115,6 +115,7 @@ import useChatKeyframeLinks from '../../hooks/use-chat-keyframe-links';
 import { isSharedWith } from '../common/shared-with';
 import useStrandsChatBridge from '../../hooks/use-strands-chat-bridge';
 import SummaryMarkdown from '../summary-markdown/SummaryMarkdown';
+import { isChatChannel } from '../common/channels';
 
 const client = generateClient();
 const logger = new ConsoleLogger('CallPanel');
@@ -481,6 +482,18 @@ const TranscriptContent = ({ segment, translateCache, query = '' }) => {
     [query],
   );
 
+  // A message typed in the meeting chat is shown as it was typed, as plain
+  // text: it is not rendered as markdown, so nothing in it becomes a link.
+  if (isChatChannel(channel)) {
+    return (
+      <TextContent>
+        <span className="transcript-chat-text" style={{ whiteSpace: 'pre-wrap' }}>
+          {transcript}
+        </span>
+      </TextContent>
+    );
+  }
+
   const k = segmentId.concat('-', targetLanguage);
 
   // prettier-ignore
@@ -649,6 +662,9 @@ const TranscriptSegment = ({
   } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
     displayChannel = 'MEETING_ASSISTANT';
     channelClass = 'transcript-segment-agent-assist';
+  } else if (isChatChannel(channel)) {
+    // A message typed in the meeting chat, under its sender.
+    displayChannel = `${segment.speaker} (chat)`.trim();
   }
 
   return (
@@ -708,6 +724,8 @@ const shouldAppendToPreviousSegment = ({ previous, current }) =>
   // eslint-disable-next-line implicit-arrow-linebreak
   previous.speaker === current.speaker
   && previous.channel === current.channel
+  // Each chat message is its own row.
+  && !isChatChannel(current.channel)
   && current.startTime - previous.endTime < PAUSE_TO_MERGE_IN_SECONDS;
 
 /**
@@ -727,10 +745,11 @@ const appendToPreviousSegment = ({ previous, current }) => {
   previous.mergedSegmentIds = [...(previous.mergedSegmentIds || [previous.segmentId]), current.segmentId];
 };
 
-// Channels that are not somebody speaking: the assistants' answers. Kept as a
+// Channels that are not somebody speaking: the assistants' answers, and the
+// meeting chat. Kept as a
 // list of what is excluded, so it holds whatever the two speech channels are
 // called.
-const NON_SPEECH_CHANNELS = ['AGENT_ASSISTANT', 'MEETING_ASSISTANT', 'CHAT_ASSISTANT'];
+const NON_SPEECH_CHANNELS = ['AGENT_ASSISTANT', 'MEETING_ASSISTANT', 'CHAT_ASSISTANT', 'MEETING_CHAT'];
 const isSpeechSegment = (segment) => !NON_SPEECH_CHANNELS.includes(segment?.channel);
 
 // The segments the transcript shows, of those it holds: not the voice-tone

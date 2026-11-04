@@ -146,6 +146,7 @@ const DEFAULTS = {
     attendeePollMs: 20000,
     pollsBeforeEnd: 3,
     pollsBeforeEndMissing: 15,
+    captureMeetingChat: true,
   },
 };
 
@@ -391,6 +392,24 @@ describe('ConfigurationContent', () => {
     // Reset stores an empty section, so the stack parameter's value applies again.
     expect(JSON.parse(callsOf('UpdateConfiguration')[0][0].variables.input.Sections)).toEqual({
       language_models: {},
+    });
+  });
+
+  it('offers the meeting chat switch in the Virtual Participant section, on by default, and saves it off', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    renderEditor();
+    openSection(await screen.findByText('Virtual Participant'));
+    const vp = section('Virtual Participant');
+    const toggle = within(vp).getByRole('checkbox', { name: /Add the meeting chat to the transcript/ });
+    expect(toggle.checked).toBe(true);
+    fireEvent.click(toggle);
+    fireEvent.click(pageButton('Save changes'));
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
+    graphqlMock.mockResolvedValueOnce(saved()).mockResolvedValueOnce(answer({ version: 5 }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await screen.findByText(/Saved as revision/);
+    expect(JSON.parse(callsOf('UpdateConfiguration')[0][0].variables.input.Sections)).toEqual({
+      virtual_participant: { captureMeetingChat: false },
     });
   });
 

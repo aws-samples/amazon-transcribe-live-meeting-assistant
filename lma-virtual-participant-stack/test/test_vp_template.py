@@ -853,7 +853,10 @@ def test_the_teams_watchdog_values_are_settings_not_main_stack_parameters(templa
             / "lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/setting_defaults.json"
         ).read_text()
     )["virtual_participant"]
-    by_parameter = {spec["formerParameter"]: spec["default"] for spec in shipped.values()}
+    # Only the settings that were a parameter; a newer one never had one.
+    by_parameter = {
+        spec["formerParameter"]: spec["default"] for spec in shipped.values() if "formerParameter" in spec
+    }
     for parameter in TEAMS_WATCHDOG_PARAMS.values():
         assert parameter not in main["Parameters"], f"{parameter} is still a main-stack parameter"
         assert parameter not in passed, f"{parameter} is still passed to the VP stack"

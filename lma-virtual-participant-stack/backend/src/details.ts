@@ -48,9 +48,7 @@ export interface MeetingDetails {
   // Meeting State
   start: boolean;
   speakers: Speaker[];
-  messages: string[];
   captions: string[];
-  attachments: Record<string, string>;
   
   // Meeting Control Messages
   introMessages: string[];
@@ -182,9 +180,7 @@ class DetailsManager {
       // Meeting State
       start: true, // Start transcription by default (LMA behavior)
       speakers: [],
-      messages: [],
       captions: [],
-      attachments: {},
 
       // Meeting Control Messages
       introMessages: [introMessage],

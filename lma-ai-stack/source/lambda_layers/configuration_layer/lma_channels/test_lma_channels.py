@@ -36,8 +36,27 @@ def test_only_the_two_speech_channels_are_speech_under_either_name() -> None:
     assert [c for c in ch.STORED_SPEECH_CHANNELS if ch.is_speech_channel(c)] == list(
         ch.STORED_SPEECH_CHANNELS
     )
-    for channel in ("AGENT_ASSISTANT", "CHAT_ASSISTANT", "AGENT_VOICETONE", None, ""):
+    for channel in (
+        "AGENT_ASSISTANT",
+        "CHAT_ASSISTANT",
+        "AGENT_VOICETONE",
+        "MEETING_CHAT",
+        None,
+        "",
+    ):
         assert not ch.is_speech_channel(channel)
+
+
+def test_the_meeting_chat_is_its_own_channel_and_not_speech() -> None:
+    assert ch.MEETING_CHAT == "MEETING_CHAT"
+    assert ch.is_chat_channel("MEETING_CHAT")
+    for channel in (*ch.STORED_SPEECH_CHANNELS, "CHAT_ASSISTANT", "AGENT_ASSISTANT", None, ""):
+        assert not ch.is_chat_channel(channel)
+    assert ch.canonical_channel("MEETING_CHAT") == "MEETING_CHAT"
+    # The speech-only filters every reader uses leave chat out; the wider one
+    # adds exactly the chat channel.
+    assert ch.MEETING_CHAT not in ch.STORED_SPEECH_CHANNELS
+    assert ch.STORED_TRANSCRIPT_CHANNELS == (*ch.STORED_SPEECH_CHANNELS, ch.MEETING_CHAT)
 
 
 def test_the_stored_speech_channels_are_every_name_that_reads_as_one() -> None:
@@ -86,3 +105,4 @@ def test_the_ui_twin_maps_the_same_names() -> None:
     assert found == ch.CHANNEL_ALIASES
     assert "export const REMOTE_CHANNEL = 'REMOTE';" in text
     assert "export const LOCAL_CHANNEL = 'LOCAL';" in text
+    assert f"export const MEETING_CHAT_CHANNEL = '{ch.MEETING_CHAT}';" in text

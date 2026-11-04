@@ -54,8 +54,20 @@ def test_the_configured_wake_phrase_wakes_the_assistant(configured) -> None:
     configured({"meeting_assist": {"wakePhraseRegex": "hey lma"}})
     pattern = cep.wake_phrase_pattern()
     assert pattern.pattern == "hey lma"
-    assert cep.matches_wake_phrase(pattern, "so, hey lma, what was decided?")
-    assert not cep.matches_wake_phrase(pattern, "OK assistant")
+
+    def wakes(transcript: str) -> bool:
+        # The decision the processor makes for a final speech segment.
+        return cep.segment_analyses(
+            is_speech=True,
+            is_partial=False,
+            sentiment_enabled=False,
+            agent_assist_enabled=True,
+            wake_pattern=cep.wake_phrase_pattern,
+            transcript=transcript,
+        ).agent_assist
+
+    assert wakes("so, hey lma, what was decided?")
+    assert not wakes("OK assistant")
 
 
 def test_without_one_the_shipped_wake_phrase_applies(configured) -> None:

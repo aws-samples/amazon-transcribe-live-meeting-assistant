@@ -8,6 +8,8 @@ import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistan
 import { chatHelpMessages } from './chat-help.js';
 import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
+import { noteSentChat } from './meeting-chat.js';
+import { meetingChat } from './meeting-chat-runtime.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startTeamsSdkServer, TeamsSdkServerHandle } from './teams-sdk-server.js';
@@ -63,6 +65,8 @@ export default class TeamsSdk {
     }
 
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
+        // So the meeting chat capture knows these when it reads them back.
+        noteSentChat(messages);
         for (const message of messages) {
             if (!message) continue;
             try {
@@ -378,7 +382,7 @@ export default class TeamsSdk {
                 if (this.ended || page.isClosed()) return;
                 let snap: {
                     speaker: string;
-                    chats: Array<{ senderName: string; text: string }>;
+                    chats: Array<{ senderName: string; text: string; id?: string | null; time?: string | null; links?: string[] }>;
                     count: number;
                     call: { page: string; callState: string };
                     endReason: { code?: number; subCode?: number } | null;
@@ -473,11 +477,18 @@ export default class TeamsSdk {
                         log.info(details.startMessages[0]);
                         await this.sendMessages(page, details.startMessages);
                         transcriptionService.startTranscription();
-                    } else if (details.start) {
-                        const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-                        const formatted = `[${timestamp}] ${sender ? `${sender}: ` : ''}${body}`;
-                        details.messages.push(formatted);
-                        log.info('New message:', formatted);
+                    } else {
+                        // Meeting chat, for the transcript (meeting-chat.ts decides).
+                        meetingChat.offer({
+                            platform: 'teams-sdk',
+                            text: body,
+                            sender,
+                            id: chat.id ?? null,
+                            platformTime: chat.time ?? null,
+                            // A Teams meeting chat is one thread everyone in the meeting reads.
+                            audience: 'everyone',
+                            links: chat.links,
+                        });
                     }
                 }
 

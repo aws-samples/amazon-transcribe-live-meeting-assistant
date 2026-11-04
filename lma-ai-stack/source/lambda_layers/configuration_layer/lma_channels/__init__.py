@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Amazon.com
 # This file is licensed under the MIT License.
 # See the LICENSE file in the project root for full license information.
-"""The names of a meeting transcript's two speech channels.
+"""The names of a meeting transcript's channels: two speech channels and the meeting chat.
 
 A meeting's audio arrives on two channels:
 
@@ -17,6 +17,13 @@ speaker-name maps written by those versions keep the old names until they
 expire, so everything that READS a channel goes through ``canonical_channel``
 and treats the two spellings as one channel. Everything that WRITES one writes
 ``REMOTE`` or ``LOCAL``.
+
+A third channel, ``MEETING_CHAT``, holds the messages participants typed in the
+meeting's chat, which a Virtual Participant reads and adds to the transcript.
+It is not speech: nothing that reads what was said (sentiment, the meeting
+assistant's wake phrase, speaker naming, the summary's transcript) reads it,
+which is why each of those filters on ``is_speech_channel`` or
+``STORED_SPEECH_CHANNELS`` rather than on "every channel but the assistants'".
 
 The UI's twin is ``lma-ai-stack/source/ui/src/components/common/channels.js``.
 The WebSocket transcriber and the Virtual Participant only write channels, so
@@ -50,6 +57,14 @@ CHANNEL_ALIASES: Dict[str, str] = {
 # ``canonical_channel`` cannot run, such as a DynamoDB FilterExpression.
 STORED_SPEECH_CHANNELS = (REMOTE, LOCAL, "CALLER", "AGENT")
 
+# Messages typed in the meeting chat, one segment per message.
+MEETING_CHAT = "MEETING_CHAT"
+
+# Every stored value that is something a participant said or typed: the speech
+# channels under either spelling, and the meeting chat. For a reader that asks
+# for chat as well as speech.
+STORED_TRANSCRIPT_CHANNELS = STORED_SPEECH_CHANNELS + (MEETING_CHAT,)
+
 
 def canonical_channel(channel: Optional[str]) -> Optional[str]:
     """The current name of a channel; any other value is returned unchanged."""
@@ -61,6 +76,11 @@ def canonical_channel(channel: Optional[str]) -> Optional[str]:
 def is_speech_channel(channel: Optional[str]) -> bool:
     """Whether a stored or incoming channel is one of the two speech channels."""
     return canonical_channel(channel) in SPEECH_CHANNELS
+
+
+def is_chat_channel(channel: Optional[str]) -> bool:
+    """Whether a stored or incoming channel is the meeting chat."""
+    return channel == MEETING_CHAT
 
 
 def canonical_speaker_key(key: Any) -> Any:
@@ -104,11 +124,14 @@ def canonical_keyed(section: Mapping[str, Any], values_are_keys: bool = False) -
 __all__ = [
     "CHANNEL_ALIASES",
     "LOCAL",
+    "MEETING_CHAT",
     "REMOTE",
     "SPEECH_CHANNELS",
     "STORED_SPEECH_CHANNELS",
+    "STORED_TRANSCRIPT_CHANNELS",
     "canonical_channel",
     "canonical_keyed",
     "canonical_speaker_key",
+    "is_chat_channel",
     "is_speech_channel",
 ]

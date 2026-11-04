@@ -4,7 +4,7 @@ import { details } from './details.js';
 import { VoiceLabelNames, buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
 import { agendaStartFields, type VpAgenda } from './meeting-agenda.js';
 import { createLogger } from './logger.js';
-import { REMOTE_CHANNEL } from './channels.js';
+import { MEETING_CHAT_CHANNEL, REMOTE_CHANNEL } from './channels.js';
 
 const log = createLogger('kinesis-stream');
 
@@ -110,6 +110,17 @@ class KinesisStreamManager {
     this.agenda = agenda;
   }
 
+  /**
+   * Whether this meeting's START event has been sent, which is what creates the
+   * meeting record. Segments that do not come from the speech engines (the
+   * meeting chat) wait for it, since there is nothing to add them to before.
+   */
+  private startSent = false;
+
+  get meetingStarted(): boolean {
+    return this.startSent;
+  }
+
   /** The meeting's CallId, so other services (the ASR launcher lease) can key on it. */
   get currentCallId(): string {
     return this.callId;
@@ -209,6 +220,7 @@ class KinesisStreamManager {
     };
 
     await this.sendRecord(record);
+    this.startSent = true;
     
     // Link CallId to VP record (matching Python kds.py behavior)
     const vpId = details.invite.virtualParticipantId;
@@ -393,6 +405,16 @@ class KinesisStreamManager {
   }
 
   /**
+   * One message from the meeting chat, as a final segment on the MEETING_CHAT
+   * channel (see meeting-chat.ts, which builds it and decides whether to send
+   * it). Its start and end are the one moment on the transcript timeline at
+   * which the message was read.
+   */
+  async sendChatSegment(segment: TranscriptSegment): Promise<void> {
+    await this.sendAsrTranscriptSegment({ ...segment, channel: MEETING_CHAT_CHANNEL, isPartial: false });
+  }
+
+  /**
    * Turn on recovery of speaker turns from Transcribe's per-item labels.
    *
    * Set once per meeting from the deployment's VP voice-separation switch, so
@@ -562,6 +584,7 @@ export const sendStartMeeting = () => kinesisStreamManager.sendStartMeeting();
 export const sendEndMeeting = (recordingUrl?: string) => kinesisStreamManager.sendEndMeeting(recordingUrl);
 export const sendAsrTranscriptSegment = (segment: TranscriptSegment) =>
   kinesisStreamManager.sendAsrTranscriptSegment(segment);
+export const sendChatSegment = (segment: TranscriptSegment) => kinesisStreamManager.sendChatSegment(segment);
 export const sendAddTranscriptSegment = (speaker: string, transcriptResult: any, timeOffsetSeconds = 0) =>
   kinesisStreamManager.sendTranscriptSegment(speaker, transcriptResult, timeOffsetSeconds);
 export const sendCallRecording = (url: string) => kinesisStreamManager.sendCallRecording(url);

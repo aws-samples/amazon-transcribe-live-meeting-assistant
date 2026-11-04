@@ -193,6 +193,48 @@ def test_kds_pipeline_creates_meeting(client: LMAClient) -> None:
         cleanup(client.stack_name, result["call_id"], region=client.region)
 
 
+def test_meeting_chat_segment_is_stored_read_and_deleted(client: LMAClient) -> None:
+    """A meeting chat message, sent as a Virtual Participant sends it, end to end.
+
+    Puts a synthetic START and one MEETING_CHAT segment on the CallDataStream and
+    checks that the segment is stored with an expiry, is returned by AppSync's
+    getTranscriptSegments, is left out of FetchTranscript (what the summary and
+    the meeting assistant read), and is removed by the transcript deletion
+    function. See integ-tests/meeting_chat_probe.py. Self-cleaning.
+    """
+    from meeting_chat_probe import CHAT_CHANNEL, SENDER, ChatProbe, wait_for
+
+    probe = ChatProbe.for_stack(client.stack_name, region=client.region)
+    try:
+        probe.send_start()
+        assert wait_for(probe.meeting, 90), f"no meeting record for {probe.call_id} within 90s"
+        probe.send_chat_segment()
+
+        stored = wait_for(probe.stored_segment, 60)
+        assert stored, (
+            f"the {CHAT_CHANNEL} segment {probe.segment_id} was not stored for {probe.call_id} "
+            "within 60s; check the CallEventProcessor logs (an AppSync enum without "
+            f"{CHAT_CHANNEL} refuses the mutation)"
+        )
+        assert stored["Channel"] == CHAT_CHANNEL
+        assert stored["Speaker"] == SENDER
+        assert stored["Transcript"] == probe.text
+        assert stored["IsPartial"] is False
+        assert stored.get("ExpiresAfter"), "a chat segment must expire with the transcript"
+
+        returned = [s for s in probe.appsync_segments(client.appsync.graphql) if s["SegmentId"] == probe.segment_id]
+        assert returned and returned[0]["Channel"] == CHAT_CHANNEL, "getTranscriptSegments did not return it"
+        assert returned[0]["Speaker"] == SENDER
+
+        assert probe.text not in probe.fetch_transcript(), "FetchTranscript must leave the meeting chat out"
+
+        result = probe.delete_transcript()
+        assert result.get("action") == "deleted" and result.get("segmentsDeleted", 0) >= 1, result
+        assert probe.stored_segment() is None, "the chat segment survived the transcript deletion"
+    finally:
+        probe.cleanup()
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # 3c. WebSocket transcriber front door (Fastify 5 / @fastify/websocket 11 upgrade)
 # ────────────────────────────────────────────────────────────────────────────

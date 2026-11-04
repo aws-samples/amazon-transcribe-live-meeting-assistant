@@ -8,6 +8,8 @@ import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistan
 import { chatHelpMessages } from './chat-help.js';
 import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
+import { ChatAudience, noteSentChat } from './meeting-chat.js';
+import { meetingChat } from './meeting-chat-runtime.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startZoomSdkServer, ZoomSdkServerHandle } from './zoom-sdk-server.js';
 import { POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
@@ -36,6 +38,33 @@ function buildSignature(clientId: string, clientSecret: string, meetingNumber: s
     return jwt.sign(payload, clientSecret, { algorithm: 'HS256', header: { alg: 'HS256', typ: 'JWT' } });
 }
 
+/** One chat message as the in-page listener queues it (zoom-sdk-server.ts). */
+export interface ZoomSdkChat {
+    senderName: string;
+    text: string;
+    id?: string | number | null;
+    time?: string | number | null;
+    receiverId?: string | number | null;
+    receiverName?: string | null;
+}
+
+/**
+ * Who a Meeting SDK chat message went to. The SDK addresses everyone as
+ * receiver 0 (the id its own sendChat takes for everyone), named "Everyone";
+ * any other receiver is a private message. Unknown when the payload names no
+ * receiver. Not confirmed against a live payload: the capture's debug line
+ * reports whether a recipient was read.
+ */
+export function zoomSdkChatAudience(
+    receiverId: string | number | null | undefined,
+    receiverName: string | null | undefined,
+): ChatAudience | undefined {
+    const name = (receiverName ?? '').trim();
+    if (name) return /^everyone\b/i.test(name) && !/privately|direct message/i.test(name) ? 'everyone' : 'direct';
+    if (receiverId === null || receiverId === undefined || String(receiverId).trim() === '') return undefined;
+    return String(receiverId).trim() === '0' ? 'everyone' : 'direct';
+}
+
 export default class ZoomSdk {
     private endRequested: Promise<ExitInfo>;
     private requestEnd: (info: ExitInfo) => void = () => {};
@@ -53,6 +82,8 @@ export default class ZoomSdk {
     }
 
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
+        // So the meeting chat capture knows these when it reads them back.
+        noteSentChat(messages);
         for (const message of messages) {
             if (!message) continue;
             try {
@@ -324,7 +355,7 @@ export default class ZoomSdk {
         let pollsSinceLonelyCheck = 0;
         const monitorTimer = setInterval(async () => {
             if (this.ended || page.isClosed()) return;
-            let snap: { speaker: string; chats: Array<{ senderName: string; text: string }>; count: number; domCount: number; status: number; selfLeave: number | null } | null;
+            let snap: { speaker: string; chats: ZoomSdkChat[]; count: number; domCount: number; status: number; selfLeave: number | null } | null;
             try {
                 snap = await page.evaluate(() => {
                     const w = window as any;
@@ -406,11 +437,16 @@ export default class ZoomSdk {
                     log.info(details.startMessages[0]);
                     await this.sendMessages(page, details.startMessages);
                     transcriptionService.startTranscription();
-                } else if (details.start) {
-                    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-                    const formatted = `[${timestamp}] ${sender ? `${sender}: ` : ''}${body}`;
-                    details.messages.push(formatted);
-                    log.info('New message:', formatted);
+                } else {
+                    // Meeting chat, for the transcript (meeting-chat.ts decides).
+                    meetingChat.offer({
+                        platform: 'zoom-sdk',
+                        text: body,
+                        sender,
+                        id: chat.id == null ? null : String(chat.id),
+                        platformTime: chat.time ?? null,
+                        audience: zoomSdkChatAudience(chat.receiverId, chat.receiverName),
+                    });
                 }
             }
 

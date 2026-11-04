@@ -137,6 +137,10 @@
       "type": "integer",
       "default": 15,
       "formerParameter": "VPPollsBeforeEndMissing"
+    },
+    "captureMeetingChat": {
+      "type": "boolean",
+      "default": true
     }
   },
   "meeting_agenda": {

@@ -250,8 +250,9 @@ the participant list on the record current, reads replies in the chat, and acts
 on `CaptureAllowed` in every answer the API gives.
 
 What "capture" means here is everything the VP takes from the meeting: the
-transcript, the audio recording, the meeting chat it stores, the voice
-assistant's input, the key frames and the screen recording. The VP gates them
+transcript, the audio recording, the meeting chat it adds to the transcript
+(see [Meeting Chat in the Transcript](virtual-participant.md#meeting-chat-in-the-transcript)),
+the voice assistant's input, the key frames and the screen recording. The VP gates them
 with the same switch the `LMA pause` and `LMA start` chat commands use, so
 starting after consent is the same path as resuming after a pause.
 
@@ -302,7 +303,8 @@ When somebody joins later, the notice is posted again, at most once a minute.
 
 An opt-in meeting starts with capture withheld: the VP joins, but sends no audio
 to Amazon Transcribe, writes no recording, does not start the voice assistant or
-the screen recording, and keeps no chat messages. Because nothing is
+the screen recording, and adds no chat messages to the transcript; messages
+sent while capture is withheld are not added later either. Because nothing is
 transcribed, the VP sends the meeting's `START` event itself, which creates the
 meeting record its consent needs, and then posts the consent request. The VP's
 detail line on the Virtual Participants page reads **Waiting for consent: …**

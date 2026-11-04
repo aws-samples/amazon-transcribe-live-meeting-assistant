@@ -331,6 +331,22 @@ def test_only_final_segments_from_the_two_audio_channels_are_requested(
     )
 
 
+def test_messages_typed_in_the_meeting_chat_are_not_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The summary, the knowledge base export and the assistant read what was said.
+
+    Chat segments (MEETING_CHAT) are stored in the same partition and left out
+    by the same filter.
+    """
+    table = install(monkeypatch, items=[segment("hello", 1)])
+    index.get_transcripts(CALL_ID)
+    requested = table.queries[0]["FilterExpression"].get_expression()["values"][0]
+    channels = requested.get_expression()["values"][1]
+    assert "MEETING_CHAT" not in channels
+    assert set(channels) == {"REMOTE", "LOCAL", "CALLER", "AGENT"}
+
+
 def test_segments_are_read_from_the_meetings_transcript_partition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
