@@ -473,3 +473,49 @@ test('a second START on a connection holds its audio away from the session it al
     sessions.releaseAudio(ws);
     assert.deepEqual(effects.audio, ['meeting-1:first', 'meeting-2:second']);
 });
+
+test('a connection that closed before its START registered a session has that session held once the START finishes', async () => {
+    const { sessions, effects } = lifecycle();
+    const ws = new FakeSocket('closed-during-start');
+    // The close arrives while the START is still awaiting: nothing is mapped yet.
+    await sessions.onConnectionClosed(ws);
+    const meeting = session();
+    sessions.register(ws, meeting);
+
+    await sessions.afterStart(ws);
+
+    assert.equal(sessions.sessionOf(ws), undefined, 'the closed connection carries no session');
+    assert.equal(sessions.heldCount, 1, 'the meeting is held for its client to reconnect');
+    assert.deepEqual(effects.ends, []);
+    const resumed = await sessions.resume(new FakeSocket('next'), 'meeting-1', 'user-a', newTokens);
+    assert.equal(resumed?.session, meeting);
+});
+
+test('with no reconnect window, a session whose connection closed during its START ends when the START finishes', async () => {
+    const { sessions, effects } = lifecycle({ graceMs: 0 });
+    const ws = new FakeSocket('closed-during-start');
+    await sessions.onConnectionClosed(ws);
+    sessions.register(ws, session());
+
+    await sessions.afterStart(ws);
+
+    assert.deepEqual(effects.ends, ['meeting-1']);
+    assert.deepEqual(effects.engineStops, ['meeting-1']);
+    assert.deepEqual(sessions.connectedSessions(), []);
+});
+
+test('the end of a START changes nothing for an open connection or one whose close was already handled', async () => {
+    const { sessions, effects } = lifecycle();
+    const open = new FakeSocket('open');
+    const meeting = session();
+    sessions.register(open, meeting);
+    await sessions.afterStart(open);
+    assert.equal(sessions.sessionOf(open), meeting);
+
+    const closedLater = new FakeSocket('closed-later');
+    sessions.register(closedLater, session('meeting-2'));
+    await sessions.onConnectionClosed(closedLater);
+    await sessions.afterStart(closedLater);
+    assert.equal(sessions.heldCount, 1, 'held once, by its own close');
+    assert.deepEqual(effects.ends, []);
+});

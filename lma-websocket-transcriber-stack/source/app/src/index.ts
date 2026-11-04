@@ -631,6 +631,7 @@ const onTextMessage = async (
             }
         );
         if (resumed) {
+            await sessions.afterStart(ws);
             return;
         }
 
@@ -720,6 +721,7 @@ const onTextMessage = async (
             noteStreamingSessionStarted(socketCallMap.callMetadata);
             await startTranscription(socketCallMap, server);
         }
+        await sessions.afterStart(ws);
     } else if (callMetaData.callEvent === 'SPEAKER_CHANGE') {
         const socketData = sessions.sessionOf(ws);
         server.log.debug(
