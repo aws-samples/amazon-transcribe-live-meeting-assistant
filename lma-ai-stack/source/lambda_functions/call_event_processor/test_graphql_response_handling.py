@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sys
 import types
 from pathlib import Path
@@ -1396,3 +1397,181 @@ def test_the_duration_takes_the_latest_end_of_every_final_segment_in_the_record(
     # segment end later than 95 s but are not final speech.
     assert len(built) == 1
     assert built[0]["TotalConversationDurationMillis"] == 95000.0
+
+
+# ── a transcript segment takes the meeting's Owner and SharedWith ────────────
+
+MEETING_OWNER = "owner@example.com"
+MEETING_SHARED_WITH = "[colleague@example.com]"
+
+
+def _meeting_record(**fields: Any) -> Dict[str, Any]:
+    return {"getCall": {"CallId": "call-1", "Status": "STARTED", **fields}}
+
+
+def mutation_inputs(session: Any, field: str) -> List[Dict[str, Any]]:
+    """The ``input`` argument of each ``field`` mutation the session was sent."""
+    inputs = []
+    for query in session.queries:
+        operation = query.definitions[0]
+        if operation.operation.value != "mutation":
+            continue
+        selection = operation.selection_set.selections[0]
+        if selection.name.value != field:
+            continue
+        (argument,) = selection.arguments
+        inputs.append(
+            {
+                item.name.value: (
+                    None
+                    if item.value.kind == "null_value"
+                    else getattr(item.value, "value", item.value)
+                )
+                for item in argument.value.fields
+            }
+        )
+    return inputs
+
+
+def run_with(
+    session: Any, message: Dict[str, Any], monkeypatch, **switches: Any
+) -> RecordingLambda:
+    """``process_event``, with the given module switches turned on afterwards."""
+    hook = RecordingLambda()
+    monkeypatch.setattr(cep, "LAMBDA_HOOK_CLIENT", hook, raising=False)
+    monkeypatch.setattr(cep, "AGENDA_DERIVER_ARN", "", raising=False)
+
+    real_run = cep.execute_process_event_api_mutation
+
+    async def with_switches(**kwargs: Any) -> Any:
+        for name, value in switches.items():
+            monkeypatch.setattr(cep, name, value, raising=False)
+        # The dispatch sets this switch from its argument, not the module.
+        if switches.get("IS_LAMBDA_AGENT_ASSIST_ENABLED"):
+            kwargs["agent_assist_args"] = {"is_lambda_agent_assist_enabled": True}
+        return await real_run(**kwargs)
+
+    monkeypatch.setattr(cep, "execute_process_event_api_mutation", with_switches)
+    process_event(session, message, monkeypatch)
+    return hook
+
+
+def segment_session(schema: Any, meeting: Dict[str, Any]) -> QueuedSession:
+    return QueuedSession(
+        schema,
+        [
+            meeting,
+            SENTIMENT_RESPONSES["populated"],
+            {"addTranscriptSegment": {"CallId": "call-1", "SegmentId": "s1"}},
+        ],
+    )
+
+
+@pytest.mark.parametrize("channel", ["REMOTE", "LOCAL", "MEETING_CHAT"])
+def test_a_stored_segment_carries_the_meetings_owner_and_shared_with(
+    schema, emitted, channel, monkeypatch
+):
+    session = segment_session(
+        schema, _meeting_record(Owner=MEETING_OWNER, SharedWith=MEETING_SHARED_WITH)
+    )
+    process_event(session, {**SEGMENT_EVENT, "Channel": channel}, monkeypatch)
+    (written,) = mutation_inputs(session, "addTranscriptSegment")
+    assert written["Owner"] == MEETING_OWNER
+    assert written["SharedWith"] == MEETING_SHARED_WITH
+    assert written["Channel"] == channel
+
+
+def test_a_stored_segment_takes_the_meetings_owner_over_one_the_event_carries(
+    schema, emitted, monkeypatch
+):
+    session = segment_session(schema, _meeting_record(Owner=MEETING_OWNER))
+    monkeypatch.setattr(
+        cep, "normalize_transcript_segments", lambda m: [{**m, "Owner": "someone-else@example.com"}]
+    )
+    process_event(session, dict(SEGMENT_EVENT), monkeypatch)
+    (written,) = mutation_inputs(session, "addTranscriptSegment")
+    assert written["Owner"] == MEETING_OWNER
+
+
+def test_a_segment_of_a_meeting_without_an_owner_is_stored_without_one(
+    schema, emitted, monkeypatch
+):
+    session = segment_session(schema, _meeting_record())
+    process_event(session, dict(SEGMENT_EVENT), monkeypatch)
+    (written,) = mutation_inputs(session, "addTranscriptSegment")
+    assert written.get("Owner") is None
+    assert written.get("SharedWith") is None
+
+
+def test_the_sentiment_write_of_a_segment_carries_the_meetings_owner_too(
+    schema, emitted, monkeypatch
+):
+    """The sentiment write replaces the stored item, so it has to keep the owner."""
+    session = segment_session(
+        schema, _meeting_record(Owner=MEETING_OWNER, SharedWith=MEETING_SHARED_WITH)
+    )
+    run_with(
+        session,
+        {**SEGMENT_EVENT, "Channel": "REMOTE", "Sentiment": "POSITIVE"},
+        monkeypatch,
+        IS_SENTIMENT_ANALYSIS_ENABLED=True,
+    )
+    writes = mutation_inputs(session, "addTranscriptSegment")
+    assert len(writes) == 2, "expected the segment write and its sentiment write"
+    for written in writes:
+        assert written["Owner"] == MEETING_OWNER
+        assert written["SharedWith"] == MEETING_SHARED_WITH
+
+
+def test_an_assistant_answer_carries_the_meetings_owner_and_shared_with(
+    schema, emitted, monkeypatch
+):
+    """ADD_AGENT_ASSIST rows are stored like the meeting's other segments."""
+    session = QueuedSession(
+        schema,
+        [
+            _meeting_record(Owner=MEETING_OWNER, SharedWith=MEETING_SHARED_WITH),
+            {"addTranscriptSegment": {"CallId": "call-1", "SegmentId": "a1"}},
+        ],
+    )
+    process_event(
+        session,
+        {
+            **SEGMENT_EVENT,
+            "EventType": "ADD_AGENT_ASSIST",
+            "Channel": "CHAT_ASSISTANT",
+            "SegmentId": "a1",
+            "Transcript": "an answer",
+            # The orchestrator's Owner is whoever asked, not the meeting's owner.
+            "Owner": "asker@example.com",
+        },
+        monkeypatch,
+    )
+    (written,) = mutation_inputs(session, "addTranscriptSegment")
+    assert written["Owner"] == MEETING_OWNER
+    assert written["SharedWith"] == MEETING_SHARED_WITH
+
+
+def test_the_wake_phrase_request_is_made_with_the_owner_the_event_carried(
+    schema, emitted, monkeypatch
+):
+    """The orchestrator passes Owner on as the asker's identity; a spoken wake phrase has none."""
+    session = segment_session(schema, _meeting_record(Owner=MEETING_OWNER))
+    hook = run_with(
+        session,
+        {**SEGMENT_EVENT, "Channel": "REMOTE", "Transcript": "ok assistant what is next"},
+        monkeypatch,
+        IS_LAMBDA_AGENT_ASSIST_ENABLED=True,
+        ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN="arn:aws:lambda:us-east-1:123456789012:function:o",
+        wake_phrase_pattern=lambda: re.compile("ok assistant", re.IGNORECASE),
+    )
+    (written,) = mutation_inputs(session, "addTranscriptSegment")
+    assert written["Owner"] == MEETING_OWNER
+    (invocation,) = [i for i in hook.invocations if i["FunctionName"].endswith(":function:o")]
+    assert json.loads(invocation["Payload"])["Owner"] is None
+
+
+def test_get_call_details_returns_the_meetings_owner(schema):
+    session = FakeSession(schema, _meeting_record(Owner=MEETING_OWNER))
+    details = run(cep.get_call_details(message={"CallId": "call-1"}, appsync_session=session))
+    assert details["Owner"] == MEETING_OWNER

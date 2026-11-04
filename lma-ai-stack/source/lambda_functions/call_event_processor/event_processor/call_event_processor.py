@@ -77,6 +77,7 @@ from pure import (  # noqa: E402
     SentimentEntry,
     SentimentPerChannel,
     agenda_derivation_due,
+    apply_meeting_access,
     convert_keys_to_uppercamelcase,
     get_sentiment_per_quarter,
     merge_dicts,
@@ -284,11 +285,16 @@ def is_put_condition_failure(error: Any) -> bool:
 
 
 def add_transcript_segments(
-    message: Dict[str, object],
-    people_can_access: List[str],
+    message: Dict[str, Any],
+    meeting: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
 ) -> List[Coroutine]:
-    """Add Transcript Segment GraphQL Mutation"""
+    """Add Transcript Segment GraphQL Mutation
+
+    The segment takes the meeting's Owner and SharedWith (``meeting`` is what
+    get_call_details read), set on ``message`` itself so that the sentiment
+    write of the same segment, which replaces the item, carries them too.
+    """
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
@@ -298,7 +304,7 @@ def add_transcript_segments(
         if "OriginalTranscript" not in message:
             message["OriginalTranscript"] = message["Transcript"]
 
-        message["SharedWith"] = people_can_access
+        apply_meeting_access(message, meeting)
 
         query = dsl_gql(
             DSLMutation(
@@ -1209,6 +1215,7 @@ async def get_call_details(
         CallId=CALL_ID,
         CallDataStream=CALL_DATA_STREAM_NAME,
         CallSummaryText=call_summary,
+        Owner=call.get("Owner"),
         SharedWith=people_can_access,
     )
 
@@ -1485,6 +1492,13 @@ async def execute_process_event_api_mutation(
         LOGGER.debug("ADD_AGENT_ASSIST MUTATION ")
         normalized_message = normalize_transcript_segments({**message})
 
+        # The answer takes the meeting's Owner and SharedWith, as the meeting's
+        # other transcript segments do, rather than the identity of whoever asked.
+        meeting = await get_call_details(
+            message=normalized_message[0], appsync_session=appsync_session
+        )
+        apply_meeting_access(normalized_message[0], meeting)
+
         response = await execute_add_agent_assist_mutation(
             message=normalized_message[0], appsync_session=appsync_session
         )
@@ -1517,13 +1531,17 @@ async def execute_process_event_api_mutation(
                 message=normalized_message, appsync_session=appsync_session
             )
 
-            people_can_access = payload.get("SharedWith", None)
+            # The Owner the event itself carried, before the segment takes the
+            # meeting's: the agent assist request below is made as before, and
+            # the orchestrator passes its Owner on as the identity of whoever
+            # asked, which a wake phrase spoken in the meeting does not have.
+            event_owner = normalized_message.get("Owner")
 
             LOGGER.debug("Add Transcript Segment")
             add_transcript_tasks.extend(
                 add_transcript_segments(
                     message=normalized_message,
-                    people_can_access=people_can_access,
+                    meeting=payload,
                     appsync_session=appsync_session,
                 )
             )
@@ -1564,7 +1582,7 @@ async def execute_process_event_api_mutation(
                 LAMBDA_HOOK_CLIENT.invoke(
                     FunctionName=ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN,
                     InvocationType="Event",
-                    Payload=json.dumps(normalized_message),
+                    Payload=json.dumps({**normalized_message, "Owner": event_owner}),
                 )
 
         # One aggregation per record, built for its last final segment. A record

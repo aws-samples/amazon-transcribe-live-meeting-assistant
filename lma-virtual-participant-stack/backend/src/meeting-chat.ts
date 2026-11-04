@@ -27,10 +27,15 @@
  *   "LMA start" typed while the meeting is running is still a command. An
  *   `LMA ask` or `@LMA` question IS added: it is something a participant asked
  *   in front of everyone;
- * - a private message, where the platform shows a message is private;
+ * - a private message, where the platform shows a message is private, and a
+ *   message whose recipient the handler could not read: only a message the
+ *   handler shows was sent to everyone is added (Teams and Google Meet, whose
+ *   meeting chats have no private messages, say so for every message);
  * - the chat that was already in the panel when the VP first read it;
  * - everything while the setting is off (`virtual_participant.captureMeetingChat`)
- *   or content redaction is turned on (in any language), while the transcript is paused or
+ *   or content redaction is turned on (in any language), and when the saved
+ *   redaction choice is not known because the configuration was not applied
+ *   at start (`contentRedactionRequested`), while the transcript is paused or
  *   consent is withheld (`details.start`), and before the meeting's START event
  *   has been sent (there is no meeting record to add it to yet);
  * - more than `MAX_PER_MINUTE` messages in a minute, or `MAX_PER_MEETING` in
@@ -126,8 +131,12 @@ export type ChatOutcome =
     | 'own'
     | 'command'
     | 'direct'
+    /** The handler did not say who the message was sent to. */
+    | 'recipient-unknown'
     | 'history'
     | 'disabled'
+    /** The configuration was not applied at start, so the saved redaction choice is not known. */
+    | 'redaction-unknown'
     | 'paused'
     | 'not-started'
     | 'flood'
@@ -234,17 +243,25 @@ export function captureMeetingChatSetting(env: Record<string, string | undefined
 }
 
 /**
- * Whether content redaction is turned on, as saved, whatever the language.
+ * Whether content redaction is turned on, as saved, whatever the language, or
+ * undefined when that is not known.
  *
  * The Virtual Participant redacts only en-US speech (ENABLE_CONTENT_REDACTION
  * is the flag combined with the language), but chat text is not redacted in any
  * language, so the chat stays out of the transcript whenever the flag is on.
- * stack-settings.ts sets CONTENT_REDACTION_REQUESTED from the saved flag; when
- * the configuration held no value, the task's derived variable is all there is.
+ * stack-settings.ts sets CONTENT_REDACTION_REQUESTED from the saved flag. It is
+ * unset when the configuration was not applied at start (the table could not
+ * be read, or held no value for the flag); the saved choice is then not known,
+ * and the capture adds nothing. The task's combined variable can still say
+ * that redaction is on, but its "false" may only mean the language is not
+ * en-US, so it never says that redaction is off.
  */
-export function contentRedactionRequested(env: Record<string, string | undefined> = process.env): boolean {
-    const raw = env['CONTENT_REDACTION_REQUESTED'] ?? env['ENABLE_CONTENT_REDACTION'] ?? '';
-    return raw.trim().toLowerCase() === 'true';
+export function contentRedactionRequested(env: Record<string, string | undefined> = process.env): boolean | undefined {
+    const requested = (env['CONTENT_REDACTION_REQUESTED'] ?? '').trim().toLowerCase();
+    if (requested === 'true') return true;
+    if (requested === 'false') return false;
+    if ((env['ENABLE_CONTENT_REDACTION'] ?? '').trim().toLowerCase() === 'true') return true;
+    return undefined;
 }
 
 /** The link addresses worth adding: http and https only, not already in the text, each once. */
@@ -299,8 +316,12 @@ export function chatSegmentId(platform: ChatPlatform, id: string | null | undefi
 export interface MeetingChatDeps {
     /** Whether the setting is on; see `captureMeetingChatSetting`. */
     settingOn: () => boolean;
-    /** Whether content redaction is turned on, in any language; chat is not added then. */
-    redacting: () => boolean;
+    /**
+     * Whether content redaction is turned on, in any language; chat is not
+     * added then. Undefined when that is not known (see
+     * `contentRedactionRequested`); chat is not added then either.
+     */
+    redacting: () => boolean | undefined;
     /** Whether the meeting is being captured now (`details.start`). */
     capturing: () => boolean;
     /** Whether the meeting's START event has been sent. */
@@ -364,16 +385,23 @@ export class MeetingChatCapture {
         if (this.isOwn(chat.sender, text)) return 'own';
         if (isLmaChatCommand(text)) return 'command';
         if (chat.audience === 'direct') return 'direct';
+        // Only a message the handler shows was sent to everyone: a Zoom label
+        // in another language, or an SDK payload naming no receiver, may be a
+        // private message.
+        if (chat.audience !== 'everyone') return 'recipient-unknown';
         if (chat.history) return 'history';
-        if (!this.deps.settingOn() || this.deps.redacting()) {
+        const settingOn = this.deps.settingOn();
+        const redacting = this.deps.redacting();
+        if (!settingOn || redacting !== false) {
             if (!this.offNoticeLogged) {
                 this.offNoticeLogged = true;
+                const redaction = redacting === undefined ? 'not known, the configuration was not applied' : redacting ? 'on' : 'off';
                 log.info(
                     `[meeting-chat] the meeting chat is not added to the transcript ` +
-                        `(setting ${this.deps.settingOn() ? 'on' : 'off'}, redaction ${this.deps.redacting() ? 'on' : 'off'})`,
+                        `(setting ${settingOn ? 'on' : 'off'}, redaction ${redaction})`,
                 );
             }
-            return 'disabled';
+            return settingOn && redacting === undefined ? 'redaction-unknown' : 'disabled';
         }
         if (!this.deps.capturing()) return 'paused';
         if (!this.deps.meetingStarted()) return 'not-started';

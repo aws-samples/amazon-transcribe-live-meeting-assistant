@@ -40,6 +40,15 @@ Non-admin users:
 - Can share and delete only their own meetings
 - Cannot access admin configuration pages
 
+Each transcript line a meeting stores, whether speech, a meeting-chat line or a
+meeting-assistant answer, carries the meeting's owner and its sharing list, as
+each video key frame does. Both are read from the meeting record when the line
+is written, not taken from the event that carried it. A non-admin user is
+answered the lines whose owner is them or whose sharing list names them, in the
+transcript query and in the live subscription. Lines stored by earlier versions
+carry the sharing list but no owner, and are left as they are: they are returned
+to Admins and to the users the meeting is shared with.
+
 ## Authorized Account Email Domain
 
 The Authorized Account Email Domain setting controls who can self-register for an LMA account.

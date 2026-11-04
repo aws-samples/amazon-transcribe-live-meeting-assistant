@@ -52,7 +52,7 @@ export interface ZoomSdkChat {
  * Who a Meeting SDK chat message went to. The SDK addresses everyone as
  * receiver 0 (the id its own sendChat takes for everyone), named "Everyone";
  * any other receiver is a private message. Unknown when the payload names no
- * receiver. Not confirmed against a live payload: the capture's debug line
+ * receiver, and the meeting chat capture does not add such a message. Not confirmed against a live payload: the capture's debug line
  * reports whether a recipient was read.
  */
 export function zoomSdkChatAudience(

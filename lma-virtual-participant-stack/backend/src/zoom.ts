@@ -114,7 +114,8 @@ export function parseZoomChatLabel(label: string): ZoomChatLabel {
  * "Everyone" (in any of the forms Zoom shows it), privately otherwise ("to
  * You", "to <name>", a "(Direct Message)" or "(Privately)" mark), and unknown
  * when the label showed no recipient. English labels only: in another language
- * the label is in neither shape and the recipient is unknown.
+ * the label is in neither shape and the recipient is unknown, and the meeting
+ * chat capture does not add a message whose recipient is unknown.
  */
 export function zoomChatAudience(recipient: string | null): 'everyone' | 'direct' | undefined {
     if (!recipient) return undefined;

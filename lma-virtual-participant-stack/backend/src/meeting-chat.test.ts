@@ -81,7 +81,7 @@ function harness(overrides: Partial<MeetingChatDeps> = {}): Harness {
         ...overrides,
     });
     const offer = (chat: Partial<IncomingChat>) =>
-        capture.offer({ platform: 'zoom', text: 'hello', sender: 'Bo Chen', ...chat } as IncomingChat);
+        capture.offer({ platform: 'zoom', text: 'hello', sender: 'Bo Chen', audience: 'everyone', ...chat } as IncomingChat);
     return { capture, sent, state, ledger, offer };
 }
 
@@ -239,12 +239,52 @@ test('every handler that adds chat records what it posts, and no handler keeps o
 // Private messages, duplicates and the panel's backlog
 // ---------------------------------------------------------------------------
 
-test('a private message is not added; one sent to everyone, or with no recipient shown, is', () => {
+test('only a message sent to everyone is added: a private one, or one whose recipient was not read, is not', () => {
     const h = harness();
     assert.equal(h.offer({ id: '1', audience: 'direct' }), 'direct');
     assert.equal(h.offer({ id: '2', audience: 'everyone' }), 'captured');
-    assert.equal(h.offer({ id: '3' }), 'captured');
+    assert.equal(h.offer({ id: '3', audience: undefined }), 'recipient-unknown');
+    assert.equal(h.offer({ platform: 'zoom-sdk', id: '4', audience: undefined }), 'recipient-unknown');
+    assert.equal(h.offer({ platform: 'zoom-sdk', id: '5', audience: 'everyone' }), 'captured');
     assert.equal(h.sent.length, 2);
+});
+
+test('a Zoom label whose recipient cannot be read, and an SDK message naming no receiver, are not added', () => {
+    const h = harness();
+    // A label in another language is in neither English shape: no recipient.
+    const label = parseZoomChatLabel('Bo Chen an Alle: Hallo zusammen');
+    assert.equal(zoomChatAudience(label.recipient), undefined);
+    assert.equal(h.offer({ id: 'z1', audience: zoomChatAudience(label.recipient) }), 'recipient-unknown');
+    assert.equal(zoomSdkChatAudience(undefined, undefined), undefined);
+    assert.equal(h.offer({ platform: 'zoom-sdk', id: 's1', audience: zoomSdkChatAudience(undefined, '') }), 'recipient-unknown');
+    assert.equal(h.offer({ platform: 'zoom-sdk', id: 's2', audience: zoomSdkChatAudience(0, undefined) }), 'captured');
+    assert.equal(h.sent.length, 1);
+});
+
+test('the debug line names a message whose recipient was not read', () => {
+    setLogLevel('debug');
+    const captured = captureLogs();
+    try {
+        const h = harness();
+        h.offer({ id: 'u1', audience: undefined, text: 'just between us' });
+        const lines = captured.messages().join('\n');
+        assert.match(lines, /platform=zoom outcome=recipient-unknown sender=yes id=yes time=no recipient=unknown/);
+        assert.ok(!lines.includes('between us') && !lines.includes('Bo Chen'), lines);
+    } finally {
+        captured.restore();
+        setLogLevel(undefined);
+    }
+});
+
+test('the Teams and Google Meet handlers say every message they offer was sent to everyone', () => {
+    for (const file of ['teams.ts', 'teams-sdk.ts', 'google-meet.ts']) {
+        const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
+        const offers = source.split('meetingChat.offer({').slice(1);
+        assert.ok(offers.length > 0, `${file} offers no chat`);
+        for (const offer of offers) {
+            assert.ok(/audience: 'everyone'/.test(offer.slice(0, offer.indexOf('})'))), `${file} offers chat without a recipient`);
+        }
+    }
 });
 
 test('a message is added once by its platform id, and the same words under another id are added again', () => {
@@ -313,9 +353,42 @@ test('redaction stops the capture whatever the language: the saved flag is read,
     // Saved on, meeting in Spanish: the VP does not redact its speech, but the chat stays out.
     assert.equal(contentRedactionRequested({ CONTENT_REDACTION_REQUESTED: 'true', ENABLE_CONTENT_REDACTION: 'false' }), true);
     assert.equal(contentRedactionRequested({ CONTENT_REDACTION_REQUESTED: 'false', ENABLE_CONTENT_REDACTION: 'false' }), false);
-    // No saved value (the configuration could not be read): the task's variable.
+    assert.equal(contentRedactionRequested({ CONTENT_REDACTION_REQUESTED: 'false', ENABLE_CONTENT_REDACTION: 'true' }), false);
+});
+
+test('with no saved redaction choice applied, redaction is not known, unless the task variable says it is on', () => {
+    // The task's combined variable is "false" for any language but en-US, so it never says redaction is off.
+    assert.equal(contentRedactionRequested({ ENABLE_CONTENT_REDACTION: 'false' }), undefined);
+    assert.equal(contentRedactionRequested({}), undefined);
+    assert.equal(contentRedactionRequested({ CONTENT_REDACTION_REQUESTED: '' }), undefined);
     assert.equal(contentRedactionRequested({ ENABLE_CONTENT_REDACTION: 'true' }), true);
-    assert.equal(contentRedactionRequested({}), false);
+});
+
+test('nothing is added when the configuration was not applied, and the reason is logged', () => {
+    setLogLevel('debug');
+    const captured = captureLogs();
+    try {
+        const h = harness({ redacting: () => undefined });
+        assert.equal(h.offer({ id: 'a' }), 'redaction-unknown');
+        assert.equal(h.offer({ id: 'b' }), 'redaction-unknown');
+        assert.equal(h.sent.length, 0);
+        const lines = captured.messages().join('\n');
+        assert.match(lines, /outcome=redaction-unknown/);
+        assert.match(lines, /redaction not known, the configuration was not applied/);
+    } finally {
+        captured.restore();
+        setLogLevel(undefined);
+    }
+});
+
+test('with the setting off, the outcome is disabled whether or not redaction is known', () => {
+    const h = harness({ settingOn: () => false, redacting: () => undefined });
+    assert.equal(h.offer({ id: 'a' }), 'disabled');
+});
+
+test('the capture this VP runs reads the redaction choice from contentRedactionRequested', () => {
+    const source = readFileSync(new URL('../src/meeting-chat-runtime.ts', import.meta.url), 'utf8');
+    assert.match(source, /redacting: \(\) => contentRedactionRequested\(\)/);
 });
 
 test('a platform the capture does not cover is observed for the diagnostics and nothing is added', () => {
@@ -421,7 +494,7 @@ test('the capture logs no message text and no sender name, even at debug', () =>
         assert.ok(!lines.includes('merger'), lines);
         assert.ok(!lines.includes('secret'), lines);
         assert.ok(!lines.includes('Bo Chen'), lines);
-        assert.match(lines, /platform=zoom outcome=captured sender=yes id=yes time=no recipient=unknown links=1/);
+        assert.match(lines, /platform=zoom outcome=captured sender=yes id=yes time=no recipient=everyone links=1/);
     } finally {
         captured.restore();
         setLogLevel(undefined);

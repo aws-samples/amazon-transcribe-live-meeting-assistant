@@ -233,3 +233,22 @@ def agenda_derivation_due(
         return float(end_time) >= after_seconds
     except (TypeError, ValueError):
         return False
+
+
+def apply_meeting_access(segment: Dict[str, Any], meeting: Dict[str, Any]) -> None:
+    """Gives a transcript segment its meeting's Owner and SharedWith, in place.
+
+    ``meeting`` is what ``get_call_details`` read from the meeting record, so the
+    access fields come from the record rather than from the event. SharedWith is
+    the meeting's, None included, as it has always been for a segment. Owner is
+    set when the meeting has one; a meeting without one leaves the segment's
+    Owner as normalization made it (from a verified access token, or None).
+
+    Every write of a segment to ``addTranscriptSegment`` replaces the whole
+    item, so each write of the same segment -- the transcript, then its
+    sentiment -- has to carry these fields.
+    """
+    segment["SharedWith"] = meeting.get("SharedWith")
+    owner = meeting.get("Owner")
+    if owner is not None:
+        segment["Owner"] = owner
