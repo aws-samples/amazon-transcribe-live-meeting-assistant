@@ -261,6 +261,11 @@ def test_a_microvm_run_is_priced_from_memory_lifetime_and_billed_vcpus() -> None
     assert m.cost == pytest.approx(8 * 200 * 0.000004 + (600 + 240 + 320) * 0.00002)
     assert m.audio_seconds == 149.0
     assert m.transcribe_equivalent == pytest.approx(149 * 0.0002)
+    assert m.used_vcpu_seconds == pytest.approx(720)
+    assert m.cost_at_used_cores == pytest.approx(8 * 200 * 0.000004 + 720 * 0.00002)
+    assert m.to_dict()["cost_at_used_cores_per_audio_hour"] == pytest.approx(
+        (8 * 200 * 0.000004 + 720 * 0.00002) / 149 * 3600
+    )
 
 
 def test_the_repository_price_table_supplies_fallback_rates() -> None:
@@ -400,6 +405,7 @@ def test_without_a_reference_each_run_is_compared_with_transcribe() -> None:
         have_reference=False,
     )
     assert "vs Transcribe" in table and "33.3%" in table and "$0.500" in table
+    assert "$/audio h, used cores" in table
 
 
 class _FakeSocket:

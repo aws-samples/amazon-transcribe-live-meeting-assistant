@@ -90,6 +90,10 @@ class EngineRun:
         return sum(u * s for u, s in self.samples) / sampled if sampled else None
 
     @property
+    def core_seconds(self) -> float:
+        return sum(u * s for u, s in self.samples)
+
+    @property
     def peak_cores(self) -> float | None:
         return max((u for u, _ in self.samples), default=None)
 
@@ -151,15 +155,27 @@ class Measurement:
     peak_cores: float | None = None
     peak_rss_mb: int | None = None
     billed_vcpu_seconds: float | None = None
+    used_vcpu_seconds: float | None = None
+    cost_at_used_cores: float | None = None
     fell_back: bool = False
+
+    def _per_audio_hour(self, cost: float | None) -> float | None:
+        if cost is None or not self.audio_seconds:
+            return None
+        return cost / self.audio_seconds * 3600
 
     @property
     def cost_per_audio_hour(self) -> float:
-        return self.cost / self.audio_seconds * 3600 if self.audio_seconds else 0.0
+        return self._per_audio_hour(self.cost) or 0.0
+
+    @property
+    def cost_at_used_cores_per_audio_hour(self) -> float | None:
+        return self._per_audio_hour(self.cost_at_used_cores)
 
     def to_dict(self) -> dict[str, Any]:
         out = dict(self.__dict__)
         out["cost_per_audio_hour"] = self.cost_per_audio_hour
+        out["cost_at_used_cores_per_audio_hour"] = self.cost_at_used_cores_per_audio_hour
         return out
 
 
@@ -176,7 +192,9 @@ def price_microvm(
     baseline = memory_mib / MIB_PER_VCPU
     vcpu_seconds = engine.billed_vcpu_seconds(lifetime, baseline)
     gb = memory_mib / 1024
-    cost = gb * lifetime * rates.gb_second + vcpu_seconds * rates.vcpu_second
+    memory_cost = gb * lifetime * rates.gb_second
+    cost = memory_cost + vcpu_seconds * rates.vcpu_second
+    used = engine.core_seconds
     audio = max(engine.audio_seconds.values(), default=0.0) or wav_seconds
     return Measurement(
         engine="microvm",
@@ -189,6 +207,8 @@ def price_microvm(
         peak_cores=engine.peak_cores,
         peak_rss_mb=engine.peak_rss_mb or None,
         billed_vcpu_seconds=vcpu_seconds,
+        used_vcpu_seconds=used,
+        cost_at_used_cores=memory_cost + used * rates.vcpu_second,
         fell_back=transcriber.fell_back,
     )
 

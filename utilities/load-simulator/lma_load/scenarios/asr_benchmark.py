@@ -275,44 +275,55 @@ def compare(results: list[dict[str, Any]], reference: str | None) -> None:
 
 def render_table(results: list[dict[str, Any]], rates: measure.Rates, have_reference: bool) -> str:
     wer_label = "WER" if have_reference else "vs Transcribe"
-    header = (
-        f"| Config | Audio | MicroVM | Avg cores | Peak cores | RSS MB | Cost | $/audio h | Transcribe $ | "
-        f"Rows | Speakers | {wer_label} |"
-    )
-    lines = [header, "|" + "---|" * 12]
+    columns = [
+        "Config",
+        "Audio",
+        "MicroVM",
+        "Avg cores",
+        "Peak cores",
+        "RSS MB",
+        "Cost",
+        "$/audio h",
+        "Cost, used cores",
+        "$/audio h, used cores",
+        "Transcribe $",
+        "Rows",
+        "Speakers",
+        wer_label,
+    ]
+    lines = ["| " + " | ".join(columns) + " |", "|" + "---|" * len(columns)]
     for r in results:
         m = r.get("measurement") or {}
         q = r.get("quality") or {}
         speakers = ", ".join(f"{ch} {len(v)}" for ch, v in (q.get("speakers") or {}).items())
         wer = q.get("wer")
-        lines.append(
-            "| "
-            + " | ".join(
-                [
-                    r["label"],
-                    _minutes(m.get("audio_seconds")),
-                    _minutes(m.get("microvm_seconds")),
-                    _num(m.get("avg_cores")),
-                    _num(m.get("peak_cores")),
-                    str(m.get("peak_rss_mb") or ""),
-                    _money(m.get("cost")),
-                    _money(m.get("cost_per_audio_hour")),
-                    _money(m.get("transcribe_equivalent")),
-                    str(q.get("rows", "")),
-                    speakers,
-                    ""
-                    if wer is None or (r["engine"] == "transcribe" and not have_reference)
-                    else f"{wer:.1%}",
-                ]
-            )
-            + " |"
-        )
+        cells = [
+            r["label"],
+            _minutes(m.get("audio_seconds")),
+            _minutes(m.get("microvm_seconds")),
+            _num(m.get("avg_cores")),
+            _num(m.get("peak_cores")),
+            str(m.get("peak_rss_mb") or ""),
+            _money(m.get("cost")),
+            _money(m.get("cost_per_audio_hour")),
+            _money(m.get("cost_at_used_cores")),
+            _money(m.get("cost_at_used_cores_per_audio_hour")),
+            _money(m.get("transcribe_equivalent")),
+            str(q.get("rows", "")),
+            speakers,
+            ""
+            if wer is None or (r["engine"] == "transcribe" and not have_reference)
+            else f"{wer:.1%}",
+        ]
+        lines.append("| " + " | ".join(cells) + " |")
         if r.get("error") or r.get("warning"):
-            lines.append(f"| ↳ {r.get('error') or r.get('warning')} |" + " |" * 11)
+            lines.append(f"| ↳ {r.get('error') or r.get('warning')} |" + " |" * (len(columns) - 1))
     lines.append("")
     lines.append(
-        f"Prices ({rates.source}): vCPU ${rates.vcpu_second:.10f}/s at the larger of the baseline and the cores in "
-        f"use, memory ${rates.gb_second:.10f}/GB-s, Transcribe ${rates.transcribe_second:.7f}/s."
+        f"Prices ({rates.source}): vCPU ${rates.vcpu_second:.10f}/s, memory ${rates.gb_second:.10f}/GB-s, "
+        f"Transcribe ${rates.transcribe_second:.7f}/s. Cost bills vCPUs at the larger of the baseline "
+        "(memory / 2 GiB) and the cores in use, as MicroVMs are billed; Cost, used cores bills only the "
+        "cores the engine measured, with memory unchanged."
     )
     return "\n".join(lines)
 
