@@ -456,8 +456,13 @@ def rbac_cmd(
 # ---------------------------------------------------------------------------
 @load_command.command("asr-benchmark")
 @_common_options
-@click.option("--wav", "wav_path", required=True, type=click.Path(exists=True, dir_okay=False),
+@click.option("--wav", "wav_path", default=None, type=click.Path(exists=True, dir_okay=False),
               help="Stereo 16-bit WAV to play through every configuration (ch_0 meeting, ch_1 microphone).")
+@click.option("--dataset", default=None,
+              help="A packaged ground-truth meeting instead of --wav, e.g. ami/IS1009c: its audio is "
+              "downloaded and built on first use and its reference transcript is scored against.")
+@click.option("--cache-dir", default=None, type=click.Path(file_okay=False),
+              help="Where --dataset audio is kept (default: ~/.cache/lma-asr-benchmark).")
 @click.option("--bundles", default="",
               help="Comma-separated ASR MicroVM bundle ids from lma-asr-microvm-stack/source/catalog.json.")
 @click.option("--transcribe/--no-transcribe", default=False,
@@ -478,13 +483,25 @@ def rbac_cmd(
               help="Price table in CallPricing.json format instead of the AWS Price List API.")
 def asr_benchmark_cmd(
     stack, region, profile, run_id, results_dir, dry_run, force, verbose,
-    wav_path, bundles, transcribe, reference_path, diarize_system, diarize_mic,
+    wav_path, dataset, cache_dir, bundles, transcribe, reference_path, diarize_system, diarize_mic,
     keep_bundle, template_bucket, prices_file,
 ):
     """Play one recording through each ASR model configuration; compare cost and quality."""
     bundle_list = [b.strip() for b in bundles.split(",") if b.strip()]
     if not bundle_list and not transcribe:
         raise click.UsageError("Pass --bundles and/or --transcribe.")
+    if bool(wav_path) == bool(dataset):
+        raise click.UsageError("Pass exactly one of --wav and --dataset.")
+    if dataset:
+        from lma_load.asr_benchmark import datasets
+
+        try:
+            built, packaged = datasets.prepare(
+                dataset, Path(cache_dir) if cache_dir else datasets.DEFAULT_CACHE
+            )
+        except ValueError as err:
+            raise click.UsageError(str(err)) from err
+        wav_path, reference_path = str(built), reference_path or str(packaged)
     ctx = _make_ctx(stack, region, profile, run_id or make_run_id("asrb"), results_dir, dry_run, force, verbose)
     stack_info = _resolve_stack(ctx)
     params = asr_benchmark_mod.AsrBenchmarkParams(

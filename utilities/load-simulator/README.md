@@ -293,9 +293,16 @@ Deletes, in order:
 ### 5. `asr-benchmark` — compare model configurations
 
 ```bash
-lma load asr-benchmark -s LMA-dev-stack-2 --wav meeting.wav \
+lma load asr-benchmark -s LMA-dev-stack-2 --dataset ami/IS1009c \
     --bundles parakeet-tdt-v3-sortformer,parakeet-tdt-v3-titanet-small --transcribe --dry-run
 ```
+
+`--dataset` takes a packaged ground-truth meeting (`ami/IS1009c`, `ami/ES2004a`): a meeting
+from the [AMI Meeting Corpus](lma_load/asr_benchmark/datasets/ami/README.md) (CC BY 4.0)
+whose reference transcript ships in the package. Its headset audio is downloaded from the
+AMI mirror on first use, checked against pinned SHA-256s, and mixed into a stereo recording
+(needs numpy: `pip install -e 'utilities/load-simulator[benchmark]'`). `--wav` takes your
+own recording instead, with an optional `--reference` STM file.
 
 A lab test of [MicroVM ASR](../../docs/microvm-asr.md) bundles on a dev stack. The
 recording (stereo 16-bit WAV: channel 0 meeting audio, channel 1 microphone) is
@@ -308,8 +315,10 @@ restored at the end unless `--keep-bundle` is given.
 Each run is measured from the transcriber's log (the MicroVM and its lifetime, or the
 Transcribe requests) and the engine's log (CPU per minute, peak memory, the bundle it
 ran), priced at AWS Price List rates (`--prices-file` takes a `CallPricing.json`
-instead), and its final transcript is read back. Quality is scored as WER against
-`--reference <file>`, or without one as disagreement with the Transcribe run.
+instead), and also priced at only the cores it used. Its final transcript is read back
+and, with a reference, scored for word error rate per channel (swapped / missing / extra
+words). Without a reference the table has no WER column; agreement with the Transcribe run
+is kept in the JSON.
 
 Results go to `results/<run-id>/`: `asr-benchmark.md` (the comparison table),
 `asr-benchmark.json`, and `transcript-<config>.txt` for each run. The benchmark

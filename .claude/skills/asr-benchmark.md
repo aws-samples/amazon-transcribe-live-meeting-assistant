@@ -12,23 +12,51 @@ The tool is the load simulator's `asr-benchmark` scenario
 
 ## How to run it
 
+The default input is a **packaged ground-truth meeting**: a meeting from the AMI Meeting
+Corpus (CC BY 4.0) with a human-made reference transcript in the repository
+(`utilities/load-simulator/lma_load/asr_benchmark/datasets/ami/`). Its audio is downloaded
+from the AMI mirror and built into a stereo recording on first use (cached in
+`~/.cache/lma-asr-benchmark`), so every run hears identical audio and is scored for real
+accuracy (WER) against the reference.
+
+| Dataset | Length | Speakers |
+|---|---|---|
+| `ami/IS1009c` | 30.3 min | 4 (host on the microphone, 3 in the meeting audio) |
+| `ami/ES2004a` | 17.5 min | 4 |
+
 ```bash
 # Dry run first: prints the plan, the bundle switches and the expected time.
-AWS_PROFILE=default make asr-benchmark STACK=LMA-dev-stack-2 WAV=/path/meeting.wav \
+AWS_PROFILE=default make asr-benchmark STACK=LMA-dev-stack-2 DATASET=ami/IS1009c \
     BUNDLES=parakeet-tdt-v3-sortformer,parakeet-tdt-v3-titanet-small TRANSCRIBE=1 DRY_RUN=1
 
-# The real run (long: run it in the background and report when it finishes).
-AWS_PROFILE=default make asr-benchmark STACK=LMA-dev-stack-2 WAV=/path/meeting.wav \
+# The real run (long: run it detached, see below, and report when it finishes).
+AWS_PROFILE=default make asr-benchmark STACK=LMA-dev-stack-2 DATASET=ami/IS1009c \
     BUNDLES=parakeet-tdt-v3-sortformer,parakeet-tdt-v3-titanet-small TRANSCRIBE=1
 ```
 
-Or call the CLI directly for the other options (`--reference`, `--no-diarize-system`,
-`--diarize-mic`, `--keep-bundle`, `--template-bucket`, `--prices-file`):
+A recording of your own works too: `WAV=/path/meeting.wav`, optionally with
+`REFERENCE=/path/meeting.stm`. Without a reference there is no WER column: agreement with
+the Transcribe run is kept in `asr-benchmark.json` only, because it is not accuracy.
+
+Or call the CLI directly for the other options (`--no-diarize-system`, `--diarize-mic`,
+`--keep-bundle`, `--template-bucket`, `--prices-file`, `--cache-dir`):
 
 ```bash
-AWS_PROFILE=default lma-load asr-benchmark -s LMA-dev-stack-2 --wav meeting.wav \
-    --bundles parakeet-tdt-v3-titanet-small --transcribe --reference reference.txt
+AWS_PROFILE=default lma-load asr-benchmark -s LMA-dev-stack-2 --dataset ami/ES2004a \
+    --bundles parakeet-tdt-v3-titanet-small --transcribe
 ```
+
+**Run long benchmarks detached** (`setsid nohup make asr-benchmark … > log 2>&1 &`), so
+they survive the session that started them. An interrupted run leaves the stack on the
+bundle it was testing; the next run restores to whatever bundle was current when it
+started, so switch back explicitly if needed.
+
+**Reference transcripts (STM).** One line per utterance:
+`<recording> <channel> <speaker> <start> <end> <words>`, channel `0` (meeting audio) or
+`1` (microphone). Lines starting `;;` are comments. To add an AMI meeting, download its
+headset WAVs and the manual annotations, then
+`python -m lma_load.asr_benchmark.datasets.ami package <meeting> <host letter>
+--annotations <dir> --headsets <dir>` writes the STM and its manifest entry.
 
 What each run does, in order (Transcribe first, then each bundle):
 1. For a bundle: update the stack with its own template and only the `AsrDefaults`
@@ -67,9 +95,10 @@ Written to `results/<run-id>/`: `asr-benchmark.md` (the table, also printed),
 | Audio / MicroVM | Audio streamed; MicroVM lifetime from launch request to release |
 | Avg / Peak cores | From the engine's per-minute `engine load` log line |
 | Cost, $/audio h | MicroVM: memory × lifetime + vCPU-seconds at the larger of the baseline (memory ÷ 2 GiB, 4 vCPU at 8 GiB) and the cores in use. Transcribe: streamed seconds, 15 s minimum per request, a stereo stream billed once |
+| Cost, used cores | The same run priced at only the core-seconds the engine measured (memory unchanged): what it would cost without the vCPU baseline |
 | Transcribe $ | What Transcribe would have cost for the same audio |
-| Rows, Speakers | Final transcript rows; distinct speaker labels per channel |
-| WER / vs Transcribe | Word error rate against `--reference`, or, without one, word-level disagreement with the Transcribe run (not an accuracy figure) |
+| Rows, Speakers | Final transcript rows; distinct speaker labels per channel, "of N" against the reference's speaker count |
+| WER meeting / microphone | Only with a reference. Word error rate per channel, with its split into swapped / missing / extra words, after normalisation (case, punctuation, fillers such as um and uh, okay/ok, numbers up to 999, -isation/-ization). Lower is better |
 
 Prices come from the AWS Price List API, or the deployment's default price table
 (`CallPricing.json`) when the API is unreachable. Cost Explorer shows the day's

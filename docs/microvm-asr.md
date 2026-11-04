@@ -771,15 +771,18 @@ To compare bundles, or a bundle with Amazon Transcribe, play the same recording 
 each on a dev stack:
 
 ```bash
-AWS_PROFILE=default make asr-benchmark STACK=<dev-stack> WAV=meeting.wav \
+AWS_PROFILE=default make asr-benchmark STACK=<dev-stack> DATASET=ami/IS1009c \
     BUNDLES=parakeet-tdt-v3-sortformer,parakeet-tdt-v3-titanet-small TRANSCRIBE=1 DRY_RUN=1
 ```
 
 For each bundle the stack is updated with only the `AsrDefaults` bundle changed (the
 image rebuilds, about 20-25 minutes), the WAV is streamed once at real time over the
 transcriber WebSocket, and the run is priced from the engine's measured CPU and the
-MicroVM's lifetime. Each run's transcript is saved and scored against a reference
-transcript (`--reference`) or, without one, against the Transcribe run. The original
+MicroVM's lifetime. Each run's transcript is saved and, with a reference, scored for word
+error rate per channel. `DATASET=ami/IS1009c` and `ami/ES2004a` are meetings from the AMI
+Meeting Corpus (CC BY 4.0) whose reference transcripts ship with the tool; their audio is
+downloaded and mixed into a stereo recording on first use. Your own recording works with
+`WAV=` and an optional `REFERENCE=` STM file. The original
 bundle is restored at the end. See the load simulator's
 [`asr-benchmark`](../utilities/load-simulator/README.md#5-asr-benchmark--compare-model-configurations)
 scenario. This is a lab comparison; the cost of real meetings is

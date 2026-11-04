@@ -633,3 +633,22 @@ lma-ai-stack/source/ui/public/js/purify.min.js and is copied unmodified into the
 web application bundle served by CloudFront. The file retains its upstream
 version and license banner. This project does not modify any DOMPurify source
 file; it is consumed as an unmodified library.
+
+----------------
+
+** AMI Meeting Corpus - https://groups.inf.ed.ac.uk/ami/corpus/
+
+The AMI Meeting Corpus and its annotations are released under the Creative Commons
+Attribution 4.0 International Public License (CC BY 4.0).
+
+CC BY 4.0 - https://creativecommons.org/licenses/by/4.0/
+
+Attribution: AMI Meeting Corpus, (c) the AMI Consortium, CC BY 4.0. J. Carletta et al.,
+"The AMI Meeting Corpus: A Pre-Announcement", Machine Learning for Multimodal
+Interaction (MLMI 2005), LNCS 3869, Springer, 2006.
+
+Reference transcripts derived from the corpus's manual word annotations (release 1.6.2)
+are included in utilities/load-simulator/lma_load/asr_benchmark/datasets/ami/ for the
+ASR model benchmark, with the changes described in that directory's README.md. No AMI
+audio is redistributed: the benchmark downloads the headset recordings from the AMI
+mirror on first use and verifies each against a pinned SHA-256.
