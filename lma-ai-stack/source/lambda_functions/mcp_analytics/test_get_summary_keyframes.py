@@ -43,3 +43,18 @@ def test_other_images_and_links_are_left_alone():
     text = "![chart](https://example.com/c.png) [keyframe:x](keyframe:x)"
     assert get_summary.keyframe_images_as_text(text) == text
     assert get_summary.keyframe_images_as_text(None) is None
+
+
+def test_the_chat_section_and_its_links_reach_an_mcp_client_unchanged():
+    summary = {
+        "SUMMARY": "Budget agreed.",
+        "CHAT & SHARED LINKS": (
+            "- **Deck**: Alice shared the deck.\n\n"
+            "**Links shared**\n- [00:20] Alice: `https://example.com/deck`"
+        ),
+    }
+    import json
+
+    text = json.dumps(summary)
+    assert get_summary.keyframe_images_as_text(text) == text
+    assert json.loads(get_summary.keyframe_images_as_text(text)) == summary

@@ -745,10 +745,20 @@ What is not added:
 
 Chat lines are stored with the meeting's transcript, expire with it (**Days
 to keep transcript segments**), and are deleted with it, including by
-[Delete the transcript after the summary](transcript-deletion.md). They are
-not used, in this release, by the summary, the meeting assistant, the
-knowledge base, sentiment, speaker naming or the wake phrase: those read what
-was said.
+[Delete the transcript after the summary](transcript-deletion.md).
+
+The meeting summary uses them. Each message is part of the transcript the
+summary sections read, as a line beginning `[chat]`, and a meeting with chat
+gets a **CHAT & SHARED LINKS** section: what was discussed in the chat, and
+the links participants shared, listed from the messages themselves rather
+than written by the model. See
+[Chat and Shared Links](transcript-summarization.md#chat-and-shared-links).
+The summary is kept when the transcript is deleted, so the links it lists
+outlive the chat lines they came from. The copy of the transcript written for
+the knowledge base's meeting-history search leaves the chat lines out, though
+its copy of the summary includes the chat section. Chat lines are not used, in
+this release, by the meeting assistant, sentiment, speaker naming or the wake
+phrase: those read what was said.
 
 How well each platform's chat can be read differs, and none of this has been
 measured in a live meeting yet:

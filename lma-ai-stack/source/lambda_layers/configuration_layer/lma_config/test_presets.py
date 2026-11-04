@@ -134,3 +134,24 @@ def test_a_preset_needing_the_asr_engine_is_offered_only_with_it():
 def test_an_unknown_preset_id_is_refused():
     with pytest.raises(library.InvalidPreset):
         preset_by_id("no-such-preset")
+
+
+def _shipped_summary_section():
+    shipped = json.loads((DEFAULTS / "LLMPromptSummaryTemplate.json").read_text(encoding="utf-8"))
+    return {f"{index}#{title}": prompt for index, (title, prompt) in enumerate(shipped.items(), 1)}
+
+
+def test_the_healthcare_preset_turns_the_chat_section_off():
+    """Its Managed profile is the preset over the shipped prompts, which include the chat."""
+    body = {"summary_prompt_templates": _shipped_summary_section()}
+    applied = apply_preset(body, preset_by_id("healthcare-summary"))["summary_prompt_templates"]
+    assert applied["7#CHAT & SHARED LINKS"] == "NONE"
+
+
+@pytest.mark.parametrize(
+    "preset_id", ["translator-voice-assistant", "on-demand-asr-with-voice-separation"]
+)
+def test_presets_that_leave_the_summary_alone_keep_the_chat_section(preset_id):
+    body = {"summary_prompt_templates": _shipped_summary_section()}
+    applied = apply_preset(body, preset_by_id(preset_id))["summary_prompt_templates"]
+    assert "{chat}" in applied["7#CHAT & SHARED LINKS"]

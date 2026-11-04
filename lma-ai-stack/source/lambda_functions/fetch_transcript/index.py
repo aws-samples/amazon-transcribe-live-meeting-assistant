@@ -17,9 +17,14 @@ from botocore.exceptions import ClientError
 from lma_channels import (  # pylint: disable=import-error
     REMOTE,
     STORED_SPEECH_CHANNELS,
+    STORED_TRANSCRIPT_CHANNELS,
     canonical_channel,
     canonical_keyed,
+    is_chat_channel,
 )
+
+# The web addresses in a chat message, by rule (configuration layer).
+from lma_chat_links import extract_links  # pylint: disable=import-error
 
 # grab environment variables
 LCA_CALL_EVENTS_TABLE = os.environ["LCA_CALL_EVENTS_TABLE"]
@@ -57,8 +62,10 @@ def get_call_metadata(callid):
         return metadata["Item"]
 
 
-def get_transcripts(callid):
+def get_transcripts(callid, include_chat=False):
     """Every final transcript segment for a meeting, across all result pages.
+
+    The two speech channels, and with ``include_chat`` the meeting chat too.
 
     DynamoDB caps a Query response at 1 MB of items *read*, and applies
     FilterExpression only after that cap. Partial segments are filtered here and
@@ -70,6 +77,7 @@ def get_transcripts(callid):
     """
     pk = "trs#" + callid
     print(f"Call transcripts PK: {pk}")
+    channels = STORED_TRANSCRIPT_CHANNELS if include_chat else STORED_SPEECH_CHANNELS
     items = []
     start_key = None
     pages = 0
@@ -78,8 +86,7 @@ def get_transcripts(callid):
             "KeyConditionExpression": Key("PK").eq(pk),
             # Both spellings of the two speech channels: a meeting recorded
             # before 0.4.0 stores CALLER and AGENT.
-            "FilterExpression": Attr("Channel").is_in(list(STORED_SPEECH_CHANNELS))
-            & Attr("IsPartial").eq(False),
+            "FilterExpression": Attr("Channel").is_in(list(channels)) & Attr("IsPartial").eq(False),
         }
         if start_key:
             query_args["ExclusiveStartKey"] = start_key
@@ -335,6 +342,111 @@ def resolve_speaker_name(row, identities, fallback_name):
     return stored
 
 
+# ── the meeting chat ─────────────────────────────────────────────────────────
+#
+# Asked for with IncludeChat, the messages typed in the meeting chat (channel
+# MEETING_CHAT, docs/virtual-participant.md#meeting-chat-in-the-transcript) are
+# interleaved with the speech as "[chat] <sender>: <text>", and returned on their
+# own as "chat" and "chatLinks". A message is typed by any participant, so it is
+# cleaned before it goes near a prompt: its line breaks become " / ", so it
+# stays on its one line and cannot start a line of its own that reads as speech,
+# and "<" and ">" become "‹" and "›", so it cannot close or open the tags that a
+# prompt wraps the transcript and the chat in.
+
+#: What marks a typed line in the transcript.
+CHAT_MARK = "[chat]"
+
+#: The speaker of a chat message whose sender the platform did not show.
+UNKNOWN_SENDER = "Unknown sender"
+
+#: Bounds on what the chat adds to one response. The VP stores up to 3,000
+#: messages of up to about 4,000 characters, and the chat is returned in three
+#: forms (the transcript, the timed transcript and "chat"), all inside a
+#: synchronous invoke's 6 MB; past these a message is cut, and past the total
+#: the later messages are left out of the text (their links are still listed).
+MAX_CHAT_MESSAGE_CHARS = 1000
+MAX_CHAT_CHARS = 100_000
+MAX_CHAT_LINKS = 200
+
+_CHAT_LINE_BREAKS = re.compile(r"\s*[\r\n\v\f\x1c\x1d\x1e\x85\u2028\u2029]+\s*")
+
+
+def clean_chat_text(text):
+    """A chat message or sender on one line, without angle brackets."""
+    one_line = _CHAT_LINE_BREAKS.sub(" / ", text if isinstance(text, str) else "")
+    one_line = one_line.replace("<", "\u2039").replace(">", "\u203a")
+    one_line = " ".join(one_line.split())
+    # A message that began or ended with a line break.
+    while one_line.startswith("/ ") or one_line == "/":
+        one_line = one_line[2:]
+    while one_line.endswith(" /"):
+        one_line = one_line[:-2]
+    return one_line.strip()
+
+
+def chat_sender(row):
+    """Who typed a chat message, cleaned like its text."""
+    return clean_chat_text(row.get("Speaker")) or UNKNOWN_SENDER
+
+
+def chat_text(row):
+    """A chat message's text, cleaned and cut to MAX_CHAT_MESSAGE_CHARS."""
+    text = clean_chat_text(row.get("Transcript"))
+    if len(text) > MAX_CHAT_MESSAGE_CHARS:
+        text = text[:MAX_CHAT_MESSAGE_CHARS].rstrip() + " [...]"
+    return text
+
+
+def bounded_chat(rows):
+    """The chat messages that go into the text, in time order, and how many were left out.
+
+    A message with no text once cleaned is left out and not counted; past
+    MAX_CHAT_CHARS of text, every later message is left out and counted.
+    """
+    kept = []
+    used = 0
+    omitted = 0
+    for row in sorted(rows, key=segment_start):
+        text = chat_text(row)
+        if not text:
+            continue
+        if omitted or used + len(text) > MAX_CHAT_CHARS:
+            omitted += 1
+            continue
+        used += len(text)
+        kept.append(row)
+    return kept, omitted
+
+
+def chat_document(rows, omitted):
+    """The "chat" field: one "[MM:SS] <sender>: <text>" line per message."""
+    lines = [
+        f"{format_clock(segment_start(row))} {chat_sender(row)}: {chat_text(row)}" for row in rows
+    ]
+    if omitted:
+        lines.append(f"({omitted} later message(s) are not included)")
+    return "\n".join(lines)
+
+
+def chat_links(rows):
+    """The "chatLinks" field: each address shared, once, with who shared it and when.
+
+    Read from every message's stored text, not the cleaned and cut one, so an
+    address past the cut or in a message left out of the text is still listed.
+    """
+    links = []
+    seen = set()
+    for row in sorted(rows, key=segment_start):
+        for url in extract_links(row.get("Transcript")):
+            if url in seen:
+                continue
+            seen.add(url)
+            links.append({"url": url, "sender": chat_sender(row), "time": segment_start(row)})
+            if len(links) >= MAX_CHAT_LINKS:
+                return links
+    return links
+
+
 def preprocess_transcripts(transcripts, condense, includeSpeaker, metadata=None):
     data = []
     call_metadata = metadata or {}
@@ -345,6 +457,14 @@ def preprocess_transcripts(transcripts, condense, includeSpeaker, metadata=None)
     fallback_name = call_metadata.get("CustomerPhoneNumber")
     transcripts.sort(key=lambda x: x["EndTime"])
     for row in transcripts:
+        if is_chat_channel(row.get("Channel")):
+            # Typed, not spoken: marked, cleaned, and never renamed from the
+            # identity map, which names voices.
+            transcript = f"{CHAT_MARK} "
+            if includeSpeaker:
+                transcript += f"{chat_sender(row)}: "
+            data.append("\n" + transcript + chat_text(row))
+            continue
         transcript = row["Transcript"]
         # prefix Speaker name to transcript segments if "IncludeSpeaker" parameter is set to True.
         if includeSpeaker:
@@ -409,10 +529,19 @@ def lambda_handler(event, context):
     if "IncludeSpeaker" in data:
         includeSpeaker = data["IncludeSpeaker"]
 
+    # The chat only when asked for: a custom summary function, the knowledge
+    # base export and the meeting assistant read this function for what was
+    # said, and expect speech alone.
+    include_chat = bool(data.get("IncludeChat"))
+
     # Read the meeting row before assembling the text: it carries the speaker
     # identity map that turns a stored voice id into a name.
     metadata = get_call_metadata(callid)
-    segments = get_transcripts(callid)
+    rows = get_transcripts(callid, include_chat=include_chat)
+    speech = [row for row in rows if not is_chat_channel(row.get("Channel"))]
+    chat_rows = [row for row in rows if is_chat_channel(row.get("Channel"))] if include_chat else []
+    chat_in_text, chat_omitted = bounded_chat(chat_rows)
+    segments = speech + chat_in_text
     transcripts = preprocess_transcripts(segments, preProcess, includeSpeaker, metadata)
     transcript_string = "".join(transcripts)
     response = {"transcript": transcript_string, "metadata": metadata}
@@ -424,15 +553,23 @@ def lambda_handler(event, context):
         # segment, as preprocess_transcripts left them.
         response["timedTranscript"] = timed_transcript(segments, transcripts, keyframes)
     if data.get("IncludeKeyframes"):
-        response["keyframes"] = attach_said(
-            keyframes, segments, preProcess, includeSpeaker, metadata
-        )
+        # What was said while each frame was up: speech, not the chat.
+        response["keyframes"] = attach_said(keyframes, speech, preProcess, includeSpeaker, metadata)
+    if include_chat:
+        response["chat"] = chat_document(chat_in_text, chat_omitted)
+        response["chatLinks"] = chat_links(chat_rows)
     # Log the shape of the response rather than the response. Everything this
     # function returns is meeting content, and the counts are what is actually
     # useful when diagnosing a short or empty transcript.
     print(
         f"Fetch Transcript response: {len(transcript_string)} characters "
         f"over {len(transcripts)} segment(s)"
+        + (
+            f", {len(chat_in_text)} chat message(s) ({chat_omitted} left out), "
+            f"{len(response['chatLinks'])} link(s)"
+            if include_chat
+            else ""
+        )
     )
     return response
 

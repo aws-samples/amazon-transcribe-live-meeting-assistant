@@ -21,9 +21,11 @@ and treats the two spellings as one channel. Everything that WRITES one writes
 A third channel, ``MEETING_CHAT``, holds the messages participants typed in the
 meeting's chat, which a Virtual Participant reads and adds to the transcript.
 It is not speech: nothing that reads what was said (sentiment, the meeting
-assistant's wake phrase, speaker naming, the summary's transcript) reads it,
-which is why each of those filters on ``is_speech_channel`` or
-``STORED_SPEECH_CHANNELS`` rather than on "every channel but the assistants'".
+assistant's wake phrase, speaker naming) reads it, which is why each of those
+filters on ``is_speech_channel`` or ``STORED_SPEECH_CHANNELS`` rather than on
+"every channel but the assistants'". A reader that wants the chat as well asks
+for it: the summary does, through FetchTranscript's ``IncludeChat``, which marks
+each typed line ``[chat]``.
 
 The UI's twin is ``lma-ai-stack/source/ui/src/components/common/channels.js``.
 The WebSocket transcriber and the Virtual Participant only write channels, so
