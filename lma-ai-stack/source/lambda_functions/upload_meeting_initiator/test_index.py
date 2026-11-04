@@ -410,10 +410,11 @@ def test_optional_fields_are_left_out_rather_than_stored_as_null(env) -> None:
 
 def test_the_parties_default_to_the_placeholder_names_the_ui_shows(env) -> None:
     """These become CustomerPhoneNumber/SystemPhoneNumber on the Kinesis START
-    event, which the meetings list renders verbatim."""
+    event; CustomerPhoneNumber is the name the transcript gives the other
+    participants when their voices have no name of their own."""
     table, _ = env
     invoke()
-    assert table.item["FromNumber"] == "Customer"
+    assert table.item["FromNumber"] == "Other Participant"
     assert table.item["ToNumber"] == "System"
 
 

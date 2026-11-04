@@ -130,16 +130,16 @@ enum CallStatus {
 # them as REMOTE and LOCAL. MEETING_CHAT holds the messages participants typed
 # in the meeting chat, which a Virtual Participant adds to the transcript, one
 # segment per message; it is not speech, and the readers of what was said leave
-# it out. (AppSync's schema parser refuses a comment between enum values, so
-# this one sits above the enum.)
+# it out. CATEGORY_MATCH, AGENT_VOICETONE and CALLER_VOICETONE are retired: the
+# two transcript queries leave out any stored item that still carries one (see
+# getTranscriptSegments.request.vtl). (AppSync's schema parser refuses a comment
+# between enum values, so this one sits above the enum.)
 enum Channel {
 	REMOTE
 	LOCAL
 	MEETING_CHAT
 	CALLER @deprecated(reason: "Stored by LMA before 0.4.0; read as REMOTE.")
 	AGENT @deprecated(reason: "Stored by LMA before 0.4.0; read as LOCAL.")
-	AGENT_VOICETONE
-	CALLER_VOICETONE
 	AGENT_ASSISTANT
 	CHAT_ASSISTANT
 }
@@ -329,8 +329,6 @@ type OverallSentiment @aws_cognito_user_pools
 	LOCAL: Float
 	AGENT: Float @deprecated(reason: "Older meetings' value for LOCAL.")
 	CALLER: Float @deprecated(reason: "Older meetings' value for REMOTE.")
-	AGENT_VOICETONE: Float
-	CALLER_VOICETONE: Float
 }
 
 input OverallSentimentInput {
@@ -339,8 +337,6 @@ input OverallSentimentInput {
 	# CALLER and AGENT are deprecated: older meetings' values for REMOTE and LOCAL.
 	AGENT: Float
 	CALLER: Float
-	AGENT_VOICETONE: Float
-	CALLER_VOICETONE: Float
 }
 
 type Query @aws_cognito_user_pools
@@ -631,8 +627,6 @@ type SentimentByChannel @aws_cognito_user_pools
 	LOCAL: [SentimentByChannelEntry]
 	AGENT: [SentimentByChannelEntry] @deprecated(reason: "Older meetings' value for LOCAL.")
 	CALLER: [SentimentByChannelEntry] @deprecated(reason: "Older meetings' value for REMOTE.")
-	AGENT_VOICETONE: [SentimentByChannelEntry]
-	CALLER_VOICETONE: [SentimentByChannelEntry]
 }
 
 type SentimentByChannelEntry @aws_cognito_user_pools
@@ -654,8 +648,6 @@ input SentimentByChannelInput {
 	# CALLER and AGENT are deprecated: older meetings' values for REMOTE and LOCAL.
 	AGENT: [SentimentByChannelEntryInput]
 	CALLER: [SentimentByChannelEntryInput]
-	AGENT_VOICETONE: [SentimentByChannelEntryInput]
-	CALLER_VOICETONE: [SentimentByChannelEntryInput]
 }
 
 type SentimentByPeriod @aws_cognito_user_pools

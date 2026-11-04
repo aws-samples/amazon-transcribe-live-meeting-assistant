@@ -248,7 +248,7 @@ def job_row(**overrides) -> dict:
         "Status": "TRANSCRIBING",
         "Owner": "bob@example.com",
         "AgentId": "bob@example.com",
-        "FromNumber": "Customer",
+        "FromNumber": "Other Participant",
         "ToNumber": "System",
         "EnableDiarization": False,
         "MaxSpeakers": 4,
@@ -823,7 +823,7 @@ def test_the_end_event_repeats_the_meeting_identity(h) -> None:
     assert h.kinesis.only("END") == {
         "EventType": "END",
         "CallId": CALL_ID,
-        "CustomerPhoneNumber": "Customer",
+        "CustomerPhoneNumber": "Other Participant",
         "SystemPhoneNumber": "System",
         "AgentId": "bob@example.com",
         "CreatedAt": h.kinesis.only("END")["CreatedAt"],

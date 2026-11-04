@@ -100,7 +100,7 @@ import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 import { InfoLink } from '../common/info-link';
 import { getWeightedSentimentLabel } from '../common/sentiment';
 
-import { VoiceToneFluctuationChart, SentimentFluctuationChart, SentimentPerQuarterChart } from './sentiment-charts';
+import { SentimentFluctuationChart, SentimentPerQuarterChart } from './sentiment-charts';
 
 import './CallPanel.css';
 import { SentimentTrendIcon } from '../sentiment-trend-icon/SentimentTrendIcon';
@@ -748,16 +748,13 @@ const appendToPreviousSegment = ({ previous, current }) => {
 // a message typed in the meeting chat.
 const isSpeechSegment = (segment) => isSpeechChannel(segment?.channel);
 
-// The segments the transcript shows, of those it holds: not the voice-tone
-// readings, not the chat assistant's (it has its own panel), and only complete
-// ones.
+// The segments the transcript shows, of those it holds: not the chat
+// assistant's (it has its own panel), and only complete ones.
 const isDisplayedSegment = (s) =>
   // prettier-ignore
   s?.segmentId
   && s?.createdAt
   && (s.agentTranscript === undefined || s.agentTranscript || s.channel !== 'LOCAL')
-  && s.channel !== 'AGENT_VOICETONE'
-  && s.channel !== 'CALLER_VOICETONE'
   && s.channel !== 'CHAT_ASSISTANT';
 
 const rowIdFor = (s) => `${s.segmentId}-${s.createdAt}`;
@@ -1147,13 +1144,13 @@ const CallInProgressTranscript = ({
         // not a voice, so the names given to voices do not apply to it.
         if (isChatChannel(t.channel)) return t;
         t.speakerKey = identityKeyFor(t, speakerIdentities);
-        // callerPhoneNumber is the remote side's name, so it substitutes for the
+        // remoteParticipantName is the remote side's name, so it substitutes for the
         // placeholder on the REMOTE channel only. The download path has always
         // scoped it this way; the other readers now match.
         const resolved = resolveSpeaker(
           t,
           speakerIdentities,
-          t.channel === 'REMOTE' ? item.callerPhoneNumber : undefined,
+          t.channel === 'REMOTE' ? item.remoteParticipantName : undefined,
         );
         t.speaker = resolved.name;
         t.speakerLocked = resolved.locked;
@@ -1411,7 +1408,7 @@ const CallInProgressTranscript = ({
                   query={query}
                   translateCache={translateCache}
                   enableSentimentAnalysis={enableSentimentAnalysis}
-                  participantName={item.callerPhoneNumber}
+                  participantName={item.remoteParticipantName}
                   onRenameSpeaker={onRenameSpeaker}
                   readOnly={readOnly}
                   onSeek={onSeek}
@@ -1533,42 +1530,6 @@ const CallTranscriptContainer = ({
   );
 };
 
-const VoiceToneContainer = ({ item, callTranscriptPerCallId, collapseSentiment, setCollapseSentiment }) => (
-  <Container
-    fitHeight="true"
-    disableContentPaddings={collapseSentiment ? '' : 'true'}
-    header={
-      <Header
-        variant="h4"
-        info={
-          <Link
-            variant="info"
-            target="_blank"
-            href="https://docs.aws.amazon.com/chime-sdk/latest/dg/call-analytics.html"
-          >
-            Info
-          </Link>
-        }
-        actions={
-          <SpaceBetween direction="horizontal" size="xs">
-            <Button
-              variant="inline-icon"
-              iconName={collapseSentiment ? 'angle-up' : 'angle-down'}
-              onClick={() => setCollapseSentiment(!collapseSentiment)}
-            />
-          </SpaceBetween>
-        }
-      >
-        Voice Tone Analysis (30sec rolling window)
-      </Header>
-    }
-  >
-    {collapseSentiment ? (
-      <VoiceToneFluctuationChart item={item} callTranscriptPerCallId={callTranscriptPerCallId} />
-    ) : null}
-  </Container>
-);
-
 const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, setCollapseSentiment }) => (
   <>
     <Container
@@ -1677,7 +1638,6 @@ export const CallPanel = ({
   const { settings } = useSettingsContext();
   const [collapseSentiment, setCollapseSentiment] = useState(false);
 
-  const enableVoiceTone = settings?.EnableVoiceToneAnalysis === 'true';
   const enableSentimentAnalysis = settings?.IsSentimentAnalysisEnabled === 'true';
 
   const {
@@ -2189,7 +2149,7 @@ export const CallPanel = ({
     [item, durationMillis],
   );
   const platform = platformLabel(meetingVp?.meetingPlatform);
-  const speakers = buildSpeakerRoster(transcriptSegmentsForCall, speakerIdentities, item.callerPhoneNumber).map(
+  const speakers = buildSpeakerRoster(transcriptSegmentsForCall, speakerIdentities, item.remoteParticipantName).map(
     (row) => ({
       key: row.key,
       label: row.name || (row.voiceId ? `${row.defaultName} ${row.voiceId}` : row.defaultName),
@@ -2256,29 +2216,14 @@ export const CallPanel = ({
           </SpaceBetween>
         )}
       </Grid>
-      {(enableSentimentAnalysis || enableVoiceTone) && (
-        <Grid
-          gridDefinition={[
-            { colspan: { default: 12, xs: enableVoiceTone && enableSentimentAnalysis ? 8 : 12 } },
-            { colspan: { default: 12, xs: enableVoiceTone && enableSentimentAnalysis ? 4 : 0 } },
-          ]}
-        >
-          {enableSentimentAnalysis && (
-            <CallStatsContainer
-              item={item}
-              callTranscriptPerCallId={callTranscriptPerCallId}
-              collapseSentiment={collapseSentiment}
-              setCollapseSentiment={setCollapseSentiment}
-            />
-          )}
-          {enableVoiceTone && (
-            <VoiceToneContainer
-              item={item}
-              callTranscriptPerCallId={callTranscriptPerCallId}
-              collapseSentiment={collapseSentiment}
-              setCollapseSentiment={setCollapseSentiment}
-            />
-          )}
+      {enableSentimentAnalysis && (
+        <Grid gridDefinition={[{ colspan: 12 }]}>
+          <CallStatsContainer
+            item={item}
+            callTranscriptPerCallId={callTranscriptPerCallId}
+            collapseSentiment={collapseSentiment}
+            setCollapseSentiment={setCollapseSentiment}
+          />
         </Grid>
       )}
     </SpaceBetween>

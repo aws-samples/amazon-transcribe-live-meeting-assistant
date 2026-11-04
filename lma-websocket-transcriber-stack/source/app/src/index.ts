@@ -51,6 +51,11 @@ import { jwtVerifier, getAuthenticatedCaller } from './utils/jwt-verifier';
 
 import { noteStreamingSessionStarted, noteStreamingSessionEnded } from './metrics/session';
 import { getSessionSettings } from './calleventdata/session-settings';
+import {
+    applySpeakerFieldAliases,
+    DEFAULT_REMOTE_SPEAKER_NAME,
+    DEFAULT_SYSTEM_LABEL,
+} from './calleventdata/speaker-fields';
 
 import {
     VideoSession,
@@ -465,7 +470,7 @@ const onTextMessage = async (
     const match = auth?.match(/^Bearer (.+)$/);
     let callMetaData: CallMetaData;
     try {
-        callMetaData = JSON.parse(data) as CallMetaData;
+        callMetaData = applySpeakerFieldAliases(JSON.parse(data) as CallMetaData);
     } catch (parseErr) {
         // A truncated/garbled control frame is the client's problem, not grounds
         // for tearing down every other call on this task. The serialized error can
@@ -520,8 +525,8 @@ const onTextMessage = async (
         // generate random metadata if none is provided
         callMetaData.callId = callMetaData.callId || randomUUID();
         bindLogContext({ callId: callMetaData.callId });
-        callMetaData.fromNumber = callMetaData.fromNumber || 'Customer Phone';
-        callMetaData.toNumber = callMetaData.toNumber || 'System Phone';
+        callMetaData.fromNumber = callMetaData.fromNumber || DEFAULT_REMOTE_SPEAKER_NAME;
+        callMetaData.toNumber = callMetaData.toNumber || DEFAULT_SYSTEM_LABEL;
         callMetaData.activeSpeaker =
             callMetaData.activeSpeaker ?? callMetaData?.fromNumber ?? 'unknown';
 
@@ -704,7 +709,8 @@ const onTextMessage = async (
         );
 
         if (socketData && socketData.callMetadata) {
-            // We already know speaker name for the microphone channel (ch_1) - represented in callMetaData.agentId.
+            // We already know speaker name for the microphone channel (ch_1) - represented in callMetaData.agentId
+            // (sent as localSpeakerName, or as agentId by older clients).
             // We should only use SPEAKER_CHANGE to track who is speaking on the incoming meeting channel (ch_0)
             // If the speaker is the same as the agentId, then we should ignore the event.
             const mic_channel_speaker = callMetaData.agentId;

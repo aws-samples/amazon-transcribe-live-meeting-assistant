@@ -252,11 +252,10 @@ Sent once at the beginning of a session to initialize the transcription.
 {
   "callEvent": "START",
   "callId": "550e8400-e29b-41d4-a716-446655440000",
-  "agentId": "agent@example.com",
-  "fromNumber": "Customer Name",
-  "toNumber": "Meeting Name",
+  "localSpeakerName": "ana@example.com",
+  "remoteSpeakerName": "Other Participant",
   "samplingRate": 16000,
-  "activeSpeaker": "Customer Name",
+  "activeSpeaker": "Other Participant",
   "diarizeSystemChannel": true,
   "diarizeMicChannel": false
 }
@@ -266,13 +265,26 @@ Sent once at the beginning of a session to initialize the transcription.
 |-------|------|----------|---------|-------------|
 | `callEvent` | `string` | **Yes** | — | Must be `"START"` |
 | `callId` | `string` (UUID) | No | Auto-generated UUID | Unique identifier for this session. Use UUID v4 format. If omitted, the server generates one. |
-| `agentId` | `string` | No | Auto-generated UUID | Identifier for the agent/user (e.g., email address or username). Used as the speaker name for the microphone channel (channel 1) in stereo mode. |
-| `fromNumber` | `string` | No | `"Customer Phone"` | Label for the caller / remote participant. Used as speaker name for channel 0. Despite the name, this is a free-form string — not necessarily a phone number. |
-| `toNumber` | `string` | No | `"System Phone"` | Label for the system / meeting. Free-form string. |
+| `localSpeakerName` | `string` | No | Auto-generated UUID | The speaker name for the microphone channel (channel 1), usually the user's email address or name. It is also stored as the meeting's `AgentId`, which the meeting list shows as **Owner Name**. Older name: `agentId`. |
+| `remoteSpeakerName` | `string` | No | `"Other Participant"` | The speaker name for the meeting-audio channel (channel 0) when the START has no `activeSpeaker`, until a `SPEAKER_CHANGE` names someone else. It is stored as the meeting's `CustomerPhoneNumber` attribute and stands in for the placeholder speaker name in the transcript. Free-form text. Older name: `fromNumber`. |
 | `samplingRate` | `number` | **Yes** | — | Audio sample rate in Hz. Must match the actual audio being sent. Supported values: `8000` or `16000`. |
-| `activeSpeaker` | `string` | No | Value of `fromNumber` | Name of the currently active speaker on the meeting/remote channel (channel 0). |
+| `activeSpeaker` | `string` | No | Value of `remoteSpeakerName` | Name of the currently active speaker on the meeting/remote channel (channel 0). |
 | `diarizeSystemChannel` | `boolean` | No | The deployment default (see below) | Enable Amazon Transcribe speaker partitioning (diarization) on the system / meeting audio channel (channel 0). See [Speaker Identification](#speaker-identification-diarization). |
 | `diarizeMicChannel` | `boolean` | No | The deployment default (see below) | Same, for the microphone channel (channel 1). |
+
+> **Older field names.** Clients written for LMA before 0.4.0 send the two
+> speaker names as `agentId` (for `localSpeakerName`) and `fromNumber` (for
+> `remoteSpeakerName`), names LMA inherited from a telephony solution. The
+> server still accepts them, in every message type, and a client need not change.
+> If a message carries both spellings of one name, the documented one is used.
+> Those clients may also send `toNumber`, a free-form label the server stores as
+> the meeting's `SystemPhoneNumber` attribute (default `"System"`) and does not
+> otherwise use; it has no newer name, and a new client need not send it.
+> The in-repository clients that are built and deployed with the stack (the
+> Stream Audio page, the embeddable components, the browser extension, the
+> sample CLI client) send the documented names. The Desktop Capture Apps for
+> macOS and Windows still send `agentId`, `fromNumber` and `toNumber`, which
+> keeps them working against deployments of earlier versions.
 
 > **Precedence:** if the client sends **either** diarization field, its values are
 > used verbatim (a field left out counts as `false`). Only when **neither** field
@@ -290,7 +302,7 @@ Sent during a session to update who is currently speaking on the meeting channel
 {
   "callEvent": "SPEAKER_CHANGE",
   "callId": "550e8400-e29b-41d4-a716-446655440000",
-  "agentId": "agent@example.com",
+  "localSpeakerName": "ana@example.com",
   "activeSpeaker": "New Speaker Name"
 }
 ```
@@ -299,10 +311,10 @@ Sent during a session to update who is currently speaking on the meeting channel
 |-------|------|----------|-------------|
 | `callEvent` | `string` | **Yes** | Must be `"SPEAKER_CHANGE"` |
 | `callId` | `string` (UUID) | **Yes** | Must match the `callId` from the START message |
-| `agentId` | `string` | **Yes** | Same agent ID from START. Used to determine if the speaker change applies to the meeting channel. |
-| `activeSpeaker` | `string` | **Yes** | Name of the new active speaker on the meeting channel. If the name matches `agentId`, the change is ignored (the agent's channel is already known). |
+| `localSpeakerName` | `string` | **Yes** | The same `localSpeakerName` as in START (older name: `agentId`). Used to determine if the speaker change applies to the meeting channel. |
+| `activeSpeaker` | `string` | **Yes** | Name of the new active speaker on the meeting channel. If the name matches `localSpeakerName`, the change is ignored (the microphone channel's speaker is already known). |
 
-> **Behavior:** The server only updates the meeting channel (channel 0) speaker. If `activeSpeaker` equals `agentId`, the event is ignored because the agent is already attributed to channel 1.
+> **Behavior:** The server only updates the meeting channel (channel 0) speaker. If `activeSpeaker` equals `localSpeakerName`, the event is ignored because that speaker is already attributed to channel 1.
 
 #### 6.1.3 END Message
 
@@ -376,7 +388,7 @@ The server answers:
 {
   "callEvent": "START",
   "callId": "Weekly sync - 2026-11-02-10:00:00.000",
-  "agentId": "ana@example.com",
+  "localSpeakerName": "ana@example.com",
   "samplingRate": 16000,
   "consent": {
     "mode": "opt_in",
@@ -473,9 +485,9 @@ For reference, here is the complete TypeScript type used by the server:
 type CallMetaData = {
   callId: string;           // UUID v4
   callEvent: string;        // "START" | "SPEAKER_CHANGE" | "END"
-  agentId?: string;         // Speaker name for microphone channel (ch_1)
-  fromNumber?: string;      // Speaker label for meeting channel (ch_0)
-  toNumber?: string;        // Meeting/system label
+  localSpeakerName?: string;  // Speaker name for microphone channel (ch_1); older name agentId
+  remoteSpeakerName?: string; // Speaker name for meeting channel (ch_0); older name fromNumber
+  toNumber?: string;        // Older clients only: stored as SystemPhoneNumber, otherwise unused
   samplingRate: number;     // 8000 or 16000
   activeSpeaker: string;    // Current speaker on meeting channel (ch_0)
   shouldRecordCall?: boolean;
@@ -574,7 +586,7 @@ The server supports three mechanisms for speaker attribution:
 
 When streaming stereo audio:
 - **Channel 0** (left) → Attributed to the meeting/remote participant(s). Speaker name is the `activeSpeaker` value.
-- **Channel 1** (right) → Attributed to the local agent/user. Speaker name is the `agentId` value.
+- **Channel 1** (right) → Attributed to the local user. Speaker name is the `localSpeakerName` value.
 
 Each transcript segment records which of the two it came from in its `Channel`
 field: `REMOTE` for channel 0 and `LOCAL` for channel 1. A client never sends
@@ -595,7 +607,7 @@ For scenarios where multiple participants share the meeting channel (channel 0),
 
 **Rules:**
 - `SPEAKER_CHANGE` only affects channel 0 (the meeting channel)
-- If `activeSpeaker` matches `agentId`, the change is ignored (channel 1 always belongs to the agent)
+- If `activeSpeaker` matches `localSpeakerName`, the change is ignored (channel 1 always belongs to the local speaker)
 - Speaker names are free-form strings
 
 ### Speaker Identification (Diarization)
@@ -811,9 +823,8 @@ ws.on('open', () => {
   const startMessage = JSON.stringify({
     callEvent: 'START',
     callId: callId,
-    agentId: 'my-agent@example.com',
-    fromNumber: 'Remote Participant',
-    toNumber: 'My Meeting',
+    localSpeakerName: 'me@example.com',
+    remoteSpeakerName: 'Remote Participant',
     samplingRate: SAMPLE_RATE,
     activeSpeaker: 'Remote Participant',
   });
@@ -879,9 +890,8 @@ ws.onopen = () => {
   ws.send(JSON.stringify({
     callEvent: 'START',
     callId: callId,
-    agentId: 'user@example.com',
-    fromNumber: 'Meeting Audio',
-    toNumber: 'My Meeting',
+    localSpeakerName: 'user@example.com',
+    remoteSpeakerName: 'Meeting Audio',
     samplingRate: SAMPLE_RATE,
     activeSpeaker: 'Meeting Audio',
   }));
@@ -984,9 +994,8 @@ async def stream_audio(pcm_file_path: str):
         start_msg = json.dumps({
             "callEvent": "START",
             "callId": call_id,
-            "agentId": "agent@example.com",
-            "fromNumber": "Remote Speaker",
-            "toNumber": "My Meeting",
+            "localSpeakerName": "me@example.com",
+            "remoteSpeakerName": "Remote Speaker",
             "samplingRate": SAMPLE_RATE,
             "activeSpeaker": "Remote Speaker",
         })
@@ -1043,6 +1052,8 @@ npx ts-node src/index.ts wss://<endpoint>/api/v1/ws --wavfile sample.wav
 - `SAMPLE_RATE` — Audio sample rate (default: `8000`)
 - `BYTES_PER_SAMPLE` — Bytes per sample (default: `2`)
 - `CHUNK_SIZE_IN_MS` — Chunk duration in ms (default: `200`)
+- `LOCAL_SPEAKER_NAME` — Speaker name for the microphone channel (older name `AGENT_ID`)
+- `REMOTE_SPEAKER_NAME` — Speaker name for the meeting-audio channel (older name `CALL_FROM_NUMBER`)
 
 ### Browser Extension
 

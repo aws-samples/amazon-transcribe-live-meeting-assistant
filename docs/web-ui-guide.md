@@ -168,7 +168,7 @@ recording that began before transcription can be longer than either.
 - **Agenda** — the meeting's agenda, who last changed it, and its coverage. A
   meeting without an agenda shows one line with **Derive agenda** and **Add
   agenda** for those who can change it. See [Meeting Agenda](meeting-agenda.md).
-- **Sentiment and voice tone** charts, when those features are enabled; see
+- **Sentiment** charts, when sentiment analysis is enabled; see
   [Sentiment Analysis](#sentiment-analysis).
 
 ### Transcript tab

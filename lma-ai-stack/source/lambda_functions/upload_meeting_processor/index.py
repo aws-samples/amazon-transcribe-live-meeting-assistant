@@ -149,7 +149,7 @@ def _emit_start_event(job: dict) -> None:
     start_event = {
         "EventType": "START",
         "CallId": call_id,
-        "CustomerPhoneNumber": job.get("FromNumber") or "Customer",
+        "CustomerPhoneNumber": job.get("FromNumber") or "Other Participant",
         "SystemPhoneNumber": job.get("ToNumber") or "System",
         "AgentId": owner,
         "CreatedAt": created_at,

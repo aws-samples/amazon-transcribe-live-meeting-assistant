@@ -126,9 +126,8 @@ async def _stream_wav(ws_url: str, tokens: dict, call_id: str, wav_path: Path,
         await ws.send(json.dumps({
             "callEvent": "START",
             "callId": call_id,
-            "fromNumber": "WS Probe",
-            "toNumber": "LMA System",
-            "agentId": agent_id,
+            "remoteSpeakerName": "WS Probe",
+            "localSpeakerName": agent_id,
             "samplingRate": rate,
         }))
 

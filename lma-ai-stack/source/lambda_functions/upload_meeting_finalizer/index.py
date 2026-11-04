@@ -419,7 +419,7 @@ def _emit_end_event(job: dict, call_id: str) -> None:
         {
             "EventType": "END",
             "CallId": call_id,
-            "CustomerPhoneNumber": job.get("FromNumber") or "Customer",
+            "CustomerPhoneNumber": job.get("FromNumber") or "Other Participant",
             "SystemPhoneNumber": job.get("ToNumber") or "System",
             "AgentId": owner,
             "CreatedAt": now,

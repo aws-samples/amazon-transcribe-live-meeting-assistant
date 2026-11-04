@@ -351,6 +351,47 @@ the first speaker on `CALLER` and the others on `AGENT`.
   rather than channel names and need no change; see the
   [WebSocket streaming API](websocket-streaming-api.md#channel-based-attribution-stereo).
 
+**The remaining telephony names inherited from Live Call Analytics are removed
+or renamed.**
+
+- The `AGENT_VOICETONE` and `CALLER_VOICETONE` values of the GraphQL `Channel`
+  enum are removed, with the fields of those names on `OverallSentiment`,
+  `SentimentByChannel` and their inputs. No LMA producer ever wrote them. Any
+  stored item that carries one is left out of `getTranscriptSegments` and
+  `getTranscriptSegmentsWithSentiment`, as `CATEGORY_MATCH` items are. A client
+  that sends one of these channels to `addTranscriptSegment`, or selects or
+  sends one of these sentiment fields, gets a validation error and must drop it.
+- The meeting page's Voice Tone Analysis panel is removed. It was shown only
+  when the deployment's settings held `EnableVoiceToneAnalysis`, which no stack
+  ever wrote there. The AI stack's `EnableVoiceToneAnalysis` parameter goes with
+  it. The main stack never exposed it, so a deployment made from the main
+  template needs no change; one that deploys the nested AI stack template on its
+  own must stop passing it.
+- The meeting list's Caller Phone Number column is removed. It was not offered
+  in the column preferences, but a preference saved by an earlier version could
+  still name it; such a column id is now ignored, and the rest of the saved
+  preference applies. The meeting's `CustomerPhoneNumber` and
+  `SystemPhoneNumber` attributes and GraphQL fields are unchanged.
+  `CustomerPhoneNumber` holds the name given for the other participants (the
+  Stream Audio page's participant name, or "Virtual Participant"), which the
+  transcript shows in place of the placeholder speaker name, and it is passed to
+  the start-of-call and end-of-call Lambda hooks as before. In the meeting list's
+  Excel export, the column that held it is now `remoteParticipantName` (it was
+  `callerPhoneNumber`), and the `systemPhoneNumber` column is gone.
+- The [WebSocket streaming API](websocket-streaming-api.md#611-start-message)
+  documents the two speaker names as `localSpeakerName` (the microphone) and
+  `remoteSpeakerName` (the meeting audio). The older `agentId` and `fromNumber`
+  are still accepted in every message, and `toNumber` is still accepted and
+  stored, so existing clients need no change; if a message carries both
+  spellings, the documented one is used. The Stream Audio page, the embeddable
+  components, the browser extension and the sample CLI client send the new
+  names. The Desktop Capture Apps still send the older ones, so they keep
+  working against deployments of earlier versions. When a START names no remote
+  speaker, the server now uses "Other Participant" (it used "Customer Phone"),
+  and stores "System" as `SystemPhoneNumber` when it has no `toNumber` (it used
+  "System Phone"). An uploaded recording with no participant name uses "Other
+  Participant" too (it used "Customer").
+
 **One new parameter.** `VPSchedulerStateMachineLogsExpirationInDays` (default 7)
 sets retention for the scheduled Virtual Participant state machine's execution
 history. The default matches the value that was previously hardcoded, so no

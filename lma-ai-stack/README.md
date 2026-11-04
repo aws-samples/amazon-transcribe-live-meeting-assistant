@@ -33,6 +33,3 @@ chmod +x ./build-s3-dist.sh \n
 
 * Get the link of the solution template uploaded to your Amazon S3 bucket (in the output of the previous command).
 * Deploy the solution to your account by launching a new AWS CloudFormation stack using the link of the solution template in Amazon S3.
-
-## Connecting this solution with Amazon Chime SDK Voice Connector
-_Pre-requisites_: You need to [enable KVS Streaming](https://docs.aws.amazon.com/chime/latest/ag/start-kinesis-vc.html) on the Amazon Chime SDK Voice Connector used in your environment. When you enable Amazon Chime SDK Voice Connector streaming, make sure to select AWS EventBridge as the streaming trigger. **This solution already hooks up an EventBridge rule to the Lambda KVS Consumer and Streaming Transcriber.**

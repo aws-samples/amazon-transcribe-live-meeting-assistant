@@ -1,4 +1,4 @@
-import { KinesisClient, PutRecordCommand, PutRecordsCommand } from '@aws-sdk/client-kinesis';
+import { KinesisClient, PutRecordCommand } from '@aws-sdk/client-kinesis';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { details } from './details.js';
 import { VoiceLabelNames, buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
@@ -36,45 +36,6 @@ export interface VideoKeyframeEvent {
   ShareDetected: boolean | null;
   /** Fraction of the picture that differs from the previous key frame. */
   ChangeScore: number;
-}
-
-export interface CallMetaData {
-  callId: string;
-  customerPhoneNumber?: string;
-  systemPhoneNumber?: string;
-  agentId?: string;
-  callStreamingStartTime?: string;
-  callStreamingEndTime?: string;
-  actionItemsDetected?: string[];
-  callSummaryText?: string;
-  recordingUrl?: string;
-  sentiment?: {
-    OverallSentiment: {
-      AGENT?: number;
-      CUSTOMER?: number;
-    };
-    SentimentByPeriod: {
-      QUARTER?: {
-        AGENT?: Array<{ Score: number; BeginOffsetMillis: number; EndOffsetMillis: number }>;
-        CUSTOMER?: Array<{ Score: number; BeginOffsetMillis: number; EndOffsetMillis: number }>;
-      };
-    };
-  };
-}
-
-export interface KinesisRecord {
-  eventType: 'START' | 'CONTINUE' | 'END' | 'ADD_TRANSCRIPT_SEGMENT';
-  callId: string;
-  channel?: string;
-  segmentId?: string;
-  startTime?: number;
-  endTime?: number;
-  transcript?: string;
-  isPartial?: boolean;
-  speaker?: string;
-  callMetaData?: CallMetaData;
-  recordingUrl?: string;
-  timestamp: number;
 }
 
 // Local testing mode
@@ -266,8 +227,6 @@ class KinesisStreamManager {
     const record: any = {
       EventType: 'END',
       CallId: this.callId,
-      CustomerPhoneNumber: 'Customer Phone',
-      SystemPhoneNumber: 'System Phone',
       CreatedAt: new Date().toISOString(),
       AccessToken: process.env.USER_ACCESS_TOKEN || '',
       IdToken: process.env.USER_ID_TOKEN || '',
@@ -542,33 +501,6 @@ class KinesisStreamManager {
       );
     }
     return segments;
-  }
-
-  // Batch send multiple records for efficiency
-  async sendBatchRecords(records: KinesisRecord[]): Promise<void> {
-    if (!this.streamName || records.length === 0) {
-      return;
-    }
-
-    try {
-      const command = new PutRecordsCommand({
-        StreamName: this.streamName,
-        Records: records.map(record => ({
-          Data: Buffer.from(JSON.stringify(record)),
-          PartitionKey: this.callId,
-        })),
-      });
-
-      const result = await this.kinesisClient.send(command);
-      log.info(`Kinesis batch sent: ${records.length} records, ${result.FailedRecordCount || 0} failed`);
-      
-      if (result.FailedRecordCount && result.FailedRecordCount > 0) {
-        log.error('Some Kinesis records failed:', result.Records?.filter(r => r.ErrorCode));
-      }
-    } catch (error) {
-      log.error('Failed to send Kinesis batch:', error);
-      throw error;
-    }
   }
 
   getCallId(): string {

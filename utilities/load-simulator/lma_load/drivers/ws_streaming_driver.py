@@ -160,9 +160,8 @@ async def _stream_one(
     call_id = f"{call_prefix}-{idx:05d} - {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')}"
     metadata = {
         "callId": call_id,
-        "fromNumber": "LoadSim-Customer",
-        "toNumber": "LoadSim-System",
-        "agentId": agent_label,
+        "remoteSpeakerName": "LoadSim-Participant",
+        "localSpeakerName": agent_label,
         "samplingRate": wav.sample_rate,
         "callEvent": "START",
     }

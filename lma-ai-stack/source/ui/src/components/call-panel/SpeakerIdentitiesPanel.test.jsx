@@ -51,7 +51,7 @@ const SEGMENTS = [
   },
 ];
 
-const ITEM = { callId: 'c1', callerPhoneNumber: 'Conference Room 3', speakerIdentities: undefined };
+const ITEM = { callId: 'c1', remoteParticipantName: 'Conference Room 3', speakerIdentities: undefined };
 
 let onSave;
 

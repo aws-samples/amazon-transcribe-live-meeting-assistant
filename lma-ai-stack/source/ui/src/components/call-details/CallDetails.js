@@ -52,7 +52,7 @@ const CallDetails = () => {
     }
     sendInitCallRequests();
     return () => {
-      logger.debug('set live transcript contact to null');
+      logger.debug('set live transcript meeting to null');
       setLiveTranscriptCallId(null);
     };
   }, [callId]);

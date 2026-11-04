@@ -23,12 +23,19 @@ dotenv.config();
  */
 type CallEventMessage = {
     callId: string;
-    fromNumber?: string;
-    toNumber?: string;
-    agentId?: string;
+    /** Speaker name for the microphone channel (ch_1). */
+    localSpeakerName?: string;
+    /** Speaker name for the meeting-audio channel (ch_0). */
+    remoteSpeakerName?: string;
     samplingRate: number;
     callEvent: 'START' | 'END';
 };
+
+// LOCAL_SPEAKER_NAME and REMOTE_SPEAKER_NAME; AGENT_ID and CALL_FROM_NUMBER are
+// their older names, still read.
+const LOCAL_SPEAKER_NAME = process.env['LOCAL_SPEAKER_NAME'] || process.env['AGENT_ID'] || 'websocket';
+const REMOTE_SPEAKER_NAME =
+    process.env['REMOTE_SPEAKER_NAME'] || process.env['CALL_FROM_NUMBER'] || 'Other Participant';
 
 const SAMPLE_RATE = parseInt(process.env['SAMPLE_RATE'] || '8000', 10);
 const BYTES_PER_SAMPLE = parseInt(process.env['BYTES_PER_SAMPLE'] || '2', 10);
@@ -43,7 +50,7 @@ const _CALL_ID = randomUUID();
 const timer = (millisec: number) => new Promise(cb => setTimeout(cb, millisec));
 
 new Command()
-    .description('LCA Websocket client')
+    .description('LMA WebSocket streaming client')
     .showHelpAfterError()
     .argument('[serveruri]', 'URI of websocket server')
     .option('--uri <uri>', 'URI of websocket server')
@@ -75,9 +82,8 @@ new Command()
                 (async () => {
                     const metadata: CallEventMessage = {
                         callId: _CALL_ID,
-                        fromNumber: process.env['CALL_FROM_NUMBER'] || '+9165551234',
-                        toNumber: process.env['CALL_TO_NUMBER'] || '+8001112222',
-                        agentId: process.env['AGENT_ID'] || 'websocket',
+                        localSpeakerName: LOCAL_SPEAKER_NAME,
+                        remoteSpeakerName: REMOTE_SPEAKER_NAME,
                         samplingRate: SAMPLE_RATE,
                         callEvent: 'START'
                     };
@@ -117,9 +123,8 @@ new Command()
 
                     const metadata: CallEventMessage = {
                         callId: _CALL_ID,
-                        fromNumber: process.env['CALL_FROM_NUMBER'] || '+9165551234',
-                        toNumber: process.env['CALL_TO_NUMBER'] || '+8001112222',
-                        agentId: process.env['AGENT_ID'] || 'websocket',
+                        localSpeakerName: LOCAL_SPEAKER_NAME,
+                        remoteSpeakerName: REMOTE_SPEAKER_NAME,
                         samplingRate: SAMPLE_RATE,
                         callEvent: 'END'
                     };

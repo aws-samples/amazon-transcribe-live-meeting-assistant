@@ -2763,7 +2763,6 @@ Resources:
         LMAStackName: !Ref AWS::StackName
         AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
         AudioRecordingExpirationInDays: !Ref AudioRecordingExpirationInDays
-        EnableVoiceToneAnalysis: "false"
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket

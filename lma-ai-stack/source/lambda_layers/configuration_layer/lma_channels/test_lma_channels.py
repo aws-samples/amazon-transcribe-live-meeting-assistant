@@ -39,7 +39,7 @@ def test_only_the_two_speech_channels_are_speech_under_either_name() -> None:
     for channel in (
         "AGENT_ASSISTANT",
         "CHAT_ASSISTANT",
-        "AGENT_VOICETONE",
+        "CATEGORY_MATCH",
         "MEETING_CHAT",
         None,
         "",

@@ -24,8 +24,9 @@ const mapCallsAttributes = (calls) => {
       TranscriptDeletionScheduledFor: transcriptDeletionScheduledFor,
       TranscriptDeletedAt: transcriptDeletedAt,
       CreatedAt: callTimestamp,
-      CustomerPhoneNumber: callerPhoneNumber,
-      SystemPhoneNumber: systemPhoneNumber,
+      // The name given for the other participants (CustomerPhoneNumber is the
+      // stored attribute's historical name); see resolveSpeaker.
+      CustomerPhoneNumber: remoteParticipantName,
       UpdatedAt: updatedAt,
       RecordingUrl: recordingUrl,
       VideoRecordingUrl: videoRecordingUrl,
@@ -68,8 +69,7 @@ const mapCallsAttributes = (calls) => {
       agendaUpdatedAt,
       transcriptDeletionScheduledFor,
       transcriptDeletedAt,
-      callerPhoneNumber,
-      systemPhoneNumber,
+      remoteParticipantName,
       updatedAt,
       recordingUrl,
       videoRecordingUrl,

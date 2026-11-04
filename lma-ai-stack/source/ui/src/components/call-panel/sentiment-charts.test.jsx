@@ -15,8 +15,6 @@ describe('SentimentFluctuationChart', () => {
   it('charts the speech channels however many other channels the meeting holds', () => {
     const transcript = {
       [CALL_ID]: {
-        AGENT_VOICETONE: { segments: [] },
-        CALLER_VOICETONE: { segments: [] },
         AGENT_ASSISTANT: { segments: [] },
         MEETING_ASSISTANT: { segments: [] },
         CHAT_ASSISTANT: { segments: [] },

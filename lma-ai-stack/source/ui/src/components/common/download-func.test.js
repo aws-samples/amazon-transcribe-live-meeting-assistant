@@ -29,8 +29,6 @@ const HYPERLINK = '=HYPERLINK("https://example.com/x","click")';
 
 const TRANSCRIPT = {
   [CALL_ID]: {
-    AGENT_VOICETONE: { segments: [] },
-    CALLER_VOICETONE: { segments: [] },
     CHAT_ASSISTANT: { segments: [] },
     AGENT_ASSISTANT: { segments: [] },
     MEETING_ASSISTANT: { segments: [] },

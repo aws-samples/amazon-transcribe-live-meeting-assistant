@@ -38,8 +38,6 @@ const segment = (id, channel, speaker, transcript, startTime, endTime = startTim
 
 const TRANSCRIPT = {
   [CALL_ID]: {
-    AGENT_VOICETONE: { segments: [] },
-    CALLER_VOICETONE: { segments: [] },
     CHAT_ASSISTANT: { segments: [] },
     AGENT_ASSISTANT: { segments: [] },
     MEETING_ASSISTANT: { segments: [] },

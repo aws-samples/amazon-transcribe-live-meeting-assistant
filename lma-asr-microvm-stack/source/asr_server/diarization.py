@@ -499,7 +499,7 @@ class DiarizationConfig:
     speaker-identification default and a sane starting point for 16 kHz speech.
 
     ``max_speakers`` caps the identity count (``0`` = unbounded); set it when the
-    conversation size is known (e.g. ``2`` for an agent/customer call).
+    conversation size is known (e.g. ``2`` for a one-to-one meeting).
 
     ``min_segment_ms`` is the shortest span worth embedding: speaker embeddings
     computed from a very short slice are unreliable, so a shorter segment reuses

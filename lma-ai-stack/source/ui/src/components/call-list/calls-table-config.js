@@ -83,13 +83,6 @@ export const COLUMN_DEFINITIONS_MAIN = [
     sortingField: 'summary',
   },
   {
-    id: 'callerPhoneNumber',
-    header: 'Caller Phone Number',
-    cell: (item) => item.callerPhoneNumber,
-    sortingField: 'callerPhoneNumber',
-    width: 175,
-  },
-  {
     id: 'recordingStatus',
     header: 'Status',
     cell: (item) => (
@@ -174,6 +167,23 @@ export const DEFAULT_PREFERENCES = {
   pageSize: PAGE_SIZE_OPTIONS[0].value,
   visibleContent: VISIBLE_CONTENT,
   wraplines: false,
+};
+
+const COLUMN_IDS = new Set(COLUMN_DEFINITIONS_MAIN.map((column) => column.id));
+
+/**
+ * The saved meeting-list preferences, holding only columns the list still has.
+ * Preferences are kept in the browser's local storage, so they can name a column
+ * an earlier version had and this one does not; such an id is dropped rather
+ * than handed to the table and the preferences dialog.
+ */
+export const withKnownColumns = (preferences) => {
+  const saved = Array.isArray(preferences?.visibleContent) ? preferences.visibleContent : VISIBLE_CONTENT;
+  return {
+    ...DEFAULT_PREFERENCES,
+    ...preferences,
+    visibleContent: saved.filter((id) => COLUMN_IDS.has(id)),
+  };
 };
 
 /* eslint-disable react/prop-types, react/jsx-props-no-spreading */

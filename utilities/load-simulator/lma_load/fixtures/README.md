@@ -5,7 +5,8 @@ Shipped audio and transcript fixtures used by the drivers.
 The drivers (`upload`, `websocket`) pick a default WAV in this order:
 
 1. **`stereo-demo-call.wav`** — real two-speaker call recording. Stereo
-   PCM-16, ~5 minutes. ch_0 = caller, ch_1 = agent. The LMA WSS server
+   PCM-16, ~5 minutes. ch_0 is the remote speaker (the meeting audio) and
+   ch_1 the local one (the microphone). The LMA WSS server
    enables Transcribe `ChannelIdentification` on stereo streams, so this
    fixture produces meaningful transcripts and downstream summaries.
    Use this for end-to-end functional tests / demos.
