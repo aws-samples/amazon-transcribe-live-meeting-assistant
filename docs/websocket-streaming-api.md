@@ -496,6 +496,8 @@ type CallMetaData = {
 
 After sending the START message, stream audio data as **binary WebSocket frames**. Each frame contains raw PCM audio samples with no headers or metadata.
 
+The server sends no reply to START, and a client does not need to wait before sending audio. Audio that arrives while the server is still handling the START (reading settings, checking consent, opening or resuming the meeting's session) is held and then delivered in the order it arrived, ahead of any audio sent later. The hold keeps up to 8 seconds of audio per connection at the START's `samplingRate` (two channels of 16-bit PCM, with the rate taken as between 8 and 48 kHz); beyond that the oldest audio is dropped and the server logs a warning. If the START is refused, or the connection closes before it has been handled, the held audio is discarded.
+
 **Requirements:**
 - Each binary frame contains raw PCM audio bytes — **no WAV headers, no container format**
 - Send audio continuously at roughly real-time pace
@@ -686,7 +688,7 @@ speaking on both channels therefore gets a different number on each.
 
 | Scenario | Behavior |
 |----------|----------|
-| Binary data received before START | Server logs an error; audio is dropped. Always send START first. |
+| Binary data received before START | Server logs an error; audio is dropped. Always send START first. Audio sent after a START the server is still handling is held, not dropped (see [Binary Messages](#62-binary-messages-audio-data)). |
 | END received without START | Server logs an error and ignores the message. |
 | Duplicate END messages | Server logs a warning; second END is ignored. |
 | WebSocket error (network) | Server logs the error and forces a close, triggering automatic end-of-call cleanup. |
@@ -741,8 +743,9 @@ A client that reconnects should therefore:
   the connection opens, so a reconnect made with tokens that have expired since
   the first connection is refused with `401`.
 - Hold a bounded amount of the audio captured while disconnected (LMA's clients
-  hold about 3 seconds), and send it after the START. The recording and the
-  transcript carry on from where they were, so whatever was not sent is missing
+  hold about 3 seconds), and send it after the START; it can follow the START
+  at once, since the server holds audio that arrives while it handles the
+  START. The recording and the transcript carry on from where they were, so whatever was not sent is missing
   from both and they stay in step with each other.
 - Stop reconnecting for a meeting the server ended for its consent
   (`CONSENT_STATE` with `captureAllowed: false`), and send no further START for
