@@ -9,11 +9,14 @@ import { render } from '@testing-library/react';
 import ReactMarkdown from 'react-markdown';
 
 import markdownRehypePlugins from './markdown-plugins';
+import { isSpeechChannel } from './channels';
 import {
   matchRanges,
   passesSpeakerFilter,
+  passesTranscriptFilter,
   rehypeMarkMatches,
   speakerFilterOptions,
+  splitByRanges,
   stepMatch,
   textMatches,
 } from './transcript-search';
@@ -89,6 +92,74 @@ describe('the speaker filter', () => {
 
   it("shows only the chosen speakers' lines", () => {
     expect(segments.filter((s) => passesSpeakerFilter(s, ['Bob Chen'], isSpeech))).toEqual([segments[2]]);
+  });
+});
+
+describe('the chat messages under the filter', () => {
+  const speech = (s) => isSpeechChannel(s.channel);
+  const segments = [
+    { channel: 'REMOTE', speaker: 'Sarah Lee', startTime: 1 },
+    { channel: 'MEETING_CHAT', speaker: 'Alice', startTime: 2 },
+    { channel: 'LOCAL', speaker: 'Bob Chen', startTime: 3 },
+    { channel: 'MEETING_CHAT', speaker: 'Sarah Lee', startTime: 4 },
+    { channel: 'MEETING_ASSISTANT', speaker: 'MEETING_ASSISTANT', startTime: 5 },
+  ];
+  const shown = (filter) => segments.filter((s) => passesTranscriptFilter(s, filter, speech));
+
+  it('offers no chat sender as a speaker, even one who also spoke', () => {
+    expect(speakerFilterOptions(segments, speech)).toEqual(['Sarah Lee', 'Bob Chen']);
+  });
+
+  it('shows everything by default', () => {
+    expect(shown({})).toEqual(segments);
+    expect(shown(undefined)).toEqual(segments);
+  });
+
+  it('hides the chat messages and nothing else when chat is off', () => {
+    expect(shown({ showChat: false })).toEqual([segments[0], segments[2], segments[4]]);
+  });
+
+  it("keeps the chat beside the chosen speakers' lines, and only it when chat is on", () => {
+    expect(shown({ speakers: ['Sarah Lee'], showChat: true })).toEqual([segments[0], segments[1], segments[3]]);
+    expect(shown({ speakers: ['Sarah Lee'], showChat: false })).toEqual([segments[0]]);
+  });
+
+  it('finds the search in a chat message like in a spoken line', () => {
+    expect(textMatches('Deck: https://example.com/Résumé', 'resume deck')).toBe(true);
+  });
+});
+
+describe('splitByRanges', () => {
+  it('cuts plain text at the matches', () => {
+    const text = 'the Budget and the budget';
+    expect(splitByRanges(text, matchRanges(text, 'budget'))).toEqual([
+      { text: 'the ', match: false },
+      { text: 'Budget', match: true },
+      { text: ' and the ', match: false },
+      { text: 'budget', match: true },
+    ]);
+  });
+
+  it('cuts a piece of a longer text by where the piece starts in it', () => {
+    const whole = 'see https://example.com/budget now';
+    const ranges = matchRanges(whole, 'budget see');
+    expect(splitByRanges('https://example.com/budget', ranges, 4)).toEqual([
+      { text: 'https://example.com/', match: false },
+      { text: 'budget', match: true },
+    ]);
+    expect(splitByRanges(' now', ranges, 30)).toEqual([{ text: ' now', match: false }]);
+  });
+
+  it('marks the part of a match that falls in the piece', () => {
+    expect(splitByRanges('abcdef', [[4, 8]], 6)).toEqual([
+      { text: 'ab', match: true },
+      { text: 'cdef', match: false },
+    ]);
+  });
+
+  it('is the text unmarked with no matches, and nothing for no text', () => {
+    expect(splitByRanges('+1', [])).toEqual([{ text: '+1', match: false }]);
+    expect(splitByRanges('', [[0, 2]])).toEqual([]);
   });
 });
 

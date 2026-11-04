@@ -13,7 +13,13 @@
  * shared screen's text on the Screen share tab. Matching segments are marked
  * and stepped through rather than the others being hidden, so each match is
  * read with what was said around it.
+ *
+ * Messages typed in the meeting chat are searched like what was said. They are
+ * not a speaker's lines, so they are shown or hidden by a filter of their own
+ * (passesTranscriptFilter) rather than by the speakers chosen.
  */
+
+import { isChatChannel } from './channels';
 
 const DIACRITICS = /[\u0300-\u036f]/g;
 
@@ -70,6 +76,27 @@ export const matchRanges = (text, query) => {
     }
     return merged;
   }, []);
+};
+
+/**
+ * Plain text cut where it meets `ranges` (as matchRanges gives them, into a
+ * longer text this one starts at `offset` of), as [{ text, match }] in order.
+ * Used to mark the search's words in text shown as typed, without markdown.
+ */
+export const splitByRanges = (text, ranges, offset = 0) => {
+  const source = String(text ?? '');
+  const runs = [];
+  let cursor = 0;
+  (ranges || []).forEach(([rangeStart, rangeEnd]) => {
+    const start = Math.max(rangeStart - offset, cursor);
+    const end = Math.min(rangeEnd - offset, source.length);
+    if (end <= start) return;
+    if (start > cursor) runs.push({ text: source.slice(cursor, start), match: false });
+    runs.push({ text: source.slice(start, end), match: true });
+    cursor = end;
+  });
+  if (cursor < source.length) runs.push({ text: source.slice(cursor), match: false });
+  return runs;
 };
 
 /**
@@ -146,6 +173,17 @@ export const passesSpeakerFilter = (segment, selectedSpeakers, isSpeech) => {
   if (!selectedSpeakers?.length) return true;
   if (!isSpeech(segment)) return false;
   return selectedSpeakers.includes(`${segment.speaker ?? ''}`.trim());
+};
+
+/**
+ * Whether a segment is shown under the transcript's filter: a chat message
+ * when `showChat` is on, whatever speakers are chosen; anything else as
+ * passesSpeakerFilter decides.
+ */
+export const passesTranscriptFilter = (segment, filter, isSpeech) => {
+  const { speakers = [], showChat = true } = filter || {};
+  if (isChatChannel(segment?.channel)) return Boolean(showChat);
+  return passesSpeakerFilter(segment, speakers, isSpeech);
 };
 
 /** The match to move to from `current` (an index, or -1 for none yet) by `step` (+1 or -1), wrapping. */

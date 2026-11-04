@@ -1,0 +1,53 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
+
+/* A message typed in the meeting chat, among the transcript's lines (see
+   ChatSegment.jsx): a faint tint and a rule beside it set it apart from what
+   was said. Translucent, so it reads on the light and the dark theme alike. */
+.chat-segment {
+  background-color: rgba(9, 114, 211, 0.06);
+  border-left: 3px solid rgba(9, 114, 211, 0.35);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+.awsui-dark-mode .chat-segment {
+  background-color: rgba(83, 159, 229, 0.12);
+  border-left-color: rgba(83, 159, 229, 0.55);
+}
+
+.chat-segment-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.chat-segment-icon {
+  display: inline-flex;
+}
+
+.chat-segment-kind,
+.chat-segment-time {
+  color: #5f6b7a;
+}
+
+.awsui-dark-mode .chat-segment-kind,
+.awsui-dark-mode .chat-segment-time {
+  color: #a4abb3;
+}
+
+/* As typed: line breaks kept, long words and addresses wrapped. */
+.chat-segment-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-segment-link code {
+  font-size: 0.95em;
+  word-break: break-all;
+}

@@ -278,37 +278,202 @@ describe('the Overview tab', () => {
 });
 
 describe('a message typed in the meeting chat', () => {
-  const chat = (id, transcript, startTime) => ({
+  const chat = (id, transcript, startTime, speaker = 'Bo Chen') => ({
     segmentId: id,
     createdAt: `2026-11-03T14:05:${String(startTime).padStart(2, '0')}.000Z`,
     channel: 'MEETING_CHAT',
-    speaker: 'Bo Chen',
+    speaker,
     transcript,
     startTime,
     endTime: startTime,
     isPartial: false,
   });
+  const spoken = (id, channel, speaker, transcript, startTime, endTime) => ({
+    segmentId: id,
+    createdAt: `2026-11-03T14:05:${String(startTime).padStart(2, '0')}.000Z`,
+    channel,
+    speaker,
+    transcript,
+    startTime,
+    endTime,
+    isPartial: false,
+  });
   const WITH_CHAT = {
     [ITEM.callId]: {
-      ...TRANSCRIPT[ITEM.callId],
+      REMOTE: {
+        segments: [
+          spoken('s1', 'REMOTE', 'Sarah Lee', 'Welcome to the budget review.', 0, 8),
+          spoken('s3', 'REMOTE', 'Sarah Lee', 'Any questions?', 30, 34),
+        ],
+      },
+      LOCAL: { segments: [spoken('s2', 'LOCAL', 'Bob Chen', 'Thanks, Sarah.', 20, 24)] },
       MEETING_CHAT: {
         segments: [
           chat('chat-zoom-1', '**not bold** [the doc](https://example.com/doc)', 2),
           chat('chat-zoom-2', '+1', 3),
+          chat('chat-zoom-3', 'Budget sheet: https://example.com/budget.', 26, 'Sarah Lee'),
         ],
       },
     },
   };
+  const rows = () => [...document.querySelectorAll('[data-row-id]')];
+  const rowOf = (text) => rows().find((row) => row.textContent.includes(text));
+  const labels = () => [...document.querySelectorAll('.chat-segment-label')].map((l) => l.textContent);
 
-  it('is shown under its sender as chat, as typed, one row per message, and is not offered as a speaker', () => {
+  it('is shown under its sender as chat, as typed, one row per message', () => {
     renderPage({ transcript: WITH_CHAT });
-    expect(screen.getAllByText('Bo Chen (chat)')).toHaveLength(2);
-    // Not rendered as markdown: no emphasis and no link.
-    expect(screen.getByText('**not bold** [the doc](https://example.com/doc)')).toBeTruthy();
-    expect(document.querySelector('a[href="https://example.com/doc"]')).toBeNull();
+    expect(labels()).toEqual(['Bo Chen · chat', 'Bo Chen · chat', 'Sarah Lee · chat']);
+    // Not rendered as markdown: no emphasis and no link; the address is code to copy.
+    const first = rowOf('**not bold**');
+    expect(first.querySelector('.chat-segment-text').textContent).toBe(
+      '**not bold** [the doc](https://example.com/doc)',
+    );
+    expect(document.querySelector('a[href]')).toBeNull();
+    expect([...first.querySelectorAll('code')].map((c) => c.textContent)).toEqual(['https://example.com/doc']);
+    expect(within(first).getByRole('button', { name: 'Copy https://example.com/doc' })).toBeTruthy();
     expect(screen.getByText('+1')).toBeTruthy();
-    const filter = screen.queryByRole('group', { name: 'Show speakers' });
-    if (filter) expect(within(filter).queryByRole('button', { name: 'Bo Chen' })).toBeNull();
+  });
+
+  it('is shown at its time among the spoken lines', () => {
+    renderPage({ transcript: WITH_CHAT });
+    expect(rows().map((row) => row.querySelector('.chat-segment-text, p')?.textContent)).toEqual([
+      '**not bold** [the doc](https://example.com/doc)',
+      '+1',
+      'Welcome to the budget review.',
+      'Thanks, Sarah.',
+      'Budget sheet: https://example.com/budget.',
+      'Any questions?',
+    ]);
+    expect(within(rowOf('+1')).getByText('00:03.0')).toBeTruthy();
+  });
+
+  it('offers no chat sender as a speaker, and shows or hides the chat with its own chip', () => {
+    renderPage({ transcript: WITH_CHAT });
+    const filter = screen.getByRole('group', { name: 'Show speakers' });
+    expect(within(filter).queryByRole('button', { name: 'Bo Chen' })).toBeNull();
+    expect(
+      within(filter)
+        .getAllByRole('button')
+        .map((b) => b.textContent),
+    ).toEqual(['All', 'Sarah Lee', 'Bob Chen', 'Chat']);
+    const chip = within(filter).getByRole('button', { name: 'Chat messages' });
+    expect(chip.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(chip);
+    expect(document.querySelectorAll('.chat-segment')).toHaveLength(0);
+    expect(screen.getByText('Thanks, Sarah.')).toBeTruthy();
+    fireEvent.click(chip);
+    expect(document.querySelectorAll('.chat-segment')).toHaveLength(3);
+  });
+
+  it("keeps the chat beside a chosen speaker's lines, not the speaker's chat alone", () => {
+    renderPage({ transcript: WITH_CHAT });
+    const filter = screen.getByRole('group', { name: 'Show speakers' });
+    fireEvent.click(within(filter).getByRole('button', { name: 'Bob Chen' }));
+    expect(screen.queryByText('Welcome to the budget review.')).toBeNull();
+    expect(screen.getByText('Thanks, Sarah.')).toBeTruthy();
+    expect(labels()).toHaveLength(3);
+    fireEvent.click(within(filter).getByRole('button', { name: 'Chat messages' }));
+    expect(labels()).toHaveLength(0);
+    expect(rows()).toHaveLength(1);
+  });
+
+  it('offers the Chat chip with a single speaker, and says why nothing is shown with only chat hidden', () => {
+    renderPage({
+      transcript: {
+        [ITEM.callId]: {
+          MEETING_CHAT: { segments: [chat('chat-1', 'hello', 2)] },
+        },
+      },
+    });
+    const filter = screen.getByRole('group', { name: 'Show speakers' });
+    expect(within(filter).queryByRole('button', { name: 'All speakers' })).toBeNull();
+    fireEvent.click(within(filter).getByRole('button', { name: 'Chat messages' }));
+    expect(screen.getByText('No lines to show with the chat hidden.')).toBeTruthy();
+  });
+
+  it('is found by the search, with its words marked in the plain text', () => {
+    renderPage({ transcript: WITH_CHAT });
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search the transcript' }), {
+      target: { value: 'budget' },
+    });
+    expect(screen.getByTestId('transcript-search-count').textContent).toBe('1 of 2');
+    const row = rowOf('Budget sheet');
+    expect(row.className).toContain('transcript-row-match');
+    expect([...row.querySelectorAll('mark.transcript-search-match')].map((m) => m.textContent)).toEqual([
+      'Budget',
+      'budget',
+    ]);
+    expect(row.querySelector('code mark').textContent).toBe('budget');
+    expect(row.querySelector('.chat-segment-text').textContent).toBe('Budget sheet: https://example.com/budget.');
+  });
+
+  it('keeps the sender the chat gave, whatever names the voices are given', () => {
+    renderPage({
+      transcript: WITH_CHAT,
+      item: { ...ITEM, speakerIdentities: JSON.stringify({ identities: { 'MEETING_CHAT#Bo Chen': { name: 'X' } } }) },
+    });
+    expect(labels()[0]).toBe('Bo Chen · chat');
+  });
+
+  it('appears in order as it arrives while the meeting is live', () => {
+    const live = { ...ITEM, recordingStatusLabel: IN_PROGRESS_STATUS, recordingStatusIcon: 'in-progress' };
+    const at = (chatSegments, speech) => ({
+      [ITEM.callId]: {
+        REMOTE: { segments: speech },
+        MEETING_CHAT: { segments: chatSegments },
+      },
+    });
+    const first = spoken('s1', 'REMOTE', 'Sarah Lee', 'Welcome.', 0, 8);
+    const second = spoken('s2', 'REMOTE', 'Sarah Lee', 'Next item.', 12, 15);
+    const view = render(
+      <MemoryRouter>
+        <CallPanel
+          item={live}
+          callTranscriptPerCallId={at([], [first])}
+          setToolsOpen={vi.fn()}
+          getCallDetailsFromCallIds={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    const rerender = (transcript) =>
+      view.rerender(
+        <MemoryRouter>
+          <CallPanel
+            item={live}
+            callTranscriptPerCallId={transcript}
+            setToolsOpen={vi.fn()}
+            getCallDetailsFromCallIds={vi.fn()}
+          />
+        </MemoryRouter>,
+      );
+    rerender(at([chat('c1', 'first message', 9)], [first]));
+    rerender(at([chat('c1', 'first message', 9)], [first, second]));
+    rerender(at([chat('c1', 'first message', 9), chat('c2', 'second message', 16)], [first, second]));
+    expect(rows().map((row) => row.querySelector('.chat-segment-text, p')?.textContent)).toEqual([
+      'Welcome.',
+      'first message',
+      'Next item.',
+      'second message',
+    ]);
+  });
+
+  it('keeps every channel the meeting has, however many', () => {
+    const many = {
+      [ITEM.callId]: {
+        AGENT_VOICETONE: { segments: [] },
+        CALLER_VOICETONE: { segments: [] },
+        CHAT_ASSISTANT: { segments: [] },
+        AGENT_ASSISTANT: { segments: [] },
+        MEETING_ASSISTANT: { segments: [] },
+        REMOTE: { segments: [spoken('s1', 'REMOTE', 'Sarah Lee', 'Welcome.', 0, 8)] },
+        LOCAL: { segments: [spoken('s2', 'LOCAL', 'Bob Chen', 'Thanks.', 10, 12)] },
+        MEETING_CHAT: { segments: [chat('c1', 'hello', 9)] },
+      },
+    };
+    renderPage({ transcript: many });
+    expect(screen.getByText('Welcome.')).toBeTruthy();
+    expect(screen.getByText('Thanks.')).toBeTruthy();
+    expect(screen.getByText('hello')).toBeTruthy();
   });
 });
 
@@ -443,6 +608,29 @@ describe('the player kept in step with the transcript', () => {
       fireEvent(media(), new Event('timeupdate'));
     });
     expect(rowOf('Thanks, Sarah.').getAttribute('aria-current')).toBe('true');
+  });
+
+  it('passes over a chat message while following the recording, and plays from its time when clicked', async () => {
+    const withChat = {
+      [ITEM.callId]: {
+        ...LINES[ITEM.callId],
+        MEETING_CHAT: {
+          segments: [{ ...line('c1', 'MEETING_CHAT', 'Alice', 'Slides: https://example.com/s', 21, 21) }],
+        },
+      },
+    };
+    await openRecording({ transcript: withChat });
+    // The chat message sits inside "Thanks, Sarah." (20-24 s): that line is the one heard.
+    fireEvent.click(screen.getByRole('button', { name: 'Play from 00:21.0' }));
+    expect(media().currentTime).toBe(21);
+    expect(media().paused).toBe(false);
+    expect(rowOf('Slides:').getAttribute('aria-current')).toBeNull();
+    expect(rowOf('Thanks, Sarah.').getAttribute('aria-current')).toBe('true');
+    act(() => {
+      media().currentTime = 26;
+      fireEvent(media(), new Event('timeupdate'));
+    });
+    expect(rowOf('Slides:').getAttribute('aria-current')).toBeNull();
   });
 
   it('marks the chapters on the seek bar', async () => {
