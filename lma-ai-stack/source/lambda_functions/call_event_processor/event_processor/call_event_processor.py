@@ -1536,7 +1536,7 @@ async def execute_process_event_api_mutation(
                 sentiment_enabled=IS_SENTIMENT_ANALYSIS_ENABLED,
                 agent_assist_enabled=IS_LAMBDA_AGENT_ASSIST_ENABLED,
                 wake_pattern=wake_phrase_pattern,
-                transcript=normalized_message["Transcript"],
+                transcript=normalized_message.get("Transcript", ""),
             )
             if analyses.sentiment:
                 LOGGER.debug("Add Sentiment Analysis")
