@@ -78,6 +78,7 @@ Stack resolution order: `--stack-name` / `STACK=` → `$LMA_STACK_NAME` → `LMA
 | `test_transcriber_ecs_service_running` | transcriber ECS service has running tasks, not crash-looping | **Fastify 5 runtime stability** |
 | `test_appsync_reachable` | IAM-signed GraphQL query succeeds | AppSync data plane |
 | `test_kds_pipeline_creates_meeting` | synthetic START on Kinesis → CallEventProcessor → meeting row in DynamoDB | **gql/AppSync introspection (the gql 4 regression)** |
+| `test_meeting_chat_segment_is_stored_read_and_deleted` | a synthetic MEETING_CHAT segment on Kinesis is stored with an expiry, returned by `getTranscriptSegments`, left out of FetchTranscript, and removed by the transcript deletion function | meeting chat in the transcript (enum, processor gates, readers, deletion) |
 | `test_ws_stream_connects` *(opt-in)* | stream audio over the live `wss://.../api/v1/ws` and stay OPEN | **@fastify/websocket 11 upgrade ordering (the WS 500 regression)** |
 | `test_vp_registry_lifecycle` | VP create → get → list → end via AppSync (no meeting) | VP CRUD surface |
 | `test_vp_live_join` *(opt-in)* | VP actually joins a real meeting and leaves `INITIALIZING` | **@zoom/meetingsdk 4→6** |

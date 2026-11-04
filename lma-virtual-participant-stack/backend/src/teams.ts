@@ -10,6 +10,8 @@ import { chatHelpMessages } from './chat-help.js';
 import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { toolbarPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
+import { noteSentChat } from './meeting-chat.js';
+import { meetingChat } from './meeting-chat-runtime.js';
 import { simliAvatar } from './simli-avatar.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { findElementWithFallback, classifyJoinState, isResolverEnabled } from './ai-dom-resolver.js';
@@ -429,6 +431,15 @@ export function decideAttendeeAction(
     return { action: 'continue' };
 }
 
+/** What the chat reader found for one message besides its text; see __lmaScrapeMessages. */
+interface TeamsChatRow {
+    id?: string | null;
+    author?: string | null;
+    time?: string | null;
+    links?: string[];
+    history?: boolean;
+}
+
 export default class Teams {
     private endRequested: Promise<ExitInfo>;
     private requestEnd: (info: ExitInfo) => void = () => {};
@@ -653,6 +664,8 @@ export default class Teams {
     // Send button (data-tid="newMessageCommands-send", confirmed via DOM dump);
     // the anon light-meetings composer does not reliably submit on Enter.
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
+        // So the meeting chat capture knows these when it reads them back.
+        noteSentChat(messages);
         try {
             if (!(await this.chatInputVisible(page))) {
                 await this.openChatPanel(page);
@@ -793,7 +806,7 @@ export default class Teams {
     // end command ("LMA leave/end"), pause/resume, and transcript capture.
     // Teams chat text doesn't expose the sender on the same node, so we use the
     // lenient matcher and a generic farewell.
-    private async handleIncomingMessage(page: Page, message: string): Promise<void> {
+    private async handleIncomingMessage(page: Page, message: string, row: TeamsChatRow = {}): Promise<void> {
         if (!message) return;
         // A consent reply, or "LMA start" while consent is withheld. No sender,
         // for the reason above.
@@ -844,8 +857,22 @@ export default class Teams {
             details.start = true;
             log.info(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
-        } else if (details.start) {
-            details.messages.push(message);
+        } else {
+            // Meeting chat, for the transcript (meeting-chat.ts decides). The
+            // author read from the message's row is used here only: the
+            // commands and the consent replies above stay unattributed, as
+            // the row's author is not confirmed against a live meeting.
+            meetingChat.offer({
+                platform: 'teams',
+                text: message,
+                sender: row.author ?? null,
+                id: row.id ?? null,
+                platformTime: row.time ?? null,
+                // A Teams meeting chat is one thread everyone in the meeting reads.
+                audience: 'everyone',
+                links: row.links,
+                history: row.history,
+            });
         }
     }
 
@@ -1601,9 +1628,16 @@ export default class Teams {
             // and a body in a [role="heading"] / [id^="content-"] node. Scrape
             // every message-ish row and return any not-yet-seen text. Also
             // accepts an optional extra selector discovered by the AI fallback.
-            (window as any).__lmaScrapeMessages = (extraSelector?: string): string[] => {
+            (window as any).__lmaScrapeMessages = (
+                extraSelector?: string,
+            ): Array<{ text: string; id: string | null; author: string | null; time: string | null; links: string[] }> => {
                 const seen: Set<string> = (window as any).__lmaSeenMessages;
-                const out: string[] = [];
+                const out: Array<{ text: string; id: string | null; author: string | null; time: string | null; links: string[] }> = [];
+                // The element a message renders in, and the id Teams gives it.
+                // ASSUMPTION (verify live): the row carries data-mid, or the
+                // body an id of the form content-<message id>; the debug line
+                // meeting-chat.ts writes says whether an id was found.
+                const ROW = '[data-mid], [data-tid="chat-pane-message"], [data-tid="chat-pane-item"], [role="listitem"]';
                 const MESSAGE_SELECTORS = [
                     'div[dir="auto"][role="heading"][aria-level="4"]', // v2 client
                     '[data-tid="messageBodyContent"]',
@@ -1623,14 +1657,37 @@ export default class Teams {
                         /* bad selector from AI — ignore */
                     }
                 }
-                for (const node of nodes) {
+                // Within one message row the selectors overlap (a heading inside
+                // a message body), so only the outermost match in the row is
+                // read. Matches outside any row are each read, as before.
+                const all = Array.from(nodes);
+                const rowOf = new Map(all.map((n) => [n, n.closest(ROW)]));
+                for (const node of all) {
+                    const ownRow = rowOf.get(node);
+                    if (ownRow && all.some((other) => other !== node && rowOf.get(other) === ownRow && other.contains(node))) {
+                        continue;
+                    }
                     const t = (node.textContent || '').replace(/\s+/g, ' ').trim();
                     // Skip empties and the system "invited to the meeting" notices.
                     if (!t || t.length > 2000) continue;
                     if (/was invited to the meeting/i.test(t)) continue;
-                    if (seen.has(t)) continue;
-                    seen.add(t);
-                    out.push(t);
+                    const row = ownRow;
+                    const ownId = /^content-/.test(node.id) ? node.id.replace(/^content-(message-body-)?/, '') : '';
+                    const id = row?.getAttribute('data-mid') || ownId || null;
+                    // Keyed on the message, not its text, so the same words
+                    // sent twice are read twice and an edited message is not
+                    // read again. Text only when no id is found, as before.
+                    const key = id ? `id:${id}` : `text:${t}`;
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    const author =
+                        (row?.querySelector('[data-tid="message-author-name"]')?.textContent || '').replace(/\s+/g, ' ').trim() ||
+                        null;
+                    const time = row?.querySelector('time')?.getAttribute('datetime') || null;
+                    const links = Array.from(node.querySelectorAll('a[href]'))
+                        .map((a) => (a as HTMLAnchorElement).href)
+                        .filter(Boolean);
+                    out.push({ text: t, id, author, time, links });
                 }
                 return out;
             };
@@ -1649,17 +1706,20 @@ export default class Teams {
         let aiMessageSelector: string | undefined;
         let aiTried = false;
         let emptyStreak = 0;
+        // The first read returns what the panel already held when the VP got
+        // in; it is still read for commands, but not added to the transcript.
+        let firstRead = true;
         const pollMessages = async (): Promise<void> => {
             if (page.isClosed()) return;
             try {
-                const fresh: string[] = await page.evaluate(
-                    (extra) => (window as any).__lmaScrapeMessages(extra),
-                    aiMessageSelector,
-                );
+                const fresh: Array<{ text: string; id: string | null; author: string | null; time: string | null; links: string[] }> =
+                    await page.evaluate((extra) => (window as any).__lmaScrapeMessages(extra), aiMessageSelector);
+                const history = firstRead;
+                firstRead = false;
                 if (fresh.length) {
                     emptyStreak = 0;
-                    for (const text of fresh) {
-                        await this.handleIncomingMessage(page, text);
+                    for (const { text, ...row } of fresh) {
+                        await this.handleIncomingMessage(page, text, { ...row, history });
                     }
                 } else if (!aiTried) {
                     // Nothing extracted this tick. If the chat list visibly has

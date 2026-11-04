@@ -18,3 +18,10 @@ export const REMOTE_CHANNEL = 'REMOTE';
 export const LOCAL_CHANNEL = 'LOCAL';
 
 export type SpeechChannel = typeof REMOTE_CHANNEL | typeof LOCAL_CHANNEL;
+
+/**
+ * The meeting chat: one segment per message a participant sent to everyone,
+ * written by meeting-chat.ts. Not a speech channel, so it is not part of
+ * SpeechChannel; the AI stack's lma_channels.MEETING_CHAT names the same value.
+ */
+export const MEETING_CHAT_CHANNEL = 'MEETING_CHAT';

@@ -64,6 +64,8 @@ CHANNELS = {
     "CALLER_VOICETONE",
     "AGENT_ASSISTANT",
     "CHAT_ASSISTANT",
+    # Messages typed in the meeting chat (lma_channels.MEETING_CHAT).
+    "MEETING_CHAT",
 }
 # The meeting's sentiment types, keyed by channel.
 SENTIMENT_BY_CHANNEL_TYPES = (
@@ -229,7 +231,8 @@ def test_each_segment_query_keeps_both_names_of_the_speech_channels(field_name: 
     """The only channel the filter excludes is the retired one."""
     text = _request_template(field_name).read_text()
     filter_block = text[text.index('"filter"') :]
-    for name in SPEECH_CHANNELS | DEPRECATED_SPEECH_CHANNELS:
+    # The meeting chat is returned with the speech: the meeting page shows both.
+    for name in SPEECH_CHANNELS | DEPRECATED_SPEECH_CHANNELS | {"MEETING_CHAT"}:
         assert f'"{name}"' not in filter_block, name
     assert re.findall(r":\w+", filter_block.split('"expression"')[1].split("\n")[0]) == [
         ":isPartial",

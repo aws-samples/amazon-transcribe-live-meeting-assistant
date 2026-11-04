@@ -47,7 +47,15 @@ from pure import (  # noqa: E402
     get_sentiment_per_quarter,
     matches_wake_phrase,
     merge_dicts,
+    segment_analyses,
 )
+
+# The configuration layer, for the channel names the processor passes in.
+LAYER = HERE.parents[1] / "lambda_layers" / "configuration_layer"
+if str(LAYER) not in sys.path:
+    sys.path.insert(0, str(LAYER))
+
+from lma_channels import MEETING_CHAT, STORED_SPEECH_CHANNELS, is_speech_channel  # noqa: E402
 
 
 def entry(begin: float, end: float, score: float, sentiment: str = "POSITIVE") -> dict:
@@ -330,3 +338,64 @@ def test_the_agenda_pass_is_not_due_twice_off_or_without_a_meeting():
     assert agenda_derivation_due("c1", 900, 0, set()) is False
     assert agenda_derivation_due("", 900, 300, set()) is False
     assert agenda_derivation_due("c1", None, 300, set()) is False
+
+
+# ── which segments get sentiment and wake the Meeting Assistant ─────────────
+
+WAKE = re.compile(r"(OK|Okay)[.,! ]*[Aa]ssistant")
+
+
+def analyses_for(
+    channel, transcript="OK Assistant, what did we decide?", is_partial=False, **flags
+):
+    asked = []
+
+    def pattern():
+        asked.append(True)
+        return WAKE
+
+    result = segment_analyses(
+        is_speech=is_speech_channel(channel),
+        is_partial=is_partial,
+        sentiment_enabled=flags.get("sentiment", True),
+        agent_assist_enabled=flags.get("agent_assist", True),
+        wake_pattern=pattern,
+        transcript=transcript,
+    )
+    return result, bool(asked)
+
+
+@pytest.mark.parametrize("channel", STORED_SPEECH_CHANNELS)
+def test_a_final_speech_segment_gets_sentiment_and_can_wake_the_assistant(channel):
+    result, _ = analyses_for(channel)
+    assert result.sentiment is True
+    assert result.agent_assist is True
+
+
+def test_a_chat_message_gets_no_sentiment_and_never_wakes_the_assistant():
+    result, read_pattern = analyses_for(MEETING_CHAT)
+    assert result.sentiment is False
+    assert result.agent_assist is False
+    # The wake phrase is not even read for it.
+    assert read_pattern is False
+
+
+def test_a_partial_segment_gets_neither():
+    result, read_pattern = analyses_for("REMOTE", is_partial=True)
+    assert result == (False, False)
+    assert read_pattern is False
+
+
+def test_each_analysis_follows_its_own_switch():
+    assert analyses_for("REMOTE", sentiment=False)[0] == (False, True)
+    assert analyses_for("REMOTE", agent_assist=False)[0] == (True, False)
+    assert analyses_for("LOCAL", transcript="nothing to see here")[0] == (True, False)
+
+
+def test_the_processor_decides_both_from_the_segments_channel():
+    """call_event_processor.py cannot be imported here; this pins the call site."""
+    source = (HERE / "event_processor" / "call_event_processor.py").read_text(encoding="utf-8")
+    assert 'is_speech=is_speech_channel(normalized_message.get("Channel"))' in source
+    assert "if analyses.sentiment:" in source
+    assert "if analyses.agent_assist:" in source
+    assert "matches_wake_phrase(" not in source

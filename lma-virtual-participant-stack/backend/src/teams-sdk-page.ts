@@ -66,6 +66,18 @@ function htmlToText(html: string): string {
     }
 }
 
+/** The addresses of the links in an HTML chat message. */
+function htmlLinks(html: string): string[] {
+    try {
+        const parsed = new DOMParser().parseFromString(html, 'text/html');
+        return Array.from(parsed.querySelectorAll('a[href]'))
+            .map((a) => a.getAttribute('href') || '')
+            .filter(Boolean);
+    } catch {
+        return [];
+    }
+}
+
 w.__lmaSdkReady = false;
 w.__lmaJoinError = null;
 w.__lmaCallEndReason = null;
@@ -414,12 +426,19 @@ function setupListeners(): void {
             const senderName = msg.senderDisplayName || '';
             const rawContent =
                 (msg.content && (msg.content.message || msg.content)) || msg.message || '';
-            const text =
-                msg.type === 'html' || /<[a-z][\s\S]*>/i.test(String(rawContent))
-                    ? htmlToText(String(rawContent))
-                    : String(rawContent).trim();
+            const isHtml = msg.type === 'html' || /<[a-z][\s\S]*>/i.test(String(rawContent));
+            const text = isHtml ? htmlToText(String(rawContent)) : String(rawContent).trim();
             if (!text) return;
-            w.__lmaChatQueue.push({ senderName, text });
+            // The id and time are the ACS chat message's own (ChatMessage.id,
+            // createdOn); a Teams meeting chat has no private messages.
+            const createdOn = msg.createdOn instanceof Date ? msg.createdOn.toISOString() : msg.createdOn || null;
+            w.__lmaChatQueue.push({
+                senderName,
+                text,
+                id: msg.id || msg.messageId || null,
+                time: createdOn,
+                links: isHtml ? htmlLinks(String(rawContent)) : [],
+            });
         } catch (err) {
             log(`chat parse error: ${err}`);
         }

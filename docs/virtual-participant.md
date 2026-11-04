@@ -31,6 +31,7 @@ title: "Virtual Participant"
 - [Transcription Engine](#transcription-engine)
 - [Chat Introduction Message](#chat-introduction-message)
 - [In-meeting Chat Commands](#in-meeting-chat-commands)
+- [Meeting Chat in the Transcript](#meeting-chat-in-the-transcript)
 - [Meeting Consent](#meeting-consent)
 - [Troubleshooting](#troubleshooting)
 - [Developer Testing](#developer-testing)
@@ -697,6 +698,75 @@ Notes:
 - **The VP never answers itself.** Its answers begin `Live Meeting Assistant`, which cannot be read as a question; its configured introduction, recording-start, recording-stop and exit messages are recognised and ignored; and messages from the VP's own display name are ignored.
 - The Virtual Participant logs each question and answer as `[chat-ask] question ...` and `[chat-ask] answered platform=<platform> chars=<n> messages=<n> ms=<n>`, without the question text. The meeting-assistant function's own log records the request it receives, question included, as it does for every meeting-assistant request.
 
+## Meeting Chat in the Transcript
+
+The VP adds the messages participants send to everyone in the meeting chat to
+the meeting's transcript, on Zoom, Microsoft Teams and Google Meet. Each message becomes one transcript line on its own
+channel, `MEETING_CHAT`, with the sender's display name as the speaker (or
+*Unknown sender* where the platform does not show one) and the message as it
+was typed. Its time is the point in the meeting at which the VP read the
+message, on the same clock as the speech: no platform gives a message time that
+can be placed on the recording's timeline. A link in a message whose address is
+not in its text is added after the text as `(link: <address>)`. The meeting
+page shows these lines among the speech, labelled *<name> (chat)*, as plain
+text.
+
+It is on by default. Turn it off with **Virtual Participant › Add the meeting
+chat to the transcript** on the Configuration page; like the section's other
+settings, a change applies to the next Virtual Participant to start.
+
+What is not added:
+
+- the LMA chat commands, whatever state the meeting is in (`LMA start` typed
+  while the meeting is already running is still a command). An `LMA ask` or
+  `@LMA` question **is** added, since it was asked in front of everyone;
+  the answer the VP posts is not;
+- replies to a consent notice, and everything the VP itself posts (its
+  introduction, status messages, answers and help);
+- private messages: on Zoom (the browser join and the Meeting SDK join), a
+  message sent to anyone but everyone. Teams and Google Meet meeting chats
+  have no private messages;
+- what the chat panel already held when the VP first read it (the Teams
+  browser join reads the whole panel once it is in), and anything sent while the
+  transcript is paused (`LMA pause`) or while consent is withheld. Those
+  messages are not kept for later: resuming does not add them;
+- everything while **Amazon Transcribe › Redact personal information** is on,
+  whatever the meeting's language, because chat text is not redacted;
+- more than 60 messages a minute, or 3,000 in a meeting;
+- edits and deletions made after a message was sent: the line keeps the text
+  the VP first read;
+- the chat of Webex and Amazon Chime meetings. The Webex chat the VP reads
+  does not reliably show which messages are private, so Webex is left out
+  until it can be told apart. The VP still reads Webex chat for the chat
+  commands, and writes the debug line below for it with
+  `outcome=not-covered`, so a live meeting shows whether a private message
+  can be recognised (`recipient=direct`).
+
+Chat lines are stored with the meeting's transcript, expire with it (**Days
+to keep transcript segments**), and are deleted with it, including by
+[Delete the transcript after the summary](transcript-deletion.md). They are
+not used, in this release, by the summary, the meeting assistant, the
+knowledge base, sentiment, speaker naming or the wake phrase: those read what
+was said.
+
+How well each platform's chat can be read differs, and none of this has been
+measured in a live meeting yet:
+
+| Platform | Sender | Message id | Private messages |
+| --- | --- | --- | --- |
+| Zoom (browser) | From the message's label (English labels) | The message element's id | Left out |
+| Zoom (Meeting SDK) | From the SDK | From the SDK, where it sends one | Left out, where the SDK names the receiver |
+| Teams (browser) | The message's author, where the row shows it | The message element's id, else the text | None in a meeting chat |
+| Teams (Azure Communication Services) | From the chat service | From the chat service | None in a meeting chat |
+| Webex | Not added to the transcript (see above) | | |
+| Google Meet | From the message group's header | Meet's message id | None in a meeting chat |
+
+With the stack's `LogLevel` at `DEBUG`, the VP writes one line per chat message
+it reads, `[meeting-chat] platform=<platform> outcome=<what happened>
+sender=yes|no id=yes|no time=yes|no recipient=everyone|direct|unknown
+links=<n> chars=<n>`, with no message text and no sender name, so a live
+meeting shows what each platform actually gives. The VP never logs chat text.
+
 ## Meeting Consent
 
 When the deployment's consent mode (the Meeting Consent section of the
@@ -705,7 +775,7 @@ Participant form, is Notify or Opt-in, the VP posts a notice in the meeting chat
 once it is admitted and reads the replies. In Notify it records and transcribes
 from the start, and stops at once when a participant objects. In Opt-in it joins
 with capture withheld (no transcript, audio or screen recording, voice assistant
-or stored chat) and starts only when every participant present has consented in
+or chat added to the transcript) and starts only when every participant present has consented in
 the chat, or when the meeting's owner has confirmed in LMA that everyone agreed;
 until then its detail line reads **Waiting for consent: …** and `LMA start` is
 refused. It keeps screenshots of the chat and the participant list as evidence

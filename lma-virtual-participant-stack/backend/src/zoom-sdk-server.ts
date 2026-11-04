@@ -111,7 +111,18 @@ export function buildZoomSdkPageHtml(version: string): string {
             // Skip our own messages echoed back, so intro/start/exit text we
             // posted is never re-parsed as a participant command.
             if (selfId && w.__lmaSelfUserId && selfId === w.__lmaSelfUserId) return;
-            w.__lmaChatQueue.push({ senderName: senderName, text: String(text) });
+            // What the payload carries beyond the sender and the text is read
+            // defensively: the field names are not confirmed against a live
+            // meeting, and meeting-chat.ts logs which of them were present.
+            var receiver = data && data.receiver;
+            w.__lmaChatQueue.push({
+              senderName: senderName,
+              text: String(text),
+              id: (data && (data.msgId || data.messageId || data.id)) || null,
+              time: (data && (data.timestamp || data.time)) || null,
+              receiverId: data && (typeof data.receiverId !== 'undefined' ? data.receiverId : (receiver && receiver.userId)),
+              receiverName: (data && (data.receiverName || (receiver && receiver.name))) || null,
+            });
           } catch (e) { log('chat parse error: ' + e); }
         });
       }

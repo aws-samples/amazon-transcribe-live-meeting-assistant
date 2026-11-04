@@ -277,6 +277,41 @@ describe('the Overview tab', () => {
   });
 });
 
+describe('a message typed in the meeting chat', () => {
+  const chat = (id, transcript, startTime) => ({
+    segmentId: id,
+    createdAt: `2026-11-03T14:05:${String(startTime).padStart(2, '0')}.000Z`,
+    channel: 'MEETING_CHAT',
+    speaker: 'Bo Chen',
+    transcript,
+    startTime,
+    endTime: startTime,
+    isPartial: false,
+  });
+  const WITH_CHAT = {
+    [ITEM.callId]: {
+      ...TRANSCRIPT[ITEM.callId],
+      MEETING_CHAT: {
+        segments: [
+          chat('chat-zoom-1', '**not bold** [the doc](https://example.com/doc)', 2),
+          chat('chat-zoom-2', '+1', 3),
+        ],
+      },
+    },
+  };
+
+  it('is shown under its sender as chat, as typed, one row per message, and is not offered as a speaker', () => {
+    renderPage({ transcript: WITH_CHAT });
+    expect(screen.getAllByText('Bo Chen (chat)')).toHaveLength(2);
+    // Not rendered as markdown: no emphasis and no link.
+    expect(screen.getByText('**not bold** [the doc](https://example.com/doc)')).toBeTruthy();
+    expect(document.querySelector('a[href="https://example.com/doc"]')).toBeNull();
+    expect(screen.getByText('+1')).toBeTruthy();
+    const filter = screen.queryByRole('group', { name: 'Show speakers' });
+    if (filter) expect(within(filter).queryByRole('button', { name: 'Bo Chen' })).toBeNull();
+  });
+});
+
 describe('the player kept in step with the transcript', () => {
   const RECORDED = {
     ...ITEM,

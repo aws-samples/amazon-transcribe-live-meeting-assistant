@@ -394,6 +394,16 @@ export function senderFromMeetGroupHeader(header: string | null | undefined): st
 }
 
 /**
+ * The time a Meet message group's header shows ("10:42 AM"), or null when it
+ * shows none, or more than one and so is not one group's header. Only used to
+ * report whether the platform gave a time: it is not on the transcript's clock.
+ */
+export function timeFromMeetGroupHeader(header: string | null | undefined): string | null {
+    const times = (header || '').match(/\b\d{1,2}:\d{2}(?:\s*[ap]\.?m\.?)?/gi) ?? [];
+    return times.length === 1 ? times[0].trim() : null;
+}
+
+/**
  * Is this name the VP's own?
  *
  * Meet labels the VP's own chat messages "You" and its own tile with its display

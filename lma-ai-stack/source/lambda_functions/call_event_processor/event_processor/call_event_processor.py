@@ -79,8 +79,8 @@ from pure import (  # noqa: E402
     agenda_derivation_due,
     convert_keys_to_uppercamelcase,
     get_sentiment_per_quarter,
-    matches_wake_phrase,
     merge_dicts,
+    segment_analyses,
 )
 
 # pylint: enable=import-error
@@ -1527,7 +1527,18 @@ async def execute_process_event_api_mutation(
                     appsync_session=appsync_session,
                 )
             )
-            if IS_SENTIMENT_ANALYSIS_ENABLED and not normalized_message["IsPartial"]:
+            # Sentiment and the wake phrase are for what was said: a message
+            # typed in the meeting chat is stored, and the transcript hook above
+            # sees it, but it gets neither.
+            analyses = segment_analyses(
+                is_speech=is_speech_channel(normalized_message.get("Channel")),
+                is_partial=normalized_message["IsPartial"],
+                sentiment_enabled=IS_SENTIMENT_ANALYSIS_ENABLED,
+                agent_assist_enabled=IS_LAMBDA_AGENT_ASSIST_ENABLED,
+                wake_pattern=wake_phrase_pattern,
+                transcript=normalized_message.get("Transcript", ""),
+            )
+            if analyses.sentiment:
                 LOGGER.debug("Add Sentiment Analysis")
                 add_transcript_sentiment_tasks.extend(
                     add_transcript_sentiment_analysis(
@@ -1549,14 +1560,7 @@ async def execute_process_event_api_mutation(
                 )
             ):
                 queue_agenda_derivation(normalized_message["CallId"])
-            if (
-                IS_LAMBDA_AGENT_ASSIST_ENABLED
-                and not normalized_message["IsPartial"]
-                and matches_wake_phrase(
-                    wake_phrase_pattern(),
-                    normalized_message["Transcript"],
-                )
-            ):
+            if analyses.agent_assist:
                 LAMBDA_HOOK_CLIENT.invoke(
                     FunctionName=ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN,
                     InvocationType="Event",

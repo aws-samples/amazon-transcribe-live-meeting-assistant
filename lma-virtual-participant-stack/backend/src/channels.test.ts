@@ -6,9 +6,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { LOCAL_CHANNEL, REMOTE_CHANNEL } from './channels.js';
+import { LOCAL_CHANNEL, MEETING_CHAT_CHANNEL, REMOTE_CHANNEL } from './channels.js';
 
 test('a Virtual Participant writes the meeting as REMOTE and its assistant as LOCAL', () => {
     assert.equal(REMOTE_CHANNEL, 'REMOTE');
     assert.equal(LOCAL_CHANNEL, 'LOCAL');
+});
+
+test('a Virtual Participant writes the meeting chat as MEETING_CHAT', () => {
+    assert.equal(MEETING_CHAT_CHANNEL, 'MEETING_CHAT');
 });

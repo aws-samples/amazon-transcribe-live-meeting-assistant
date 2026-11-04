@@ -57,6 +57,15 @@ test('a value the configuration holds replaces the variable, as text', () => {
     assert.deepEqual(result.notes, []);
 });
 
+test('the meeting chat switch is applied as text, and left unset when the configuration has no value', () => {
+    const env = started();
+    applySections({ virtual_participant: { captureMeetingChat: false } }, env);
+    assert.equal(env['CAPTURE_MEETING_CHAT'], 'false');
+    const untouched = started();
+    applySections({ virtual_participant: {} }, untouched);
+    assert.equal(untouched['CAPTURE_MEETING_CHAT'], undefined);
+});
+
 test('a setting the configuration does not hold keeps the task value', () => {
     const env = started();
     const result = applySections({ virtual_participant: {}, recording: {}, transcription: {} }, env);
@@ -79,6 +88,21 @@ test('redaction is requested only for en-US, as the template derives it', () => 
     applySections({ transcription: { contentRedactionEnabled: true, languageCode: 'es-US' } }, spanish);
     assert.equal(spanish['TRANSCRIBE_LANGUAGE_CODE'], 'es-US');
     assert.equal(spanish['ENABLE_CONTENT_REDACTION'], 'false');
+});
+
+test('the redaction flag is also kept as saved, whatever the language, for the meeting chat', () => {
+    const spanish = started();
+    applySections({ transcription: { contentRedactionEnabled: true, languageCode: 'es-US' } }, spanish);
+    assert.equal(spanish['ENABLE_CONTENT_REDACTION'], 'false');
+    assert.equal(spanish['CONTENT_REDACTION_REQUESTED'], 'true');
+
+    const off = started();
+    applySections({ transcription: { contentRedactionEnabled: false } }, off);
+    assert.equal(off['CONTENT_REDACTION_REQUESTED'], 'false');
+
+    const unset = started();
+    applySections({ transcription: {} }, unset);
+    assert.equal(unset['CONTENT_REDACTION_REQUESTED'], undefined);
 });
 
 test('options that cannot be used together give way, while the page redaction still applies', () => {

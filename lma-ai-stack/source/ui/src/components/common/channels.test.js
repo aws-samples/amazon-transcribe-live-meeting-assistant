@@ -10,8 +10,10 @@ import {
   canonicalSentiment,
   canonicalSpeakerKey,
   channelLabel,
+  isChatChannel,
   isSpeechChannel,
   LOCAL_CHANNEL,
+  MEETING_CHAT_CHANNEL,
   REMOTE_CHANNEL,
   SPEECH_CHANNELS,
 } from './channels';
@@ -38,9 +40,19 @@ describe('isSpeechChannel', () => {
     ['REMOTE', 'LOCAL', 'CALLER', 'AGENT'].forEach((c) => expect(isSpeechChannel(c)).toBe(true));
   });
 
-  it('is false for the assistants and anything else', () => {
-    ['AGENT_ASSISTANT', 'CHAT_ASSISTANT', 'AGENT_VOICETONE', '', undefined].forEach((c) =>
+  it('is false for the assistants, the meeting chat and anything else', () => {
+    ['AGENT_ASSISTANT', 'CHAT_ASSISTANT', 'AGENT_VOICETONE', 'MEETING_CHAT', '', undefined].forEach((c) =>
       expect(isSpeechChannel(c)).toBe(false),
+    );
+  });
+});
+
+describe('isChatChannel', () => {
+  it('is true for the meeting chat only', () => {
+    expect(MEETING_CHAT_CHANNEL).toBe('MEETING_CHAT');
+    expect(isChatChannel('MEETING_CHAT')).toBe(true);
+    ['REMOTE', 'LOCAL', 'CALLER', 'AGENT', 'CHAT_ASSISTANT', '', undefined].forEach((c) =>
+      expect(isChatChannel(c)).toBe(false),
     );
   });
 });

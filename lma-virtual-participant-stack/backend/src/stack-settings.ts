@@ -18,6 +18,10 @@
  * baseline, and an administrator's change wins over it. The meeting retention
  * its usage records are written with (the Retention section) is applied too;
  * there the parameter is an upper limit as well as the default.
+ * Whether the meeting chat is added to the transcript, in the Virtual
+ * Participant section, is applied the same way but was never a parameter: the
+ * task sets no variable for it, and its reader falls back to the shipped
+ * default (CAPTURE_MEETING_CHAT_DEFAULT in meeting-chat.ts).
  *
  * Rather than change every place that reads one of these variables, this module
  * reads the three sections and sets each variable the configuration holds a
@@ -80,6 +84,7 @@ export const VIRTUAL_PARTICIPANT_SETTINGS: readonly SettingTarget[] = [
     { section: 'virtual_participant', setting: 'attendeePollMs', envVar: 'VP_ATTENDEE_POLL_MS', type: 'integer' },
     { section: 'virtual_participant', setting: 'pollsBeforeEnd', envVar: 'VP_POLLS_BEFORE_END', type: 'integer' },
     { section: 'virtual_participant', setting: 'pollsBeforeEndMissing', envVar: 'VP_POLLS_BEFORE_END_MISSING', type: 'integer' },
+    { section: 'virtual_participant', setting: 'captureMeetingChat', envVar: 'CAPTURE_MEETING_CHAT', type: 'boolean' },
 ];
 
 /**
@@ -100,6 +105,13 @@ export const VIRTUAL_PARTICIPANT_LIMITED_SETTINGS: readonly SettingTarget[] = [
  * Participant redacts only en-US.
  */
 export const CONTENT_REDACTION_VARIABLE = 'ENABLE_CONTENT_REDACTION';
+/**
+ * The redaction flag as saved, whatever the language: the meeting chat is not
+ * added to the transcript while it is on (meeting-chat.ts), because chat text
+ * is not redacted in any language. Not set when the configuration holds no
+ * value; its reader then falls back to CONTENT_REDACTION_VARIABLE.
+ */
+export const CONTENT_REDACTION_REQUESTED_VARIABLE = 'CONTENT_REDACTION_REQUESTED';
 const REDACTED_LANGUAGES: ReadonlySet<string> = new Set(['en-US']);
 
 export interface AppliedSettings {
@@ -182,6 +194,8 @@ export const applySections = (sections: Sections, env: Record<string, string | u
         const language = env['TRANSCRIBE_LANGUAGE_CODE'] || 'en-US';
         env[CONTENT_REDACTION_VARIABLE] = String(redactionFlag && REDACTED_LANGUAGES.has(language));
         applied.push(CONTENT_REDACTION_VARIABLE);
+        env[CONTENT_REDACTION_REQUESTED_VARIABLE] = String(redactionFlag);
+        applied.push(CONTENT_REDACTION_REQUESTED_VARIABLE);
     }
     return { applied, notes };
 };

@@ -7,6 +7,8 @@ import { chatHelpMessages } from './chat-help.js';
 import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { toolbarPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
+import { noteSentChat } from './meeting-chat.js';
+import { meetingChat } from './meeting-chat-runtime.js';
 import { simliAvatar } from './simli-avatar.js';
 import {
     findElementWithFallback,
@@ -81,13 +83,43 @@ async function safeEvaluate<T>(
  * body, with no sender.
  */
 export function splitZoomChatLabel(label: string): { sender: string | null; body: string } {
-    const senderMatch = label.match(
-        /^([^,:]+?)\s+to\s+[^,:]+?(?:\s*:\s*|,\s*\d{1,2}:\d{2}(?:\s*[AP]M)?\s*,\s*)/i,
+    const { sender, body } = parseZoomChatLabel(label);
+    return { sender, body };
+}
+
+/** A Zoom chat row's aria-label, read in full: see splitZoomChatLabel for the shapes. */
+export interface ZoomChatLabel {
+    sender: string | null;
+    /** The "<recipient>" of "<sender> to <recipient>", or null when the label has neither shape. */
+    recipient: string | null;
+    body: string;
+    /** The "HH:MM AM" of the timestamp form, or null. */
+    time: string | null;
+}
+
+export function parseZoomChatLabel(label: string): ZoomChatLabel {
+    const match = label.match(
+        /^([^,:]+?)\s+to\s+([^,:]+?)(?:\s*:\s*|,\s*(\d{1,2}:\d{2}(?:\s*[AP]M)?)\s*,\s*)/i,
     );
     return {
-        sender: senderMatch?.[1]?.trim() || null,
-        body: senderMatch ? label.slice(senderMatch[0].length) : label,
+        sender: match?.[1]?.trim() || null,
+        recipient: match?.[2]?.trim() || null,
+        body: match ? label.slice(match[0].length) : label,
+        time: match?.[3]?.trim() || null,
     };
+}
+
+/**
+ * Who a Zoom chat message went to: everyone when the recipient reads as
+ * "Everyone" (in any of the forms Zoom shows it), privately otherwise ("to
+ * You", "to <name>", a "(Direct Message)" or "(Privately)" mark), and unknown
+ * when the label showed no recipient. English labels only: in another language
+ * the label is in neither shape and the recipient is unknown.
+ */
+export function zoomChatAudience(recipient: string | null): 'everyone' | 'direct' | undefined {
+    if (!recipient) return undefined;
+    if (/privately|direct message/i.test(recipient)) return 'direct';
+    return /^everyone\b/i.test(recipient) ? 'everyone' : 'direct';
 }
 
 export default class Zoom {
@@ -494,6 +526,8 @@ export default class Zoom {
     }
 
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
+        // So the meeting chat capture knows these when it reads them back.
+        noteSentChat(messages);
         // Make sure the panel is open, but never toggle a panel that's already
         // open (see openChatPanel — the toolbar button is a toggle).
         if (!(await this.chatInputVisible(page))) {
@@ -1719,10 +1753,10 @@ export default class Zoom {
         }
 
         // Set up message monitoring with LMA features
-        await page.exposeFunction('messageChange', async (message: string) => {
+        await page.exposeFunction('messageChange', async (message: string, messageId?: string | null, links?: string[]) => {
             // `message` is the row's aria-label, sender and recipient included.
             // Every command below is matched against the body alone.
-            const { sender, body } = splitZoomChatLabel(message);
+            const { sender, recipient, body, time } = parseZoomChatLabel(message);
             // A consent reply, or "LMA start" while consent is withheld.
             if (await meetingConsent.handleChat(sender, body)) return;
             // Checked ahead of pause/resume so an assistant-mode toggle lands
@@ -1765,16 +1799,19 @@ export default class Zoom {
                 await this.sendMessages(page, details.startMessages);
                 // Restart transcription if needed
                 transcriptionService.startTranscription();
-            } else if (details.start) {
-                // Process meeting messages (LMA feature)
-                const timestamp = new Date().toLocaleTimeString('en-US', {
-                    hour12: false,
-                    hour: '2-digit',
-                    minute: '2-digit',
+            } else {
+                // Meeting chat, for the transcript; meeting-chat.ts decides
+                // whether it is added (paused, private, a command in another
+                // state, the setting).
+                meetingChat.offer({
+                    platform: 'zoom',
+                    text: body,
+                    sender,
+                    id: messageId,
+                    platformTime: time,
+                    audience: zoomChatAudience(recipient),
+                    links,
                 });
-                const formattedMessage = `[${timestamp}] ${message}`;
-                details.messages.push(formattedMessage);
-                log.info('New message:', formattedMessage);
             }
         });
 
@@ -1798,14 +1835,42 @@ export default class Zoom {
             await page.evaluate((selector: string) => {
                 const targetNode = document.querySelector(selector);
                 const config = { childList: true, subtree: true };
+                const CONTENT = 'div[id^="chat-message-content"]';
+                // Keyed on the message element's id, which carries Zoom's
+                // message id, so a row Zoom re-renders is not read twice and
+                // the same command typed twice is read twice.
+                const seen = new Set<string>();
+                // The rows already in the list when the observer attaches were
+                // there before the VP was listening: if Zoom re-renders them
+                // they are not read as new messages.
+                targetNode?.querySelectorAll(CONTENT).forEach((content) => {
+                    seen.add(content.id || `label:${content.getAttribute('aria-label') ?? ''}`);
+                });
+                const deliver = (content: Element) => {
+                    const label = content.getAttribute('aria-label');
+                    // No label yet: the row is filled in by a later mutation,
+                    // so it is not marked seen.
+                    if (!label) return;
+                    const key = content.id || `label:${label}`;
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    if (label.startsWith('You to ')) return;
+                    const id = content.id ? content.id.replace(/^chat-message-content-?/, '') || content.id : null;
+                    const scope = content.parentElement ?? content;
+                    const links = Array.from(scope.querySelectorAll('a[href]'))
+                        .map((a) => (a as HTMLAnchorElement).href)
+                        .filter(Boolean);
+                    (window as any).messageChange(label, id, links);
+                };
                 const callback = (mutationList: MutationRecord[]) => {
-                    const addedNode = mutationList[mutationList.length - 1].addedNodes[0] as Element;
-                    if (addedNode) {
-                        const message = addedNode
-                            .querySelector('div[id^="chat-message-content"]')
-                            ?.getAttribute('aria-label');
-                        if (message && !message.startsWith('You to Everyone')) {
-                            (window as any).messageChange(message);
+                    // Every added node of every mutation: a burst of messages
+                    // arrives as several, and Zoom can add a wrapper holding
+                    // more than one row.
+                    for (const mutation of mutationList) {
+                        for (const node of Array.from(mutation.addedNodes)) {
+                            if (!(node instanceof Element)) continue;
+                            if (node.matches(CONTENT)) deliver(node);
+                            node.querySelectorAll(CONTENT).forEach(deliver);
                         }
                     }
                 };

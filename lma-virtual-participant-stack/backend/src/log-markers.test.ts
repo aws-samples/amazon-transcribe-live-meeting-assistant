@@ -49,6 +49,7 @@ const MARKERS: Marker[] = [
     { marker: '[translator-turn]', readers: 'docs/voice-assistant.md' },
     { marker: '[nova-throttle]', readers: 'docs/voice-assistant.md' },
     { marker: '[DIARIZATION]', readers: 'docs/virtual-participant.md' },
+    { marker: '[meeting-chat] platform=', readers: 'docs/virtual-participant.md (Meeting Chat in the Transcript)' },
     { marker: '[SETTINGS]', readers: 'operators checking which settings a participant started with' },
     { marker: '[teams-sdk] joined meeting', readers: 'docs/teams-acs-sdk.md' },
     { marker: '[zoom-sdk] joined meeting', readers: 'docs/zoom-meeting-sdk.md' },

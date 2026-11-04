@@ -574,6 +574,14 @@ def test_the_virtual_participant_task_sets_the_variable_from_the_same_parameter(
 ) -> None:
     entry = _by_setting()[(section, setting)]
     environment = _vp_environment()
+    if not entry.parameter:
+        # Never a stack parameter: the task sets no variable for it, so a
+        # Virtual Participant that cannot read the configuration falls back to
+        # its own copy of the shipped default (see the test below).
+        assert env_var not in environment, (
+            f"the Virtual Participant task sets {env_var}, but {section} › {setting} has no stack parameter"
+        )
+        return
     assert env_var in environment, f"the Virtual Participant task sets no {env_var}"
     # Either form passes the parameter's own value through.
     assert environment[env_var] in ({"Ref": entry.parameter}, {"Fn::Sub": f"${{{entry.parameter}}}"})
@@ -583,6 +591,29 @@ def test_the_virtual_participant_task_sets_the_variable_from_the_same_parameter(
     else:
         # The nested stack's own parameter, at its default; see the transcriber's.
         assert entry.parameter not in passed
+
+
+#: The Virtual Participant's own copy of the default of each setting it applies
+#: that no stack parameter backs: (section, setting) -> (file, exported name).
+VP_SHIPPED_FALLBACKS = {
+    ("virtual_participant", "captureMeetingChat"): ("meeting-chat.ts", "CAPTURE_MEETING_CHAT_DEFAULT"),
+}
+
+
+def test_every_unbacked_virtual_participant_setting_has_a_fallback_named() -> None:
+    unbacked = {(s, n) for s, n, *_ in VP_ENTRIES if not _by_setting()[(s, n)].parameter}
+    assert unbacked == set(VP_SHIPPED_FALLBACKS)
+
+
+@pytest.mark.parametrize("key", sorted(VP_SHIPPED_FALLBACKS))
+def test_a_virtual_participant_fallback_is_the_shipped_default(key) -> None:
+    """Used when the configuration cannot be read; pinned so the two cannot drift."""
+    file_name, name = VP_SHIPPED_FALLBACKS[key]
+    text = (VP_BACKEND / file_name).read_text(encoding="utf-8")
+    match = re.search(rf"^export const {name}\b[^=]*= (.+);$", text, re.M)
+    assert match, f"{file_name} declares no {name}"
+    section, setting = key
+    assert json.loads(match.group(1)) == parameters.shipped_setting_defaults()[section][setting]
 
 
 def test_every_virtual_participant_section_setting_is_applied() -> None:

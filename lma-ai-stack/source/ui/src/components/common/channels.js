@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 /**
- * The names of a meeting transcript's two speech channels.
+ * The names of a meeting transcript's two speech channels, and of the meeting chat.
  *
  * REMOTE is everyone else in the meeting (the meeting audio); LOCAL is the local
  * side (the user's microphone, or a Virtual Participant's voice assistant).
@@ -13,6 +13,9 @@
  * versions keep the old names until they expire, so every value read from the
  * API goes through canonicalChannel, and everything below compares only the
  * current names.
+ *
+ * MEETING_CHAT holds the messages participants typed in the meeting's chat, one
+ * segment per message. It is not speech, so isSpeechChannel is false for it.
  *
  * The Python twin is lma_channels in the configuration Lambda layer;
  * lma_channels/test_lma_channels.py holds the alias map below to it.
@@ -23,6 +26,9 @@ export const LOCAL_CHANNEL = 'LOCAL';
 
 /** The two speech channels, as written. */
 export const SPEECH_CHANNELS = [REMOTE_CHANNEL, LOCAL_CHANNEL];
+
+/** Messages typed in the meeting chat. */
+export const MEETING_CHAT_CHANNEL = 'MEETING_CHAT';
 
 // Older spellings, still read. CUSTOMER is Amazon Transcribe's role name for the
 // non-agent side of a call. One entry per line: the Python twin's test reads them.
@@ -39,6 +45,9 @@ export const canonicalChannel = (channel) => (own(CHANNEL_ALIASES, channel) ? CH
 
 /** Whether a channel, under either spelling, is one of the two speech channels. */
 export const isSpeechChannel = (channel) => SPEECH_CHANNELS.includes(canonicalChannel(channel));
+
+/** Whether a channel is the meeting chat. */
+export const isChatChannel = (channel) => channel === MEETING_CHAT_CHANNEL;
 
 // What the UI calls each channel where it names one: sentiment charts and
 // columns, and a voice with no voice id in the Speakers panel. Not "Me": on a

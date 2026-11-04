@@ -71,7 +71,8 @@ already ended.
 Deleted, for the meeting:
 
 - every turn of the transcript, partial or final, from the meeting's
-  transcript records in DynamoDB;
+  transcript records in DynamoDB, including the meeting chat messages a
+  Virtual Participant added to it;
 - every meeting assistant answer stored with the transcript;
 - the **Issues detected** field, which quotes the transcript, on a meeting
   recorded by a version of LMA before 0.4.0 that still carries it;
@@ -85,7 +86,9 @@ Deleted, for the meeting:
 Kept:
 
 - the summary, on the meeting and in the transcript knowledge base, so the
-  meeting can still be found and asked about;
+  meeting can still be found and asked about. Whatever the summary quotes from
+  the transcript, or from the meeting chat (a link a participant shared, for
+  example), stays in it;
 - the meeting record: its title, times, participants, agenda, speaker names
   and sentiment;
 - the audio and video recordings, which follow `AudioRecordingExpirationInDays`.

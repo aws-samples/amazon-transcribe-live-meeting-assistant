@@ -29,6 +29,7 @@ import {
     parseMeetParticipantCount,
     pickMeetActiveSpeaker,
     senderFromMeetGroupHeader,
+    timeFromMeetGroupHeader,
 } from './google-meet-page.js';
 import { isOwnMeetMessage, meetInMeetingExit, meetPreJoinExit } from './google-meet.js';
 import { details } from './details.js';
@@ -323,4 +324,12 @@ test('the Leave call check cannot match the pre-join screen', () => {
     for (const selector of MEET_IN_PAGE_SELECTORS.leaveCall) {
         assert.match(selector, /Leave call/);
     }
+});
+
+test('the time a message group header shows is read when there is exactly one', () => {
+    assert.equal(timeFromMeetGroupHeader('Alice Smith 10:32 AM'), '10:32 AM');
+    assert.equal(timeFromMeetGroupHeader('Alice Smith 14:05'), '14:05');
+    assert.equal(timeFromMeetGroupHeader('Alice Smith'), null);
+    assert.equal(timeFromMeetGroupHeader('Alice 10:32 AM Bob 10:33 AM'), null);
+    assert.equal(timeFromMeetGroupHeader(null), null);
 });

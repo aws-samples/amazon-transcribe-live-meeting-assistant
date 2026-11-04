@@ -23,7 +23,7 @@ session belongs in call_event_processor.py, not in this module.
 from __future__ import annotations
 
 from statistics import fmean
-from typing import Any, Dict, List, Literal, Optional, Pattern, TypedDict
+from typing import Any, Callable, Dict, List, Literal, NamedTuple, Optional, Pattern, TypedDict
 
 SentimentLabelType = Literal["NEGATIVE", "MIXED", "NEUTRAL", "POSITIVE"]
 # The speech channels sentiment is aggregated for (lma_channels.SPEECH_CHANNELS).
@@ -144,6 +144,43 @@ def matches_wake_phrase(pattern: Optional[Pattern[str]], transcript: str) -> boo
     if pattern is None:
         return False
     return pattern.search(transcript) is not None
+
+
+class SegmentAnalyses(NamedTuple):
+    """Which per-segment analyses a stored transcript segment is given."""
+
+    sentiment: bool
+    agent_assist: bool
+
+
+def segment_analyses(
+    *,
+    is_speech: bool,
+    is_partial: bool,
+    sentiment_enabled: bool,
+    agent_assist_enabled: bool,
+    wake_pattern: Callable[[], Optional[Pattern[str]]],
+    transcript: str,
+) -> SegmentAnalyses:
+    """Whether a segment gets Amazon Comprehend sentiment, and wakes the Meeting Assistant.
+
+    Both read what was said, so both are for a final segment on a speech
+    channel only. A message typed in the meeting chat (the MEETING_CHAT
+    channel) is stored like a segment but gets neither: its sentiment would be
+    counted with the speakers', and a wake phrase typed in the chat is not
+    somebody asking the assistant aloud. ``is_speech`` is the caller's
+    ``lma_channels.is_speech_channel(channel)``; it is passed in so this module
+    keeps no imports outside the standard library. ``wake_pattern`` is called
+    only for a segment that could wake the assistant, because reading it reads
+    the configuration.
+    """
+    final_speech = is_speech and not is_partial
+    return SegmentAnalyses(
+        sentiment=final_speech and sentiment_enabled,
+        agent_assist=final_speech
+        and agent_assist_enabled
+        and matches_wake_phrase(wake_pattern(), transcript),
+    )
 
 
 def convert_keys_to_uppercamelcase(d: Dict[str, Any]) -> Dict[str, Any]:
