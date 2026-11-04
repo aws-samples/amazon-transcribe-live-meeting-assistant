@@ -28,7 +28,10 @@ vi.mock('react-use-websocket', () => ({
   },
 }));
 vi.mock('aws-amplify/api', () => ({ generateClient: () => ({ graphql: vi.fn().mockResolvedValue({ data: {} }) }) }));
-vi.mock('aws-amplify/auth', () => ({ fetchUserAttributes: vi.fn().mockResolvedValue({}) }));
+vi.mock('aws-amplify/auth', () => ({
+  fetchUserAttributes: vi.fn().mockResolvedValue({}),
+  fetchAuthSession: vi.fn().mockResolvedValue({}),
+}));
 vi.mock('../../contexts/app', () => ({
   default: () => ({
     currentSession: { tokens: { accessToken: 'access', idToken: 'id' } },
@@ -75,8 +78,9 @@ const OPT_IN = {
 const frames = () => socket.sent.filter((m) => typeof m === 'string').map((m) => JSON.parse(m));
 const serverSays = (frame) => act(() => socket.options.onMessage({ data: JSON.stringify(frame) }));
 
+// What the page sends on the open socket is recorded with the rest.
 const openSocket = () => {
-  const target = { send: vi.fn() };
+  const target = { send: vi.fn((message) => socket.sent.push(message)) };
   act(() => socket.options.onOpen({ target }));
   return target;
 };
@@ -103,6 +107,7 @@ describe('StreamAudio consent step', () => {
 
   it('sends START with consent mode off when the settings are not known yet', async () => {
     render(<StreamAudio mode="stream" />);
+    openSocket();
     fireEvent.click(screen.getByRole('button', { name: 'Start Streaming' }));
     await waitFor(() => expect(frames().some((f) => f.callEvent === 'START')).toBe(true));
     expect(frames().find((f) => f.callEvent === 'START').consent).toMatchObject({ mode: 'off', confirmed: false });

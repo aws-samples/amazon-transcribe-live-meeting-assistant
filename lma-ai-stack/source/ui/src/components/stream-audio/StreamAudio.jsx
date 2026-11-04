@@ -3,7 +3,7 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import PropTypes from 'prop-types';
 
 import {
@@ -25,7 +25,6 @@ import {
   Alert,
 } from '@cloudscape-design/components';
 import '@cloudscape-design/global-styles/index.css';
-import * as ReactUseWebSocket from 'react-use-websocket';
 import { generateClient } from 'aws-amplify/api';
 import { fetchUserAttributes } from 'aws-amplify/auth';
 
@@ -34,6 +33,7 @@ import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
 import createUploadMeeting from '../../graphql/queries/createUploadMeeting';
+import useTranscriberSocket from '../../hooks/use-transcriber-socket';
 import ConsentStep from './ConsentStep';
 import {
   captureEvidenceScreenshot,
@@ -47,14 +47,7 @@ import {
   START_REFUSALS,
   startBlockedReason,
 } from './consent';
-
-// react-use-websocket ships a CJS bundle. Vite 8 / rolldown exports the CJS
-// module.exports OBJECT as the ESM default (a "double-wrapped default"), so the
-// hook is not the default itself but one level in. Unwrap to whichever level is
-// actually the function so this works regardless of bundler interop. (Same
-// interop class as the react-audio-player fix; blanks the page if wrong.)
-const useWebSocket =
-  typeof ReactUseWebSocket.default === 'function' ? ReactUseWebSocket.default : ReactUseWebSocket.default.default;
+import { CONNECTION_LOST_MESSAGE } from './transcriber-stream';
 
 let SOURCE_SAMPLING_RATE;
 const DEFAULT_BLANK_FIELD_MSG = 'This will be set back to the default value if left blank.';
@@ -127,13 +120,6 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       cancelled = true;
     };
   }, [asrEngineAvailable]);
-  // Amplify v6 exposes tokens as currentSession.tokens.{accessToken,idToken}.toString().
-  // The refresh token is not exposed via fetchAuthSession in v6; pass an empty string
-  // since the websocket server's JWT verifier only strictly requires access/id tokens.
-  const JWT_TOKEN = currentSession?.tokens?.accessToken?.toString() ?? '';
-  const ID_TOKEN = currentSession?.tokens?.idToken?.toString() ?? '';
-  const REFRESH_TOKEN = '';
-
   // In Amplify v6 the `user` object from the Authenticator does NOT reliably
   // expose `.attributes.email`; we must call fetchUserAttributes() for email.
   // Fall back to the Cognito loginId / username which are available on `user`.
@@ -216,6 +202,8 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   const [consentFrame, setConsentFrame] = useState(null);
   const [evidenceFrame, setEvidenceFrame] = useState(null);
   const [startError, setStartError] = useState('');
+  // Set when the connection stayed down until the transcriber ended the meeting.
+  const [connectionLost, setConnectionLost] = useState(false);
   const recordingRef = useRef(false);
   // Set when the transcriber already ended the meeting, so stopping sends no END.
   const skipEndRef = useRef(false);
@@ -250,65 +238,44 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     return () => clearInterval(interval);
   }, [recording]);
 
-  const getSocketUrl = useCallback(() => {
-    console.log(`DEBUG - [${new Date().toISOString()}]: Trying to resolve websocket url...`);
-    return new Promise((resolve) => {
-      if (settings.WSEndpoint) {
-        console.log(`
-          DEBUG - [${new Date().toISOString()}]: Resolved Websocket URL to ${settings.WSEndpoint}
-        `);
-        resolve(settings.WSEndpoint);
-      }
-    });
-  }, [settings.WSEndpoint]);
-
-  const onServerFrame = (frame) => {
-    if (frame.event === 'CONSENT_SETTINGS') {
-      setConsentSettings(frame);
-      return;
-    }
-    if (frame.event !== 'CONSENT_STATE') return;
-    if (frame.evidence || String(frame.code || '').startsWith('EVIDENCE_')) {
-      setEvidenceFrame(frame);
-      return;
-    }
-    setConsentFrame(frame);
-    if (captureStopped(frame) && recordingRef.current) {
-      skipEndRef.current = true;
-      refusedRef.current = START_REFUSALS.has(frame.code);
-      setRecording(false);
-    }
-  };
-
-  const { sendMessage } = useWebSocket(getSocketUrl, {
-    queryParams: {
-      authorization: `Bearer ${JWT_TOKEN}`,
-      id_token: ID_TOKEN,
-      refresh_token: REFRESH_TOKEN,
-    },
+  // Every connection that opens during a meeting sends the meeting's START
+  // again before anything else, so the transcriber continues the meeting
+  // (see transcriber-stream.js).
+  const transcriber = useTranscriberSocket({
+    endpoint: settings.WSEndpoint,
+    session: currentSession,
     onOpen: (event) => {
-      console.log(`
-        DEBUG - [${new Date().toISOString()}]: Websocket onOpen Event: ${JSON.stringify(event)}
-      `);
       // Read the consent settings on every connection, so a reconnect after
       // the transcriber refused or ended a meeting shows the settings in force.
       event.target.send(JSON.stringify({ callEvent: 'CONSENT_SETTINGS' }));
     },
     onMessage: (event) => {
       const frame = parseServerFrame(event.data);
-      if (frame) onServerFrame(frame);
+      if (!frame) return;
+      if (frame.event === 'CONSENT_SETTINGS') {
+        setConsentSettings(frame);
+        return;
+      }
+      if (frame.event !== 'CONSENT_STATE') return;
+      if (frame.evidence || String(frame.code || '').startsWith('EVIDENCE_')) {
+        setEvidenceFrame(frame);
+        return;
+      }
+      setConsentFrame(frame);
+      if (captureStopped(frame) && recordingRef.current) {
+        // The transcriber has ended the meeting: nothing more is sent for it, and a
+        // reconnect does not send its START again.
+        transcriber.abandon();
+        skipEndRef.current = true;
+        refusedRef.current = START_REFUSALS.has(frame.code);
+        setRecording(false);
+      }
     },
-    onClose: (event) => {
-      console.log(`
-        DEBUG - [${new Date().toISOString()}]: Websocket onClose Event: ${JSON.stringify(event)}
-      `);
+    onResumeExpired: () => {
+      // The transcriber has ended the meeting, so stopping sends no END.
+      setConnectionLost(true);
+      setRecording(false);
     },
-    onError: (event) => {
-      console.log(`
-        DEBUG - [${new Date().toISOString()}]: Websocket onError Event: ${JSON.stringify(event)}
-      `);
-    },
-    shouldReconnect: () => true,
   });
 
   const handleCallIdChange = (e) => {
@@ -407,7 +374,8 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       console.log(`
         DEBUG - [${new Date().toISOString()}]: Send Call END msg: ${JSON.stringify(callMetaData)}
       `);
-      sendMessage(JSON.stringify(callMetaData));
+      // Nothing is sent if the transcriber already ended the meeting.
+      transcriber.end(callMetaData);
       setStreamingStarted(false);
       resetConsentStep();
       setCallMetaData({
@@ -493,10 +461,11 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       setConsentFrame(null);
       setEvidenceFrame(null);
       skipEndRef.current = false;
-      sendMessage(JSON.stringify(startFrame));
+      setConnectionLost(false);
+      transcriber.begin(startFrame);
       setStreamingStarted(true);
       if (consentRequired(consentSettings) && consentEvidence.dataUrl) {
-        sendMessage(
+        transcriber.sendControl(
           JSON.stringify({
             callEvent: 'CONSENT_EVIDENCE',
             image: consentEvidence.dataUrl,
@@ -537,7 +506,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
 
       audioProcessor.current.port.onmessage = (event) => {
         // this is pcm audio
-        sendMessage(event.data);
+        transcriber.sendAudio(event.data);
       };
       channelMerger.current.connect(audioProcessor.current);
     } catch (error) {
@@ -590,7 +559,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       const dataUrl = sharedTrack ? await frameToJpeg(sharedTrack) : await captureEvidenceScreenshot();
       const capturedAt = new Date().toISOString();
       if (recording) {
-        sendMessage(
+        transcriber.sendControl(
           JSON.stringify({
             callEvent: 'CONSENT_EVIDENCE',
             image: dataUrl,
@@ -610,13 +579,16 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   };
 
   const handleObjection = (participantName) => {
-    sendMessage(
+    transcriber.sendControl(
       JSON.stringify({
         callEvent: 'CONSENT_OBJECTION',
         ...(participantName ? { participantName } : {}),
         source: 'voice',
       }),
     );
+    // The transcriber ends the meeting on the objection, so the meeting ends
+    // here with no END of its own (after a reconnect, if the objection waits for one).
+    transcriber.end(null);
     // The transcriber ends the meeting on an objection; stop capturing here at once.
     skipEndRef.current = true;
     setRecording(false);
@@ -988,6 +960,17 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
                 </Box>
               )}
             </Container>
+
+            {mode === MODE_STREAM && connectionLost && !recording && (
+              <Alert
+                type="warning"
+                header="Connection lost: meeting ended"
+                dismissible
+                onDismiss={() => setConnectionLost(false)}
+              >
+                {CONNECTION_LOST_MESSAGE}
+              </Alert>
+            )}
 
             {mode === MODE_STREAM && consentSettings?.available === false && (
               <Alert type="warning" header="Meeting consent settings unavailable">

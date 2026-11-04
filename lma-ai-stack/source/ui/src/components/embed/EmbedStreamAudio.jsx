@@ -15,7 +15,7 @@
  *   diarizeMic    - Identify separate speakers on the microphone (true/false)
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import {
   Form,
@@ -29,17 +29,15 @@ import {
   Grid,
   Box,
   Link,
+  Alert,
 } from '@cloudscape-design/components';
 import '@cloudscape-design/global-styles/index.css';
-import * as ReactUseWebSocket from 'react-use-websocket';
 import { DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, SYSTEM } from '../common/constants';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
-
-// See StreamAudio.jsx: unwrap the double-wrapped CJS default for Vite 8 interop.
-const useWebSocket =
-  typeof ReactUseWebSocket.default === 'function' ? ReactUseWebSocket.default : ReactUseWebSocket.default.default;
+import useTranscriberSocket from '../../hooks/use-transcriber-socket';
+import { CONNECTION_LOST_MESSAGE } from '../stream-audio/transcriber-stream';
 
 const logger = new ConsoleLogger('EmbedStreamAudio');
 
@@ -49,10 +47,6 @@ const DEFAULT_BLANK_FIELD_MSG = 'This will be set back to the default value if l
 const EmbedStreamAudio = ({ params, sendToParent }) => {
   const { currentSession, user } = useAppContext();
   const { settings } = useSettingsContext();
-  // Amplify v6 exposes tokens via currentSession.tokens.{accessToken,idToken}.toString()
-  const JWT_TOKEN = currentSession?.tokens?.accessToken?.toString() ?? '';
-  const ID_TOKEN = currentSession?.tokens?.idToken?.toString() ?? '';
-  const REFRESH_TOKEN = '';
 
   const userIdentifier = user?.attributes?.email || user?.signInDetails?.loginId || DEFAULT_LOCAL_SPEAKER_NAME;
 
@@ -83,6 +77,8 @@ const EmbedStreamAudio = ({ params, sendToParent }) => {
   const [micMuted, setMicMuted] = useState(false);
   const [recordedMeetingId, setRecordedMeetingId] = useState('');
   const [autoStartTriggered, setAutoStartTriggered] = useState(false);
+  // Set when the connection stayed down until the transcriber ended the meeting.
+  const [connectionLost, setConnectionLost] = useState(false);
 
   useEffect(() => {
     let interval;
@@ -97,26 +93,15 @@ const EmbedStreamAudio = ({ params, sendToParent }) => {
     return () => clearInterval(interval);
   }, [recording]);
 
-  const getSocketUrl = useCallback(() => {
-    logger.debug('Trying to resolve websocket url...');
-    return new Promise((resolve) => {
-      if (settings.WSEndpoint) {
-        logger.debug(`Resolved Websocket URL to ${settings.WSEndpoint}`);
-        resolve(settings.WSEndpoint);
-      }
-    });
-  }, [settings.WSEndpoint]);
-
-  const { sendMessage } = useWebSocket(getSocketUrl, {
-    queryParams: {
-      authorization: `Bearer ${JWT_TOKEN}`,
-      id_token: ID_TOKEN,
-      refresh_token: REFRESH_TOKEN,
+  // Sends the meeting's START again on every reconnect (see transcriber-stream.js).
+  const transcriber = useTranscriberSocket({
+    endpoint: settings.WSEndpoint,
+    session: currentSession,
+    onResumeExpired: () => {
+      // The transcriber has ended the meeting, so stopping sends no END.
+      setConnectionLost(true);
+      setRecording(false);
     },
-    onOpen: () => logger.debug('Websocket connected'),
-    onClose: () => logger.debug('Websocket closed'),
-    onError: (event) => logger.error('Websocket error:', event),
-    shouldReconnect: () => true,
   });
 
   const handleCallIdChange = (e) => {
@@ -167,13 +152,15 @@ const EmbedStreamAudio = ({ params, sendToParent }) => {
     }
     if (streamingStarted && !recording) {
       callMetaData.callEvent = 'END';
-      sendMessage(JSON.stringify(callMetaData));
+      // Nothing is sent if the transcriber already ended the meeting.
+      transcriber.end(callMetaData);
       setStreamingStarted(false);
 
       // Notify parent
       sendToParent({
         type: 'LMA_MEETING_STOPPED',
         callId: callMetaData.callId,
+        ...(connectionLost ? { reason: 'CONNECTION_LOST' } : {}),
       });
 
       setCallMetaData({
@@ -218,7 +205,8 @@ const EmbedStreamAudio = ({ params, sendToParent }) => {
       recordingCallMetaData.samplingRate = SOURCE_SAMPLING_RATE;
       recordingCallMetaData.callEvent = 'START';
 
-      sendMessage(JSON.stringify(recordingCallMetaData));
+      setConnectionLost(false);
+      transcriber.begin(recordingCallMetaData);
       setStreamingStarted(true);
 
       // Notify parent
@@ -250,7 +238,7 @@ const EmbedStreamAudio = ({ params, sendToParent }) => {
       };
 
       audioProcessor.current.port.onmessage = (event) => {
-        sendMessage(event.data);
+        transcriber.sendAudio(event.data);
       };
       channelMerger.current.connect(audioProcessor.current);
     } catch (error) {
@@ -422,6 +410,18 @@ const EmbedStreamAudio = ({ params, sendToParent }) => {
           </Container>
         </Form>
       </form>
+      {connectionLost && !recording && (
+        <Box margin={{ top: 'l' }}>
+          <Alert
+            type="warning"
+            header="Connection lost: meeting ended"
+            dismissible
+            onDismiss={() => setConnectionLost(false)}
+          >
+            {CONNECTION_LOST_MESSAGE}
+          </Alert>
+        </Box>
+      )}
       {!recording && recordedMeetingId !== '' && (
         <Box margin={{ top: 'xl' }} float="right" color="text-label">
           <SpaceBetween direction="horizontal" size="s">

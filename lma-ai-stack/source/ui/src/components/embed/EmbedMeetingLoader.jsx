@@ -20,7 +20,7 @@
  *   callId        - If provided, redirect to call details view
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import PropTypes from 'prop-types';
 import {
   Box,
@@ -35,15 +35,12 @@ import {
   Alert,
 } from '@cloudscape-design/components';
 import '@cloudscape-design/global-styles/index.css';
-import * as ReactUseWebSocket from 'react-use-websocket';
 import { DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, SYSTEM } from '../common/constants';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
-
-// See StreamAudio.jsx: unwrap the double-wrapped CJS default for Vite 8 interop.
-const useWebSocket =
-  typeof ReactUseWebSocket.default === 'function' ? ReactUseWebSocket.default : ReactUseWebSocket.default.default;
+import useTranscriberSocket from '../../hooks/use-transcriber-socket';
+import { CONNECTION_LOST_MESSAGE } from '../stream-audio/transcriber-stream';
 
 const logger = new ConsoleLogger('EmbedMeetingLoader');
 
@@ -70,10 +67,6 @@ const STATES = {
 const EmbedMeetingLoader = ({ params, sendToParent }) => {
   const { currentSession, user } = useAppContext();
   const { settings } = useSettingsContext();
-  // Amplify v6 exposes tokens via currentSession.tokens.{accessToken,idToken}.toString()
-  const JWT_TOKEN = currentSession?.tokens?.accessToken?.toString() ?? '';
-  const ID_TOKEN = currentSession?.tokens?.idToken?.toString() ?? '';
-  const REFRESH_TOKEN = '';
 
   const userIdentifier = user?.attributes?.email || user?.signInDetails?.loginId || DEFAULT_LOCAL_SPEAKER_NAME;
 
@@ -89,6 +82,8 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
   const [errorMessage, setErrorMessage] = useState('');
   const [callId, setCallId] = useState(params.callId || '');
   const [isFlashing, setIsFlashing] = useState(false);
+  // Set when the connection stayed down until the transcriber ended the meeting.
+  const [connectionLost, setConnectionLost] = useState(false);
 
   const audioProcessor = useRef();
   const audioContext = useRef();
@@ -109,24 +104,11 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
     return () => clearInterval(interval);
   }, [state]);
 
-  const getSocketUrl = useCallback(() => {
-    return new Promise((resolve) => {
-      if (settings.WSEndpoint) {
-        resolve(settings.WSEndpoint);
-      }
-    });
-  }, [settings.WSEndpoint]);
-
-  const { sendMessage } = useWebSocket(getSocketUrl, {
-    queryParams: {
-      authorization: `Bearer ${JWT_TOKEN}`,
-      id_token: ID_TOKEN,
-      refresh_token: REFRESH_TOKEN,
-    },
-    onOpen: () => logger.debug('WebSocket connected'),
-    onClose: () => logger.debug('WebSocket closed'),
-    onError: (event) => logger.error('WebSocket error:', event),
-    shouldReconnect: () => true,
+  // Sends the meeting's START again on every reconnect (see transcriber-stream.js).
+  const transcriber = useTranscriberSocket({
+    endpoint: settings.WSEndpoint,
+    session: currentSession,
+    onResumeExpired: () => setConnectionLost(true),
   });
 
   const convertToMono = (audioSource) => {
@@ -138,7 +120,7 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
     return merger;
   };
 
-  const stopMeeting = async () => {
+  const stopMeeting = async (reason) => {
     logger.debug('Stopping meeting...');
     if (audioProcessor.current) {
       audioProcessor.current.port.postMessage({
@@ -157,11 +139,12 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
         toNumber: SYSTEM,
         callEvent: 'END',
       };
-      sendMessage(JSON.stringify(endMeta));
+      // Nothing is sent if the transcriber already ended the meeting.
+      transcriber.end(endMeta);
     }
 
     setState(STATES.STOPPED);
-    sendToParent({ type: 'LMA_MEETING_STOPPED', callId });
+    sendToParent({ type: 'LMA_MEETING_STOPPED', callId, ...(reason ? { reason } : {}) });
   };
 
   const startMeeting = async () => {
@@ -200,7 +183,8 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
         callEvent: 'START',
       };
 
-      sendMessage(JSON.stringify(callMetaData));
+      setConnectionLost(false);
+      transcriber.begin(callMetaData);
       setCallId(newCallId);
 
       displayAudioSource.current = audioContext.current.createMediaStreamSource(displayStream.current);
@@ -220,7 +204,7 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
       }
 
       audioProcessor.current = new AudioWorkletNode(audioContext.current, 'recording-processor');
-      audioProcessor.current.port.onmessage = (event) => sendMessage(event.data);
+      audioProcessor.current.port.onmessage = (event) => transcriber.sendAudio(event.data);
       channelMerger.current.connect(audioProcessor.current);
 
       setState(STATES.ACTIVE);
@@ -235,6 +219,11 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
       });
     }
   };
+
+  // The transcriber ended the meeting while the connection was down.
+  useEffect(() => {
+    if (connectionLost && state === STATES.ACTIVE) stopMeeting('CONNECTION_LOST');
+  }, [connectionLost]);
 
   // Auto-start support
   useEffect(() => {
@@ -346,7 +335,7 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
                   >
                     Open meeting details
                   </Button>
-                  <Button variant="primary" onClick={stopMeeting}>
+                  <Button variant="primary" onClick={() => stopMeeting()}>
                     Stop Meeting
                   </Button>
                 </SpaceBetween>
@@ -393,6 +382,13 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
       <div className="embed-meeting-loader">
         <Container>
           <Box textAlign="center" padding="xxl">
+            {connectionLost && (
+              <Box margin={{ bottom: 'm' }} textAlign="left">
+                <Alert type="warning" header="Connection lost: meeting ended">
+                  {CONNECTION_LOST_MESSAGE}
+                </Alert>
+              </Box>
+            )}
             <Box fontSize="heading-m">Meeting Ended</Box>
             <Box margin={{ top: 's' }} color="text-body-secondary">
               The meeting has been stopped.
