@@ -442,7 +442,8 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
           header={<Header variant="h2">Start a Meeting</Header>}
           footer={
             <Box float="right">
-              <Button variant="primary" onClick={startMeeting}>
+              {/* Submits the form, whose onSubmit is the one path that starts the meeting. */}
+              <Button variant="primary" formAction="submit">
                 Start Meeting
               </Button>
             </Box>

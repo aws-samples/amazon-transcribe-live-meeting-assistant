@@ -5,8 +5,8 @@
  */
 
 /**
- * The embeddable meeting loader across a reconnect of its transcriber socket,
- * with the socket faked: the same START on the new connection, and a meeting
+ * The embeddable meeting loader's transcriber socket, faked: one START for one
+ * click of Start Meeting, the same START on a new connection, and a meeting
  * the transcriber ended while disconnected reported to the parent page.
  */
 import React from 'react';
@@ -59,7 +59,7 @@ const openSocket = () => {
 };
 const closeSocket = (target) => act(() => socket.options.onClose({ target, code: 1006 }));
 
-describe('EmbedMeetingLoader reconnect', () => {
+describe('EmbedMeetingLoader', () => {
   let sendToParent;
 
   beforeEach(() => {
@@ -89,6 +89,16 @@ describe('EmbedMeetingLoader reconnect', () => {
     await screen.findByText('Meeting In Progress');
     return first;
   };
+
+  it('sends exactly one START for one click of Start Meeting', async () => {
+    render(<EmbedMeetingLoader params={{ meetingTopic: 'Weekly' }} sendToParent={sendToParent} />);
+    const first = openSocket();
+    fireEvent.click(screen.getByRole('button', { name: 'Start Meeting' }));
+    await screen.findByText('Meeting In Progress');
+    expect(first.sent).toEqual(['START']);
+    expect(navigator.mediaDevices.getDisplayMedia).toHaveBeenCalledTimes(1);
+    expect(sendToParent.mock.calls.filter(([m]) => m.type === 'LMA_MEETING_STARTED')).toHaveLength(1);
+  });
 
   it('sends the START again on a reconnect, and END with a plain stop message', async () => {
     const first = await start();
