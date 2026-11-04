@@ -203,6 +203,11 @@ export type SocketCallData = {
      * when the meeting is transcribed by Amazon Transcribe.
      */
     asr?: AsrSessionSet,
+    /**
+     * When the session was created. Not a position on the meeting's timeline:
+     * that is the audio received (session-lifecycle.ts recordedAudioSeconds),
+     * which leaves out time the audio connection was down.
+     */
     startStreamTime: Date,
     speakerEvents: [],
     ended: boolean,

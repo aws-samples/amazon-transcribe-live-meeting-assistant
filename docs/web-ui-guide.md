@@ -248,7 +248,7 @@ player converts between them:
 |---|---|---|
 | Virtual Participant | Starts with transcription: the same clock. A pause (`LMA pause`) is kept in it as silence, because the transcript's clock runs on through a pause too | Starts before the Virtual Participant is admitted, so it is ahead of the transcript by the time spent joining and in the lobby, and by more after each reconnection of its transcription (the video records through the gap; the transcript and the audio recording skip it). Lined up from the key frames, as below |
 | Stream Audio, the browser extension | Starts with transcription | None |
-| Desktop Capture App | Starts with transcription. When the app reconnects after a dropped connection, the recording and the transcript both continue from where they were | Its file is built with the audio recording as its sound and the video placed against it, so it starts on the same clock |
+| Desktop Capture App | Starts with transcription. When the app reconnects within the 60 seconds the transcriber holds a dropped meeting, the recording and the transcript continue together. Audio the app could not send meanwhile is missing from both (the app buffers about the last 3 seconds of an outage and sends them after reconnecting) | Its file is built with the audio recording as its sound and the video placed against it, so it starts on the same clock. The app keeps recording video through a dropped connection and sends it after reconnecting, so after a reconnect the video, and the transcript times of its key frames, are ahead of the audio and the transcript by the audio that was lost. Key frames from a video stream the app restarted afresh are placed at the audio received so far, which is on the transcript's clock |
 | Upload Audio | The uploaded file itself, which is what was transcribed | None |
 
 Each [key frame](meeting-video.md) records both its time in the transcript and
@@ -267,11 +267,11 @@ Virtual Participant's audio was not ready as its recording started, or when the
 desktop app's video could not be combined with the audio) plays silently, and
 **Audio only** plays the sound. With more than a hundred key frames, only the
 ones loaded so far (the first hundred, more as the Screen share strip is
-scrolled) are used. Small differences are expected where the transcription engine places a word a
-little early or late. A Desktop
-Capture App meeting whose connection dropped for longer than the transcriber
-holds it (60 seconds), or that reconnected to a different transcriber task, has
-a second transcript session that starts again from zero; see
+scrolled) are used. Small differences are expected where the transcription
+engine places a word a little early or late. A Desktop Capture App meeting
+whose connection dropped for longer than the transcriber holds it (60 seconds),
+or that reconnected to a different transcriber task, has a second transcript
+session that starts again from zero; see
 [Reconnection](websocket-streaming-api.md#reconnection).
 
 #### Searching and filtering

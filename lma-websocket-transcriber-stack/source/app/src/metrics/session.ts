@@ -47,10 +47,8 @@ interface SessionMetricState {
     /**
      * When the meeting's audio session opened.
      *
-     * Deliberately not the session's `startStreamTime`, which looks like the
-     * same thing and is not: the Amazon Transcribe path resets that on every
-     * stream reconnect, so a meeting that reconnected would report its time to
-     * first segment as the time since the reconnect.
+     * Kept here rather than read from the session's `startStreamTime`, so this
+     * metric's clock does not depend on how the session's own fields are set.
      */
     readonly openedAtMs: number;
     sawTranscriptSegment: boolean;

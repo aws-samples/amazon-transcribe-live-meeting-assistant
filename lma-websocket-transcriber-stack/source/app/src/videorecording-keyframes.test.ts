@@ -7,8 +7,8 @@
 /**
  * How a video session starts its key frame lane (videorecording.ts): the first
  * stream at the client's offset on both clocks, a resumed stream on the same
- * lane, and a fresh restart on a new lane placed by wall-clock time with no
- * recording position. FFmpeg is replaced by a command that exits at once, so
+ * lane, and a fresh restart on a new lane placed at the audio position the
+ * caller passes, with no recording position. FFmpeg is replaced by a command that exits at once, so
  * no decoding happens here; videokeyframes.test.ts covers the lane itself.
  */
 import { strict as assert } from 'node:assert';
@@ -36,23 +36,24 @@ type LaneOptions = { timelineBaseSeconds: number, videoOffsetBaseSeconds: number
 const optionsOf = (lane: unknown): LaneOptions => (lane as { options: LaneOptions }).options;
 
 test('first stream, resumed stream and fresh restart each get the lane they need', async () => {
-    const audioStartedAtMs = Date.now() - 60_000;
+    // Sixty seconds of audio received, however long the meeting has run.
+    const audioPositionSeconds = 60;
     const meta = { callId: 'wiring-call', videoTimeOffsetMs: 2500 } as Parameters<typeof startVideoSession>[0];
 
-    const first = startVideoSession(meta, quietServer, audioStartedAtMs);
+    const first = startVideoSession(meta, quietServer, audioPositionSeconds);
     const lane1 = first.keyframes;
     assert.ok(lane1, 'the first stream has a lane');
     assert.deepEqual(optionsOf(lane1), { ...optionsOf(lane1), timelineBaseSeconds: 2.5, videoOffsetBaseSeconds: 2.5 });
 
-    const resumed = startVideoSession({ ...meta, videoResume: true }, quietServer, audioStartedAtMs);
+    const resumed = startVideoSession({ ...meta, videoResume: true }, quietServer, audioPositionSeconds);
     assert.equal(resumed.keyframes, lane1, 'a resumed stream keeps feeding the same lane');
 
-    const restarted = startVideoSession({ ...meta, videoResume: false }, quietServer, audioStartedAtMs);
+    const restarted = startVideoSession({ ...meta, videoResume: false }, quietServer, audioPositionSeconds);
     const lane2 = restarted.keyframes;
     assert.ok(lane2 && lane2 !== lane1, 'a fresh encoder session gets a new lane');
     const { timelineBaseSeconds, videoOffsetBaseSeconds } = optionsOf(lane2);
     assert.equal(videoOffsetBaseSeconds, null, 'its place in the recording is not known');
-    assert.ok(timelineBaseSeconds >= 59 && timelineBaseSeconds <= 70, `placed by wall clock (${timelineBaseSeconds})`);
+    assert.equal(timelineBaseSeconds, 60, 'placed at the audio position, not by wall clock');
 
     await endVideoSession('wiring-call', quietServer);
     assert.equal(restarted.keyframes, undefined, 'ending the video stops its lane');

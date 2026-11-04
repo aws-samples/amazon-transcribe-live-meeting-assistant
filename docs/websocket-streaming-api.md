@@ -696,8 +696,13 @@ speaking on both channels therefore gets a different number on each.
 ### Reconnection
 
 If a connection drops without an END, the server holds the meeting for 60
-seconds (the transcriber task's `AUDIO_RECONNECT_GRACE_MS` environment variable;
-`0` turns holding off). To continue the meeting, the client must:
+seconds. The window is the `AUDIO_RECONNECT_GRACE_MS` environment variable of
+the transcriber's container, in milliseconds: `0` turns holding off, and a value
+that is not a number keeps the default. The stack does not set this variable
+and has no parameter for it, so it is changed only by editing the transcriber's
+ECS task definition (registering a new revision with the variable added and
+updating the service to it). A stack update that replaces the task definition
+does not carry that edit over. To continue the meeting, the client must:
 1. Open a new WebSocket connection
 2. Send START again with the **same `callId`**, authenticated as the same user
 3. Begin streaming audio again
@@ -710,6 +715,16 @@ The meeting gets one END, when the client sends it or the connection closes
 for good. A START for the same meeting from the same user while its old
 connection is still open (the client noticed the drop first) moves the meeting
 to the new connection and closes the old one.
+
+A video stream of the meeting (`START_VIDEO` on its own connection) keeps the
+times its client gives it. A stream resumed with `videoResume: true` continues
+its own timestamps, so if the client went on recording video while the audio
+connection was down, the video and its key frames are ahead of the transcript
+from then on by the audio that was lost. A stream restarted without
+`videoResume` has its key frames placed at the duration of the audio received
+so far, which leaves out the time the audio connection was down, as the
+transcript does; how closely depends on the client sending audio as it is
+captured.
 
 A meeting nobody reconnects to within the 60 seconds is ended as if its
 connection had closed for good. A START with a new `callId` starts a new

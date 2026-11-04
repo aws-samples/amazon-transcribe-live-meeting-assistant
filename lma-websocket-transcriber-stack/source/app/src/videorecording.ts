@@ -309,11 +309,15 @@ const muxedFileName = (callId: string): string => {
  * to (so binary frames on that socket can be routed), or undefined when video
  * recording is disabled server-side (the caller should still bind the socket
  * to a discarding session so binary frames are dropped quietly).
+ *
+ * `audioPositionSeconds` is where the meeting's audio timeline is when the
+ * stream starts (calleventdata/session-lifecycle.ts recordedAudioSeconds); a
+ * stream that restarts with a fresh encoder has its key frames placed there.
  */
 export const startVideoSession = (
     callMetaData: CallMetaData,
     server: FastifyInstance,
-    audioStartedAtMs?: number
+    audioPositionSeconds?: number
 ): VideoSession => {
     const callId = callMetaData.callId;
     let session = videoSessions.get(callId);
@@ -360,12 +364,14 @@ export const startVideoSession = (
             // Fresh client encoder session (e.g. app restarted mid-call): the
             // new part begins with its own fMP4 init segment, so the mux treats
             // the parts as independent MP4s (concat demuxer). Its key frames
-            // need a decoder of their own, placed on the transcript's clock by
-            // wall-clock time; their place in the muxed recording, which joins
-            // the parts end to end, is not known.
+            // need a decoder of their own, placed on the transcript's clock at
+            // the audio position the caller passes (the audio received so far,
+            // which skips time the audio connection was down, as the transcript
+            // does); their place in the muxed recording, which joins the parts
+            // end to end, is not known.
             stopKeyframes(session, server);
-            if (audioStartedAtMs !== undefined) {
-                startKeyframes(session, Math.max(0, (Date.now() - audioStartedAtMs) / 1000), null, server);
+            if (audioPositionSeconds !== undefined && Number.isFinite(audioPositionSeconds)) {
+                startKeyframes(session, Math.max(0, audioPositionSeconds), null, server);
             }
             server.log.info(
                 `[START_VIDEO]: [${callId}] - Video stream restarted; starting part ${

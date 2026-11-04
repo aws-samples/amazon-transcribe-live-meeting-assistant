@@ -458,7 +458,6 @@ export const startTranscribe = async (
     // rapid clean-close/reopen cycle can never become a 0ms hot loop.
     const MIN_BACKOFF_MS = 500;
     let sessionId: string | undefined;
-    let transcriptClockStarted = false;
 
     // Amazon Transcribe streaming timestamps (Item.StartTime / EndTime) are
     // relative to the audio sent in EACH StartStreamTranscription request and
@@ -630,14 +629,6 @@ export const startTranscribe = async (
 
             const outputTranscriptStream: AsyncIterable<TranscriptResultStream> | undefined =
                 response.TranscriptResultStream;
-
-            // The wall-clock start of the transcript's clock, which a video
-            // stream's key frames are placed against. Only the first request
-            // starts that clock; a reconnect continues it from the audio taken.
-            if (!transcriptClockStarted) {
-                transcriptClockStarted = true;
-                socketCallMap.startStreamTime = new Date();
-            }
 
             if (outputTranscriptStream) {
                 tsStream = stream.Readable.from(outputTranscriptStream);
