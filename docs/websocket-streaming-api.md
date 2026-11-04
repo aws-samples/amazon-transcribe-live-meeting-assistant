@@ -228,9 +228,9 @@ Client                                          Server
 3. **Stream Audio** — Send raw PCM audio data as binary WebSocket frames. Continue sending audio for the duration of the session.
 4. **Speaker Changes** *(optional)* — Send `SPEAKER_CHANGE` text messages when the active speaker changes in a multi-participant meeting.
 5. **Send END** — When the session is complete, send a JSON text message with `callEvent: "END"` to signal the server to finalize the transcription, upload recordings, and clean up.
-6. **Close** — The server will close the WebSocket connection after processing the END event. The client may also close the connection. If the client disconnects without sending END, the server will automatically trigger end-of-call processing.
+6. **Close** — The server will close the WebSocket connection after processing the END event. The client may also close the connection. If the client disconnects without sending END, the server holds the meeting for 60 seconds for the client to reconnect, and then triggers end-of-call processing (see [Reconnection](#reconnection)).
 
-> **Important:** If the WebSocket connection is closed unexpectedly (network error, client crash), the server automatically triggers end-of-call cleanup including writing the call end event. However, explicitly sending the END message is strongly recommended for clean shutdown.
+> **Important:** If the WebSocket connection is closed unexpectedly (network error, client crash), the server ends the meeting, including writing the call end event, 60 seconds later unless the client reconnects and sends START for it again. Explicitly sending the END message is strongly recommended for clean shutdown.
 
 ---
 
@@ -729,6 +729,38 @@ captured.
 A meeting nobody reconnects to within the 60 seconds is ended as if its
 connection had closed for good. A START with a new `callId` starts a new
 meeting.
+
+A client that reconnects should therefore:
+
+- Send the meeting's START again on **every** connection it opens for the
+  meeting, as that connection's first frame, before any audio. Audio on a
+  connection that has had no START is dropped. Send the same START as the first
+  time, including its `consent` field: the server checks the meeting's consent
+  again on each START.
+- Authenticate each connection with current tokens. The tokens are checked when
+  the connection opens, so a reconnect made with tokens that have expired since
+  the first connection is refused with `401`.
+- Hold a bounded amount of the audio captured while disconnected (LMA's clients
+  hold about 3 seconds), and send it after the START. The recording and the
+  transcript carry on from where they were, so whatever was not sent is missing
+  from both and they stay in step with each other.
+- Stop reconnecting for a meeting the server ended for its consent
+  (`CONSENT_STATE` with `captureAllowed: false`), and send no further START for
+  it.
+- Treat a meeting whose connection could not be restored within the 60 seconds
+  as ended, rather than send START for it again, which would start a second
+  session (below).
+
+LMA's own clients do this. The Stream Audio page and its embeddable variants
+reconnect after 1, 2 and 4 seconds and then every 5 seconds, fetch tokens for
+each connection, send the START again, and then send up to the last 3 seconds of
+audio captured while disconnected (older audio is dropped). If no connection
+opens within 55 seconds of the drop, they stop streaming and say that the
+meeting was ended; the meeting keeps what was captured before the drop. The 55
+seconds are counted from when the browser reports the connection closed, which
+can be later than the server notices. The Desktop Capture App also holds about
+3 seconds of audio and sends START on every connection. The browser extension
+does not reconnect: a dropped connection stops its capture.
 
 The held meeting lives on the transcriber task that served it. With more than
 one task (`TranscriberDesiredTaskCount` above 1), a reconnection can reach a

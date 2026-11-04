@@ -435,6 +435,9 @@ window.addEventListener('message', (event) => {
     case 'LMA_MEETING_STOPPED':
       // Meeting recording has stopped
       console.log('Meeting ID:', event.data.callId);
+      if (event.data.reason === 'CONNECTION_LOST') {
+        // The connection to LMA stayed down until LMA ended the meeting
+      }
       break;
     case 'LMA_MEETING_ERROR':
       // An error occurred
@@ -446,6 +449,13 @@ window.addEventListener('message', (event) => {
   }
 });
 ```
+
+The stream-audio and meeting-loader components reconnect to LMA if their
+connection drops and continue the same meeting. `LMA_MEETING_STOPPED` carries
+`reason: 'CONNECTION_LOST'` when the connection could not be restored within
+about a minute, so LMA ended the meeting and the component stopped streaming; it
+has no `reason` when the meeting was stopped by the user or by
+`LMA_STOP_MEETING`. See [Reconnection](websocket-streaming-api.md#reconnection).
 
 #### Call Details Events
 

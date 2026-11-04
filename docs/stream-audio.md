@@ -11,6 +11,7 @@ title: "Stream Audio"
 - [Step-by-Step Walkthrough](#step-by-step-walkthrough)
 - [Meeting Consent](#meeting-consent)
 - [Speaker Identification](#speaker-identification)
+- [If the Connection Drops](#if-the-connection-drops)
 - [Browser Compatibility](#browser-compatibility)
 - [Technical Details](#technical-details)
 - [Important Notice](#important-notice)
@@ -119,6 +120,29 @@ Notes:
   use the [Chrome Extension](browser-extension.md) or a
   [Virtual Participant](virtual-participant.md), which read them from the meeting.
 - There is no additional Amazon Transcribe charge for speaker identification.
+
+## If the Connection Drops
+
+If the page's connection to LMA drops while you are streaming (for example on a
+change of network), the page keeps capturing and reconnects on its own, after 1, 2 and 4 seconds and then
+every 5 seconds. Each time it connects it signs in with your current session and
+continues the same meeting: the transcript and the recording carry on in the same
+meeting, with one recording. The page keeps the last 3 seconds of audio captured
+while it was disconnected and sends them once it has reconnected; anything said
+earlier in the outage is missing from both the transcript and the recording.
+
+LMA holds a meeting whose connection dropped for 60 seconds. If the page cannot
+reconnect within 55 seconds, it stops streaming and shows **Connection lost:
+meeting ended**. The meeting keeps everything captured before the drop and has
+its summary as usual, and **Open recorded meeting** opens it. Click **Start
+Streaming** to continue in a new meeting. The 55 seconds count from when the
+browser notices the connection is gone, which for a network that fails silently
+can be some time after it failed. If LMA has already ended the meeting by the
+time the page reconnects, the page's audio goes to a second session of the same
+meeting, as described under
+[Reconnection](websocket-streaming-api.md#reconnection). The same happens
+when the reconnection reaches a different transcription server task than the
+one holding the meeting, on deployments that run more than one.
 
 ## Browser Compatibility
 
