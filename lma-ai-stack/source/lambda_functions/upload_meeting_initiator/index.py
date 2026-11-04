@@ -112,15 +112,21 @@ def _parse_and_validate_input(arguments: dict) -> dict:
     if len(meeting_topic) > 200:
         raise ValidationError("meetingTopic must be 200 characters or fewer")
 
-    agent_id = (raw.get("agentId") or "").strip()
+    # localSpeakerName and remoteSpeakerName are the documented names; agentId
+    # and fromNumber are their older names, still accepted.
+    agent_id = (raw.get("localSpeakerName") or "").strip() or (raw.get("agentId") or "").strip()
     if not agent_id:
-        raise ValidationError("agentId is required")
+        raise ValidationError("localSpeakerName is required")
     if len(agent_id) > 200:
-        raise ValidationError("agentId must be 200 characters or fewer")
+        raise ValidationError("localSpeakerName must be 200 characters or fewer")
 
     # The name the transcript shows for the other participants when none is given:
     # the placeholder the UI and the WebSocket server use.
-    from_number = (raw.get("fromNumber") or "").strip() or "Other Participant"
+    from_number = (
+        (raw.get("remoteSpeakerName") or "").strip()
+        or (raw.get("fromNumber") or "").strip()
+        or "Other Participant"
+    )
     to_number = (raw.get("toNumber") or "").strip() or "System"
 
     filename = _sanitize_filename(raw.get("filename") or "")
