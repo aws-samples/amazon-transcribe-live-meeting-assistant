@@ -1691,13 +1691,28 @@ def test_the_shipped_chat_section_names_the_chat_and_asks_for_no_links() -> None
     assert list(shipped)[-1] == "CHAT & SHARED LINKS"
 
 
-def test_every_shipped_section_that_reads_the_transcript_says_what_a_chat_line_is() -> None:
+@pytest.mark.parametrize(
+    "template, expected",
+    [
+        (
+            "LLMPromptSummaryTemplate.json",
+            {"SUMMARY", "DETAILS", "ACTIONS", "AGENDA COVERAGE", "CHAPTERS"},
+        ),
+        ("LLMPromptHealthcareSummaryTemplate.json", {"SUMMARY", "DETAILS", "SOAP", "BIRP"}),
+    ],
+)
+def test_every_shipped_section_that_reads_the_transcript_says_what_a_chat_line_is(
+    template: str, expected: set
+) -> None:
+    prompts = json.loads(
+        (HERE.parent / "configuration_seeder" / "defaults" / template).read_text(encoding="utf-8")
+    )
     reading = {
         title: prompt
-        for title, prompt in _shipped_prompts().items()
+        for title, prompt in prompts.items()
         if "{transcript}" in prompt or "{timed_transcript}" in prompt
     }
-    assert {"SUMMARY", "DETAILS", "ACTIONS", "AGENDA COVERAGE", "CHAPTERS"} <= set(reading)
+    assert expected <= set(reading)
     for title, prompt in reading.items():
         assert (
             "Lines that begin with [chat] were typed in the meeting chat rather than spoken."
