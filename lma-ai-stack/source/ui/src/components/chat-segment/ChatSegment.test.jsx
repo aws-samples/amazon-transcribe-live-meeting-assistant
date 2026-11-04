@@ -48,7 +48,7 @@ describe('ChatSegmentContent', () => {
     ]);
     expect(container.querySelector('a')).toBeNull();
     expect(screen.getByRole('button', { name: 'Copy https://example.com/deck' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Copy www.example.org/notes' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy https://www.example.org/notes' })).toBeTruthy();
     expect(container.textContent).toBe('Deck (https://example.com/deck). Also www.example.org/notes, thanks');
   });
 

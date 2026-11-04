@@ -11,8 +11,9 @@
  * The message is shown as it was typed, as React text: never rendered as
  * markdown or HTML, so nothing in it is formatted, and no address in it
  * becomes a link to follow. Each web address (see common/chat-links.js) is
- * shown as code with a button that copies it, so a reader who wants it can
- * take it and decide where to paste it.
+ * shown as typed, as code, with a button that copies the address it stands for
+ * (a `www.` one with `https://` before it), so a reader who wants it can take
+ * it and decide where to paste it.
  */
 import React from 'react';
 import PropTypes from 'prop-types';
@@ -55,13 +56,13 @@ export const ChatSegmentContent = ({ text = '', query = '' }) => {
           <span key={piece.start} className="chat-segment-link">
             <CopyToClipboard
               variant="inline"
-              textToCopy={piece.text}
+              textToCopy={piece.address}
               textToDisplay={
                 <code>
                   <Marked text={piece.text} ranges={ranges} offset={piece.start} />
                 </code>
               }
-              copyButtonAriaLabel={`Copy ${piece.text}`}
+              copyButtonAriaLabel={`Copy ${piece.address}`}
               copySuccessText="Address copied"
               copyErrorText="The address could not be copied"
             />
