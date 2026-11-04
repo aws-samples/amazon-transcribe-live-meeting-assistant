@@ -109,7 +109,7 @@ Each attribute's value contains the prompt template text that instructs the mode
 - Use the `{chat_links}` placeholder for the list of links shared in the chat, in the form shown under [Chat and Shared Links](#chat-and-shared-links), or *No links were shared in the chat.* It is likewise used only for a meeting with chat, and a section that names it is handled as a chat section.
 - Use `<br>` for newlines within the prompt template.
 
-In `{transcript}` and `{timed_transcript}`, each chat message also appears among the speech at the time the VP read it, as a line that begins `[chat]`: `[chat] Alice: the deck is on the team site`. Every shipped prompt that reads either of them (**SUMMARY**, **DETAILS**, **ACTIONS**, **AGENDA COVERAGE** and **CHAPTERS**) says so. A message's line breaks are written as ` / ` and its `<` and `>` as `‹` and `›`, so a message stays on its one line and cannot close the `<transcript>` or `<chat>` tags around it.
+In `{transcript}` and `{timed_transcript}`, each chat message also appears among the speech at the time the VP read it, as a line that begins `[chat]`: `[chat] Alice: the deck is on the team site`. Every shipped prompt that reads either of them says so: **SUMMARY**, **DETAILS**, **ACTIONS**, **AGENDA COVERAGE** and **CHAPTERS** in the default templates, and **SUMMARY**, **DETAILS**, **SOAP** and **BIRP** in the healthcare ones. A message's line breaks are written as ` / ` and its `<` and `>` as `‹` and `›`, so a message stays on its one line and cannot close the `<transcript>` or `<chat>` tags around it.
 
 The edits below are all made in the **Transcript Summary** section of **Configuration ▸ Configuration**, which a link can open directly:
 
