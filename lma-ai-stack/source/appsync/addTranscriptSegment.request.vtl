@@ -1,6 +1,13 @@
 #set( $PK = "trs#${ctx.args.input.CallId}" )
 #set( $SK = "s#${ctx.args.input.SegmentId}" )
 
+## The speech channels' names before 0.4.0 are accepted and stored under the
+## current ones, as the Kinesis path does (lma_channels.canonical_channel).
+#if( $ctx.args.input.Channel == "CALLER" )
+  $util.qr($ctx.args.input.put("Channel", "REMOTE"))
+#elseif( $ctx.args.input.Channel == "AGENT" )
+  $util.qr($ctx.args.input.put("Channel", "LOCAL"))
+#end
 #set( $CreatedAt = $util.defaultIfNullOrBlank($ctx.args.input.CreatedAt, $util.time.nowISO8601()) )
 $util.qr($ctx.args.input.put("CreatedAt", ${CreatedAt}))
 

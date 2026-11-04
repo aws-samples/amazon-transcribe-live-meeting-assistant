@@ -558,11 +558,37 @@ async def execute_get_transcript_segments_query(
     return result
 
 
+def latest_speech_end_seconds(segments: List[Any]) -> float:
+    """The latest EndTime, in seconds, of the final speech segments listed.
+
+    This is how long the meeting has run on the transcript's clock. A meeting's
+    final segments arrive in more than one batch, and not in order, so the end
+    time of the one segment a batch carries is not it: written as the duration,
+    the value stored is whichever batch wrote last.
+    """
+    latest = 0.0
+    for segment in segments:
+        if not isinstance(segment, dict) or not is_speech_channel(
+            canonical_channel(segment.get("Channel"))
+        ):
+            continue
+        try:
+            latest = max(latest, float(segment.get("EndTime") or 0.0))
+        except (TypeError, ValueError):
+            continue
+    return latest
+
+
 async def get_aggregated_sentiment(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
+    observed: Optional[Dict[str, float]] = None,
 ) -> Optional[Sentiment]:
-    """The meeting's sentiment aggregation, or None if the segments were unreadable."""
+    """The meeting's sentiment aggregation, or None if the segments were unreadable.
+
+    ``observed``, when given, receives ``latest_end``: the latest end time of
+    the meeting's final speech segments, read from the same list.
+    """
     call_id = message.get("CallId")
     if not call_id:
         error_message = "callid does not exist"
@@ -608,6 +634,8 @@ async def get_aggregated_sentiment(
     )
     if segments is None:
         return None
+    if observed is not None:
+        observed["latest_end"] = latest_speech_end_seconds(segments)
 
     for segment in segments:
         # The list's element type is nullable, and a null entry carries nothing
@@ -673,13 +701,21 @@ async def get_aggregate_call_data(
         error_message = "callid does not exist"
         raise TypeError(error_message)
 
-    total_duration = float(message.get("EndTime", 0.0)) * 1000
-
-    sentiment = await get_aggregated_sentiment(message=message, appsync_session=appsync_session)
+    observed: Dict[str, float] = {}
+    sentiment = await get_aggregated_sentiment(
+        message=message, appsync_session=appsync_session, observed=observed
+    )
     if sentiment is None:
         # The scored segments could not be read. Writing the aggregation anyway
         # would replace the stored one with an empty aggregation.
         return None
+
+    # The meeting's duration so far: the latest end of all its final speech
+    # segments, which the sentiment read above returned, or of this segment
+    # when it is later still (it may not be readable yet).
+    total_duration = (
+        max(float(message.get("EndTime", 0.0) or 0.0), observed.get("latest_end", 0.0)) * 1000
+    )
 
     updated_at = message.get("UpdatedAt", datetime.utcnow().astimezone().isoformat())
     event_type = message.get("EventType", "")

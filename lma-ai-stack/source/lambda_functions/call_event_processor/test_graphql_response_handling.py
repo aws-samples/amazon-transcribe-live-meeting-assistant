@@ -1272,3 +1272,51 @@ def test_a_failed_summary_does_not_bring_the_transcript_deletion_forward(
         monkeypatch,
     )
     assert _deletion_payloads(deletion_function) == []
+
+
+# ── the meeting's duration ───────────────────────────────────────────────────
+
+
+def test_the_duration_is_the_latest_final_speech_segment_end_not_this_segments(schema):
+    """A batch carrying an early segment must not shorten the stored duration.
+
+    Final segments arrive out of order across batches; the duration written is
+    the latest end of every final speech segment read back, so a late batch with
+    an early segment still writes the meeting's full length so far.
+    """
+    response = {
+        "getTranscriptSegmentsWithSentiment": {
+            "TranscriptSegmentsWithSentiment": [
+                {"Channel": "REMOTE", "SegmentId": "a", "StartTime": 0.0, "EndTime": 30.0},
+                {"Channel": "LOCAL", "SegmentId": "b", "StartTime": 1000.0, "EndTime": 1036.5},
+                {
+                    "Channel": "AGENT_ASSISTANT",
+                    "SegmentId": "c",
+                    "StartTime": 2000.0,
+                    "EndTime": 2001.0,
+                },
+            ]
+        }
+    }
+    session = FakeSession(schema, response)
+    aggregation = run(
+        cep.get_aggregate_call_data(
+            message={"CallId": "call-1", "EndTime": 30.0, "EventType": "ADD_TRANSCRIPT_SEGMENT"},
+            appsync_session=session,
+        )
+    )
+    # The assistant's row is not speech in the meeting and does not count.
+    assert aggregation["TotalConversationDurationMillis"] == 1036500.0
+
+
+def test_the_duration_includes_a_segment_not_yet_readable(schema):
+    """The segment this record carries may be later than anything read back."""
+    response = {"getTranscriptSegmentsWithSentiment": {"TranscriptSegmentsWithSentiment": []}}
+    session = FakeSession(schema, response)
+    aggregation = run(
+        cep.get_aggregate_call_data(
+            message={"CallId": "call-1", "EndTime": 12.25, "EventType": "ADD_TRANSCRIPT_SEGMENT"},
+            appsync_session=session,
+        )
+    )
+    assert aggregation["TotalConversationDurationMillis"] == 12250.0
