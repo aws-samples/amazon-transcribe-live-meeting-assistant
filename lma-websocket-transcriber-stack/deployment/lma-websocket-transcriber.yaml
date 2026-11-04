@@ -413,8 +413,11 @@ Parameters:
   # Task count and auto scaling.
   #
   # Running more than one task requires that any client connection for a meeting
-  # can be served by any task. That holds for audio: a meeting uses a single
-  # WebSocket connection for its lifetime. It does not hold when
+  # can be served by any task. That mostly holds for audio: a meeting uses a
+  # single WebSocket connection unless it drops, and a client that reconnects
+  # continues the meeting only on the task that held it (another task starts a
+  # second session for it; see docs/websocket-streaming-api.md, Reconnection).
+  # It does not hold when
   # EnableVideoRecording is true, because the desktop capture app opens the
   # video stream as a *second* WebSocket connection, and the task that receives
   # it can only attach it to an audio session it is hosting itself — the load

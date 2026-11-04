@@ -28,6 +28,7 @@ import {
 import { voiceAssistant } from './voice-assistant.js';
 import { meterTranscribeRequest, pcmSeconds } from './metering.js';
 import { RosterTimeline } from './roster-timeline.js';
+import { recordedAudio } from './recorded-audio.js';
 import { noteParticipantSeen } from './consent-roster.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
@@ -305,11 +306,12 @@ export class TranscriptionService {
         });
 
         // The recording's only writer, always fed from the combined capture.
-        // Gated on details.start for the same reason the silence branch below
-        // is — nothing before the meeting starts belongs in the recording.
+        // While capture is off it records silence of the same length, as the
+        // engines are sent, so the recording stays on the transcript's clock
+        // through a pause (see recorded-audio.ts).
         const record = (chunk: Buffer): void => {
-            if (details.start && recordingStream) {
-                recordingStream.write(chunk);
+            if (recordingStream) {
+                recordingStream.write(recordedAudio(chunk, details.start));
             }
         };
 

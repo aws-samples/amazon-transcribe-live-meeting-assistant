@@ -9,6 +9,8 @@ process.env['ASR_RETRY_BACKOFF_MS'] = '20';
 process.env['ASR_MIN_BACKOFF_MS'] = '20';
 process.env['ASR_READY_TIMEOUT_MS'] = '5000';
 process.env['ASR_FINISH_TIMEOUT_MS'] = '500';
+// Five seconds of 16 kHz mono PCM, so a test can overflow the backlog cheaply.
+process.env['ASR_MAX_PENDING_BYTES'] = String(16000 * 2 * 5);
 process.env['AWS_REGION'] = process.env['AWS_REGION'] || 'us-east-1';
 // A non-empty ARN so invokeLauncher actually calls the (patched) Lambda client.
 process.env['ASR_LAUNCHER_FUNCTION_ARN'] = 'arn:aws:lambda:us-east-1:000000000000:function:fake';
@@ -128,7 +130,7 @@ const newSession = (
         channelId,
         { endpointUrl: asr.url },
         new SpeakerNameRegistry(),
-        { diarize, maxSpeakers: 0 },
+        { diarize, maxSpeakers: 0, runTag: 'r1' },
         async (segment) => {
             rows.push(segment);
         }
@@ -164,7 +166,7 @@ test('a partial and its final land on one transcript row', async () => {
     await asr.close();
 
     assert.equal(rows[0].SegmentId, rows[1].SegmentId);
-    assert.equal(rows[0].SegmentId, 'ch_1-g0-s0');
+    assert.equal(rows[0].SegmentId, 'ch_1-r1-g0-s0');
     assert.equal(rows[0].IsPartial, true);
     assert.equal(rows[0].Transcript, 'hello');
     assert.equal(rows[1].IsPartial, false);
@@ -207,12 +209,12 @@ test('a second voice on a channel gets its own suffix', async () => {
     );
     assert.deepEqual(
         rows.map((row) => row.SegmentId),
-        ['ch_0-g0-s0', 'ch_0-g0-s1', 'ch_0-g0-s2']
+        ['ch_0-r1-g0-s0', 'ch_0-r1-g0-s1', 'ch_0-r1-g0-s2']
     );
     assert.equal(rows[0].Channel, 'REMOTE');
 });
 
-test('a reconnect keeps segment ids unique and the timeline monotonic', async () => {
+test('a reconnect keeps segment ids unique and continues from the audio sent', async () => {
     const asr = await startFakeAsr((socket, index) => {
         socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
             if (isBinary) {
@@ -224,6 +226,7 @@ test('a reconnect keeps segment ids unique and the timeline monotonic', async ()
             send(socket, ready(true));
             if (index === 0) {
                 // The engine's own clock; it restarts from 0 on the next connect.
+                // Its last word ends at 3 s, a second before the audio does.
                 send(socket, { type: 'final', segment: 0, text: 'before', start: 1, end: 3, speaker: 'spk_0' });
                 // terminate(), not close(): an abrupt drop is what a MicroVM
                 // session loss actually looks like to the transcriber.
@@ -236,16 +239,54 @@ test('a reconnect keeps segment ids unique and the timeline monotonic', async ()
 
     const rows: TranscriptSegmentRecord[] = [];
     const session = newSession(asr, rows);
+    // Four seconds of audio before the first connection opens: its backlog.
+    for (let i = 0; i < 40; i += 1) {
+        session.pushPcm(Buffer.alloc(3200, 1));
+    }
     await session.start();
     await waitFor(() => rows.length === 2);
     await session.finish();
     await asr.close();
 
     assert.equal(asr.connections, 2);
-    assert.equal(rows[0].SegmentId, 'ch_1-g0-s0');
-    assert.equal(rows[1].SegmentId, 'ch_1-g1-s0');
-    assert.equal(rows[1].StartTime, 3.5);
-    assert.equal(rows[1].EndTime, 4.5);
+    assert.equal(rows[0].SegmentId, 'ch_1-r1-g0-s0');
+    assert.equal(rows[1].SegmentId, 'ch_1-r1-g1-s0');
+    // After the four seconds the first connection was sent, where the
+    // recording has it; the last word's end (3 s) would put it a second early.
+    assert.equal(rows[1].StartTime, 4.5);
+    assert.equal(rows[1].EndTime, 5.5);
+});
+
+test('audio dropped from a full backlog moves the clock on, so later rows stay on the recording', async () => {
+    const asr = await startFakeAsr((socket) => {
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (isBinary) {
+                return;
+            }
+            if ((JSON.parse(data.toString()) as { type: string }).type === 'config') {
+                send(socket, ready(false));
+                send(socket, { type: 'final', segment: 0, text: 'kept', start: 0.5, end: 1 });
+            }
+        });
+    });
+
+    const rows: TranscriptSegmentRecord[] = [];
+    const session = newSession(asr, rows);
+    // Six seconds before the connection opens, against a five-second backlog:
+    // the oldest second goes, and the engine hears the last five.
+    for (let i = 0; i < 60; i += 1) {
+        session.pushPcm(Buffer.alloc(3200, i));
+    }
+    await session.start();
+    await waitFor(() => rows.length === 1);
+    await session.finish();
+    await asr.close();
+
+    const heard = Buffer.concat(asr.audio);
+    assert.equal(heard.length, 16000 * 2 * 5);
+    assert.equal(heard[0], 10, 'the backlog keeps the newest audio');
+    assert.equal(rows[0].StartTime, 1.5);
+    assert.equal(rows[0].EndTime, 2);
 });
 
 test('audio pushed before the session connects is buffered, not dropped', async () => {
