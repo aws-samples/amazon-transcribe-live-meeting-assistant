@@ -105,6 +105,13 @@ export const VIRTUAL_PARTICIPANT_LIMITED_SETTINGS: readonly SettingTarget[] = [
  * Participant redacts only en-US.
  */
 export const CONTENT_REDACTION_VARIABLE = 'ENABLE_CONTENT_REDACTION';
+/**
+ * The redaction flag as saved, whatever the language: the meeting chat is not
+ * added to the transcript while it is on (meeting-chat.ts), because chat text
+ * is not redacted in any language. Not set when the configuration holds no
+ * value; its reader then falls back to CONTENT_REDACTION_VARIABLE.
+ */
+export const CONTENT_REDACTION_REQUESTED_VARIABLE = 'CONTENT_REDACTION_REQUESTED';
 const REDACTED_LANGUAGES: ReadonlySet<string> = new Set(['en-US']);
 
 export interface AppliedSettings {
@@ -187,6 +194,8 @@ export const applySections = (sections: Sections, env: Record<string, string | u
         const language = env['TRANSCRIBE_LANGUAGE_CODE'] || 'en-US';
         env[CONTENT_REDACTION_VARIABLE] = String(redactionFlag && REDACTED_LANGUAGES.has(language));
         applied.push(CONTENT_REDACTION_VARIABLE);
+        env[CONTENT_REDACTION_REQUESTED_VARIABLE] = String(redactionFlag);
+        applied.push(CONTENT_REDACTION_REQUESTED_VARIABLE);
     }
     return { applied, notes };
 };

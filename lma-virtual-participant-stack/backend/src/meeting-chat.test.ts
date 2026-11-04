@@ -39,6 +39,7 @@ import {
     UNKNOWN_CHAT_SENDER,
     captureMeetingChatSetting,
     chatTranscript,
+    contentRedactionRequested,
     isLmaChatCommand,
     noteSentChat,
     ownChatLedger,
@@ -208,7 +209,7 @@ test("a message under the VP's own name, or shown as You, is not added", () => {
 });
 
 test('every handler that adds chat records what it posts, and no handler keeps or logs chat any more', () => {
-    for (const file of ['zoom.ts', 'zoom-sdk.ts', 'teams.ts', 'teams-sdk.ts', 'webex.ts', 'google-meet.ts']) {
+    for (const file of ['zoom.ts', 'zoom-sdk.ts', 'teams.ts', 'teams-sdk.ts', 'google-meet.ts']) {
         const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
         const send = source.indexOf('private async sendMessages(');
         assert.ok(send >= 0, `${file} has no sendMessages`);
@@ -222,8 +223,16 @@ test('every handler that adds chat records what it posts, and no handler keeps o
         assert.ok(!source.includes('details.attachments'), `${file} still keeps chat attachments`);
         assert.ok(!source.includes("'New message:'"), `${file} still logs chat text`);
     }
-    // Amazon Chime is left out of the capture.
+    // Amazon Chime is left out of the capture, and Webex is only observed.
     assert.ok(!readFileSync(new URL('../src/chime.ts', import.meta.url), 'utf8').includes('meetingChat'));
+    const webex = readFileSync(new URL('../src/webex.ts', import.meta.url), 'utf8');
+    assert.ok(!webex.includes('meetingChat.offer('), 'Webex chat must not be added to the transcript');
+    assert.ok(webex.includes('meetingChat.observe({'), 'Webex chat is no longer observed for the diagnostics');
+    // No handler logs the text it posts.
+    for (const file of ['zoom.ts', 'zoom-sdk.ts', 'teams.ts', 'teams-sdk.ts', 'webex.ts', 'google-meet.ts', 'chime.ts']) {
+        const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
+        assert.ok(!/log\.\w+\('Sent messages:', messages\)/.test(source), `${file} logs the messages it posts`);
+    }
 });
 
 // ---------------------------------------------------------------------------
@@ -298,6 +307,32 @@ test('nothing is added with the setting off, or while the VP redacts its transcr
     h.state.redacting = true;
     assert.equal(h.offer({ id: 'b' }), 'disabled');
     assert.equal(h.sent.length, 0);
+});
+
+test('redaction stops the capture whatever the language: the saved flag is read, not the en-US one', () => {
+    // Saved on, meeting in Spanish: the VP does not redact its speech, but the chat stays out.
+    assert.equal(contentRedactionRequested({ CONTENT_REDACTION_REQUESTED: 'true', ENABLE_CONTENT_REDACTION: 'false' }), true);
+    assert.equal(contentRedactionRequested({ CONTENT_REDACTION_REQUESTED: 'false', ENABLE_CONTENT_REDACTION: 'false' }), false);
+    // No saved value (the configuration could not be read): the task's variable.
+    assert.equal(contentRedactionRequested({ ENABLE_CONTENT_REDACTION: 'true' }), true);
+    assert.equal(contentRedactionRequested({}), false);
+});
+
+test('a platform the capture does not cover is observed for the diagnostics and nothing is added', () => {
+    setLogLevel('debug');
+    const captured = captureLogs();
+    try {
+        const h = harness();
+        h.capture.observe({ platform: 'webex', text: 'just between us', sender: 'Bo Chen', id: 'w1', audience: 'direct' });
+        assert.equal(h.sent.length, 0);
+        assert.equal(h.capture.capturedCount, 0);
+        const lines = captured.messages().join('\n');
+        assert.match(lines, /platform=webex outcome=not-covered sender=yes id=yes time=no recipient=direct links=0/);
+        assert.ok(!lines.includes('between us') && !lines.includes('Bo Chen'), lines);
+    } finally {
+        captured.restore();
+        setLogLevel(undefined);
+    }
 });
 
 test('the setting is on unless the configuration turned it off', () => {

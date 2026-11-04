@@ -90,6 +90,21 @@ test('redaction is requested only for en-US, as the template derives it', () => 
     assert.equal(spanish['ENABLE_CONTENT_REDACTION'], 'false');
 });
 
+test('the redaction flag is also kept as saved, whatever the language, for the meeting chat', () => {
+    const spanish = started();
+    applySections({ transcription: { contentRedactionEnabled: true, languageCode: 'es-US' } }, spanish);
+    assert.equal(spanish['ENABLE_CONTENT_REDACTION'], 'false');
+    assert.equal(spanish['CONTENT_REDACTION_REQUESTED'], 'true');
+
+    const off = started();
+    applySections({ transcription: { contentRedactionEnabled: false } }, off);
+    assert.equal(off['CONTENT_REDACTION_REQUESTED'], 'false');
+
+    const unset = started();
+    applySections({ transcription: {} }, unset);
+    assert.equal(unset['CONTENT_REDACTION_REQUESTED'], undefined);
+});
+
 test('options that cannot be used together give way, while the page redaction still applies', () => {
     const env = started();
     const result = applySections(

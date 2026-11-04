@@ -454,7 +454,7 @@ export default class GoogleMeet {
                     await new Promise((r) => setTimeout(r, 300));
                 }
             }
-            log.info('Sent messages:', messages);
+            log.info(`Sent ${messages.length} chat message(s).`);
         } catch (e) {
             log.warn('sendMessages failed (non-fatal — VP remains in meeting):', e);
         }

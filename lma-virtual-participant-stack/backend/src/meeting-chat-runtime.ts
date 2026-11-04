@@ -13,13 +13,14 @@
  * transcription service.
  */
 import { details } from './details.js';
-import { MeetingChatCapture, captureMeetingChatSetting } from './meeting-chat.js';
+import { MeetingChatCapture, captureMeetingChatSetting, contentRedactionRequested } from './meeting-chat.js';
 import { transcriptionService } from './scribe.js';
 import { kinesisStreamManager } from './kinesis-stream.js';
 
 export const meetingChat = new MeetingChatCapture({
     settingOn: () => captureMeetingChatSetting(),
-    redacting: () => details.enableContentRedaction,
+    // The saved flag, whatever the language; see contentRedactionRequested.
+    redacting: () => contentRedactionRequested(),
     capturing: () => details.start,
     meetingStarted: () => kinesisStreamManager.meetingStarted,
     // The clock the speech segments and the key frames are on.

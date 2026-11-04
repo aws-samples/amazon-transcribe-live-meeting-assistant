@@ -96,7 +96,7 @@
       "order": 9,
       "type": "boolean",
       "title": "Add the meeting chat to the transcript",
-      "description": "On: the messages participants send to everyone in the meeting chat are added to the meeting's transcript, each under its sender's name, at the time the Virtual Participant read it. Not added: LMA chat commands (an \"LMA ask\" question is added), consent replies, the Virtual Participant's own messages, private messages where the platform shows that a message is private, and anything sent while the transcript is paused or consent is withheld. Nothing is added while the Virtual Participant redacts its transcript (Redact personal information in the Amazon Transcribe section), whatever this says. Amazon Chime meetings are not covered. Chat messages expire with the transcript and are deleted with it."
+      "description": "On: the messages participants send to everyone in the meeting chat are added to the meeting's transcript, each under its sender's name, at the time the Virtual Participant read it. Not added: LMA chat commands (an \"LMA ask\" question is added), consent replies, the Virtual Participant's own messages, private messages, and anything sent while the transcript is paused or consent is withheld. Nothing is added while Redact personal information in the Amazon Transcribe section is on, in any language, whatever this says. Zoom, Microsoft Teams and Google Meet meetings are covered; Webex and Amazon Chime meetings are not. Chat messages expire with the transcript and are deleted with it."
     }
   },
   "additionalProperties": false

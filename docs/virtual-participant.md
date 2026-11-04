@@ -701,7 +701,7 @@ Notes:
 ## Meeting Chat in the Transcript
 
 The VP adds the messages participants send to everyone in the meeting chat to
-the meeting's transcript. Each message becomes one transcript line on its own
+the meeting's transcript, on Zoom, Microsoft Teams and Google Meet. Each message becomes one transcript line on its own
 channel, `MEETING_CHAT`, with the sender's display name as the speaker (or
 *Unknown sender* where the platform does not show one) and the message as it
 was typed. Its time is the point in the meeting at which the VP read the
@@ -723,21 +723,24 @@ What is not added:
   the answer the VP posts is not;
 - replies to a consent notice, and everything the VP itself posts (its
   introduction, status messages, answers and help);
-- private messages, where the platform shows that a message is private:
-  on Zoom (the browser join and the Meeting SDK join), a message sent to
-  anyone but everyone. The Webex chat this reads does not show which messages
-  are private, so on Webex a private message to the VP is added like any
-  other. Teams and Google Meet meeting chats have no private messages;
+- private messages: on Zoom (the browser join and the Meeting SDK join), a
+  message sent to anyone but everyone. Teams and Google Meet meeting chats
+  have no private messages;
 - what the chat panel already held when the VP first read it (the Teams
   browser join reads the whole panel once it is in), and anything sent while the
   transcript is paused (`LMA pause`) or while consent is withheld. Those
   messages are not kept for later: resuming does not add them;
-- everything while the VP redacts its transcript (**Amazon Transcribe ›
-  Redact personal information**), because chat text is not redacted;
+- everything while **Amazon Transcribe › Redact personal information** is on,
+  whatever the meeting's language, because chat text is not redacted;
 - more than 60 messages a minute, or 3,000 in a meeting;
 - edits and deletions made after a message was sent: the line keeps the text
   the VP first read;
-- the chat of Amazon Chime meetings.
+- the chat of Webex and Amazon Chime meetings. The Webex chat the VP reads
+  does not reliably show which messages are private, so Webex is left out
+  until it can be told apart. The VP still reads Webex chat for the chat
+  commands, and writes the debug line below for it with
+  `outcome=not-covered`, so a live meeting shows whether a private message
+  can be recognised (`recipient=direct`).
 
 Chat lines are stored with the meeting's transcript, expire with it (**Days
 to keep transcript segments**), and are deleted with it, including by
@@ -755,7 +758,7 @@ measured in a live meeting yet:
 | Zoom (Meeting SDK) | From the SDK | From the SDK, where it sends one | Left out, where the SDK names the receiver |
 | Teams (browser) | The message's author, where the row shows it | The message element's id, else the text | None in a meeting chat |
 | Teams (Azure Communication Services) | From the chat service | From the chat service | None in a meeting chat |
-| Webex | From the message's row | The message element's id, where there is one | Not told apart |
+| Webex | Not added to the transcript (see above) | | |
 | Google Meet | From the message group's header | Meet's message id | None in a meeting chat |
 
 With the stack's `LogLevel` at `DEBUG`, the VP writes one line per chat message

@@ -13,7 +13,6 @@ import { allChatHelpMessages, chatHelpMessages } from './chat-help.js';
 import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { toolbarPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
-import { noteSentChat } from './meeting-chat.js';
 import { meetingChat } from './meeting-chat-runtime.js';
 import { simliAvatar } from './simli-avatar.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
@@ -243,8 +242,6 @@ export default class Webex {
         messages: string[],
         isEnterprise: boolean | null = false
     ): Promise<void> {
-        // So the meeting chat capture knows these when it reads them back.
-        noteSentChat(messages);
         // Cap the input lookup so a stale/missing chat editor selector can't hang
         // the caller forever (the goodbye-on-exit path is time-sensitive).
         const messageElement = await frame.waitForSelector(
@@ -862,6 +859,7 @@ export default class Webex {
             message: string,
             messageId?: string | null,
             links?: string[],
+            privateMark?: boolean,
         ) => {
             const sender = normalizeWebexSender(rawSender);
             // Never act on, or transcribe, our own chat messages. The sender is
@@ -941,10 +939,19 @@ export default class Webex {
                 // Restart transcription if needed
                 transcriptionService.startTranscription();
             } else {
-                // Meeting chat, for the transcript (meeting-chat.ts decides).
-                // Webex's private messages are not told apart from the rest
-                // in the panel markup this reads, so the recipient is unknown.
-                meetingChat.offer({ platform: 'webex', text: message, sender, id: messageId, links });
+                // Not added to the transcript: the panel markup this reads does
+                // not reliably show which messages are private, so Webex is
+                // left out of the meeting chat capture. Observed for the
+                // capture's debug line only, so a live meeting shows whether a
+                // private message can be told apart (recipient=direct).
+                meetingChat.observe({
+                    platform: 'webex',
+                    text: message,
+                    sender,
+                    id: messageId,
+                    links,
+                    audience: privateMark ? 'direct' : undefined,
+                });
             }
         });
 
@@ -1104,7 +1111,15 @@ export default class Webex {
                                 const links = Array.from(bodyEl.querySelectorAll('a[href]'))
                                     .map((a) => (a as HTMLAnchorElement).href)
                                     .filter(Boolean);
-                                (window as any).messageChange(sender ?? null, message, messageId, links);
+                                // Whether the row marks the message as private,
+                                // read from the row outside the body (ASSUMPTION,
+                                // unconfirmed: Webex labels one "Privately" or
+                                // "Private message"). Diagnostic only.
+                                const rowText = (scope?.textContent || '').replace(message, '');
+                                const privateMark =
+                                    /\bprivate(ly)?\b|direct message/i.test(rowText) ||
+                                    !!scope?.querySelector('[aria-label*="private" i], [title*="private" i]');
+                                (window as any).messageChange(sender ?? null, message, messageId, links, privateMark);
                             }
                         }
                     }

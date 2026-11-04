@@ -8,7 +8,8 @@
  * The meeting chat, added to the transcript.
  *
  * Every platform handler reads the meeting's chat for the LMA chat commands.
- * After a message has been through the commands, the handler offers it here,
+ * After a message has been through the commands, the Zoom, Teams and Google
+ * Meet handlers offer it here,
  * and a message participants sent to everyone becomes one transcript segment
  * on the MEETING_CHAT channel: the sender as the speaker, the text as the
  * transcript, and as its time the point on the transcript timeline at which
@@ -29,11 +30,16 @@
  * - a private message, where the platform shows a message is private;
  * - the chat that was already in the panel when the VP first read it;
  * - everything while the setting is off (`virtual_participant.captureMeetingChat`)
- *   or the VP redacts its transcript, while the transcript is paused or
+ *   or content redaction is turned on (in any language), while the transcript is paused or
  *   consent is withheld (`details.start`), and before the meeting's START event
  *   has been sent (there is no meeting record to add it to yet);
  * - more than `MAX_PER_MINUTE` messages in a minute, or `MAX_PER_MEETING` in
  *   the meeting.
+ *
+ * Webex and Amazon Chime are not covered. Webex's chat panel does not show
+ * which messages are private, so its handler only calls `observe`, which
+ * writes the diagnostic line and adds nothing; the Amazon Chime handler offers
+ * nothing.
  *
  * A message that is not added is not kept for later either: one read while the
  * transcript was paused stays out after it resumes, because it is marked seen
@@ -124,7 +130,9 @@ export type ChatOutcome =
     | 'disabled'
     | 'paused'
     | 'not-started'
-    | 'flood';
+    | 'flood'
+    /** A platform the capture does not cover; read for the diagnostics only. */
+    | 'not-covered';
 
 /**
  * Whether a chat message is one of the LMA chat commands, in any state of the
@@ -225,6 +233,20 @@ export function captureMeetingChatSetting(env: Record<string, string | undefined
     return CAPTURE_MEETING_CHAT_DEFAULT;
 }
 
+/**
+ * Whether content redaction is turned on, as saved, whatever the language.
+ *
+ * The Virtual Participant redacts only en-US speech (ENABLE_CONTENT_REDACTION
+ * is the flag combined with the language), but chat text is not redacted in any
+ * language, so the chat stays out of the transcript whenever the flag is on.
+ * stack-settings.ts sets CONTENT_REDACTION_REQUESTED from the saved flag; when
+ * the configuration held no value, the task's derived variable is all there is.
+ */
+export function contentRedactionRequested(env: Record<string, string | undefined> = process.env): boolean {
+    const raw = env['CONTENT_REDACTION_REQUESTED'] ?? env['ENABLE_CONTENT_REDACTION'] ?? '';
+    return raw.trim().toLowerCase() === 'true';
+}
+
 /** The link addresses worth adding: http and https only, not already in the text, each once. */
 export function linksToAdd(text: string, links: readonly string[] | undefined): string[] {
     const out: string[] = [];
@@ -277,7 +299,7 @@ export function chatSegmentId(platform: ChatPlatform, id: string | null | undefi
 export interface MeetingChatDeps {
     /** Whether the setting is on; see `captureMeetingChatSetting`. */
     settingOn: () => boolean;
-    /** Whether the VP redacts its transcript; chat is not added then. */
+    /** Whether content redaction is turned on, in any language; chat is not added then. */
     redacting: () => boolean;
     /** Whether the meeting is being captured now (`details.start`). */
     capturing: () => boolean;
@@ -323,6 +345,16 @@ export class MeetingChatCapture {
         const outcome = this.decide(chat);
         this.diagnose(chat, outcome);
         return outcome;
+    }
+
+    /**
+     * For a platform the capture does not cover (Webex): writes only the
+     * diagnostic line, so a live run shows what that platform's chat gives
+     * (in particular whether its private messages can be told apart). Never
+     * adds anything.
+     */
+    observe(chat: IncomingChat): void {
+        this.diagnose(chat, 'not-covered');
     }
 
     private decide(chat: IncomingChat): ChatOutcome {
