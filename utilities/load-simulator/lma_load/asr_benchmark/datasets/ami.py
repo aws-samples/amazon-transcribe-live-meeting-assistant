@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import json
 import re
 import tempfile
@@ -51,7 +52,7 @@ def headset_url(meeting: str, channel: str) -> str:
 def read_words(xml: str) -> list[tuple[float, float, str]]:
     words: list[tuple[float, float, str]] = []
     for start, end, attrs, text in WORD_RE.findall(xml):
-        text = text.strip()
+        text = html.unescape(text).strip()
         if not text:
             continue
         if 'punc="true"' in attrs and words:

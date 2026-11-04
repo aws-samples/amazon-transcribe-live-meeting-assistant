@@ -29,6 +29,11 @@ def test_words_keep_their_punctuation_and_skip_other_annotations() -> None:
     assert ami.read_words(WORDS) == [(1.0, 1.4, "Hello,"), (1.5, 1.9, "there"), (4.0, 4.3, "Okay.")]
 
 
+def test_character_entities_in_the_annotations_are_decoded() -> None:
+    xml = '<w nite:id="x1" starttime="1.0" endtime="1.4">couldn&#39;t</w>'
+    assert ami.read_words(xml) == [(1.0, 1.4, "couldn't")]
+
+
 def test_words_are_joined_into_utterances_until_a_pause() -> None:
     assert ami.utterances(ami.read_words(WORDS)) == [
         (1.0, 1.9, "Hello, there"),
