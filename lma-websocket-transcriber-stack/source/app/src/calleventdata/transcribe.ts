@@ -328,6 +328,26 @@ export const openAudioTap = (source: stream.Readable): AudioTap => {
 };
 
 /**
+ * Resolves true once the meeting's audio stream holds audio for a request, or
+ * false if the meeting ends first. A request opened with no audio coming (a session held for its
+ * client to reconnect) is closed by Amazon Transcribe after its idle timeout
+ * and billed at the request minimum, so it is not opened until there is audio.
+ */
+export const waitForAudio = async (
+    source: stream.Readable,
+    isEnded: () => boolean,
+    pollMs = 200
+): Promise<boolean> => {
+    while (source.readableLength === 0) {
+        if (isEnded() || source.destroyed) {
+            return false;
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+    return !isEnded();
+};
+
+/**
  * Where the next Transcribe request's clock starts on the meeting's timeline:
  * this request's start plus the duration of the audio it took. Transcribe's
  * item times restart at 0 with every request, and the audio recording holds
@@ -482,7 +502,22 @@ export const startTranscribe = async (
             return;
         }
 
+        // Audio waits in the shared stream between requests, so this reads its
+        // buffer without taking anything from it.
+        const waitStartMs = Date.now();
+        if (audioInputStream && !(await waitForAudio(audioInputStream, () => socketCallMap.ended))) {
+            server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Call ended while waiting for audio; not (re)starting transcription session.`);
+            return;
+        }
+        if (Date.now() - waitStartMs >= 1000) {
+            server.log.info(
+                `[TRANSCRIBING]: [${callMetaData.callId}] - Audio resumed after ${Date.now() - waitStartMs} ms; opening the Transcribe request.`
+            );
+        }
         const attemptStartMs = Date.now();
+        // This attempt's own reader of the shared audio stream. Opened before
+        // the request so its byte count covers everything this attempt takes.
+        const tap = audioInputStream ? openAudioTap(audioInputStream) : undefined;
         // Audio bytes this attempt's request carried, and whether the request was
         // accepted at all: Transcribe bills an accepted request for the seconds of
         // audio it was sent (15-second minimum), and nothing for one it refused.
@@ -510,9 +545,6 @@ export const startTranscribe = async (
         // Highest absolute segment EndTime observed during this attempt, for the
         // reconnect log line only; the next offset comes from the audio taken.
         let observedMaxEndTime = timeOffsetSeconds;
-        // This attempt's own reader of the shared audio stream. Opened before
-        // the request so its byte count covers everything this attempt takes.
-        const tap = audioInputStream ? openAudioTap(audioInputStream) : undefined;
         const nextOffset = (): number =>
             nextRequestTimeOffset(timeOffsetSeconds, tap?.close() ?? 0, callMetaData.samplingRate);
         // Recompute retryCount for the *next* attempt: reset to 0 if this
