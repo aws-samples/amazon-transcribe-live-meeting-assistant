@@ -137,14 +137,18 @@ assistant is a panel beside the tabs, on every tab; see
 #### Duration
 
 The stored duration (`TotalConversationDurationMillis`) is written as transcript
-segments are processed, and holds the end time of whichever final segment was
-written last rather than the latest one, so it can be shorter than the meeting.
-The page therefore shows the longer of that value and the end of the last final
-transcript segment it has loaded; when the two differ, the **Details** tab gives
-the stored value as well. Both are measured on the transcript's clock, from when
-transcription started, so a recording that began before transcription can be
-longer than either.
-The meeting list and the MCP tools still read the stored value.
+segments are processed. For meetings recorded with this version or later it is
+the latest end time of all the meeting's final speech segments, and the meeting
+list, the summary download and the MCP tools read it. Meetings recorded with an
+earlier version keep the value they were stored with, which is the end time of
+whichever final segment was written last rather than the latest one, and can be
+shorter than the meeting.
+
+So that those older meetings also read correctly, the page shows the longer of
+the stored value and the end of the last final transcript segment it has loaded;
+when the two differ, the **Details** tab gives the stored value as well. Both are
+measured on the transcript's clock, from when transcription started, so a
+recording that began before transcription can be longer than either.
 
 ### Overview tab
 

@@ -27,11 +27,17 @@ export const MEET_HOST = 'meet.google.com';
 
 /** A Meet meeting code: three, four and three lower-case letters. */
 const CODE_PATTERN = /^([a-z]{3})-?([a-z]{4})-?([a-z]{3})$/;
+/**
+ * A meet.google.com link to a meeting code, with or without the scheme, and
+ * including the /meet/<code> form Meet redirects a guest that is not signed in
+ * to (observed live), so a link copied from the address bar can carry either.
+ */
+const LINK_PATTERN = /^(?:https?:\/\/)?meet\.google\.com\/(?:meet\/)?([a-z]{3}-?[a-z]{4}-?[a-z]{3})\/?(?:[?#].*)?$/;
 
-/** A meeting the VP can open: its canonical code when it has one, and the URL to open. */
+/** A meeting the VP can open: its canonical code, and the URL to open. */
 export interface GoogleMeetMeeting {
-    /** `abc-defg-hij`, or null for a Meet URL that is not a plain meeting code (a lookup link). */
-    code: string | null;
+    /** `abc-defg-hij`. */
+    code: string;
     /** The page the VP opens, always on https://meet.google.com and with `hl=en`. */
     url: string;
 }
@@ -40,53 +46,26 @@ export interface GoogleMeetMeeting {
  * Reduce what a user typed or pasted to a Meet meeting, or null when it is not one.
  *
  * Accepted: a bare code with or without hyphens and in any case (`abc-defg-hij`,
- * `ABCDEFGHIJ`), and a link on meet.google.com with or without the scheme
- * (`https://meet.google.com/abc-defg-hij?authuser=0`). Whitespace anywhere is
- * ignored, as the create form strips it. A link on any other host, including
- * one whose name merely starts with meet.google.com, is not a Meet meeting.
- * A meet.google.com link whose path is not a code (`/lookup/<name>`, which
- * Workspace calendar invitations have used) is accepted as a URL with no code.
+ * `ABCDEFGHIJ`), and a link to one on meet.google.com with or without the
+ * scheme (`https://meet.google.com/abc-defg-hij?authuser=0`). Whitespace
+ * anywhere is ignored, as the create form strips it. A link on any other host,
+ * with a port or credentials, or whose path is not a code is refused. That
+ * includes a `/lookup/<name>` link: it is a Meet meeting nickname, which Google
+ * lets only signed-in members of the organiser's Workspace use, and the VP
+ * joins as a guest.
+ *
+ * The same rule is applied by the create form, the invitation parser, the SDK
+ * and the meeting assistant's tools; each runs the shared table in
+ * test-fixtures/google-meet-inputs.json.
  */
 export function parseGoogleMeetMeeting(input: string | null | undefined): GoogleMeetMeeting | null {
-    const raw = (input || '').replace(/\s+/g, '');
-    if (!raw) return null;
-
-    const bare = CODE_PATTERN.exec(raw.toLowerCase());
-    if (bare) {
-        const code = `${bare[1]}-${bare[2]}-${bare[3]}`;
-        return { code, url: meetUrlFor(code) };
-    }
-
-    let parsed: URL;
-    try {
-        parsed = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`);
-    } catch {
-        return null;
-    }
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
-    if (parsed.hostname.toLowerCase() !== MEET_HOST) return null;
-    if (parsed.username || parsed.password || (parsed.port && parsed.port !== '443')) return null;
-
-    const segments = parsed.pathname.split('/').filter(Boolean);
-    if (segments.length === 0) return null;
-    // Meet redirects https://meet.google.com/<code> to /meet/<code> (observed
-    // live for a guest that was not signed in), so a link copied from the
-    // address bar can carry either form.
-    const codeSegment =
-        segments.length === 1 ? segments[0] : segments.length === 2 && segments[0].toLowerCase() === 'meet' ? segments[1] : null;
-    const first = codeSegment ? CODE_PATTERN.exec(codeSegment.toLowerCase()) : null;
-    if (first) {
-        const code = `${first[1]}-${first[2]}-${first[3]}`;
-        return { code, url: meetUrlFor(code) };
-    }
-    // Any other meet.google.com path. The query is kept apart from `hl`, which
-    // is forced to English below.
-    const url = new URL(`https://${MEET_HOST}${parsed.pathname}`);
-    parsed.searchParams.forEach((value, key) => {
-        if (key.toLowerCase() !== 'hl') url.searchParams.append(key, value);
-    });
-    url.searchParams.set('hl', 'en');
-    return { code: null, url: url.toString() };
+    const text = (input || '').replace(/\s+/g, '').toLowerCase();
+    if (!text) return null;
+    const link = LINK_PATTERN.exec(text);
+    const code = CODE_PATTERN.exec(link ? link[1] : text);
+    if (!code) return null;
+    const canonical = `${code[1]}-${code[2]}-${code[3]}`;
+    return { code: canonical, url: meetUrlFor(canonical) };
 }
 
 /**

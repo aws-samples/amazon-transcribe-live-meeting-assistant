@@ -12,6 +12,9 @@
  * those as an assumption to verify in a live meeting.
  */
 import { strict as assert } from 'node:assert';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import {
     MEET_IN_PAGE_SELECTORS,
@@ -32,61 +35,37 @@ import { details } from './details.js';
 
 // ---------------------------------------------------------------- codes and links
 
-test('a bare meeting code is accepted in any case, with or without hyphens', () => {
-    for (const input of ['abc-defg-hij', 'ABC-DEFG-HIJ', 'abcdefghij', ' abc-defg-hij ', 'abc defg hij']) {
-        assert.deepEqual(
-            parseGoogleMeetMeeting(input),
-            { code: 'abc-defg-hij', url: 'https://meet.google.com/abc-defg-hij?hl=en' },
-            input,
-        );
+/**
+ * The table every implementation of the Meet code rule runs (the create form,
+ * the invitation parser, the SDK and the meeting assistant's tools too), found
+ * by walking up from this file so it resolves from dist/ as well as src/.
+ */
+function sharedMeetCases(): Array<{ input: string | null; code: string | null }> {
+    let dir = dirname(fileURLToPath(import.meta.url));
+    for (;;) {
+        const candidate = join(dir, 'test-fixtures', 'google-meet-inputs.json');
+        if (existsSync(candidate)) return JSON.parse(readFileSync(candidate, 'utf8')).cases;
+        const parent = dirname(dir);
+        assert.notEqual(parent, dir, 'test-fixtures/google-meet-inputs.json not found above this file');
+        dir = parent;
+    }
+}
+
+test('each shared Meet input is reduced to its code, or refused, as the table says', () => {
+    const cases = sharedMeetCases();
+    assert.ok(cases.length > 20, 'the shared table was read');
+    for (const { input, code } of cases) {
+        const parsed = parseGoogleMeetMeeting(input);
+        if (code === null) {
+            assert.equal(parsed, null, String(input));
+        } else {
+            assert.deepEqual(parsed, { code, url: `https://meet.google.com/${code}?hl=en` }, String(input));
+        }
     }
 });
 
-test('a meet.google.com link is reduced to its code', () => {
-    for (const input of [
-        'https://meet.google.com/abc-defg-hij',
-        'https://meet.google.com/abc-defg-hij?authuser=0&hl=fr',
-        'meet.google.com/abc-defg-hij',
-        'http://meet.google.com/abc-defg-hij/',
-        'https://MEET.GOOGLE.COM/ABC-DEFG-HIJ',
-        // Meet's own redirect for a guest that is not signed in (observed live).
-        'https://meet.google.com/meet/abc-defg-hij',
-    ]) {
-        assert.equal(parseGoogleMeetMeeting(input)?.code, 'abc-defg-hij', input);
-    }
-});
-
-test('a meet.google.com link that is not a code is kept as a link, in English', () => {
-    const parsed = parseGoogleMeetMeeting('https://meet.google.com/lookup/team-standup?authuser=1&hl=de');
-    assert.equal(parsed?.code, null);
-    const url = new URL(parsed!.url);
-    assert.equal(url.hostname, 'meet.google.com');
-    assert.equal(url.pathname, '/lookup/team-standup');
-    assert.equal(url.searchParams.get('hl'), 'en');
-    assert.equal(url.searchParams.get('authuser'), '1');
-    assert.equal(url.protocol, 'https:');
-});
-
-test('anything that is not a Meet code or a meet.google.com link is refused', () => {
-    for (const input of [
-        '',
-        '   ',
-        null,
-        undefined,
-        '1234567890',
-        'abc-defg-hi',
-        'abcd-efgh-ijk',
-        'https://zoom.us/j/123456789',
-        'https://meet.google.com.example.org/abc-defg-hij',
-        'https://example.org/meet.google.com/abc-defg-hij',
-        'https://user:pw@meet.google.com/abc-defg-hij',
-        'https://meet.google.com:8443/abc-defg-hij',
-        'mailto:someone@example.org',
-        'ftp://meet.google.com/abc-defg-hij',
-        'https://meet.google.com/',
-    ]) {
-        assert.equal(parseGoogleMeetMeeting(input as string), null, String(input));
-    }
+test('undefined is refused like an empty value', () => {
+    assert.equal(parseGoogleMeetMeeting(undefined), null);
 });
 
 test('the refusal redirect is recognised, and nothing else is', () => {

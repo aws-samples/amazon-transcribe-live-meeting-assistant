@@ -69,6 +69,12 @@ export const MEET_REFUSAL_RETRIES = 4;
 /** The pause before each of those retries. */
 export const MEET_REFUSAL_BACKOFF_MS = [4_000, 8_000, 15_000, 20_000];
 
+/** The page state `logTileActivity` keeps on `window` for its two-minute count. */
+interface MeetActivityWindow {
+    __lmaMeetActivity?: Record<string, Record<string, number>>;
+    __lmaMeetActivityObserver?: MutationObserver;
+}
+
 const log = createLogger('google-meet');
 
 /** One reading of the page: whether the VP is in the meeting, and what the page says. */
@@ -549,30 +555,22 @@ export default class GoogleMeet {
     // ------------------------------------------------------------- monitors
 
     /**
-     * The participant tiles, for the active-speaker poll. `withClasses` adds the
-     * class names found in each tile, for the one diagnostic line; it is left
-     * off the once-a-second reads.
-     */
-    /**
-     * Once per meeting, at debug level: the structure of the first two tiles
-     * (tag, class, data-* and aria attributes, and leaf text), so a live run can
-     * confirm which element holds the name and which shows the speaking state.
-     */
-    /**
      * Once per meeting, at debug level: which elements inside each tile change
      * attributes over two minutes, counted per tile, with the element's tag,
      * class, jscontroller and the attribute. The element whose changes follow a
      * participant's speech is the speaking indicator; this is how a live run
-     * shows which one it is when Meet changes its page.
+     * shows which one it is when Meet changes its page. The observer is
+     * disconnected and its counts deleted after that one read, so it does no
+     * work for the rest of the meeting.
      */
     private async logTileActivity(page: Page): Promise<void> {
         const started = await page
             .evaluate((tileSel: string) => {
-                const w = window as unknown as { __lmaMeetActivity?: Record<string, Record<string, number>> };
+                const w = window as unknown as MeetActivityWindow;
                 if (w.__lmaMeetActivity) return false;
                 const activity: Record<string, Record<string, number>> = {};
                 w.__lmaMeetActivity = activity;
-                new MutationObserver((mutations) => {
+                const observer = new MutationObserver((mutations) => {
                     for (const m of mutations) {
                         const el = m.target as Element;
                         const tile = el.closest?.(tileSel);
@@ -584,14 +582,23 @@ export default class GoogleMeet {
                         const counts = (activity[id] ??= {});
                         counts[key] = (counts[key] ?? 0) + 1;
                     }
-                }).observe(document.body, { subtree: true, attributes: true });
+                });
+                observer.observe(document.body, { subtree: true, attributes: true });
+                w.__lmaMeetActivityObserver = observer;
                 return true;
             }, MEET_IN_PAGE_SELECTORS.participantTile)
             .catch(() => false);
         if (!started) return;
         await new Promise((r) => setTimeout(r, 120_000));
         const activity = await page
-            .evaluate(() => (window as unknown as { __lmaMeetActivity?: Record<string, Record<string, number>> }).__lmaMeetActivity ?? {})
+            .evaluate(() => {
+                const w = window as unknown as MeetActivityWindow;
+                const counts = w.__lmaMeetActivity ?? {};
+                w.__lmaMeetActivityObserver?.disconnect();
+                delete w.__lmaMeetActivityObserver;
+                delete w.__lmaMeetActivity;
+                return counts;
+            })
             .catch(() => ({}) as Record<string, Record<string, number>>);
         for (const [tile, counts] of Object.entries(activity)) {
             const top = Object.entries(counts)
@@ -603,6 +610,11 @@ export default class GoogleMeet {
         }
     }
 
+    /**
+     * Once per meeting, at debug level: the structure of the first two tiles
+     * (tag, class, data-* and aria attributes, and leaf text), so a live run can
+     * confirm which element holds the name and which shows the speaking state.
+     */
     private async logTileStructure(page: Page): Promise<void> {
         const outline = await page
             .evaluate((tileSel: string) => {
@@ -629,6 +641,11 @@ export default class GoogleMeet {
         outline.forEach((tile, i) => log.debug(`[meet] tile ${i} structure:\n${tile}`));
     }
 
+    /**
+     * The participant tiles, for the active-speaker poll. `withClasses` adds the
+     * class names found in each tile, for the one diagnostic line; it is left
+     * off the once-a-second reads.
+     */
     private async readTiles(page: Page, withClasses = false): Promise<Array<MeetTileReading & { classes?: string }>> {
         return page
             .evaluate(
@@ -760,7 +777,7 @@ export default class GoogleMeet {
 
         await substep('Opening the Google Meet page…');
         try {
-            log.info(`Opening Google Meet (${meeting.code ?? 'link without a meeting code'}).`);
+            log.info(`Opening Google Meet (${meeting.code}).`);
             await gotoMeetingPage(page, meeting.url, MEETING_HOST_PATTERNS.googleMeet, 'meet-join');
         } catch {
             log.warn('Your scribe was unable to open the Google Meet page.');
@@ -778,9 +795,11 @@ export default class GoogleMeet {
         // measured from this network, the same browser was refused on one load
         // of a meeting with open access and shown the name field on the next.
         // So a refusal before the join is retried with a fresh page load, a
-        // few times and with a growing pause, and the browser's Google cookies
-        // are cleared from the second retry on, so a saved profile cannot keep
-        // carrying whatever Meet held against it.
+        // few times and with a growing pause. A Meet join always starts from a
+        // fresh browser profile (acquireProfile saves none for Meet), but the
+        // refused loads of this session leave Google cookies behind, so from
+        // the second retry on they are cleared and the reload arrives without
+        // them, as the first load of the session did.
         let refusals = 0;
         const retryAfterRefusal = async (why: string): Promise<boolean> => {
             if (refusals >= MEET_REFUSAL_RETRIES) return false;
@@ -826,8 +845,11 @@ export default class GoogleMeet {
                     break;
                 }
             }
-            // A profile signed in to Google has no name field: its join button
-            // is there instead, and the join goes on without one.
+            // Defensive fallback: a browser signed in to Google has no name
+            // field, only its join button, and the join goes on without one. A
+            // Meet join starts from a fresh guest profile, so this is not
+            // expected to happen; it is kept so that a join button shown without
+            // a name field is used rather than treated as a missing name field.
             if (!nameField && reading.joinButtonVisible) break;
             if (!nameField) await new Promise((r) => setTimeout(r, 1000));
         }
@@ -852,7 +874,8 @@ export default class GoogleMeet {
                 }
                 nameField = found.element;
             } else {
-                log.info('No guest name field (the profile is signed in to Google) — joining with the account name.');
+                // The defensive fallback above: not expected with a fresh guest profile.
+                log.info('No guest name field, only the join button (as for a browser signed in to Google) — joining without entering a name.');
             }
         }
         // Meet shows a "Sign in with your Google account … Got it" callout beside
@@ -1015,6 +1038,7 @@ export default class GoogleMeet {
             const watchdogConfig = DEFAULT_ATTENDEE_WATCHDOG_CONFIG;
             const watchdogState: AttendeeWatchdogState = { consecutiveLonely: 0, consecutiveMissing: 0, suppressedMissing: 0, unreadableRun: 0 };
             let attendeePollInFlight = false;
+            let lastAttendeeLine = '';
             log.info(`Listening for attendee changes (poll ${watchdogConfig.pollMs}ms, alone x${watchdogConfig.pollsBeforeEnd}).`);
             timers.push(setInterval(async () => {
                 if (page.isClosed() || attendeePollInFlight) return;
@@ -1023,7 +1047,13 @@ export default class GoogleMeet {
                     const reading = await this.readAttendees(page);
                     if (reading.state === 'OK') meetingConsent.noteAttendeeCount(reading.count);
                     const decision = decideAttendeeAction(reading, watchdogState, watchdogConfig);
-                    log.info(`DEBUG: Meet attendee reading ${JSON.stringify(reading)} lonely=${watchdogState.consecutiveLonely} missing=${watchdogState.consecutiveMissing}`);
+                    // At debug level, and only when the reading or the watchdog's
+                    // counters change: this runs on every poll for the whole meeting.
+                    const attendeeLine = `${JSON.stringify(reading)} lonely=${watchdogState.consecutiveLonely} missing=${watchdogState.consecutiveMissing}`;
+                    if (attendeeLine !== lastAttendeeLine) {
+                        lastAttendeeLine = attendeeLine;
+                        log.debug(`[meet] attendee reading ${attendeeLine}`);
+                    }
                     if (decision.action === 'end') {
                         log.info(`LMA Virtual Participant is leaving: ${decision.detail}`);
                         details.start = false;

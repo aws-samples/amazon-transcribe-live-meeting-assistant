@@ -3,6 +3,7 @@
 """Unit tests for client.vp launches made for an LMA user (``as_user``)."""
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,7 +11,7 @@ from botocore.exceptions import ClientError
 
 from lma_sdk.exceptions import LMAConfigurationError, LMAVirtualParticipantError
 from lma_sdk.models.stack import StackOutput
-from lma_sdk.operations.virtual_participant import _extract_user_pool_id
+from lma_sdk.operations.virtual_participant import _extract_user_pool_id, google_meet_code
 
 POOL_ID = "us-east-1_AbCdEf123"
 SUB = "11111111-2222-3333-4444-555555555555"
@@ -90,6 +91,19 @@ class TestLaunchWithoutUser:
                 wait=False, use_zoom_credentials=True,
             )
         services["appsync"].graphql.assert_not_called()
+
+
+# The table of Meet inputs every implementation of the Meet code rule runs.
+SHARED_MEET_CASES = json.loads(
+    (Path(__file__).resolve().parents[3] / "test-fixtures" / "google-meet-inputs.json").read_text()
+)["cases"]
+
+
+@pytest.mark.parametrize(
+    "case", SHARED_MEET_CASES, ids=[repr(c["input"]) for c in SHARED_MEET_CASES]
+)
+def test_each_shared_meet_input_reduces_to_the_tables_code(case):
+    assert google_meet_code(case["input"]) == case["code"]
 
 
 class TestGoogleMeet:

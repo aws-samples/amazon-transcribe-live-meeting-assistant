@@ -267,17 +267,32 @@ _MEET_CODE = re.compile(r"^([a-z]{3})-?([a-z]{4})-?([a-z]{3})$")
 _MEET_LINK = re.compile(
     r"^(?:https?://)?meet\.google\.com/(?:meet/)?([a-z]{3}-?[a-z]{4}-?[a-z]{3})/?(?:[?#].*)?$"
 )
-_MEET_OTHER_LINK = re.compile(r"^(?:https?://)?meet\.google\.com/[^\s]+$")
+# Any link on meet.google.com, whether or not its path is a meeting code.
+_MEET_ANY_LINK = re.compile(r"^(?:https?://)?meet\.google\.com/\S*$")
+
+# Why a Meet invitation's link was not put in the meeting ID field. Shown by the
+# paste-invitation dialog alongside the filled-in form.
+MEET_NICKNAME_NOTE = (
+    "The invitation's Google Meet link (meet.google.com/lookup/...) uses a meeting "
+    "nickname, which only signed-in members of the organiser's Google Workspace can "
+    "open, and the Virtual Participant joins as a guest. Enter the meeting code "
+    "(for example abc-defg-hij) instead."
+)
+MEET_NOT_A_CODE_NOTE = (
+    "The invitation's Google Meet link does not contain a meeting code. Enter the "
+    "meeting code (for example abc-defg-hij) or a https://meet.google.com/ link to it."
+)
 
 
 def normalize_google_meet_id(value):
     """Reduce a Google Meet code or link to its code, or return None if it is neither.
 
-    Mirrors parseGoogleMeetMeeting in the Virtual Participant (google-meet-page.ts):
-    a bare code in any case, with or without hyphens, or a meet.google.com link
-    (including Meet's /meet/<code> redirect form) gives "abc-defg-hij". A
-    meet.google.com link whose path is not a code (a /lookup/ link) is returned
-    unchanged, since the Virtual Participant can open it as it is.
+    The same rule as parseGoogleMeetMeeting in the Virtual Participant
+    (google-meet-page.ts), the create form, the SDK and the meeting assistant's
+    tools; each runs the shared table in test-fixtures/google-meet-inputs.json.
+    A bare code in any case, with or without hyphens, or a meet.google.com link
+    to one (including Meet's /meet/<code> redirect form) gives "abc-defg-hij".
+    Any other meet.google.com link, such as a /lookup/ nickname link, gives None.
     """
     if not isinstance(value, str):
         return None
@@ -288,9 +303,14 @@ def normalize_google_meet_id(value):
     code = _MEET_CODE.match(link.group(1) if link else text)
     if code:
         return f"{code.group(1)}-{code.group(2)}-{code.group(3)}"
-    if _MEET_OTHER_LINK.match(text):
-        return "".join(value.split())
     return None
+
+
+def is_google_meet_link(value):
+    """Whether a value is a link on meet.google.com, whatever its path."""
+    if not isinstance(value, str):
+        return False
+    return bool(_MEET_ANY_LINK.match("".join(value.split()).lower()))
 
 
 def validate_parsed_data(data):
@@ -309,8 +329,9 @@ def validate_parsed_data(data):
     # A Meet link or code identifies the platform by itself. Checked when the model
     # gave no platform as well: the UI otherwise falls back to its own ZOOM default
     # and hands the user a Zoom form holding a Meet link.
-    if data.get("meetingPlatform") not in valid_platforms and normalize_google_meet_id(
-        data.get("meetingId")
+    if data.get("meetingPlatform") not in valid_platforms and (
+        normalize_google_meet_id(data.get("meetingId"))
+        or is_google_meet_link(data.get("meetingId"))
     ):
         data["meetingPlatform"] = "GOOGLE_MEET"
     if data.get("meetingPlatform") and data["meetingPlatform"] not in valid_platforms:
@@ -368,12 +389,21 @@ def validate_parsed_data(data):
 
     # Google Meet: store the meeting code ("abc-defg-hij") rather than the link, as
     # the create form does, and no password. A Meet invitation's only number is the
-    # dial-in PIN, which is not a meeting password.
+    # dial-in PIN, which is not a meeting password. A Meet ID that is not a
+    # meeting code is left out, with the reason in meetingIdNote, rather than
+    # filling the form with an ID the form refuses to submit.
     if data.get("meetingPlatform") == "GOOGLE_MEET":
         data["meetingPassword"] = None
-        meet_id = normalize_google_meet_id(data.get("meetingId"))
+        original_id = data.get("meetingId")
+        meet_id = normalize_google_meet_id(original_id)
         if meet_id:
             data["meetingId"] = meet_id
+        elif original_id:
+            data["meetingId"] = None
+            lowered = "".join(str(original_id).split()).lower()
+            data["meetingIdNote"] = (
+                MEET_NICKNAME_NOTE if "meet.google.com/lookup/" in lowered else MEET_NOT_A_CODE_NOTE
+            )
 
     # Clean up meeting ID for Teams.
     # New format: https://teams.microsoft.com/meet/243574196567966?p=ixpjsDWNj8cLxyHlQD
