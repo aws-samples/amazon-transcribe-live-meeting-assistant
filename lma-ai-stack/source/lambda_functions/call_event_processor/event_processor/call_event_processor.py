@@ -12,7 +12,18 @@ from functools import lru_cache
 from os import getenv
 from statistics import fmean
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Mapping, Optional, Pattern
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Coroutine,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Pattern,
+    Tuple,
+)
 
 # third-party imports from Lambda layer
 import boto3
@@ -568,9 +579,7 @@ def latest_speech_end_seconds(segments: List[Any]) -> float:
     """
     latest = 0.0
     for segment in segments:
-        if not isinstance(segment, dict) or not is_speech_channel(
-            canonical_channel(segment.get("Channel"))
-        ):
+        if not isinstance(segment, dict) or not is_speech_channel(segment.get("Channel")):
             continue
         try:
             latest = max(latest, float(segment.get("EndTime") or 0.0))
@@ -582,12 +591,22 @@ def latest_speech_end_seconds(segments: List[Any]) -> float:
 async def get_aggregated_sentiment(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
-    observed: Optional[Dict[str, float]] = None,
 ) -> Optional[Sentiment]:
-    """The meeting's sentiment aggregation, or None if the segments were unreadable.
+    """The meeting's sentiment aggregation, or None if the segments were unreadable."""
+    sentiment, _latest_end = await get_sentiment_and_latest_end(
+        message=message, appsync_session=appsync_session
+    )
+    return sentiment
 
-    ``observed``, when given, receives ``latest_end``: the latest end time of
-    the meeting's final speech segments, read from the same list.
+
+async def get_sentiment_and_latest_end(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> Tuple[Optional[Sentiment], float]:
+    """The meeting's sentiment aggregation and the latest end of its final speech segments.
+
+    Both come from one read of the meeting's final segments. The aggregation is
+    None if the segments were unreadable, and the end time is then 0.0.
     """
     call_id = message.get("CallId")
     if not call_id:
@@ -616,7 +635,7 @@ async def get_aggregated_sentiment(
             describe_exception(error),
             extra=dict(frames=traceback_frames(error)),
         )
-        return None
+        return None, 0.0
 
     sentiment_entry_list_by_channel: Dict[ChannelType, SentimentPerChannel] = {}
 
@@ -633,9 +652,8 @@ async def get_aggregated_sentiment(
         logger=LOGGER,
     )
     if segments is None:
-        return None
-    if observed is not None:
-        observed["latest_end"] = latest_speech_end_seconds(segments)
+        return None, 0.0
+    latest_end = latest_speech_end_seconds(segments)
 
     for segment in segments:
         # The list's element type is nullable, and a null entry carries nothing
@@ -688,22 +706,28 @@ async def get_aggregated_sentiment(
         "SentimentByPeriod": {"QUARTER": sentiment_by_period_by_channel},
     }
 
-    return aggregated_sentiment
+    return aggregated_sentiment, latest_end
 
 
 async def get_aggregate_call_data(
     message: Dict[str, object],
     appsync_session: AppsyncAsyncClientSession,
+    record_latest_end: Optional[float] = None,
 ) -> Optional[Dict]:
-    """The meeting aggregation to write, or None when there is nothing to write."""
+    """The meeting aggregation to write, or None when there is nothing to write.
+
+    ``record_latest_end`` is the latest end time of the final speech segments
+    the current Kinesis record carries. Those segments are written after this
+    read, so the read may not include them. Without it, ``message`` is taken as
+    the record's only segment.
+    """
     call_id = message.get("CallId")
     if not call_id:
         error_message = "callid does not exist"
         raise TypeError(error_message)
 
-    observed: Dict[str, float] = {}
-    sentiment = await get_aggregated_sentiment(
-        message=message, appsync_session=appsync_session, observed=observed
+    sentiment, latest_end = await get_sentiment_and_latest_end(
+        message=message, appsync_session=appsync_session
     )
     if sentiment is None:
         # The scored segments could not be read. Writing the aggregation anyway
@@ -711,11 +735,12 @@ async def get_aggregate_call_data(
         return None
 
     # The meeting's duration so far: the latest end of all its final speech
-    # segments, which the sentiment read above returned, or of this segment
-    # when it is later still (it may not be readable yet).
-    total_duration = (
-        max(float(message.get("EndTime", 0.0) or 0.0), observed.get("latest_end", 0.0)) * 1000
-    )
+    # segments, which the read above returned, or of this record's own final
+    # speech segments when one of them ends later still (they may not be
+    # readable yet). Both are limited to the speech channels.
+    if record_latest_end is None:
+        record_latest_end = latest_speech_end_seconds([message])
+    total_duration = max(record_latest_end, latest_end) * 1000
 
     updated_at = message.get("UpdatedAt", datetime.utcnow().astimezone().isoformat())
     event_type = message.get("EventType", "")
@@ -735,10 +760,14 @@ async def get_aggregate_call_data(
 async def get_call_aggregation_tasks(
     message: Dict[str, object],
     appsync_session: AppsyncAsyncClientSession,
+    record_latest_end: Optional[float] = None,
 ) -> List[Coroutine]:
-    """The updateCallAggregation task for this message, or none to send."""
+    """The updateCallAggregation task for this message, or none to send.
+
+    ``record_latest_end`` is passed through to ``get_aggregate_call_data``.
+    """
     call_aggregation = await get_aggregate_call_data(
-        message=message, appsync_session=appsync_session
+        message=message, appsync_session=appsync_session, record_latest_end=record_latest_end
     )
     if call_aggregation is None:
         return []
@@ -1534,13 +1563,17 @@ async def execute_process_event_api_mutation(
                     Payload=json.dumps(normalized_message),
                 )
 
+        # One aggregation per record, built for its last final segment. A record
+        # can normalize into several final segments, and the last one need not
+        # end latest, so the duration is given the latest end of all of them.
         update_call_aggregation_tasks = []
-        for normalized_message in normalized_messages:
-            if not normalized_message["IsPartial"]:
-                update_call_aggregation_tasks = await get_call_aggregation_tasks(
-                    message=normalized_message,
-                    appsync_session=appsync_session,
-                )
+        final_messages = [m for m in normalized_messages if not m["IsPartial"]]
+        if final_messages:
+            update_call_aggregation_tasks = await get_call_aggregation_tasks(
+                message=final_messages[-1],
+                appsync_session=appsync_session,
+                record_latest_end=latest_speech_end_seconds(final_messages),
+            )
 
         task_responses = await asyncio.gather(
             *add_transcript_tasks,

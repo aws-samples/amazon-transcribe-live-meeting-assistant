@@ -1315,8 +1315,84 @@ def test_the_duration_includes_a_segment_not_yet_readable(schema):
     session = FakeSession(schema, response)
     aggregation = run(
         cep.get_aggregate_call_data(
-            message={"CallId": "call-1", "EndTime": 12.25, "EventType": "ADD_TRANSCRIPT_SEGMENT"},
+            message={
+                "CallId": "call-1",
+                "Channel": "REMOTE",
+                "EndTime": 12.25,
+                "EventType": "ADD_TRANSCRIPT_SEGMENT",
+            },
             appsync_session=session,
         )
     )
     assert aggregation["TotalConversationDurationMillis"] == 12250.0
+
+
+def test_a_non_speech_segment_not_yet_readable_does_not_lengthen_the_duration(schema):
+    """The record's own segment counts only on a speech channel, as the read-back ones do."""
+    response = {
+        "getTranscriptSegmentsWithSentiment": {
+            "TranscriptSegmentsWithSentiment": [
+                {"Channel": "LOCAL", "SegmentId": "a", "StartTime": 0.0, "EndTime": 20.0}
+            ]
+        }
+    }
+    aggregation = run(
+        cep.get_aggregate_call_data(
+            message={
+                "CallId": "call-1",
+                "Channel": "AGENT_ASSISTANT",
+                "EndTime": 90.0,
+                "EventType": "ADD_TRANSCRIPT_SEGMENT",
+            },
+            appsync_session=FakeSession(schema, response),
+        )
+    )
+    assert aggregation["TotalConversationDurationMillis"] == 20000.0
+
+
+def test_the_duration_takes_the_latest_end_of_every_final_segment_in_the_record(
+    schema, monkeypatch
+):
+    """One Kinesis record can normalize into several final segments.
+
+    The aggregation is built once, for the record's last final segment, before
+    any of the record's segments is written. An earlier segment in the same
+    record that ends later must still reach the duration: if this is the
+    meeting's last record, nothing afterwards corrects it.
+    """
+    segments = [
+        {"CallId": "call-1", "Channel": "REMOTE", "EndTime": 95.0, "IsPartial": False},
+        {"CallId": "call-1", "Channel": "AGENT_ASSISTANT", "EndTime": 120.0, "IsPartial": False},
+        {"CallId": "call-1", "Channel": "LOCAL", "EndTime": 99.0, "IsPartial": True},
+        {"CallId": "call-1", "Channel": "LOCAL", "EndTime": 60.0, "IsPartial": False},
+    ]
+    built = []
+
+    async def no_details(**_kwargs):
+        return {}
+
+    async def recording_tasks(message, appsync_session, record_latest_end=None):
+        built.append(
+            await cep.get_aggregate_call_data(
+                message=message,
+                appsync_session=appsync_session,
+                record_latest_end=record_latest_end,
+            )
+        )
+        return []
+
+    monkeypatch.setattr(cep, "normalize_transcript_segments", lambda _message: segments)
+    monkeypatch.setattr(cep, "get_call_details", no_details)
+    monkeypatch.setattr(cep, "add_transcript_segments", lambda **_kwargs: [])
+    monkeypatch.setattr(cep, "AGENDA_DERIVER_ARN", "", raising=False)
+    monkeypatch.setattr(cep, "get_call_aggregation_tasks", recording_tasks)
+    empty = {"getTranscriptSegmentsWithSentiment": {"TranscriptSegmentsWithSentiment": []}}
+    process_event(
+        FakeSession(schema, empty),
+        {"EventType": "ADD_TRANSCRIPT_SEGMENT", "CallId": "call-1"},
+        monkeypatch,
+    )
+    # One aggregation for the record. The partial segment and the assistant's
+    # segment end later than 95 s but are not final speech.
+    assert len(built) == 1
+    assert built[0]["TotalConversationDurationMillis"] == 95000.0

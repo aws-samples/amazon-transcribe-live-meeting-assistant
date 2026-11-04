@@ -62,7 +62,12 @@ def google_meet_code(value: str) -> str | None:
 
     ``abc-defg-hij``, ``ABCDEFGHIJ``, ``https://meet.google.com/abc-defg-hij``
     and Meet's own ``/meet/abc-defg-hij`` redirect form all give
-    ``abc-defg-hij``; the Virtual Participant parses the same forms.
+    ``abc-defg-hij``. Any other meet.google.com link, including a
+    ``/lookup/`` meeting-nickname link, gives None: only signed-in members of
+    the organiser's Workspace can open a nickname, and the Virtual Participant
+    joins as a guest. The Virtual Participant, the create form, the invitation
+    parser and the meeting assistant's tools apply the same rule, and each runs
+    the shared table in ``test-fixtures/google-meet-inputs.json``.
     """
     text = "".join((value or "").split()).lower()
     link = _MEET_LINK.match(text)

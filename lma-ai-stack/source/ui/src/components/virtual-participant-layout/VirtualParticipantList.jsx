@@ -444,10 +444,15 @@ const VirtualParticipantList = () => {
         setInvitationText('');
         setShowCreateModal(true);
 
-        setNotification({
-          type: 'success',
-          content: 'Meeting invitation parsed successfully! Please review and verify the details.',
-        });
+        // The parser leaves out a meeting ID the form cannot use, and says why.
+        setNotification(
+          data.meetingIdNote
+            ? { type: 'warning', content: `Meeting invitation parsed. ${data.meetingIdNote}` }
+            : {
+                type: 'success',
+                content: 'Meeting invitation parsed successfully! Please review and verify the details.',
+              },
+        );
       } else {
         setParseError(parsedResponse.error || 'Failed to parse meeting invitation');
       }

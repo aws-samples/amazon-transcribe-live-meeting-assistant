@@ -114,38 +114,25 @@ if __name__ == "__main__":
     unittest.main()
 
 
+# The table of Meet inputs every implementation of the Meet code rule runs.
+SHARED_MEET_CASES = (
+    Path(__file__).resolve().parents[4] / "test-fixtures" / "google-meet-inputs.json"
+)
+
+
 class TestGoogleMeetId(unittest.TestCase):
-    """normalize_google_meet_id, which mirrors the Virtual Participant's own parser."""
+    """normalize_google_meet_id, which applies the same rule as the Virtual Participant."""
 
-    def test_codes_and_links_reduce_to_the_code(self):
-        for value in (
-            "abc-defg-hij",
-            "ABCDEFGHIJ",
-            " abc defg hij ",
-            "https://meet.google.com/abc-defg-hij",
-            "meet.google.com/abc-defg-hij",
-            "https://meet.google.com/abc-defg-hij?authuser=1",
-            "https://meet.google.com/meet/abc-defg-hij",
-            "http://meet.google.com/abcdefghij/",
-        ):
-            self.assertEqual(index.normalize_google_meet_id(value), "abc-defg-hij", value)
+    def test_each_shared_meet_input_reduces_to_the_tables_code(self):
+        cases = json.loads(SHARED_MEET_CASES.read_text())["cases"]
+        self.assertGreater(len(cases), 20)
+        for case in cases:
+            self.assertEqual(
+                index.normalize_google_meet_id(case["input"]), case["code"], case["input"]
+            )
 
-    def test_a_meet_link_that_is_not_a_code_is_kept(self):
-        link = "https://meet.google.com/lookup/team-standup"
-        self.assertEqual(index.normalize_google_meet_id(link), link)
-
-    def test_anything_else_is_not_meet(self):
-        for value in (
-            None,
-            "",
-            "96187501703",
-            "abc-defg-hi",
-            "https://zoom.us/j/96187501703",
-            "https://meet.google.com.example.org/abc-defg-hij",
-            "https://example.org/?u=meet.google.com/abc-defg-hij",
-            12345,
-        ):
-            self.assertIsNone(index.normalize_google_meet_id(value), value)
+    def test_a_value_that_is_not_text_is_not_meet(self):
+        self.assertIsNone(index.normalize_google_meet_id(12345))
 
 
 class TestPlatformSupport(unittest.TestCase):
@@ -202,6 +189,32 @@ class TestPlatformSupport(unittest.TestCase):
             self.assertTrue(result["success"], platform)
             self.assertEqual(result["data"]["meetingPlatform"], "GOOGLE_MEET", platform)
             self.assertEqual(result["data"]["meetingId"], "abc-defg-hij", platform)
+
+    def test_a_meet_nickname_link_leaves_the_meeting_id_empty_and_says_why(self):
+        """The form refuses a /lookup/ link, so it is not put in the meeting ID field."""
+        for platform in ("GOOGLE_MEET", None):
+            result = self._handle(
+                {
+                    "meetingName": "Standup",
+                    "meetingPlatform": platform,
+                    "meetingId": "https://meet.google.com/lookup/team-standup?authuser=1",
+                }
+            )
+            self.assertTrue(result["success"], platform)
+            self.assertEqual(result["data"]["meetingPlatform"], "GOOGLE_MEET", platform)
+            self.assertIsNone(result["data"]["meetingId"], platform)
+            self.assertEqual(result["data"]["meetingIdNote"], index.MEET_NICKNAME_NOTE)
+
+    def test_another_meet_link_without_a_code_leaves_the_meeting_id_empty(self):
+        result = self._handle(
+            {"meetingPlatform": "GOOGLE_MEET", "meetingId": "https://meet.google.com/landing"}
+        )
+        self.assertIsNone(result["data"]["meetingId"])
+        self.assertEqual(result["data"]["meetingIdNote"], index.MEET_NOT_A_CODE_NOTE)
+
+    def test_a_meet_code_carries_no_note(self):
+        result = self._handle({"meetingPlatform": "GOOGLE_MEET", "meetingId": "abc-defg-hij"})
+        self.assertNotIn("meetingIdNote", result["data"])
 
     def test_an_unsupported_platform_is_refused(self):
         original = index.VP_SUPPORTED_PLATFORMS

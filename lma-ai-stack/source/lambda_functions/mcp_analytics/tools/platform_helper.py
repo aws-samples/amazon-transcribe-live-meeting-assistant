@@ -40,7 +40,11 @@ def normalize_meeting_id(platform: str, meeting_id: str) -> str:
 
     A Google Meet meeting is identified by its code ("abc-defg-hij"), which is
     also what the create form stores. Anything else for Google Meet is refused
-    here, rather than launching a Virtual Participant that cannot find the meeting.
+    here, rather than launching a Virtual Participant that cannot find the meeting;
+    that includes a meet.google.com/lookup/ nickname link, which only signed-in
+    members of the organiser's Workspace can open. The Virtual Participant, the
+    create form, the invitation parser and the SDK apply the same rule, and each
+    runs the shared table in test-fixtures/google-meet-inputs.json.
     """
     compact = "".join((meeting_id or "").split())
     if platform != "GOOGLE_MEET":

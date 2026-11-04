@@ -131,20 +131,20 @@ def _queries_returning_channels(schema) -> list[str]:
     )
 
 
-def _request_template(field_name: str) -> Path:
-    """The request mapping template of the Query resolver on this field."""
+def _request_template(field_name: str, type_name: str = "Query") -> Path:
+    """The request mapping template of the resolver on this field."""
     matches = []
     for block in _RESOURCE_SPLIT.split(TEMPLATE.read_text()):
         if "Type: AWS::AppSync::Resolver" not in block:
             continue
-        if not re.search(r"^      TypeName: Query$", block, re.M):
+        if not re.search(rf"^      TypeName: {type_name}$", block, re.M):
             continue
         if not re.search(rf"^      FieldName: {field_name}$", block, re.M):
             continue
         location = re.search(r"^      RequestMappingTemplateS3Location: (\S+)", block, re.M)
-        assert location, f"Query.{field_name} has no request template file"
+        assert location, f"{type_name}.{field_name} has no request template file"
         matches.append((TEMPLATE.parent / location.group(1)).resolve())
-    assert len(matches) == 1, f"expected exactly one resolver on Query.{field_name}"
+    assert len(matches) == 1, f"expected exactly one resolver on {type_name}.{field_name}"
     return matches[0]
 
 
@@ -275,6 +275,71 @@ def test_a_new_segment_carries_a_channel_of_the_enum(schema) -> None:
     assert mutations == ["addTranscriptSegment"]
 
 
+def _evaluated_request(response: dict) -> dict:
+    """The request an EvaluateMappingTemplate call rendered.
+
+    The templates keep trailing commas, which AppSync accepts and the json
+    module does not, so they are removed before parsing.
+    """
+    return json.loads(re.sub(r",(\s*[}\]])", r"\1", response["evaluationResult"]))
+
+
+# The older name of each speech channel and the name addTranscriptSegment stores it under.
+OLDER_TO_CURRENT = {"CALLER": "REMOTE", "AGENT": "LOCAL"}
+
+
+def test_add_transcript_segment_stores_each_older_speech_name_under_the_current_one() -> None:
+    """A producer writing segments through the API may still send CALLER or AGENT.
+
+    The request template rewrites the input's Channel before building the
+    PutItem, so the stored segment carries the current name, as one written
+    through the Kinesis path does.
+    """
+    text = _request_template("addTranscriptSegment", type_name="Mutation").read_text()
+    put_item = text.index('"operation": "PutItem"')
+    assert sorted(OLDER_TO_CURRENT) == sorted(DEPRECATED_SPEECH_CHANNELS)
+    for older, current in OLDER_TO_CURRENT.items():
+        rewrite = re.search(
+            rf'#(?:else)?if\(\s*\$ctx\.args\.input\.Channel == "{older}"\s*\)\s*\n'
+            rf'\s*\$util\.qr\(\$ctx\.args\.input\.put\("Channel", "{current}"\)\)',
+            text,
+        )
+        assert rewrite, f"{older} is not stored as {current}"
+        assert rewrite.end() < put_item, f"the {older} rewrite comes after the PutItem"
+
+
+@pytest.mark.skipif(
+    os.environ.get("LMA_EVALUATE_APPSYNC") != "1",
+    reason="evaluates templates with the AppSync API; set LMA_EVALUATE_APPSYNC=1 to run",
+)
+@pytest.mark.parametrize("sent", [*OLDER_TO_CURRENT, *SPEECH_CHANNELS, "AGENT_ASSISTANT"])
+def test_the_evaluated_segment_write_stores_the_current_channel_name(sent: str) -> None:
+    import boto3  # imported here so the module collects without boto3 when skipped
+
+    client = boto3.client("appsync", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+    response = client.evaluate_mapping_template(
+        template=_request_template("addTranscriptSegment", type_name="Mutation").read_text(),
+        context=json.dumps(
+            {
+                "arguments": {
+                    "input": {
+                        "CallId": "c1",
+                        "SegmentId": "s1",
+                        "Channel": sent,
+                        "StartTime": 0.0,
+                        "EndTime": 1.0,
+                        "Transcript": "hello",
+                        "IsPartial": False,
+                    }
+                }
+            }
+        ),
+    )
+    assert not response.get("error"), response.get("error")
+    stored = _evaluated_request(response)["attributeValues"]["Channel"]
+    assert stored == {"S": OLDER_TO_CURRENT.get(sent, sent)}
+
+
 @pytest.mark.skipif(
     os.environ.get("LMA_EVALUATE_APPSYNC") != "1",
     reason="evaluates templates with the AppSync API; set LMA_EVALUATE_APPSYNC=1 to run",
@@ -291,7 +356,7 @@ def test_the_evaluated_request_excludes_the_retired_channel(field_name: str) -> 
         context=json.dumps({"arguments": {"callId": "c1"}}),
     )
     assert not response.get("error"), response.get("error")
-    request = json.loads(response["evaluationResult"])
+    request = _evaluated_request(response)
     query_filter = request["filter"]
     assert query_filter["expressionNames"]["#Channel"] == "Channel"
     assert query_filter["expressionValues"][":retiredChannel"] == {"S": RETIRED_CHANNEL}

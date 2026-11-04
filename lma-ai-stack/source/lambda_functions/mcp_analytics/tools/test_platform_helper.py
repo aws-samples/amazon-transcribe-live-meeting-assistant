@@ -4,6 +4,7 @@
 
 """Platform and meeting ID normalisation for start_meeting_now / schedule_meeting."""
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -13,6 +14,9 @@ if str(HERE.parent) not in sys.path:
     sys.path.insert(0, str(HERE.parent))
 
 from tools.platform_helper import normalize_meeting_id, normalize_platform  # noqa: E402
+
+# The table of Meet inputs every implementation of the Meet code rule runs.
+SHARED_MEET_CASES = HERE.parents[4] / "test-fixtures" / "google-meet-inputs.json"
 
 
 class TestNormalizePlatform(unittest.TestCase):
@@ -53,6 +57,18 @@ class TestNormalizeMeetingId(unittest.TestCase):
             "meet.google.com/meet/abc-defg-hij",
         ):
             self.assertEqual(normalize_meeting_id("GOOGLE_MEET", value), "abc-defg-hij", value)
+
+    def test_each_shared_meet_input_becomes_the_tables_code_or_is_refused(self):
+        cases = json.loads(SHARED_MEET_CASES.read_text())["cases"]
+        self.assertGreater(len(cases), 20)
+        for case in cases:
+            if case["code"] is None:
+                with self.assertRaises(ValueError, msg=case["input"]):
+                    normalize_meeting_id("GOOGLE_MEET", case["input"])
+            else:
+                self.assertEqual(
+                    normalize_meeting_id("GOOGLE_MEET", case["input"]), case["code"], case["input"]
+                )
 
     def test_a_meet_meeting_id_that_is_not_meet_is_refused(self):
         for value in (

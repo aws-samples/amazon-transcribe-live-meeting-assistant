@@ -4,8 +4,27 @@
  * See the LICENSE file in the project root for full license information.
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { googleMeetCode, googleMeetIdError } from './google-meet';
+
+// The table of Meet inputs every implementation of the Meet code rule runs. The
+// test environment is jsdom, whose import.meta.url is not a file URL, so the
+// path is built from __dirname, which vitest provides.
+const SHARED_MEET_CASES = JSON.parse(
+  readFileSync(resolve(__dirname, '../../../../../../test-fixtures/google-meet-inputs.json'), 'utf8'),
+).cases;
+
+describe('the shared Google Meet input table', () => {
+  it('was read', () => {
+    expect(SHARED_MEET_CASES.length).toBeGreaterThan(20);
+  });
+
+  it.each(SHARED_MEET_CASES)('reduces $input to $code', ({ input, code }) => {
+    expect(googleMeetCode(input)).toBe(code);
+  });
+});
 
 describe('googleMeetCode', () => {
   it('accepts a code in any case, with or without hyphens or spaces', () => {
@@ -51,5 +70,9 @@ describe('googleMeetIdError', () => {
 
   it('explains what to enter for anything else', () => {
     expect(googleMeetIdError('12345')).toMatch(/meeting code/);
+  });
+
+  it('says why a meeting nickname link is refused', () => {
+    expect(googleMeetIdError('https://meet.google.com/lookup/team-standup')).toMatch(/nickname/);
   });
 });
