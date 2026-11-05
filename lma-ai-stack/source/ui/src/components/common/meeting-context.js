@@ -11,13 +11,17 @@
  * what the meeting record and the page already hold; kept free of React so it
  * can be tested directly.
  *
- * The meeting record does not say which client captured it. The Virtual
- * Participant writes fixed labels on it ('Virtual Participant', 'LMA System')
- * and links its own record to the meeting; the other sources are told apart by
- * the time stamp each appends to the Meeting ID (see meeting-header.js). Stream
- * Audio and the browser extension append the same one, so they are named
- * together. The transcription engine, the transcription language and whether
- * speaker separation was asked for are not stored on the meeting at all.
+ * A meeting records how it was captured and transcribed when it starts:
+ * CaptureSource, TranscriptionEngine, TranscriptionLanguage and
+ * SpeakerSeparation on the meeting record, which these read first. A meeting
+ * started before those were stored has none of them. For such a meeting the
+ * source is inferred and said to be: the Virtual Participant writes fixed labels
+ * on the record ('Virtual Participant', 'LMA System') and links its own record to
+ * the meeting, and the other sources are told apart by the time stamp each
+ * appends to the Meeting ID (see meeting-header.js) -- Stream Audio and the
+ * browser extension append the same one, so they are named together. Its
+ * engine and language are not known, and its speaker separation is read from
+ * the voice labels in the transcript (speakerSeparation).
  */
 import { STATUS_LABELS } from './meeting-consent';
 
@@ -25,6 +29,8 @@ export const SOURCE_VIRTUAL_PARTICIPANT = 'virtual-participant';
 export const SOURCE_STREAM_AUDIO = 'stream-audio';
 export const SOURCE_DESKTOP_APP = 'desktop-app';
 export const SOURCE_UPLOAD = 'upload';
+export const SOURCE_BROWSER_EXTENSION = 'browser-extension';
+export const SOURCE_API = 'api';
 export const SOURCE_UNKNOWN = 'unknown';
 
 const SOURCE_LABELS = {
@@ -34,6 +40,36 @@ const SOURCE_LABELS = {
   [SOURCE_UPLOAD]: 'Uploaded recording',
   [SOURCE_UNKNOWN]: 'Not known (an MCP client, the API, or a Meeting ID typed by hand)',
 };
+
+// The values of the meeting record's CaptureSource, and how each reads.
+const RECORDED_SOURCES = {
+  VIRTUAL_PARTICIPANT: { kind: SOURCE_VIRTUAL_PARTICIPANT, label: 'Virtual Participant' },
+  STREAM_AUDIO: { kind: SOURCE_STREAM_AUDIO, label: 'Stream Audio' },
+  BROWSER_EXTENSION: { kind: SOURCE_BROWSER_EXTENSION, label: 'Browser extension' },
+  DESKTOP_APP: { kind: SOURCE_DESKTOP_APP, label: 'Desktop Capture App' },
+  UPLOAD: { kind: SOURCE_UPLOAD, label: 'Uploaded recording' },
+  API: { kind: SOURCE_API, label: 'Another client of the streaming API (such as an MCP client)' },
+};
+
+const ENGINE_LABELS = { TRANSCRIBE: 'Amazon Transcribe', MICROVM_ASR: 'ASR MicroVM' };
+
+const LANGUAGE_SETTINGS = {
+  'identify-language': 'Identified by Amazon Transcribe (one language)',
+  'identify-multiple-languages': 'Identified by Amazon Transcribe (several languages)',
+};
+
+const SEPARATION_LABELS = {
+  BOTH: 'On for both channels',
+  REMOTE: 'On for the meeting audio',
+  LOCAL: 'On for the microphone',
+  NONE: 'Off',
+};
+
+const recorded = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null);
+
+/** Whether the meeting record says how the meeting was captured (any of the four fields). */
+export const hasRecordedCaptureContext = (item) =>
+  [item?.captureSource, item?.transcriptionEngine, item?.transcriptionLanguage, item?.speakerSeparation].some(recorded);
 
 // The Virtual Participant's own labels on the meeting record.
 const VP_REMOTE_LABEL = 'Virtual Participant';
@@ -46,11 +82,17 @@ const DESKTOP_SUFFIX = /\s+-\s+\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}|T\d{2}:\d{2}:\d{
 const UPLOAD_SUFFIX = /-\d{8}T\d{6}-[0-9a-f]{8}$/;
 
 /**
- * Where a meeting's audio came from: { kind, label, inferred }. `vp` is the
- * Virtual Participant linked to the meeting, when one is. `inferred` is true
- * when the answer is read from the Meeting ID's form rather than recorded.
+ * Where a meeting's audio came from: { kind, label, inferred }. The meeting
+ * record's CaptureSource when it has one. Otherwise `vp`, the Virtual
+ * Participant linked to the meeting, or its labels, and failing those the form
+ * of the Meeting ID -- `inferred` is true for an answer read from that form.
  */
 export const captureSource = (item, vp = null) => {
+  const stored = recorded(item?.captureSource);
+  if (stored) {
+    const known = RECORDED_SOURCES[stored.toUpperCase()];
+    return known ? { ...known, inferred: false } : { kind: SOURCE_UNKNOWN, label: stored, inferred: false };
+  }
   const callId = typeof item?.callId === 'string' ? item.callId : '';
   const vpLabels = item?.remoteParticipantName === VP_REMOTE_LABEL || item?.systemLabel === VP_SYSTEM_LABEL;
   if (vp || vpLabels) {
@@ -62,6 +104,30 @@ export const captureSource = (item, vp = null) => {
   else if (DESKTOP_SUFFIX.test(callId) || callId.startsWith('LMA native prototype')) kind = SOURCE_DESKTOP_APP;
   else if (VP_SUFFIX.test(callId)) kind = SOURCE_VIRTUAL_PARTICIPANT;
   return { kind, label: SOURCE_LABELS[kind], inferred: kind !== SOURCE_UNKNOWN };
+};
+
+/** The engine that transcribed the meeting, as the record names it, or null when it does not. */
+export const transcriptionEngine = (item) => {
+  const stored = recorded(item?.transcriptionEngine);
+  return stored ? ENGINE_LABELS[stored.toUpperCase()] || stored : null;
+};
+
+/**
+ * The transcription language setting the meeting used, or null when the record
+ * does not say: a language code, Amazon Transcribe's language identification,
+ * or, for the ASR MicroVM (which records none), the model's own language.
+ */
+export const transcriptionLanguage = (item) => {
+  const stored = recorded(item?.transcriptionLanguage);
+  if (stored) return LANGUAGE_SETTINGS[stored.toLowerCase()] || stored;
+  if (recorded(item?.transcriptionEngine)?.toUpperCase() === 'MICROVM_ASR') return 'Set by the ASR model';
+  return null;
+};
+
+/** Which channels speaker separation was asked for, as the record says, or null when it does not. */
+export const recordedSpeakerSeparation = (item) => {
+  const stored = recorded(item?.speakerSeparation);
+  return stored ? SEPARATION_LABELS[stored.toUpperCase()] || stored : null;
 };
 
 /**

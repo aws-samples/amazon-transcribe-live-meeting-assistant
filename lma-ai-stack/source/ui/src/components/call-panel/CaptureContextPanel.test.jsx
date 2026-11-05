@@ -63,7 +63,7 @@ describe('CaptureContextPanel', () => {
     const item = { ...ITEM, callId: 'TOH5 - 2026-08-14 12:12', remoteParticipantName: 'Others', systemLabel: 'System' };
     renderPanel({ item });
     expect(screen.getByText('Desktop Capture App')).toBeTruthy();
-    expect(screen.getByText(/Read from the form of the Meeting ID/)).toBeTruthy();
+    expect(screen.getByText(/Inferred from the form of the Meeting ID/)).toBeTruthy();
   });
 
   it('counts the voices told apart', () => {
@@ -114,6 +114,37 @@ describe('CaptureContextPanel', () => {
     renderPanel({ item: { ...ITEM, expiresAfter: 1793000000 } });
     expect(screen.getByText(/Kept for the deployment's days to keep transcript segments/)).toBeTruthy();
     expect(screen.getByText(/The meeting record is kept until/)).toBeTruthy();
+  });
+
+  it('shows what the meeting recorded about its capture, and infers nothing', () => {
+    const item = {
+      ...ITEM,
+      callId: 'Weekly sync - 2026-11-03-14:05:09.123',
+      remoteParticipantName: 'Others',
+      systemLabel: 'System',
+      captureSource: 'BROWSER_EXTENSION',
+      transcriptionEngine: 'TRANSCRIBE',
+      transcriptionLanguage: 'identify-language',
+      speakerSeparation: 'BOTH',
+    };
+    const roster = [{ key: 'a', channel: 'REMOTE', voiceId: '(spk_0)', mergedKeys: [] }];
+    renderPanel({ item, roster });
+    expect(screen.getByText('Browser extension')).toBeTruthy();
+    expect(screen.getByText('Amazon Transcribe')).toBeTruthy();
+    expect(screen.getByText('Identified by Amazon Transcribe (one language)')).toBeTruthy();
+    expect(screen.getByText('On for both channels')).toBeTruthy();
+    expect(screen.getByText('1 voice told apart in the transcript.')).toBeTruthy();
+    expect(screen.queryByText(/Inferred/)).toBeNull();
+    expect(screen.queryByText(/started before LMA recorded/)).toBeNull();
+  });
+
+  it('says what is inferred for a meeting started before its capture was recorded', () => {
+    const roster = [{ key: 'a', channel: 'REMOTE', voiceId: '(spk_0)', mergedKeys: [] }];
+    renderPanel({ item: { ...ITEM, remoteParticipantName: 'Others', systemLabel: 'System' }, roster });
+    expect(screen.getByText(/started before LMA recorded how meetings are captured/)).toBeTruthy();
+    expect(screen.getByText(/Inferred from the form of the Meeting ID/)).toBeTruthy();
+    expect(screen.getByText('Inferred from the voice labels in the transcript.')).toBeTruthy();
+    expect(screen.queryByText('Transcription engine')).toBeNull();
   });
 
   it('says a live meeting has no recordings yet', () => {

@@ -3,6 +3,7 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { CHAPTERS_HEADING } from './chapters';
 import { consentAsText } from './meeting-consent';
 
 // A picture of a key frame in a summary (the screen share summary section), which
@@ -103,8 +104,14 @@ export const getMarkdownSummaryWithout = (callSummaryText, omit = []) => {
 // editor seeds the sections of a generated summary. A bold line with lower-case
 // letters (`**[00:30] Budget**`) is a sub-heading within a section, not a section.
 const SECTION_HEADING = /^\s*(?:#{1,3}\s+(.+?)\s*#*|\*\*([^*\n]+)\*\*\s*:?)\s*$/;
+// The sections the meeting page shows in their own place, named in any case and
+// at any heading level: their text must be a section of its own, or it would be
+// shown twice (once in the section before it, once in its own place).
+const AGENDA_COVERAGE_HEADING = /^\s*(?:#{1,6}\s*)?\**\s*agenda\s+coverage\s*\**\s*:?\s*$/i;
 
 const headingOf = (line) => {
+  if (CHAPTERS_HEADING.test(line)) return 'CHAPTERS';
+  if (AGENDA_COVERAGE_HEADING.test(line)) return 'AGENDA COVERAGE';
   const match = line.match(SECTION_HEADING);
   if (!match) return null;
   if (match[1]) return match[1].trim();

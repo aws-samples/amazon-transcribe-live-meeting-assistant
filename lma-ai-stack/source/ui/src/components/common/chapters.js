@@ -19,7 +19,7 @@ import { showsSharedContent } from './video-keyframes';
 const CHAPTER_LINE =
   /^\s*(?:[-*•]\s*|\d{1,3}[.)]\s+)?\**\s*\[?((?:\d{1,2}:)?\d{1,3}:\d{2})\]?\s*\**\s*(?:[-–—:|]\s*)?(.*?)\s*$/;
 // A heading that names the section in a hand-edited (Markdown) summary.
-const CHAPTERS_HEADING = /^\s*(?:#{1,6}\s*)?\**\s*chapters\s*\**\s*:?\s*$/i;
+export const CHAPTERS_HEADING = /^\s*(?:#{1,6}\s*)?\**\s*chapters\s*\**\s*:?\s*$/i;
 // Any other heading, which ends the section.
 const HEADING = /^\s*(?:#{1,6}\s+\S|\*\*[^*]+\*\*\s*:?\s*$)/;
 

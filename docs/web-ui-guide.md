@@ -423,14 +423,17 @@ as a deck. See [Meeting Video and Key Frames](meeting-video.md#on-the-meeting-pa
 - **Capture and processing** — how the meeting was captured and what happened
   to it, from the meeting record and what the page has loaded:
   - **Captured with** — *Virtual Participant* (with the platform, and a link to
-    the Virtual Participant), *Stream Audio or the browser extension*, *Desktop
-    Capture App* or *Uploaded recording*. Only the Virtual Participant is
-    recorded on the meeting; the others are read from the form of the Meeting ID
-    each source writes, and the page says so. Stream Audio and the browser
-    extension write the same form, so they are named together. A Meeting ID of
-    any other form (an MCP client, the API) is shown as not known.
-  - **Speaker separation** — how many voices the speech engine told apart in the
-    transcript, read from the voice labels on its segments.
+    the Virtual Participant), *Stream Audio*, *Browser extension*, *Desktop
+    Capture App*, *Uploaded recording*, or another client of the streaming API,
+    as the meeting recorded it when it started.
+  - **Transcription engine** — *Amazon Transcribe* or *ASR MicroVM* (a meeting
+    that fell back from the MicroVM to Amazon Transcribe shows Amazon
+    Transcribe), and **Transcription language** — the language code, Amazon
+    Transcribe's language identification, or, for the ASR MicroVM, the model's
+    own language.
+  - **Speaker separation** — which channels it was asked for (both, the meeting
+    audio, the microphone, or off), with how many voices the transcript tells
+    apart.
   - **Audio recording** and **Video recording** — whether each was stored, or,
     for a Virtual Participant whose video recording was turned off, that it was.
   - **Consent** — the consent setting that applied (*Off*, *Notify* or *Opt-in*)
@@ -442,8 +445,12 @@ as a deck. See [Meeting Video and Key Frames](meeting-video.md#on-the-meeting-pa
     that a missing transcript is explained. When the meeting record says when it
     expires, that is given too.
 
-  The transcription engine (Amazon Transcribe or the ASR MicroVM) and the
-  transcription language are not recorded on the meeting, so they are not shown.
+  A meeting started before LMA recorded these shows no engine or language. Its
+  source is inferred from the form of the Meeting ID each source writes (Stream
+  Audio and the browser extension write the same form, so they are named
+  together, and any other form is shown as not known), its speaker separation is
+  read from the voice labels in the transcript, and the page says that both are
+  inferred.
 - **Speakers** — name each voice once and the whole transcript updates; see
   [Naming the voices](transcription-and-translation.md#naming-the-voices).
 - **Consent** — for a meeting whose consent was in notify or opt-in mode: its mode and status,

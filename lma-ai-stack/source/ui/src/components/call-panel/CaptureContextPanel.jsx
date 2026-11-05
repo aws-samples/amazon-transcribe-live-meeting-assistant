@@ -11,7 +11,10 @@
  * applied, and what the deployment's Retention settings do to its transcript --
  * so that a transcript that is missing, or that stops, can be explained from
  * the page. Read from the meeting record and what the page already loaded
- * (common/meeting-context.js).
+ * (common/meeting-context.js). The capture source, transcription engine,
+ * language and speaker separation are the ones the meeting recorded when it
+ * started; a meeting started before those were recorded shows its source and
+ * speaker separation as inferred, and says so, and no engine or language.
  */
 import React from 'react';
 import PropTypes from 'prop-types';
@@ -23,7 +26,11 @@ import {
   SOURCE_VIRTUAL_PARTICIPANT,
   captureSource,
   consentSummary,
+  hasRecordedCaptureContext,
+  recordedSpeakerSeparation,
   speakerSeparation,
+  transcriptionEngine,
+  transcriptionLanguage,
   transcriptRetention,
 } from '../common/meeting-context';
 
@@ -47,7 +54,7 @@ const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`;
 const sourceValue = (source, vp, platform) => (
   <>
     <div>{source.kind === SOURCE_VIRTUAL_PARTICIPANT && platform ? `${source.label} · ${platform}` : source.label}</div>
-    {source.inferred && <Note>Read from the form of the Meeting ID; the meeting record does not name its source.</Note>}
+    {source.inferred && <Note>Inferred from the form of the Meeting ID; the meeting record does not name it.</Note>}
     {vp?.id && (
       <Link href={`#/virtual-participant/${vp.id}`} fontSize="body-s">
         {`Virtual Participant ${vp.id}`}
@@ -56,7 +63,19 @@ const sourceValue = (source, vp, platform) => (
   </>
 );
 
-const separationValue = (separation, transcriptDeleted) => {
+const observedVoices = (separation) =>
+  separation?.separated ? `${plural(separation.voices, 'voice', 'voices')} told apart in the transcript.` : null;
+
+const separationValue = (separation, transcriptDeleted, recordedSetting) => {
+  if (recordedSetting) {
+    const observed = observedVoices(separation);
+    return (
+      <>
+        <div>{recordedSetting}</div>
+        {observed && <Note>{observed}</Note>}
+      </>
+    );
+  }
   if (!separation) {
     return transcriptDeleted ? 'Not known: the transcript was deleted' : 'Not known yet: no speech in the transcript';
   }
@@ -64,13 +83,14 @@ const separationValue = (separation, transcriptDeleted) => {
     return (
       <>
         <div>No separated voices</div>
-        <Note>Each channel is one speaker in the transcript.</Note>
+        <Note>Inferred from the transcript: each channel is one speaker in it.</Note>
       </>
     );
   }
   return (
     <>
       <div>{`On: ${plural(separation.voices, 'voice', 'voices')} told apart`}</div>
+      <Note>Inferred from the voice labels in the transcript.</Note>
       {separation.splitChannel && <Note>More than one voice on a channel; name them on the Speakers panel.</Note>}
     </>
   );
@@ -170,10 +190,19 @@ const CaptureContextPanel = ({
   const retention = transcriptRetention(item);
   const consent = consentSummary(consentState);
   const videoOff = Boolean(vp) && vp.enableVideoRecording === false;
+  const engine = transcriptionEngine(item);
+  const language = transcriptionLanguage(item);
+  const separation = separationValue(
+    speakerSeparation(roster),
+    retention.state === 'deleted',
+    recordedSpeakerSeparation(item),
+  );
 
   const items = [
     { label: 'Captured with', value: sourceValue(source, vp, platform) },
-    { label: 'Speaker separation', value: separationValue(speakerSeparation(roster), retention.state === 'deleted') },
+    ...(engine ? [{ label: 'Transcription engine', value: engine }] : []),
+    ...(language ? [{ label: 'Transcription language', value: language }] : []),
+    { label: 'Speaker separation', value: separation },
     { label: 'Audio recording', value: recordingValue(item.recordingUrl, { live, kind: 'audio' }) },
     { label: 'Video recording', value: recordingValue(item.videoRecordingUrl, { live, off: videoOff, kind: 'video' }) },
     {
@@ -188,7 +217,12 @@ const CaptureContextPanel = ({
       header={
         <Header
           variant="h3"
-          description="The transcription engine and language are not recorded on the meeting, so they are not shown."
+          description={
+            hasRecordedCaptureContext(item)
+              ? undefined
+              : 'This meeting started before LMA recorded how meetings are captured: its source and speaker ' +
+                'separation are inferred, and its transcription engine and language are not known.'
+          }
         >
           Capture and processing
         </Header>

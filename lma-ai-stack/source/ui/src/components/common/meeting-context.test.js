@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CONSENT_PAUSE_GRACE_MS,
+  SOURCE_API,
+  SOURCE_BROWSER_EXTENSION,
   SOURCE_DESKTOP_APP,
   SOURCE_STREAM_AUDIO,
   SOURCE_UNKNOWN,
@@ -15,9 +17,54 @@ import {
   captureSource,
   consentPauseDueAt,
   consentSummary,
+  hasRecordedCaptureContext,
+  recordedSpeakerSeparation,
   speakerSeparation,
+  transcriptionEngine,
+  transcriptionLanguage,
   transcriptRetention,
 } from './meeting-context';
+
+describe('the capture context a meeting recorded', () => {
+  it.each([
+    ['VIRTUAL_PARTICIPANT', SOURCE_VIRTUAL_PARTICIPANT, 'Virtual Participant'],
+    ['STREAM_AUDIO', SOURCE_STREAM_AUDIO, 'Stream Audio'],
+    ['BROWSER_EXTENSION', SOURCE_BROWSER_EXTENSION, 'Browser extension'],
+    ['DESKTOP_APP', SOURCE_DESKTOP_APP, 'Desktop Capture App'],
+    ['UPLOAD', SOURCE_UPLOAD, 'Uploaded recording'],
+    ['API', SOURCE_API, 'Another client of the streaming API (such as an MCP client)'],
+  ])('reads CaptureSource %s as recorded, whatever the Meeting ID looks like', (stored, kind, label) => {
+    // A Meeting ID in the Stream Audio form, which the recorded source wins over.
+    const item = { callId: 'Weekly sync - 2026-11-03-14:05:09.123', captureSource: stored };
+    expect(captureSource(item)).toEqual({ kind, label, inferred: false });
+  });
+
+  it('shows an unknown CaptureSource as it is, and infers only when there is none', () => {
+    expect(captureSource({ callId: 'x', captureSource: 'KIOSK' })).toMatchObject({ label: 'KIOSK', inferred: false });
+    expect(captureSource({ callId: 'Weekly sync - 2026-11-03-14:05:09.123', captureSource: '' }).inferred).toBe(true);
+  });
+
+  it('names the engine, the language setting and the speaker separation asked for', () => {
+    expect(transcriptionEngine({ transcriptionEngine: 'TRANSCRIBE' })).toBe('Amazon Transcribe');
+    expect(transcriptionEngine({ transcriptionEngine: 'MICROVM_ASR' })).toBe('ASR MicroVM');
+    expect(transcriptionLanguage({ transcriptionLanguage: 'en-US' })).toBe('en-US');
+    expect(transcriptionLanguage({ transcriptionLanguage: 'identify-multiple-languages' })).toBe(
+      'Identified by Amazon Transcribe (several languages)',
+    );
+    expect(transcriptionLanguage({ transcriptionEngine: 'MICROVM_ASR' })).toBe('Set by the ASR model');
+    expect(recordedSpeakerSeparation({ speakerSeparation: 'REMOTE' })).toBe('On for the meeting audio');
+    expect(recordedSpeakerSeparation({ speakerSeparation: 'NONE' })).toBe('Off');
+  });
+
+  it('knows nothing of these for a meeting started before they were recorded', () => {
+    const older = { callId: 'Weekly sync-2026-11-03-14-05-09-123' };
+    expect(hasRecordedCaptureContext(older)).toBe(false);
+    expect(transcriptionEngine(older)).toBeNull();
+    expect(transcriptionLanguage(older)).toBeNull();
+    expect(recordedSpeakerSeparation(older)).toBeNull();
+    expect(hasRecordedCaptureContext({ transcriptionEngine: 'TRANSCRIBE' })).toBe(true);
+  });
+});
 
 describe('captureSource', () => {
   it('names a Virtual Participant meeting from its own labels or its linked record, as recorded', () => {

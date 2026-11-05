@@ -38,6 +38,12 @@ const mapCallsAttributes = (calls) => {
       UpdatedAt: updatedAt,
       RecordingUrl: recordingUrl,
       VideoRecordingUrl: videoRecordingUrl,
+      // How the meeting was captured and transcribed, as its START recorded it;
+      // absent on a meeting started before these were stored (meeting-context.js).
+      CaptureSource: captureSource,
+      TranscriptionEngine: transcriptionEngine,
+      TranscriptionLanguage: transcriptionLanguage,
+      SpeakerSeparation: speakerSeparation,
       TotalConversationDurationMillis: totalConversationDurationMillis = 0,
       Sentiment: storedSentiment = {},
       Owner: owner,
@@ -85,6 +91,10 @@ const mapCallsAttributes = (calls) => {
       updatedAt,
       recordingUrl,
       videoRecordingUrl,
+      captureSource,
+      transcriptionEngine,
+      transcriptionLanguage,
+      speakerSeparation,
       totalConversationDurationMillis,
       conversationDurationTimeStamp: new Date(totalConversationDurationMillis).toISOString().substr(11, 8),
       sentiment,
