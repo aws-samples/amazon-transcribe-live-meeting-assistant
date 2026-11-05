@@ -243,3 +243,38 @@ def test_the_warm_exercise_asks_for_speaker_labels_when_a_diarizer_is_baked(
     (tmp_path / "diarizer").mkdir()
     (tmp_path / "diarizer" / "model_quantized.onnx").write_bytes(b"graph")
     assert hook_server.speaker_labels_baked() is True
+
+
+def test_concurrent_ready_requests_run_one_warm_decode() -> None:
+    """A /ready retried while the first decodes waits for it instead of decoding beside it."""
+    import threading
+
+    harness = Harness()
+    started = threading.Event()
+    release = threading.Event()
+    running = []
+
+    def slow_exercise() -> bool:
+        running.append(1)
+        assert len(running) == 1, "two warm decodes ran at once"
+        started.set()
+        release.wait(5)
+        harness.exercises += 1
+        running.pop()
+        return True
+
+    harness.deps.exercise = slow_exercise
+    hooks = Hooks(harness.deps)
+    results: list[int] = []
+    first = threading.Thread(target=lambda: results.append(hooks.on_ready()))
+    first.start()
+    assert started.wait(5)
+    second = threading.Thread(target=lambda: results.append(hooks.on_ready()))
+    second.start()
+    release.set()
+    first.join(5)
+    second.join(5)
+
+    assert results == [200, 200]
+    assert harness.exercises == 1
+    assert harness.spawns == 1
