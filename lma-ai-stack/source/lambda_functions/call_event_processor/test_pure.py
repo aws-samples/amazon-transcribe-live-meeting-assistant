@@ -43,6 +43,7 @@ if str(HERE) not in sys.path:
 from pure import (  # noqa: E402
     QUARTER_COUNT,
     agenda_derivation_due,
+    capture_context_fields,
     convert_keys_to_uppercamelcase,
     get_sentiment_per_quarter,
     matches_wake_phrase,
@@ -399,3 +400,27 @@ def test_the_processor_decides_both_from_the_segments_channel():
     assert "if analyses.sentiment:" in source
     assert "if analyses.agent_assist:" in source
     assert "matches_wake_phrase(" not in source
+
+
+# ---------------------------------------------------------------------------
+# capture_context_fields
+# ---------------------------------------------------------------------------
+
+
+def test_capture_context_keeps_only_the_fields_an_event_sets():
+    message = {
+        "EventType": "UPDATE_CAPTURE_CONTEXT",
+        "CallId": "c1",
+        "TranscriptionEngine": "TRANSCRIBE",
+        "TranscriptionLanguage": " en-US ",
+        "SpeakerSeparation": "",
+        "CaptureSource": None,
+    }
+    assert capture_context_fields(message) == {
+        "TranscriptionEngine": "TRANSCRIBE",
+        "TranscriptionLanguage": "en-US",
+    }
+
+
+def test_capture_context_of_an_event_without_one_is_empty():
+    assert capture_context_fields({"EventType": "START", "CallId": "c1"}) == {}

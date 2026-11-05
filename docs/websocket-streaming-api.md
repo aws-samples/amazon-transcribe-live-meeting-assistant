@@ -257,7 +257,8 @@ Sent once at the beginning of a session to initialize the transcription.
   "samplingRate": 16000,
   "activeSpeaker": "Other Participant",
   "diarizeSystemChannel": true,
-  "diarizeMicChannel": false
+  "diarizeMicChannel": false,
+  "clientType": "DESKTOP_APP"
 }
 ```
 
@@ -271,6 +272,7 @@ Sent once at the beginning of a session to initialize the transcription.
 | `activeSpeaker` | `string` | No | Value of `remoteSpeakerName` | Name of the currently active speaker on the meeting/remote channel (channel 0). |
 | `diarizeSystemChannel` | `boolean` | No | The deployment default (see below) | Enable Amazon Transcribe speaker partitioning (diarization) on the system / meeting audio channel (channel 0). See [Speaker Identification](#speaker-identification-diarization). |
 | `diarizeMicChannel` | `boolean` | No | The deployment default (see below) | Same, for the microphone channel (channel 1). |
+| `clientType` | `string` | No | `API` | Which client is capturing the meeting: `STREAM_AUDIO` (the Stream Audio page and its embeddable components), `BROWSER_EXTENSION` or `DESKTOP_APP`. Stored on the meeting as its capture source; any other value, or none, is stored as `API`. See [Capture Context](#capture-context). |
 
 > **Older field names.** Clients written for LMA before 0.4.0 send the two
 > speaker names as `agentId` (for `localSpeakerName`) and `fromNumber` (for
@@ -494,6 +496,7 @@ type CallMetaData = {
   diarizeSystemChannel?: boolean;  // START only: diarize ch_0 (system/meeting)
   diarizeMicChannel?: boolean;     // START only: diarize ch_1 (microphone)
   consent?: object;         // START only: the client's consent step (6.1.5)
+  clientType?: string;      // START only: STREAM_AUDIO | BROWSER_EXTENSION | DESKTOP_APP (Capture Context)
   channels?: {              // Server-managed; do not send from client
     [channelId: string]: {
       currentSpeakerName: string | null;
@@ -503,6 +506,28 @@ type CallMetaData = {
   };
 };
 ```
+
+#### Capture Context
+
+Each meeting's record says how it was captured and transcribed, in four fields
+of the `Call` type that `getCall` returns. The server writes them from the
+`START` message and the settings the meeting starts with; a client sets only
+the first, through `clientType`.
+
+| Field | Values |
+|-------|--------|
+| `CaptureSource` | `STREAM_AUDIO`, `BROWSER_EXTENSION` or `DESKTOP_APP` from the START's `clientType`, and `API` for any other client of this API. Meetings that do not come through this API are `VIRTUAL_PARTICIPANT` (a [Virtual Participant](virtual-participant.md) joined the meeting) and `UPLOAD` (an uploaded recording). |
+| `TranscriptionEngine` | `TRANSCRIBE` (Amazon Transcribe) or `MICROVM_ASR` (the [MicroVM ASR engine](microvm-asr.md)). A meeting the MicroVM could not take, and that Amazon Transcribe transcribed instead, reads `TRANSCRIBE`. |
+| `TranscriptionLanguage` | The Amazon Transcribe language setting the meeting used: a language code such as `en-US`, or `identify-language` / `identify-multiple-languages` when Transcribe identified the language from the deployment's language options. Absent for `MICROVM_ASR`, whose model sets the language. |
+| `SpeakerSeparation` | The channels speaker separation (diarization) was asked for, after the [precedence](#611-start-message) above: `BOTH`, `REMOTE` (the meeting audio, channel 0), `LOCAL` (the microphone, channel 1) or `NONE`. |
+
+The engine is the one the meeting is expected to start with when its record is
+created. If another one transcribes it — Amazon Transcribe taking over because
+no MicroVM could be started, or an opt-in meeting that waited for consent while
+the engine setting changed — the server writes the transcription fields again
+when transcription starts. The `clientType` is the client's own statement: it is
+informational, and does not change how the meeting is processed. All four fields are absent on meetings recorded before LMA stored
+them, and a client that does not send `clientType` keeps working unchanged.
 
 ### 6.2 Binary Messages (Audio Data)
 

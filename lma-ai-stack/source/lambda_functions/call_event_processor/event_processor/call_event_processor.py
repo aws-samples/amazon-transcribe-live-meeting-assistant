@@ -78,6 +78,7 @@ from pure import (  # noqa: E402
     SentimentPerChannel,
     agenda_derivation_due,
     apply_meeting_access,
+    capture_context_fields,
     convert_keys_to_uppercamelcase,
     get_sentiment_per_quarter,
     merge_dicts,
@@ -890,6 +891,50 @@ async def execute_add_s3_recording_mutation(
     return result
 
 
+async def execute_update_capture_context_mutation(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> Dict:
+    """Sets the capture context fields an UPDATE_CAPTURE_CONTEXT event carries.
+
+    Sent after START when the meeting is transcribed by another engine than the
+    one START named. The write is conditional on the meeting existing, so an
+    event processed before its START in the same batch fails and is redelivered.
+    """
+    call_id = message.get("CallId")
+    fields = capture_context_fields(message)
+    if not call_id or not fields:
+        error_message = "update capture context event has no CallId or no field to set"
+        raise TypeError(error_message)
+
+    if not appsync_session.client.schema:
+        raise ValueError("invalid AppSync schema")
+    schema = DSLSchema(appsync_session.client.schema)
+
+    query = dsl_gql(
+        DSLMutation(
+            schema.Mutation.updateCaptureContext.args(input={"CallId": call_id, **fields}).select(
+                schema.Call.CallId,
+                schema.Call.CaptureSource,
+                schema.Call.TranscriptionEngine,
+                schema.Call.TranscriptionLanguage,
+                schema.Call.SpeakerSeparation,
+            )
+        )
+    )
+
+    result = await execute_gql_query_with_retries(
+        query,
+        client_session=appsync_session,
+        logger=LOGGER,
+    )
+
+    query_string = print_ast(query)
+    LOGGER.debug("query result", extra=dict(query=query_string, result=result))
+
+    return result
+
+
 async def execute_add_s3_video_recording_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
@@ -1299,6 +1344,7 @@ async def execute_process_event_api_mutation(
         ADD_S3_RECORDING_URL="ADD_S3_RECORDING_URL",
         ADD_S3_VIDEO_RECORDING_URL="ADD_S3_VIDEO_RECORDING_URL",
         ADD_VIDEO_KEYFRAME="ADD_VIDEO_KEYFRAME",
+        UPDATE_CAPTURE_CONTEXT="UPDATE_CAPTURE_CONTEXT",
     )
 
     msg_event_type = message.get("EventType", "")
@@ -1667,6 +1713,16 @@ async def execute_process_event_api_mutation(
         # ADD S3 VIDEO RECORDING URL
         LOGGER.debug("Add video recording url")
         response = await execute_add_s3_video_recording_mutation(
+            message=message, appsync_session=appsync_session
+        )
+        if isinstance(response, Exception):
+            return_value["errors"].append(response)
+        else:
+            return_value["successes"].append(response)
+
+    elif event_type == "UPDATE_CAPTURE_CONTEXT":
+        LOGGER.debug("Update capture context")
+        response = await execute_update_capture_context_mutation(
             message=message, appsync_session=appsync_session
         )
         if isinstance(response, Exception):

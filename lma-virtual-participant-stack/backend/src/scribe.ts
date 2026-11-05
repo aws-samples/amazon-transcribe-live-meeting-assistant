@@ -15,6 +15,7 @@ import {
     sendStartMeeting,
     sendEndMeeting,
     kinesisStreamManager,
+    vpTranscriptionContext,
 } from './kinesis-stream.js';
 import {
     AsrSegment,
@@ -405,6 +406,11 @@ export class TranscriptionService {
         log.info('Starting transcription service');
         this.isTranscribing = true;
         this.subscribeToAssistantTurns();
+
+        // The deployment's runtime switch, read per meeting; ASR_ENGINE overrides it
+        // per VP. A MicroVM that cannot be acquired falls through to Amazon Transcribe.
+        // Read while the voice assistant starts, since START names the engine.
+        const switchesRead = fetchAsrRuntimeSwitches();
         
         // Start voice assistant if enabled
         if (voiceAssistant.isEnabled()) {
@@ -416,6 +422,25 @@ export class TranscriptionService {
                 // Non-critical - continue with transcription
             }
         }
+
+        const switches = await switchesRead;
+        // The same switch both engines honour. On the on-demand engine it is
+        // passed into the session below; on Amazon Transcribe it tells the
+        // segment builder to recover turns from the per-item speaker labels,
+        // which this path has always requested and never read.
+        kinesisStreamManager.setDiarization(switches.diarizeVirtualParticipant);
+        // Transcribe rows are named from the same roster timeline as the
+        // engine's, by each word's span on the meeting timeline.
+        kinesisStreamManager.setRosterLookup((start, end) => this.rosterNameFor(start, end));
+        if (switches.diarizeVirtualParticipant) {
+            log.info('[DIARIZATION] VP voice separation is on for this meeting');
+        }
+        const engine = resolveVpAsrEngine(switches);
+        // Stored on the meeting record by START; written again below if Amazon
+        // Transcribe takes over from the MicroVM.
+        kinesisStreamManager.setTranscriptionContext(
+            vpTranscriptionContext(engine, switches.diarizeVirtualParticipant, details.transcribeLanguageCode),
+        );
 
         // Send start meeting event to Kinesis
         try {
@@ -450,27 +475,18 @@ export class TranscriptionService {
         // closed once when the meeting ends (below).
         const recordingStream = createWriteStream(details.tmpRecordingFilename, { flags: 'a' });
 
-        // The deployment's runtime switch, read per meeting; ASR_ENGINE overrides it
-        // per VP. A MicroVM that cannot be acquired falls through to Amazon Transcribe.
-        const switches = await fetchAsrRuntimeSwitches();
-        // The same switch both engines honour. On the on-demand engine it is
-        // passed into the session below; on Amazon Transcribe it tells the
-        // segment builder to recover turns from the per-item speaker labels,
-        // which this path has always requested and never read.
-        kinesisStreamManager.setDiarization(switches.diarizeVirtualParticipant);
-        // Transcribe rows are named from the same roster timeline as the
-        // engine's, by each word's span on the meeting timeline.
-        kinesisStreamManager.setRosterLookup((start, end) => this.rosterNameFor(start, end));
-        if (switches.diarizeVirtualParticipant) {
-            log.info('[DIARIZATION] VP voice separation is on for this meeting');
-        }
-        if (resolveVpAsrEngine(switches) === 'microvm') {
+        if (engine === 'microvm') {
             const ran = await this.runMicrovmTranscription(recordingStream, switches.diarizeVirtualParticipant);
             if (ran) {
                 this.finishMeeting(recordingStream);
                 return;
             }
             log.warn('[ASR] MicroVM ASR unavailable; Amazon Transcribe takes over for the rest of this meeting');
+            // In the background: a lost event is logged by sendRecord, and
+            // transcription does not wait on it.
+            void kinesisStreamManager.sendTranscriptionContext(
+                vpTranscriptionContext('transcribe', switches.diarizeVirtualParticipant, details.transcribeLanguageCode),
+            );
         }
 
         // Loop over Transcribe sessions for the life of the meeting. Each

@@ -214,6 +214,7 @@ OTHER_FIELDS = [
     ("Mutation", "updateCallAggregation"),
     ("Mutation", "updateRecordingUrl"),
     ("Mutation", "updateVideoRecordingUrl"),
+    ("Mutation", "updateCaptureContext"),
     ("Mutation", "updateAgent"),
     ("Mutation", "addCallSummaryText"),
     ("Mutation", "addTranscriptSegment"),

@@ -252,3 +252,24 @@ def apply_meeting_access(segment: Dict[str, Any], meeting: Dict[str, Any]) -> No
     owner = meeting.get("Owner")
     if owner is not None:
         segment["Owner"] = owner
+
+
+# The meeting record's capture context fields (Call.CaptureSource and the three
+# beside it in schema.graphql), which START carries and UPDATE_CAPTURE_CONTEXT
+# changes. See docs/websocket-streaming-api.md#capture-context.
+CAPTURE_CONTEXT_FIELDS = (
+    "CaptureSource",
+    "TranscriptionEngine",
+    "TranscriptionLanguage",
+    "SpeakerSeparation",
+)
+
+
+def capture_context_fields(message: Dict[str, Any]) -> Dict[str, str]:
+    """The capture context fields an event sets: each one it carries as a
+    non-blank string. A field it leaves out keeps the value already stored."""
+    return {
+        field: message[field].strip()
+        for field in CAPTURE_CONTEXT_FIELDS
+        if isinstance(message.get(field), str) and message[field].strip()
+    }

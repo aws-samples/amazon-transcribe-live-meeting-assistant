@@ -447,8 +447,26 @@ def test_the_start_event_matches_what_the_live_transcriber_emits(env) -> None:
             "SystemPhoneNumber": "System",
             "AgentId": "bob@example.com",
             "CreatedAt": FROZEN_NOW.isoformat(),
+            "CaptureSource": "UPLOAD",
+            "TranscriptionEngine": "TRANSCRIBE",
+            "TranscriptionLanguage": "en-US",
+            "SpeakerSeparation": "NONE",
         }
     ]
+
+
+def test_the_start_event_records_the_language_and_speaker_separation_used(env, monkeypatch) -> None:
+    """The meeting record names the language and the diarization the job ran with."""
+    monkeypatch.setattr(
+        index,
+        "job_table",
+        FakeTable(job_row(EnableDiarization=True, MaxSpeakers=3, LanguageCode="es-US")),
+    )
+    _, kinesis, transcribe = env
+    index.lambda_handler(s3_event(), None)
+    payload = kinesis.payloads[0]
+    assert payload["TranscriptionLanguage"] == transcribe.params["LanguageCode"] == "es-US"
+    assert payload["SpeakerSeparation"] == "REMOTE"
 
 
 def test_the_start_event_goes_to_the_call_data_stream_keyed_by_call_id(env) -> None:

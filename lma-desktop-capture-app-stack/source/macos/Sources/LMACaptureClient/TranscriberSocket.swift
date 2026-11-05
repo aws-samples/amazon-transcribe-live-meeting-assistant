@@ -230,6 +230,9 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
             "toNumber": config.toNumber,
             "samplingRate": config.sampleRate,
             "callEvent": "START",
+            // Which client captured the meeting, stored on its record as its
+            // capture source (docs/websocket-streaming-api.md).
+            "clientType": "DESKTOP_APP",
             "diarizeSystemChannel": config.diarizeSystemChannel,
             "diarizeMicChannel": config.diarizeMicChannel,
         ]

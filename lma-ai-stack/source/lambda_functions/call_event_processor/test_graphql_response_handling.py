@@ -907,6 +907,69 @@ def test_a_start_event_without_an_agenda_creates_the_meeting_without_one(
     assert "Agenda" not in print_ast(session.queries[0])
 
 
+def test_a_start_event_creates_the_meeting_with_its_capture_context(schema, emitted, monkeypatch):
+    """The capture context reaches createCall the way the agenda does: the input
+    type declares the fields, so gql keeps them from the message."""
+    created = {"createCall": {"CallId": "call-1", "Owner": "someone@example.com"}}
+    session = FakeSession(schema, created)
+    process_event(
+        session,
+        {
+            "EventType": "START",
+            "CallId": "call-1",
+            "AgentId": "someone@example.com",
+            "CaptureSource": "STREAM_AUDIO",
+            "TranscriptionEngine": "TRANSCRIBE",
+            "TranscriptionLanguage": "en-US",
+            "SpeakerSeparation": "REMOTE",
+        },
+        monkeypatch,
+    )
+    sent = print_ast(session.queries[0])
+    assert 'CaptureSource: "STREAM_AUDIO"' in sent
+    assert 'TranscriptionEngine: "TRANSCRIBE"' in sent
+    assert 'TranscriptionLanguage: "en-US"' in sent
+    assert 'SpeakerSeparation: "REMOTE"' in sent
+
+
+def test_an_update_capture_context_event_sets_only_the_fields_it_carries(
+    schema, emitted, monkeypatch
+):
+    updated = {"updateCaptureContext": {"CallId": "call-1", "TranscriptionEngine": "TRANSCRIBE"}}
+    session = FakeSession(schema, updated)
+    process_event(
+        session,
+        {
+            "EventType": "UPDATE_CAPTURE_CONTEXT",
+            "CallId": "call-1",
+            "TranscriptionEngine": "TRANSCRIBE",
+            "TranscriptionLanguage": "en-US",
+            "AccessToken": "not-sent",
+        },
+        monkeypatch,
+    )
+    assert len(session.queries) == 1
+    sent = print_ast(session.queries[0])
+    assert "updateCaptureContext" in sent
+    assert 'TranscriptionEngine: "TRANSCRIBE"' in sent
+    assert 'TranscriptionLanguage: "en-US"' in sent
+    # As an argument; the selection names the field with no colon.
+    assert "SpeakerSeparation:" not in sent
+    assert "ExpiresAfter" not in sent
+    assert "not-sent" not in sent
+
+
+def test_an_update_capture_context_event_with_nothing_to_set_fails(schema, emitted, monkeypatch):
+    session = FakeSession(schema, {})
+    with pytest.raises(TypeError):
+        process_event(
+            session,
+            {"EventType": "UPDATE_CAPTURE_CONTEXT", "CallId": "call-1", "TranscriptionEngine": ""},
+            monkeypatch,
+        )
+    assert session.queries == []
+
+
 def test_a_redelivered_start_event_counts_no_meeting_started(schema, emitted, monkeypatch):
     """Otherwise the meeting count measures stream redelivery, not meetings.
 

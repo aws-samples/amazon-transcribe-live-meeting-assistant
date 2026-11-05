@@ -27,6 +27,10 @@ export default /* GraphQL */ `
       UpdatedAt
       RecordingUrl
       VideoRecordingUrl
+      CaptureSource
+      TranscriptionEngine
+      TranscriptionLanguage
+      SpeakerSeparation
       TotalConversationDurationMillis
       Sentiment {
         OverallSentiment {

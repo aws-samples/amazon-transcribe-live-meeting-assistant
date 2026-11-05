@@ -310,6 +310,9 @@ public sealed class TranscriberSocket
             ["toNumber"] = _config.ToNumber,
             ["samplingRate"] = _config.SampleRate,
             ["callEvent"] = "START",
+            // Which client captured the meeting, stored on its record as its
+            // capture source (docs/websocket-streaming-api.md).
+            ["clientType"] = "DESKTOP_APP",
             ["diarizeSystemChannel"] = _config.DiarizeSystemChannel,
             ["diarizeMicChannel"] = _config.DiarizeMicChannel,
         };

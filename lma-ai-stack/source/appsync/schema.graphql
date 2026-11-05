@@ -95,6 +95,26 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	TranscriptDeletedAt: AWSDateTime
 	TranscriptSegmentsDeleted: Int
 	TranscriptFilesDeleted: Int
+	# How the meeting was captured and transcribed, written when it starts (and
+	# again if the engine changes, see updateCaptureContext). Absent on a meeting
+	# started before these fields existed. See
+	# docs/websocket-streaming-api.md#capture-context.
+	# CaptureSource: VIRTUAL_PARTICIPANT, STREAM_AUDIO (the Stream Audio page and
+	# its embeddable component), BROWSER_EXTENSION, DESKTOP_APP, UPLOAD, or API
+	# (any other client of the streaming API, or one that did not say).
+	CaptureSource: String
+	# TRANSCRIBE (Amazon Transcribe) or MICROVM_ASR (the on-demand ASR MicroVM).
+	# A meeting that fell back from the MicroVM to Amazon Transcribe reads
+	# TRANSCRIBE.
+	TranscriptionEngine: String
+	# The Amazon Transcribe language setting the meeting used: a language code
+	# such as en-US, or identify-language / identify-multiple-languages when
+	# Transcribe identified the language. Absent for MICROVM_ASR, whose model
+	# sets the language.
+	TranscriptionLanguage: String
+	# Which channels speaker separation (diarization) was asked for: BOTH,
+	# REMOTE (the meeting audio), LOCAL (the microphone) or NONE.
+	SpeakerSeparation: String
 	Owner: String
 	SharedWith: String
 }
@@ -162,6 +182,11 @@ input CreateCallInput {
 	AgendaSource: String
 	AgendaUpdatedBy: String
 	AgendaUpdatedAt: AWSDateTime
+	# How the meeting is captured and transcribed; see these fields on Call.
+	CaptureSource: String
+	TranscriptionEngine: String
+	TranscriptionLanguage: String
+	SpeakerSeparation: String
 }
 
 type CreateCallOutput @aws_iam {
@@ -248,6 +273,10 @@ type Mutation @aws_iam {
 	updateCallAggregation(input: UpdateCallAggregationInput!): Call
 	updateRecordingUrl(input: UpdateRecordingUrlInput!): Call
 	updateVideoRecordingUrl(input: UpdateVideoRecordingUrlInput!): Call
+	# Sets the capture context fields of Call after the meeting started: written
+	# when the engine that transcribes it is not the one its START named, as
+	# when the MicroVM could not start and Amazon Transcribe took over.
+	updateCaptureContext(input: UpdateCaptureContextInput!): Call
 	updateAgent(input: UpdateAgentInput!): Call
 	updateSpeakerIdentities(input: UpdateSpeakerIdentitiesInput!): Call @aws_cognito_user_pools @aws_iam
 	resolveSpeakerNames(input: ResolveSpeakerNamesInput!): ResolveSpeakerNamesOutput @aws_cognito_user_pools @aws_iam
@@ -879,6 +908,16 @@ input UpdateVideoRecordingUrlInput {
 	UpdatedAt: AWSDateTime
 	Owner: String
 	SharedWith: String
+}
+
+# A field left out (or null) keeps its stored value.
+input UpdateCaptureContextInput {
+	CallId: ID!
+	CaptureSource: String
+	TranscriptionEngine: String
+	TranscriptionLanguage: String
+	SpeakerSeparation: String
+	UpdatedAt: AWSDateTime
 }
 
 # ----------------------------------------------------------------------------
