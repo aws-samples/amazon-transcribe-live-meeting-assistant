@@ -121,6 +121,15 @@ assistant is a panel beside the tabs, on every tab; see
   [Duration](#duration)).
 - **Platform** — when a Virtual Participant joined the meeting, the platform it
   joined (Zoom, Microsoft Teams, Amazon Chime, Webex).
+- **Consent** — the consent setting that applied to the meeting and where it
+  stands, such as *Consent Opt-in · granted*, or *Consent enforcement off* when
+  consent was off (or never started) for it. Selecting it opens the consent
+  record, or the consent setting, on the **Details** tab. While a meeting with
+  consent in notify or opt-in mode is live and recording and transcription are
+  withheld, a warning above the tabs says that transcription is paused until
+  consent is recorded, or that a participant objected, once the meeting has run
+  for 30 seconds (the time a notice normally takes to be posted and answered);
+  **Show the consent record** opens the record.
 - **Owner** and **Speakers** — the people heard in the meeting, by the names
   given to their voices. **Name speakers** opens the Speakers panel on the
   **Details** tab.
@@ -411,9 +420,33 @@ as a deck. See [Meeting Video and Key Frames](meeting-video.md#on-the-meeting-pa
   and video recordings: **Play** opens the **Transcript** tab and plays it in the
   [player](#the-recording-player), and **Open file** opens the file in a new
   browser tab, to watch or save.
+- **Capture and processing** — how the meeting was captured and what happened
+  to it, from the meeting record and what the page has loaded:
+  - **Captured with** — *Virtual Participant* (with the platform, and a link to
+    the Virtual Participant), *Stream Audio or the browser extension*, *Desktop
+    Capture App* or *Uploaded recording*. Only the Virtual Participant is
+    recorded on the meeting; the others are read from the form of the Meeting ID
+    each source writes, and the page says so. Stream Audio and the browser
+    extension write the same form, so they are named together. A Meeting ID of
+    any other form (an MCP client, the API) is shown as not known.
+  - **Speaker separation** — how many voices the speech engine told apart in the
+    transcript, read from the voice labels on its segments.
+  - **Audio recording** and **Video recording** — whether each was stored, or,
+    for a Virtual Participant whose video recording was turned off, that it was.
+  - **Consent** — the consent setting that applied (*Off*, *Notify* or *Opt-in*)
+    and the status, with **View the consent record**.
+  - **Transcript retention** — what the deployment's Retention settings do to
+    the transcript: kept for the days set to keep transcript segments, to be
+    deleted at a given time, or deleted at a given time (with how many segments
+    and files were removed) by **Delete the transcript after the summary**, so
+    that a missing transcript is explained. When the meeting record says when it
+    expires, that is given too.
+
+  The transcription engine (Amazon Transcribe or the ASR MicroVM) and the
+  transcription language are not recorded on the meeting, so they are not shown.
 - **Speakers** — name each voice once and the whole transcript updates; see
   [Naming the voices](transcription-and-translation.md#naming-the-voices).
-- **Consent** — for a meeting whose consent was started: its mode and status,
+- **Consent** — for a meeting whose consent was in notify or opt-in mode: its mode and status,
   whether it may be recorded and transcribed now, the notice posted, each
   participant's latest reply, the owner's attestation, the evidence screenshots
   with a vision model's check of each, and a timeline. The owner, anyone the

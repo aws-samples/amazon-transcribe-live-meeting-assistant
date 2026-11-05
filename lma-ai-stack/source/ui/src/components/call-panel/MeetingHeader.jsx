@@ -13,9 +13,10 @@
  * tooltip, one click away on the copy button, and on the Details tab. The line
  * under it gives the status, the start time in the viewer's own time zone (the
  * UTC value in its tooltip), the length, the platform when a Virtual
- * Participant joined it, the owner, and a cost chip that opens the itemised
- * estimate. Then the people heard in it, from the transcript and the names
- * given to its voices.
+ * Participant joined it, the owner, the consent setting that applied ("Consent
+ * Opt-in · granted", or "Consent enforcement off"), which opens the consent
+ * record, and a cost chip that opens the itemised estimate. Then the people
+ * heard in it, from the transcript and the names given to its voices.
  *
  * The actions are the meeting's: Assistant, which opens and closes the
  * meeting assistant's panel (when the assistant is enabled), Share, Download
@@ -45,6 +46,7 @@ import { shareModal, deleteModal } from '../common/meeting-controls';
 import { InfoLink } from '../common/info-link';
 import { DONE_STATUS } from '../common/get-recording-status';
 import { formatDuration, formatMeetingStart, meetingTitle } from '../common/meeting-header';
+import { consentSummary } from '../common/meeting-context';
 import { CallCostBreakdown, costSummaryText } from './CallCostPanel';
 import { ASSISTANT_PANEL_ID } from './MeetingAssistantPanel';
 import {
@@ -124,7 +126,8 @@ const MeetingHeader = ({
   platform = '',
   speakers = [],
   cost,
-  consent = null,
+  consentState = null,
+  onShowConsent = undefined,
   callTranscriptPerCallId,
   getCallDetailsFromCallIds = undefined,
   setToolsOpen = undefined,
@@ -132,6 +135,8 @@ const MeetingHeader = ({
   assistant = undefined,
 }) => {
   const { calls } = useCallsContext();
+  const consent = consentState?.consent || null;
+  const consentInfo = consentSummary(consentState);
   const [deleteRequest, setDeleteRequest] = useState(0);
   const controls = { calls, selectedItems: [item], loading: false, getCallDetailsFromCallIds };
 
@@ -274,6 +279,32 @@ const MeetingHeader = ({
               <span>{item.owner}</span>
             </Meta>
           )}
+          {consentInfo.known && (
+            // The consent setting that applied, and where the meeting stands
+            // with it; it opens the consent record on the Details tab.
+            <Box variant="span" fontSize="body-s" data-testid="meeting-consent-indicator">
+              {consentInfo.enforced && (
+                <Box variant="span" color="text-body-secondary" fontSize="body-s">
+                  {'Consent '}
+                </Box>
+              )}
+              {onShowConsent ? (
+                <Button
+                  variant="inline-link"
+                  onClick={onShowConsent}
+                  ariaLabel={
+                    consentInfo.enforced
+                      ? `Consent: ${consentInfo.text}. Show the consent record`
+                      : 'Consent enforcement off. Show the consent setting'
+                  }
+                >
+                  {consentInfo.text}
+                </Button>
+              ) : (
+                consentInfo.text
+              )}
+            </Box>
+          )}
           <CostChip cost={cost} />
         </SpaceBetween>
         {shownSpeakers.length > 0 && (
@@ -310,8 +341,11 @@ MeetingHeader.propTypes = {
   platform: PropTypes.string,
   speakers: PropTypes.arrayOf(PropTypes.shape({ key: PropTypes.string, label: PropTypes.string })),
   cost: COST_SHAPE.isRequired,
+  // What useMeetingConsent returns: the consent record, for the header's
+  // indicator and the summary downloads.
   // eslint-disable-next-line react/forbid-prop-types
-  consent: PropTypes.object,
+  consentState: PropTypes.object,
+  onShowConsent: PropTypes.func,
   // eslint-disable-next-line react/forbid-prop-types
   callTranscriptPerCallId: PropTypes.object.isRequired,
   getCallDetailsFromCallIds: PropTypes.func,

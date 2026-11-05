@@ -139,8 +139,17 @@ settings, since its record decides its own gate.
 
 ## On the meeting page
 
-A meeting whose consent was started has a **Consent** section on its page,
-below the agenda. It shows:
+The meeting page's header names the consent setting that applied to the
+meeting and its status (*Consent Opt-in · granted*), or *Consent enforcement
+off* for a meeting whose consent was off or never started; selecting it opens
+the record. The **Details** tab's **Capture and processing** section shows the
+same setting with the status. While a live meeting in notify or opt-in mode has
+recording and transcription withheld, a warning above the tabs says that
+transcription is paused until consent is recorded (or that a participant
+objected), from 30 seconds after the meeting started, with a link to the record.
+
+A meeting whose consent was in notify or opt-in mode has a **Consent** section
+on its **Details** tab. It shows:
 
 - the **mode** and, for opt-in, the **rule**;
 - the **status**, and whether the meeting may be **recorded and transcribed**
@@ -167,7 +176,7 @@ the same access check as the transcript, and last an hour. An image that has
 expired (see [What is stored](#what-is-stored)) or was deleted after its check
 is shown as such, with its entry and check. The section updates
 as the record changes, whoever changed it. A meeting whose consent was never
-started shows no section.
+started, or ran in mode off, shows no section.
 
 Three actions, each offered only to the people the backend lets do it:
 

@@ -107,6 +107,14 @@ A meeting page that is open when the meeting ends shows the deletion time a few
 seconds after the summary appears. It shows that the transcript has been deleted
 the next time it is loaded.
 
+The **Details** tab's **Capture and processing** section says the same under
+**Transcript retention**: when the transcript is to be deleted or was deleted,
+that the **Delete the transcript after the summary** setting did it, how many
+transcript segments and files were removed, and that the summary, the
+recordings and the meeting record are kept. For a meeting whose transcript is
+not deleted after the summary, it says that the transcript is kept for the days
+set to keep transcript segments.
+
 After the deletion:
 
 - **Regenerate** on the summary is refused, because a new summary would be

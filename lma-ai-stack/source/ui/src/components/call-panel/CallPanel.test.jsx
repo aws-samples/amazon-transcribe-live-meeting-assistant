@@ -21,6 +21,8 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 const responses = vi.hoisted(() => ({ frames: [], cost: null, vps: [], vncToggle: null }));
 // The calls context, which a test can give the writers the page offers controls for.
 const callsContext = vi.hoisted(() => ({ value: { calls: [] } }));
+// What useMeetingConsent answers; nothing read yet unless a test says otherwise.
+const consentState = vi.hoisted(() => ({ value: { consent: null } }));
 // The options the page gives the chat bridge, so a test can finish an answer.
 const bridge = vi.hoisted(() => ({ options: null }));
 
@@ -50,7 +52,7 @@ vi.mock('../../contexts/app', () => ({
 vi.mock('../../contexts/settings', () => ({ default: () => ({ settings: {} }) }));
 vi.mock('../../contexts/calls', () => ({ default: () => callsContext.value }));
 vi.mock('../../hooks/use-user-groups', () => ({ default: () => ({ isAdmin: false, isLoading: false }) }));
-vi.mock('../../hooks/use-meeting-consent', () => ({ default: () => ({ consent: null }) }));
+vi.mock('../../hooks/use-meeting-consent', () => ({ default: () => consentState.value }));
 vi.mock('../../hooks/use-strands-chat-bridge', () => ({
   default: (callId, options) => {
     bridge.options = options;
@@ -160,6 +162,7 @@ beforeEach(() => {
   responses.cost = null;
   responses.vps = [];
   callsContext.value = { calls: [] };
+  consentState.value = { consent: null };
   // Which summary sections a viewer opened is remembered between visits.
   window.localStorage.removeItem('lma-summary-sections');
 });
@@ -1119,5 +1122,55 @@ describe('naming a speaker from the Transcript tab', () => {
     callsContext.value = { calls: [], sendUpdateSpeakerIdentities: vi.fn() };
     renderPage({ transcript: LINES, item: { ...ITEM, owner: 'someone-else' } });
     expect(screen.queryByRole('button', { name: /^Name or combine/ })).toBeNull();
+  });
+});
+
+describe('the consent that applied to the meeting', () => {
+  const OPT_IN = {
+    consent: { Mode: 'opt_in', Rule: 'each_participant', Status: 'granted', CaptureAllowed: true },
+    captureAllowed: true,
+    settings: { Mode: 'opt_in' },
+  };
+  const indicator = () => screen.queryByTestId('meeting-consent-indicator');
+  const consentRecordHeading = () => screen.queryByRole('heading', { name: /^Consent/ });
+
+  it('is not named in the header before the record has been read', () => {
+    renderPage();
+    expect(indicator()).toBeNull();
+  });
+
+  it('is named in the header, which opens the consent record on the Details tab', () => {
+    consentState.value = OPT_IN;
+    renderPage();
+    expect(indicator().textContent).toBe('Consent Opt-in · granted');
+    fireEvent.click(within(indicator()).getByRole('button'));
+    expect(selectedTab().textContent).toBe('Details');
+    expect(document.getElementById('meeting-consent-record')).toBeTruthy();
+    expect(consentRecordHeading()).toBeTruthy();
+  });
+
+  it('says when consent enforcement was off, and shows no consent record', () => {
+    consentState.value = { consent: null, captureAllowed: true, settings: { Mode: 'off' } };
+    renderPage({ url: '/calls/m?tab=details' });
+    expect(indicator().textContent).toBe('Consent enforcement off');
+    expect(document.getElementById('meeting-consent-record')).toBeNull();
+    expect(screen.getByText('Capture and processing')).toBeTruthy();
+  });
+
+  it('says above the tabs that transcription is paused while a live meeting waits for consent', () => {
+    consentState.value = {
+      consent: { Mode: 'opt_in', Status: 'pending', CaptureAllowed: false },
+      captureAllowed: false,
+      settings: { Mode: 'opt_in' },
+    };
+    const live = { ...ITEM, recordingStatusLabel: IN_PROGRESS_STATUS, recordingStatusIcon: 'in-progress' };
+    const { unmount } = renderPage({ item: live });
+    // The meeting started days ago, so the grace period is long past.
+    expect(screen.getByText('Transcription is paused until consent is recorded')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Show the consent record' }));
+    expect(selectedTab().textContent).toBe('Details');
+    unmount();
+    renderPage();
+    expect(screen.queryByText('Transcription is paused until consent is recorded')).toBeNull();
   });
 });

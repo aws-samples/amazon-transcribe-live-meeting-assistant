@@ -23,10 +23,18 @@ const mapCallsAttributes = (calls) => {
       AgendaUpdatedAt: agendaUpdatedAt,
       TranscriptDeletionScheduledFor: transcriptDeletionScheduledFor,
       TranscriptDeletedAt: transcriptDeletedAt,
+      TranscriptSegmentsDeleted: transcriptSegmentsDeleted,
+      TranscriptFilesDeleted: transcriptFilesDeleted,
+      // When the meeting record expires (epoch seconds), by the deployment's
+      // days to keep meeting records.
+      ExpiresAfter: expiresAfter,
       CreatedAt: callTimestamp,
       // The name given for the other participants (CustomerPhoneNumber is the
       // stored attribute's historical name); see resolveSpeaker.
       CustomerPhoneNumber: remoteParticipantName,
+      // The label the capturing client gave the meeting's system side; a
+      // Virtual Participant writes 'LMA System' (see meeting-context.js).
+      SystemPhoneNumber: systemLabel,
       UpdatedAt: updatedAt,
       RecordingUrl: recordingUrl,
       VideoRecordingUrl: videoRecordingUrl,
@@ -69,7 +77,11 @@ const mapCallsAttributes = (calls) => {
       agendaUpdatedAt,
       transcriptDeletionScheduledFor,
       transcriptDeletedAt,
+      transcriptSegmentsDeleted,
+      transcriptFilesDeleted,
+      expiresAfter,
       remoteParticipantName,
+      systemLabel,
       updatedAt,
       recordingUrl,
       videoRecordingUrl,
