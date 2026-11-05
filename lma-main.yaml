@@ -2774,6 +2774,11 @@ Resources:
         CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
         IsLambdaAgentAssistEnabled: "true"
         AgentAssistExistingLambdaFunctionArn: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
+        # Named rather than read from MEETINGASSISTSETUP's output, because that
+        # stack takes its inputs from this one and the reference would be
+        # circular. The name is the FunctionName the meeting assistant setup
+        # template gives the agent.
+        TroubleshootingAgentFunctionArn: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-Troubleshooting"
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         ConfigurationPreset: !Ref ConfigurationPreset
@@ -4283,8 +4288,9 @@ Outputs:
 
   TroubleshootingAgentFunctionArn:
     Description:
-      ARN of the troubleshooting agent Lambda function. No user-facing entry
-      point in this release; invoke it with the AWS CLI or SDK.
+      ARN of the troubleshooting agent Lambda function. The web UI's
+      Troubleshooting page and Diagnose buttons reach it through AppSync; it can
+      also be invoked with the AWS CLI or SDK.
     Value: !GetAtt MEETINGASSISTSETUP.Outputs.TroubleshootingAgentFunctionArn
 
   # The chat buttons live in the shared configuration table too, as a

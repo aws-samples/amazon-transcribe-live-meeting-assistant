@@ -31,6 +31,8 @@ export const MOVED_CONFIGURATION_PAGES = {
   [ASR_CONFIG_PATH]: 'asr_engine',
   [TRANSCRIPT_SUMMARY_PATH]: 'summary_prompt_templates',
 };
+// The troubleshooting agent's page, for the Admin group.
+export const TROUBLESHOOTING_PATH = '/troubleshooting';
 export const DEFAULT_PATH = CALLS_PATH;
 export const EMBED_PATH = '/embed';
 // The enrollment portal. Top-level rather than under /configuration, because

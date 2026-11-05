@@ -16,6 +16,7 @@ import {
   USER_MANAGEMENT_PATH,
   CONFIGURATION_PATH,
   VOICE_ENROLLMENT_PATH,
+  TROUBLESHOOTING_PATH,
   DEFAULT_PATH,
 } from '../../routes/constants';
 
@@ -84,6 +85,13 @@ export const generateNavigationItems = (settings, isAdmin) => {
 
   // Add Configuration section (admin only)
   if (isAdmin) {
+    // Questions about the deployment, answered by the troubleshooting agent.
+    // Admin only, as every troubleshooting diagnosis is.
+    navigationItems.push({
+      type: 'link',
+      text: 'Troubleshooting',
+      href: `#${TROUBLESHOOTING_PATH}`,
+    });
     navigationItems.push({
       type: 'section',
       text: 'Configuration',

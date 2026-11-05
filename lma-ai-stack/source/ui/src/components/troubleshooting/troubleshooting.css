@@ -1,0 +1,28 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
+
+.troubleshooting-answer h2 {
+  font-size: 1.1em;
+  margin: 0.8em 0 0.3em;
+}
+
+.troubleshooting-answer details {
+  margin-top: 0.8em;
+}
+
+.troubleshooting-answer details summary {
+  cursor: pointer;
+}
+
+.troubleshooting-answer pre,
+.troubleshooting-answer code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.troubleshooting-question {
+  white-space: pre-wrap;
+}

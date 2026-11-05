@@ -20,6 +20,7 @@ import {
   MCP_SERVERS_PATH,
   USER_MANAGEMENT_PATH,
   CONFIGURATION_PATH,
+  TROUBLESHOOTING_PATH,
   DEFAULT_PATH,
 } from '../../routes/constants';
 
@@ -47,6 +48,7 @@ export const NAV_PATHS = [
   VIRTUAL_PARTICIPANT_PATH,
   BROWSER_EXTENSION_PATH,
   MEETINGS_QUERY_PATH,
+  TROUBLESHOOTING_PATH,
 ];
 
 /* eslint-disable react/prop-types */
@@ -69,6 +71,8 @@ const Navigation = ({ header = callsNavHeader, items, onFollowHandler = defaultO
     activeHref = `#${MCP_SERVERS_PATH}`;
   } else if (path.includes(USER_MANAGEMENT_PATH)) {
     activeHref = `#${USER_MANAGEMENT_PATH}`;
+  } else if (path.includes(TROUBLESHOOTING_PATH)) {
+    activeHref = `#${TROUBLESHOOTING_PATH}`;
   } else if (path.includes(CONFIGURATION_PATH)) {
     activeHref = `#${CONFIGURATION_PATH}`;
   } else if (path.includes(CALLS_PATH)) {

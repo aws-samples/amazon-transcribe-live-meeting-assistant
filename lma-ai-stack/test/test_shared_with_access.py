@@ -690,6 +690,7 @@ PYTHON_READERS = [
     "microvm_vnc_token/vp_access.py",
     "speaker_name_resolver/index.py",
     "summary_regenerator/index.py",
+    "troubleshooting_resolver/index.py",
     "video_keyframes_resolver/index.py",
     "vnc_edge_token/vp_access.py",
 ]

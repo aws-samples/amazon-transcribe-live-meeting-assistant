@@ -175,6 +175,10 @@ ADMIN_ONLY_FIELDS = [
     # read and saved together.
     ("Query", "getConfiguration"),
     ("Mutation", "updateConfiguration"),
+    # Troubleshooting agent diagnoses, of the deployment or of one meeting or
+    # Virtual Participant.
+    ("Mutation", "startTroubleshooting"),
+    ("Query", "getTroubleshootingJob"),
 ]
 
 # Reads every signed-in user performs in the course of using the product, so the

@@ -294,6 +294,10 @@ type Mutation @aws_iam {
 	addMeetingConsentEvidence(input: AddMeetingConsentEvidenceInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
 	verifyMeetingConsentEvidence(input: VerifyMeetingConsentEvidenceInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
 	regenerateCallSummary(input: RegenerateCallSummaryInput!): RegenerateCallSummaryOutput @aws_cognito_user_pools @aws_iam
+	# Starts a diagnosis by the troubleshooting agent and returns at once; the
+	# answer is read with getTroubleshootingJob. For the Admin group, and
+	# re-checked in the resolver Lambda. See docs/troubleshooting-agent.md.
+	startTroubleshooting(input: StartTroubleshootingInput!): TroubleshootingJob @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	grantVoiceConsent: VoiceEnrollmentResult @aws_cognito_user_pools
 	enrolMyVoice(input: EnrolMyVoiceInput!): VoiceEnrollmentResult @aws_cognito_user_pools
 	revokeVoiceConsent(input: RevokeVoiceConsentInput): VoiceEnrollmentResult @aws_cognito_user_pools
@@ -423,6 +427,8 @@ type Query @aws_cognito_user_pools
 	# the callers getCall answers -- an Admin, the owner, anyone the meeting is
 	# shared with, or a backend role with IAM -- and checked in the resolver.
 	getCallCost(CallId: ID!): CallCost @aws_cognito_user_pools @aws_iam
+	# One diagnosis started with startTroubleshooting, for the Admin who started it.
+	getTroubleshootingJob(JobId: ID!): TroubleshootingJob @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	# The price table behind those estimates, for the Admin who edits it.
 	getCallPricing: CallPricing @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	# What the configuration editor renders: every section's schema, the shipped
@@ -1783,6 +1789,36 @@ type ConfigurationProfileList @aws_cognito_user_pools {
 # where the usage happened and a configurable price table. It is an estimate:
 # list prices, first usage tier, and only the usage that is metered -- NotIncluded
 # names what is left out. See docs/meeting-cost-estimate.md.
+# ── Troubleshooting agent ──────────────────────────────────────────────────
+#
+# A diagnosis takes minutes, longer than an AppSync request may, so it runs as a
+# job: startTroubleshooting records it and returns, and the page reads it with
+# getTroubleshootingJob until Status is COMPLETED or FAILED.
+
+input StartTroubleshootingInput {
+	# The question. When empty, a diagnosis of the meeting or Virtual
+	# Participant named below asks a fixed question about it.
+	Question: String
+	CallId: ID
+	VirtualParticipantId: ID
+}
+
+type TroubleshootingJob @aws_cognito_user_pools {
+	JobId: ID!
+	# PENDING, RUNNING, COMPLETED or FAILED.
+	Status: String!
+	Question: String
+	CallId: ID
+	VirtualParticipantId: ID
+	# Markdown, in the agent's three sections: Root Cause, Recommendations, Evidence.
+	Answer: String
+	Error: String
+	# True when the agent reached one of its limits before it finished searching.
+	Truncated: Boolean
+	CreatedAt: AWSDateTime
+	UpdatedAt: AWSDateTime
+}
+
 type CallCost @aws_cognito_user_pools @aws_iam {
 	CallId: ID!
 	Currency: String

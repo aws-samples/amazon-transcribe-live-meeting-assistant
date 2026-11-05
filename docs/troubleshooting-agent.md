@@ -7,11 +7,6 @@ title: "AI Troubleshooting Agent"
 
 # AI Troubleshooting Agent
 
-> **Status: foundation release.** The agent, its tools and its prompt are
-> deployed, but there is **no entry point in the LMA web UI yet**. Invoke it
-> with the AWS CLI or SDK as shown below. The Admin-only troubleshooting page
-> and the per-resource "Diagnose" button are a later change.
-
 An agent that answers "why did this fail?" about a deployed LMA stack by
 reading that stack's own CloudWatch logs, its Virtual Participant records and
 its CloudFormation parameters, and reporting a cause together with the evidence
@@ -40,6 +35,81 @@ alarm or a user report has told you something is wrong and you need to know
 what.
 
 ## Using it
+
+There are three ways to ask the agent a question: the **Troubleshooting**
+page, the **Diagnose** button on a meeting or a Virtual Participant, and the
+AWS CLI or SDK.
+
+### The Troubleshooting page
+
+Every web UI entry point to the agent is for members of the Admin group.
+
+Members of the Admin group see **Troubleshooting** in the web UI's navigation.
+The page asks questions about the whole deployment, such as "Why didn't my last
+Virtual Participant join its meeting?" or "Are there errors in the transcriber
+in the last hour?". Type a question, or choose one of the suggested questions
+shown on an empty page, and choose **Ask**. The optional **Scope** section takes
+a Meeting ID or a Virtual Participant ID to point the agent at one resource.
+
+The answer is shown in the agent's three sections, described in
+[What it answers with](#what-it-answers-with), with the Evidence section
+collapsed. A diagnosis usually takes one to four minutes, and the page shows
+how long the current one has been running. One question runs at a time: each
+run is paid for, so the next question waits until the last one is answered.
+Earlier questions and their answers stay on the page until you leave it; they
+are not kept anywhere you can return to.
+
+A user outside the Admin group who opens the page is told that it is for
+administrators.
+
+### The Diagnose button
+
+The meeting page's header and the Virtual Participant detail page's header
+each have a **Diagnose** button, shown to members of the Admin group only. It
+opens a window and starts a diagnosis of that meeting or Virtual Participant.
+
+There is nothing to type. The diagnosis asks a fixed question for the
+resource: for a Virtual Participant, whether it joined the meeting and, if it
+failed or ended early, why; for a meeting, whether it was captured and
+transcribed from start to end and, if anything failed, why. Closing the window
+does not stop the diagnosis, and opening it again shows the same one, running
+or finished. **Run again** starts a new one.
+
+### How the web UI runs a diagnosis
+
+A diagnosis takes longer than an AppSync request is allowed to, so the web UI
+runs it as a job through two GraphQL fields:
+
+| Field | What it does |
+|---|---|
+| `startTroubleshooting(input: {Question, CallId, VirtualParticipantId})` | Checks who is asking, records a job with status `PENDING`, starts it, and returns it at once. |
+| `getTroubleshootingJob(JobId)` | Returns the job — `PENDING`, `RUNNING`, `COMPLETED` with its `Answer`, or `FAILED` with its `Error` — to the Admin who started it, and to no one else. The page reads it every three seconds. |
+
+Both fields are declared for the Admin group in the GraphQL schema, and the AI
+stack's troubleshooting resolver function
+(`lma-ai-stack/source/lambda_functions/troubleshooting_resolver`) checks the
+group again before it records anything. A request naming a `CallId` or a
+`VirtualParticipantId` that does not exist is refused.
+
+`Question` is asked as written. When it is empty, a job scoped to a meeting or
+Virtual Participant asks the fixed question for that resource, as the Diagnose
+button does, and an unscoped job asks for the most recent failure in the
+deployment.
+
+The job then runs in an asynchronous invocation of the same resolver function,
+which invokes the agent synchronously, once, and writes the answer to the job.
+Neither invocation is retried, because a retry is a second diagnosis paid for
+from the start. Jobs are kept in the `<AI stack>-TroubleshootingJobs` DynamoDB
+table for seven days, then removed by its time-to-live setting. A job that is
+still `PENDING` or `RUNNING` seven minutes after it last changed is reported as
+`FAILED` with "The diagnosis did not finish", since the function that ran it
+has stopped by then.
+
+The answer the web UI shows is the agent's `answer`. When the agent reports an
+error, the job carries the agent's fixed error message rather than the
+underlying exception text; that text is in the agent function's log.
+
+### From the AWS CLI or SDK
 
 The function's ARN is a stack output, `TroubleshootingAgentFunctionArn`:
 
@@ -70,13 +140,14 @@ Accepted fields, all optional except that a `query` is strongly advised:
 | `query` | The question. Defaults to "diagnose the most recent failure". |
 | `vpId` | A Virtual Participant id to scope the investigation to. |
 | `callId` | A meeting id to scope to. Also the channel thinking steps stream on. |
-| `messageId` | When present together with `callId`, each tool call is streamed to the UI's thinking-step panel over the existing `onAddChatToken` subscription. |
+| `messageId` | When present together with `callId`, each tool call is streamed to the UI's thinking-step panel over the existing `onAddChatToken` subscription. The web UI's jobs do not send one. |
 
-Because there is no UI entry point, the only way to invoke it is with an IAM
-principal that holds `lambda:InvokeFunction` on the function. **The stack grants
-that to no principal**, so unless you already have it through a broad
+Invoking the function directly needs an IAM principal that holds
+`lambda:InvokeFunction` on it. The stack grants that only to the AI stack's
+troubleshooting resolver role, so unless you already have it through a broad
 account-level policy such as an administrator role, you have to grant it
-deliberately.
+deliberately. A direct invocation is authorized by IAM alone; the access rule
+above belongs to the web UI's two GraphQL fields.
 
 ## What it answers with
 
@@ -350,7 +421,7 @@ what leaves the function.
 
 The same applies to an error response: a 400 or a 500 carries a fixed message
 and an `errorType`, and the full text goes to the function's log. That matters
-more once the UI entry points forward this body to a browser.
+because the troubleshooting resolver forwards that message to the browser.
 
 ## Related
 

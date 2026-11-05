@@ -821,7 +821,7 @@ Resources:
             reason: Customer can choose reserved concurrency based on their requirement.
     # checkov:skip=CKV_AWS_116: "DLQ not applicable - invoked synchronously for one diagnosis at a time; a failed run is reported, never retried"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only reads AWS service APIs"
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency; it has no user-facing entry point in this release"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency; it runs one diagnosis per request from the AI stack's troubleshooting resolver"
     # checkov:skip=CKV_AWS_173: "Environment variables hold resource names and model configuration, no sensitive data"
     Properties:
       FunctionName: !Sub "STRANDS-${LMAStackName}-Troubleshooting"
@@ -1013,9 +1013,9 @@ Outputs:
 
   TroubleshootingAgentFunctionArn:
     Description: >-
-      ARN of the troubleshooting agent Lambda function. It has no user-facing
-      entry point in this release; invoke it with the AWS CLI or SDK to
-      diagnose a deployment.
+      ARN of the troubleshooting agent Lambda function. The AI stack's
+      troubleshooting resolver invokes it for the web UI; it can also be
+      invoked with the AWS CLI or SDK to diagnose a deployment.
     Value: !If
       - ShouldDeployTroubleshootingAgent
       - !GetAtt TroubleshootingAgentFunction.Arn

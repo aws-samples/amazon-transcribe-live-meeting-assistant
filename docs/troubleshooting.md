@@ -31,6 +31,8 @@ title: "Troubleshooting"
 
 This guide covers monitoring and troubleshooting for LMA deployments, including common deployment failures, runtime issues, and cost estimation.
 
+For a runtime failure, the [AI Troubleshooting Agent](troubleshooting-agent.md) can do the log reading this guide describes. Admins ask it questions about the whole deployment on the web UI's **Troubleshooting** page, or choose **Diagnose** on a meeting or Virtual Participant page for a diagnosis of that one resource.
+
 ## CloudFormation Deployment Failures
 
 When a CloudFormation deployment fails:
