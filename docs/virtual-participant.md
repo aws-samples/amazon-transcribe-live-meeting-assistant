@@ -12,6 +12,7 @@ title: "Virtual Participant"
 - [Supported Platforms](#supported-platforms)
   - [Google Meet](#google-meet)
 - [Joining a Meeting](#joining-a-meeting)
+  - [Reviewing the launch settings](#reviewing-the-launch-settings)
 - [Status Lifecycle](#status-lifecycle)
   - [The status detail line](#the-status-detail-line)
   - [How the VP decides a meeting has ended](#how-the-vp-decides-a-meeting-has-ended)
@@ -231,6 +232,16 @@ What has been observed in live attempts, from a browser on an Amazon EC2 host an
 4. The VP starts in approximately 20-25 seconds (MicroVM, the default), 30-60 seconds (EC2), or 1-2 minutes (Fargate).
 5. Once joined, the VP posts an introduction message in the meeting chat.
 6. View VP status in the UI as it progresses through its lifecycle (see [Status Lifecycle](#status-lifecycle)).
+
+### Reviewing the launch settings
+
+The Virtual Participant page has a **Launch settings** section (collapsed by default) that lists what the Create Virtual Participant form asked for, in three groups:
+
+- **Meeting**: meeting name, platform, meeting ID, URL or Google Meet code, whether a meeting password was given (the password itself is never shown), the Zoom account choice for Zoom meetings, the meeting time (**Start now**, or the scheduled time in the time zone it was entered in and in yours when they differ), and the agenda.
+- **Capture**: whether the meeting video (screen) is recorded. Audio recording and the transcript are not a per-meeting choice.
+- **Consent**: the meeting consent choice for this meeting, or **Not set (deployment default)** when the deployment's [Meeting Consent](#meeting-consent) setting applies.
+
+A setting the form did not send, such as on a Virtual Participant started from an MCP client or created before the setting was recorded, reads **Not set (deployment default)** or **Not recorded**.
 
 ## Status Lifecycle
 
