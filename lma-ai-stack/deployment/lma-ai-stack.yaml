@@ -9137,7 +9137,8 @@ Resources:
         
         #if($ctx.args.input.meetingTime)
           $util.qr($input.put("meetingTime", $ctx.args.input.meetingTime))
-          #set($meetingTimeMillis = $util.math.multiply($ctx.args.input.meetingTime, 1000))
+          ## Plain arithmetic: $util.math.multiply answers null for an epoch time.
+          #set($meetingTimeMillis = $ctx.args.input.meetingTime * 1000)
           #set($scheduledDateTime = $util.time.epochMilliSecondsToISO8601($meetingTimeMillis))
           $util.qr($input.put("scheduledFor", $scheduledDateTime))
         #end

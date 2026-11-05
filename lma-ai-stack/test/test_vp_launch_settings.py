@@ -192,6 +192,8 @@ def test_create_stores_the_time_zone_and_a_false_zoom_choice(appsync, resources:
     assert not response.get("error"), response.get("error")
     stored = json.loads(response["evaluationResult"])["attributeValues"]
     assert stored["scheduledTimeZone"] == {"S": "America/New_York"}
+    # The instant as an ISO date-time, which the page and the status card read.
+    assert stored["scheduledFor"] == {"S": "2026-09-01T21:45:00Z"}
     assert stored["useStoredZoomAccount"] == {"BOOL": False}
 
 
