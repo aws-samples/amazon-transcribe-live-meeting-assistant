@@ -20,6 +20,7 @@ title: "Virtual Participant"
 - [AI-driven self-healing](#ai-driven-self-healing)
 - [Zoom Sign-in](#zoom-sign-in)
 - [Meeting Scheduling](#meeting-scheduling)
+  - [Changing a scheduled Virtual Participant](#changing-a-scheduled-virtual-participant)
 - [Meeting Invitation Parsing](#meeting-invitation-parsing)
 - [VNC Preview](#vnc-preview)
   - [How a viewer is authorized](#how-a-viewer-is-authorized)
@@ -376,6 +377,15 @@ Enter a future meeting time to schedule the VP to join a meeting later. The sche
 - Starting a scheduled meeting immediately
 - Stopping an in-progress scheduled meeting
 - Deleting a scheduled meeting before it starts
+- Changing a scheduled meeting before it starts
+
+### Changing a scheduled Virtual Participant
+
+While a Virtual Participant is waiting for its scheduled launch, its owner and Admins see an **Edit** button on the **Launch settings** section of its page. It opens the Create Virtual Participant form's fields, filled in with the stored values: the meeting name, platform, meeting ID or link, meeting time, agenda, meeting consent, video recording and, for Zoom, the stored Zoom account choice. The meeting password field starts empty, and leaving it empty keeps the current password. The stored Zoom account used is always that of the user who scheduled the meeting, whoever makes the change.
+
+Changes are accepted until 5 minutes before the meeting time, and a new meeting time must also be at least 5 minutes away. The check is made again when the change is saved: if the Virtual Participant has started launching in the meantime, the change is refused and it launches as it was scheduled.
+
+A saved change moves the launch schedule: the scheduler rewrites the one EventBridge Scheduler schedule created for the Virtual Participant, so it launches once, at the new time and with the new settings. If the schedule cannot be moved (for example because it no longer exists), no new schedule is created, and the Virtual Participant's status line says that it will launch as it was scheduled before; cancel it and schedule a new one to use the new settings. The agenda and meeting consent choice are read by the Virtual Participant when it starts, so changes to them apply even without moving the schedule.
 
 ## Meeting Invitation Parsing
 

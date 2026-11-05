@@ -1,0 +1,248 @@
+## updateScheduledVirtualParticipant: the write.
+##
+## Changes the launch settings of a Virtual Participant that is scheduled and
+## has not started. The pipeline's first function read the row into
+## $ctx.stash.vpAsRead; this one checks it and writes, on condition that the row
+## is still as it was read: still SCHEDULED, still at the same meeting time, and
+## still the caller's (the "Virtual Participant owner condition" below). A launch
+## that starts between the read and the write changes the status, so the write
+## is refused and the launch goes ahead as it was scheduled.
+##
+## The launch schedule itself is not written here. The VPScheduler Lambda in the
+## Virtual Participant stack reads this write from the table's stream and moves
+## the schedule it created for the row (lma-virtual-participant-stack/template.yaml).
+## So that it has time to, a change is accepted only while the meeting is at
+## least $editCutoffSeconds away, and a new meeting time must be as far away.
+##
+## An omitted input field leaves the attribute as it is. An agenda or meeting
+## consent choice sent empty removes it, and clearMeetingPassword removes the
+## meeting password; a meeting password sent empty is the same as not sending one.
+#set( $editCutoffSeconds = 300 )
+#set( $now = $util.time.nowEpochSeconds() )
+#set( $cutoff = $now + $editCutoffSeconds )
+#set( $row = $util.defaultIfNull($ctx.stash.vpAsRead, {}) )
+
+## The row must exist: UpdateItem would otherwise create one.
+#set( $conditions = ["attribute_exists(#conditionId)"] )
+#set( $conditionNames = { "#conditionId": "id" } )
+#set( $conditionValues = {} )
+## BEGIN Virtual Participant owner condition -- one text in every template
+## that has it; test_shared_with_access.py holds the copies to it.
+## A signed-in caller who is not an Admin may change a Virtual Participant
+## only as its Owner. The rule is added to the write's DynamoDB condition,
+## so it is judged on the row as it is when the write happens. Admins, and
+## backend roles with IAM credentials (the Virtual Participant task and
+## the Lambdas that launch and manage it), are not held to it; a backend
+## role is detected as getCall.response.vtl detects it.
+#set( $vpCallerRestricted = true )
+#if( $ctx.identity.userArn && $ctx.identity.userArn.contains(":assumed-role/") )
+  #set( $vpCallerRestricted = false )
+#elseif( $ctx.identity.groups && $ctx.identity.groups.contains("Admin") )
+  #set( $vpCallerRestricted = false )
+#end
+#if( $vpCallerRestricted )
+  $util.qr( $conditionNames.put("#conditionOwner", "Owner") )
+  $util.qr( $conditionValues.put(":conditionCaller", $util.dynamodb.toDynamoDB($util.defaultIfNull($ctx.identity.username, ""))) )
+  $util.qr( $conditions.add("#conditionOwner = :conditionCaller") )
+#end
+$util.qr( $ctx.stash.put("vpCallerRestricted", $vpCallerRestricted) )
+## END Virtual Participant owner condition
+
+## Who may change the row is decided before anything about the row is said: a
+## signed-in caller who is not an Admin is told only that they may not, both
+## when the row is someone else's and when there is none.
+#if( $vpCallerRestricted && $util.defaultIfNull($row.Owner, "") != $util.defaultIfNull($ctx.identity.username, "") )
+  $util.error("User $ctx.identity.username is not authorized to change Virtual Participant $ctx.args.input.id", "AuthorizationError")
+#end
+#if( !$ctx.stash.vpFound )
+  $util.error("Virtual Participant $ctx.args.input.id was not found", "NotFound")
+#end
+#if( $row.status != "SCHEDULED" || $row.isScheduled != true )
+  $util.error("Virtual Participant $ctx.args.input.id is not waiting for a scheduled launch, so its launch settings can no longer be changed", "ConflictError")
+#end
+#if( $util.isNull($row.meetingTime) || $row.meetingTime < $cutoff )
+  $util.error("Virtual Participant $ctx.args.input.id starts in less than 5 minutes, so its launch settings can no longer be changed", "ConflictError")
+#end
+
+## Still as read when the write happens.
+$util.qr( $conditionNames.put("#conditionStatus", "status") )
+$util.qr( $conditionValues.put(":conditionScheduled", $util.dynamodb.toDynamoDB("SCHEDULED")) )
+$util.qr( $conditions.add("#conditionStatus = :conditionScheduled") )
+$util.qr( $conditionNames.put("#conditionIsScheduled", "isScheduled") )
+$util.qr( $conditionValues.put(":conditionTrue", $util.dynamodb.toDynamoDB(true)) )
+$util.qr( $conditions.add("#conditionIsScheduled = :conditionTrue") )
+$util.qr( $conditionNames.put("#conditionMeetingTime", "meetingTime") )
+$util.qr( $conditionValues.put(":conditionMeetingTimeAsRead", $util.dynamodb.toDynamoDB($row.meetingTime)) )
+$util.qr( $conditions.add("#conditionMeetingTime = :conditionMeetingTimeAsRead") )
+
+#set( $conditionExpression = "" )
+#foreach( $condition in $conditions )
+  #set( $conditionExpression = "${conditionExpression}${condition}" )
+  #if( $foreach.hasNext )
+    #set( $conditionExpression = "${conditionExpression} AND " )
+  #end
+#end
+
+## The update.
+#set( $setValues = {} )
+#set( $removeNames = [] )
+
+#foreach( $field in ["meetingName", "meetingId"] )
+  #if( $ctx.args.input.containsKey($field) )
+    #if( $util.isNullOrBlank($ctx.args.input.get($field)) )
+      $util.error("$field cannot be empty", "BadRequest")
+    #end
+    $util.qr( $setValues.put($field, $ctx.args.input.get($field)) )
+  #end
+#end
+
+#if( !$util.isNullOrBlank($ctx.args.input.meetingPlatform) )
+  #set( $platforms = ["ZOOM", "CHIME", "TEAMS", "WEBEX", "GOOGLE_MEET"] )
+  #if( !$platforms.contains($ctx.args.input.meetingPlatform) )
+    $util.error("meetingPlatform must be ZOOM, CHIME, TEAMS, WEBEX or GOOGLE_MEET", "BadRequest")
+  #end
+  $util.qr( $setValues.put("meetingPlatform", $ctx.args.input.meetingPlatform) )
+#end
+
+#if( $util.defaultIfNull($ctx.args.input.clearMeetingPassword, false) == true )
+  $util.qr( $removeNames.add("meetingPassword") )
+#elseif( !$util.isNullOrBlank($ctx.args.input.meetingPassword) )
+  $util.qr( $setValues.put("meetingPassword", $ctx.args.input.meetingPassword) )
+#end
+
+#if( !$util.isNull($ctx.args.input.meetingTime) )
+  #if( $ctx.args.input.meetingTime < $cutoff )
+    $util.error("The meeting time must be at least 5 minutes from now", "BadRequest")
+  #end
+  $util.qr( $setValues.put("meetingTime", $ctx.args.input.meetingTime) )
+  ## Plain arithmetic: $util.math.multiply answers null for an epoch time.
+  #set( $meetingTimeMillis = $ctx.args.input.meetingTime * 1000 )
+  $util.qr( $setValues.put("scheduledFor", $util.time.epochMilliSecondsToISO8601($meetingTimeMillis)) )
+#end
+
+#if( !$util.isNullOrBlank($ctx.args.input.scheduledTimeZone) )
+  #if( $ctx.args.input.scheduledTimeZone.length() > 64 )
+    $util.error("scheduledTimeZone is longer than 64 characters", "BadRequest")
+  #end
+  $util.qr( $setValues.put("scheduledTimeZone", $ctx.args.input.scheduledTimeZone) )
+#end
+
+#if( $ctx.args.input.containsKey("agenda") )
+  #if( $util.isNullOrBlank($ctx.args.input.agenda) )
+    $util.qr( $removeNames.add("agenda") )
+    $util.qr( $removeNames.add("agendaSource") )
+  #else
+    ## Same bound and source rule as createVirtualParticipant.
+    #if( $ctx.args.input.agenda.length() > 10000 )
+      $util.error("The agenda is longer than 10000 characters", "BadRequest")
+    #end
+    $util.qr( $setValues.put("agenda", $ctx.args.input.agenda) )
+    #if( $ctx.identity.userArn )
+      $util.qr( $setValues.put("agendaSource", "mcp") )
+    #else
+      $util.qr( $setValues.put("agendaSource", "scheduled") )
+    #end
+  #end
+#end
+
+## Meeting consent, with createVirtualParticipant's names and rule.
+#if( $ctx.args.input.containsKey("consentMode") )
+  #if( $util.isNullOrBlank($ctx.args.input.consentMode) )
+    #if( !$util.isNullOrBlank($ctx.args.input.consentRule) )
+      $util.error("consentRule is only used with consentMode opt_in", "BadRequest")
+    #end
+    $util.qr( $removeNames.add("consentMode") )
+    $util.qr( $removeNames.add("consentRule") )
+  #else
+    #set( $consentModes = ["off", "notify", "opt_in"] )
+    #if( !$consentModes.contains($ctx.args.input.consentMode) )
+      $util.error("consentMode must be off, notify or opt_in", "BadRequest")
+    #end
+    $util.qr( $setValues.put("consentMode", $ctx.args.input.consentMode) )
+    #if( $util.isNullOrBlank($ctx.args.input.consentRule) )
+      $util.qr( $removeNames.add("consentRule") )
+    #else
+      #set( $consentRules = ["each_participant", "owner_attests"] )
+      #if( !$consentRules.contains($ctx.args.input.consentRule) )
+        $util.error("consentRule must be each_participant or owner_attests", "BadRequest")
+      #end
+      #if( $ctx.args.input.consentMode != "opt_in" )
+        $util.error("consentRule is only used with consentMode opt_in", "BadRequest")
+      #end
+      $util.qr( $setValues.put("consentRule", $ctx.args.input.consentRule) )
+    #end
+  #end
+#elseif( !$util.isNullOrBlank($ctx.args.input.consentRule) )
+  $util.error("consentRule is only sent together with consentMode", "BadRequest")
+#end
+
+#if( !$util.isNull($ctx.args.input.enableVideoRecording) )
+  $util.qr( $setValues.put("enableVideoRecording", $ctx.args.input.enableVideoRecording) )
+#end
+
+## The Zoom account is the owner's, whoever makes the change: userZoomSub is
+## set from the row's userSub (the user who scheduled it), never from the input.
+#if( !$util.isNull($ctx.args.input.useStoredZoomAccount) )
+  $util.qr( $setValues.put("useStoredZoomAccount", $ctx.args.input.useStoredZoomAccount) )
+  #if( $ctx.args.input.useStoredZoomAccount == true )
+    #if( $util.isNullOrBlank($row.userSub) )
+      $util.error("This Virtual Participant was scheduled without a user identity, so it cannot join with a stored Zoom account", "BadRequest")
+    #end
+    $util.qr( $setValues.put("userZoomSub", $row.userSub) )
+  #else
+    $util.qr( $removeNames.add("userZoomSub") )
+  #end
+#end
+
+$util.qr( $setValues.put("updatedAt", $util.time.nowISO8601()) )
+
+#set( $expNames = {} )
+#set( $expValues = {} )
+#set( $setParts = [] )
+#foreach( $entry in $setValues.entrySet() )
+  $util.qr( $expNames.put("#${entry.key}", $entry.key) )
+  $util.qr( $expValues.put(":${entry.key}", $util.dynamodb.toDynamoDB($entry.value)) )
+  $util.qr( $setParts.add("#${entry.key} = :${entry.key}") )
+#end
+#set( $removeParts = [] )
+#foreach( $name in $removeNames )
+  #if( !$setValues.containsKey($name) )
+    $util.qr( $expNames.put("#${name}", $name) )
+    $util.qr( $removeParts.add("#${name}") )
+  #end
+#end
+#set( $expression = "SET" )
+#foreach( $part in $setParts )
+  #set( $expression = "${expression} ${part}" )
+  #if( $foreach.hasNext )
+    #set( $expression = "${expression}," )
+  #end
+#end
+#if( !$removeParts.isEmpty() )
+  #set( $expression = "${expression} REMOVE" )
+  #foreach( $part in $removeParts )
+    #set( $expression = "${expression} ${part}" )
+    #if( $foreach.hasNext )
+      #set( $expression = "${expression}," )
+    #end
+  #end
+#end
+{
+  "version": "2018-05-29",
+  "operation": "UpdateItem",
+  "key": {
+    "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
+  },
+  "update": {
+    "expression": "$expression",
+    "expressionNames": $utils.toJson($expNames),
+    "expressionValues": $utils.toJson($expValues)
+  },
+  "condition": {
+    "expression": "$conditionExpression",
+    "expressionNames": $utils.toJson($conditionNames)
+  #if( !$conditionValues.isEmpty() )
+    ,"expressionValues": $utils.toJson($conditionValues)
+  #end
+  }
+}

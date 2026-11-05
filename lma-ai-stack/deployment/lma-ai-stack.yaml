@@ -11164,6 +11164,90 @@ Resources:
       RequestMappingTemplate: "{}"
       ResponseMappingTemplate: "$util.toJson($ctx.result)"
 
+  # Changing the launch settings of a scheduled Virtual Participant is for its
+  # owner and Admins, on the same "Virtual Participant owner condition" as
+  # sharing it, and only while it is scheduled and has not started. A pipeline:
+  # the row is read, and the write
+  # (updateScheduledVirtualParticipant.request.vtl) is conditional on the row
+  # still being as read. The VPScheduler Lambda in the Virtual Participant
+  # stack moves the launch schedule when it sees the write on the stream.
+  ReadScheduledVirtualParticipantAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: ReadScheduledVirtualParticipant
+      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "GetItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
+          },
+          "consistentRead": true
+        }
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        ## The row as read, for the write's checks and its condition. The stash
+        ## is not part of the response.
+        #if( $ctx.result )
+          $util.qr( $ctx.stash.put("vpFound", true) )
+          $util.qr( $ctx.stash.put("vpAsRead", $ctx.result) )
+        #else
+          $util.qr( $ctx.stash.put("vpFound", false) )
+        #end
+        {}
+
+  UpdateScheduledVirtualParticipantAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: UpdateScheduledVirtualParticipantWrite
+      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplateS3Location: ../source/appsync/updateScheduledVirtualParticipant.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          #if( $ctx.error.type == "DynamoDB:ConditionalCheckFailedException" )
+            #if( $ctx.stash.vpCallerRestricted && $util.defaultIfNull($ctx.stash.vpAsRead.Owner, "") != $ctx.identity.username )
+              $util.error("User $ctx.identity.username is not authorized to change Virtual Participant $ctx.args.input.id", "AuthorizationError")
+            #end
+            #if( !$ctx.stash.vpFound )
+              $util.error("Virtual Participant $ctx.args.input.id was not found", "NotFound")
+            #end
+            ## The row changed between the read and the write: most often the
+            ## launch started, which then goes ahead as it was scheduled.
+            $util.error("Virtual Participant $ctx.args.input.id changed while it was being edited, and may have started; reload it to see its current state", "ConflictError")
+          #end
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        ## Whether a meeting password is set, as getVirtualParticipant answers
+        ## it, rather than the password.
+        #set( $hasMeetingPassword = !$util.isNullOrBlank($ctx.result.meetingPassword) )
+        $util.qr( $ctx.result.remove("meetingPassword") )
+        $util.qr( $ctx.result.put("hasMeetingPassword", $hasMeetingPassword) )
+        $util.toJson($ctx.result)
+
+  UpdateScheduledVirtualParticipantResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: updateScheduledVirtualParticipant
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt ReadScheduledVirtualParticipantAppSyncFunction.FunctionId
+          - !GetAtt UpdateScheduledVirtualParticipantAppSyncFunction.FunctionId
+      RequestMappingTemplate: "{}"
+      ResponseMappingTemplate: "$util.toJson($ctx.result)"
+
 
   ##########################################################################
   # Lambda@Edge for VNC Authentication

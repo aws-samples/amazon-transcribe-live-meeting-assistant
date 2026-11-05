@@ -257,6 +257,7 @@ OTHER_FIELDS = [
     # A user's own Virtual Participants.
     ("Mutation", "createVirtualParticipant"),
     ("Mutation", "updateVirtualParticipant"),
+    ("Mutation", "updateScheduledVirtualParticipant"),
     ("Mutation", "endVirtualParticipant"),
     ("Mutation", "deleteVirtualParticipants"),
     ("Mutation", "shareVirtualParticipant"),

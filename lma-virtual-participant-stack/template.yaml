@@ -3782,6 +3782,8 @@ Resources:
                   - scheduler:CreateSchedule
                   - scheduler:DeleteSchedule
                   - scheduler:GetSchedule
+                  # Moves the schedule when a scheduled VP's launch settings change.
+                  - scheduler:UpdateSchedule
                 Resource: 
                   - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${VPScheduleGroup}/*"
                   - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/${VPScheduleGroup}"
@@ -3809,10 +3811,19 @@ Resources:
                   - dynamodb:GetShardIterator
                   - dynamodb:ListStreams
                 Resource: !Ref VirtualParticipantTableStreamArn
+              # Records on a scheduled VP's row that a change to its launch
+              # settings could not be applied to its schedule.
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
               - Effect: Allow
                 Action:
                   - "kms:Decrypt"
                   - "kms:DescribeKey"
+                  # The table is encrypted with this key, and the row update
+                  # writes to it.
+                  - "kms:GenerateDataKey"
                 Resource: !Ref CustomerManagedEncryptionKeyArn
 
   # Virtual Participant Scheduler Lambda Function
@@ -3849,6 +3860,7 @@ Resources:
           logger.setLevel(getattr(logging, os.environ.get('LOG_LEVEL', 'INFO')))
           
           scheduler_client = boto3.client('scheduler')
+          dynamodb_client = boto3.client('dynamodb')
 
 
           def _record_summary(record):
@@ -3909,6 +3921,173 @@ Resources:
               }
 
 
+          def _schedule_params(vp_id, new_image):
+              """The EventBridge Scheduler schedule for a scheduled VP row.
+
+              One definition for creating the schedule when the row is written and for
+              moving it when the row's launch settings are changed, so a moved schedule
+              launches exactly as a new one would.
+              """
+              meeting_time_int = int(new_image['meetingTime']['N'])
+
+              # Schedule for future execution
+              delay_seconds = 120  # 2 minutes before meeting
+              scheduled_time = datetime.fromtimestamp(meeting_time_int - delay_seconds, tz=timezone.utc)
+
+              # User identity for persistent profile + stored Zoom creds.
+              # Absent on older rows / guest-only flows.
+              user_sub = new_image.get('userSub', {}).get('S', '')
+              user_zoom_sub = new_image.get('userZoomSub', {}).get('S', '')
+              # Per-VP video toggle. Default ON when absent (older rows).
+              # ECS env values must be strings, so coerce the bool.
+              enable_video_recording = new_image.get('enableVideoRecording', {}).get('BOOL', True)
+              enable_video_recording_str = 'true' if enable_video_recording else 'false'
+              stack_name = os.environ.get('LMA_STACK_NAME', '')
+              zoom_secret_name = (
+                  f"{stack_name}/zoom-credentials/{user_zoom_sub}"
+                  if user_zoom_sub and stack_name else ''
+              )
+
+              launch_type = os.environ.get('VP_LAUNCH_TYPE', 'FARGATE')
+
+              if launch_type == 'MICROVM':
+                  # EventBridge Scheduler has a native ECS runTask target but
+                  # none for lambda-microvms, so a MICROVM schedule invokes the
+                  # launcher Lambda instead -- the same target the "start now"
+                  # state machine uses (see ScheduledMeetingTarget). Forwarding
+                  # VP_LAUNCH_TYPE into an ecs:runTask LaunchType instead makes
+                  # ECS reject the fire with "launch type should be one of
+                  # [EC2,FARGATE,EXTERNAL]", and because the schedule is
+                  # ActionAfterCompletion=DELETE it then vanishes, leaving the
+                  # VP stuck at SCHEDULED with no visible error (issue #613).
+                  #
+                  # The launcher accepts this flat payload as well as the state
+                  # machine's {"data": {...}} shape; the key names below are the
+                  # ones its FIELD_MAP looks for. Cognito tokens are absent by
+                  # design -- they are minted per session and would have expired
+                  # by the meeting time -- which matches what the ECS scheduled
+                  # path passes today.
+                  target = {
+                      'Arn': os.environ['MICROVM_LAUNCHER_ARN'],
+                      'RoleArn': os.environ['SCHEDULE_INVOKE_LAUNCHER_ROLE_ARN'],
+                      'Input': json.dumps({
+                          'virtualParticipantId': vp_id,
+                          'meetingPlatform': new_image.get('meetingPlatform', {}).get('S', ''),
+                          'meetingId': new_image.get('meetingId', {}).get('S', ''),
+                          'meetingPassword': new_image.get('meetingPassword', {}).get('S', ''),
+                          'meetingName': new_image.get('meetingName', {}).get('S', ''),
+                          'meetingTime': str(meeting_time_int),
+                          'owner': new_image.get('owner', {}).get('S', ''),
+                          'userSub': user_sub,
+                          'zoomCredentialsSecretName': zoom_secret_name,
+                          'enableVideoRecording': enable_video_recording_str,
+                      })
+                  }
+              else:
+                  target = {
+                      'Arn': 'arn:aws:scheduler:::aws-sdk:ecs:runTask',
+                      'RoleArn': os.environ['SCHEDULER_ROLE_ARN'],
+                      'Input': json.dumps(_ecs_params(
+                          vp_id, new_image, launch_type, meeting_time_int,
+                          user_sub, zoom_secret_name, enable_video_recording_str,
+                      ))
+                  }
+
+              return {
+                  'ActionAfterCompletion': 'DELETE',
+                  'FlexibleTimeWindow': {'Mode': 'OFF'},
+                  'GroupName': os.environ['SCHEDULE_GROUP_NAME'],
+                  'Name': vp_id,
+                  'ScheduleExpression': f"at({scheduled_time.strftime('%Y-%m-%dT%H:%M:%S')})",
+                  'ScheduleExpressionTimezone': 'UTC',
+                  'State': 'ENABLED',
+                  'Target': target,
+              }, scheduled_time
+
+
+          # What the schedule's target carries from the row. A change to any of them on a
+          # row still waiting for its launch means the schedule has to be rewritten; the
+          # agenda and the meeting consent choice are read from the row by the VP when it
+          # starts, so they need nothing here.
+          LAUNCH_FIELDS = (
+              'meetingTime', 'meetingId', 'meetingPassword', 'meetingName', 'meetingPlatform',
+              'owner', 'userSub', 'userZoomSub', 'enableVideoRecording',
+          )
+
+          # A schedule is moved only if it would still fire this far in the future. The
+          # updateScheduledVirtualParticipant resolver accepts a change only while the
+          # meeting, and so the fire time, is minutes away; this is the backstop.
+          MIN_SECONDS_BEFORE_FIRE = 30
+
+
+          def _waiting_for_launch(image):
+              return (
+                  image.get('status', {}).get('S') == 'SCHEDULED'
+                  and image.get('isScheduled', {}).get('BOOL', False)
+                  and bool(image.get('meetingTime', {}).get('N'))
+              )
+
+
+          def _launch_settings_changed(old_image, new_image):
+              return any(old_image.get(field) != new_image.get(field) for field in LAUNCH_FIELDS)
+
+
+          def _note_schedule_not_moved(vp_id, why):
+              """Say on the row, while it is still waiting, that its launch is unchanged.
+
+              The page shows errorMessage as the status detail, so the owner sees that
+              the saved settings will not be the ones used.
+              """
+              message = (
+                  "The changed launch settings were saved, but the launch schedule could "
+                  f"not be moved ({why}), so the Virtual Participant launches as it was "
+                  "scheduled before. Cancel it and schedule a new one to use the new settings."
+              )
+              try:
+                  dynamodb_client.update_item(
+                      TableName=os.environ['VP_TABLE_NAME'],
+                      Key={'id': {'S': vp_id}},
+                      UpdateExpression='SET #e = :e, #u = :u',
+                      ConditionExpression='#s = :scheduled',
+                      ExpressionAttributeNames={'#e': 'errorMessage', '#u': 'updatedAt', '#s': 'status'},
+                      ExpressionAttributeValues={
+                          ':e': {'S': message},
+                          ':u': {'S': datetime.now(timezone.utc).isoformat()},
+                          ':scheduled': {'S': 'SCHEDULED'},
+                      },
+                  )
+              except Exception as e:
+                  logger.error(f"Could not record on VP {vp_id} that its schedule was not moved: {e}")
+
+
+          def _move_schedule(vp_id, new_image):
+              """Rewrite the existing schedule for a changed row; never create one.
+
+              UpdateSchedule replaces the schedule named for the VP in place, so there is
+              never a second schedule for it and the old time stops applying as the new
+              one starts. If there is no such schedule (it has fired and deleted itself,
+              or was cancelled) nothing is created: the launch, if any, already happened.
+              """
+              params, scheduled_time = _schedule_params(vp_id, new_image)
+              seconds_left = (scheduled_time - datetime.now(timezone.utc)).total_seconds()
+              if seconds_left < MIN_SECONDS_BEFORE_FIRE:
+                  logger.warning(f"VP {vp_id}: new fire time is {seconds_left:.0f}s away; schedule not moved")
+                  _note_schedule_not_moved(vp_id, 'the new launch time is too close')
+                  return False
+              try:
+                  scheduler_client.update_schedule(**params)
+              except scheduler_client.exceptions.ResourceNotFoundException:
+                  logger.warning(f"VP {vp_id}: no schedule to move (already fired or removed)")
+                  _note_schedule_not_moved(vp_id, 'no launch schedule was found for it')
+                  return False
+              except Exception as e:
+                  logger.error(f"VP {vp_id}: could not move schedule: {e}")
+                  _note_schedule_not_moved(vp_id, 'the schedule update failed')
+                  return False
+              logger.info(f"Moved schedule for VP {vp_id} to {params['ScheduleExpression']}")
+              return True
+
+
           def lambda_handler(event, context):
               records = event.get('Records', [])
               logger.info(
@@ -3920,106 +4099,46 @@ Resources:
                   for record in event.get('Records', []):
                       event_name = record.get('eventName')
                       dynamodb_data = record.get('dynamodb', {})
-                      
+
                       keys = dynamodb_data.get('Keys', {})
                       vp_id = keys.get('id', {}).get('S')
-                      
+
                       if not vp_id:
                           logger.warning("No VP ID found in record, skipping")
                           continue
-                          
+
                       logger.info(f"Processing {event_name} event for VP {vp_id}")
-                      
+
                       if event_name == 'INSERT':
                           new_image = dynamodb_data.get('NewImage', {})
                           is_scheduled = new_image.get('isScheduled', {}).get('BOOL', False)
                           meeting_time = new_image.get('meetingTime', {}).get('N')
-                          
+
                           if is_scheduled and meeting_time:
-                              meeting_time_int = int(meeting_time)
-
-                              # Schedule for future execution
-                              delay_seconds = 120  # 2 minutes before meeting
-                              scheduled_time = datetime.fromtimestamp(meeting_time_int - delay_seconds, tz=timezone.utc)
-
-                              # User identity for persistent profile + stored Zoom creds.
-                              # Absent on older rows / guest-only flows.
-                              user_sub = new_image.get('userSub', {}).get('S', '')
-                              user_zoom_sub = new_image.get('userZoomSub', {}).get('S', '')
-                              # Per-VP video toggle. Default ON when absent (older rows).
-                              # ECS env values must be strings, so coerce the bool.
-                              enable_video_recording = new_image.get('enableVideoRecording', {}).get('BOOL', True)
-                              enable_video_recording_str = 'true' if enable_video_recording else 'false'
-                              stack_name = os.environ.get('LMA_STACK_NAME', '')
-                              zoom_secret_name = (
-                                  f"{stack_name}/zoom-credentials/{user_zoom_sub}"
-                                  if user_zoom_sub and stack_name else ''
-                              )
-
-                              launch_type = os.environ.get('VP_LAUNCH_TYPE', 'FARGATE')
-
-                              if launch_type == 'MICROVM':
-                                  # EventBridge Scheduler has a native ECS runTask target but
-                                  # none for lambda-microvms, so a MICROVM schedule invokes the
-                                  # launcher Lambda instead -- the same target the "start now"
-                                  # state machine uses (see ScheduledMeetingTarget). Forwarding
-                                  # VP_LAUNCH_TYPE into an ecs:runTask LaunchType instead makes
-                                  # ECS reject the fire with "launch type should be one of
-                                  # [EC2,FARGATE,EXTERNAL]", and because the schedule is
-                                  # ActionAfterCompletion=DELETE it then vanishes, leaving the
-                                  # VP stuck at SCHEDULED with no visible error (issue #613).
-                                  #
-                                  # The launcher accepts this flat payload as well as the state
-                                  # machine's {"data": {...}} shape; the key names below are the
-                                  # ones its FIELD_MAP looks for. Cognito tokens are absent by
-                                  # design -- they are minted per session and would have expired
-                                  # by the meeting time -- which matches what the ECS scheduled
-                                  # path passes today.
-                                  target = {
-                                      'Arn': os.environ['MICROVM_LAUNCHER_ARN'],
-                                      'RoleArn': os.environ['SCHEDULE_INVOKE_LAUNCHER_ROLE_ARN'],
-                                      'Input': json.dumps({
-                                          'virtualParticipantId': vp_id,
-                                          'meetingPlatform': new_image.get('meetingPlatform', {}).get('S', ''),
-                                          'meetingId': new_image.get('meetingId', {}).get('S', ''),
-                                          'meetingPassword': new_image.get('meetingPassword', {}).get('S', ''),
-                                          'meetingName': new_image.get('meetingName', {}).get('S', ''),
-                                          'meetingTime': str(meeting_time_int),
-                                          'owner': new_image.get('owner', {}).get('S', ''),
-                                          'userSub': user_sub,
-                                          'zoomCredentialsSecretName': zoom_secret_name,
-                                          'enableVideoRecording': enable_video_recording_str,
-                                      })
-                                  }
-                              else:
-                                  target = {
-                                      'Arn': 'arn:aws:scheduler:::aws-sdk:ecs:runTask',
-                                      'RoleArn': os.environ['SCHEDULER_ROLE_ARN'],
-                                      'Input': json.dumps(_ecs_params(
-                                          vp_id, new_image, launch_type, meeting_time_int,
-                                          user_sub, zoom_secret_name, enable_video_recording_str,
-                                      ))
-                                  }
-
-                              schedule_expression = f"at({scheduled_time.strftime('%Y-%m-%dT%H:%M:%S')})"
-
-                              response = scheduler_client.create_schedule(
-                                  ActionAfterCompletion='DELETE',
-                                  FlexibleTimeWindow={'Mode': 'OFF'},
-                                  GroupName=os.environ['SCHEDULE_GROUP_NAME'],
-                                  Name=vp_id,
-                                  ScheduleExpression=schedule_expression,
-                                  ScheduleExpressionTimezone='UTC',
-                                  State='ENABLED',
-                                  Target=target
-                              )
+                              params, _ = _schedule_params(vp_id, new_image)
+                              response = scheduler_client.create_schedule(**params)
 
                               logger.info(
-                                  f"Successfully scheduled VP {vp_id} ({launch_type}) "
+                                  f"Successfully scheduled VP {vp_id} "
+                                  f"({os.environ.get('VP_LAUNCH_TYPE', 'FARGATE')}) "
                                   f"with schedule ARN: {response.get('ScheduleArn')}"
                               )
                           else:
                               logger.info(f"VP {vp_id} is not scheduled, skipping")
+
+                      elif event_name == 'MODIFY':
+                          # updateScheduledVirtualParticipant changed the launch settings
+                          # of a row still waiting for its launch: move its schedule. Every
+                          # other write (status, sharing, the VP's own progress) leaves
+                          # the launch fields alone or the row no longer waiting.
+                          old_image = dynamodb_data.get('OldImage', {})
+                          new_image = dynamodb_data.get('NewImage', {})
+                          if (
+                              _waiting_for_launch(old_image)
+                              and _waiting_for_launch(new_image)
+                              and _launch_settings_changed(old_image, new_image)
+                          ):
+                              _move_schedule(vp_id, new_image)
 
                       elif event_name == 'REMOVE':
                           try:
@@ -4069,6 +4188,7 @@ Resources:
             - !GetAtt VPScheduleInvokeLauncherRole.Arn
             - !Ref AWS::NoValue
           LMA_STACK_NAME: !Ref LMAStackName
+          VP_TABLE_NAME: !Ref VirtualParticipantTableName
           LOG_LEVEL: !Ref LogLevel
   # DynamoDB Event Source Mapping for Scheduler Lambda
   VirtualParticipantSchedulerEventSourceMapping:

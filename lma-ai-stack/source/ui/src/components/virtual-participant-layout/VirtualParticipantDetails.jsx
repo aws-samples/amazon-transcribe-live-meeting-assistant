@@ -27,6 +27,8 @@ import useSettingsContext from '../../contexts/settings';
 import StatusTimeline from './StatusTimeline';
 import VNCViewer from './VNCViewer';
 import LaunchSettings from './LaunchSettings';
+import EditScheduledVirtualParticipant from './EditScheduledVirtualParticipant';
+import { canEditScheduled, editWindowOpen } from './scheduled-edit';
 import { canManageVirtualParticipant } from './vp-access';
 
 const client = generateClient();
@@ -647,7 +649,9 @@ const VirtualParticipantDetails = () => {
   // actual launch type instead of always describing EC2 host-slot behavior.
   const { settings } = useSettingsContext() || {};
   const launchType = settings?.VPLaunchType;
+  const zoomSdkEnabled = String(settings?.ZoomSdkEnabled ?? '').toLowerCase() === 'true';
   const [vpDetails, setVpDetails] = useState(null);
+  const [showEdit, setShowEdit] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [notifications, setNotifications] = useState([]);
@@ -806,6 +810,22 @@ const VirtualParticipantDetails = () => {
   }, [vpId, authState]);
 
   const handleRefresh = () => {
+    loadVpDetails();
+  };
+
+  const handleScheduledEditSaved = (updated) => {
+    setShowEdit(false);
+    if (updated) setVpDetails((prev) => ({ ...prev, ...updated }));
+    setNotifications((prev) => [
+      ...prev,
+      {
+        type: 'success',
+        content: 'Launch settings saved. The scheduled launch uses them.',
+        dismissible: true,
+        id: `edit-success-${Date.now()}`,
+        onDismiss: () => setNotifications((items) => items.filter((n) => !n.id.startsWith('edit-success-'))),
+      },
+    ]);
     loadVpDetails();
   };
 
@@ -979,8 +999,33 @@ const VirtualParticipantDetails = () => {
         <ConnectionDetails vpDetails={vpDetails} />
       </Container>
 
-      {/* What the Create Virtual Participant form asked for. */}
-      <LaunchSettings vp={vpDetails} />
+      {/* What the Create Virtual Participant form asked for, editable while
+          the Virtual Participant waits for its scheduled launch. */}
+      <LaunchSettings
+        vp={vpDetails}
+        headerActions={
+          canEditScheduled(vpDetails, { username: user?.username, isAdmin }) ? (
+            <Button
+              iconName="edit"
+              onClick={() => setShowEdit(true)}
+              disabled={!editWindowOpen(vpDetails)}
+              disabledReason="The meeting is less than 5 minutes away"
+            >
+              Edit
+            </Button>
+          ) : null
+        }
+      />
+      {canEditScheduled(vpDetails, { username: user?.username, isAdmin }) && (
+        <EditScheduledVirtualParticipant
+          vp={vpDetails}
+          visible={showEdit}
+          onDismiss={() => setShowEdit(false)}
+          onSaved={handleScheduledEditSaved}
+          zoomSdkEnabled={zoomSdkEnabled}
+          isOwner={!!user?.username && vpDetails.Owner === user.username}
+        />
+      )}
 
       {/* VNC Live View - Show when VNC is ready and VP is active.
           FAILED is intentionally included: the VP container waits up to

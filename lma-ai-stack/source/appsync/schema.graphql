@@ -312,6 +312,10 @@ type Mutation @aws_iam {
 	createUploadMeeting(input: CreateUploadMeetingInput!): CreateUploadMeetingOutput @aws_cognito_user_pools
 	createVirtualParticipant(input: CreateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	updateVirtualParticipant(input: UpdateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
+	# Change the launch settings of a Virtual Participant that is scheduled and
+	# has not started, while the meeting is at least 5 minutes away. Its owner,
+	# Admins and backend roles may; the launch schedule follows the change.
+	updateScheduledVirtualParticipant(input: UpdateScheduledVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	endVirtualParticipant(input: EndVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	deleteVirtualParticipants(input: DeleteVirtualParticipantsInput!): DeleteVirtualParticipantsOutput @aws_cognito_user_pools @aws_iam
 	shareVirtualParticipant(input: ShareVirtualParticipantInput!): ShareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
@@ -625,6 +629,31 @@ input UpdateVirtualParticipantInput {
 	# over a value supplied for the same attribute in the same call.
 	clearErrorMessage: Boolean
 	clearManualAction: Boolean
+}
+
+# The launch settings of a scheduled Virtual Participant, as the Create
+# Virtual Participant form asks for them. An omitted field is left as it is.
+input UpdateScheduledVirtualParticipantInput {
+	id: ID!
+	meetingName: String
+	meetingPlatform: String
+	meetingId: String
+	# A new meeting password; empty or omitted keeps the current one.
+	meetingPassword: String
+	# Remove the meeting password (a join link or a Google Meet code takes none).
+	clearMeetingPassword: Boolean
+	# At least 5 minutes from now.
+	meetingTime: AWSTimestamp
+	scheduledTimeZone: String
+	# Sent empty, removes the agenda.
+	agenda: String
+	# Sent empty, removes the meeting consent choice, so the deployment's applies.
+	consentMode: String
+	consentRule: String
+	enableVideoRecording: Boolean
+	# Join a Zoom meeting with the stored Zoom account of the user who
+	# scheduled it, or as a guest.
+	useStoredZoomAccount: Boolean
 }
 
 input EndVirtualParticipantInput {

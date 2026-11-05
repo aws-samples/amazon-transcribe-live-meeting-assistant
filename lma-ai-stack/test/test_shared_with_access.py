@@ -528,6 +528,7 @@ VP_OWNER_WRITES = [
     "unshareVirtualParticipant",
     "updateVirtualParticipant",
     "acknowledgeVPFailure",
+    "updateScheduledVirtualParticipant",
 ]
 
 
