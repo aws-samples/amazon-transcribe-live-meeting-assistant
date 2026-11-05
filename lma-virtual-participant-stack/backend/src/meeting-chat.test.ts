@@ -24,6 +24,7 @@ delete process.env.CALL_DATA_STREAM_NAME;
 // eslint-disable-next-line import/first
 import { END_COMMAND_VERBS, details } from './details.js';
 import { ASSISTANT_CHAT_COMMANDS } from './assistant-toggles.js';
+import { ChatAnswerer, createChatAnswerer, parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { MEETING_CHAT_CHANNEL } from './channels.js';
 import {
     ANSWER_WAIT_MS,
@@ -226,13 +227,91 @@ test('an answer is not added when the transcript was paused while the agent answ
     assert.equal(h.sent.length, 2);
 });
 
-test('every handler that answers chat questions offers the answer to the capture', () => {
+test('every handler that answers chat questions offers only the answer, not a notice, to the capture', () => {
     for (const file of ['zoom.ts', 'zoom-sdk.ts', 'teams.ts', 'teams-sdk.ts', 'google-meet.ts']) {
         const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
         const call = source.indexOf('void startChatAnswer(');
         assert.ok(call >= 0, `${file} does not answer chat questions`);
-        assert.ok(source.slice(call, call + 600).includes('meetingChat.offerAnswer('), `${file} does not add the answer`);
+        const callback = source.slice(call, source.indexOf('\n            });', call) + 1 || call + 800);
+        assert.match(callback, /async \(messages, answered\) =>/, `${file} does not read whether the reply is an answer`);
+        assert.match(
+            callback,
+            /if \(answered\) \{\s*meetingChat\.offerAnswer\(/,
+            `${file} adds a reply to the transcript whether or not it is an answer`,
+        );
     }
+});
+
+/**
+ * A question and its reply through the path a handler takes: the question is
+ * offered to the capture, `startChatAnswer` runs the answerer, and the send
+ * callback posts the reply and offers it to the capture only when it is an
+ * answer, as every handler's does.
+ */
+function askThroughHandler(h: Harness, answerer: ChatAnswerer) {
+    const posted: string[][] = [];
+    let n = 0;
+    return async (text: string, sender = 'Bo Chen') => {
+        const parsed = parseChatQuestion(text, true);
+        assert.ok(parsed, `"${text}" is not a question`);
+        const id = `h${(n += 1)}`;
+        const answering = startChatAnswer(parsed, sender, 'zoom', async (messages, answered) => {
+            posted.push(messages);
+            if (answered) h.capture.offerAnswer({ platform: 'zoom', text, sender, id }, messages);
+        }, answerer);
+        assert.equal(h.offer({ text, sender, id }), 'captured');
+        await answering;
+        return posted[posted.length - 1];
+    };
+}
+
+test("through the handler path, the assistant's answer is added and the VP's notices are not", async () => {
+    const h = harness();
+    let release: (value: string) => void = () => {};
+    let slow = false;
+    const answerer = createChatAnswerer(
+        (question) => {
+            if (question.includes('fail')) return Promise.reject(new Error('Lambda timed out'));
+            if (slow) return new Promise<string>((resolve) => (release = resolve));
+            return Promise.resolve('The team agreed to ship on Friday.');
+        },
+        { intervalMs: 20_000, now: () => h.state.now, available: () => true, paused: () => false },
+    );
+    const ask = askThroughHandler(h, answerer);
+    const transcriptOf = () => h.sent.map((segment) => `${segment.speaker}: ${segment.transcript}`);
+
+    assert.deepEqual(await ask('LMA what was decided?'), ['Live Meeting Assistant: The team agreed to ship on Friday.']);
+    assert.deepEqual(transcriptOf(), [
+        'Bo Chen: LMA what was decided?',
+        'LMA (Alice): Live Meeting Assistant: The team agreed to ship on Friday.',
+    ]);
+
+    // Asked again too soon: the rate-limit notice is posted, not added.
+    assert.match((await ask('LMA ask and then?'))[0], /one question every 20 seconds/);
+    // Too long, from another sender.
+    assert.match((await ask(`LMA ask ${'x'.repeat(501)}`, 'Cy'))[0], /under 500 characters/);
+    // The agent fails.
+    assert.match((await ask('LMA ask please fail', 'Di'))[0], /could not get an answer/);
+    // Still answering another question.
+    slow = true;
+    const first = ask('LMA ask a slow one?', 'Ed');
+    assert.match((await ask('LMA ask meanwhile?', 'Flo'))[0], /still answering the previous question/);
+    release('Slow answer.');
+    await first;
+
+    const added = transcriptOf().filter((line) => line.startsWith('LMA (Alice): '));
+    assert.deepEqual(added, [
+        'LMA (Alice): Live Meeting Assistant: The team agreed to ship on Friday.',
+        'LMA (Alice): Live Meeting Assistant: Slow answer.',
+    ]);
+});
+
+test('through the handler path, the note that no meeting assistant is configured is not added', async () => {
+    const h = harness();
+    const answerer = createChatAnswerer(async () => 'unused', { available: () => false });
+    const posted = await askThroughHandler(h, answerer)('LMA ask what was decided?');
+    assert.match(posted[0], /Strands meeting assistant/);
+    assert.equal(h.sent.length, 1, 'only the question is added');
 });
 
 // ---------------------------------------------------------------------------

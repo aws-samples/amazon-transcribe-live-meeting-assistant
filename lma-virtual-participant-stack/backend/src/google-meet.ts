@@ -83,8 +83,8 @@ interface MeetTile extends MeetTileReading {
 /** Tile speaking-state changes logged per meeting; the rest are counted, not logged. */
 const MAX_LOGGED_SPEAKING_CHANGES = 50;
 
-/** When `logTileActivity` writes its first report. */
-const TILE_ACTIVITY_FIRST_REPORT_MS = 45_000;
+/** How long `logTileActivity` counts before it reports and stops. */
+const TILE_ACTIVITY_WINDOW_MS = 45_000;
 
 /** The page state `logTileActivity` keeps on `window` for its counts. */
 interface MeetActivityWindow {
@@ -547,13 +547,16 @@ export default class GoogleMeet {
         // Not a branch of the chain below, so the question is still recorded as
         // meeting chat.
         if (chatQuestion && this.freshToggle(message, sender)) {
-            void startChatAnswer(chatQuestion, sender, 'google-meet', async (messages) => {
+            void startChatAnswer(chatQuestion, sender, 'google-meet', async (messages, answered) => {
                 await this.sendMessages(page, messages);
-                // Added to the transcript when the question was (meeting-chat.ts).
-                meetingChat.offerAnswer(
-                    { platform: 'google-meet', text: message, sender, id: reading.id ?? null },
-                    messages,
-                );
+                // The meeting assistant's answer, not a notice, is added to the
+                // transcript when the question was (meeting-chat.ts).
+                if (answered) {
+                    meetingChat.offerAnswer(
+                        { platform: 'google-meet', text: message, sender, id: reading.id ?? null },
+                        messages,
+                    );
+                }
             });
         }
         if (matchesEndCommand(message)) {
@@ -611,10 +614,12 @@ export default class GoogleMeet {
      * attributes, counted per tile, with the element's tag, class, jscontroller
      * and the attribute. The element whose changes follow a participant's
      * speech is the speaking indicator; this is how a live run shows which one
-     * it is when Meet changes its page. Reported twice: for the first
-     * `TILE_ACTIVITY_FIRST_REPORT_MS`, and for the rest of the meeting when it
-     * ends (`ended` resolves), or once, when the meeting ends sooner. The
-     * observer is disconnected and its counts deleted at the end.
+     * it is when Meet changes its page. The observer watches every attribute
+     * in the page, so it runs for one window only: it reports after
+     * `TILE_ACTIVITY_WINDOW_MS`, or when the meeting ends (`ended` resolves)
+     * if that is sooner, and is then disconnected and its counts deleted, so
+     * it does no work for the rest of the meeting. (The INFO line for a tile's
+     * speaking-state change comes from the speaker poll, not from here.)
      */
     private async logTileActivity(page: Page, ended: Promise<void>): Promise<void> {
         const started = await page
@@ -645,21 +650,17 @@ export default class GoogleMeet {
             .catch(() => false);
         if (!started) return;
 
-        // The counts so far, reset; with `stop`, the observer is removed too.
-        const take = (stop: boolean) =>
+        // The counts, with the observer removed.
+        const take = () =>
             page
-                .evaluate((stopObserving: boolean) => {
+                .evaluate(() => {
                     const w = window as unknown as MeetActivityWindow;
                     const counts = w.__lmaMeetActivity ?? {};
-                    if (stopObserving) {
-                        w.__lmaMeetActivityObserver?.disconnect();
-                        delete w.__lmaMeetActivityObserver;
-                        delete w.__lmaMeetActivity;
-                    } else {
-                        w.__lmaMeetActivity = {};
-                    }
+                    w.__lmaMeetActivityObserver?.disconnect();
+                    delete w.__lmaMeetActivityObserver;
+                    delete w.__lmaMeetActivity;
                     return counts;
-                }, stop)
+                })
                 .catch(() => ({}) as Record<string, Record<string, number>>);
         const report = (activity: Record<string, Record<string, number>>, span: string) => {
             for (const [tile, counts] of Object.entries(activity)) {
@@ -676,18 +677,12 @@ export default class GoogleMeet {
         const endedFirst = await Promise.race([
             ended.then(() => true),
             new Promise<boolean>((resolve) => {
-                timer = setTimeout(() => resolve(false), TILE_ACTIVITY_FIRST_REPORT_MS);
+                timer = setTimeout(() => resolve(false), TILE_ACTIVITY_WINDOW_MS);
                 timer.unref?.();
             }),
         ]);
         clearTimeout(timer);
-        if (endedFirst) {
-            report(await take(true), 'until the meeting ended');
-            return;
-        }
-        report(await take(false), `over the first ${TILE_ACTIVITY_FIRST_REPORT_MS / 1000} s`);
-        await ended;
-        report(await take(true), 'from then until the meeting ended');
+        report(await take(), endedFirst ? 'until the meeting ended' : `over ${TILE_ACTIVITY_WINDOW_MS / 1000} s`);
     }
 
     /**
@@ -1380,7 +1375,15 @@ export default class GoogleMeet {
             stopTimers();
             // The tile diagnostics' last report; bounded, since the page may be going.
             signalMeetingEnded();
-            await Promise.race([tileActivity, new Promise((r) => setTimeout(r, 3000))]);
+            let teardownTimer: NodeJS.Timeout | undefined;
+            await Promise.race([
+                tileActivity,
+                new Promise((r) => {
+                    teardownTimer = setTimeout(r, 3000);
+                    teardownTimer.unref?.();
+                }),
+            ]);
+            clearTimeout(teardownTimer);
         }
     }
 }
