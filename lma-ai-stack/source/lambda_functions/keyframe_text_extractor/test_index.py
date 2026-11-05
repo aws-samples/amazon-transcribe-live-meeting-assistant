@@ -352,3 +352,21 @@ def test_a_page_of_templated_rows_is_not_taken_for_repetition():
 def test_a_truncated_answer_loses_its_cut_off_last_line():
     assert pure.clean_text("Agenda\n- one\n- tw", truncated=True) == "Agenda\n- one"
     assert pure.clean_text("Agenda", truncated=True) == "Agenda"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "def handler(event,  context):    return  None",
+        "Region      Q1      Q2      Q3",
+        "  indented  code   line  with  spaces",
+    ],
+)
+def test_a_line_with_no_repeated_run_keeps_its_spacing(line):
+    assert pure.collapse_repetition(line) == line
+    assert pure.collapse_repetition("Heading\n" + line) == "Heading\n" + line
+
+
+def test_a_line_with_a_repeated_run_is_collapsed():
+    line = "#projects #idp-lim #develop " * 6 + "end"
+    assert pure.collapse_repetition(line) == "#projects #idp-lim #develop end"

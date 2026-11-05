@@ -154,13 +154,17 @@ def collapse_repetition(text: str) -> str:
     lines = _collapse_runs(
         text.split("\n"), MIN_LINE_REPEATS, MAX_LOOP_LINES, key=lambda line: " ".join(line.split())
     )
-    lines = [
-        " ".join(_collapse_runs(line.split(), MIN_LOOP_REPEATS, MAX_LOOP_WORDS))
-        if len(line.split()) >= MIN_LOOP_REPEATS
-        else line
-        for line in lines
-    ]
-    return "\n".join(lines)
+    return "\n".join(_collapse_words(line) for line in lines)
+
+
+def _collapse_words(line: str) -> str:
+    """The line with a repeated run of words kept once; unchanged, spacing and
+    all, when no run repeats -- a slide's code or aligned columns keep their layout."""
+    words = line.split()
+    if len(words) < MIN_LOOP_REPEATS:
+        return line
+    kept = _collapse_runs(words, MIN_LOOP_REPEATS, MAX_LOOP_WORDS)
+    return line if len(kept) == len(words) else " ".join(kept)
 
 
 def mostly_repeated(text: str) -> bool:
