@@ -1775,3 +1775,80 @@ def test_task_role_grants_only_the_kinesis_action_the_vp_calls(template: dict) -
             granted = [granted] if isinstance(granted, str) else granted
             actions += [a for a in granted if isinstance(a, str) and a.startswith("kinesis:")]
     assert actions == ["kinesis:PutRecord"]
+
+
+# ----------------------------------------------------------------------
+# What the VP stack's inline Lambdas log
+# ----------------------------------------------------------------------
+
+_ROW_SECRETS = ("secret", "25582977335241", "https://zoom.us/j/1?pwd=abc", "Budget review")
+
+
+def test_the_scheduler_logs_record_ids_not_record_contents(raw: str, caplog) -> None:
+    import logging
+    import types
+    from unittest import mock
+
+    row = {
+        **SCHEDULED_ROW,
+        "agenda": {"S": "Budget review"},
+        "joinLink": {"S": "https://zoom.us/j/1?pwd=abc"},
+    }
+    changed = {**row, "meetingName": {"S": "Renamed"}}
+    records = [
+        {"eventName": "INSERT", "dynamodb": {"Keys": {"id": {"S": "vp-1"}}, "NewImage": row}},
+        {
+            "eventName": "MODIFY",
+            "dynamodb": {"Keys": {"id": {"S": "vp-1"}}, "OldImage": row, "NewImage": changed},
+        },
+    ]
+    module = types.ModuleType("vpscheduler")
+    env = {**SCHEDULER_ENV, "VP_LAUNCH_TYPE": "FARGATE"}
+    with (
+        mock.patch.dict("os.environ", env, clear=False),
+        mock.patch(
+            "boto3.client",
+            side_effect=lambda service, *a, **k: (
+                _FakeScheduler() if service == "scheduler" else mock.Mock()
+            ),
+        ),
+        caplog.at_level(logging.DEBUG),
+    ):
+        exec(compile(_scheduler_source(raw), "vpscheduler", "exec"), module.__dict__)
+        module.lambda_handler({"Records": records}, None)
+
+    for value in _ROW_SECRETS:
+        assert value not in caplog.text, value
+    assert "vp-1" in caplog.text
+    assert "MODIFY" in caplog.text
+    assert '"changed": ["meetingName"]' in caplog.text
+
+
+def _inline_handler_source(raw: str, marker: str) -> str:
+    """The inline ZipFile body of the resource whose code contains `marker`."""
+    lines = raw.split("\n")
+    for i, line in enumerate(lines):
+        if "ZipFile: |" not in line:
+            continue
+        indent = len(line) - len(line.lstrip()) + 2
+        body = []
+        for candidate in lines[i + 1 :]:
+            if candidate.strip() and len(candidate) - len(candidate.lstrip()) < indent:
+                break
+            body.append(candidate[indent:] if candidate.strip() else "")
+        if any(marker in code for code in body):
+            return "\n".join(body)
+    raise AssertionError(f"no inline code contains {marker!r}")
+
+
+def test_the_task_reaper_logs_the_task_not_its_environment(raw: str) -> None:
+    source = _inline_handler_source(raw, "def _build_error_message")
+    handler = source[source.index("def lambda_handler") :]
+    assert "json.dumps(event" not in handler
+    assert "detail.get('taskArn')" in handler
+
+
+def test_the_asg_deletion_handler_logs_the_request_not_the_event(raw: str) -> None:
+    source = _inline_handler_source(raw, "autoscaling = boto3.client('autoscaling')")
+    assert 'logger.info(f"Event: {event}")' not in source
+    assert "event.get('RequestType')" in source

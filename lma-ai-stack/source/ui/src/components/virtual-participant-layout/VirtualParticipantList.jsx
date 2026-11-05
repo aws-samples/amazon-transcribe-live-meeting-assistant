@@ -31,6 +31,7 @@ import { SFNClient, StartSyncExecutionCommand } from '@aws-sdk/client-sfn';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 
 import useAppContext from '../../contexts/app';
+import useUserGroups from '../../hooks/use-user-groups';
 import awsExports from '../../aws-exports';
 import useSettingsContext from '../../contexts/settings';
 import useLocalStorage from '../common/local-storage';
@@ -107,6 +108,7 @@ const parseMeetingInvitation = /* GraphQL */ `
 
 const VirtualParticipantList = () => {
   const { user, currentCredentials } = useAppContext();
+  const { isAdmin } = useUserGroups();
   const { settings } = useSettingsContext();
   const zoomSdkEnabled = String(settings?.ZoomSdkEnabled ?? '').toLowerCase() === 'true';
 
@@ -825,6 +827,7 @@ const VirtualParticipantList = () => {
             onPasteInvite={() => setShowPasteInviteModal(true)}
             onCreateVP={() => setShowCreateModal(true)}
             onNotify={setNotification}
+            viewer={{ username: user?.username, isAdmin }}
             items={filteredParticipants}
           />
         }

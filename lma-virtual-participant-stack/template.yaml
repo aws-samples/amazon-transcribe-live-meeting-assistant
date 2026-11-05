@@ -1829,7 +1829,12 @@ Resources:
           autoscaling = boto3.client('autoscaling')
           
           def handler(event, context):
-              logger.info(f"Event: {event}")
+              # The request type and resource only: the event's ResponseURL is a
+              # presigned URL and stays out of the logs.
+              logger.info(
+                  f"{event.get('RequestType')} request for "
+                  f"{event.get('LogicalResourceId')} ({event.get('RequestId')})"
+              )
               request_type = event['RequestType']
               asg_name = event['ResourceProperties'].get('AutoScalingGroupName')
               
@@ -3846,6 +3851,24 @@ Resources:
           scheduler_client = boto3.client('scheduler')
 
 
+          def _record_summary(record):
+              """What is logged of a stream record: its event name, the VP id and,
+              for a MODIFY, the names of the attributes that changed. Never the
+              attribute values, which include the meeting ID or link, the meeting
+              password and the agenda."""
+              data = record.get('dynamodb', {}) or {}
+              vp_id = (data.get('Keys', {}) or {}).get('id', {}).get('S')
+              summary = {'eventName': record.get('eventName'), 'vpId': vp_id}
+              if record.get('eventName') == 'MODIFY':
+                  old_image = data.get('OldImage', {}) or {}
+                  new_image = data.get('NewImage', {}) or {}
+                  summary['changed'] = sorted(
+                      key for key in set(old_image) | set(new_image)
+                      if old_image.get(key) != new_image.get(key)
+                  )
+              return summary
+
+
           def _ecs_params(vp_id, new_image, launch_type, meeting_time_int,
                           user_sub, zoom_secret_name, enable_video_recording_str):
               """RunTask parameters for the EC2/FARGATE scheduled launch path."""
@@ -3887,8 +3910,11 @@ Resources:
 
 
           def lambda_handler(event, context):
-              logger.info("Processing VP scheduler request")
-              logger.info(f"Event: {json.dumps(event, default=str)}")
+              records = event.get('Records', [])
+              logger.info(
+                  f"Processing VP scheduler request: "
+                  f"{json.dumps([_record_summary(r) for r in records])}"
+              )
               
               try:
                   for record in event.get('Records', []):
@@ -4365,8 +4391,13 @@ Resources:
               )
 
           def lambda_handler(event, context):
-              logger.debug(f'Event: {json.dumps(event, default=str)[:2000]}')
               detail = event.get('detail', {}) or {}
+              # The task and its state only: the event's overrides carry the
+              # task's environment, meeting password included.
+              logger.debug(
+                  f"Task state change: taskArn={detail.get('taskArn')} "
+                  f"lastStatus={detail.get('lastStatus')} stopCode={detail.get('stopCode')}"
+              )
 
               # Only act on STOPPED transitions for our cluster. The
               # EventBridge rule already filters on these but defense-
