@@ -1313,7 +1313,12 @@ def test_a_meeting_with_nothing_shared_gets_no_slides_section(
         templates=ddb_item(**{"1#Summary": "S {transcript}", "2#Slides Presented": SLIDES_PROMPT}),
         custom=ddb_item(),
     )
-    for keyframes in (None, [], [{"FrameId": "not an id!", "Timestamp": 1}]):
+    for keyframes in (
+        None,
+        [],
+        [{"FrameId": "not an id!", "Timestamp": 1}],
+        [{"FrameId": "f1", "Timestamp": 1, "SlideText": "", "ContentKind": "CAMERA"}],
+    ):
         bedrock.requests.clear()
         index.generate_summary("T", None, keyframes=keyframes)
         assert prompts_sent(bedrock) == ["S T"]
@@ -1362,6 +1367,54 @@ def test_slide_text_and_speech_are_bounded_and_the_briefest_frames_left_out() ->
         if "keyframe:" in line
     ]
     assert ids == sorted(ids)
+
+
+def test_camera_frames_are_left_out_of_the_slides_and_titles_are_listed() -> None:
+    frames = [
+        {
+            "FrameId": "f1",
+            "Timestamp": 10.0,
+            "SlideText": "Budget",
+            "ContentKind": "SCREEN",
+            "Title": "Q3 budget",
+        },
+        {"FrameId": "f2", "Timestamp": 40.0, "SlideText": "", "ContentKind": "CAMERA"},
+        {"FrameId": "f3", "Timestamp": 70.0, "SlideText": "Hiring", "ContentKind": "MIXED"},
+        # Read before ContentKind was stored: kept, as before.
+        {"FrameId": "f4", "Timestamp": 90.0, "SlideText": "Close"},
+    ]
+    text = index.slides_for_prompt(frames)
+    assert text.count("<slide>") == 3
+    assert "keyframe:f2)" not in text
+    assert "Time: [00:10]\nTitle: Q3 budget\nImage:" in text
+    assert "Time: [01:10]\nImage:" in text
+
+
+def test_camera_frames_are_left_out_of_the_shared_screen_section() -> None:
+    frames = [
+        {"FrameId": "f1", "Timestamp": 10.0, "SlideText": "Budget"},
+        {"FrameId": "f2", "Timestamp": 40.0, "SlideText": "Alice Bob", "ContentKind": "CAMERA"},
+    ]
+    section = index.shared_screen_section(frames)
+    assert "[00:10] Budget" in section and "Alice" not in section
+
+
+def test_a_slide_shown_until_the_camera_replaced_it_is_measured_to_that_point() -> None:
+    # Past MAX_SLIDES, the briefest are left out; a camera frame ends the one
+    # before it, so a slide followed by a long camera view is still brief.
+    frames = []
+    for n in range(index.MAX_SLIDES + 1):
+        frames.append({"FrameId": f"s{n}", "Timestamp": n * 100.0, "SlideText": "x"})
+        frames.append(
+            {
+                "FrameId": f"c{n}",
+                "Timestamp": n * 100.0 + (1 if n == 0 else 50),
+                "ContentKind": "CAMERA",
+            }
+        )
+    text = index.slides_for_prompt(frames)
+    assert text.count("<slide>") == index.MAX_SLIDES
+    assert "keyframe:s0)" not in text and "keyframe:c" not in text
 
 
 def test_the_screen_share_placeholder_is_another_name_for_the_slides(

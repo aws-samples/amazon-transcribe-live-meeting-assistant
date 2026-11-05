@@ -1112,6 +1112,49 @@ def test_the_timed_transcript_marks_each_line_and_each_change_of_the_shared_scre
     assert response["transcript"] == "\nAlice: welcome\nBob: the budget is fine\nAlice: hiring next"
 
 
+def test_key_frames_carry_what_they_show_and_their_title_when_stored(monkeypatch):
+    frames = [
+        {
+            "FrameId": "1",
+            "Timestamp": Decimal("30"),
+            "SlideText": "Budget",
+            "ContentKind": "SCREEN",
+            "Title": "Q3 budget",
+        },
+        {"FrameId": "2", "Timestamp": Decimal("60"), "SlideText": "", "ContentKind": "CAMERA"},
+    ]
+    table = install(monkeypatch, items=frames)
+    assert index.get_keyframes(CALL_ID) == [
+        {
+            "FrameId": "1",
+            "Timestamp": 30.0,
+            "SlideText": "Budget",
+            "ContentKind": "SCREEN",
+            "Title": "Q3 budget",
+        },
+        {"FrameId": "2", "Timestamp": 60.0, "SlideText": "", "ContentKind": "CAMERA"},
+    ]
+    assert "ContentKind" in table.queries[0]["ProjectionExpression"]
+
+
+def test_a_camera_frame_marks_no_change_of_the_shared_screen(monkeypatch):
+    install(monkeypatch, items=[segment("welcome", 3, StartTime=Decimal("1"), speaker="Alice")])
+    monkeypatch.setattr(
+        index,
+        "get_keyframes",
+        lambda callid: [
+            {"FrameId": "1", "Timestamp": 0.5, "SlideText": "Budget", "ContentKind": "SCREEN"},
+            {"FrameId": "2", "Timestamp": 2.0, "SlideText": "", "ContentKind": "CAMERA"},
+        ],
+    )
+    response = index.lambda_handler(
+        {"CallId": CALL_ID, "IncludeSpeaker": True, "IncludeTimes": True}, None
+    )
+    assert response["timedTranscript"] == (
+        "\n[00:00] (The shared screen changed: Budget)\n[00:01] Alice: welcome"
+    )
+
+
 def test_the_timed_transcript_is_only_returned_when_asked_for(monkeypatch):
     response, _ = run(monkeypatch, items=[segment("hello", 2)])
     assert "timedTranscript" not in response

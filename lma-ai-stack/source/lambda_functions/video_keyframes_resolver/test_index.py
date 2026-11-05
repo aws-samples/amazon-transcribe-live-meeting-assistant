@@ -210,6 +210,17 @@ def test_both_images_get_signed_links_and_the_fields_keep_their_types(fakes):
     ]
 
 
+def test_what_a_frame_shows_and_its_title_are_returned_and_camera_frames_are_kept(fakes):
+    # The strip leaves CAMERA frames out itself; the resolver still returns
+    # them, for the clock anchors and for a frame asked for by id.
+    camera = {**item(1000), "ContentKind": {"S": "CAMERA"}}
+    screen = {**item(2000), "ContentKind": {"S": "SCREEN"}, "Title": {"S": "Q3 roadmap"}}
+    fakes([camera, screen, item(3000)])
+    frames = call(OWNER)["VideoKeyframes"]
+    assert [f.get("ContentKind") for f in frames] == ["CAMERA", "SCREEN", None]
+    assert [f.get("Title") for f in frames] == [None, "Q3 roadmap", None]
+
+
 @pytest.mark.parametrize(
     "image",
     [

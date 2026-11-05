@@ -39,6 +39,23 @@ describe('buildDeck', () => {
     expect(images).toHaveLength(2);
   });
 
+  it('leaves out frames of the camera video and heads a slide with its own title', () => {
+    const doc = freshDocument();
+    buildDeck(doc, {
+      title: 'm',
+      frames: [
+        ...frames,
+        { FrameId: 'c', Timestamp: 200, ContentKind: 'SCREEN', Title: 'Hiring plan', SlideText: 'Hiring' },
+        { FrameId: 'd', Timestamp: 260, ContentKind: 'CAMERA', SlideText: '' },
+      ],
+      chapters: [{ seconds: 201, title: 'Chapter title' }],
+    });
+    const slides = [...doc.querySelectorAll('section.deck-slide')];
+    expect(slides).toHaveLength(3);
+    expect(slides[2].querySelector('h2').textContent).toBe('Hiring plan');
+    expect(doc.querySelector('.deck-cover .deck-time').textContent).toBe('3 frames of the shared screen');
+  });
+
   it('shows a slide that holds markup as its text', () => {
     const doc = freshDocument();
     buildDeck(doc, { title: 'm', frames });

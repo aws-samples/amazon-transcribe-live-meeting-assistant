@@ -126,28 +126,34 @@ MAX_KEYFRAME_PAGES = 20
 def get_keyframes(callid):
     """The meeting's key frames of the shared screen, in time order: id, time and text.
 
-    Only the fields a document about the meeting needs; the images stay where
-    they are. See docs/meeting-video.md.
+    Only the fields a document about the meeting needs, with what the frame
+    shows and its title; the images stay where they are. CAMERA frames are
+    kept here, so speech while the camera filled the screen is attached to
+    that frame and not to the slide before it; the summary leaves them out.
+    See docs/meeting-video.md.
     """
     frames = []
     start_key = None
     for _ in range(MAX_KEYFRAME_PAGES):
         query_args = {
             "KeyConditionExpression": Key("PK").eq("kf#" + callid),
-            "ProjectionExpression": "FrameId, #t, SlideText",
+            "ProjectionExpression": "FrameId, #t, SlideText, ContentKind, Title",
             "ExpressionAttributeNames": {"#t": "Timestamp"},
         }
         if start_key:
             query_args["ExclusiveStartKey"] = start_key
         response = ddbTable.query(**query_args)
         for item in response.get("Items", []):
-            frames.append(
-                {
-                    "FrameId": item.get("FrameId"),
-                    "Timestamp": float(item.get("Timestamp", 0)),
-                    "SlideText": item.get("SlideText"),
-                }
-            )
+            frame = {
+                "FrameId": item.get("FrameId"),
+                "Timestamp": float(item.get("Timestamp", 0)),
+                "SlideText": item.get("SlideText"),
+            }
+            # Only on frames read since the extractor began storing them.
+            for name in ("ContentKind", "Title"):
+                if item.get(name):
+                    frame[name] = item[name]
+            frames.append(frame)
         next_key = response.get("LastEvaluatedKey")
         if not next_key or next_key == start_key:
             break
@@ -177,6 +183,9 @@ def format_clock(seconds):
 
 #: How much of a frame's text names it in the timed transcript.
 SLIDE_MARK_CHARS = 120
+#: The ContentKind of a key frame of the meeting's camera video rather than
+#: shared content, as the key frame text extractor stores it.
+CAMERA_CONTENT = "CAMERA"
 
 
 def timed_transcript(segments, lines, frames):
@@ -186,7 +195,8 @@ def timed_transcript(segments, lines, frames):
     sorted them, and its output, one line per segment. A key frame adds
     "[MM:SS] (The shared screen changed: <the start of its text>)" at its
     time, so the summary's chapters can begin where a new slide did
-    (docs/meeting-video.md).
+    (docs/meeting-video.md). A frame of the meeting's camera video
+    (ContentKind CAMERA) adds no line: the shared screen did not change.
     """
     entries = []
     for row, line in zip(segments, lines):
@@ -194,6 +204,8 @@ def timed_transcript(segments, lines, frames):
         if text:
             entries.append((segment_start(row), f"{format_clock(segment_start(row))} {text}"))
     for frame in frames or []:
+        if frame.get("ContentKind") == CAMERA_CONTENT:
+            continue
         first = " ".join((frame.get("SlideText") or "").split())[:SLIDE_MARK_CHARS]
         shown = f": {first}" if first else ""
         entries.append(

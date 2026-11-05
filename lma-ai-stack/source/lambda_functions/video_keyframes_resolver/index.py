@@ -240,6 +240,8 @@ FIELDS = (
     "ShareDetected",
     "ChangeScore",
     "SlideText",
+    "ContentKind",
+    "Title",
     "Owner",
     "SharedWith",
 )

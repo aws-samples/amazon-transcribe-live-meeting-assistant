@@ -1679,6 +1679,7 @@ def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id:
         success = True
         try:
             frames = meeting_frames.load_keyframes(run_query, call_id)
+            shared = [f for f in frames if meeting_frames.shows_shared_content(f)]
             at_seconds = meeting_frames.parse_meeting_time(at_time)
             selected = meeting_frames.select_frames(
                 frames,
@@ -1705,10 +1706,10 @@ def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id:
                     logger.warning(f"Meeting frames tool: transcript unreadable, frames go without it: {str(e)}")
             result = meeting_frames.build_tool_result(
                 selected, segments, images,
-                total_frames=len(frames), send_images=send_images, show_inline=show_inline,
+                total_frames=len(shared), send_images=send_images, show_inline=show_inline,
                 at_time=at_seconds, look=look_at_pictures,
                 first_frame_at=min(
-                    (float(f['Timestamp']) for f in frames if isinstance(f.get('Timestamp'), (int, float))),
+                    (float(f['Timestamp']) for f in shared if isinstance(f.get('Timestamp'), (int, float))),
                     default=None,
                 ),
             )

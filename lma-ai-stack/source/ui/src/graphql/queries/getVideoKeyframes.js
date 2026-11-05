@@ -31,6 +31,8 @@ export default /* GraphQL */ `
         Source
         ShareDetected
         SlideText
+        ContentKind
+        Title
         ImageSignedUrl
         ThumbnailSignedUrl
       }

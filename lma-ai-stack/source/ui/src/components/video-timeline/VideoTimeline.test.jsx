@@ -316,6 +316,60 @@ describe('VideoTimeline', () => {
     expect(screen.queryByText('No new slide')).toBeNull();
   });
 
+  it("labels a frame with its own title before a chapter's, and camera frames not at all", async () => {
+    const loadFrames = vi.fn().mockResolvedValue({
+      VideoKeyframes: [
+        frame(30000, { ContentKind: 'SCREEN', Title: 'Q3 budget review' }),
+        frame(60000, { ContentKind: 'CAMERA' }),
+        frame(300000, { ContentKind: 'MIXED' }),
+      ],
+      nextToken: null,
+    });
+    const onFramesChange = vi.fn();
+    render(
+      <VideoTimeline
+        callId="m-1"
+        loadFrames={loadFrames}
+        subscribe={noSubscribe}
+        onFramesChange={onFramesChange}
+        chapters={[
+          { seconds: 32, label: '00:32', title: 'Budget' },
+          // Nearest to the camera frame, which marks no chapter; the next frame is out of reach.
+          { seconds: 61, label: '01:01', title: 'Introductions' },
+          { seconds: 301, label: '05:01', title: 'Hiring' },
+        ]}
+      />,
+    );
+    const first = await screen.findByTitle('Key frame at 0:30');
+    expect(first.textContent).toContain('Q3 budget review');
+    expect(first.textContent).not.toContain('Budget');
+    expect(screen.getByTitle('Key frame at 5:00').textContent).toContain('Hiring');
+    expect(screen.queryByTitle('Key frame at 1:00')).toBeNull();
+    expect(screen.queryByText('Introductions')).toBeNull();
+    expect(screen.getByText('(2)')).toBeTruthy();
+    await waitFor(() => expect(onFramesChange).toHaveBeenLastCalledWith({ count: 2, more: false, loaded: true }));
+  });
+
+  it('reads on past a page that held only camera frames', async () => {
+    const loadFrames = vi
+      .fn()
+      .mockResolvedValueOnce({ VideoKeyframes: [frame(1000, { ContentKind: 'CAMERA' })], nextToken: 't1' })
+      .mockResolvedValueOnce({ VideoKeyframes: [frame(2000, { ContentKind: 'SCREEN' })], nextToken: null });
+    render(<VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} />);
+    await screen.findByTitle('Key frame at 0:02');
+    expect(screen.queryByTitle('Key frame at 0:01')).toBeNull();
+    expect(loadFrames).toHaveBeenLastCalledWith(expect.objectContaining({ nextToken: 't1' }));
+  });
+
+  it('shows nothing for a meeting whose frames are all of the camera', async () => {
+    const loadFrames = vi
+      .fn()
+      .mockResolvedValue({ VideoKeyframes: [frame(1000, { ContentKind: 'CAMERA' })], nextToken: null });
+    const { container } = render(<VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} />);
+    await waitFor(() => expect(loadFrames).toHaveBeenCalledTimes(1));
+    expect(container.querySelector('[data-testid="video-timeline"]')).toBeNull();
+  });
+
   it('tells the page both clocks of every frame that has them, as anchors in time order', async () => {
     const loadFrames = vi.fn().mockResolvedValue({
       VideoKeyframes: [frame(90000), frame(30000), { ...frame(60000), VideoOffset: null }],

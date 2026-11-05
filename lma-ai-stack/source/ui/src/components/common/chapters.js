@@ -13,6 +13,7 @@
  * by hand, so the reading is lenient about list marks, brackets and bold, and
  * a line it cannot read is left out rather than guessed at.
  */
+import { showsSharedContent } from './video-keyframes';
 
 // "- [05:12] Budget", "1. **[1:02:03]** - Hiring", "05:12: Budget", "* 5:12 Budget".
 const CHAPTER_LINE =
@@ -105,16 +106,18 @@ export const CHAPTER_FRAME_WINDOW_SECONDS = 30;
  * Which key frame marks each chapter on the strip: the frame that went up
  * closest to the chapter's time, within CHAPTER_FRAME_WINDOW_SECONDS (a new
  * slide and the line that begins its topic rarely share a second). A chapter
- * that begins with no change of the shared screen marks no frame.
+ * that begins with no change of the shared screen marks no frame, and a frame
+ * of the meeting's camera video (ContentKind CAMERA) marks none.
  * FrameId -> chapter titles.
  */
 export const chapterTitlesByFrame = (chapters, frames) => {
   const titles = new Map();
   if (!chapters?.length || !frames?.length) return titles;
+  const shared = frames.filter(showsSharedContent);
   chapters.forEach((chapter) => {
     let best = null;
     let bestGap = Infinity;
-    frames.forEach((frame) => {
+    shared.forEach((frame) => {
       const gap = Math.abs(Number(frame.Timestamp) - chapter.seconds);
       if (gap <= CHAPTER_FRAME_WINDOW_SECONDS && gap < bestGap) {
         best = frame;

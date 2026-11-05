@@ -6,9 +6,10 @@
 
 /**
  * The meeting's key frames as a printable deck: one page per frame, landscape,
- * with its time, the chapter it begins (if any) and its text, in a new tab with
- * the browser's print dialog, where **Save as PDF** makes the PDF. See
- * docs/meeting-video.md.
+ * with its time, its label (its title, else the chapter it begins) and its
+ * text, in a new tab with the browser's print dialog, where **Save as PDF**
+ * makes the PDF. Frames of the meeting's camera video are left out, as on the
+ * strip. See docs/meeting-video.md.
  *
  * The tab is opened by openDeckTab within the click itself: browsers allow a
  * new tab only while the click still counts as the user's, which an await for
@@ -20,7 +21,7 @@
  * DOM calls and textContent, so a slide's text is never read as markup.
  */
 import { chapterTitlesByFrame } from './chapters';
-import { formatFrameTime } from './video-keyframes';
+import { formatFrameTime, frameLabel, showsSharedContent } from './video-keyframes';
 
 const DECK_STYLE = `
 @page { size: landscape; margin: 10mm; }
@@ -58,7 +59,7 @@ export const openDeckTab = (open = window.open) => {
 
 /** Fills `doc` with the deck, replacing what it shows. Returns its images, for the caller to wait on. */
 export const buildDeck = (doc, { title, frames, chapters = [] }) => {
-  const ordered = [...(frames || [])].sort((a, b) => Number(a.Timestamp) - Number(b.Timestamp));
+  const ordered = (frames || []).filter(showsSharedContent).sort((a, b) => Number(a.Timestamp) - Number(b.Timestamp));
   const chapterTitles = chapterTitlesByFrame(chapters, ordered);
   // eslint-disable-next-line no-param-reassign
   doc.title = `${title} - shared screen`;
@@ -79,7 +80,8 @@ export const buildDeck = (doc, { title, frames, chapters = [] }) => {
   ordered.forEach((frame) => {
     const time = formatFrameTime(frame.Timestamp);
     const slide = element(doc, 'section', 'deck-slide');
-    (chapterTitles.get(frame.FrameId) || []).forEach((chapter) => slide.appendChild(element(doc, 'h2', null, chapter)));
+    const label = frameLabel(frame, chapterTitles);
+    if (label) slide.appendChild(element(doc, 'h2', null, label));
     const src = frame.ImageSignedUrl || frame.ThumbnailSignedUrl;
     if (src) {
       const img = element(doc, 'img');

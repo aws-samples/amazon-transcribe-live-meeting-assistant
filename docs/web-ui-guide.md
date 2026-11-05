@@ -369,8 +369,9 @@ with the panel open; see [Embeddable Components](embeddable-components.md).
 
 Shown for a meeting whose shared screen was captured, with the number of key
 frames in its label. A strip of thumbnails of the shared screen: one for each
-slide, page or view, with the time it went up, growing while the meeting runs.
-Selecting one shows it large and moves the transcript and the
+slide, page or view, with the time it went up and a short title, growing while
+the meeting runs. Frames that show only the meeting's camera video are left
+out. Selecting one shows it large and moves the transcript and the
 [player](#the-recording-player) to that time; **Show in transcript** opens the
 **Transcript** tab there, and after the meeting **Play recording from here**
 opens it and plays the recording from there. **Find text on the

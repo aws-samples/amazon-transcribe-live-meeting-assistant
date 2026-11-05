@@ -102,6 +102,21 @@ describe('chapterTitlesByFrame', () => {
     const titles = chapterTitlesByFrame(chapters, frames);
     expect(Object.fromEntries(titles)).toEqual({ a: ['Welcome'], b: ['Budget'], c: ['Hiring'] });
   });
+
+  it('marks no frame of the camera video, even the closest one', () => {
+    const frames = [
+      { FrameId: 'a', Timestamp: 100, ContentKind: 'SCREEN' },
+      { FrameId: 'cam', Timestamp: 148, ContentKind: 'CAMERA' },
+      { FrameId: 'old', Timestamp: 400 },
+    ];
+    const chapters = [
+      { seconds: 150, title: 'Introductions' },
+      { seconds: 125, title: 'Budget' },
+      { seconds: 410, title: 'Hiring' },
+    ];
+    const titles = chapterTitlesByFrame(chapters, frames);
+    expect(Object.fromEntries(titles)).toEqual({ a: ['Budget'], old: ['Hiring'] });
+  });
 });
 
 describe('withoutChaptersSection', () => {

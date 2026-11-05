@@ -8,7 +8,9 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   HIGHLIGHT_CLASS,
   formatFrameTime,
+  frameLabel,
   frameMatches,
+  showsSharedContent,
   matchSnippet,
   mergeKeyframes,
   frameIdSeconds,
@@ -126,5 +128,21 @@ describe('searching slide text', () => {
     expect(snippet).toContain('budget');
     expect(snippet.startsWith('…')).toBe(true);
     expect(matchSnippet(slide, 'nothing')).toBe('');
+  });
+});
+
+describe('what a frame shows', () => {
+  it('shows every frame but those of the camera video, including frames not yet read', () => {
+    expect(
+      [{ ContentKind: 'SCREEN' }, { ContentKind: 'MIXED' }, {}, { ContentKind: 'CAMERA' }].map(showsSharedContent),
+    ).toEqual([true, true, true, false]);
+  });
+
+  it('labels a frame with its own title, else the chapters it begins, else nothing', () => {
+    const chapters = new Map([['a', ['Budget', 'Hiring']]]);
+    expect(frameLabel({ FrameId: 'a', Title: ' Q3 review ' }, chapters)).toBe('Q3 review');
+    expect(frameLabel({ FrameId: 'a', Title: '' }, chapters)).toBe('Budget / Hiring');
+    expect(frameLabel({ FrameId: 'b' }, chapters)).toBe('');
+    expect(frameLabel({ FrameId: 'b' }, undefined)).toBe('');
   });
 });
