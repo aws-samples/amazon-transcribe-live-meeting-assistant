@@ -191,3 +191,11 @@ describe('transcriptRetention', () => {
     expect(transcriptRetention({})).toEqual({ state: 'kept', at: null, recordExpiresAt: null });
   });
 });
+
+describe('transcriptionLanguage on the ASR MicroVM', () => {
+  it('reports the model language even when a language from START is still stored', () => {
+    expect(transcriptionLanguage({ transcriptionEngine: 'MICROVM_ASR', transcriptionLanguage: 'en-US' })).toBe(
+      'Set by the ASR model',
+    );
+  });
+});

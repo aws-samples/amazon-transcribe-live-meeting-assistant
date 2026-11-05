@@ -115,13 +115,14 @@ export const transcriptionEngine = (item) => {
 /**
  * The transcription language setting the meeting used, or null when the record
  * does not say: a language code, Amazon Transcribe's language identification,
- * or, for the ASR MicroVM (which records none), the model's own language.
+ * or, for the ASR MicroVM, the model's own language. A meeting that moved to the
+ * MicroVM after START can still hold the language START recorded; the engine
+ * decides.
  */
 export const transcriptionLanguage = (item) => {
-  const stored = recorded(item?.transcriptionLanguage);
-  if (stored) return LANGUAGE_SETTINGS[stored.toLowerCase()] || stored;
   if (recorded(item?.transcriptionEngine)?.toUpperCase() === 'MICROVM_ASR') return 'Set by the ASR model';
-  return null;
+  const stored = recorded(item?.transcriptionLanguage);
+  return stored ? LANGUAGE_SETTINGS[stored.toLowerCase()] || stored : null;
 };
 
 /** Which channels speaker separation was asked for, as the record says, or null when it does not. */
