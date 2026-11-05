@@ -14,7 +14,6 @@ import {
   DESKTOP_CAPTURE_APP_PATH,
   MCP_SERVERS_PATH,
   USER_MANAGEMENT_PATH,
-  CONFIGURATION_HISTORY_PATH,
   CONFIGURATION_PATH,
   VOICE_ENROLLMENT_PATH,
   DEFAULT_PATH,
@@ -89,21 +88,17 @@ export const generateNavigationItems = (settings, isAdmin) => {
       type: 'section',
       text: 'Configuration',
       items: [
-        // Every section of the runtime configuration, edited from its schema.
+        // The configuration profiles and every section of the runtime
+        // configuration, edited from its schema, with each profile's revisions.
         {
           type: 'link',
-          text: 'Configuration',
+          text: 'View / Edit Configuration',
           href: `#${CONFIGURATION_PATH}`,
         },
         {
           type: 'link',
           text: 'MCP Servers',
           href: `#${MCP_SERVERS_PATH}`,
-        },
-        {
-          type: 'link',
-          text: 'Configuration History',
-          href: `#${CONFIGURATION_HISTORY_PATH}`,
         },
         {
           type: 'link',

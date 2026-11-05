@@ -13,7 +13,13 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { compareProfiles, configurationText, readConfigurationText } from './config-text';
+import {
+  compareProfiles,
+  comparisonCsv,
+  comparisonDocument,
+  configurationText,
+  readConfigurationText,
+} from './config-text';
 
 const sections = [{ name: 'language_models' }, { name: 'meeting_processing' }];
 
@@ -165,36 +171,86 @@ describe('compareProfiles', () => {
       language_models: { summaryModelId: 'us.amazon.nova-pro-v1:0' },
       meeting_processing: { inactiveMeetingTimeoutMinutes: 240, transcriptHookNonPartialOnly: false },
     };
-    expect(compareProfiles(sections, values, other)).toEqual([
+    expect(compareProfiles(sections, [values, other])).toEqual([
       {
         section: 'language_models',
         path: ['summaryModelId'],
-        left: 'global.anthropic.claude-sonnet-5-5',
-        right: 'us.amazon.nova-pro-v1:0',
+        values: ['global.anthropic.claude-sonnet-5-5', 'us.amazon.nova-pro-v1:0'],
       },
-      { section: 'meeting_processing', path: ['transcriptHookNonPartialOnly'], left: true, right: false },
+      { section: 'meeting_processing', path: ['transcriptHookNonPartialOnly'], values: [true, false] },
     ]);
   });
 
   it('finds a setting only one side holds, whichever side it is', () => {
     const left = { language_models: { a: 1 } };
     const right = { language_models: { b: 2 } };
-    expect(compareProfiles(sections, left, right)).toEqual([
-      { section: 'language_models', path: ['a'], left: 1, right: undefined },
-      { section: 'language_models', path: ['b'], left: undefined, right: 2 },
+    expect(compareProfiles(sections, [left, right])).toEqual([
+      { section: 'language_models', path: ['a'], values: [1, undefined] },
+      { section: 'language_models', path: ['b'], values: [undefined, 2] },
     ]);
   });
 
   it('compares nested settings key by key and a list as one value', () => {
     const left = { language_models: { prices: { us: { input: 1 } }, list: [1, 2] } };
     const right = { language_models: { prices: { us: { input: 2 } }, list: [2, 1] } };
-    expect(compareProfiles(sections, left, right).map((entry) => entry.path)).toEqual([
+    expect(compareProfiles(sections, [left, right]).map((entry) => entry.path)).toEqual([
       ['prices', 'us', 'input'],
       ['list'],
     ]);
   });
 
   it('finds nothing between equal profiles', () => {
-    expect(compareProfiles(sections, values, JSON.parse(JSON.stringify(values)))).toEqual([]);
+    expect(compareProfiles(sections, [values, JSON.parse(JSON.stringify(values))])).toEqual([]);
+  });
+
+  it('compares three profiles, listing a setting where any one of them differs', () => {
+    const base = { language_models: { a: 1, b: 'x' }, meeting_processing: { c: true } };
+    const second = { language_models: { a: 1, b: 'x' }, meeting_processing: { c: true } };
+    const third = { language_models: { a: 2, b: 'x' }, meeting_processing: { c: true, d: 5 } };
+    expect(compareProfiles(sections, [base, second, third])).toEqual([
+      { section: 'language_models', path: ['a'], values: [1, 1, 2] },
+      { section: 'meeting_processing', path: ['d'], values: [undefined, undefined, 5] },
+    ]);
+  });
+
+  it('lists a whole section that only some profiles hold as an object', () => {
+    const left = { language_models: { prices: { us: 1 } } };
+    const right = { language_models: { prices: 'none' } };
+    const third = { language_models: { prices: { us: 1 } } };
+    expect(compareProfiles(sections, [left, right, third])).toEqual([
+      { section: 'language_models', path: ['prices'], values: [{ us: 1 }, 'none', { us: 1 }] },
+    ]);
+  });
+});
+
+describe('comparison exports', () => {
+  const comparison = [
+    { section: 'language_models', path: ['a'], values: [1, 'say "hi"', undefined] },
+    { section: 'meeting_processing', path: ['b', 'c'], values: ['=SUM(A1)', true, '-1'] },
+  ];
+
+  it('writes CSV with a column per profile, quoting every cell', () => {
+    const csv = comparisonCsv(['default', 'custom', 'trial'], comparison);
+    expect(csv.split('\r\n')).toEqual([
+      '"Section","Setting","default","custom","trial"',
+      '"language_models","a","1","say ""hi""","(not set)"',
+      `"meeting_processing","b › c","'=SUM(A1)","true","-1"`,
+      '',
+    ]);
+  });
+
+  it('names each setting with the label it is given', () => {
+    const csv = comparisonCsv(['x', 'y', 'z'], comparison.slice(0, 1), () => 'Models › A');
+    expect(csv.split('\r\n')[1]).toBe('"language_models","Models › A","1","say ""hi""","(not set)"');
+  });
+
+  it('writes JSON keyed by profile, leaving out a profile that does not hold the setting', () => {
+    expect(comparisonDocument(['default', 'custom', 'trial'], comparison)).toEqual({
+      profiles: ['default', 'custom', 'trial'],
+      differences: [
+        { section: 'language_models', path: ['a'], values: { default: 1, custom: 'say "hi"' } },
+        { section: 'meeting_processing', path: ['b', 'c'], values: { default: '=SUM(A1)', custom: true, trial: '-1' } },
+      ],
+    });
   });
 });

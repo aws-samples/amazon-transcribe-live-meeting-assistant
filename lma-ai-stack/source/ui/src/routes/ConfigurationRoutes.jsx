@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import { AppLayout, Flashbar } from '@cloudscape-design/components';
 import CallAnalyticsTopNavigation from '../components/call-analytics-top-navigation';
-import ConfigurationPage from '../components/configuration/ConfigurationPage';
+import ConfigurationWorkspace from '../components/configuration/ConfigurationWorkspace';
 import Navigation from '../components/call-analytics-layout/navigation';
 import Breadcrumbs from '../components/configuration/breadcrumbs';
 import ToolsPanel from '../components/configuration/tools-panel';
@@ -32,8 +32,8 @@ const ConfigurationRoutes = () => {
         tools={<ToolsPanel />}
         toolsOpen={toolsOpen}
         onToolsChange={({ detail }) => setToolsOpen(detail.open)}
-        content={<ConfigurationPage />}
-        contentType="form"
+        content={<ConfigurationWorkspace />}
+        contentType="default"
         ariaLabels={appLayoutLabels}
       />
     </div>

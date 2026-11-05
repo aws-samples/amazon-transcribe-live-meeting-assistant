@@ -4,8 +4,9 @@
  * See the LICENSE file in the project root for full license information.
  */
 
-// The GraphQL documents and the pure helpers behind the Configuration History
-// page, kept apart from the component so they can be tested without rendering it.
+// The GraphQL documents and the pure helpers behind the revision history dialog
+// of the View / Edit Configuration page, kept apart from the component so they
+// can be tested without rendering it.
 
 export const listRevisionsQuery = `
   query ListConfigurationRevisions($Profile: String) {

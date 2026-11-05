@@ -5,8 +5,9 @@
  */
 
 /**
- * The configuration editor against a mocked GraphQL client and the section
- * schemas exactly as the configuration layer ships them.
+ * The View / Edit Configuration page -- the profile list and the editor below
+ * it -- against a mocked GraphQL client and the section schemas exactly as the
+ * configuration layer ships them.
  *
  * What is asserted is what would be silent if wrong: a save sends only the
  * sections that changed, as deltas over the defaults, against the version that
@@ -20,12 +21,11 @@ import { join } from 'path';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import createWrapper from '@cloudscape-design/components/test-utils/dom';
 
 import { SettingsContext } from '../../contexts/settings';
-import { CONFIGURATION_PATH, MOVED_CONFIGURATION_PAGES } from '../../routes/constants';
+import { CONFIGURATION_HISTORY_PATH, CONFIGURATION_PATH, MOVED_CONFIGURATION_PAGES } from '../../routes/constants';
 import movedConfigurationRoutes from '../../routes/moved-configuration-routes';
-import { ConfigurationContent } from './ConfigurationPage';
+import { ConfigurationWorkspaceContent } from './ConfigurationWorkspace';
 
 // The page renders every section's form; under a full parallel run that can take
 // longer than the defaults allow, both for an element to appear and for a test.
@@ -182,6 +182,25 @@ const saved = (revision = 10, version = 5) => ({
   },
 });
 
+// Downloads are made with URL.createObjectURL, which jsdom lacks. Only the two
+// static methods are replaced: the router constructs URLs as it navigates.
+const stubDownloads = () => {
+  const created = [];
+  const original = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+  URL.createObjectURL = vi.fn((blob) => {
+    created.push(blob);
+    return 'blob:download';
+  });
+  URL.revokeObjectURL = vi.fn();
+  return {
+    created,
+    restore: () => {
+      URL.createObjectURL = original.create;
+      URL.revokeObjectURL = original.revoke;
+    },
+  };
+};
+
 const operationOf = (call) => call[0].query.match(/(query|mutation) (\w+)/)[2];
 const callsOf = (name) => graphqlMock.mock.calls.filter((call) => operationOf(call) === name);
 
@@ -189,7 +208,7 @@ const renderEditor = ({ settings = {}, route = '/configuration/settings' } = {})
   render(
     <MemoryRouter initialEntries={[route]}>
       <SettingsContext.Provider value={{ settings }}>
-        <ConfigurationContent />
+        <ConfigurationWorkspaceContent />
       </SettingsContext.Provider>
     </MemoryRouter>,
   );
@@ -202,7 +221,11 @@ const openSection = (heading) => fireEvent.click(typeof heading === 'string' ? s
 
 const pageButton = (name) => screen.getAllByRole('button', { name })[0];
 
-describe('ConfigurationContent', () => {
+// A Cloudscape button with a reason for being disabled is aria-disabled, so
+// its reason can still be focused and read, rather than disabled.
+const isDisabled = (element) => element.disabled || element.getAttribute('aria-disabled') === 'true';
+
+describe('the editor', () => {
   beforeEach(() => {
     graphqlMock.mockReset();
     profilesMock.mockReset();
@@ -655,7 +678,7 @@ describe('import, export and presets', () => {
   });
 
   const menuItem = async (text) => {
-    fireEvent.click(screen.getByRole('button', { name: 'Import, export and presets' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
     fireEvent.click(await screen.findByText(text));
   };
 
@@ -739,12 +762,7 @@ describe('import, export and presets', () => {
   });
 
   it('exports the configuration as saved, as a download', async () => {
-    const created = [];
-    const createObjectURL = vi.fn((blob) => {
-      created.push(blob);
-      return 'blob:configuration';
-    });
-    vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL: vi.fn() });
+    const { created, restore } = stubDownloads();
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     graphqlMock.mockResolvedValueOnce(answer({ custom: { nova_sonic_config: { voiceId: 'amy' } } }));
     renderEditor({ settings: { StackName: 'LMA-test' } });
@@ -759,7 +777,7 @@ describe('import, export and presets', () => {
     expect(exported.sections.nova_sonic_config).toEqual({ voiceId: 'amy' });
     expect(exported.sections.call_pricing).toEqual({});
     click.mockRestore();
-    vi.unstubAllGlobals();
+    restore();
   });
 });
 
@@ -825,28 +843,413 @@ describe('the JSON and YAML views, and comparing profiles', () => {
     expect(await screen.findByText(/inactiveMeetingTimeoutMinutes: must be/)).toBeTruthy();
     expect(pageButton('Save changes').disabled).toBe(true);
   });
+});
 
-  it('compares the profile shown with another, setting by setting, as saved', async () => {
-    const other = answer();
-    Object.assign(other.data.getConfiguration, { Profile: 'default', Managed: true });
-    graphqlMock.mockImplementation(async (request) =>
-      request.variables.Profile === 'default' ? other : answer({ custom: { recording: { recordAudio: false } } }),
+// Three profiles: the managed default, the active custom one, and an inactive trial.
+const THREE_PROFILES = {
+  data: {
+    listConfigurationProfiles: {
+      Profiles: [
+        { Name: 'default', Managed: true, Active: false, Description: 'Deployment default' },
+        { Name: 'custom', Managed: false, Active: true, Description: 'What meetings use' },
+        { Name: 'trial', Managed: false, Active: false, Description: 'Trying a new model' },
+      ],
+    },
+  },
+};
+
+// A profile's read, named as it is, holding `custom` over the defaults.
+const answerFor = (name, custom = {}) => {
+  const response = answer({ custom });
+  Object.assign(response.data.getConfiguration, {
+    Profile: name,
+    Managed: name === 'default',
+    Active: name === 'custom',
+  });
+  return response;
+};
+
+// The checkbox that selects a profile's row in the profile list.
+const selectProfile = (name) => fireEvent.click(screen.getByRole('checkbox', { name: `Select profile ${name}` }));
+
+describe('the profile list', () => {
+  const STORED = {
+    default: {},
+    custom: { recording: { recordAudio: false } },
+    trial: { recording: { recordAudio: false }, retention: { meetingRecordExpirationInDays: 30 } },
+  };
+
+  beforeEach(() => {
+    graphqlMock.mockReset();
+    profilesMock.mockReset();
+    profilesMock.mockResolvedValue(THREE_PROFILES);
+    graphqlMock.mockImplementation(async (request) => {
+      if (/query GetConfiguration/.test(request.query)) {
+        return answerFor(request.variables.Profile, STORED[request.variables.Profile]);
+      }
+      if (/mutation ActivateConfigurationProfile/.test(request.query)) {
+        return { data: { activateConfigurationProfile: { Success: true, Profile: request.variables.input.Name } } };
+      }
+      if (/mutation DeleteConfigurationProfile/.test(request.query)) {
+        return { data: { deleteConfigurationProfile: { Success: true, Profile: request.variables.input.Name } } };
+      }
+      if (/mutation CreateConfigurationProfile/.test(request.query)) {
+        return { data: { createConfigurationProfile: { Success: true, Profile: request.variables.input.Name } } };
+      }
+      if (/query ListConfigurationRevisions/.test(request.query)) {
+        return {
+          data: { listConfigurationRevisions: { Profile: request.variables.Profile, Version: 1, Revisions: [] } },
+        };
+      }
+      throw new Error(`unexpected request ${request.query}`);
+    });
+  });
+
+  it('lists every profile, marks the active one and the one open, and opens the active one', async () => {
+    renderEditor();
+    await screen.findByText('Transcript Summary');
+    expect(callsOf('GetConfiguration')[0][0].variables).toEqual({ Profile: 'custom' });
+    const customRow = screen.getByRole('button', { name: 'Open custom' }).closest('tr');
+    expect(within(customRow).getByText('Active')).toBeTruthy();
+    expect(within(customRow).getByText('Open in the editor')).toBeTruthy();
+    expect(within(customRow).getByText('Custom')).toBeTruthy();
+    const defaultRow = screen.getByRole('button', { name: 'Open default' }).closest('tr');
+    expect(within(defaultRow).getByText('Managed')).toBeTruthy();
+    expect(within(defaultRow).queryByText('Open in the editor')).toBeNull();
+    expect(within(defaultRow).getByText('Deployment default')).toBeTruthy();
+  });
+
+  it('opens a profile from its row, and names it in the address', async () => {
+    const Where = () => <span data-testid="where">{useLocation().search}</span>;
+    render(
+      <MemoryRouter initialEntries={['/configuration/settings']}>
+        <SettingsContext.Provider value={{ settings: {} }}>
+          <ConfigurationWorkspaceContent />
+          <Where />
+        </SettingsContext.Provider>
+      </MemoryRouter>,
+    );
+    await screen.findByText('Transcript Summary');
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('?profile=custom'));
+    fireEvent.click(screen.getByRole('button', { name: 'Open trial' }));
+    await waitFor(() => expect(callsOf('GetConfiguration').at(-1)[0].variables).toEqual({ Profile: 'trial' }));
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('?profile=trial'));
+    const trialRow = screen.getByRole('button', { name: 'Open trial' }).closest('tr');
+    expect(within(trialRow).getByText('Open in the editor')).toBeTruthy();
+  });
+
+  it('asks before opening another profile over unsaved changes, and stays when told to', async () => {
+    renderEditor();
+    openSection(await screen.findByText('Nova Sonic Voice Assistant'));
+    fireEvent.change(within(section('Nova Sonic Voice Assistant')).getByLabelText('Voice ID'), {
+      target: { value: 'matthew' },
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Open trial' }));
+    expect(confirm).toHaveBeenCalledWith('Open another profile? Your unsaved changes will be lost.');
+    expect(callsOf('GetConfiguration').map((call) => call[0].variables.Profile)).toEqual(['custom']);
+    expect(within(section('Nova Sonic Voice Assistant')).getByLabelText('Voice ID').value).toBe('matthew');
+
+    confirm.mockReturnValueOnce(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Open trial' }));
+    await waitFor(() => expect(callsOf('GetConfiguration').at(-1)[0].variables).toEqual({ Profile: 'trial' }));
+    confirm.mockRestore();
+  });
+
+  it('offers each action only for a selection it can act on', async () => {
+    renderEditor();
+    await screen.findByText('Transcript Summary');
+    const compare = () => screen.getByRole('button', { name: /^Compare profiles/ });
+    expect(isDisabled(compare())).toBe(true);
+    expect(isDisabled(pageButton('Activate'))).toBe(true);
+    expect(isDisabled(pageButton('Delete'))).toBe(true);
+
+    selectProfile('custom');
+    // The active profile is already active, and cannot be deleted.
+    expect(isDisabled(pageButton('Activate'))).toBe(true);
+    expect(isDisabled(pageButton('Delete'))).toBe(true);
+    expect(isDisabled(compare())).toBe(true);
+
+    selectProfile('trial');
+    expect(compare().textContent).toBe('Compare profiles (2)');
+    expect(isDisabled(compare())).toBe(false);
+    // Two selected: there is nothing single to activate.
+    expect(isDisabled(pageButton('Activate'))).toBe(true);
+
+    selectProfile('custom');
+    expect(isDisabled(pageButton('Activate'))).toBe(false);
+    expect(isDisabled(pageButton('Delete'))).toBe(false);
+
+    selectProfile('default');
+    // A managed profile is in the selection.
+    expect(isDisabled(pageButton('Delete'))).toBe(true);
+  });
+
+  it('activates the profile selected', async () => {
+    renderEditor();
+    await screen.findByText('Transcript Summary');
+    selectProfile('trial');
+    fireEvent.click(pageButton('Activate'));
+    expect(await screen.findByText(/The trial profile is now active/)).toBeTruthy();
+    expect(callsOf('ActivateConfigurationProfile')[0][0].variables.input).toEqual({ Name: 'trial' });
+  });
+
+  it('deletes the profiles selected, after asking', async () => {
+    profilesMock.mockResolvedValue({
+      data: {
+        listConfigurationProfiles: {
+          Profiles: [...THREE_PROFILES.data.listConfigurationProfiles.Profiles, { Name: 'old', Managed: false }],
+        },
+      },
+    });
+    renderEditor();
+    await screen.findByText('Transcript Summary');
+    selectProfile('trial');
+    selectProfile('old');
+    fireEvent.click(pageButton('Delete'));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete 2 profiles?' });
+    expect(callsOf('DeleteConfigurationProfile')).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    // In the order the list shows them.
+    expect(await screen.findByText(/Deleted old, trial\. Their revisions stay in the history/)).toBeTruthy();
+    expect(callsOf('DeleteConfigurationProfile').map((call) => call[0].variables.input.Name)).toEqual(['old', 'trial']);
+  });
+
+  it('compares three profiles as saved, a column each, and exports the comparison as CSV', async () => {
+    const { created, restore } = stubDownloads();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    renderEditor();
+    await screen.findByText('Transcript Summary');
+    selectProfile('default');
+    selectProfile('custom');
+    selectProfile('trial');
+    fireEvent.click(screen.getByRole('button', { name: 'Compare profiles (3)' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Compare default, custom, trial' });
+    expect(await within(dialog).findByText('Settings that differ')).toBeTruthy();
+    await waitFor(() =>
+      expect(new Set(callsOf('GetConfiguration').map((call) => call[0].variables.Profile))).toEqual(
+        new Set(['custom', 'default', 'trial']),
+      ),
+    );
+    const headers = within(dialog)
+      .getAllByRole('columnheader')
+      .map((cell) => cell.textContent);
+    expect(headers).toEqual(expect.arrayContaining(['Setting', 'default', 'custom', 'trial']));
+    // Recording differs between the default and the other two; retention only in trial.
+    const recording = within(dialog)
+      .getByText(/Meeting Recording ›/)
+      .closest('tr');
+    expect(within(recording).getAllByText('false')).toHaveLength(2);
+    expect(within(recording).getByText('true')).toBeTruthy();
+    const retention = within(dialog)
+      .getByText(/Retention ›/)
+      .closest('tr');
+    expect(within(retention).getByText('30')).toBeTruthy();
+    expect(within(retention).getAllByText('90')).toHaveLength(2);
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Export' }));
+    fireEvent.click(await within(dialog).findByText('Export as CSV'));
+    expect(click).toHaveBeenCalled();
+    const rows = (await created[0].text()).trim().split('\r\n');
+    expect(rows[0]).toBe('"Section","Setting","default","custom","trial"');
+    expect(rows).toHaveLength(3);
+    expect(rows.find((row) => row.startsWith('"recording"'))).toMatch(/"true","false","false"$/);
+    click.mockRestore();
+    restore();
+  });
+
+  it('says a comparison leaves out the unsaved changes to the open profile', async () => {
+    renderEditor();
+    openSection(await screen.findByText('Nova Sonic Voice Assistant'));
+    fireEvent.change(within(section('Nova Sonic Voice Assistant')).getByLabelText('Voice ID'), {
+      target: { value: 'matthew' },
+    });
+    selectProfile('custom');
+    selectProfile('trial');
+    fireEvent.click(screen.getByRole('button', { name: 'Compare profiles (2)' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Compare custom, trial' });
+    expect(within(dialog).getByText(/Your unsaved changes to custom are not included/)).toBeTruthy();
+    expect(await within(dialog).findByText('Setting that differs')).toBeTruthy();
+  });
+
+  it('creates a profile as a copy of the one selected, and opens it', async () => {
+    renderEditor();
+    await screen.findByText('Transcript Summary');
+    selectProfile('trial');
+    fireEvent.click(pageButton('Create profile'));
+    const dialog = await screen.findByRole('dialog', { name: 'Create a profile' });
+    expect(within(dialog).getByLabelText('Profile name').value).toBe('trial-copy');
+    fireEvent.change(within(dialog).getByLabelText('Profile description'), { target: { value: 'for the pilot' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+    expect(await screen.findByText(/Created the trial-copy profile as a copy of trial/)).toBeTruthy();
+    expect(callsOf('CreateConfigurationProfile')[0][0].variables.input).toEqual({
+      Name: 'trial-copy',
+      CopyFrom: 'trial',
+      Description: 'for the pilot',
+    });
+    await waitFor(() => expect(callsOf('GetConfiguration').at(-1)[0].variables).toEqual({ Profile: 'trial-copy' }));
+  });
+
+  it('refuses a new profile name already in use', async () => {
+    renderEditor();
+    await screen.findByText('Transcript Summary');
+    fireEvent.click(pageButton('Create profile'));
+    const dialog = await screen.findByRole('dialog', { name: 'Create a profile' });
+    fireEvent.change(within(dialog).getByLabelText('Profile name'), { target: { value: 'Trial' } });
+    expect(within(dialog).getByText('A profile with that name already exists.')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Create' }).disabled).toBe(true);
+  });
+
+  it('imports an exported file as a new profile, holding what the file sets', async () => {
+    renderEditor();
+    await screen.findByText('Transcript Summary');
+    const file = new File(
+      [
+        JSON.stringify({
+          format: 'lma-configuration-profile',
+          formatVersion: 1,
+          profile: 'staging',
+          sections: { nova_sonic_config: { voiceId: 'amy' }, retention: {}, not_here: {} },
+        }),
+      ],
+      'staging.json',
+      { type: 'application/json' },
+    );
+    fireEvent.change(screen.getByTestId('profile-import'), { target: { files: [file] } });
+    const dialog = await screen.findByRole('dialog', { name: 'Import staging.json as a new profile' });
+    expect(within(dialog).getByText(/no such section: not_here/)).toBeTruthy();
+    // The name the file was exported from, as it is free.
+    expect(within(dialog).getByLabelText('Imported profile name').value).toBe('staging');
+    expect(callsOf('CreateConfigurationProfile')).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Import' }));
+    expect(await screen.findByText(/Created the staging profile from staging.json/)).toBeTruthy();
+    const { input } = callsOf('CreateConfigurationProfile')[0][0].variables;
+    expect(input.CopyFrom).toBeUndefined();
+    expect(input.Comment).toBe('Imported from staging.json');
+    expect(JSON.parse(input.Body)).toEqual({ nova_sonic_config: { voiceId: 'amy' }, retention: {} });
+    await waitFor(() => expect(callsOf('GetConfiguration').at(-1)[0].variables).toEqual({ Profile: 'staging' }));
+  });
+
+  it('opens the revision history of the profile open in the editor', async () => {
+    renderEditor({ route: '/configuration/settings?profile=trial' });
+    await screen.findByText('Transcript Summary');
+    expect(callsOf('ListConfigurationRevisions')).toHaveLength(0);
+    fireEvent.click(pageButton('Revisions…'));
+    expect(await screen.findByRole('dialog', { name: 'Revision history of trial' })).toBeTruthy();
+    await waitFor(() => expect(callsOf('ListConfigurationRevisions')[0][0].variables).toEqual({ Profile: 'trial' }));
+  });
+
+  it('opens with the revision history shown when the address asks for it', async () => {
+    renderEditor({ route: '/configuration/settings?profile=trial&history=1' });
+    expect(await screen.findByRole('dialog', { name: 'Revision history of trial' })).toBeTruthy();
+    await waitFor(() => expect(callsOf('ListConfigurationRevisions')[0][0].variables).toEqual({ Profile: 'trial' }));
+  });
+});
+
+describe('the editor actions', () => {
+  beforeEach(() => {
+    graphqlMock.mockReset();
+    profilesMock.mockReset();
+    profilesMock.mockResolvedValue(THREE_PROFILES);
+  });
+
+  const actionsItem = async (text) => {
+    fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
+    fireEvent.click(await screen.findByText(text));
+  };
+
+  it('saves the editor contents, unsaved edits included, as a new profile, and leaves the open one', async () => {
+    graphqlMock.mockImplementation(async (request) => {
+      if (/mutation CreateConfigurationProfile/.test(request.query)) {
+        return { data: { createConfigurationProfile: { Success: true, Profile: 'pilot', Version: 1, Revision: 1 } } };
+      }
+      return answerFor(request.variables.Profile, { recording: { recordAudio: false } });
+    });
+    renderEditor();
+    openSection(await screen.findByText('Nova Sonic Voice Assistant'));
+    fireEvent.change(within(section('Nova Sonic Voice Assistant')).getByLabelText('Voice ID'), {
+      target: { value: 'matthew' },
+    });
+    await actionsItem('Save current edits as new profile…');
+    const dialog = await screen.findByRole('dialog', { name: 'Save current edits as a new profile' });
+    fireEvent.change(within(dialog).getByLabelText('New profile name'), { target: { value: 'pilot' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save as new profile' }));
+    expect(await screen.findByText(/Created the pilot profile from what the editor held for custom/)).toBeTruthy();
+    expect(callsOf('UpdateConfiguration')).toHaveLength(0);
+    const { input } = callsOf('CreateConfigurationProfile')[0][0].variables;
+    expect(input.Name).toBe('pilot');
+    expect(input.CopyFrom).toBeUndefined();
+    const body = JSON.parse(input.Body);
+    // Every section, as a save would store it: the stored change and the unsaved one.
+    expect(Object.keys(body).sort()).toEqual(SECTIONS.map((entry) => entry.Name).sort());
+    expect(body.recording).toEqual({ recordAudio: false });
+    expect(body.nova_sonic_config).toEqual({ voiceId: 'matthew' });
+    expect(body.retention).toEqual({});
+    await waitFor(() => expect(callsOf('GetConfiguration').at(-1)[0].variables).toEqual({ Profile: 'pilot' }));
+  });
+
+  it('resets every section to its defaults on the page only, and saves that as one revision', async () => {
+    graphqlMock.mockResolvedValueOnce(
+      answer({
+        custom: { recording: { recordAudio: false }, nova_sonic_config: { voiceId: 'amy' } },
+      }),
     );
     renderEditor();
     await screen.findByText('Transcript Summary');
-    fireEvent.click(screen.getByRole('button', { name: 'Profile' }));
-    fireEvent.click(await screen.findByText('Compare with another profile'));
-    const dialog = await screen.findByRole('dialog', { name: /Compare custom with another profile/ });
-    const picker = createWrapper(dialog).findSelect();
-    picker.openDropdown();
-    picker.selectOptionByValue('default');
-    expect(await within(dialog).findByText('Setting that differs')).toBeTruthy();
-    await waitFor(() => expect(callsOf('GetConfiguration').at(-1)[0].variables).toEqual({ Profile: 'default' }));
-    const row = within(dialog)
-      .getByText(/Meeting Recording ›/)
-      .closest('tr');
-    expect(within(row).getByText('false')).toBeTruthy();
-    expect(within(row).getByText('true')).toBeTruthy();
+    await actionsItem('Reset all sections to defaults');
+    expect(await screen.findByText(/Every section is set to its defaults on the page/)).toBeTruthy();
+    expect(callsOf('UpdateConfiguration')).toHaveLength(0);
+
+    fireEvent.click(pageButton('Save changes'));
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
+    graphqlMock.mockResolvedValueOnce(saved()).mockResolvedValueOnce(answer({ version: 5 }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await screen.findByText(/Saved as revision/);
+    expect(JSON.parse(callsOf('UpdateConfiguration')[0][0].variables.input.Sections)).toEqual({
+      nova_sonic_config: {},
+      recording: {},
+    });
+  });
+
+  it('reloads the editor after a revision is restored', async () => {
+    let restoredYet = false;
+    graphqlMock.mockImplementation(async (request) => {
+      if (/query ListConfigurationRevisions/.test(request.query)) {
+        return {
+          data: {
+            listConfigurationRevisions: {
+              Profile: 'custom',
+              Version: 4,
+              Revisions: [
+                { Revision: 3, CreatedBy: 'second@example.com', Source: 'save', Published: true, Sections: [] },
+                { Revision: 2, CreatedBy: 'first@example.com', Source: 'save', Published: false, Sections: [] },
+              ],
+            },
+          },
+        };
+      }
+      if (/mutation RestoreConfigurationRevision/.test(request.query)) {
+        restoredYet = true;
+        return { data: { restoreConfigurationRevision: { Success: true, Version: 5, Revision: 4, Unchanged: false } } };
+      }
+      return answer({ custom: restoredYet ? { nova_sonic_config: { voiceId: 'amy' } } : {} });
+    });
+    renderEditor();
+    await screen.findByText('Transcript Summary');
+    fireEvent.click(pageButton('Revisions…'));
+    const history = await screen.findByRole('dialog', { name: 'Revision history of custom' });
+    await within(history).findByText('first@example.com');
+    fireEvent.click(within(history).getByRole('checkbox', { name: 'Select revision 2' }));
+    fireEvent.click(within(history).getByRole('button', { name: 'Restore' }));
+    const confirm = await screen.findByRole('dialog', { name: 'Restore revision 2?' });
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Restore' }));
+    expect(await screen.findByText(/Restored revision 2 as revision 4/)).toBeTruthy();
+    await waitFor(() => expect(callsOf('GetConfiguration')).toHaveLength(2));
+    expect(callsOf('RestoreConfigurationRevision')[0][0].variables.input).toMatchObject({
+      Profile: 'custom',
+      Revision: 2,
+      ExpectedVersion: 4,
+    });
   });
 });
 
@@ -872,4 +1275,16 @@ describe('the pages that each edited one section', () => {
       expect(screen.getByText(`${CONFIGURATION_PATH}?section=${name}`)).toBeTruthy();
     },
   );
+
+  it('send the Configuration History page to the revision history of the profile it named', () => {
+    render(
+      <MemoryRouter initialEntries={[`${CONFIGURATION_HISTORY_PATH}?profile=trial`]}>
+        <Routes>
+          {movedConfigurationRoutes()}
+          <Route path={`${CONFIGURATION_PATH}/*`} element={<Where />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText(`${CONFIGURATION_PATH}?profile=trial&history=1`)).toBeTruthy();
+  });
 });

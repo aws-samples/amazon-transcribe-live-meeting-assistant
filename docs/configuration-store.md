@@ -557,9 +557,9 @@ schemas.
 
 ### Export, import and the configuration library
 
-The Configuration page's **Import, export and presets** menu moves configuration
-between deployments, and applies named presets. None of the three saves anything
-by itself: an import or a preset becomes unsaved changes on the page, marked and
+The configuration editor's **Actions** menu moves configuration between
+deployments, and applies named presets. None of the three saves anything by
+itself: an import or a preset becomes unsaved changes on the page, marked and
 checked like any edit, and is saved only when the administrator saves it, as one
 revision that can be compared and restored like any other.
 
@@ -715,8 +715,10 @@ index names. The bucket expires nothing else.
 
 ### Restoring, comparing and labelling
 
-In the web UI this is the **Configuration ▸ Configuration History** page, for
-Admin users. It lists the revisions with who saved each, when, what it changed,
+In the web UI this is the revision history dialog of the **View / Edit
+Configuration** page, opened with **Revisions…** for the profile open, for Admin
+users. The earlier Configuration History address, `#/configuration/history`, opens
+that page with the dialog open. It lists the revisions with who saved each, when, what it changed,
 how it came to be and its comment, and marks the current one. Select one
 revision to **View** its whole configuration, **Label** it, or **Restore** it,
 which asks for an optional comment first. A label left empty removes the label.

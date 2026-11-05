@@ -9,7 +9,7 @@ import { CONFIGURATION_PATH, DEFAULT_PATH } from '../../routes/constants';
 
 export const configurationBreadcrumbItems = [
   { text: 'Meeting Assistant', href: `#${DEFAULT_PATH}` },
-  { text: 'Configuration', href: `#${CONFIGURATION_PATH}` },
+  { text: 'View / Edit Configuration', href: `#${CONFIGURATION_PATH}` },
 ];
 
 const Breadcrumbs = () => <BreadcrumbGroup ariaLabel="Breadcrumbs" items={configurationBreadcrumbItems} />;

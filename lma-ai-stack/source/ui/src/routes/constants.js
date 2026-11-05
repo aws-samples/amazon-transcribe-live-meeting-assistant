@@ -18,8 +18,11 @@ export const NOVA_SONIC_CONFIG_PATH = '/configuration/nova-sonic';
 export const ASR_CONFIG_PATH = '/configuration/asr';
 export const TRANSCRIPT_SUMMARY_PATH = '/configuration/transcript-summary';
 export const USER_MANAGEMENT_PATH = '/configuration/user-management';
+// Once the Configuration History page; now opens the revision history dialog
+// of the View / Edit Configuration page.
 export const CONFIGURATION_HISTORY_PATH = '/configuration/history';
-// The schema-driven editor for every section of the runtime configuration.
+// View / Edit Configuration: the configuration profiles, and the schema-driven
+// editor for every section of the runtime configuration.
 export const CONFIGURATION_PATH = '/configuration/settings';
 // Each earlier single-section configuration page, and the section of the
 // Configuration page it now opens.

@@ -5,6 +5,7 @@
  */
 import { generateClient } from 'aws-amplify/api';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import PropTypes from 'prop-types';
 import { useLocation } from 'react-router-dom';
 import {
   Alert,
@@ -16,22 +17,19 @@ import {
   Input,
   Modal,
   SegmentedControl,
-  Select,
   SpaceBetween,
   Spinner,
-  Table,
   Textarea,
 } from '@cloudscape-design/components';
 
 import useSettingsContext from '../../contexts/settings';
-import { CONFIGURATION_HISTORY_PATH } from '../../routes/constants';
-import AdminOnly from '../common/AdminOnly';
 import { isConflict } from '../common/config-conflict';
 import { MAX_LABEL_LENGTH, labelRevisionMutation } from '../configuration-history/history';
 import {
   appliesText,
   applyPresetSection,
   changedCount,
+  clone,
   deepEqual,
   effectiveSection,
   exportDocument,
@@ -43,21 +41,18 @@ import {
 } from './config-model';
 import {
   DEFAULT_PROFILE,
-  activateProfileMutation,
   createProfileMutation,
-  deleteProfileMutation,
   errorText,
   getConfigurationQuery,
   invalidMessage,
-  listProfilesQuery,
   parseConfiguration,
-  parseProfiles,
   profileNameProblem,
   refusedMessage,
   updateConfigurationMutation,
 } from './configuration-api';
-import { compareProfiles, configurationText, readConfigurationText } from './config-text';
+import { configurationText, readConfigurationText } from './config-text';
 import ConfigurationSection, { sectionElementId } from './ConfigurationSection';
+import { profileText } from './ProfilesTable';
 import { UNAVAILABLE_REASONS } from './section-notices';
 import { checkDetailed, formatPath, limitProblems } from './schema-validation';
 import './configuration.css';
@@ -69,7 +64,8 @@ export const MAX_COMMENT_LENGTH = 500;
 
 const sectionLabel = (section) => section.schema.sectionLabel || section.schema.title || section.name;
 
-const effectiveOf = (doc) =>
+// Each section's effective values: the baseline with what the profile stores over it.
+export const effectiveOf = (doc) =>
   Object.fromEntries(
     doc.sections.map((section) => [
       section.name,
@@ -77,18 +73,7 @@ const effectiveOf = (doc) =>
     ]),
   );
 
-// What a profile is called in the selector.
-const profileText = (entry) => (entry.name === DEFAULT_PROFILE ? 'default (deployment default)' : entry.name);
-
-const profileTags = (entry) => [entry.active ? 'Active' : null, entry.managed ? 'Managed' : 'Custom'].filter(Boolean);
-
-// A compared value, for display: a string as it is, anything else as compact
-// JSON, so that `true` and "true" are told apart; a setting one profile does
-// not hold says so.
-const comparedText = (value) => {
-  if (value === undefined) return '(not set)';
-  return typeof value === 'string' ? value : JSON.stringify(value);
-};
+const COPY_TO_CHANGE = 'This profile is read-only: copy it to a Custom profile to change it.';
 
 const VIEW_OPTIONS = [
   { id: 'form', text: 'Form' },
@@ -101,12 +86,25 @@ const whenText = (iso) => {
   return parsed && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleString() : iso || '';
 };
 
-export const ConfigurationContent = () => {
+/**
+ * The editor for one configuration profile: every section as a form, or the
+ * whole profile as JSON or YAML, with validation, the save dialog and the
+ * handling of a save someone else made first. Which profile it shows, and what
+ * is done to whole profiles, is the workspace's, which renders it.
+ */
+const ConfigurationEditor = ({
+  profile,
+  profiles = [],
+  reloadKey = 0,
+  onDirtyChange = () => {},
+  onOpenHistory = () => {},
+  onCopy = () => {},
+  onActivate = () => {},
+  onProfileCreated = () => {},
+}) => {
   const { settings } = useSettingsContext() || {};
   const location = useLocation();
-  const query = new URLSearchParams(location.search);
-  const focus = query.get('section');
-  const requestedProfile = query.get('profile');
+  const focus = new URLSearchParams(location.search).get('section');
 
   const [doc, setDoc] = useState(null);
   // Each section's values as loaded, and as edited since.
@@ -121,16 +119,12 @@ export const ConfigurationContent = () => {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [preset, setPreset] = useState(null);
-  // The profiles, and the one this page shows: the active one unless a link
-  // names another.
-  const [profiles, setProfiles] = useState([]);
-  const [profile, setProfile] = useState(requestedProfile || null);
-  const [copyOpen, setCopyOpen] = useState(false);
-  const [copyName, setCopyName] = useState('');
-  const [copyDescription, setCopyDescription] = useState('');
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [profileBusy, setProfileBusy] = useState(false);
-  const [profileError, setProfileError] = useState(null);
+  // Saving the editor's contents, unsaved edits included, as a new profile.
+  const [saveAsOpen, setSaveAsOpen] = useState(false);
+  const [saveAsName, setSaveAsName] = useState('');
+  const [saveAsDescription, setSaveAsDescription] = useState('');
+  const [saveAsBusy, setSaveAsBusy] = useState(false);
+  const [saveAsError, setSaveAsError] = useState(null);
   // The form, or the whole configuration as JSON or YAML text. The text is
   // read into the page's edits as it is typed, so it is checked and saved like
   // any other edit; `textError` is what stops a text that does not read.
@@ -139,43 +133,37 @@ export const ConfigurationContent = () => {
   const [textError, setTextError] = useState(null);
   // Settings named in the text that this deployment does not offer, so not used.
   const [textWithheld, setTextWithheld] = useState([]);
-  const [compareOpen, setCompareOpen] = useState(false);
-  const [compareWith, setCompareWith] = useState(null);
-  const [comparison, setComparison] = useState(null);
-  const [comparing, setComparing] = useState(false);
-  const [compareError, setCompareError] = useState(null);
   const scrolled = useRef(false);
   const fileInput = useRef(null);
   // The edits the text view last produced, so typing does not rewrite the text.
   const fromText = useRef(null);
 
-  const loadProfiles = useCallback(async () => {
-    const result = await client.graphql({ query: listProfilesQuery });
-    const listed = parseProfiles(result.data?.listConfigurationProfiles);
-    setProfiles(listed);
-    return listed;
-  }, []);
+  const read = useCallback(async () => {
+    const result = await client.graphql({ query: getConfigurationQuery, variables: { Profile: profile } });
+    return parseConfiguration(result.data?.getConfiguration);
+  }, [profile]);
 
-  const read = useCallback(
-    async (name) => {
-      const result = await client.graphql({ query: getConfigurationQuery, variables: { Profile: name || profile } });
-      return parseConfiguration(result.data?.getConfiguration);
-    },
-    [profile],
-  );
+  // Another profile is another document: nothing of the last one's is shown
+  // while it loads, nor said about it afterwards.
+  useEffect(() => {
+    setDoc(null);
+    setStatus(null);
+    setConflict(false);
+    setTextError(null);
+    setTextWithheld([]);
+    fromText.current = null;
+  }, [profile]);
+
+  // The profile last asked for, so a read that finishes after another profile
+  // was opened is not shown as that one.
+  const wanted = useRef(profile);
+  wanted.current = profile;
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      let name = profile;
-      if (!name) {
-        const listed = await loadProfiles();
-        name = (listed.find((entry) => entry.active) || { name: DEFAULT_PROFILE }).name;
-        setProfile(name);
-      } else {
-        loadProfiles().catch(() => null);
-      }
-      const parsed = await read(name);
+      const parsed = await read();
+      if (wanted.current !== profile) return;
       const effective = effectiveOf(parsed);
       setDoc(parsed);
       setLoaded(effective);
@@ -187,11 +175,13 @@ export const ConfigurationContent = () => {
     } finally {
       setLoading(false);
     }
-  }, [read, profile, loadProfiles]);
+  }, [read, profile]);
 
+  // Loaded again when the workspace says the profile changed under it, as a
+  // restore does.
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, reloadKey]);
 
   const sections = useMemo(
     () => (doc?.sections || []).filter((section) => isAvailable(section.schema, settings)),
@@ -221,6 +211,11 @@ export const ConfigurationContent = () => {
     ]),
   );
   const problemCount = Object.values(problems).reduce((total, list) => total + list.length, 0);
+
+  // The workspace asks before opening another profile over unsaved changes.
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
 
   // The text follows every change made elsewhere -- a load, a discard, an
   // import, a preset -- but not the one it made itself.
@@ -262,103 +257,79 @@ export const ConfigurationContent = () => {
     setView(next);
   };
 
-  const selected = profiles.find((entry) => entry.name === profile);
+  const listed = profiles.find((entry) => entry.name === profile);
+  // Activating is done from the profile list, so the list says which is active.
+  const active = listed ? listed.active : Boolean(doc?.active);
 
-  // Choosing another profile discards unsaved edits, so it asks first.
-  const chooseProfile = (name) => {
-    // eslint-disable-next-line no-alert -- the browser's own prompt, as for leaving the page
-    if (dirty && !window.confirm('Open another profile? Your unsaved changes will be lost.')) return;
-    setStatus(null);
-    setProfile(name);
+  // Every section, as a save would store it, to make a new profile of: what
+  // the editor holds now, unsaved edits included, and the sections this
+  // deployment does not show as they are stored.
+  const saveAsBody = () =>
+    Object.fromEntries(
+      (doc?.sections || []).map((section) => [
+        section.name,
+        storedSection(section.schema, doc.defaults[section.name], edits[section.name]),
+      ]),
+    );
+
+  const openSaveAs = () => {
+    setSaveAsError(null);
+    setSaveAsName('');
+    setSaveAsDescription('');
+    setSaveAsOpen(true);
   };
 
-  // Compared as saved, as the export is: unsaved edits are not part of either side.
-  const openCompare = () => {
-    setCompareError(null);
-    setComparison(null);
-    setCompareWith(null);
-    setCompareOpen(true);
-  };
+  const saveAsProblem = profileNameProblem(saveAsName, profiles);
 
-  const compare = async (name) => {
-    setCompareWith(name);
-    setComparing(true);
-    setCompareError(null);
+  const saveAs = async () => {
+    const name = saveAsName;
+    setSaveAsBusy(true);
+    setSaveAsError(null);
     try {
-      const other = await read(name);
-      if (!other.exists) throw new Error(`there is no profile named ${name}`);
-      setComparison(compareProfiles(sections, loaded, effectiveOf(other)));
-    } catch (err) {
-      setComparison(null);
-      setCompareError(`Could not read the ${name} profile: ${errorText(err)}`);
-    } finally {
-      setComparing(false);
-    }
-  };
-
-  const runProfileOperation = async (operation, success) => {
-    setProfileBusy(true);
-    setProfileError(null);
-    try {
-      await operation();
-      await loadProfiles();
-      setStatus({ type: 'success', text: success });
-      return true;
-    } catch (err) {
-      setProfileError(refusedMessage(err) || invalidMessage(err) || errorText(err));
-      return false;
-    } finally {
-      setProfileBusy(false);
-    }
-  };
-
-  const activate = () =>
-    runProfileOperation(
-      () => client.graphql({ query: activateProfileMutation, variables: { input: { Name: profile } } }),
-      `The ${profile} profile is now active. Every reader uses it as its cache allows; see each section.`,
-    ).then(() => load());
-
-  const openCopy = () => {
-    setProfileError(null);
-    setCopyName(profile === DEFAULT_PROFILE ? 'custom' : `${profile}-copy`);
-    setCopyDescription('');
-    setCopyOpen(true);
-  };
-
-  const copyProblem = profileNameProblem(copyName, profiles);
-
-  const copy = async () => {
-    const name = copyName;
-    const made = await runProfileOperation(
-      () =>
-        client.graphql({
-          query: createProfileMutation,
-          variables: {
-            input: { Name: name, CopyFrom: profile, Description: copyDescription.trim() || null },
+      await client.graphql({
+        query: createProfileMutation,
+        variables: {
+          input: {
+            Name: name,
+            Body: JSON.stringify(saveAsBody()),
+            Description: saveAsDescription.trim() || null,
+            Comment: `Saved from the ${profile} profile${dirty ? ', with edits not saved there' : ''}`.slice(
+              0,
+              MAX_COMMENT_LENGTH,
+            ),
           },
-        }),
-      `Created the ${name} profile as a copy of ${profile}. Activate it to have meetings use it.`,
-    );
-    if (made) {
-      setCopyOpen(false);
-      setProfile(name);
+        },
+      });
+      setSaveAsOpen(false);
+      onProfileCreated(
+        name,
+        `Created the ${name} profile from what the editor held for ${profile}${
+          dirty ? ', including the unsaved edits' : ''
+        }. ${profile} itself is unchanged. Activate ${name} to have meetings use it.`,
+      );
+    } catch (err) {
+      setSaveAsError(refusedMessage(err) || invalidMessage(err) || errorText(err));
+    } finally {
+      setSaveAsBusy(false);
     }
   };
 
-  const remove = async () => {
-    const name = profile;
-    const gone = await runProfileOperation(
-      () => client.graphql({ query: deleteProfileMutation, variables: { input: { Name: name } } }),
-      `Deleted the ${name} profile. Its revisions stay in its history.`,
-    );
-    if (gone) {
-      setDeleteOpen(false);
-      setProfile((profiles.find((entry) => entry.active) || { name: DEFAULT_PROFILE }).name);
-    }
+  const allDefaults = sections.every((section) => deepEqual(edits[section.name], doc?.defaults[section.name] || {}));
+
+  // Reset section to defaults, for every section shown, as unsaved changes.
+  const resetAll = () => {
+    const next = Object.fromEntries(sections.map((section) => [section.name, clone(doc.defaults[section.name] || {})]));
+    setEdits((current) => ({ ...current, ...next }));
+    setStatus({
+      type: 'info',
+      text:
+        'Every section is set to its defaults on the page. Nothing is saved yet: review the marked changes, then ' +
+        'save them, or discard them.',
+    });
   };
 
-  // Closing or reloading the page with unsaved changes asks first. Following
-  // View history asks too; other navigation inside the app does not.
+  // Closing or reloading the page with unsaved changes asks first; so does
+  // opening another profile, which the workspace asks about.
   useEffect(() => {
     if (!dirty) return undefined;
     const warn = (event) => {
@@ -376,13 +347,6 @@ export const ConfigurationContent = () => {
     scrolled.current = true;
     document.getElementById(sectionElementId(focus))?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
   }, [focus, doc]);
-
-  const confirmLeaving = (event) => {
-    // eslint-disable-next-line no-alert -- the browser's own prompt, as for closing the page
-    if (dirty && !window.confirm('Leave the Configuration page? Your unsaved changes will be lost.')) {
-      event.preventDefault();
-    }
-  };
 
   const setSection = (name) => (values) => setEdits((current) => ({ ...current, [name]: values }));
 
@@ -602,7 +566,6 @@ export const ConfigurationContent = () => {
   // The default and Managed profiles are rewritten by every stack update, so
   // they are shown, compared and activated, and copied to be changed.
   const readOnly = !doc?.exists || doc?.managed;
-  const historyHref = `#${CONFIGURATION_HISTORY_PATH}?profile=${encodeURIComponent(profile || '')}`;
   // A link to a section this deployment does not offer says so, rather than
   // opening a page without it.
   const unavailable = (doc?.sections || []).find(
@@ -616,67 +579,28 @@ export const ConfigurationContent = () => {
   return (
     <SpaceBetween size="l">
       <Header
-        variant="h1"
+        variant="h2"
         description={
-          `Every setting LMA reads at run time, in one place. The active profile is what meetings use; a value ` +
-          `that differs from the deployment default is marked. ${provenance}`
+          `${doc?.description ? `${doc.description} ` : ''}A value that differs from the deployment default is ` +
+          `marked. ${provenance}`
         }
         actions={
           <SpaceBetween direction="horizontal" size="xs">
-            <Select
-              ariaLabel="Configuration profile"
-              selectedOption={
-                selected
-                  ? { value: selected.name, label: profileText(selected), tags: profileTags(selected) }
-                  : { value: profile || '', label: profile || '' }
-              }
-              options={profiles.map((entry) => ({
-                value: entry.name,
-                label: profileText(entry),
-                description: entry.description || undefined,
-                tags: profileTags(entry),
-              }))}
-              onChange={({ detail }) => chooseProfile(detail.selectedOption.value)}
-              disabled={saving || profileBusy}
-            />
-            <ButtonDropdown
-              disabled={!doc || saving || profileBusy}
-              items={[
-                { id: 'activate', text: 'Activate', disabled: !doc?.exists || doc?.active },
-                { id: 'copy', text: 'Copy to a new profile', disabled: !doc?.exists },
-                { id: 'compare', text: 'Compare with another profile', disabled: !doc?.exists || profiles.length < 2 },
-                {
-                  id: 'delete',
-                  text: 'Delete',
-                  disabled: !doc?.exists || doc?.managed || doc?.active,
-                  disabledReason: doc?.active
-                    ? 'Activate another profile first.'
-                    : 'The deployment manages this profile.',
-                },
-              ]}
-              onItemClick={({ detail }) => {
-                setProfileError(null);
-                if (detail.id === 'activate') activate();
-                else if (detail.id === 'copy') openCopy();
-                else if (detail.id === 'compare') openCompare();
-                else if (detail.id === 'delete') setDeleteOpen(true);
-              }}
-            >
-              Profile
-            </ButtonDropdown>
-            <Button href={historyHref} onFollow={confirmLeaving}>
-              View history
+            <Button iconName="history" onClick={onOpenHistory} disabled={!doc?.exists}>
+              Revisions…
             </Button>
             <ButtonDropdown
-              disabled={!doc || readOnly || saving}
+              disabled={!doc?.exists || saving}
               items={[
-                { id: 'export', text: 'Export to a file', disabled: !doc },
-                { id: 'import', text: 'Import from a file' },
+                { id: 'export', text: 'Export to a file' },
+                { id: 'import', text: 'Import from a file', disabled: readOnly, disabledReason: COPY_TO_CHANGE },
                 ...(doc?.presets?.length
                   ? [
                       {
                         id: 'presets',
                         text: 'Apply a preset',
+                        disabled: readOnly,
+                        disabledReason: COPY_TO_CHANGE,
                         items: doc.presets.map((entry) => ({
                           id: `preset:${entry.Id}`,
                           text: entry.Title,
@@ -686,16 +610,30 @@ export const ConfigurationContent = () => {
                       },
                     ]
                   : []),
+                {
+                  id: 'save-as',
+                  text: 'Save current edits as new profile…',
+                  disabled: problemCount > 0 || Boolean(textError),
+                  disabledReason: 'Correct the settings marked first.',
+                },
+                {
+                  id: 'reset-all',
+                  text: 'Reset all sections to defaults',
+                  disabled: readOnly || allDefaults,
+                  disabledReason: readOnly ? COPY_TO_CHANGE : 'Every section already holds its defaults.',
+                },
               ]}
               onItemClick={({ detail }) => {
                 if (detail.id === 'export') exportConfiguration();
                 else if (detail.id === 'import') fileInput.current?.click();
+                else if (detail.id === 'save-as') openSaveAs();
+                else if (detail.id === 'reset-all') resetAll();
                 else if (detail.id.startsWith('preset:')) {
                   setPreset(doc.presets.find((entry) => `preset:${entry.Id}` === detail.id));
                 }
               }}
             >
-              Import, export and presets
+              Actions
             </ButtonDropdown>
             <Button iconName="refresh" onClick={load} disabled={loading || saving} ariaLabel="Reload" />
             <Button onClick={discard} disabled={(!dirty && !textError) || saving}>
@@ -711,18 +649,12 @@ export const ConfigurationContent = () => {
           </SpaceBetween>
         }
       >
-        Configuration
+        {profileText({ name: profile })}
       </Header>
-
-      {profileError && (
-        <Alert type="error" dismissible onDismiss={() => setProfileError(null)}>
-          {profileError}
-        </Alert>
-      )}
 
       {doc && !doc.exists && (
         <Alert type="error" header={`There is no configuration profile named ${profile}`}>
-          Choose another profile.
+          Open another profile from the list above.
         </Alert>
       )}
 
@@ -734,7 +666,7 @@ export const ConfigurationContent = () => {
               ? 'The deployment default is read-only'
               : `The ${profile} profile is managed by the deployment`
           }
-          action={<Button onClick={openCopy}>Copy to a new profile</Button>}
+          action={<Button onClick={onCopy}>Copy to a new profile</Button>}
         >
           {`Every stack update rewrites it${
             profile === DEFAULT_PROFILE
@@ -744,8 +676,8 @@ export const ConfigurationContent = () => {
         </Alert>
       )}
 
-      {doc?.exists && !doc.managed && !doc.active && (
-        <Alert type="info" action={<Button onClick={activate}>Activate</Button>}>
+      {doc?.exists && !doc.managed && !active && (
+        <Alert type="info" action={<Button onClick={onActivate}>Activate</Button>}>
           {`The ${profile} profile is not the active one, so meetings do not use it. Saving changes it; activate it to ` +
             'have meetings use it.'}
         </Alert>
@@ -778,13 +710,7 @@ export const ConfigurationContent = () => {
           type={status.type}
           dismissible
           onDismiss={() => setStatus(null)}
-          action={
-            status.revision ? (
-              <Button href={historyHref} onFollow={confirmLeaving}>
-                View history
-              </Button>
-            ) : undefined
-          }
+          action={status.revision ? <Button onClick={onOpenHistory}>Revisions…</Button> : undefined}
         >
           {status.text}
         </Alert>
@@ -925,141 +851,45 @@ export const ConfigurationContent = () => {
       </Modal>
 
       <Modal
-        visible={compareOpen}
-        size="large"
-        onDismiss={() => setCompareOpen(false)}
-        header={`Compare ${selected ? profileText(selected) : profile} with another profile`}
-        footer={
-          <Box float="right">
-            <Button variant="primary" onClick={() => setCompareOpen(false)}>
-              Close
-            </Button>
-          </Box>
-        }
-      >
-        <SpaceBetween size="m">
-          <Box>
-            {`Both profiles as saved, setting by setting.${dirty ? ' Your unsaved changes are not included.' : ''}`}
-          </Box>
-          <FormField label="Compare with">
-            <Select
-              ariaLabel="Profile to compare with"
-              placeholder="Choose a profile"
-              selectedOption={
-                compareWith
-                  ? {
-                      value: compareWith,
-                      label: profileText(profiles.find((entry) => entry.name === compareWith) || { name: compareWith }),
-                    }
-                  : null
-              }
-              options={profiles
-                .filter((entry) => entry.name !== profile)
-                .map((entry) => ({ value: entry.name, label: profileText(entry), tags: profileTags(entry) }))}
-              onChange={({ detail }) => compare(detail.selectedOption.value)}
-              disabled={comparing}
-            />
-          </FormField>
-          {compareError && <Alert type="error">{compareError}</Alert>}
-          {comparing && (
-            <Box>
-              <Spinner /> Reading the profile...
-            </Box>
-          )}
-          {comparison && !comparing && (
-            <Table
-              variant="embedded"
-              wrapLines
-              items={comparison}
-              trackBy={(item) => `${item.section}:${JSON.stringify(item.path)}`}
-              empty={<Box textAlign="center">The two profiles hold the same value for every setting.</Box>}
-              header={
-                <Header counter={`(${comparison.length})`}>
-                  {comparison.length === 1 ? 'Setting that differs' : 'Settings that differ'}
-                </Header>
-              }
-              columnDefinitions={[
-                {
-                  id: 'setting',
-                  header: 'Setting',
-                  cell: (item) => {
-                    const section = sections.find((candidate) => candidate.name === item.section);
-                    const title = item.path.length === 1 ? section?.schema.properties?.[item.path[0]]?.title : null;
-                    return `${section ? sectionLabel(section) : item.section} › ${title || formatPath(item.path)}`;
-                  },
-                },
-                {
-                  id: 'left',
-                  header: selected ? profileText(selected) : profile,
-                  cell: (item) => comparedText(item.left),
-                },
-                {
-                  id: 'right',
-                  header: profileText(profiles.find((entry) => entry.name === compareWith) || { name: compareWith }),
-                  cell: (item) => comparedText(item.right),
-                },
-              ]}
-            />
-          )}
-        </SpaceBetween>
-      </Modal>
-
-      <Modal
-        visible={copyOpen}
-        onDismiss={() => !profileBusy && setCopyOpen(false)}
-        header={`Copy ${profile} to a new profile`}
+        visible={saveAsOpen}
+        onDismiss={() => !saveAsBusy && setSaveAsOpen(false)}
+        header="Save current edits as a new profile"
         footer={
           <Box float="right">
             <SpaceBetween direction="horizontal" size="xs">
-              <Button variant="link" onClick={() => setCopyOpen(false)} disabled={profileBusy}>
+              <Button variant="link" onClick={() => setSaveAsOpen(false)} disabled={saveAsBusy}>
                 Cancel
               </Button>
-              <Button variant="primary" onClick={copy} loading={profileBusy} disabled={Boolean(copyProblem)}>
-                Create
+              <Button variant="primary" onClick={saveAs} loading={saveAsBusy} disabled={Boolean(saveAsProblem)}>
+                Save as new profile
               </Button>
             </SpaceBetween>
           </Box>
         }
       >
         <SpaceBetween size="m">
-          {profileError && <Alert type="error">{profileError}</Alert>}
+          {saveAsError && <Alert type="error">{saveAsError}</Alert>}
           <Box>
-            The new profile is a Custom copy of every setting, which you can change and save. It is not active until you
-            activate it.
+            {`The new profile is a Custom one holding every setting as the editor shows it now${
+              dirty ? ', including your unsaved edits' : ''
+            }. ${profile} itself is left as it is saved. The new profile is not active until you activate it. To ` +
+              "copy a profile's last saved state instead, use Create profile in the list of profiles."}
           </Box>
-          <FormField label="Name" errorText={copyName ? copyProblem : null}>
-            <Input value={copyName} ariaLabel="Profile name" onChange={({ detail }) => setCopyName(detail.value)} />
+          <FormField label="Name" errorText={saveAsName ? saveAsProblem : null}>
+            <Input
+              value={saveAsName}
+              ariaLabel="New profile name"
+              placeholder="e.g. trial"
+              onChange={({ detail }) => setSaveAsName(detail.value)}
+            />
           </FormField>
           <FormField label="Description" description="Optional.">
             <Input
-              value={copyDescription}
-              ariaLabel="Profile description"
-              onChange={({ detail }) => setCopyDescription(detail.value.slice(0, MAX_COMMENT_LENGTH))}
+              value={saveAsDescription}
+              ariaLabel="New profile description"
+              onChange={({ detail }) => setSaveAsDescription(detail.value.slice(0, MAX_COMMENT_LENGTH))}
             />
           </FormField>
-        </SpaceBetween>
-      </Modal>
-
-      <Modal
-        visible={deleteOpen}
-        onDismiss={() => !profileBusy && setDeleteOpen(false)}
-        header={`Delete the ${profile} profile?`}
-        footer={
-          <Box float="right">
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button variant="link" onClick={() => setDeleteOpen(false)} disabled={profileBusy}>
-                Cancel
-              </Button>
-              <Button variant="primary" onClick={remove} loading={profileBusy}>
-                Delete
-              </Button>
-            </SpaceBetween>
-          </Box>
-        }
-      >
-        <SpaceBetween size="m">
-          {profileError && <Alert type="error">{profileError}</Alert>}
-          <Box>The profile is deleted. Its revisions stay in its history.</Box>
         </SpaceBetween>
       </Modal>
 
@@ -1125,13 +955,21 @@ export const ConfigurationContent = () => {
   );
 };
 
-// Every setting here applies to every meeting in the deployment, so the page is
-// for Admin users; everyone else is told so instead of being shown a form whose
-// save would be refused.
-const ConfigurationPage = () => (
-  <AdminOnly feature="the configuration">
-    <ConfigurationContent />
-  </AdminOnly>
-);
+ConfigurationEditor.propTypes = {
+  // The profile shown.
+  profile: PropTypes.string.isRequired,
+  // Every profile, as the workspace lists them: for the names a new profile
+  // cannot take, and which profile is active.
+  profiles: PropTypes.arrayOf(PropTypes.shape({ name: PropTypes.string, active: PropTypes.bool })),
+  // Changed by the workspace to have the editor read the profile again.
+  reloadKey: PropTypes.number,
+  onDirtyChange: PropTypes.func,
+  onOpenHistory: PropTypes.func,
+  // Copy the profile shown to a new one; activate it.
+  onCopy: PropTypes.func,
+  onActivate: PropTypes.func,
+  // Told the name of a profile Save as new profile created, and what to say about it.
+  onProfileCreated: PropTypes.func,
+};
 
-export default ConfigurationPage;
+export default ConfigurationEditor;
