@@ -39,6 +39,7 @@ import { DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME } from '../commo
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
+import { STREAM_AUDIO_CLIENT_TYPE } from '../common/streaming-frame';
 import useTranscriberSocket from '../../hooks/use-transcriber-socket';
 import { CONNECTION_LOST_MESSAGE } from '../stream-audio/transcriber-stream';
 
@@ -179,6 +180,7 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
         remoteSpeakerName: participants || DEFAULT_OTHER_SPEAKER_NAME,
         samplingRate: SOURCE_SAMPLING_RATE,
         callEvent: 'START',
+        clientType: STREAM_AUDIO_CLIENT_TYPE,
       };
 
       setConnectionLost(false);

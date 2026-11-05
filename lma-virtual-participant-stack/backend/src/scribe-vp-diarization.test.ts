@@ -45,7 +45,7 @@ test('it is applied before either engine is chosen', () => {
     // So the Amazon Transcribe fallback is covered too, not just the branch
     // that was taken first.
     const applied = code.search(/setDiarization\(\s*switches\./);
-    const engine = code.indexOf("resolveVpAsrEngine(switches) === 'microvm'");
+    const engine = code.indexOf('resolveVpAsrEngine(switches)');
     assert.ok(applied > -1 && engine > -1, 'both call sites must be present');
     assert.ok(applied < engine);
 });

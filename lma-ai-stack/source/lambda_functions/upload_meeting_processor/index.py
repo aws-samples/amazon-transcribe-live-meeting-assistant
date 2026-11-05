@@ -132,6 +132,11 @@ def _mark_job(call_id: str, status: str, extra: dict | None = None) -> None:
         logger.error("DDB update_item failed for %s: %s", pk, err)
 
 
+def _language_code(job: dict) -> str:
+    """The language the upload's Transcribe job runs in."""
+    return (job.get("LanguageCode") or DEFAULT_LANGUAGE_CODE).strip()
+
+
 def _emit_start_event(job: dict) -> None:
     """Put a ``START`` event on the Call Data Kinesis stream.
 
@@ -153,6 +158,13 @@ def _emit_start_event(job: dict) -> None:
         "SystemPhoneNumber": job.get("ToNumber") or "System",
         "AgentId": owner,
         "CreatedAt": created_at,
+        # How the meeting is captured and transcribed (Call.CaptureSource and the
+        # fields beside it): an Amazon Transcribe batch job over the uploaded
+        # file, whose transcript is all on the REMOTE channel.
+        "CaptureSource": "UPLOAD",
+        "TranscriptionEngine": "TRANSCRIBE",
+        "TranscriptionLanguage": _language_code(job),
+        "SpeakerSeparation": "REMOTE" if job.get("EnableDiarization") else "NONE",
     }
     logger.info("Emitting START to Kinesis: %s", json.dumps(start_event, default=str))
     kinesis_client.put_record(
@@ -182,7 +194,7 @@ def _start_transcription_job(job: dict) -> str:
         settings["ShowSpeakerLabels"] = True
         settings["MaxSpeakerLabels"] = max_speakers
 
-    language_code = (job.get("LanguageCode") or DEFAULT_LANGUAGE_CODE).strip()
+    language_code = _language_code(job)
 
     params: dict[str, Any] = {
         "TranscriptionJobName": call_id,

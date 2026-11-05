@@ -30,7 +30,16 @@ import {
     stopMicrovmAsr,
     shouldFallbackToTranscribe,
     getAsrRuntimeConfig,
+    diarizationSettingsFor,
+    writeCaptureContextEvent,
 } from './calleventdata';
+import {
+    CaptureContext,
+    captureSourceFor,
+    transcriptionContextFor,
+    transcriptionEngineName,
+} from './calleventdata/capture-context';
+import type { AsrEngineName } from './calleventdata/asr-microvm';
 
 import {
     createWavHeader,
@@ -438,6 +447,7 @@ const startTranscription = async (
     const runtime = await getAsrRuntimeConfig(server_);
     if (resolveAsrEngine(socketData.callMetadata, server_, runtime) === 'microvm') {
         if (await startMicrovmAsr(socketData, server_)) {
+            noteTranscriptionEngine(socketData, 'microvm', server_);
             // startTranscribe is the ONLY consumer of audioInputStream, and it is not
             // running on this path — so every frame onBinaryMessage writes would sit
             // in the stream's buffer for the whole meeting. At the 16 kHz stereo this
@@ -459,7 +469,41 @@ const startTranscription = async (
             `[TRANSCRIBING]: [${socketData.callMetadata.callId}] - MicroVM ASR could not start; falling back to Amazon Transcribe.`
         );
     }
+    noteTranscriptionEngine(socketData, 'transcribe', server_);
     void startTranscribe(socketData, server_);
+};
+
+/**
+ * The meeting's transcription fields (capture-context.ts), from its engine and
+ * the settings it started with.
+ */
+const transcriptionContextOf = (socketData: SocketCallData, engine: AsrEngineName) => {
+    const transcription = socketData.sessionSettings?.transcription;
+    return transcriptionContextFor(
+        engine,
+        diarizationSettingsFor(socketData.callMetadata, transcription?.showSpeakerLabel ?? false),
+        transcription
+    );
+};
+
+/**
+ * The engine now transcribing the meeting. When its record names another one --
+ * the MicroVM could not start and Amazon Transcribe took over, or the setting
+ * changed while an opt-in meeting waited for consent -- the record's
+ * transcription fields are written again. In the background: transcription
+ * does not wait on it, and a lost event is logged by writeCallEvent.
+ */
+const noteTranscriptionEngine = (
+    socketData: SocketCallData,
+    engine: AsrEngineName,
+    server_: typeof server
+): void => {
+    if (socketData.recordedTranscriptionEngine === transcriptionEngineName(engine)) {
+        return;
+    }
+    const context = transcriptionContextOf(socketData, engine);
+    socketData.recordedTranscriptionEngine = context.TranscriptionEngine;
+    void writeCaptureContextEvent(socketData.callMetadata, context, server_);
 };
 
 const onTextMessage = async (
@@ -552,8 +596,12 @@ const onTextMessage = async (
             callMetaData.activeSpeaker ?? callMetaData?.fromNumber ?? 'unknown';
 
         // Once per meeting: the engine paths below and every Transcribe
-        // reconnect read these from the call rather than again.
-        const sessionSettings = await getSessionSettings(server.log);
+        // reconnect read these from the call rather than again. The engine
+        // switch is read alongside, for the capture context START records.
+        const [sessionSettings, asrRuntime] = await Promise.all([
+            getSessionSettings(server.log),
+            getAsrRuntimeConfig(server),
+        ]);
         callMetaData.shouldRecordCall = resolveShouldRecordCall(
             callMetaData.shouldRecordCall,
             sessionSettings.recording.recordAudio
@@ -644,7 +692,19 @@ const onTextMessage = async (
             return;
         }
 
-        await writeCallStartEvent(callMetaData, server);
+        // How the meeting is captured and transcribed, stored on its record. The
+        // engine is the one it is expected to start with; noteTranscriptionEngine
+        // writes it again if another one transcribes it. No log here: the engine
+        // is resolved again, with its warnings, when transcription starts.
+        const captureContext: CaptureContext = {
+            CaptureSource: captureSourceFor(callMetaData.clientType),
+            ...transcriptionContextFor(
+                resolveAsrEngine(callMetaData, undefined, asrRuntime),
+                diarizationSettingsFor(callMetaData, sessionSettings.transcription.showSpeakerLabel),
+                sessionSettings.transcription
+            ),
+        };
+        await writeCallStartEvent(callMetaData, server, captureContext);
         // Local files named per session (see SocketCallData.recordingTempPath);
         // the S3 key is the meeting's, from its callId (see finishRecording).
         const sessionFileTag = randomUUID().slice(0, 8);
@@ -689,6 +749,7 @@ const onTextMessage = async (
             // From the VERIFIED token, not the message body — this is what
             // later authorizes START_VIDEO for the same callId.
             ownerSub: getAuthenticatedCaller(request)?.sub,
+            recordedTranscriptionEngine: captureContext.TranscriptionEngine,
         };
         // The consent session sends to connection.ws, which follows the
         // meeting to the connection its client reconnects with.

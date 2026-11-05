@@ -16,6 +16,8 @@ import { applyMuteAndPause, formatTimestamp, MeetingMetadata, MetadataForTab, me
 // frame names only the local one.
 type Call = {
   callEvent: string,
+  // Which client captured the meeting, stored on its record as its capture source.
+  clientType: string,
   localSpeakerName: string,
   callId: string,
   samplingRate: number,
@@ -183,6 +185,7 @@ function IntegrationProvider({ children }: any) {
     setShouldConnect(true);
     const callMetadata = {
       callEvent: 'START',
+      clientType: 'BROWSER_EXTENSION',
       localSpeakerName: userName,
       callId: `${meetingTopic} - ${formatTimestamp(new Date())}`,
       samplingRate: 8000,

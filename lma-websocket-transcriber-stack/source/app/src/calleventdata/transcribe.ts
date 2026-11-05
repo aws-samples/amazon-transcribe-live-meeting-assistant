@@ -22,6 +22,7 @@ import { KinesisClient, PutRecordCommand } from '@aws-sdk/client-kinesis';
 
 import {
     CallStartEvent,
+    CallCaptureContextEvent,
     CallEndEvent,
     CallRecordingEvent,
     CallVideoRecordingEvent,
@@ -35,6 +36,7 @@ import {
 } from './eventtypes';
 
 import { transcriptChannelFor } from './channels';
+import type { CaptureContext, TranscriptionContext } from './capture-context';
 import { DEFAULT_REMOTE_SPEAKER_NAME, DEFAULT_SYSTEM_LABEL } from './speaker-fields';
 
 import {
@@ -140,6 +142,7 @@ export const diarizationSettingsFor = (
 export const writeCallEvent = async (
     callEvent:
         | CallStartEvent
+        | CallCaptureContextEvent
         | CallEndEvent
         | CallRecordingEvent
         | CallVideoRecordingEvent
@@ -179,9 +182,15 @@ export const writeCallEvent = async (
     }
 };
 
+/**
+ * The meeting's START event, which creates its record. `captureContext` is how
+ * the meeting is captured and transcribed (capture-context.ts), stored on the
+ * record with it.
+ */
 export const writeCallStartEvent = async (
     callMetaData: CallMetaData,
-    server: FastifyInstance
+    server: FastifyInstance,
+    captureContext?: CaptureContext
 ): Promise<void> => {
     const callStartEvent: CallStartEvent = {
         EventType: 'START',
@@ -190,11 +199,32 @@ export const writeCallStartEvent = async (
         SystemPhoneNumber: callMetaData.toNumber || DEFAULT_SYSTEM_LABEL,
         AgentId: callMetaData.agentId,
         CreatedAt: new Date().toISOString(),
+        ...captureContext,
         AccessToken: callMetaData.accessToken,
         IdToken: callMetaData.idToken,
         RefreshToken: callMetaData.refreshToken,
     };
     await writeCallEvent(callStartEvent, server);
+};
+
+/**
+ * The meeting record's transcription fields again, for a meeting transcribed by
+ * another engine than the one its START event named.
+ */
+export const writeCaptureContextEvent = async (
+    callMetaData: CallMetaData,
+    context: TranscriptionContext,
+    server: FastifyInstance
+): Promise<void> => {
+    const event: CallCaptureContextEvent = {
+        EventType: 'UPDATE_CAPTURE_CONTEXT',
+        CallId: callMetaData.callId,
+        ...context,
+        AccessToken: callMetaData.accessToken,
+        IdToken: callMetaData.idToken,
+        RefreshToken: callMetaData.refreshToken,
+    };
+    await writeCallEvent(event, server);
 };
 
 export const writeCallEndEvent = async (

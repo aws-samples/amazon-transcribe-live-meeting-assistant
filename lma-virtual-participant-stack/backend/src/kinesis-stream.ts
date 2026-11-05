@@ -5,6 +5,7 @@ import { VoiceLabelNames, buildDiarizedSegments, type TranscribeItem } from './t
 import { agendaStartFields, type VpAgenda } from './meeting-agenda.js';
 import { createLogger } from './logger.js';
 import { MEETING_CHAT_CHANNEL, REMOTE_CHANNEL } from './channels.js';
+import type { AsrEngineName } from './asr-microvm-client.js';
 
 const log = createLogger('kinesis-stream');
 
@@ -38,6 +39,30 @@ export interface VideoKeyframeEvent {
   ChangeScore: number;
 }
 
+/**
+ * How a meeting is transcribed, as stored on its meeting record next to its
+ * capture source (Call.TranscriptionEngine, TranscriptionLanguage and
+ * SpeakerSeparation; see docs/websocket-streaming-api.md#capture-context).
+ */
+export interface TranscriptionContext {
+  TranscriptionEngine: 'TRANSCRIBE' | 'MICROVM_ASR';
+  /** Amazon Transcribe's language setting; absent for the MicroVM, whose model sets it. */
+  TranscriptionLanguage?: string;
+  /** Only the meeting audio (REMOTE) is ever separated; the assistant's voice never is. */
+  SpeakerSeparation: 'REMOTE' | 'NONE';
+}
+
+/** The transcription fields of a VP meeting's record for one engine. */
+export const vpTranscriptionContext = (
+  engine: AsrEngineName,
+  diarize: boolean,
+  languageCode: string,
+): TranscriptionContext => ({
+  TranscriptionEngine: engine === 'microvm' ? 'MICROVM_ASR' : 'TRANSCRIBE',
+  ...(engine === 'transcribe' && languageCode ? { TranscriptionLanguage: languageCode } : {}),
+  SpeakerSeparation: diarize ? 'REMOTE' : 'NONE',
+});
+
 // Local testing mode
 const isLocalTest = process.env.LOCAL_TEST === 'true';
 
@@ -69,6 +94,17 @@ class KinesisStreamManager {
 
   setAgenda(agenda: VpAgenda | null): void {
     this.agenda = agenda;
+  }
+
+  /**
+   * The engine, language and speaker separation the meeting is expected to be
+   * transcribed with, stored on its record by the START event. Null leaves them
+   * off the record.
+   */
+  private transcriptionContext: TranscriptionContext | null = null;
+
+  setTranscriptionContext(context: TranscriptionContext | null): void {
+    this.transcriptionContext = context;
   }
 
   /**
@@ -178,6 +214,8 @@ class KinesisStreamManager {
       // Created with the meeting, so it is there from the first event; nothing
       // is added when the VP has no agenda.
       ...agendaStartFields(this.agenda, details.lmaUser),
+      CaptureSource: 'VIRTUAL_PARTICIPANT',
+      ...(this.transcriptionContext ?? {}),
     };
 
     await this.sendRecord(record);
@@ -220,6 +258,24 @@ class KinesisStreamManager {
     if (!linked) {
         throw new Error(`Failed to link CallId ${callId} to VP ${vpId}`);
     }
+  }
+
+  /**
+   * UPDATE_CAPTURE_CONTEXT: the record's transcription fields again, for a
+   * meeting transcribed by another engine than the one its START named (the
+   * MicroVM could not be used and Amazon Transcribe took over).
+   */
+  async sendTranscriptionContext(context: TranscriptionContext): Promise<void> {
+    this.transcriptionContext = context;
+    const record: any = {
+      EventType: 'UPDATE_CAPTURE_CONTEXT',
+      CallId: this.callId,
+      ...context,
+      AccessToken: process.env.USER_ACCESS_TOKEN || '',
+      IdToken: process.env.USER_ID_TOKEN || '',
+      RefreshToken: process.env.USER_REFRESH_TOKEN || '',
+    };
+    await this.sendRecord(record);
   }
 
   async sendEndMeeting(recordingUrl?: string): Promise<void> {

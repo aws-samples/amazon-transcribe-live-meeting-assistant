@@ -18,6 +18,7 @@ describe('toStreamingFrame', () => {
     });
     expect(frame).toEqual({
       callId: 'Weekly sync - 2026-11-04',
+      clientType: 'STREAM_AUDIO',
       localSpeakerName: 'ana@example.com',
       remoteSpeakerName: 'Other Participant',
       samplingRate: 48000,
@@ -28,5 +29,10 @@ describe('toStreamingFrame', () => {
   it('keeps every other field, and adds no name the form did not hold', () => {
     const frame = toStreamingFrame({ callId: 'c1', callEvent: 'END', diarizeMicChannel: true });
     expect(frame).toEqual({ callId: 'c1', callEvent: 'END', diarizeMicChannel: true });
+  });
+
+  it('names the client on a START frame only', () => {
+    expect(toStreamingFrame({ callId: 'c1', callEvent: 'START' }).clientType).toBe('STREAM_AUDIO');
+    expect(toStreamingFrame({ callId: 'c1', callEvent: 'END' })).not.toHaveProperty('clientType');
   });
 });

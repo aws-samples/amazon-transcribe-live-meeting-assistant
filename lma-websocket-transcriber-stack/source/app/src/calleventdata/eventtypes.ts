@@ -9,6 +9,7 @@ import { WriteStream } from 'fs';
 import type { AsrSessionSet } from './asr-microvm';
 import type { SessionSettings } from './session-settings';
 import type { ConsentSession } from '../consent/session';
+import type { CaptureContext, TranscriptionContext, TranscriptionEngineName } from './capture-context';
 
 export type Uuid = string;             // UUID as defined by RFC#4122
 
@@ -19,6 +20,7 @@ export type EventType =
     | 'ADD_S3_RECORDING_URL'  // optional
     | 'ADD_S3_VIDEO_RECORDING_URL' // optional
     | 'ADD_VIDEO_KEYFRAME' // optional
+    | 'UPDATE_CAPTURE_CONTEXT' // optional
     | 'END'; // required
 
 export type CallEventBase<Type extends EventType = EventType> = {
@@ -28,10 +30,18 @@ export type CallEventBase<Type extends EventType = EventType> = {
     UpdatedAt?: string,
 };
 
-export type CallStartEvent = CallEventBase<'START'> & {
+export type CallStartEvent = CallEventBase<'START'> & Partial<CaptureContext> & {
     CustomerPhoneNumber: string,
     SystemPhoneNumber: string,
     AgentId: string | undefined,
+    AccessToken?: string,
+    IdToken?: string,
+    RefreshToken?: string,
+};
+
+// The transcription fields of the meeting record again, when the engine that
+// transcribes the meeting is not the one its START named (see capture-context.ts).
+export type CallCaptureContextEvent = CallEventBase<'UPDATE_CAPTURE_CONTEXT'> & TranscriptionContext & {
     AccessToken?: string,
     IdToken?: string,
     RefreshToken?: string,
@@ -197,6 +207,12 @@ export type CallMetaData = {
         };
     };
     /**
+     * START only: which client this is -- STREAM_AUDIO, BROWSER_EXTENSION or
+     * DESKTOP_APP -- stored on the meeting record as its capture source. Absent
+     * or unknown is stored as API. See capture-context.ts.
+     */
+    clientType?: string,
+    /**
      * START only: the client's consent step (see consent/rules.ts and
      * docs/meeting-consent.md). Absent from clients without one.
      */
@@ -254,5 +270,10 @@ export type SocketCallData = {
      * write into a file an earlier one is still uploading.
      */
     recordingTempPath?: string,
-    recordingWavPath?: string
+    recordingWavPath?: string,
+    /**
+     * The transcription engine the meeting record names: the one its START event
+     * named, or the last UPDATE_CAPTURE_CONTEXT written for it.
+     */
+    recordedTranscriptionEngine?: TranscriptionEngineName
 };
