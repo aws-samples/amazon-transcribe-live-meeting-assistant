@@ -62,7 +62,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # numeric Chromium version, e.g. '148.0.7778.215.2'." 0.3.31 ignored the
 # variable, which is why the old pin never tripped over it. Verified by docker
 # build; do not rename this back.
-ARG CLOAKBROWSER_PIP_VERSION=0.6.4
+ARG CLOAKBROWSER_PIP_VERSION=0.6.5
 RUN pip install --no-cache-dir "cloakbrowser[geoip]==${CLOAKBROWSER_PIP_VERSION}" \
     && python -m cloakbrowser install \
     && python -m cloakbrowser info
