@@ -74,7 +74,7 @@ const MAX_CLIP_SECONDS = 20;
  *
  * Phonetically varied on purpose: a voiceprint from one short phrase recognises
  * that phrase more than it recognises the person. Mundane on purpose too --
- * nobody should have to say anything about themselves to enrol.
+ * nobody should have to say anything about themselves to enroll.
  */
 const SCRIPT = [
   'The quick brown fox jumps over the lazy dog, and the early bird catches the worm.',
@@ -253,7 +253,7 @@ const VoiceEnrollmentPage = () => {
       setNotice('Your voice is enrolled. Meetings will label you by name from now on.');
       await load();
     } catch (problem) {
-      logger.error('could not enrol', problem);
+      logger.error('could not enroll', problem);
       setError('Could not store your voiceprint. Please try again.');
     } finally {
       setBusy(false);
@@ -453,7 +453,7 @@ const VoiceEnrollmentPage = () => {
                 loading={busy}
                 onClick={submit}
               >
-                Enrol my voice
+                Enroll my voice
               </Button>
 
               <Box variant="small" color="text-body-secondary">
@@ -465,7 +465,7 @@ const VoiceEnrollmentPage = () => {
 
         {status === 'revoked' && (
           <Alert type="info">
-            Your voiceprint was deleted. You can enrol again at any time by agreeing to the terms above.
+            Your voiceprint was deleted. You can enroll again at any time by agreeing to the terms above.
           </Alert>
         )}
       </SpaceBetween>

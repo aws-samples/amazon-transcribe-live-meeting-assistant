@@ -146,7 +146,7 @@ def handler(event, context):  # pylint: disable=unused-argument
             # here would point the reader at the wrong thing entirely.
             LOGGER.warning(
                 "Active enrollments record no agreed terms, so none can be used. "
-                "They predate that field and their owners must enrol again."
+                "They predate that field and their owners must enroll again."
             )
         elif agreed and current not in agreed:
             LOGGER.warning(

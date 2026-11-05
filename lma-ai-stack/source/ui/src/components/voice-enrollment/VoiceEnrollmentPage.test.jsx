@@ -145,10 +145,10 @@ describe('after agreeing, before recording', () => {
     expect(screen.getByText(/Seventeen, forty-two/)).toBeTruthy();
   });
 
-  it('will not enrol without enough speech', async () => {
+  it('will not enroll without enough speech', async () => {
     renderWith(state({ Status: 'pending' }));
-    await waitFor(() => expect(screen.getByText('Enrol my voice')).toBeTruthy());
-    expect(screen.getByText('Enrol my voice').closest('button').disabled).toBe(true);
+    await waitFor(() => expect(screen.getByText('Enroll my voice')).toBeTruthy());
+    expect(screen.getByText('Enroll my voice').closest('button').disabled).toBe(true);
   });
 
   it('says the recordings are not kept', async () => {
@@ -235,7 +235,7 @@ describe('after withdrawing, or after a consent lapses', () => {
   // promise withdrawal is reversible, and the retention pass puts everybody
   // here eventually, so the way back has to be open.
 
-  it('offers the terms again so somebody can enrol a second time', async () => {
+  it('offers the terms again so somebody can enroll a second time', async () => {
     renderWith(state({ Status: 'revoked', DisplayName: 'Sarah Lee' }));
     await waitFor(() => expect(screen.getByText(/recognise your voice/)).toBeTruthy());
     expect(screen.getByRole('checkbox')).toBeTruthy();
@@ -269,7 +269,7 @@ describe('after withdrawing, or after a consent lapses', () => {
   });
 });
 
-describe('an active enrolment', () => {
+describe('an active enrollment', () => {
   it('does not show the terms again', async () => {
     // Somebody who has already agreed and recorded should see their record,
     // not be asked to agree a second time.
@@ -279,7 +279,7 @@ describe('an active enrolment', () => {
   });
 });
 
-describe('having enough speech to enrol', () => {
+describe('having enough speech to enroll', () => {
   // The backend refuses under MIN_SECONDS, so somebody who has read every line
   // and is still short has done what was asked and is being told it is not
   // enough. Reading pace varies more than any fixed script can allow for.

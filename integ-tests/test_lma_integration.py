@@ -362,7 +362,7 @@ def test_vp_live_join(client: LMAClient, request: pytest.FixtureRequest) -> None
 
 @pytest.mark.optional_feature
 def test_voice_enrollment_consent_lifecycle(client: LMAClient) -> None:
-    """Grant consent, enrol a voice, withdraw — and check what was STORED.
+    """Grant consent, enroll a voice, withdraw — and check what was STORED.
 
     The reason this exists as an integration test rather than more unit tests:
     no amount of review can establish that a consent row lands in DynamoDB,

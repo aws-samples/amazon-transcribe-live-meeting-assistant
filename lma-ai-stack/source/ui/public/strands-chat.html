@@ -419,9 +419,8 @@
         // Thinking steps tracking
         const thinkingSteps = new Map();
         
-        // Load button configuration on page load
+        // Filled by loadButtonConfiguration, which runs at the end of this script.
         let buttonConfig = null;
-        loadButtonConfiguration();
 
         // This page is always served from the same origin as the LMA app that
         // frames it, so the postMessage channel is pinned to that origin in both
@@ -1273,5 +1272,9 @@
         messageInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') sendMessage();
         });
+
+        // Last, so every declaration it reaches (PARENT_ORIGIN, isFromParent and
+        // the render helpers) is initialised before the request is posted.
+        loadButtonConfiguration();
     </script>
 </body>

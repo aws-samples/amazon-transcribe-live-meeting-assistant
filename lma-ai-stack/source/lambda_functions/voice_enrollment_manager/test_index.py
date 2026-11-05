@@ -31,7 +31,7 @@ os.environ.setdefault("VOICE_ENROLLMENT_TERMS_VERSION", "1")
 os.environ.setdefault("VOICE_ENROLLMENT_RETENTION_DAYS", "365")
 # Enrolling needs an engine that computes embeddings. These tests stub the
 # embedding call itself, but the handler checks the deployment has one before
-# asking, so the variable has to be present for the enrolment path to run.
+# asking, so the variable has to be present for the enrollment path to run.
 os.environ.setdefault(
     "ASR_LAUNCHER_FUNCTION_ARN", "arn:aws:lambda:us-east-1:123456789012:function:asr-launcher"
 )
@@ -487,7 +487,7 @@ def test_a_lapsed_consent_does_not_permit_storing_a_voiceprint(
 def test_agreeing_again_is_the_way_back_after_a_withdrawal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Refusing the enrolment above must not leave somebody permanently stuck."""
+    """Refusing the enrollment above must not leave somebody permanently stuck."""
     ddb = install(monkeypatch, enrollment=consented(status="revoked"))
     granted = index.handler(event("grantVoiceConsent"), None)
     assert granted["Success"] is True

@@ -163,7 +163,7 @@ it (or shared to it from the Admin account).
   `#/virtual-participant`, `#/configuration/settings`,
   `#/configuration/user-management` and so on (`lma-ai-stack/source/ui/src/routes/constants.js`).
 - **Some side-navigation links open a new tab.** Virtual Participant, Stream Audio,
-  Upload Audio and Enrol My Voice are external links in the navigation
+  Upload Audio and Enroll My Voice are external links in the navigation
   (`components/common/navigation-items.js`), and the recorder follows only the tab
   it attached to. Reach those pages in the recorded tab with the MCP
   `navigate_page` to the hash URL, or attach the recorder (`--target`) to the tab

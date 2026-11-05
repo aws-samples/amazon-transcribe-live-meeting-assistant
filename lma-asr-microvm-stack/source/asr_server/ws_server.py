@@ -491,7 +491,7 @@ class AsrSession:
                     live_turn_cut=config.live_turn_cut,
                     turn_cut_interval_ms=config.turn_cut_interval_ms,
                     max_open_segment_ms=config.max_open_segment_ms,
-                    # Voices a person consented to enrol, so their speech is
+                    # Voices a person consented to enroll, so their speech is
                     # labelled with their name from the first word rather than
                     # spk_0 until something names it.
                     enrolled_voices=tuple(

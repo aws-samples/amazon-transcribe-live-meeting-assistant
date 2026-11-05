@@ -57,7 +57,7 @@ query Terms {
 """
 GRANT = "mutation Grant { grantVoiceConsent { Success Message Status } }"
 ENROL = """
-mutation Enrol($input: EnrolMyVoiceInput!) {
+mutation Enroll($input: EnrolMyVoiceInput!) {
   enrolMyVoice(input: $input) { Success Message Status }
 }
 """

@@ -28,7 +28,7 @@ title: "Voice Enrollment (Speaker Recognition)"
 - [The consent model](#the-consent-model)
 - [What is stored, and where](#what-is-stored-and-where)
 - [The audit trail](#the-audit-trail)
-- [Who can enrol](#who-can-enrol)
+- [Who can enroll](#who-can-enroll)
 - [Enrolling a voice](#enrolling-a-voice)
 - [How a match is used](#how-a-match-is-used)
   - [Which voices a meeting is given](#which-voices-a-meeting-is-given)
@@ -61,7 +61,7 @@ their behalf would make the consent record worthless.
 So consent is **first-party and self-service**. Nobody can enroll anybody else,
 and there is no administrative action that creates a voiceprint:
 
-1. An LMA user opens **Enrol My Voice** in the navigation (or goes straight to
+1. An LMA user opens **Enroll My Voice** in the navigation (or goes straight to
    **`/#/voice-enrollment`**) and is shown the consent terms in full, including
    what is stored, what it is used for, how long it is kept and how to withdraw.
 2. They consent by an explicit affirmative action — a checkbox they must tick
@@ -149,10 +149,10 @@ more. If you are decommissioning a deployment and people have enrolled, delete
 those two tables deliberately after the stack, or ask people to withdraw first,
 which destroys the voiceprints and leaves only the log.
 
-## Who can enrol
+## Who can enroll
 
-Anyone with an account in the deployment can enrol their own voice, and nobody
-can enrol anybody else's. **Enrol My Voice** appears in the navigation for every
+Anyone with an account in the deployment can enroll their own voice, and nobody
+can enroll anybody else's. **Enroll My Voice** appears in the navigation for every
 user when `EnableVoiceEnrollment` is `true`.
 
 There is no administrative enrollment action, and that is a property of the
@@ -160,7 +160,7 @@ design rather than a gap in the UI: a consent somebody else gives on your behalf
 is not consent. An admin can revoke on somebody's behalf — for a person who has
 left — which is recorded with the admin as the actor.
 
-**People without an account in the deployment cannot currently enrol.** The
+**People without an account in the deployment cannot currently enroll.** The
 obvious use for this feature is the participant from another company or the
 contractor in a meeting room, and they are exactly who it does not yet serve,
 because enrolling would mean issuing them an account here. See
@@ -173,11 +173,11 @@ which in practice is about 20–30 seconds across several utterances. The audio 
 streamed to an [ASR MicroVM](microvm-asr.md) session in `embed` mode, which
 returns one embedding per utterance; those are averaged into the stored centroid.
 
-The session is acquired for the enrolment and released as soon as it finishes,
+The session is acquired for the enrollment and released as soon as it finishes,
 including when it fails. It is the same engine and the same short-lived MicroVM
 a meeting uses, so **enrolling requires `EnableMicrovmAsr=true`**: the embedding
 model lives in that image and Amazon Transcribe exposes no speaker embedding. In
-a deployment with enrolment on but that engine absent, the portal says so rather
+a deployment with enrollment on but that engine absent, the portal says so rather
 than telling somebody their recordings were unusable.
 
 **The sample audio is not kept.** It is held in memory for the length of the
@@ -226,7 +226,7 @@ not in produces no label for them.
 Where more than 32 enrollments are permitted, the most recently enrolled are
 sent; the rest of the meeting's voices are named the way they would be without
 enrollment. The bound exists so session setup stays quick, not as a limit on how
-many people may enrol.
+many people may enroll.
 
 If the lookup fails or is slow, the meeting starts with voice ids instead. A
 transcript matters more than a label, so nothing about this step can stop a
@@ -269,7 +269,7 @@ organisation that wants a shorter cycle can set one.
   voiceprint.
 - **No cross-deployment sharing.** A centroid stays in the account and table it
   was created in.
-- **People outside the deployment cannot enrol yet.** Enrolling requires an
+- **People outside the deployment cannot enroll yet.** Enrolling requires an
   account here, so the external participant and the contractor in a meeting
   room — the people this feature is most useful for — are not served by it
   today. Inviting them would mean issuing them credentials to this deployment,
@@ -284,14 +284,14 @@ organisation that wants a shorter cycle can set one.
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `EnableVoiceEnrollment` | `false` | Creates the tables, the portal and the matching step, and adds **Enrol My Voice** to the navigation. While `false`, none of it exists. |
+| `EnableVoiceEnrollment` | `false` | Creates the tables, the portal and the matching step, and adds **Enroll My Voice** to the navigation. While `false`, none of it exists. |
 | `VoiceEnrollmentRetentionDays` | `365` | How long a consent stands before it must be renewed. |
 | `VoiceEnrollmentTermsVersion` | `1` | Bump to require everybody to re-consent to new terms. |
 
 Both enrolling and matching need the on-demand
 [ASR MicroVM engine](microvm-asr.md) (`EnableMicrovmAsr=true`), because that is
 the engine that computes speaker embeddings — one to build a voiceprint, the
-other to compare against it. Amazon Transcribe exposes none, so with enrolment
+other to compare against it. Amazon Transcribe exposes none, so with enrollment
 on and that engine off the tables, the portal and the consent log all exist and
 work, and the step that would create a voiceprint reports that the engine is
 missing.

@@ -265,7 +265,7 @@ OTHER_FIELDS = [
     ("Mutation", "createVncEdgeToken"),
     # A user acting on their own account: their voice, their credentials, their
     # browser profile, their API keys. First-party by design -- nobody may
-    # consent, enrol or store credentials on another person's behalf -- so a
+    # consent, enroll or store credentials on another person's behalf -- so a
     # group argument would be the wrong control here.
     ("Mutation", "grantVoiceConsent"),
     ("Mutation", "enrolMyVoice"),

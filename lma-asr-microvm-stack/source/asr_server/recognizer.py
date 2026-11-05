@@ -178,7 +178,7 @@ class SessionConfig:
     turn_cut_interval_ms: int | None = None
     max_open_segment_ms: int | None = None
     diarize: bool | None = None
-    # Voices a person consented to enrol, to be recognised by name from the first
+    # Voices a person consented to enroll, to be recognised by name from the first
     # word. Per-session for the obvious reason: who is in the meeting is a
     # property of the meeting, not of the image.
     enrolled_voices: tuple[EnrolledVoiceSeed, ...] = ()
