@@ -33,8 +33,8 @@ counted (see [Camera frames](#camera-frames)).
   it. **Play recording from here** opens the **Transcript** tab and plays the
   recording from the frame selected, and **Open full size** opens the picture
   in a new tab.
-- **A slide named in the summary** is a link on the **Overview** tab; following
-  it opens this tab with that frame selected.
+- **A slide named in the summary** is a thumbnail on the **Summary** tab;
+  selecting it opens this tab with that frame selected.
 - **During the meeting**, new frames are added to the end of the strip as they
   are taken, and the strip follows them unless it has been scrolled back.
 - **Long meetings** load a hundred frames at a time; the next hundred load as
@@ -162,10 +162,11 @@ How it is built:
   the shortest time are left out), with each frame's text cut at 1,500
   characters and its speech at 3,000 (the fetch-transcript function sends no
   more than that).
-- The meeting page's **Overview** tab shows each picture reference as a link
-  that opens the frame on the **Screen share** tab (and as its alt text when
-  the meeting has no frames left), so that the summary of a long presentation
-  is not a column of slides. The embeddable summary panel shows each picture
+- The meeting page's **Summary** tab shows each picture reference as the
+  frame's thumbnail, inside a section that starts closed, so the summary of a
+  long presentation is not a column of slides until it is opened; the frames
+  are read once the section is opened, and selecting one opens it on the
+  **Screen share** tab. The embeddable summary panel shows each picture
   reference as the frame's thumbnail, read through `getVideoKeyframes` for that
   meeting with the same access check as the strip, in one request for every
   frame the summary names; selecting it opens the full picture. A picture whose
@@ -212,7 +213,7 @@ summary, under **Summary**.
 The summary has a **CHAPTERS** section: one line per main topic of the
 meeting, `- [MM:SS] Title`, at the time the topic was first discussed or a new
 slide started it. The meeting page reads that section and shows a **Chapters**
-list beside the summary on the **Overview** tab, in place of the section itself.
+list beside the summary on the **Summary** tab, in place of the section itself.
 Selecting a chapter opens the **Transcript** tab at its time and, after the
 meeting, plays the recording from there. The chapters are also marks on the
 seek bar of the page's [player](web-ui-guide.md#the-recording-player). In the **Screen share** strip, the frame that went up within

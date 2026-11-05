@@ -48,6 +48,10 @@ import {
   parseAttendeeList,
   parseSpeakerIdentities,
   serializeSpeakerIdentities,
+  speakerRowLabel,
+  withMerge,
+  withoutMerges,
+  withSpeakerName,
 } from '../common/speaker-identities';
 
 const MERGE_PLACEHOLDER = { label: 'Same person as…', value: '' };
@@ -97,10 +101,7 @@ const SpeakerRow = ({
       // Same channel only: the two channels are separate audio sources, and
       // folding the local microphone into a remote voice is never meant.
       .filter((other) => other.key !== row.key && other.channel === row.channel)
-      .map((other) => ({
-        label: other.name || `${other.defaultName} ${other.voiceId}`.trim(),
-        value: other.key,
-      })),
+      .map((other) => ({ label: speakerRowLabel(other), value: other.key })),
   ];
 
   const nameField = candidates.length ? (
@@ -299,32 +300,13 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, onIdenti
     }
   };
 
-  const handleRename = (row, name) => {
-    const nextIdentities = { ...identities.identities };
-    if (name) {
-      nextIdentities[row.key] = {
-        ...(nextIdentities[row.key] || {}),
-        name,
-        status: 'confirmed',
-        source: 'manual',
-        updatedAt: new Date().toISOString(),
-      };
-    } else {
-      // Clearing the field removes the mapping, so the transcript falls back to
-      // the voice id rather than showing an empty speaker.
-      delete nextIdentities[row.key];
-    }
-    return write({ ...identities, identities: nextIdentities });
-  };
+  // Clearing the field removes the mapping, so the transcript falls back to
+  // the voice id rather than showing an empty speaker.
+  const handleRename = (row, name) => write(withSpeakerName(identities, row.key, name));
 
-  const handleMerge = (row, targetKey) =>
-    write({ ...identities, merges: { ...identities.merges, [row.key]: targetKey } });
+  const handleMerge = (row, targetKey) => write(withMerge(identities, row.key, targetKey));
 
-  const handleUnmergeAll = (row) => {
-    const nextMerges = { ...identities.merges };
-    row.mergedKeys.forEach((key) => delete nextMerges[key]);
-    return write({ ...identities, merges: nextMerges });
-  };
+  const handleUnmergeAll = (row) => write(withoutMerges(identities, row.mergedKeys));
 
   /**
    * Accept a suggested name as the user's own.

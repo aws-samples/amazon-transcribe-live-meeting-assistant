@@ -98,6 +98,60 @@ export const getMarkdownSummaryWithout = (callSummaryText, omit = []) => {
   return getMarkdownSummary(JSON.stringify(Object.fromEntries(kept)));
 };
 
+// A line that opens a section of a summary written as one Markdown document: a
+// Markdown heading, or a bold line in capitals (`**ACTIONS**`), which is how the
+// editor seeds the sections of a generated summary. A bold line with lower-case
+// letters (`**[00:30] Budget**`) is a sub-heading within a section, not a section.
+const SECTION_HEADING = /^\s*(?:#{1,3}\s+(.+?)\s*#*|\*\*([^*\n]+)\*\*\s*:?)\s*$/;
+
+const headingOf = (line) => {
+  const match = line.match(SECTION_HEADING);
+  if (!match) return null;
+  if (match[1]) return match[1].trim();
+  const bold = match[2].trim();
+  return /[A-Z]/.test(bold) && !/[a-z]/.test(bold) ? bold : null;
+};
+
+/** A summary written as one Markdown document, as its sections, split at its headings. */
+const markdownSections = (text) => {
+  // The first entry holds what comes before the first heading, and has no title.
+  const sections = [{ title: null, lines: [] }];
+  text.split(/\r?\n/).forEach((line) => {
+    const heading = headingOf(line);
+    if (heading === null) sections[sections.length - 1].lines.push(line);
+    else sections.push({ title: heading, lines: [] });
+  });
+  const [preamble, ...headed] = sections.map(({ title, lines }) => ({ title, markdown: lines.join('\n').trim() }));
+  // Text before the first heading, or a document with no heading at all, is a section called Summary.
+  return preamble.markdown || !headed.length ? [{ ...preamble, title: 'Summary' }, ...headed] : headed;
+};
+
+/**
+ * The summary as its sections, in order: [{ title, markdown }], without the
+ * sections named in `omit` (compared as section names are: case and spacing
+ * aside). A summary produced from several prompt templates is stored as a JSON
+ * object, a section per template; one written by hand is a single Markdown
+ * document, split at its headings (one section, "Summary", when it has none).
+ * The sections are returned whole when `omit` would leave none. Empty for a
+ * meeting with no summary.
+ */
+export const summarySections = (callSummaryText, omit = []) => {
+  if (!callSummaryText || typeof callSummaryText !== 'string') return [];
+  let parsed = null;
+  try {
+    parsed = JSON.parse(callSummaryText);
+  } catch (e) {
+    parsed = null;
+  }
+  const all =
+    parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? Object.entries(parsed).map(([title, value]) => ({ title, markdown: String(value ?? '') }))
+      : markdownSections(callSummaryText);
+  const left = new Set(omit.map(sectionName));
+  const kept = all.filter((section) => !left.has(sectionName(section.title)));
+  return kept.length ? kept : all;
+};
+
 /**
  * The summary as a percent-encoded `mailto:` body.
  *

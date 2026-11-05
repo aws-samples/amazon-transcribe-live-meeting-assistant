@@ -115,7 +115,7 @@ Each meeting in the list shows its current status (in progress, completed, etc.)
 - **Transcript** (the tab it opens on) — the live or completed transcript with speaker labels and timestamps.
 
 The meeting assistant's chat is a panel on the right, on every tab: **Assistant** in the header opens and closes it. It starts open on a wide enough page until you close it, and the first time you open a live meeting.
-- **Overview** — the summary, with its action items, the chapters and the agenda.
+- **Summary** — the summary, a section at a time, with its action items, the chapters and the agenda.
 - **Screen share** — the shared screen's slides, for a meeting whose screen was captured.
 - **Details** — speaker naming, consent, the cost breakdown, the recordings and the meeting's attributes.
 

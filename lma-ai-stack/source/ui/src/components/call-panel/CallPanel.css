@@ -245,3 +245,39 @@ mark.transcript-search-match {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* The Summary tab: the line of links to its sections, and a rule between sections. */
+.summary-toc {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e9ebed;
+}
+
+.summary-toc-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.summary-section + .summary-section {
+  padding-top: 4px;
+  border-top: 1px solid #e9ebed;
+}
+
+.awsui-dark-mode .summary-toc,
+.awsui-dark-mode .summary-section + .summary-section {
+  border-color: #414d5c;
+}
+
+/* A speaker's chip on the Transcript tab, with its edit button beside it. */
+.transcript-speaker-chip {
+  display: inline-flex;
+  align-items: center;
+}

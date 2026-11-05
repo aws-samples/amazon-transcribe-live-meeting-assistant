@@ -204,7 +204,7 @@ describe('SummaryMarkdown', () => {
   });
 });
 
-describe("SummaryMarkdown on the meeting page's Overview tab", () => {
+describe('SummaryMarkdown shown as links or as text', () => {
   it('shows a slide as a link to the Screen share tab, reading no frame', () => {
     const loadFrames = framesLoader();
     const loadFrame = vi.fn();

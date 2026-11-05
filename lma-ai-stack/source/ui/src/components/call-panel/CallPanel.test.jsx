@@ -7,8 +7,8 @@
 /**
  * The meeting page as a whole: the header above the tabs, which tab is shown
  * (and that the choice lives in the URL), the Screen share tab appearing once
- * the meeting has key frames, and the Overview's summary showing the slides as
- * links and the chapters once.
+ * the meeting has key frames, and the Summary tab showing the summary a section
+ * at a time, the slides as thumbnails and the chapters once.
  *
  * Everything that talks to AWS is replaced: the GraphQL client answers the
  * handful of queries the page makes, and the contexts supply a signed-in user.
@@ -19,6 +19,8 @@ import { act, render, screen, fireEvent, waitFor, within } from '@testing-librar
 import { MemoryRouter, useLocation } from 'react-router-dom';
 
 const responses = vi.hoisted(() => ({ frames: [], cost: null, vps: [], vncToggle: null }));
+// The calls context, which a test can give the writers the page offers controls for.
+const callsContext = vi.hoisted(() => ({ value: { calls: [] } }));
 // The options the page gives the chat bridge, so a test can finish an answer.
 const bridge = vi.hoisted(() => ({ options: null }));
 
@@ -46,7 +48,7 @@ vi.mock('../../contexts/app', () => ({
   default: () => ({ currentCredentials: {}, user: { username: 'alice' }, setErrorMessage: vi.fn() }),
 }));
 vi.mock('../../contexts/settings', () => ({ default: () => ({ settings: {} }) }));
-vi.mock('../../contexts/calls', () => ({ default: () => ({ calls: [] }) }));
+vi.mock('../../contexts/calls', () => ({ default: () => callsContext.value }));
 vi.mock('../../hooks/use-user-groups', () => ({ default: () => ({ isAdmin: false, isLoading: false }) }));
 vi.mock('../../hooks/use-meeting-consent', () => ({ default: () => ({ consent: null }) }));
 vi.mock('../../hooks/use-strands-chat-bridge', () => ({
@@ -157,6 +159,9 @@ beforeEach(() => {
   responses.frames = [];
   responses.cost = null;
   responses.vps = [];
+  callsContext.value = { calls: [] };
+  // Which summary sections a viewer opened is remembered between visits.
+  window.localStorage.removeItem('lma-summary-sections');
 });
 
 describe('the meeting header', () => {
@@ -226,9 +231,9 @@ describe('the tabs', () => {
 
   it('keeps the selected tab in the URL', () => {
     renderPage({ url: '/calls/m' });
-    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
-    expect(selectedTab().textContent).toBe('Overview');
-    expect(screen.getByTestId('location').textContent).toBe('/calls/m?tab=overview');
+    fireEvent.click(screen.getByRole('tab', { name: 'Summary' }));
+    expect(selectedTab().textContent).toBe('Summary');
+    expect(screen.getByTestId('location').textContent).toBe('/calls/m?tab=summary');
   });
 
   it("leaves the host page's URL alone where the panel is embedded", () => {
@@ -253,27 +258,66 @@ describe('the tabs', () => {
   });
 });
 
-describe('the Overview tab', () => {
+describe('the Summary tab', () => {
+  const openSection = (title) => fireEvent.click(screen.getByRole('button', { name: title, expanded: false }));
+
+  it('shows the SUMMARY section open and the others closed, with links to each', () => {
+    renderPage({ url: '/calls/m?tab=summary' });
+    expect(screen.getByText('Sarah walked through the plan.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'SUMMARY', expanded: true })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'SCREEN SHARE SUMMARY', expanded: false })).toBeTruthy();
+    expect(screen.queryByText('Sarah covered Q3.')).toBeNull();
+    const toc = screen.getByRole('navigation', { name: 'Summary sections' });
+    fireEvent.click(within(toc).getByRole('button', { name: 'SCREEN SHARE SUMMARY' }));
+    expect(screen.getByText('Sarah covered Q3.')).toBeTruthy();
+  });
+
+  it('opens and closes every section at once, and remembers the choice', () => {
+    const { unmount } = renderPage({ url: '/calls/m?tab=summary' });
+    fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
+    expect(screen.getByText('Sarah covered Q3.')).toBeTruthy();
+    unmount();
+    renderPage({ url: '/calls/m?tab=summary' });
+    expect(screen.getByText('Sarah covered Q3.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }));
+    expect(screen.queryByText('Sarah walked through the plan.')).toBeNull();
+  });
+
   it.each(['SCREEN SHARE SUMMARY', 'SLIDES PRESENTED'])(
-    'shows the frames its %s section names as links, not as pictures, and opens one on Screen share',
+    'shows the frames its %s section names as thumbnails once opened, and opens one on Screen share',
     async (title) => {
       responses.frames = [frame(30000)];
-      renderPage({ item: { ...ITEM, callSummaryText: summaryWith(title) }, url: '/calls/m?tab=overview' });
+      renderPage({ item: { ...ITEM, callSummaryText: summaryWith(title) }, url: '/calls/m?tab=summary' });
       await screen.findByRole('tab', { name: 'Screen share (1)' });
-      const overview = screen.getByText('Sarah walked through the plan.').closest('[role="tabpanel"]');
-      expect(within(overview).queryAllByRole('img')).toHaveLength(0);
-      fireEvent.click(within(overview).getByRole('button', { name: /Slide at 00:30/ }));
+      const summary = screen.getByText('Sarah walked through the plan.').closest('[role="tabpanel"]');
+      // Closed, the section reads no frame and shows none.
+      expect(within(summary).queryAllByRole('img')).toHaveLength(0);
+      openSection(title);
+      const thumbnail = await within(summary).findByRole('img', { name: 'Slide at 00:30' });
+      expect(thumbnail.getAttribute('src')).toBe('https://signed.example/30000_thumb.jpg');
+      fireEvent.click(thumbnail);
       expect(selectedTab().textContent).toBe('Screen share (1)');
       expect(await screen.findByAltText('Shared screen at 0:30, full size')).toBeTruthy();
     },
   );
 
   it('lists the chapters once, as the list that moves the transcript', () => {
-    renderPage({ url: '/calls/m?tab=overview' });
+    renderPage({ url: '/calls/m?tab=summary' });
     expect(screen.getAllByText('Budget review')).toHaveLength(1);
     expect(screen.queryByText('CHAPTERS')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Budget review' }));
     expect(selectedTab().textContent).toBe('Transcript');
+  });
+
+  it('opens for a link saved when the tab was called Overview', () => {
+    renderPage({ url: '/calls/m?tab=overview' });
+    expect(selectedTab().textContent).toBe('Summary');
+  });
+
+  it('has no download of its own: the downloads are in the header', () => {
+    renderPage({ url: '/calls/m?tab=summary' });
+    expect(screen.queryByRole('button', { name: 'Download the summary' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Download' })).toBeTruthy();
   });
 });
 
@@ -639,8 +683,8 @@ describe('the player kept in step with the transcript', () => {
     ]);
   });
 
-  it('opens the Transcript tab and plays from a chapter selected on the Overview', async () => {
-    await openRecording({ url: '/calls/m?tab=overview' });
+  it('opens the Transcript tab and plays from a chapter selected on the Summary tab', async () => {
+    await openRecording({ url: '/calls/m?tab=summary' });
     fireEvent.click(screen.getByRole('button', { name: 'Budget review' }));
     expect(selectedTab().textContent).toBe('Transcript');
     expect(media().currentTime).toBe(312);
@@ -661,9 +705,10 @@ describe('the player kept in step with the transcript', () => {
 
   it('moves the player to a slide named in the summary', async () => {
     responses.frames = [frame(30000)];
-    await openRecording({ url: '/calls/m?tab=overview' });
+    await openRecording({ url: '/calls/m?tab=summary' });
     await screen.findByRole('tab', { name: 'Screen share (1)' });
-    fireEvent.click(screen.getByRole('button', { name: /Slide at 00:30/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'SCREEN SHARE SUMMARY', expanded: false }));
+    fireEvent.click(await screen.findByRole('img', { name: 'Slide at 00:30' }));
     expect(selectedTab().textContent).toBe('Screen share (1)');
     expect(media().currentTime).toBe(30);
     expect(media().paused).toBe(true);
@@ -672,7 +717,7 @@ describe('the player kept in step with the transcript', () => {
   it('pauses when another tab is opened', async () => {
     await openRecording();
     fireEvent.click(screen.getByRole('button', { name: 'Play from 00:20.0' }));
-    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Summary' }));
     expect(media().paused).toBe(true);
   });
 
@@ -837,7 +882,7 @@ describe('the meeting assistant panel', () => {
     fireEvent.click(assistantButton());
     const chat = chatFrame();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Summary' }));
     expect(chatFrame()).toBe(chat);
     expect(panel().hidden).toBe(false);
 
@@ -897,8 +942,8 @@ describe('the meeting assistant panel', () => {
     chooseClosed();
     renderPage();
     fireEvent.click(assistantButton());
-    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
-    expect(selectedTab().textContent).toBe('Overview');
+    fireEvent.click(screen.getByRole('tab', { name: 'Summary' }));
+    expect(selectedTab().textContent).toBe('Summary');
     fromFrame({ type: 'STRANDS_SHOW_IN_TRANSCRIPT', frameId: '0000030000-ab12cd' });
     expect(selectedTab().textContent).toBe('Transcript');
     // Beside the tabs, the panel stays open.
@@ -911,7 +956,7 @@ describe('the meeting assistant panel', () => {
     fireEvent.click(assistantButton());
     const body = document.querySelector('.meeting-body');
     expect(body.classList.contains('meeting-body-assistant-overlay')).toBe(true);
-    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Summary' }));
     fromFrame({ type: 'STRANDS_SHOW_IN_TRANSCRIPT', frameId: '0000030000-ab12cd' });
     expect(selectedTab().textContent).toBe('Transcript');
     expect(panel().hidden).toBe(true);
@@ -977,7 +1022,7 @@ describe('the meeting assistant panel', () => {
     responses.vps = [{ id: 'vp-1', CallId: ITEM.callId, meetingPlatform: 'ZOOM', vncReady: true }];
     renderPage({ item: LIVE });
     expect((await screen.findAllByText('Zoom')).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Summary' }));
     expect(screen.queryByTestId('vnc')).toBeNull();
     act(() => responses.vncToggle.next({ data: { onVNCPreviewToggle: { Success: true, Action: 'open' } } }));
     expect(selectedTab().textContent).toBe('Transcript');
@@ -997,5 +1042,82 @@ describe('the meeting assistant panel', () => {
     renderPage();
     expect(assistantButton().getAttribute('aria-pressed')).toBe('false');
     expect(window.localStorage.getItem('lma-meeting-assistant-open:alice')).toBe('false');
+  });
+});
+
+describe('the Download menu', () => {
+  const openMenu = () => fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+  const menuItems = () => screen.getAllByRole('menuitem').map((item) => item.textContent);
+
+  it('offers the summary and the transcript in the same formats, and a copy of each as Markdown', () => {
+    renderPage();
+    openMenu();
+    expect(menuItems()).toEqual([
+      'Markdown (.md)',
+      'Word (.docx)',
+      'Plain text (.txt)',
+      'Copy to clipboard (Markdown)',
+      'Email summary (beta)',
+      'Markdown (.md)',
+      'Word (.docx)',
+      'Plain text (.txt)',
+      'Excel (.xlsx)',
+      'Copy to clipboard (Markdown)',
+    ]);
+  });
+
+  it('copies the summary as Markdown, and says so', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    renderPage();
+    openMenu();
+    fireEvent.click(screen.getAllByRole('menuitem', { name: /Copy to clipboard/ })[0]);
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText.mock.calls[0][0]).toMatch(/^# Weekly sync\n/);
+    expect(writeText.mock.calls[0][0]).toContain('## SUMMARY\n\nSarah walked through the plan.');
+    expect(await screen.findByText('Summary copied as Markdown')).toBeTruthy();
+  });
+});
+
+describe('naming a speaker from the Transcript tab', () => {
+  const line = (id, channel, speaker, transcript, startTime) => ({
+    segmentId: id,
+    createdAt: `2026-11-03T14:05:${String(startTime).padStart(2, '0')}.000Z`,
+    channel,
+    speaker,
+    transcript,
+    startTime,
+    endTime: startTime + 3,
+    isPartial: false,
+  });
+  const LINES = {
+    [ITEM.callId]: {
+      REMOTE: { segments: [line('s1', 'REMOTE', 'Sarah Lee', 'Welcome.', 0)] },
+      LOCAL: { segments: [line('s2', 'LOCAL', 'Bob Chen', 'Thanks, Sarah.', 10)] },
+    },
+  };
+
+  it("renames a voice from its chip's speaker modal, through the same write as the Speakers panel", async () => {
+    const sendUpdateSpeakerIdentities = vi.fn().mockResolvedValue(true);
+    callsContext.value = { calls: [], sendUpdateSpeakerIdentities };
+    renderPage({ transcript: LINES });
+    const filter = screen.getByRole('group', { name: 'Show speakers' });
+    fireEvent.click(within(filter).getByRole('button', { name: 'Name or combine Bob Chen' }));
+    const dialog = screen.getByRole('dialog', { name: 'Speaker: Bob Chen' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), { target: { value: 'Robert Chen' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(sendUpdateSpeakerIdentities).toHaveBeenCalledTimes(1));
+    const [callId, serialized] = sendUpdateSpeakerIdentities.mock.calls[0];
+    expect(callId).toBe(ITEM.callId);
+    expect(JSON.parse(serialized).identities['LOCAL#Bob Chen']).toMatchObject({
+      name: 'Robert Chen',
+      source: 'manual',
+    });
+  });
+
+  it('offers no speaker modal to a user who may not name speakers', () => {
+    callsContext.value = { calls: [], sendUpdateSpeakerIdentities: vi.fn() };
+    renderPage({ transcript: LINES, item: { ...ITEM, owner: 'someone-else' } });
+    expect(screen.queryByRole('button', { name: /^Name or combine/ })).toBeNull();
   });
 });

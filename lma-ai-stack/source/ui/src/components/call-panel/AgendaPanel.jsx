@@ -12,7 +12,7 @@
  * replaced only by somebody saving a new one or pressing Derive agenda. The
  * automatic derivation pass writes only while a meeting has no agenda.
  *
- * On the meeting page's Overview tab a meeting with no agenda gets one line
+ * On the meeting page's Summary tab a meeting with no agenda gets one line
  * (`compactWhenEmpty`) -- "No agenda", with Add agenda and Derive agenda --
  * rather than a whole panel saying so; the panel opens once there is something
  * to edit or show. The summary's AGENDA COVERAGE section (`coverage`) is shown

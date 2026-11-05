@@ -99,8 +99,10 @@ Click a VP from the list to open its detail page. The page shows:
 
 Clicking a meeting from the list opens the meeting detail page: a compact
 header with what the meeting was, and four tabs under it. The selected tab is
-part of the page's address (`#/calls/<Meeting ID>?tab=overview`), so a link or
-a reload opens the same tab; a link without one opens the **Transcript** tab.
+part of the page's address (`#/calls/<Meeting ID>?tab=summary`), so a link or
+a reload opens the same tab; a link without one opens the **Transcript** tab. A
+link saved when the **Summary** tab was called **Overview** (`?tab=overview`)
+still opens it.
 Switching tabs keeps each tab as it was, including a summary or agenda being
 edited and the transcript's translation and scroll position. The meeting
 assistant is a panel beside the tabs, on every tab; see
@@ -127,9 +129,13 @@ assistant is a panel beside the tabs, on every tab; see
 - **Assistant** — opens and closes the [meeting assistant panel](#meeting-assistant-panel),
   when the deployment has the meeting assistant enabled. A dot on the button
   means an answer finished while the panel was closed.
-- **Share**, **Download** and the **⋮** menu — **Download** offers the summary
-  (copy, text file, Word, email) and, once the meeting has ended, the transcript
-  (Excel, text, Word); see [Transcript Downloads](#transcript-downloads). **Delete
+- **Share**, **Download** and the **⋮** menu — **Download** is the one place a
+  meeting is taken away from. It offers the summary and, once the meeting has
+  ended, the transcript, each as **Markdown (.md)**, **Word (.docx)** and
+  **Plain text (.txt)**, the transcript also as **Excel (.xlsx)**, and each can
+  be copied to the clipboard as Markdown (**Copy to clipboard (Markdown)**; the
+  header confirms the copy). The summary can also be sent with **Email summary
+  (beta)**. See [Transcript Downloads](#transcript-downloads). **Delete
   meeting** is in the **⋮** menu. Share and Delete open the same dialogs as on the
   meeting list.
 
@@ -149,13 +155,24 @@ when the two differ, the **Details** tab gives the stored value as well. Both ar
 measured on the transcript's clock, from when transcription started, so a
 recording that began before transcription can be longer than either.
 
-### Overview tab
+### Summary tab
 
 - **Meeting Summary** — the summary from the configured prompt templates, with
-  **Regenerate**, **Edit** and the summary's own download menu. The key
-  frames named in its **SCREEN SHARE SUMMARY** section (**SLIDES PRESENTED** in
-  a summary written by a 0.4.0 pre-release) are links rather than pictures:
-  selecting one opens the **Screen share** tab at that frame. The **CHAPTERS**
+  **Regenerate** and **Edit**; its downloads are in the header's **Download**
+  menu. Each section of the summary (**SUMMARY**, **DETAILS**, **ACTIONS**,
+  **SCREEN SHARE SUMMARY** and so on, one per prompt template) opens and closes
+  on its own. A line of links above them opens a section and moves to it, with
+  **Expand all** and **Collapse all** beside it. **SUMMARY** starts open and the
+  others closed; the sections you open or close are remembered in your browser,
+  by section name, for every meeting. A summary edited by hand is split into
+  sections at its headings (a Markdown heading, or a bold line in capitals such
+  as `**ACTIONS**`).
+- **Pictures of the shared screen** — the key frames named in the **SCREEN SHARE
+  SUMMARY** section (**SLIDES PRESENTED** in a summary written by a 0.4.0
+  pre-release) are shown as their thumbnails, read only once the section is
+  opened. Selecting one opens the **Screen share** tab at that frame (or, for a
+  meeting whose frames have not loaded on the strip, the full-size picture); a
+  frame that can no longer be read shows as its caption. The **CHAPTERS**
   section is shown once, as the **Chapters** list beside the summary, and the
   **AGENDA COVERAGE** section under the agenda it describes. Downloads and copies
   of the summary still include every section. See
@@ -318,6 +335,15 @@ pass over chat messages, since they were typed rather than heard.
   in the transcript. Choosing speakers shows only their segments (and hides the
   assistant's answers); choosing **All** shows everything again. The search
   works within the speakers chosen.
+- **Naming a speaker from its chip** — for those who can name the meeting's
+  speakers (its owner, an Admin, and anyone it is shared with), the pencil
+  beside a chip opens that speaker's dialog: give the voice a name (which
+  renames every segment it spoke, earlier ones included), say it is the **Same
+  person as** another voice on its channel, or **Separate** a voice combined
+  into it. When two voices are shown under one name, it can combine them into
+  one person. It writes the same names as the **Speakers** panel on the
+  **Details** tab, which remains the place to paste an attendee list, confirm
+  or reject a suggested name, or lock a name.
 - **Chat** — shown when the transcript holds meeting chat messages. On by
   default; turning it off hides every chat message, and turning it on shows
   them again. It works on its own, whichever speakers are chosen: with a
@@ -414,9 +440,16 @@ LMA provides sentiment analysis at multiple levels:
 Export meeting transcripts in multiple formats, from **Download** in the meeting
 page's header once the meeting has ended:
 
-- **XLSX** — Spreadsheet format with structured columns
-- **DOCX** — Word document format
-- **TXT** — Plain text format
+- **Markdown (.md)** — a paragraph per segment, `**Speaker** [time]: text`, under
+  the meeting's name, ID, date and duration
+- **Word (.docx)** — Word document format
+- **Plain text (.txt)** — Plain text format
+- **Excel (.xlsx)** — Spreadsheet format with structured columns
+- **Copy to clipboard (Markdown)** — the Markdown document, copied
+
+The summary is offered in the same formats (Excel aside): Markdown and Word keep
+its sections as headings, with each picture of the shared screen written as its
+caption, and the consent record at the end when the meeting has one.
 
 All export formats include speaker attribution and timestamps for each segment,
 and every channel the meeting has. A meeting chat message is under its sender

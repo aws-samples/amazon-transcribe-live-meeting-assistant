@@ -11,13 +11,11 @@ import {
   Badge,
   Box,
   Button,
-  ButtonDropdown,
   ColumnLayout,
   Container,
   FormField,
   Grid,
   Header,
-  Icon,
   Input,
   Link,
   Modal,
@@ -35,7 +33,7 @@ import ReactMarkdown from 'react-markdown';
 import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate';
 import { StandardRetryStrategy } from '@aws-sdk/middleware-retry';
 import markdownRehypePlugins from '../common/markdown-plugins';
-import { getMarkdownSummary, getMarkdownSummaryWithout, getSummarySection } from '../common/summary';
+import { getMarkdownSummary, getSummarySection, summarySections } from '../common/summary';
 import {
   SOURCE_MANUAL,
   STATUS_IDLE,
@@ -53,6 +51,7 @@ import {
   serializeSpeakerIdentities,
 } from '../common/speaker-identities';
 import SpeakerIdentitiesPanel from './SpeakerIdentitiesPanel';
+import SpeakerAssignmentModal from './SpeakerAssignmentModal';
 import AgendaPanel from './AgendaPanel';
 import ConsentPanel from './ConsentPanel';
 import TranscriptDeletionNotice from './TranscriptDeletionNotice';
@@ -63,14 +62,14 @@ import MeetingAttributes from './MeetingAttributes';
 import MeetingAssistantPanel from './MeetingAssistantPanel';
 import useAssistantPanel from '../../hooks/use-assistant-panel';
 import { NodeSlot, useDetachedNode } from './NodeSlot';
-import { SUMMARY_ACTION_ITEMS, runSummaryAction } from './meeting-downloads';
-import { TAB_DETAILS, TAB_OVERVIEW, TAB_SCREEN_SHARE, TAB_TRANSCRIPT } from './meeting-tabs';
+import { TAB_DETAILS, TAB_SCREEN_SHARE, TAB_SUMMARY, TAB_TRANSCRIPT } from './meeting-tabs';
+import SummarySections from './SummarySections';
 import useMeetingTab from '../../hooks/use-meeting-tab';
 import useCallCost from '../../hooks/use-call-cost';
 
 import VideoTimeline from '../video-timeline';
 import MeetingChapters from '../meeting-chapters/MeetingChapters';
-import { chaptersFromSummary, withoutChaptersSection } from '../common/chapters';
+import { chaptersFromSummary } from '../common/chapters';
 import { parseAgendaItems } from '../common/agenda';
 import { formatDurationClock, meetingDurationMillis, platformLabel } from '../common/meeting-header';
 import { frameIdSeconds, scrollTranscriptToTime } from '../common/video-keyframes';
@@ -114,7 +113,6 @@ import { listVirtualParticipants, onUpdateVirtualParticipant } from '../../graph
 import useChatKeyframeLinks from '../../hooks/use-chat-keyframe-links';
 import { isSharedWith } from '../common/shared-with';
 import useStrandsChatBridge from '../../hooks/use-strands-chat-bridge';
-import SummaryMarkdown from '../summary-markdown/SummaryMarkdown';
 import { isChatChannel, isSpeechChannel } from '../common/channels';
 import ChatSegment from '../chat-segment/ChatSegment';
 
@@ -170,7 +168,6 @@ export const CallSummary = ({
   onSave,
   onRegenerate,
   readOnly,
-  consent = null,
   omitSections = [],
   keyframes = 'image',
   onKeyframeSelect = undefined,
@@ -287,11 +284,9 @@ export const CallSummary = ({
 
   // The meeting page shows some sections in their own place -- the chapters as
   // a list, the agenda coverage under the agenda -- and leaves them out here.
+  // The downloads are in the page header's Download menu.
   const omitKey = omitSections.join('|');
-  const displayedSummary = useMemo(() => {
-    const markdown = getMarkdownSummaryWithout(item.callSummaryText, omitSections);
-    return omitSections.includes('CHAPTERS') ? withoutChaptersSection(markdown) : markdown;
-  }, [item.callSummaryText, omitKey]);
+  const sections = useMemo(() => summarySections(item.callSummaryText, omitSections), [item.callSummaryText, omitKey]);
 
   return (
     <Container
@@ -351,16 +346,6 @@ export const CallSummary = ({
                   )}
                 </SpaceBetween>
               )}
-              {item.callSummaryText && (
-                <ButtonDropdown
-                  items={SUMMARY_ACTION_ITEMS}
-                  variant="normal"
-                  ariaLabel="Download the summary"
-                  onItemClick={({ detail }) => runSummaryAction(detail.id, item, consent)}
-                >
-                  <Icon name="download" variant="primary" />
-                </ButtonDropdown>
-              )}
             </SpaceBetween>
           }
         >
@@ -406,11 +391,12 @@ export const CallSummary = ({
           />
         </FormField>
       ) : (
-        <TextContent color="gray">
-          <SummaryMarkdown callId={item.callId} keyframes={keyframes} onKeyframeSelect={onKeyframeSelect}>
-            {displayedSummary}
-          </SummaryMarkdown>
-        </TextContent>
+        <SummarySections
+          callId={item.callId}
+          sections={sections}
+          keyframes={keyframes}
+          onKeyframeSelect={onKeyframeSelect}
+        />
       )}
     </Container>
   );
@@ -848,6 +834,8 @@ const TranscriptToolbar = ({
   hasChat = false,
   showChat = true,
   onShowChatChange = () => {},
+  editableSpeakers = null,
+  onEditSpeaker = undefined,
 }) => {
   let countText = '';
   if (query.trim()) {
@@ -855,6 +843,7 @@ const TranscriptToolbar = ({
   }
   const toggleSpeaker = (name, pressed) =>
     onSpeakersChange(pressed ? [...selectedSpeakers, name] : selectedSpeakers.filter((n) => n !== name));
+  const canEdit = Boolean(onEditSpeaker && editableSpeakers?.size);
   return (
     <div className="transcript-toolbar" data-testid="transcript-toolbar">
       <div className="transcript-search">
@@ -886,25 +875,44 @@ const TranscriptToolbar = ({
           {countText}
         </span>
       </div>
-      {(speakerNames.length > 1 || hasChat) && (
+      {(speakerNames.length > 1 || hasChat || (canEdit && speakerNames.length > 0)) && (
         <div className="transcript-speaker-filter" role="group" aria-label="Show speakers">
-          {speakerNames.length > 1 && (
+          {(speakerNames.length > 1 || canEdit) && (
             <>
-              <ToggleButton
-                pressed={!selectedSpeakers.length}
-                onChange={() => onSpeakersChange([])}
-                ariaLabel="All speakers"
-              >
-                All
-              </ToggleButton>
-              {speakerNames.map((name) => (
+              {speakerNames.length > 1 && (
                 <ToggleButton
-                  key={name}
-                  pressed={selectedSpeakers.includes(name)}
-                  onChange={({ detail }) => toggleSpeaker(name, detail.pressed)}
+                  pressed={!selectedSpeakers.length}
+                  onChange={() => onSpeakersChange([])}
+                  ariaLabel="All speakers"
                 >
-                  {name}
+                  All
                 </ToggleButton>
+              )}
+              {speakerNames.map((name) => (
+                <span key={name} className="transcript-speaker-chip">
+                  {speakerNames.length > 1 ? (
+                    <ToggleButton
+                      pressed={selectedSpeakers.includes(name)}
+                      onChange={({ detail }) => toggleSpeaker(name, detail.pressed)}
+                    >
+                      {name}
+                    </ToggleButton>
+                  ) : (
+                    <Box variant="span" fontSize="body-s">
+                      {name}
+                    </Box>
+                  )}
+                  {/* Rename, combine or separate this speaker's voices, here
+                      rather than on the Details tab. */}
+                  {canEdit && editableSpeakers.has(name) && (
+                    <Button
+                      variant="icon"
+                      iconName="edit"
+                      ariaLabel={`Name or combine ${name}`}
+                      onClick={() => onEditSpeaker(name)}
+                    />
+                  )}
+                </span>
               ))}
             </>
           )}
@@ -943,8 +951,11 @@ const CallInProgressTranscript = ({
   active = true,
   playback = null,
   onSeek = null,
+  onSaveSpeakerIdentities = undefined,
 }) => {
   const containerRef = useRef();
+  // The speaker whose chip opened the speaker modal, or null.
+  const [editingSpeaker, setEditingSpeaker] = useState(null);
   const [turnByTurnSegments, setTurnByTurnSegments] = useState([]);
   const [translateCache, setTranslateCache] = useState({});
   const [cacheSeen, setCacheSeen] = useState({});
@@ -1154,6 +1165,8 @@ const CallInProgressTranscript = ({
         );
         t.speaker = resolved.name;
         t.speakerLocked = resolved.locked;
+        // A name given to this segment alone, not to its voice.
+        t.speakerOverridden = resolved.overridden;
         // An inferred name that nobody has confirmed. Rendered differently
         // below, because showing a guess as indistinguishable from a name a
         // person typed is the one thing that would make this actively harmful.
@@ -1171,6 +1184,31 @@ const CallInProgressTranscript = ({
     [selectedSpeakers, speakerNames],
   );
   const hasChat = useMemo(() => turnByTurnSegments.some((s) => isChatChannel(s.channel)), [turnByTurnSegments]);
+  // The voices each speaker's chip stands for: usually one, and several when
+  // voices that were never merged were given the same name. A name given to a
+  // single segment stands for no voice, so it is not edited from its chip.
+  const voiceKeysByName = useMemo(() => {
+    const byName = new Map();
+    turnByTurnSegments.forEach((s) => {
+      if (!isSpeechSegment(s) || s.speakerOverridden || !s.speakerKey) return;
+      const name = `${s.speaker ?? ''}`.trim();
+      if (!byName.has(name)) byName.set(name, new Set());
+      byName.get(name).add(s.speakerKey);
+    });
+    return byName;
+  }, [turnByTurnSegments]);
+  const editableSpeakers = useMemo(
+    () => (onSaveSpeakerIdentities && !readOnly ? new Set(voiceKeysByName.keys()) : null),
+    [voiceKeysByName, onSaveSpeakerIdentities, readOnly],
+  );
+  // The meeting's voices as the Speakers panel lists them, read when the modal opens.
+  const roster = useMemo(
+    () =>
+      editingSpeaker === null ? [] : buildSpeakerRoster(getSegments(), speakerIdentities, item.remoteParticipantName),
+    [editingSpeaker, callTranscriptPerCallId, speakerIdentities, item.remoteParticipantName],
+  );
+  const editingKeys = editingSpeaker === null ? null : voiceKeysByName.get(editingSpeaker);
+  const editingRows = editingKeys ? roster.filter((row) => editingKeys.has(row.key)) : [];
   const visibleSegments = useMemo(
     () =>
       turnByTurnSegments.filter((s) =>
@@ -1355,7 +1393,20 @@ const CallInProgressTranscript = ({
         hasChat={hasChat}
         showChat={showChat}
         onShowChatChange={setShowChat}
+        editableSpeakers={editableSpeakers}
+        onEditSpeaker={editableSpeakers ? setEditingSpeaker : undefined}
       />
+      {editingRows.length > 0 && (
+        <SpeakerAssignmentModal
+          speaker={editingSpeaker}
+          rows={editingRows}
+          roster={roster}
+          identities={speakerIdentities}
+          onSave={onSaveSpeakerIdentities}
+          onDismiss={() => setEditingSpeaker(null)}
+          readOnly={readOnly}
+        />
+      )}
       {/* The notice lies over the lines rather than among them: shown and
           hidden among them, it would move them, and the browser's scroll
           anchoring would then scroll the box -- which reads as the reader
@@ -1438,6 +1489,7 @@ const CallTranscriptContainer = ({
   player = null,
   playback = null,
   onSeek = null,
+  onSaveSpeakerIdentities = undefined,
 }) => {
   // Auto-scroll follows the newest line while the meeting runs, and the line
   // being heard once it has ended and there is a recording to play; it is on
@@ -1524,6 +1576,7 @@ const CallTranscriptContainer = ({
           active={active}
           playback={playback}
           onSeek={onSeek}
+          onSaveSpeakerIdentities={onSaveSpeakerIdentities}
         />
       </Container>
     </div>
@@ -1681,7 +1734,7 @@ export const CallPanel = ({
   const speakerNamesReadOnly =
     !isAdminUser && item.owner !== user?.username && !isSharedWith(item.sharedWith, user?.username);
 
-  // The consent record, for the Consent panel and the summary download. Read
+  // The consent record, for the Consent panel and the summary downloads. Read
   // with its own query, which signs the evidence links, and kept current by
   // its own subscription.
   const meetingConsent = useMeetingConsent(item.callId);
@@ -1977,7 +2030,7 @@ export const CallPanel = ({
 
   // Chapters from the summary, on the transcript's clock.
   const chapters = useMemo(() => chaptersFromSummary(item.callSummaryText), [item.callSummaryText]);
-  // A chapter selected on the Overview: the Transcript tab at that time, the
+  // A chapter selected on the Summary tab: the Transcript tab at that time, the
   // recording playing from it.
   const selectChapter = useCallback(
     (chapter) => {
@@ -2160,7 +2213,7 @@ export const CallPanel = ({
     `${item.recordingStatusLabel || ''}|${(item.callSummaryText || '').length}|${item.callSummaryState || ''}`,
   );
 
-  // The summary's sections that the Overview shows in their own place: the
+  // The summary's sections that the Summary tab shows in their own place: the
   // chapters as the clickable list, and the agenda coverage under the agenda.
   // Each is left in the summary when there is nothing to show it in instead.
   const agendaItems = parseAgendaItems(item.agenda);
@@ -2185,7 +2238,7 @@ export const CallPanel = ({
     />
   );
 
-  const overview = (
+  const summaryTab = (
     <SpaceBetween size="l">
       {!agendaItems.length && agendaPanel}
       <Grid
@@ -2202,12 +2255,12 @@ export const CallPanel = ({
           onSave={sendUpdateCallSummary ? saveCallSummary : undefined}
           onRegenerate={sendRegenerateCallSummary ? regenerateCallSummaryForItem : undefined}
           readOnly={speakerNamesReadOnly}
-          consent={meetingConsent.consent}
           omitSections={omitSections}
-          // The slides the summary names open on the Screen share tab rather
-          // than filling the summary with pictures of them.
-          keyframes={hasKeyframes ? 'link' : 'text'}
-          onKeyframeSelect={showKeyframe}
+          // The slides the summary names are shown as their thumbnails, read
+          // once their section is opened; a click shows one on the Screen
+          // share tab when the meeting has one, and otherwise opens it full size.
+          keyframes="image"
+          onKeyframeSelect={hasKeyframes ? showKeyframe : undefined}
         />
         {sideColumn && (
           <SpaceBetween size="l">
@@ -2271,6 +2324,7 @@ export const CallPanel = ({
         enableSentimentAnalysis={enableSentimentAnalysis}
         speakerIdentities={speakerIdentities}
         onRenameSpeaker={handleRenameSpeaker}
+        onSaveSpeakerIdentities={sendUpdateSpeakerIdentities ? saveSpeakerIdentities : undefined}
         readOnly={speakerNamesReadOnly}
         scrollRequest={transcriptScrollRequest}
         active={activeTab === TAB_TRANSCRIPT}
@@ -2310,7 +2364,7 @@ export const CallPanel = ({
   // keeps the transcript's translations and scroll position, a summary or
   // agenda being edited, and the assistant's conversation.
   const tabs = [
-    { id: TAB_OVERVIEW, label: 'Overview', content: overview, contentRenderStrategy: 'eager' },
+    { id: TAB_SUMMARY, label: 'Summary', content: summaryTab, contentRenderStrategy: 'eager' },
     { id: TAB_TRANSCRIPT, label: 'Transcript', content: transcript, contentRenderStrategy: 'eager' },
     ...(hasKeyframes
       ? [
