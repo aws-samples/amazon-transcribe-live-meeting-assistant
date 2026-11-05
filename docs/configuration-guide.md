@@ -9,7 +9,7 @@ title: "Configuration Guide"
 
 This page is for administrators. It explains which of LMA's settings you can
 change from the web UI while the stack is running, how to change them on the
-**Configuration** page, what happens when you save, and what to do when a save is
+**View / Edit Configuration** page (the Configuration page), what happens when you save, and what to do when a save is
 refused. How the settings are stored, cached and versioned underneath is
 described in the [Unified Configuration Store](configuration-store.md) reference.
 
@@ -100,8 +100,8 @@ were never released as parameters.
 parameters held are not carried across. After the update, a deployment upgraded
 from v0.3.10 uses the shipped default for every one of these settings. To keep a value you had set with a parameter:
 
-- create a Custom profile (**Profile › Copy to a new profile**), set the values
-  there, save and **Activate** it; or
+- create a Custom profile (**Create profile** in the profile list), set the
+  values there, save and **Activate** it; or
 - write the values into a configuration file and deploy with the
   `CustomConfigPath` stack parameter, which makes them the deployment default; see
   [Choosing the default configuration at deploy time](configuration-store.md#choosing-the-default-configuration-at-deploy-time).
@@ -190,21 +190,42 @@ of them is **active**: the one every meeting uses. They work as IDP's do.
   `translator-voice-assistant`), each the default with the preset applied. They
   are read-only and rewritten by every stack update too. Activate one to use it
   as it is.
-- **Custom** profiles are yours. Choose **Copy to a new profile** on any profile
-  to make one, change its settings and save them, then **Activate** it. A Custom
+- **Custom** profiles are yours. Choose **Create profile** in the profile list
+  to copy any profile, change its settings and save them, then **Activate** it. A Custom
   profile is a full copy: a later release's new defaults do not change a setting
   it holds, and a setting the release adds comes from the default.
 
-The selector at the top of the Configuration page lists the profiles, marking the
-active one, and opens the active profile by default. The **Profile** menu
-activates, copies or deletes the profile shown; the active profile and the
-Managed ones cannot be deleted. The configuration history is kept per profile,
-and **View history** opens the history of the profile shown.
+The **Configuration Profiles** list at the top of the page shows every profile
+with its type (Managed or Custom), description and when it was last saved. It
+marks the active one, and the one open in the editor below it; the page opens the
+active profile by default, and the address names the profile open
+(`#/configuration/settings?profile=trial`), so a link can open another. Choose a
+profile's name to open it in the editor; if the editor holds unsaved changes, the
+page asks first. The list can be collapsed to give the editor more room.
 
-**Comparing two profiles.** **Profile › Compare with another profile** lists
-every setting the profile shown and another profile hold differently, with each
-one's value; a setting only one of them holds reads `(not set)` on the other.
-Both are compared as saved, so edits you have not saved are not included.
+Select profiles in the list to act on them:
+
+- **Compare profiles** (two or more selected) lists every setting the selected
+  profiles do not all hold alike, with a column for each profile's value; a
+  setting a profile does not hold reads `(not set)`. Profiles are compared as
+  saved, so edits you have not saved are not included. **Export** downloads the
+  comparison as CSV or JSON.
+- **Activate** (one selected) makes it the active profile.
+- **Delete** removes the selected Custom profiles; the active profile and the
+  Managed ones cannot be deleted. A deleted profile's revisions stay in the
+  history.
+- **Create profile** copies a profile, as it is saved, to a new Custom one: the
+  one selected, or else the one open.
+- **Import** makes a new Custom profile of a file exported from LMA (see
+  [Copying configuration between deployments](#copying-configuration-between-deployments-and-presets)).
+
+The editor's **Actions** menu works on the profile open. Besides export, import
+and presets, **Save current edits as new profile** makes a new Custom profile of
+what the editor holds, unsaved edits included, and leaves the open profile as it
+is saved; **Reset all sections to defaults** does what each section's **Reset
+section to defaults** does, for every section, as unsaved changes. The
+configuration history is kept per profile, and **Revisions…** opens the history
+of the profile open.
 
 The pages that edit one setting outside the Configuration page, such as the
 meeting page's chat buttons, save into the active profile, and refuse while the
@@ -213,7 +234,8 @@ first.
 
 ## Using the Configuration page
 
-Open **Configuration ▸ Configuration** in the navigation. Each section is a panel
+Open **Configuration ▸ View / Edit Configuration** in the navigation, and open a
+profile from the list at the top; the editor below the list shows it. Each section is a panel
 that says what it controls and when a saved change applies; open one to edit it.
 A link to `#/configuration/settings?section=call_pricing` (or any other section's
 name) opens that section directly.
@@ -303,8 +325,8 @@ replacing their change. The page then offers two ways on:
 
 **Every save is recorded.** A save that changes something becomes a numbered
 revision recording who saved it, when, which sections it changed, and your comment
-and label. **View history** opens **Configuration ▸ Configuration History**,
-where you can see the revisions, compare any two of them setting by setting,
+and label. **Revisions…** opens the revision history of the profile open, where
+you can see the revisions, compare any two of them setting by setting,
 label or relabel one, or restore an earlier one. A restore puts back every section
 as it was in that revision and is itself recorded as a new revision, so it can be
 undone the same way. See
@@ -312,8 +334,8 @@ undone the same way. See
 
 ## Copying configuration between deployments, and presets
 
-The **Import, export and presets** menu at the top of the Configuration page
-offers three things. None of them saves anything: what they change appears on the
+The editor's **Actions** menu offers three things for the profile open. None of
+them saves anything: what they change appears on the
 page as unsaved changes, marked like your own edits, and is stored only when you
 select **Save changes**.
 
@@ -327,7 +349,11 @@ select **Save changes**.
   holds that this deployment does not have is listed and left out, and so is a
   setting the page does not show here, such as the engine choices on a deployment
   without the on-demand speech engine, which keeps its current value. The save
-  comment is filled in with the file's name; change it if you like.
+  comment is filled in with the file's name; change it if you like. To make a
+  new profile of the file instead, leaving every existing profile as it is, use
+  **Import** in the Configuration Profiles list: it reads the file the same way,
+  asks for the new profile's name, and creates it with the file's changes over
+  the deployment defaults.
 - **Apply a preset** applies one of the configurations LMA ships:
   - **Healthcare summary** — the summary sections of the healthcare prompt domain,
     with the other shipped sections turned off;

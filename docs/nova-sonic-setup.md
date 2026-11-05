@@ -57,7 +57,7 @@ provider, the activation mode, the wake phrases and the activation duration can
 be changed there while the stack runs, with no stack update, and apply to the
 next Virtual Participant to start. To change them, an Admin opens the
 Configuration page, makes and activates a Custom configuration profile if one is
-not already active (**Profile** › **Copy to a new profile**, then **Activate**;
+not already active (**Create profile** in the profile list, then **Activate**;
 see [Configuration profiles](configuration-guide.md#configuration-profiles)),
 and saves:
 

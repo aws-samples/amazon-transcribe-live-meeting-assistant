@@ -19,7 +19,7 @@ const content = (
     <ul>
       <li>
         <strong>Admin</strong> &mdash; full access, including this User Management page and every Configuration page
-        (Configuration, Configuration History and MCP Servers).
+        (View / Edit Configuration and MCP Servers).
       </li>
       <li>
         <strong>User</strong> &mdash; standard LMA access (Meetings, Streaming, Virtual Participant). Cannot access

@@ -38,9 +38,8 @@ The left sidebar organizes the application into the following sections:
 - **Meetings Query Tool** — Advanced search and filtering across meetings
 
 ### Configuration (admin only)
-- **Configuration** — Every runtime setting in one place: summary prompts, chat buttons, Nova Sonic, transcription engine and meeting cost prices (see [Configuration Guide](configuration-guide.md))
+- **View / Edit Configuration** — The configuration profiles, and every runtime setting of the one open in one place: summary prompts, chat buttons, Nova Sonic, transcription engine, meeting cost prices and more, with each profile's saved revisions to view, compare, label and restore (see [Configuration Guide](configuration-guide.md))
 - **MCP Servers** — Install and manage MCP server integrations
-- **Configuration History** — Every saved revision of the configuration: view, compare, label and restore
 - **User Management** — Create and delete LMA users (see [User Management](user-management.md))
 
 ### Deployment Info
@@ -519,7 +518,9 @@ See [MCP Servers](mcp-servers.md) for full documentation.
 
 The **Nova Sonic**, **Transcript Summary** and **Transcription Engine** pages
 each edited one section of the configuration. They are now sections of the
-**Configuration** page, and their addresses open those sections:
+**View / Edit Configuration** page, and their addresses open those sections. The
+**Configuration History** page became that page's revision history dialog, and
+`/#/configuration/history` opens it:
 
 | Earlier address | Opens |
 |---|---|

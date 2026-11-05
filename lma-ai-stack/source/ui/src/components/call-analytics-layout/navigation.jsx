@@ -19,7 +19,6 @@ import {
   BROWSER_EXTENSION_PATH,
   MCP_SERVERS_PATH,
   USER_MANAGEMENT_PATH,
-  CONFIGURATION_HISTORY_PATH,
   CONFIGURATION_PATH,
   DEFAULT_PATH,
 } from '../../routes/constants';
@@ -42,7 +41,6 @@ export const NAV_PATHS = [
   CALLS_PATH,
   MCP_SERVERS_PATH,
   USER_MANAGEMENT_PATH,
-  CONFIGURATION_HISTORY_PATH,
   CONFIGURATION_PATH,
   STREAM_AUDIO_PATH,
   UPLOAD_AUDIO_PATH,
@@ -71,8 +69,6 @@ const Navigation = ({ header = callsNavHeader, items, onFollowHandler = defaultO
     activeHref = `#${MCP_SERVERS_PATH}`;
   } else if (path.includes(USER_MANAGEMENT_PATH)) {
     activeHref = `#${USER_MANAGEMENT_PATH}`;
-  } else if (path.includes(CONFIGURATION_HISTORY_PATH)) {
-    activeHref = `#${CONFIGURATION_HISTORY_PATH}`;
   } else if (path.includes(CONFIGURATION_PATH)) {
     activeHref = `#${CONFIGURATION_PATH}`;
   } else if (path.includes(CALLS_PATH)) {
