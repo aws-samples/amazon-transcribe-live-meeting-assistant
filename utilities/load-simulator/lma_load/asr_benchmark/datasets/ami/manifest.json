@@ -3,6 +3,7 @@
   "licence": "CC BY 4.0",
   "meetings": {
     "ES2004a": {
+      "audio": "noisy: headsets recorded at a low level, so levelling raises their noise floor",
       "host": "B",
       "hostRole": "PM",
       "seconds": 1049.35,
@@ -31,6 +32,7 @@
       "stereoSha256": "650fad70ffec8a6eeaf633dba40dc142636fdbc081bf13b544e6c5db591526f4"
     },
     "IS1009c": {
+      "audio": "clean",
       "host": "A",
       "hostRole": "PM",
       "seconds": 1820.67,
@@ -57,6 +59,35 @@
         }
       },
       "stereoSha256": "7c520d87f8a2c40d54859db64552c8a0c9df5163a27c42d8f066ec4f3457690b"
+    },
+    "IS1009d": {
+      "audio": "clean",
+      "host": "A",
+      "hostRole": "PM",
+      "seconds": 1944.49,
+      "speakers": {
+        "A": {
+          "headset": "0",
+          "role": "PM",
+          "sha256": "66c73315fc23dfe4dbf20aa62bdd63d8d0347572e4846d3708857c2d77667dee"
+        },
+        "B": {
+          "headset": "1",
+          "role": "UI",
+          "sha256": "b491356392d997f6edaf6bb803eeabb66a3360bababfa3ab8885605cb1c98168"
+        },
+        "C": {
+          "headset": "2",
+          "role": "ID",
+          "sha256": "bfc4661f8e4d6ec82792411c268beb0a0663cdb9b924ecee43dc388255cee772"
+        },
+        "D": {
+          "headset": "3",
+          "role": "ME",
+          "sha256": "45105c65c6b2162368c8f305029db6913edd24d962b6d0f7d93deca10978b402"
+        }
+      },
+      "stereoSha256": "48964150c4c3c78369777f96a00d63248f4ebaf2f49540922a7b286c716ec869"
     }
   }
 }

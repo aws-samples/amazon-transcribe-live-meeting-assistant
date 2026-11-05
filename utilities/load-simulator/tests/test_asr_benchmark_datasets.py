@@ -44,8 +44,8 @@ def test_words_are_joined_into_utterances_until_a_pause() -> None:
 def test_the_host_is_on_the_microphone_channel_and_everyone_else_on_the_meeting_channel() -> None:
     stm = ami.build_stm("M1", "B", {"A": "0", "B": "1"}, {"A": WORDS, "B": WORDS})
     reference = quality.parse_stm(stm)
-    assert reference.words("AGENT") == reference.words("CALLER") == ["hello", "there", "okay"]
-    assert {s.speaker for s in reference.segments if s.channel == "AGENT"} == {"M1_B"}
+    assert reference.words("LOCAL") == reference.words("REMOTE") == ["hello", "there", "okay"]
+    assert {s.speaker for s in reference.segments if s.channel == "LOCAL"} == {"M1_B"}
 
 
 def _write(path: Path, samples: np.ndarray) -> Path:
@@ -88,13 +88,17 @@ def test_downloads_come_only_from_the_ami_mirror(tmp_path: Path) -> None:
 def test_every_packaged_meeting_has_a_reference_with_both_channels() -> None:
     manifest = ami.manifest()
     assert manifest["licence"] == "CC BY 4.0"
-    assert set(manifest["meetings"]) >= {"IS1009c", "ES2004a"}
+    assert set(manifest["meetings"]) >= {"IS1009c", "IS1009d", "ES2004a"}
+    assert {m for m, e in manifest["meetings"].items() if e["audio"] == "clean"} >= {
+        "IS1009c",
+        "IS1009d",
+    }
     for meeting, entry in manifest["meetings"].items():
         reference = quality.load_reference(ami.reference_path(meeting))
         assert reference.by_channel
-        assert len(reference.words("CALLER")) > 1000 and len(reference.words("AGENT")) > 200
-        assert reference.speakers("AGENT") == 1
-        assert reference.speakers("CALLER") == len(entry["speakers"]) - 1
+        assert len(reference.words("REMOTE")) > 1000 and len(reference.words("LOCAL")) > 200
+        assert reference.speakers("LOCAL") == 1
+        assert reference.speakers("REMOTE") == len(entry["speakers"]) - 1
         assert all(len(s["sha256"]) == 64 for s in entry["speakers"].values())
 
 

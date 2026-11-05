@@ -17,10 +17,17 @@ Institute, TNO, Brno University of Technology and others), CC BY 4.0.
 
 ## Meetings
 
-| Meeting | Length | Speakers | Microphone channel (host) | Source |
-|---|---|---|---|---|
-| `IS1009c` | 30.3 min | 4 | A, the project manager | AMI test set, recorded at Idiap |
-| `ES2004a` | 17.5 min | 4 | B, the project manager | AMI test set, recorded in Edinburgh |
+| Meeting | Length | Speakers | Microphone channel (host) | Audio | Source |
+|---|---|---|---|---|---|
+| `IS1009c` | 30.3 min | 4 | A, the project manager | clean | AMI test set, recorded at Idiap |
+| `IS1009d` | 32.4 min | 4 | A, the project manager | clean | AMI test set, recorded at Idiap |
+| `ES2004a` | 17.5 min | 4 | B, the project manager | **noisy** | AMI test set, recorded in Edinburgh |
+
+`IS1009c` and `IS1009d` are the clean-audio benchmark: close-talk headsets at normal levels.
+`ES2004a`'s headsets were recorded at a low level (about a fifth of the Idiap meetings'), so
+bringing its speakers to speech level also raises the noise floor. Use it to test noise
+robustness, not to compare engines on clean audio: a detector or recogniser with its own
+noise handling has an advantage there.
 
 Use them with `lma load asr-benchmark --dataset ami/IS1009c` or
 `make asr-benchmark DATASET=ami/IS1009c`.

@@ -297,7 +297,8 @@ lma load asr-benchmark -s LMA-dev-stack-2 --dataset ami/IS1009c \
     --bundles parakeet-tdt-v3-sortformer,parakeet-tdt-v3-titanet-small --transcribe --dry-run
 ```
 
-`--dataset` takes a packaged ground-truth meeting (`ami/IS1009c`, `ami/ES2004a`): a meeting
+`--dataset` takes a packaged ground-truth meeting (`ami/IS1009c` and `ami/IS1009d`, clean
+headset audio; `ami/ES2004a`, low-level headsets, for noise robustness): a meeting
 from the [AMI Meeting Corpus](lma_load/asr_benchmark/datasets/ami/README.md) (CC BY 4.0)
 whose reference transcript ships in the package. Its headset audio is downloaded from the
 AMI mirror on first use, checked against pinned SHA-256s, and mixed into a stereo recording

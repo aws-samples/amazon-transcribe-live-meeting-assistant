@@ -779,7 +779,8 @@ For each bundle the stack is updated with only the `AsrDefaults` bundle changed 
 image rebuilds, about 20-25 minutes), the WAV is streamed once at real time over the
 transcriber WebSocket, and the run is priced from the engine's measured CPU and the
 MicroVM's lifetime. Each run's transcript is saved and, with a reference, scored for word
-error rate per channel. `DATASET=ami/IS1009c` and `ami/ES2004a` are meetings from the AMI
+error rate per channel. `DATASET=ami/IS1009c` and `ami/IS1009d` (clean audio) and `ami/ES2004a`
+(low-level, noisier headsets, for noise robustness) are meetings from the AMI
 Meeting Corpus (CC BY 4.0) whose reference transcripts ship with the tool; their audio is
 downloaded and mixed into a stereo recording on first use. Your own recording works with
 `WAV=` and an optional `REFERENCE=` STM file. The original

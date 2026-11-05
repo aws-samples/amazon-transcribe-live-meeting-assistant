@@ -19,10 +19,15 @@ from the AMI mirror and built into a stereo recording on first use (cached in
 `~/.cache/lma-asr-benchmark`), so every run hears identical audio and is scored for real
 accuracy (WER) against the reference.
 
-| Dataset | Length | Speakers |
-|---|---|---|
-| `ami/IS1009c` | 30.3 min | 4 (host on the microphone, 3 in the meeting audio) |
-| `ami/ES2004a` | 17.5 min | 4 |
+| Dataset | Length | Speakers | Audio |
+|---|---|---|---|
+| `ami/IS1009c` | 30.3 min | 4 (host on the microphone, 3 in the meeting audio) | clean |
+| `ami/IS1009d` | 32.4 min | 4 | clean |
+| `ami/ES2004a` | 17.5 min | 4 | noisy (low-level headsets) |
+
+Compare engines on the **clean** meetings. `ami/ES2004a` is a noise-robustness test: its
+headsets were recorded at a low level, so levelling raises the noise floor, and an engine
+with its own noise handling (Amazon Transcribe) has an advantage there.
 
 ```bash
 # Dry run first: prints the plan, the bundle switches and the expected time.
@@ -42,7 +47,7 @@ Or call the CLI directly for the other options (`--no-diarize-system`, `--diariz
 `--keep-bundle`, `--template-bucket`, `--prices-file`, `--cache-dir`):
 
 ```bash
-AWS_PROFILE=default lma-load asr-benchmark -s LMA-dev-stack-2 --dataset ami/ES2004a \
+AWS_PROFILE=default lma-load asr-benchmark -s LMA-dev-stack-2 --dataset ami/IS1009d \
     --bundles parakeet-tdt-v3-titanet-small --transcribe
 ```
 

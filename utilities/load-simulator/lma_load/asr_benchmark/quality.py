@@ -11,6 +11,11 @@ from dataclasses import dataclass
 from typing import Any
 
 WORD_RE = re.compile(r"[\w']+")
+CHANNEL_ALIASES = {"CALLER": "REMOTE", "AGENT": "LOCAL"}
+
+
+def canonical_channel(channel: str) -> str:
+    return CHANNEL_ALIASES.get(channel, channel)
 
 
 @dataclass
@@ -27,10 +32,12 @@ def read_segments(ddb, table: str, call_id: str) -> list[Segment]:
     kwargs: dict[str, Any] = {
         "TableName": table,
         "KeyConditionExpression": "PK = :pk",
-        "FilterExpression": "IsPartial = :false AND Channel IN (:agent, :caller)",
+        "FilterExpression": "IsPartial = :false AND Channel IN (:local, :remote, :agent, :caller)",
         "ExpressionAttributeValues": {
             ":pk": {"S": f"trs#{call_id}"},
             ":false": {"BOOL": False},
+            ":local": {"S": "LOCAL"},
+            ":remote": {"S": "REMOTE"},
             ":agent": {"S": "AGENT"},
             ":caller": {"S": "CALLER"},
         },
@@ -40,7 +47,7 @@ def read_segments(ddb, table: str, call_id: str) -> list[Segment]:
         for item in page.get("Items", []):
             segments.append(
                 Segment(
-                    channel=item.get("Channel", {}).get("S", ""),
+                    channel=canonical_channel(item.get("Channel", {}).get("S", "")),
                     speaker=item.get("Speaker", {}).get("S", ""),
                     start=float(item.get("StartTime", {}).get("N", "0")),
                     end=float(item.get("EndTime", {}).get("N", "0")),
@@ -102,16 +109,18 @@ ONES = [
 ]
 TENS = ["_", "_", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
 REFERENCE_CHANNELS = {
-    "0": "CALLER",
-    "a": "CALLER",
-    "caller": "CALLER",
-    "meeting": "CALLER",
-    "system": "CALLER",
-    "1": "AGENT",
-    "b": "AGENT",
-    "agent": "AGENT",
-    "mic": "AGENT",
-    "microphone": "AGENT",
+    "0": "REMOTE",
+    "a": "REMOTE",
+    "remote": "REMOTE",
+    "caller": "REMOTE",
+    "meeting": "REMOTE",
+    "system": "REMOTE",
+    "1": "LOCAL",
+    "b": "LOCAL",
+    "local": "LOCAL",
+    "agent": "LOCAL",
+    "mic": "LOCAL",
+    "microphone": "LOCAL",
 }
 
 
@@ -196,7 +205,7 @@ def parse_stm(text: str) -> Reference:
         channel = REFERENCE_CHANNELS.get(fields[1].lower())
         if channel is None:
             raise ValueError(
-                f"STM channel {fields[1]!r} is not 0/1, A/B, meeting/mic or CALLER/AGENT"
+                f"STM channel {fields[1]!r} is not 0/1, A/B, meeting/mic or REMOTE/LOCAL"
             )
         words = fields[5] if len(fields) > 5 else ""
         if words.startswith("<"):
@@ -218,12 +227,15 @@ def load_reference(path) -> Reference:
 
 
 def score(segments: list[Segment], reference: Reference) -> dict[str, Any]:
+    segments = [
+        Segment(canonical_channel(s.channel), s.speaker, s.start, s.end, s.text) for s in segments
+    ]
     if not reference.by_channel:
         chronological = sorted(segments, key=lambda s: s.start)
         return {"all": align(reference.words(), normalise(transcript_text(chronological)))}
     ordered = sorted(segments, key=lambda s: (s.channel, s.start))
     out: dict[str, Any] = {}
-    for channel in ("CALLER", "AGENT"):
+    for channel in ("REMOTE", "LOCAL"):
         ref_words = reference.words(channel)
         if ref_words:
             out[channel] = align(ref_words, normalise(transcript_text(ordered, channel)))
@@ -240,6 +252,9 @@ def render(segments: list[Segment]) -> str:
 
 
 def summarise(segments: list[Segment], reference: Reference | None) -> dict[str, Any]:
+    segments = [
+        Segment(canonical_channel(s.channel), s.speaker, s.start, s.end, s.text) for s in segments
+    ]
     words = normalise(transcript_text(segments))
     out: dict[str, Any] = {
         "rows": len(segments),

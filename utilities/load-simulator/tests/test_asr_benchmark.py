@@ -339,7 +339,7 @@ def _item(start: float, channel: str, speaker: str, text: str) -> dict:
 
 
 def test_segments_are_read_across_pages_in_time_order() -> None:
-    ddb = _FakeDdb([[_item(5, "CALLER", "A", "later")], [_item(1, "AGENT", "Me", "first")]])
+    ddb = _FakeDdb([[_item(5, "REMOTE", "A", "later")], [_item(1, "LOCAL", "Me", "first")]])
     segments = quality.read_segments(ddb, "table", "call")
     assert [s.text for s in segments] == ["first", "later"]
     assert ddb.calls[1]["ExclusiveStartKey"] == {"PK": {"S": "0"}}
@@ -348,9 +348,9 @@ def test_segments_are_read_across_pages_in_time_order() -> None:
 
 def test_a_summary_counts_rows_words_and_speakers_per_channel() -> None:
     segments = [
-        quality.Segment("CALLER", "Other (spk_0)", 0, 1, "hello there"),
-        quality.Segment("CALLER", "Other (spk_1)", 1, 2, "hi"),
-        quality.Segment("AGENT", "Me", 2, 3, "good morning"),
+        quality.Segment("REMOTE", "Other (spk_0)", 0, 1, "hello there"),
+        quality.Segment("REMOTE", "Other (spk_1)", 1, 2, "hi"),
+        quality.Segment("LOCAL", "Me", 2, 3, "good morning"),
     ]
     reference = quality.Reference(
         [quality.Segment("", "", 0, 0, "hello there hi good morning")], False
@@ -358,7 +358,7 @@ def test_a_summary_counts_rows_words_and_speakers_per_channel() -> None:
     summary = quality.summarise(segments, reference)
     assert summary["rows"] == 3 and summary["words"] == 5
     assert summary["accuracy"]["all"]["wer"] == 0.0
-    assert summary["speakers"] == {"AGENT": ["Me"], "CALLER": ["Other (spk_0)", "Other (spk_1)"]}
+    assert summary["speakers"] == {"LOCAL": ["Me"], "REMOTE": ["Other (spk_0)", "Other (spk_1)"]}
 
 
 def test_normalisation_ignores_fillers_spelling_variants_and_number_forms() -> None:
@@ -383,9 +383,9 @@ def test_an_stm_reference_is_read_per_channel() -> None:
         "meeting mic me 1.0 2.0 good morning\n"
     )
     assert reference.by_channel
-    assert reference.words("CALLER") == ["hello", "there", "hi"]
-    assert reference.words("AGENT") == ["good", "morning"]
-    assert reference.speakers("CALLER") == 2
+    assert reference.words("REMOTE") == ["hello", "there", "hi"]
+    assert reference.words("LOCAL") == ["good", "morning"]
+    assert reference.speakers("REMOTE") == 2
 
 
 def test_an_stm_reference_with_an_unknown_channel_is_refused() -> None:
@@ -398,13 +398,13 @@ def test_scoring_against_an_stm_reference_is_per_channel() -> None:
         "m 0 alice 0 2 hello there\nm 0 bob 2 3 hi\nm 1 me 1 2 good morning\n"
     )
     segments = [
-        quality.Segment("AGENT", "Me", 1, 2, "good morning"),
-        quality.Segment("CALLER", "Other (spk_0)", 2, 3, "hi"),
-        quality.Segment("CALLER", "Other (spk_0)", 0, 1, "hello there"),
+        quality.Segment("LOCAL", "Me", 1, 2, "good morning"),
+        quality.Segment("REMOTE", "Other (spk_0)", 2, 3, "hi"),
+        quality.Segment("REMOTE", "Other (spk_0)", 0, 1, "hello there"),
     ]
     scored = quality.score(segments, reference)
-    assert scored["CALLER"]["wer"] == 0.0 and scored["AGENT"]["wer"] == 0.0
-    assert scored["CALLER"]["reference_speakers"] == 2
+    assert scored["REMOTE"]["wer"] == 0.0 and scored["LOCAL"]["wer"] == 0.0
+    assert scored["REMOTE"]["reference_speakers"] == 2
 
 
 def test_runs_put_transcribe_first_and_name_each_meeting() -> None:
@@ -434,13 +434,13 @@ def _two_runs() -> list[dict]:
         {
             "label": "transcribe",
             "engine": "transcribe",
-            "segments": [quality.Segment("CALLER", "A", 0, 1, "one two three").__dict__],
+            "segments": [quality.Segment("REMOTE", "A", 0, 1, "one two three").__dict__],
         },
         {
             "label": "b",
             "engine": "microvm",
             "measurement": {"cost": 0.5},
-            "segments": [quality.Segment("CALLER", "A", 0, 1, "one too three").__dict__],
+            "segments": [quality.Segment("REMOTE", "A", 0, 1, "one too three").__dict__],
         },
     ]
 
@@ -449,7 +449,7 @@ def test_without_a_reference_the_table_has_no_wer_and_the_json_keeps_the_agreeme
     results = _two_runs()
     bench.compare(results, None)
     assert "accuracy" not in results[1]["quality"]
-    assert results[1]["agreement_with_transcribe"]["CALLER"]["wer"] == pytest.approx(1 / 3)
+    assert results[1]["agreement_with_transcribe"]["REMOTE"]["wer"] == pytest.approx(1 / 3)
     table = bench.render_table(results, RATES)
     assert "WER" not in table and "vs Transcribe" not in table
     assert "$0.500" in table and "$/audio h, used cores" in table
@@ -462,7 +462,7 @@ def test_with_a_reference_the_table_shows_wer_per_channel_and_speakers_against_i
     table = bench.render_table(results, RATES, reference)
     assert "WER meeting" in table and "WER microphone" in table
     assert "50.0% (25.0% / 25.0% / 0.0%)" in table
-    assert "CALLER 1 of 2" in table
+    assert "REMOTE 1 of 2" in table
 
 
 class _FakeSocket:
@@ -629,3 +629,67 @@ def test_a_failed_run_is_recorded_and_the_next_one_still_runs(monkeypatch, tmp_p
     ]
     assert results[0]["error"] == "RuntimeError: image build failed"
     assert switched == ["parakeet-tdt-v3-sortformer", "parakeet-tdt-v3-titanet-small", "orig"]
+
+
+def test_rows_stored_under_the_old_channel_names_are_scored_under_the_new_ones() -> None:
+    reference = quality.parse_stm("m 0 a 0 1 one two\nm 1 me 0 1 three\n")
+    segments = [
+        quality.Segment("CALLER", "A", 0, 1, "one two"),
+        quality.Segment("AGENT", "Me", 0, 1, "three"),
+    ]
+    scored = quality.score(segments, reference)
+    assert scored["REMOTE"]["wer"] == 0.0 and scored["LOCAL"]["wer"] == 0.0
+    assert set(quality.summarise(segments, None)["speakers"]) == {"REMOTE", "LOCAL"}
+
+
+def test_a_run_that_falls_back_to_transcribe_is_retried_once(monkeypatch, tmp_path) -> None:
+    import wave as wave_mod
+
+    path = tmp_path / "a.wav"
+    with wave_mod.open(str(path), "wb") as out:
+        out.setnchannels(2)
+        out.setsampwidth(2)
+        out.setframerate(16000)
+        out.writeframes(b"\0" * 6400)
+    attempts: list[int] = []
+
+    def fake_run(*args, attempt: int = 1):
+        attempts.append(attempt)
+        spec = args[3]
+        if attempt == 1:
+            return {"label": spec.label, "engine": "microvm", "warning": bench.FELL_BACK}
+        return {"label": spec.label, "engine": "microvm"}
+
+    class _Pool:
+        def __init__(self, **kwargs) -> None:
+            self.users = [type("U", (), {"email": "u", "access_token": "a", "id_token": "i"})()]
+
+        def provision(self, **kwargs) -> None:
+            pass
+
+        def delete_synthetic_users(self, run_id) -> int:
+            return 1
+
+    monkeypatch.setattr(bench.bundles_mod, "current_bundle", lambda cfn, stack: "orig")
+    monkeypatch.setattr(bench.bundles_mod, "switch_bundle", lambda *a, **k: True)
+    monkeypatch.setattr(
+        bench.boto3, "Session", lambda **k: type("S", (), {"client": lambda self, n, **kw: None})()
+    )
+    monkeypatch.setattr(bench, "SyntheticUserPool", _Pool)
+    monkeypatch.setattr(bench.measure, "resolve_rates", lambda *a: RATES)
+    monkeypatch.setattr(bench.measure, "transcriber_log_group", lambda cfn, stack: "g")
+    monkeypatch.setattr(bench, "FALLBACK_RETRY_WAIT_S", 0)
+    monkeypatch.setattr(bench, "_one_run", fake_run)
+    ctx = bench.RunContext(stack_name="LMA-dev", region="us-east-1", results_dir=tmp_path)
+    params = bench.AsrBenchmarkParams(wav_path=str(path), bundles=["parakeet-tdt-v3-sortformer"])
+    results = bench.run(
+        ctx, type("S", (), {"user_pool_id": "p", "user_pool_client_id": "c"})(), params
+    )
+
+    assert attempts == [1, 2]
+    assert (
+        "warning" not in results[0] and results[0]["previous_attempt"]["warning"] == bench.FELL_BACK
+    )
+    assert (
+        bench.call_id_for("r1", bench.RunSpec("b", "microvm", "b"), 2) == "asr-bench-r1-b-attempt2"
+    )

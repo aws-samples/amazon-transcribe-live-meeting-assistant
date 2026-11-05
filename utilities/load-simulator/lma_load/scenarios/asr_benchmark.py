@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 SWITCH_MINUTES_ESTIMATE = 25
+FALLBACK_RETRY_WAIT_S = 120
+FELL_BACK = "the meeting fell back to Amazon Transcribe"
 DEFAULT_MEMORY_MIB = 8192
 
 
@@ -81,8 +83,9 @@ def start_metadata(spec: RunSpec, params: AsrBenchmarkParams) -> dict[str, Any]:
     }
 
 
-def call_id_for(run_id: str, spec: RunSpec) -> str:
-    return f"asr-bench-{run_id}-{spec.label}"
+def call_id_for(run_id: str, spec: RunSpec, attempt: int = 1) -> str:
+    suffix = "" if attempt == 1 else f"-attempt{attempt}"
+    return f"asr-bench-{run_id}-{spec.label}{suffix}"
 
 
 def run(ctx: RunContext, stack: LMAStackInfo, params: AsrBenchmarkParams) -> list[dict[str, Any]]:
@@ -147,7 +150,7 @@ def run(ctx: RunContext, stack: LMAStackInfo, params: AsrBenchmarkParams) -> lis
                     bundles_mod.switch_bundle(
                         session, ctx.stack_name, spec.bundle, ctx.run_id, params.template_bucket
                     )
-                result = _one_run(
+                args = (
                     ctx,
                     stack,
                     params,
@@ -163,6 +166,16 @@ def run(ctx: RunContext, stack: LMAStackInfo, params: AsrBenchmarkParams) -> lis
                     engine_groups,
                     catalog,
                 )
+                result = _one_run(*args)
+                if result.get("warning") == FELL_BACK:
+                    console.print(
+                        f"{spec.label}: fell back to Amazon Transcribe; retrying in "
+                        f"{FALLBACK_RETRY_WAIT_S}s"
+                    )
+                    time.sleep(FALLBACK_RETRY_WAIT_S)
+                    retry = _one_run(*args, attempt=2)
+                    retry["previous_attempt"] = result
+                    result = retry
             except Exception as err:
                 logger.exception("%s failed", spec.label)
                 result = {
@@ -203,9 +216,10 @@ def _one_run(
     transcriber_group,
     engine_groups,
     catalog,
+    attempt: int = 1,
 ) -> dict[str, Any]:
     pool.authenticate(user)
-    call_id = call_id_for(ctx.run_id, spec)
+    call_id = call_id_for(ctx.run_id, spec, attempt)
     console.print(f"[bold]{spec.label}[/]: streaming {wav_seconds / 60:.1f} min as {call_id!r}")
     start_ms = int(time.time() * 1000)
     streamed = asyncio.run(
@@ -247,7 +261,7 @@ def _one_run(
     else:
         measurement = measure.price_transcribe(transcriber, rates, wav_seconds)
         if spec.engine == "microvm":
-            result["warning"] = "the meeting fell back to Amazon Transcribe"
+            result["warning"] = FELL_BACK
     result["measurement"] = measurement.to_dict()
 
     segments, shrank = quality.wait_for_segments(ddb, stack.event_sourcing_table, call_id)
@@ -298,7 +312,7 @@ def render_table(
     wer_channels = (
         []
         if reference is None
-        else [("CALLER", "WER meeting (swapped / missing / extra)"), ("AGENT", "WER microphone")]
+        else [("REMOTE", "WER meeting (swapped / missing / extra)"), ("LOCAL", "WER microphone")]
         if reference.by_channel
         else [("all", "WER both channels (swapped / missing / extra)")]
     )
