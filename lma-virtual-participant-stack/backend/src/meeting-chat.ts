@@ -41,6 +41,13 @@
  * - more than `MAX_PER_MINUTE` messages in a minute, or `MAX_PER_MEETING` in
  *   the meeting.
  *
+ * The VP's own answer to a question asked in the chat (chat-ask.ts) is added
+ * as well, under the VP's display name, but only through `offerAnswer`, and
+ * only when the question itself was added: an answer to a private question, or
+ * to one asked while the capture was off, stays out like the question did. The
+ * answer read back from the chat panel is the VP's own message and is left
+ * out as such, so it is added once.
+ *
  * Webex and Amazon Chime are not covered. Webex's chat panel does not show
  * which messages are private, so its handler only calls `observe`, which
  * writes the diagnostic line and adds nothing; the Amazon Chime handler offers
@@ -90,6 +97,8 @@ export const MAX_PER_MINUTE = 60;
 export const MAX_PER_MEETING = 3000;
 /** How long a message the VP posted is recognised when it is read back. */
 export const OWN_MESSAGE_TTL_MS = 10 * 60_000;
+/** How long a captured question waits for its answer to be added; see `offerAnswer`. */
+export const ANSWER_WAIT_MS = 5 * 60_000;
 /** Platform message ids remembered, oldest forgotten first. */
 export const MAX_SEEN_IDS = 5000;
 /**
@@ -293,6 +302,12 @@ export function chatSpeaker(sender: string | null | undefined): string {
     return name.length <= MAX_SENDER_LENGTH ? name : name.slice(0, MAX_SENDER_LENGTH);
 }
 
+/** How a question is matched to its answer: by the platform's id, else by sender and text. */
+function questionKey(chat: Pick<IncomingChat, 'platform' | 'text' | 'sender' | 'id'>): string {
+    if (chat.id) return `${chat.platform}:${chat.id}`;
+    return `${chat.platform}|${(chat.sender ?? '').trim()}|${(chat.text ?? '').trim()}`;
+}
+
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,96}$/;
 
 function shortHash(text: string): string {
@@ -332,6 +347,8 @@ export interface MeetingChatDeps {
     send: (segment: TranscriptSegment) => Promise<void>;
     /** Names the VP appears under in the chat. */
     ownIdentities: () => readonly string[];
+    /** The VP's display name, the speaker of its own answers (`offerAnswer`). */
+    ownName: () => string;
     ledger?: OwnChatLedger;
     now?: () => number;
 }
@@ -345,6 +362,8 @@ export class MeetingChatCapture {
     private readonly recentIdLess = new Map<string, number>();
     private readonly occurrences = new Map<string, number>();
     private readonly addedAt: number[] = [];
+    /** Captured questions awaiting their answer, by `questionKey`, with when they were captured. */
+    private readonly openQuestions = new Map<string, number>();
     private added = 0;
     private floodNoticeAt = -Infinity;
     private offNoticeLogged = false;
@@ -378,6 +397,36 @@ export class MeetingChatCapture {
         this.diagnose(chat, 'not-covered');
     }
 
+    /**
+     * The VP's answer to `question`, posted as `messages`: each message is
+     * added to the transcript under the VP's display name when the question
+     * itself was added (pass the question as it was given to `offer`), and the
+     * capture is still on. Each question's answer is added once. Returns how
+     * many messages were added.
+     */
+    offerAnswer(question: Pick<IncomingChat, 'platform' | 'text' | 'sender' | 'id'>, messages: readonly string[]): number {
+        const key = questionKey(question);
+        const at = this.now();
+        for (const [open, capturedAt] of this.openQuestions) {
+            if (at - capturedAt >= ANSWER_WAIT_MS) this.openQuestions.delete(open);
+        }
+        if (!this.openQuestions.delete(key)) return 0;
+        // The same gates as a message, read again now: the meeting may have
+        // been paused while the agent was answering.
+        if (!this.deps.settingOn() || this.deps.redacting() !== false) return 0;
+        if (!this.deps.capturing() || !this.deps.meetingStarted()) return 0;
+        const speaker = chatSpeaker(this.deps.ownName());
+        let added = 0;
+        for (const message of messages) {
+            const text = (message ?? '').trim();
+            if (!text || this.flooded()) continue;
+            this.write(question.platform, null, speaker, text);
+            added += 1;
+        }
+        if (added) log.info(`[meeting-chat] added the chat answer to the transcript (platform=${question.platform} messages=${added})`);
+        return added;
+    }
+
     private decide(chat: IncomingChat): ChatOutcome {
         const text = (chat.text ?? '').trim();
         if (!text) return 'empty';
@@ -407,17 +456,30 @@ export class MeetingChatCapture {
         if (!this.deps.meetingStarted()) return 'not-started';
         if (this.flooded()) return 'flood';
 
-        const speaker = chatSpeaker(chat.sender);
+        this.write(chat.platform, chat.id, chatSpeaker(chat.sender), text, chat.links);
+        // A question for the meeting assistant: its answer may now be added too.
+        if (parseChatQuestion(text, true)?.question) this.openQuestions.set(questionKey(chat), this.now());
+        return 'captured';
+    }
+
+    /** Writes one message as a MEETING_CHAT segment, at the current point on the timeline. */
+    private write(
+        platform: ChatPlatform,
+        id: string | null | undefined,
+        speaker: string,
+        text: string,
+        links?: readonly string[],
+    ): void {
         const occurrenceKey = `${speaker}|${text}`;
         const occurrence = (this.occurrences.get(occurrenceKey) ?? 0) + 1;
         this.occurrences.set(occurrenceKey, occurrence);
         const at = Math.max(0, this.deps.timelineSeconds());
         const segment: TranscriptSegment = {
             channel: MEETING_CHAT_CHANNEL,
-            segmentId: chatSegmentId(chat.platform, chat.id, speaker, text, occurrence),
+            segmentId: chatSegmentId(platform, id, speaker, text, occurrence),
             startTime: at,
             endTime: at,
-            transcript: chatTranscript(text, chat.links),
+            transcript: chatTranscript(text, links),
             isPartial: false,
             speaker,
         };
@@ -425,10 +487,9 @@ export class MeetingChatCapture {
         this.addedAt.push(this.now());
         if (!this.firstCaptureLogged) {
             this.firstCaptureLogged = true;
-            log.info(`[meeting-chat] adding the meeting chat to the transcript (platform=${chat.platform})`);
+            log.info(`[meeting-chat] adding the meeting chat to the transcript (platform=${platform})`);
         }
         void this.deps.send(segment).catch((error) => log.warn('[meeting-chat] could not write a chat segment:', error));
-        return 'captured';
     }
 
     /** Marks the message seen, and says whether it was already. */

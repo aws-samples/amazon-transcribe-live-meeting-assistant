@@ -24,7 +24,9 @@ delete process.env.CALL_DATA_STREAM_NAME;
 // eslint-disable-next-line import/first
 import { END_COMMAND_VERBS, details } from './details.js';
 import { ASSISTANT_CHAT_COMMANDS } from './assistant-toggles.js';
+import { MEETING_CHAT_CHANNEL } from './channels.js';
 import {
+    ANSWER_WAIT_MS,
     CAPTURE_MEETING_CHAT_DEFAULT,
     ChatOutcome,
     ID_LESS_DUPLICATE_MS,
@@ -76,6 +78,7 @@ function harness(overrides: Partial<MeetingChatDeps> = {}): Harness {
             sent.push(segment);
         },
         ownIdentities: () => ['LMA (Alice)', 'LMA'],
+        ownName: () => 'LMA (Alice)',
         ledger,
         now: () => state.now,
         ...overrides,
@@ -147,6 +150,91 @@ test('a question for the assistant is added under its sender', () => {
     assert.equal(h.sent[0].speaker, 'Bo Chen');
 });
 
+test('a bare "LMA <question>?" is a question, not a command, so it is added', () => {
+    assert.equal(isLmaChatCommand('LMA what was just discussed?'), false);
+    const h = harness();
+    assert.equal(h.offer({ text: 'LMA what was just discussed?', id: 'q1' }), 'captured');
+});
+
+// ---------------------------------------------------------------------------
+// The VP's answer to a question
+// ---------------------------------------------------------------------------
+
+const ANSWER = ['Live Meeting Assistant: The team agreed to ship on Friday.'];
+
+test("the VP's answer to a captured question is added once, under the VP's display name", () => {
+    const h = harness();
+    const question = { platform: 'zoom' as const, text: 'LMA what was just discussed?', sender: 'Bo Chen', id: 'q1' };
+    assert.equal(h.offer({ ...question }), 'captured');
+    assert.equal(h.capture.offerAnswer(question, ANSWER), 1);
+    assert.equal(h.sent.length, 2);
+    const answer = h.sent[1];
+    assert.equal(answer.channel, MEETING_CHAT_CHANNEL);
+    assert.equal(answer.speaker, 'LMA (Alice)');
+    assert.equal(answer.transcript, ANSWER[0]);
+    assert.equal(answer.isPartial, false);
+    assert.match(answer.segmentId, /^chat-zoom-/);
+    assert.notEqual(answer.segmentId, h.sent[0].segmentId);
+    assert.equal(h.capture.offerAnswer(question, ANSWER), 0, 'one answer per question');
+    assert.equal(h.sent.length, 2);
+});
+
+test('the answer read back from the chat panel is the VP\'s own message and is not added again', () => {
+    const h = harness();
+    const question = { platform: 'teams' as const, text: 'LMA ask who owns the budget?', sender: null, id: null };
+    assert.equal(h.offer({ ...question }), 'captured');
+    // What every handler's sendMessages does before posting.
+    h.ledger.record(ANSWER);
+    assert.equal(h.capture.offerAnswer(question, ANSWER), 1);
+    assert.equal(h.offer({ platform: 'teams', text: ANSWER[0], sender: null, id: 'a1' }), 'own');
+    assert.equal(h.offer({ platform: 'teams', text: ANSWER[0], sender: 'LMA (Alice)', id: 'a2' }), 'own');
+    assert.equal(h.sent.length, 2);
+});
+
+test('an answer is not added when its question was not: private, before the meeting, or with the capture off', () => {
+    const h = harness();
+    const direct = { platform: 'zoom' as const, text: 'LMA ask anything?', sender: 'Bo Chen', id: 'd1' };
+    assert.equal(h.offer({ ...direct, audience: 'direct' }), 'direct');
+    assert.equal(h.capture.offerAnswer(direct, ANSWER), 0);
+
+    h.state.settingOn = false;
+    const off = { platform: 'zoom' as const, text: 'LMA ask anything?', sender: 'Bo Chen', id: 'o1' };
+    assert.equal(h.offer({ ...off }), 'disabled');
+    assert.equal(h.capture.offerAnswer(off, ANSWER), 0);
+    h.state.settingOn = true;
+
+    // An answer to a question this capture never saw.
+    assert.equal(h.capture.offerAnswer({ platform: 'zoom', text: 'LMA ask x?', sender: 'Bo Chen', id: 'never' }, ANSWER), 0);
+    // A captured message that is not a question.
+    assert.equal(h.offer({ text: 'hello all', id: 'h1' }), 'captured');
+    assert.equal(h.capture.offerAnswer({ platform: 'zoom', text: 'hello all', sender: 'Bo Chen', id: 'h1' }, ANSWER), 0);
+    assert.equal(h.sent.length, 1);
+});
+
+test('an answer is not added when the transcript was paused while the agent answered, or too late', () => {
+    const h = harness();
+    const first = { platform: 'zoom' as const, text: 'LMA ask one?', sender: 'Bo Chen', id: 'p1' };
+    assert.equal(h.offer({ ...first }), 'captured');
+    h.state.capturing = false;
+    assert.equal(h.capture.offerAnswer(first, ANSWER), 0);
+    h.state.capturing = true;
+
+    const second = { platform: 'zoom' as const, text: 'LMA ask two?', sender: 'Bo Chen', id: 'p2' };
+    assert.equal(h.offer({ ...second }), 'captured');
+    h.state.now += ANSWER_WAIT_MS;
+    assert.equal(h.capture.offerAnswer(second, ANSWER), 0);
+    assert.equal(h.sent.length, 2);
+});
+
+test('every handler that answers chat questions offers the answer to the capture', () => {
+    for (const file of ['zoom.ts', 'zoom-sdk.ts', 'teams.ts', 'teams-sdk.ts', 'google-meet.ts']) {
+        const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
+        const call = source.indexOf('void startChatAnswer(');
+        assert.ok(call >= 0, `${file} does not answer chat questions`);
+        assert.ok(source.slice(call, call + 600).includes('meetingChat.offerAnswer('), `${file} does not add the answer`);
+    }
+});
+
 // ---------------------------------------------------------------------------
 // The VP's own messages
 // ---------------------------------------------------------------------------
@@ -194,6 +282,7 @@ test('noteSentChat feeds the ledger the capture reads by default', () => {
         timelineSeconds: () => 1,
         send: async () => undefined,
         ownIdentities: () => [],
+        ownName: () => 'LMA',
     });
     noteSentChat(['Thanks Bo — I will head out now.']);
     assert.equal(ownChatLedger.matches('Thanks Bo — I will head out now.'), true);
