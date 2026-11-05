@@ -801,6 +801,13 @@ type VideoKeyframe implements DynamoDbBase @aws_cognito_user_pools
 	# The text on the frame, read once by a vision model after it is stored;
 	# empty when it holds none, absent until it has been read.
 	SlideText: String
+	# What the frame shows, read with its text: SCREEN (shared content),
+	# CAMERA (the meeting's camera video) or MIXED (both). Absent until the
+	# text has been read, and on frames read before it was. A CAMERA frame is
+	# left out of the summary, the assistant's view and the Screen share strip.
+	ContentKind: String
+	# A few words naming the frame's shared content, when the model gave them.
+	Title: String
 	Owner: String
 	SharedWith: String
 	# Signed links to the two images, valid for an hour, filled in only by

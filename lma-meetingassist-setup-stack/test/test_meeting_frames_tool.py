@@ -358,3 +358,42 @@ def test_the_tool_downloads_only_the_pictures_it_sends(tool, monkeypatch):
     assert downloads == [] and metered == []
     assert meeting_frames.images_in(get_meeting_frames(last=2, look_at_pictures=True)) == 2
     assert len(downloads) == 2
+
+
+# ── camera frames ───────────────────────────────────────────────────────────
+
+
+def camera(f: Dict[str, Any]) -> Dict[str, Any]:
+    return {**f, "SlideText": "", "ContentKind": "CAMERA"}
+
+
+def test_camera_frames_are_not_chosen_and_a_slide_stays_up_until_the_camera_replaced_it():
+    frames = [frame(30), camera(frame(95)), frame(240), camera(frame(600))]
+    selected = meeting_frames.select_frames(frames, last=5)
+    assert ids(selected) == [30, 240]
+    assert [until for _, until in selected] == [95, 600]
+    assert ids(meeting_frames.select_frames(frames, at=100)) == [30]
+    # Frames with no ContentKind -- read before it was stored -- are kept.
+    assert ids(meeting_frames.select_frames(FRAMES, last=5)) == [30, 95, 240, 600]
+
+
+def test_a_frames_title_is_given_with_it():
+    titled = {**with_text(frame(30), "Budget"), "ContentKind": "SCREEN", "Title": "Q3 budget"}
+    result = result_for(meeting_frames.select_frames([titled], last=1))
+    assert "Shows: Q3 budget" in texts(result)
+
+
+def test_the_tool_counts_only_frames_of_shared_content(tool, monkeypatch):
+    monkeypatch.setattr(
+        handler_module.meeting_frames, "load_keyframes",
+        lambda _run, _cid: [camera(frame(10)), frame(30), camera(frame(95))],
+    )
+    get_meeting_frames, _ = tool()
+    text = texts(get_meeting_frames(start_time="1:40", end_time="2:00"))
+    assert "None of the meeting's 1 key frame(s)" in text
+    assert "the first went up at 00:30" in text
+
+
+def test_the_frames_query_asks_for_what_each_frame_shows():
+    assert "ContentKind" in meeting_frames.KEYFRAMES_QUERY
+    assert "Title" in meeting_frames.KEYFRAMES_QUERY

@@ -113,7 +113,10 @@ to 1080p, which keeps CPU and bandwidth modest while staying legible for slides.
 While the video arrives, the transcriber also keeps a **key frame** each time
 the picture changes to something new and holds still — each slide, each page —
 and stores it on the meeting; see
-[Meeting Video and Key Frames](meeting-video.md#desktop-video).
+[Meeting Video and Key Frames](meeting-video.md#desktop-video). The app captures
+the whole display, so a meeting window showing camera video also yields frames;
+those are recognised when their text is read and left out of the summary and
+the Screen share tab ([Camera frames](meeting-video.md#camera-frames)).
 
 When screen video is enabled, the one-time consent gate and the live recording
 view both show a **"Screen video is ON"** notice, since screen contents are more

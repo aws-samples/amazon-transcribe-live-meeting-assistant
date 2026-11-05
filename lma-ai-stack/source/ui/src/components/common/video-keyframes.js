@@ -11,6 +11,24 @@
  */
 
 /**
+ * Whether a frame shows shared content rather than the meeting's camera video.
+ * ContentKind is read with the frame's text (SCREEN, CAMERA or MIXED); a frame
+ * without it -- not read yet, or read before it was stored -- is shown.
+ */
+export const showsSharedContent = (frame) => frame?.ContentKind !== 'CAMERA';
+
+/**
+ * A frame's label on the strip and in the deck: its own Title when the model
+ * gave one, else the titles of the chapters it begins (chapterTitlesByFrame),
+ * else ''.
+ */
+export const frameLabel = (frame, chapterTitles) => {
+  const title = typeof frame?.Title === 'string' ? frame.Title.trim() : '';
+  if (title) return title;
+  return (chapterTitles?.get(frame?.FrameId) || []).join(' / ');
+};
+
+/**
  * The frames of `existing` and `incoming` in time order, one per FrameId. A
  * frame in `incoming` replaces the stored one: it carries fresher signed links.
  * FrameId starts with the zero-padded time in milliseconds, so it sorts in

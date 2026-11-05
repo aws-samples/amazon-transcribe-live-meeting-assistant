@@ -10,6 +10,8 @@ one on screen at a moment -- each with its text (read once when the frame was
 stored) and what was said while it was on screen. The pictures themselves go
 to the model only when the text is not enough: when the agent asks to look
 (a chart, a diagram, a layout), or for a frame whose text has not been read.
+Frames of the meeting's camera video rather than shared content (ContentKind
+CAMERA, decided when the text was read) are not handed to the agent at all.
 
 Frames are read through the ``getVideoKeyframes`` query, which signs short-lived
 links to the images; this function's role signs with IAM and is answered as the
@@ -42,7 +44,9 @@ MAX_IMAGE_BYTES = 3_500_000
 KEYFRAMES_QUERY = """
 query GetVideoKeyframes($callId: ID!, $limit: Int, $nextToken: String) {
   getVideoKeyframes(callId: $callId, limit: $limit, nextToken: $nextToken) {
-    VideoKeyframes { FrameId Timestamp VideoOffset Width Height SlideText ImageSignedUrl }
+    VideoKeyframes {
+      FrameId Timestamp VideoOffset Width Height SlideText ContentKind Title ImageSignedUrl
+    }
     nextToken
   }
 }
@@ -99,6 +103,16 @@ def format_time(seconds: Any) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
 
 
+#: The ContentKind of a key frame of the meeting's camera video rather than
+#: shared content, as the key frame text extractor stores it.
+CAMERA_CONTENT = "CAMERA"
+
+
+def shows_shared_content(frame: Mapping[str, Any]) -> bool:
+    """Whether a frame shows shared content: all but CAMERA ones (none, before it was read)."""
+    return frame.get("ContentKind") != CAMERA_CONTENT
+
+
 def with_spans(frames: Sequence[Mapping[str, Any]]) -> List[Tuple[Mapping[str, Any], Optional[float]]]:
     """Each frame in time order with the time the next one replaced it (None for the last)."""
     ordered = sorted(
@@ -123,9 +137,11 @@ def select_frames(
 
     ``at``: the one on screen at that time. ``start``/``end``: those on screen at
     any point in the range. Otherwise the last ``last`` (at least one). At most
-    MAX_FRAMES, keeping the latest.
+    MAX_FRAMES, keeping the latest. Frames of the camera video are left out
+    after the spans are worked out, so a slide is on screen until the camera
+    replaced it.
     """
-    spans = with_spans(frames)
+    spans = [span for span in with_spans(frames) if shows_shared_content(span[0])]
     if not spans:
         return []
     if at is not None:
@@ -267,6 +283,9 @@ def build_tool_result(
             f"from {format_time(went_up)} (still the latest)"
         )
         lines = [f"Frame {frame_id}: on screen {span}."]
+        title = frame.get("Title")
+        if isinstance(title, str) and title.strip():
+            lines.append(f"Shows: {title.strip()}")
         if show_inline:
             lines.append(f"Image markdown: {frame_markdown(frame)}")
         slide_text = frame.get("SlideText")

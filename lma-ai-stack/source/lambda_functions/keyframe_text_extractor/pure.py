@@ -10,7 +10,7 @@ a frame's image is, what the model is asked, and what of its answer is kept.
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
 FRAME_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -22,13 +22,37 @@ MAX_TEXT_CHARS = 6000
 #: What the model answers when the picture holds no readable text.
 NO_TEXT = "NO TEXT"
 
+#: What a frame shows, the first line of the model's answer. SCREEN: shared
+#: slides, documents or applications. CAMERA: the meeting's video tiles, people.
+#: MIXED: both, with shared content worth reading. An answer without a readable
+#: line is taken as SCREEN, which is how every frame was treated before.
+SCREEN, CAMERA, MIXED = "SCREEN", "CAMERA", "MIXED"
+CONTENT_KINDS = (SCREEN, CAMERA, MIXED)
+
+#: What is kept of a frame's title: the prompt asks for eight words at most.
+MAX_TITLE_WORDS = 12
+MAX_TITLE_CHARS = 100
+
 PROMPT = (
-    "This is a picture of the screen shared in a meeting: a slide, a document or an application. "
-    "Transcribe all of the readable text on it, top to bottom, one line per line of text, keeping "
-    "headings, bullets and numbers as they are. If it shows a chart, diagram or picture, add one "
-    "line in square brackets saying what it shows, for example [Bar chart of revenue by quarter]. "
-    "Do not describe or name people, faces or camera video. Output only the text. If there is no "
-    f"readable text and nothing else to describe, answer exactly: {NO_TEXT}"
+    "This is a picture of a computer screen during a meeting. It may show content shared in the "
+    "meeting (a slide, a document, a web page or an application), the meeting's camera video "
+    "(tiles or a room camera showing people), or both.\n"
+    "Answer in exactly this form:\n"
+    "CONTENT: SCREEN, CAMERA or MIXED\n"
+    "TITLE: a few words naming the main shared content\n"
+    "then the text.\n"
+    "CONTENT is SCREEN when the picture is mainly shared content, CAMERA when it is mainly camera "
+    "video of people with no shared content worth reading, and MIXED when it shows both and the "
+    "shared content is worth reading. TITLE names the main shared content in at most 8 words, "
+    "for example TITLE: Q3 revenue review; for CAMERA write TITLE: none.\n"
+    "Then transcribe the readable text of the main shared content only, top to bottom, one line "
+    "per line of text, keeping headings, bullets and numbers as they are. Leave out the meeting's "
+    "video tiles and their name labels, small terminal windows and status strips, the operating "
+    "system's menu bar, taskbar and dock, and window title bars. If the shared content shows a "
+    "chart, diagram or picture, add one line in square brackets saying what it shows, for example "
+    "[Bar chart of revenue by quarter]. Do not describe or name people, faces or camera video. "
+    "Write each line once; do not repeat text. If there is no readable shared text and nothing "
+    f"else to describe, write exactly {NO_TEXT} after the two header lines."
 )
 
 
@@ -72,15 +96,146 @@ def request_from(event: Mapping[str, Any]) -> Optional[Mapping[str, str]]:
     return {"CallId": call_id, "FrameId": frame_id, "ImageUrl": image_url}
 
 
-def clean_text(answer: Any) -> str:
-    """What is stored as the frame's text: the model's answer, trimmed; "" for no text."""
+#: A run of the same words or lines, one after another, this many times or more
+#: is the model looping, not the slide: kept once. Slides do repeat a word or a
+#: table cell a few times, so the bar is above that; units without a letter or
+#: digit in them (table rules, "| --- |") are never collapsed.
+MIN_LOOP_REPEATS = 4
+#: The longest unit, in words, a loop is looked for in.
+MAX_LOOP_WORDS = 12
+#: The same, for whole lines; three identical lines in a row is already a loop.
+MIN_LINE_REPEATS = 3
+MAX_LOOP_LINES = 5
+#: Text this long whose distinct words are fewer than this share of all its
+#: words is a loop that varies too much to collapse; it is dropped. The
+#: measured loop is 5 distinct words in hundreds; a page of templated rows
+#: ("Item 1 covers budget, hiring and ...") is about 10%, and is kept.
+MIN_WORDS_FOR_RATIO = 60
+MIN_UNIQUE_WORD_RATIO = 0.08
+
+_HEADER = re.compile(r"^[\s*_#>`-]*(CONTENT|TITLE)[\s*_]*[:=\-][\s*_]*(.*?)[\s*_]*$", re.IGNORECASE)
+_KIND = re.compile(r"\b(SCREEN|CAMERA|MIXED)\b", re.IGNORECASE)
+_NO_TITLE = {"", "none", "n/a", "na", "-", "no title", "(none)", "[none]"}
+_FENCE = re.compile(r"^```[a-z]*\n?|\n?```$")
+_WORD = re.compile(r"\w")
+
+
+def _collapse_runs(units: list, min_repeats: int, max_length: int, key=lambda u: u) -> list:
+    """``units`` with each run of a block repeated ``min_repeats`` times or more kept once."""
+    keys = [key(unit) for unit in units]
+    kept: list = []
+    i = 0
+    while i < len(units):
+        step = 0
+        for length in range(1, min(max_length, len(units) - i) + 1):
+            block = keys[i : i + length]
+            if not any(_WORD.search(k) for k in block):
+                continue
+            repeats = 1
+            while keys[i + repeats * length : i + (repeats + 1) * length] == block:
+                repeats += 1
+            if repeats >= min_repeats:
+                kept.extend(units[i : i + length])
+                step = repeats * length
+                break
+        if not step:
+            kept.append(units[i])
+            step = 1
+        i += step
+    return kept
+
+
+def collapse_repetition(text: str) -> str:
+    """The text with a looping model's repeated words and lines kept once.
+
+    Repeated lines are found on the lines with their spacing folded; repeated
+    runs of words within each line after that.
+    """
+    lines = _collapse_runs(
+        text.split("\n"), MIN_LINE_REPEATS, MAX_LOOP_LINES, key=lambda line: " ".join(line.split())
+    )
+    lines = [
+        " ".join(_collapse_runs(line.split(), MIN_LOOP_REPEATS, MAX_LOOP_WORDS))
+        if len(line.split()) >= MIN_LOOP_REPEATS
+        else line
+        for line in lines
+    ]
+    return "\n".join(lines)
+
+
+def mostly_repeated(text: str) -> bool:
+    """Whether the text is long and made of a few words said over and over."""
+    words = re.findall(r"\w+", text.lower())
+    if len(words) < MIN_WORDS_FOR_RATIO:
+        return False
+    return len(set(words)) / len(words) < MIN_UNIQUE_WORD_RATIO
+
+
+def clean_text(answer: Any, truncated: bool = False) -> str:
+    """What is stored as the frame's text: the model's answer, trimmed; "" for no text.
+
+    A loop -- the same words or lines over and over, which a model reading a
+    small, dense strip of text can fall into -- is kept once, and text that is
+    still mostly repetition after that is dropped. ``truncated``: the model
+    stopped at its token ceiling, so its last line is cut off and is left out.
+    """
     if not isinstance(answer, str):
         return ""
     text = answer.strip()
     # Some models wrap their answer in a fence despite being asked not to.
-    text = re.sub(r"^```[a-z]*\n?|\n?```$", "", text).strip()
+    text = _FENCE.sub("", text).strip()
     if text.upper().rstrip(".") == NO_TEXT:
+        return ""
+    if truncated and "\n" in text:
+        text = text.rsplit("\n", 1)[0].rstrip()
+    text = collapse_repetition(text).strip()
+    if mostly_repeated(text):
         return ""
     if len(text) > MAX_TEXT_CHARS:
         text = text[:MAX_TEXT_CHARS].rsplit("\n", 1)[0]
     return text
+
+
+def clean_title(value: str) -> str:
+    """A TITLE line's value as stored: one line, unquoted, a few words; "" for none."""
+    title = " ".join(value.split()).strip("\"'`*[]()")
+    title = title.strip().rstrip(".")
+    if title.lower() in _NO_TITLE:
+        return ""
+    words = title.split()
+    if len(words) > MAX_TITLE_WORDS:
+        title = " ".join(words[:MAX_TITLE_WORDS])
+    return title[:MAX_TITLE_CHARS].strip()
+
+
+def read_answer(answer: Any, truncated: bool = False) -> Tuple[str, str, str]:
+    """ContentKind, Title and text from the model's answer.
+
+    The header is read leniently (any case, Markdown emphasis), but only as a
+    header: a CONTENT line naming one of the three kinds, then optionally a
+    TITLE line. An answer that does not begin so -- a model that ignored the
+    form, or a slide whose own first line is "Title: ..." -- is SCREEN with no
+    title, and all of it is the text, as before the header was asked for. A
+    CAMERA frame keeps no title and no text: what a model reads off a picture
+    of people is name labels and the meeting's controls.
+    """
+    if not isinstance(answer, str):
+        return SCREEN, "", ""
+    lines = _FENCE.sub("", answer.strip()).strip().split("\n")
+    kind, title = SCREEN, ""
+    header = _HEADER.match(lines[0])
+    found = (
+        _KIND.search(header.group(2)) if header and header.group(1).upper() == "CONTENT" else None
+    )
+    if found:
+        kind = found.group(1).upper()
+        lines.pop(0)
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        header = _HEADER.match(lines[0]) if lines else None
+        if header and header.group(1).upper() == "TITLE":
+            title = clean_title(header.group(2))
+            lines.pop(0)
+    if kind == CAMERA:
+        return CAMERA, "", ""
+    return kind, title, clean_text("\n".join(lines), truncated=truncated)

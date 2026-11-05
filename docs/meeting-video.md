@@ -19,7 +19,9 @@ was on screen. The meeting page shows them as a strip of thumbnails, below.
 A meeting with key frames has a **Screen share** tab on its page, with the
 number of frames in its label: a strip of thumbnails in time order, each
 labelled with the time it went up. The tab appears once the first frames have
-loaded, including during a live meeting when the first frame is taken.
+loaded, including during a live meeting when the first frame is taken. Frames
+of the meeting's camera video rather than shared content are not shown or
+counted (see [Camera frames](#camera-frames)).
 
 - **Selecting a thumbnail** shows the picture large and moves the transcript to
   that time, highlighting the segment that was under way, for when the
@@ -44,8 +46,9 @@ loaded, including during a live meeting when the first frame is taken.
   shown are read again if any of them was loaded before its text was read
   (the text follows its frame by a few seconds). A selected frame shows its
   text under the picture.
-- **Chapters**: a frame that begins one of the meeting's
-  [chapters](#chapters) is labelled with the chapter's title.
+- **Labels**: a frame is labelled with its own title, a few words read with
+  its [slide text](#slide-text); a frame without one that begins one of the
+  meeting's [chapters](#chapters) is labelled with the chapter's title.
 - **Export slides (PDF)** opens every frame as a printable deck; see
   [Exporting the slides](#exporting-the-slides).
 
@@ -60,8 +63,14 @@ Each key frame's text is read once, a few seconds after the frame is stored: a
 vision model (**Key frame text** in the Amazon Bedrock Models section of the
 [Configuration page](configuration-guide.md), Amazon Nova Lite unless changed) transcribes the readable text, top to bottom, and adds a line in
 brackets for a chart, diagram or picture, for example
-`[Bar chart of revenue by quarter]`. It is told not to describe or name people.
-The text is stored on the frame (`SlideText`; empty when the frame holds none)
+`[Bar chart of revenue by quarter]`. It is told not to describe or name people,
+and to leave out the meeting's video tiles, small terminal windows and status
+strips, the operating system's menu bar and taskbar, and window title bars. The
+model's answer begins with two lines: what the frame shows (`CONTENT: SCREEN`,
+`CAMERA` or `MIXED`; see [Camera frames](#camera-frames)) and a title of at most
+eight words naming the main shared content. An answer without them is read as
+`SCREEN` with no title, all of it text. The text is stored on the frame
+(`SlideText`; empty when the frame holds none), with `ContentKind` and `Title`,
 and is what:
 
 - the [meeting assistant](#asking-the-assistant-about-the-shared-screen) reads
@@ -86,6 +95,32 @@ meeting's frames with their true text known:
 Every method read every word; the model costs a tenth of Textract and also says
 what a chart shows, which Textract does not. The text read is metered against
 the meeting under **Slide text** in its [cost estimate](meeting-cost-estimate.md).
+
+A model reading a small, dense strip of text can fall into a loop, writing the
+same few words until it reaches its output budget (measured on a Desktop
+Capture App meeting: three of 24 frames). The budget is 1,200 tokens, about
+twice a dense page, and what is kept collapses a run of words or lines repeated
+in a row to one copy and drops text that is still mostly repetition after that.
+An answer cut off at the budget is logged and keeps its text, without its last,
+cut-off line.
+
+### Camera frames
+
+A key frame is taken whenever the picture changes and then holds still, so a
+camera view that fills the screen (a meeting window showing a room camera, in
+the Desktop Capture App's capture of the whole display) yields frames when the
+people in it move. On one measured meeting 10 of 24 frames were of that kind.
+The vision model therefore also says what each frame shows: `SCREEN` (shared
+slides, documents or applications), `CAMERA` (the meeting's video tiles or
+camera), or `MIXED` (both, with shared content worth reading). A `CAMERA` frame
+is stored with no text and no title, and is left out of the
+[screen share summary](#screen-share-summary), the slide changes the
+[chapters](#chapters) are placed by, the meeting's knowledge-base document, the
+[assistant's view](#asking-the-assistant-about-the-shared-screen), the
+**Screen share** strip and the exported deck. Its images are kept like any
+other frame's. Frames read before `ContentKind` was stored, or not yet read,
+have none and are treated as shared content. How well the model tells the kinds
+apart depends on the model.
 
 ## Screen share summary
 
@@ -181,8 +216,9 @@ list beside the summary on the **Overview** tab, in place of the section itself.
 Selecting a chapter opens the **Transcript** tab at its time and, after the
 meeting, plays the recording from there. The chapters are also marks on the
 seek bar of the page's [player](web-ui-guide.md#the-recording-player). In the **Screen share** strip, the frame that went up within
-30 seconds of a chapter's start is labelled with the chapter; a chapter that
-began without a change of slide labels no frame.
+30 seconds of a chapter's start is labelled with the chapter, unless the frame
+has a title of its own; a chapter that began without a change of slide labels
+no frame, and a camera frame is never matched.
 
 How it is built:
 
@@ -231,8 +267,8 @@ to be less reliable on real meetings.
 
 **Export slides (PDF)**, on the **Screen share** tab, opens the meeting's
 key frames in a new tab as a deck, one landscape page per frame in time order,
-each with its picture at full size (1568 pixels wide), its time, the chapter it
-begins, and its [slide text](#slide-text). It then opens the browser's print
+each with its picture at full size (1568 pixels wide), its time, its label (as
+on the strip), and its [slide text](#slide-text); camera frames are left out. It then opens the browser's print
 dialog, where **Save as PDF** saves it. All of the meeting's frames are read
 again for the export, so their links are fresh, and the dialog opens once
 the pictures have loaded. The tab opens as soon as the button is selected, and
@@ -440,6 +476,8 @@ finds the images. The item has:
 | `ShareDetected` | `true` when the frame was taken while the platform showed a share; absent on platforms without the signal and for desktop video. |
 | `ChangeScore` | The part of the picture that differed from the previous key frame. |
 | `SlideText` | The text on the frame, read once after it is stored (see [Slide text](#slide-text)); empty when it holds none. |
+| `ContentKind` | What the frame shows, read with its text: `SCREEN`, `CAMERA` or `MIXED` (see [Camera frames](#camera-frames)). Absent until read, and on frames read before it was stored. |
+| `Title` | A few words naming the frame's shared content, when the model gave them. |
 
 ### Retention, access and deletion
 

@@ -21,9 +21,13 @@
  * from getVideoKeyframes that last an hour, so a thumbnail that fails to load
  * reloads the frames, at most once a minute.
  *
- * A frame that begins one of the meeting's chapters (from its summary) is
- * labelled with the chapter, and **Export slides (PDF)** prints every frame as
- * a deck (common/slide-deck.js).
+ * A frame is labelled with its Title, read with its text, or else, when it
+ * begins one of the meeting's chapters (from its summary), with the chapter;
+ * **Export slides (PDF)** prints every frame as a deck (common/slide-deck.js).
+ * Frames of the meeting's camera video rather than shared content
+ * (ContentKind CAMERA) are loaded, for the clock anchors, but not shown,
+ * counted, labelled or exported. A frame shown before its text was read is
+ * classified when the frames are next read.
  *
  * On the meeting page the strip is the Screen share tab. `onFramesChange` tells
  * the page how many frames it has loaded (which is what decides whether the
@@ -41,7 +45,14 @@ import { Box, Button, Container, Header, SpaceBetween, Spinner, TextFilter } fro
 
 import getVideoKeyframes from '../../graphql/queries/getVideoKeyframes';
 import onAddVideoKeyframe from '../../graphql/queries/onAddVideoKeyframe';
-import { formatFrameTime, frameMatches, matchSnippet, mergeKeyframes } from '../common/video-keyframes';
+import {
+  formatFrameTime,
+  frameLabel,
+  frameMatches,
+  matchSnippet,
+  mergeKeyframes,
+  showsSharedContent,
+} from '../common/video-keyframes';
 import { chapterTitlesByFrame } from '../common/chapters';
 import { clockAnchorsFromFrames } from '../meeting-player/playback-sync';
 import { openDeckTab as defaultOpenDeckTab, printDeck as defaultPrintDeck } from '../common/slide-deck';
@@ -291,11 +302,14 @@ const VideoTimeline = ({
     if (onClockAnchors) onClockAnchors(clockAnchorsFromFrames(frames));
   }, [frames, onClockAnchors]);
 
-  // How many frames are loaded, whether there are more, and whether the first
+  // The frames of shared content: what the strip shows and counts.
+  const sharedFrames = useMemo(() => frames.filter(showsSharedContent), [frames]);
+
+  // How many frames are shown, whether there are more, and whether the first
   // page has been read (`loaded`), for the page's tab label and its player.
   useEffect(() => {
-    if (onFramesChange) onFramesChange({ count: frames.length, more: Boolean(nextToken), loaded });
-  }, [frames.length, nextToken, loaded, onFramesChange]);
+    if (onFramesChange) onFramesChange({ count: sharedFrames.length, more: Boolean(nextToken), loaded });
+  }, [sharedFrames.length, nextToken, loaded, onFramesChange]);
 
   // A frame selected from elsewhere: shown large, and its thumbnail brought into
   // view. Read by id when it is on a page not loaded yet.
@@ -379,16 +393,18 @@ const VideoTimeline = ({
   const selected = frames.find((f) => f.FrameId === selectedId);
   const searching = Boolean(search.trim());
   const shown = useMemo(
-    () => (search.trim() ? frames.filter((f) => frameMatches(f, search)) : frames),
-    [frames, search],
+    () => (search.trim() ? sharedFrames.filter((f) => frameMatches(f, search)) : sharedFrames),
+    [sharedFrames, search],
   );
 
   // A search covers the whole meeting: the pages not loaded yet are loaded,
-  // one after another, while it is typed. A page that fails stops it; Load
-  // more tries again.
+  // one after another, while it is typed. So do pages that held only camera
+  // frames, which would otherwise leave nothing to scroll to the next page
+  // with. A page that fails stops it; Load more tries again.
+  const nothingShown = !sharedFrames.length;
   useEffect(() => {
-    if (searching && nextToken && !loading && !error) loadPage({ token: nextToken });
-  }, [searching, nextToken, loading, error, loadPage]);
+    if ((searching || nothingShown) && nextToken && !loading && !error) loadPage({ token: nextToken });
+  }, [searching, nothingShown, nextToken, loading, error, loadPage]);
 
   // A frame's text is read a few seconds after the frame is stored, so a frame
   // shown before then has none yet. Starting a search reads the frames shown
@@ -404,8 +420,9 @@ const VideoTimeline = ({
     if (framesRef.current.some((f) => typeof f.SlideText !== 'string')) refreshShown();
   }, [searching, refreshShown]);
 
-  if (loaded && !frames.length && !error) {
-    // Nothing to show: a meeting without video, or before its first frame.
+  if (loaded && !sharedFrames.length && !error) {
+    // Nothing to show: a meeting without video, before its first frame, or
+    // with only camera frames so far.
     return null;
   }
   if (!loaded) return null;
@@ -415,7 +432,7 @@ const VideoTimeline = ({
       header={
         <Header
           variant="h4"
-          counter={`(${frames.length}${nextToken ? '+' : ''})`}
+          counter={`(${sharedFrames.length}${nextToken ? '+' : ''})`}
           description="The shared screen each time it changed. Select one to see it full size."
           actions={
             <Button iconName="download" loading={exporting} onClick={exportDeck}>
@@ -445,33 +462,36 @@ const VideoTimeline = ({
           <Box color="text-body-secondary">No frame shows that text.</Box>
         )}
         <div className="video-timeline-strip" ref={stripRef} onScroll={onStripScroll} data-testid="video-timeline">
-          {shown.map((frame) => (
-            <button
-              type="button"
-              key={frame.FrameId}
-              data-frame-id={frame.FrameId}
-              className={`video-timeline-frame${frame.FrameId === selectedId ? ' video-timeline-frame-selected' : ''}`}
-              onClick={() => select(frame)}
-              aria-pressed={frame.FrameId === selectedId}
-              title={`Key frame at ${formatFrameTime(frame.Timestamp)}`}
-            >
-              {chapterTitles.has(frame.FrameId) && (
-                <span className="video-timeline-chapter">{chapterTitles.get(frame.FrameId).join(' / ')}</span>
-              )}
-              {frame.ThumbnailSignedUrl ? (
-                <img
-                  src={frame.ThumbnailSignedUrl}
-                  alt={`Shared screen at ${formatFrameTime(frame.Timestamp)}`}
-                  loading="lazy"
-                  onError={onImageError}
-                />
-              ) : (
-                <span className="video-timeline-missing">No image</span>
-              )}
-              <span className="video-timeline-time">{formatFrameTime(frame.Timestamp)}</span>
-              {searching && <span className="video-timeline-snippet">{matchSnippet(frame, search)}</span>}
-            </button>
-          ))}
+          {shown.map((frame) => {
+            const label = frameLabel(frame, chapterTitles);
+            return (
+              <button
+                type="button"
+                key={frame.FrameId}
+                data-frame-id={frame.FrameId}
+                className={`video-timeline-frame${
+                  frame.FrameId === selectedId ? ' video-timeline-frame-selected' : ''
+                }`}
+                onClick={() => select(frame)}
+                aria-pressed={frame.FrameId === selectedId}
+                title={`Key frame at ${formatFrameTime(frame.Timestamp)}`}
+              >
+                {label && <span className="video-timeline-chapter">{label}</span>}
+                {frame.ThumbnailSignedUrl ? (
+                  <img
+                    src={frame.ThumbnailSignedUrl}
+                    alt={`Shared screen at ${formatFrameTime(frame.Timestamp)}`}
+                    loading="lazy"
+                    onError={onImageError}
+                  />
+                ) : (
+                  <span className="video-timeline-missing">No image</span>
+                )}
+                <span className="video-timeline-time">{formatFrameTime(frame.Timestamp)}</span>
+                {searching && <span className="video-timeline-snippet">{matchSnippet(frame, search)}</span>}
+              </button>
+            );
+          })}
           <div ref={sentinelRef} className="video-timeline-sentinel" />
           {loading && <Spinner />}
         </div>

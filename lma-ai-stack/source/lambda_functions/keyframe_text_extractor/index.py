@@ -6,11 +6,15 @@
 Invoked asynchronously by the call event processor for each key frame it stores
 (docs/meeting-video.md). The frame's large image is read from the recordings
 bucket and given to a vision model (the Key frame text model of the
-Configuration page's Amazon Bedrock Models section), which transcribes
-the readable text and notes any chart or picture in a line; the result is
-stored on the frame as ``SlideText``. The meeting assistant reads it before it
-looks at a picture, the meeting page searches it, and the meeting's document in
-the meeting-history knowledge base includes it.
+Configuration page's Amazon Bedrock Models section), which says what the
+frame shows (``ContentKind``: SCREEN for shared content, CAMERA for the
+meeting's camera video, MIXED for both), names the shared content in a few
+words (``Title``), and transcribes its readable text, noting any chart or
+picture in a line; the text is stored on the frame as ``SlideText``. The
+meeting assistant reads it before it looks at a picture, the meeting page
+searches it, and the meeting's document in the meeting-history knowledge base
+includes it. A CAMERA frame is stored with no text and no title, and the
+readers leave it out (docs/meeting-video.md, "Camera frames").
 
 A vision model rather than Amazon Textract: on the measured frames both read
 every word, and the model also says what a chart shows, for a tenth of the
@@ -28,11 +32,11 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 import boto3
 import pure
-from bedrock_compat import build_inference_config, extract_text
+from bedrock_compat import TRUNCATED_STOP_REASON, build_inference_config, extract_text
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
@@ -55,8 +59,10 @@ KEYFRAMES_PREFIX = os.environ.get("KEYFRAMES_PREFIX", "lma-video-keyframes/")
 FALLBACK_MODEL_ID = "amazon.nova-lite-v1:0"
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 
-#: Room for a dense page of text and a line about a chart.
-MAX_OUTPUT_TOKENS = 2000
+#: Room for a dense page of text (about 2,000 characters, 600 tokens) and a
+#: line about a chart. Kept close to that: an answer that reaches it is almost
+#: always a model repeating itself, and every token of the loop is billed.
+MAX_OUTPUT_TOKENS = 1200
 #: Largest image passed to the model (Bedrock accepts up to 3.75 MB).
 MAX_IMAGE_BYTES = 3_500_000
 
@@ -89,8 +95,8 @@ def model_id() -> str:
     )
 
 
-def read_text(image: bytes, call_id: str, model: str) -> str:
-    """The frame's text, from the model, metered against the meeting."""
+def read_text(image: bytes, call_id: str, model: str) -> Tuple[str, str, str]:
+    """The frame's ContentKind, Title and text, from the model, metered against the meeting."""
     response = BEDROCK.converse(
         modelId=model,
         messages=[
@@ -107,7 +113,14 @@ def read_text(image: bytes, call_id: str, model: str) -> str:
     METERING.record(
         call_id, "SlideText", bedrock_service(model), bedrock_usage(response.get("usage"))
     )
-    return pure.clean_text(extract_text(response))
+    truncated = response.get("stopReason") == TRUNCATED_STOP_REASON
+    if truncated:
+        # Suspect: at this budget the model has usually been looping. What is
+        # left once clean_text has collapsed the loop is kept.
+        LOGGER.warning(
+            "The answer for a key frame of %s reached %d tokens", call_id, MAX_OUTPUT_TOKENS
+        )
+    return pure.read_answer(extract_text(response), truncated=truncated)
 
 
 def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
@@ -157,7 +170,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
 
     try:
         model = model_id()
-        text = read_text(body, call_id, model)
+        kind, title, text = read_text(body, call_id, model)
     except ClientError as error:
         LOGGER.error(
             "The model could not read key frame %s: %s", frame_id, error.response["Error"]["Code"]
@@ -169,18 +182,24 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         LOGGER.error("The model gave no text for key frame %s: %s", frame_id, error)
         return {"status": "failed", "reason": "no answer"}
 
+    update = "SET SlideText = :t, ContentKind = :k, SlideTextModel = :m, UpdatedAt = :u"
+    values = {
+        ":t": {"S": text},
+        ":k": {"S": kind},
+        ":m": {"S": model},
+        ":u": {"S": datetime.now(timezone.utc).isoformat()},
+    }
+    if title:
+        update += ", Title = :n"
+        values[":n"] = {"S": title}
     try:
         DYNAMODB.update_item(
             TableName=EVENT_SOURCING_TABLE,
             Key=frame_key(call_id, frame_id),
-            UpdateExpression="SET SlideText = :t, SlideTextModel = :m, UpdatedAt = :u",
+            UpdateExpression=update,
             # Not onto a frame deleted with its meeting meanwhile.
             ConditionExpression="attribute_exists(PK)",
-            ExpressionAttributeValues={
-                ":t": {"S": text},
-                ":m": {"S": model},
-                ":u": {"S": datetime.now(timezone.utc).isoformat()},
-            },
+            ExpressionAttributeValues=values,
         )
     except ClientError as error:
         if error.response["Error"]["Code"] == "ConditionalCheckFailedException":
@@ -191,5 +210,5 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             error.response["Error"]["Code"],
         )
         return {"status": "failed", "reason": "not stored"}
-    LOGGER.info("Read key frame %s of %s: %d characters", frame_id, call_id, len(text))
-    return {"status": "read", "characters": len(text)}
+    LOGGER.info("Read key frame %s of %s: %s, %d characters", frame_id, call_id, kind, len(text))
+    return {"status": "read", "characters": len(text), "contentKind": kind}

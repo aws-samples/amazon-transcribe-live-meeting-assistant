@@ -378,28 +378,40 @@ def clip(text, limit):
     return text if len(text) <= limit else text[:limit].rstrip() + " [...]"
 
 
+#: The ContentKind of a key frame of the meeting's camera video rather than
+#: shared content, as the key frame text extractor stores it.
+CAMERA_CONTENT = "CAMERA"
+
+
+def shows_shared_content(frame):
+    """Whether a key frame shows shared content: all but CAMERA ones (none, before it was read)."""
+    return frame.get("ContentKind") != CAMERA_CONTENT
+
+
 def slides_for_prompt(keyframes):
     """The meeting's key frames as the {slides} text, or "" when it has none.
 
     The same text fills {screen_share}. Each entry carries the picture as
     ready-made markdown, which the prompt asks the model to copy unchanged, so
     the summary refers to the frame by its real id rather than one the model
-    wrote.
+    wrote. Frames of the meeting's camera video are left out; how long a slide
+    was shown still ends where one of them replaced it.
     """
     frames = [
         frame
         for frame in keyframes or []
         if isinstance(frame, dict) and FRAME_ID.match(str(frame.get("FrameId") or ""))
     ]
+    shown_for = {}
+    for position, frame in enumerate(frames):
+        following = frames[position + 1] if position + 1 < len(frames) else None
+        shown_for[id(frame)] = (
+            float(following.get("Timestamp") or 0) - float(frame.get("Timestamp") or 0)
+            if following
+            else float("inf")
+        )
+    frames = [frame for frame in frames if shows_shared_content(frame)]
     if len(frames) > MAX_SLIDES:
-        shown_for = {}
-        for position, frame in enumerate(frames):
-            following = frames[position + 1] if position + 1 < len(frames) else None
-            shown_for[id(frame)] = (
-                float(following.get("Timestamp") or 0) - float(frame.get("Timestamp") or 0)
-                if following
-                else float("inf")
-            )
         kept = {id(f) for f in sorted(frames, key=lambda f: -shown_for[id(f)])[:MAX_SLIDES]}
         print(f"Slides: listing the {MAX_SLIDES} longest shown of {len(frames)} key frames")
         frames = [frame for frame in frames if id(frame) in kept]
@@ -408,10 +420,12 @@ def slides_for_prompt(keyframes):
         time = format_elapsed(frame.get("Timestamp"))
         text = clip(frame.get("SlideText"), MAX_SLIDE_TEXT_CHARS) or "(none read)"
         said = clip(frame.get("Said"), MAX_SAID_CHARS) or "(nothing)"
+        title = clip(frame.get("Title"), 100)
         entries.append(
             "<slide>\n"
             f"Time: {time}\n"
-            f"Image: ![Slide at {time[1:-1]}](keyframe:{frame['FrameId']})\n"
+            + (f"Title: {title}\n" if title else "")
+            + f"Image: ![Slide at {time[1:-1]}](keyframe:{frame['FrameId']})\n"
             f"Text on screen:\n{text}\n"
             f"Said while it was on screen:\n{said}\n"
             "</slide>"
@@ -620,7 +634,9 @@ def shared_screen_section(keyframes):
     """
     entries = []
     for frame in keyframes or []:
-        text = (frame.get("SlideText") or "").strip() if isinstance(frame, dict) else ""
+        if not isinstance(frame, dict) or not shows_shared_content(frame):
+            continue
+        text = (frame.get("SlideText") or "").strip()
         if text:
             entries.append(f"{format_elapsed(frame.get('Timestamp'))} {text}")
     if not entries:
