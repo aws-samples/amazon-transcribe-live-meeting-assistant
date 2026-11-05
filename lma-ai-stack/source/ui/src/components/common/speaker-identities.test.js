@@ -18,6 +18,10 @@ import {
   resolveSpeakerName,
   serializeSpeakerIdentities,
   speakerKey,
+  speakerRowLabel,
+  withMerge,
+  withoutMerges,
+  withSpeakerName,
 } from './speaker-identities';
 
 const withIdentity = (key, entry) => ({ ...emptyIdentities(), identities: { [key]: entry } });
@@ -494,5 +498,47 @@ describe('a meeting stored under the older channel names', () => {
     );
     expect(roster).toHaveLength(1);
     expect(roster[0]).toMatchObject({ channel: 'REMOTE', name: 'Bob', turns: 2 });
+  });
+});
+
+describe('the edits the Speakers panel and the speaker modal make', () => {
+  const A = 'REMOTE#Other Participant (spk_0)';
+  const B = 'REMOTE#Other Participant (spk_1)';
+
+  it('names a voice as a person would: confirmed and manual, keeping what else it held', () => {
+    const start = withIdentity(A, { name: 'Bob', status: 'proposed', locked: false, evidence: { quote: 'hi' } });
+    const next = withSpeakerName(start, A, 'Bob Strahan', '2026-11-05T10:00:00Z');
+    expect(next.identities[A]).toEqual({
+      name: 'Bob Strahan',
+      status: 'confirmed',
+      source: 'manual',
+      updatedAt: '2026-11-05T10:00:00Z',
+      locked: false,
+      evidence: { quote: 'hi' },
+    });
+    expect(start.identities[A].name).toBe('Bob');
+  });
+
+  it('removes the entry for an empty name, so the voice id shows again', () => {
+    expect(withSpeakerName(withIdentity(A, { name: 'Bob' }), A, '').identities).toEqual({});
+  });
+
+  it('merges a voice into another, and separates it again', () => {
+    const merged = withMerge(emptyIdentities(), B, A);
+    expect(merged.merges).toEqual({ [B]: A });
+    expect(
+      resolveSpeakerName(
+        { channel: 'REMOTE', speaker: 'Other Participant (spk_1)' },
+        withSpeakerName(merged, A, 'Bob'),
+      ),
+    ).toBe('Bob');
+    expect(withoutMerges(merged, [B]).merges).toEqual({});
+    expect(merged.merges).toEqual({ [B]: A });
+  });
+
+  it('labels a roster row by its name, or by its placeholder and voice id', () => {
+    expect(speakerRowLabel({ name: 'Bob', defaultName: 'Room 3', voiceId: '(spk_0)' })).toBe('Bob');
+    expect(speakerRowLabel({ name: '', defaultName: 'Room 3', voiceId: '(spk_0)' })).toBe('Room 3 (spk_0)');
+    expect(speakerRowLabel({ name: '', defaultName: 'Me', voiceId: '' })).toBe('Me');
   });
 });

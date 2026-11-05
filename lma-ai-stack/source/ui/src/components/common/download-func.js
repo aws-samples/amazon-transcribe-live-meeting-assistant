@@ -7,6 +7,9 @@
 import * as XLSX from 'xlsx';
 import { canonicalChannel, isChatChannel, isSpeechChannel, REMOTE_CHANNEL } from './channels';
 import { parseSpeakerIdentities, resolveSpeakerName } from './speaker-identities';
+import { keyframeImagesAsText, summarySections } from './summary';
+import { consentAsText } from './meeting-consent';
+import { meetingTitle } from './meeting-header';
 
 // eslint-disable-next-line prettier/prettier
 export const onImportExcelAsync = (file) =>
@@ -61,14 +64,22 @@ export const exportToExcel = async (data, nameFile) => {
   }
 };
 
-export const exportToTextFile = async (text, nameFile) => {
-  const blob = new Blob([text], { type: 'text/plain' });
+// Hands a file to the browser to save.
+const saveBlob = (blob, fileName) => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `${nameFile}.txt`;
+  link.download = fileName;
   link.click();
   URL.revokeObjectURL(url);
+};
+
+export const exportToTextFile = async (text, nameFile) => {
+  saveBlob(new Blob([text], { type: 'text/plain' }), `${nameFile}.txt`);
+};
+
+export const exportToMarkdownFile = async (text, nameFile) => {
+  saveBlob(new Blob([text], { type: 'text/markdown' }), `${nameFile}.md`);
 };
 
 /**
@@ -83,7 +94,7 @@ export const parseTranscriptLine = (line) => {
 };
 
 // Function to export transcript as DOCX
-export const exportToDocxFile = async (text, nameFile) => {
+export const exportToDocxFile = async (text, nameFile, title = `Meeting Transcript: ${nameFile}`) => {
   try {
     // Load the docx library dynamically
     const docx = await import('docx');
@@ -95,7 +106,7 @@ export const exportToDocxFile = async (text, nameFile) => {
     // Add title
     paragraphs.push(
       new docx.Paragraph({
-        text: `Meeting Transcript: ${nameFile}`,
+        text: title,
         heading: docx.HeadingLevel.HEADING_1,
         spacing: { after: 200 },
       }),
@@ -148,14 +159,7 @@ export const exportToDocxFile = async (text, nameFile) => {
     });
 
     // Generate and download the document
-    docx.Packer.toBlob(doc).then((blob) => {
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${nameFile}.docx`;
-      link.click();
-      URL.revokeObjectURL(url);
-    });
+    docx.Packer.toBlob(doc).then((blob) => saveBlob(blob, `${nameFile}.docx`));
   } catch (error) {
     console.error('Error exporting to DOCX:', error);
 
@@ -280,5 +284,146 @@ export const downloadTranscriptAsText = async (callTranscriptPerCallId, meeting)
 
 export const downloadTranscriptAsDocx = async (callTranscriptPerCallId, meeting) => {
   const { callId } = meeting;
-  await exportToDocxFile(transcriptDownloadText(callTranscriptPerCallId, meeting), `Transcript-${callId}`);
+  await exportToDocxFile(
+    transcriptDownloadText(callTranscriptPerCallId, meeting),
+    `Transcript-${callId}`,
+    `Meeting Transcript: ${meetingTitle(callId)}`,
+  );
+};
+
+// Characters that would start Markdown formatting in a name, escaped so the
+// name reads as typed.
+const escapeMarkdown = (text) => String(text ?? '').replace(/([\\`*_[\]<>#|])/g, '\\$1');
+
+/** The lines naming the meeting at the top of a Markdown download. */
+const markdownMeetingFacts = (meeting) =>
+  [
+    `- **Meeting ID:** ${escapeMarkdown(meeting.callId)}`,
+    meeting.initiationTimeStamp ? `- **Date:** ${meeting.initiationTimeStamp}` : null,
+    meeting.conversationDurationTimeStamp ? `- **Duration:** ${meeting.conversationDurationTimeStamp}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+/** The consent record (consentAsText) as a Markdown section. */
+export const consentAsMarkdown = (consent) => {
+  const text = consentAsText(consent);
+  if (!text) return '';
+  const body = text
+    .replace(/^CONSENT\n\n/, '')
+    .split('\n')
+    .map((line) => {
+      // "Participants:" and the like open a list.
+      if (/^[A-Z][A-Za-z ]*:$/.test(line)) return `\n**${line.slice(0, -1)}**\n`;
+      const fact = line.match(/^([A-Z][A-Za-z ]*): (.*)$/);
+      if (fact) return `- **${fact[1]}:** ${fact[2]}`;
+      // The closing note, as a paragraph of its own.
+      if (line && !line.startsWith('- ')) return `\n${line}`;
+      return line;
+    })
+    .join('\n');
+  return `## Consent\n\n${body}`.replace(/\n{3,}/g, '\n\n').trimEnd();
+};
+
+/**
+ * The summary as a Markdown document: the meeting's name and facts, a section
+ * per summary section (a `##` heading each), and the consent record when the
+ * meeting has one. A key frame cannot travel with the file, so its picture is
+ * written as its alt text.
+ */
+export const summaryDownloadMarkdown = (meeting, consent = null) => {
+  const parts = [`# ${escapeMarkdown(meetingTitle(meeting.callId))}`, markdownMeetingFacts(meeting)];
+  const sections = summarySections(meeting.callSummaryText);
+  if (!sections.length) parts.push('## Summary\n\nNot available');
+  sections.forEach(({ title, markdown }) => {
+    parts.push(`## ${title}\n\n${keyframeImagesAsText(markdown).trim()}`.trim());
+  });
+  if (consent) parts.push(consentAsMarkdown(consent));
+  return `${parts.join('\n\n')}\n`;
+};
+
+/**
+ * The transcript as a Markdown document: the meeting's name and facts, then a
+ * paragraph per segment, "**Speaker** [start]: text", with the same rows and
+ * speaker names as the other transcript downloads (transcriptDownloadRows).
+ */
+export const transcriptDownloadMarkdown = (callTranscriptPerCallId, meeting) => {
+  const lines = transcriptDownloadRows(callTranscriptPerCallId, meeting).map(
+    (row) => `**${escapeMarkdown(row.speaker)}** [${row.startTimestamp}]: ${String(row.transcript ?? '').trim()}`,
+  );
+  const head = [`# Transcript: ${escapeMarkdown(meetingTitle(meeting.callId))}`, markdownMeetingFacts(meeting)];
+  return `${[...head, ...lines].join('\n\n')}\n`;
+};
+
+// Inline Markdown as runs of text: **bold** is bold, a link is its text and
+// address, and the other markers (emphasis, code, escapes) are dropped.
+// An escaped character is held as a private-use character while the markers
+// are read, so `\*` is never taken for emphasis, and restored afterwards.
+const ESCAPE_BASE = 0xe000;
+const holdEscapes = (text) =>
+  text.replace(/\\([\\`*_[\]<>#|])/g, (_m, c) => String.fromCharCode(ESCAPE_BASE + c.charCodeAt(0)));
+const restoreEscapes = (text) =>
+  text.replace(/[\ue000-\ue07f]/g, (c) => String.fromCharCode(c.charCodeAt(0) - ESCAPE_BASE));
+
+const inlineRuns = (text) => {
+  const plain = holdEscapes(text)
+    .replace(/\[([^\]]*)\]\(([^)\s]+)\)/g, (_m, label, url) => (label && label !== url ? `${label} (${url})` : url))
+    .replace(/`([^`]*)`/g, '$1');
+  return plain
+    .split(/(\*\*[^*]+\*\*)/)
+    .filter(Boolean)
+    .map((part) => {
+      const bold = part.length > 4 && part.startsWith('**') && part.endsWith('**');
+      const inner = bold ? part.slice(2, -2) : part.replace(/(^|\W)[*_]([^*_\n]+)[*_](?=\W|$)/g, '$1$2');
+      return { text: restoreEscapes(inner), bold };
+    });
+};
+
+/**
+ * A Markdown document as the blocks of a Word document: headings (`#` to
+ * `###`, deeper ones as `###`), bullets (their indent as the level, up to 3)
+ * and paragraphs, each as runs of text. Kept apart from the docx library so it
+ * can be tested directly.
+ */
+export const markdownToDocBlocks = (markdown) =>
+  String(markdown ?? '')
+    .split(/\r?\n/)
+    .map((line) => {
+      if (!line.trim()) return null;
+      const heading = line.match(/^\s*(#{1,6})\s+(.*?)\s*#*\s*$/);
+      if (heading) return { kind: 'heading', level: Math.min(heading[1].length, 3), runs: inlineRuns(heading[2]) };
+      const bullet = line.match(/^(\s*)[-*+]\s+(.*)$/);
+      if (bullet) {
+        return { kind: 'bullet', level: Math.min(Math.floor(bullet[1].length / 2), 3), runs: inlineRuns(bullet[2]) };
+      }
+      return { kind: 'paragraph', runs: inlineRuns(line.trim()) };
+    })
+    .filter(Boolean);
+
+/** A Markdown document (the summary's) as a Word document, with its headings and bullets. */
+export const exportMarkdownToDocxFile = async (markdown, nameFile) => {
+  try {
+    const docx = await import('docx');
+    const headingLevels = [docx.HeadingLevel.HEADING_1, docx.HeadingLevel.HEADING_2, docx.HeadingLevel.HEADING_3];
+    const children = markdownToDocBlocks(markdown).map((block) => {
+      const runs = block.runs.map((run) => new docx.TextRun({ text: run.text, bold: run.bold }));
+      if (block.kind === 'heading') {
+        return new docx.Paragraph({ children: runs, heading: headingLevels[block.level - 1], spacing: { after: 160 } });
+      }
+      if (block.kind === 'bullet') {
+        return new docx.Paragraph({ children: runs, bullet: { level: block.level }, spacing: { after: 60 } });
+      }
+      return new docx.Paragraph({ children: runs, spacing: { after: 120 } });
+    });
+    const doc = new docx.Document({ sections: [{ properties: {}, children }] });
+    saveBlob(await docx.Packer.toBlob(doc), `${nameFile}.docx`);
+  } catch (error) {
+    console.error('Error exporting to DOCX:', error);
+    alert('Could not generate DOCX file. Please make sure you have an internet connection and try again.');
+  }
+};
+
+export const downloadTranscriptAsMarkdown = async (callTranscriptPerCallId, meeting) => {
+  const { callId } = meeting;
+  await exportToMarkdownFile(transcriptDownloadMarkdown(callTranscriptPerCallId, meeting), `Transcript-${callId}`);
 };

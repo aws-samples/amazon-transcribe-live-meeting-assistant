@@ -23,6 +23,7 @@ import {
   getTextFileFormattedSummary,
   getTextOnlySummary,
   keyframeImagesAsText,
+  summarySections,
 } from './summary';
 
 const SECTIONED = JSON.stringify({
@@ -134,5 +135,59 @@ describe('the sections the meeting page shows in their own place', () => {
     expect(getMarkdownSummaryWithout('## Notes\nWe met.', ['CHAPTERS'])).toBe('## Notes\nWe met.');
     const onlyChapters = JSON.stringify({ CHAPTERS: '- [00:00] Welcome' });
     expect(getMarkdownSummaryWithout(onlyChapters, ['CHAPTERS'])).toBe(getMarkdownSummary(onlyChapters));
+  });
+});
+
+describe('summarySections', () => {
+  it('reads a generated summary as its sections, in order', () => {
+    expect(summarySections(SECTIONED)).toEqual([
+      { title: 'Summary', markdown: 'Sarah Lee walked through the migration plan.' },
+      { title: 'Action Items', markdown: 'Sarah to size the backfill.' },
+    ]);
+  });
+
+  it('leaves out the sections named, by name in any case, unless none would be left', () => {
+    const full = JSON.stringify({ SUMMARY: 'We met.', CHAPTERS: '- [00:00] Welcome' });
+    expect(summarySections(full, ['chapters']).map((s) => s.title)).toEqual(['SUMMARY']);
+    const onlyChapters = JSON.stringify({ CHAPTERS: '- [00:00] Welcome' });
+    expect(summarySections(onlyChapters, ['CHAPTERS']).map((s) => s.title)).toEqual(['CHAPTERS']);
+  });
+
+  it('splits a hand-written summary at its headings, and at the capitalised bold lines the editor seeds', () => {
+    const edited = [
+      'Opening words.',
+      '',
+      '**SUMMARY**',
+      '',
+      'We met.',
+      '',
+      '**SCREEN SHARE SUMMARY**',
+      '',
+      '**[00:30] Budget**',
+      '',
+      'Bob covered Q3.',
+      '',
+      '## Next steps',
+      '- Ship it',
+    ].join('\n');
+    expect(summarySections(edited)).toEqual([
+      { title: 'Summary', markdown: 'Opening words.' },
+      { title: 'SUMMARY', markdown: 'We met.' },
+      // A bold line in mixed case is a sub-heading, kept within its section.
+      { title: 'SCREEN SHARE SUMMARY', markdown: '**[00:30] Budget**\n\nBob covered Q3.' },
+      { title: 'Next steps', markdown: '- Ship it' },
+    ]);
+    expect(summarySections(edited, ['CHAPTERS'])).toHaveLength(4);
+  });
+
+  it('reads a document with no headings as one Summary section, and nothing as no sections', () => {
+    expect(summarySections('Just a note.')).toEqual([{ title: 'Summary', markdown: 'Just a note.' }]);
+    expect(summarySections(HAND_EDITED).map((s) => s.title)).toEqual(['Migration review']);
+    expect(summarySections('')).toEqual([]);
+    expect(summarySections(undefined)).toEqual([]);
+  });
+
+  it('reads a JSON value that is not an object as Markdown', () => {
+    expect(summarySections('42')).toEqual([{ title: 'Summary', markdown: '42' }]);
   });
 });

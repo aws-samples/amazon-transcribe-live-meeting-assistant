@@ -19,10 +19,12 @@
  *
  * The actions are the meeting's: Assistant, which opens and closes the
  * meeting assistant's panel (when the assistant is enabled), Share, Download
- * (the summary and the transcript) and, under the "more" menu, Delete. Share
+ * (the summary and the transcript, each as Markdown, Word or text, the
+ * transcript as Excel too, or copied as Markdown) and, under the "more" menu,
+ * Delete. Share
  * and Delete are the meeting list's own dialogs (common/meeting-controls.js).
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
 import {
   Badge,
@@ -51,6 +53,9 @@ import {
   runSummaryAction,
   runTranscriptDownload,
 } from './meeting-downloads';
+
+/** How long the outcome of a copy to the clipboard stays beside the Download menu. */
+const COPIED_VISIBLE_MS = 4000;
 
 /** How many speakers are named in the header before the rest are counted. */
 export const MAX_SPEAKER_CHIPS = 6;
@@ -146,6 +151,7 @@ const MeetingHeader = ({
       items: SUMMARY_ACTION_ITEMS.map((entry) => ({
         ...entry,
         id: `summary:${entry.id}`,
+        ariaLabel: `Summary: ${entry.text}`,
         disabled: !hasSummary,
         disabledReason: hasSummary ? undefined : 'This meeting has no summary yet.',
       })),
@@ -154,18 +160,35 @@ const MeetingHeader = ({
       text: 'Transcript',
       items: TRANSCRIPT_DOWNLOAD_ITEMS.map((entry) => ({
         ...entry,
-        text: `Transcript as ${entry.text}`,
         id: `transcript:${entry.id}`,
+        ariaLabel: `Transcript: ${entry.text}`,
         disabled: !canDownloadTranscript,
         disabledReason: transcriptReason,
       })),
     },
   ];
 
-  const onDownload = ({ detail }) => {
+  // What a copy to the clipboard came to, shown beside the menu for a moment.
+  const [copied, setCopied] = useState(null);
+  useEffect(() => {
+    if (!copied) return undefined;
+    const timer = setTimeout(() => setCopied(null), COPIED_VISIBLE_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  const onDownload = async ({ detail }) => {
     const [kind, id] = detail.id.split(':');
-    if (kind === 'summary') runSummaryAction(id, item, consent);
-    else if (kind === 'transcript') runTranscriptDownload(id, callTranscriptPerCallId, item);
+    let done = true;
+    if (kind === 'summary') done = await runSummaryAction(id, item, consent);
+    else if (kind === 'transcript') done = await runTranscriptDownload(id, callTranscriptPerCallId, item);
+    if (id === 'copy') {
+      const what = kind === 'summary' ? 'Summary' : 'Transcript';
+      setCopied(
+        done
+          ? { type: 'success', text: `${what} copied as Markdown` }
+          : { type: 'error', text: `${what} could not be copied` },
+      );
+    }
   };
 
   const shownSpeakers = speakers.slice(0, MAX_SPEAKER_CHIPS);
@@ -197,6 +220,11 @@ const MeetingHeader = ({
                 </ToggleButton>
               )}
               {shareModal({ ...controls, triggerText: 'Share' })}
+              {copied && (
+                <Box nativeAttributes={{ role: 'status', 'aria-live': 'polite' }}>
+                  <StatusIndicator type={copied.type}>{copied.text}</StatusIndicator>
+                </Box>
+              )}
               <ButtonDropdown items={downloadItems} onItemClick={onDownload}>
                 Download
               </ButtonDropdown>

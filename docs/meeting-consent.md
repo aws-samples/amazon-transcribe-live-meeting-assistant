@@ -186,8 +186,8 @@ Three actions, each offered only to the people the backend lets do it:
 
 ### In the summary download
 
-**Download summary**, **Download as Word** and **Copy to clipboard** in the
-Meeting Summary section add the consent record after the summary, as text: the
+The summary's downloads and its copy to the clipboard, under **Download** in
+the meeting page's header, add the consent record after the summary: the
 mode, rule and status, whether capture was allowed at the time of the download,
 the notice, the attestation, each participant's latest reply, the timeline, and
 each evidence image's check, followed by the note that the record is supporting

@@ -432,6 +432,38 @@ export const hasMultipleVoicesOnAChannel = (roster) => {
   return Object.values(groups).some((count) => count > 1);
 };
 
+/** How a roster row is labelled: its name, or the placeholder with the voice id that tells it apart. */
+export const speakerRowLabel = (row) => row.name || `${row.defaultName} ${row.voiceId || ''}`.trim();
+
+/**
+ * The map with the voice `key` given `name` by a person: confirmed, and
+ * recorded as manual so no automatic pass revisits it. An empty name removes
+ * the voice's entry, so the transcript falls back to the voice id rather than
+ * showing an empty speaker.
+ */
+export const withSpeakerName = (identities, key, name, now = new Date().toISOString()) => {
+  const next = { ...identities.identities };
+  if (name) {
+    next[key] = { ...(next[key] || {}), name, status: 'confirmed', source: 'manual', updatedAt: now };
+  } else {
+    delete next[key];
+  }
+  return { ...identities, identities: next };
+};
+
+/** The map with the voice `key` folded into `targetKey`: one person, shown under the target's name. */
+export const withMerge = (identities, key, targetKey) => ({
+  ...identities,
+  merges: { ...identities.merges, [key]: targetKey },
+});
+
+/** The map with the voices `keys` separated again from whatever they were merged into. */
+export const withoutMerges = (identities, keys) => {
+  const merges = { ...identities.merges };
+  (keys ?? []).forEach((key) => delete merges[key]);
+  return { ...identities, merges };
+};
+
 /** mm:ss for a talk-time total. */
 export const formatTalkTime = (seconds) => {
   const total = Math.round(seconds ?? 0);

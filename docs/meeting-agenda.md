@@ -54,7 +54,7 @@ meeting page at any time.
 
 ## The Agenda panel
 
-The meeting page's **Overview** tab has an **Agenda** panel, beside the summary.
+The meeting page's **Summary** tab has an **Agenda** panel, beside the summary.
 It shows the items as a numbered list, with a badge for where the agenda came
 from and a line saying who last changed it and when, and under them the
 summary's agenda coverage once the summary has been written. A meeting with no
@@ -131,7 +131,7 @@ section: one line per agenda item, in agenda order, marked **Covered**,
 or decided. A meeting without an agenda has no such section; it is left out
 rather than generated empty.
 
-On the meeting page the section is shown under the agenda on the **Overview**
+On the meeting page the section is shown under the agenda on the **Summary**
 tab rather than in the summary; the summary's downloads and copies still
 include it.
 

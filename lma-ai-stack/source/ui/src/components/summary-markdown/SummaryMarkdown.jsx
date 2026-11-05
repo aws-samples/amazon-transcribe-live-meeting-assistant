@@ -20,11 +20,11 @@
  * A frame that cannot be read (expired with the meeting's retention, or never
  * stored) shows as its alt text. See docs/meeting-video.md.
  *
- * The meeting page's Overview tab asks for the pictures differently
- * (`keyframes`): as a link that opens the frame on the page's Screen share tab
- * ('link'), or as their alt text alone ('text', for a meeting whose frames are
- * gone), so that a summary of a long presentation is not a column of slides.
- * Neither reads any frame.
+ * The pictures can be asked for differently (`keyframes`): as a link that
+ * opens the frame on the meeting page's Screen share tab ('link'), or as their
+ * alt text alone ('text'). Neither reads any frame. The meeting page's Summary
+ * tab shows them as pictures, in sections that are read only once opened, and
+ * with `onKeyframeSelect` a click on one shows it on the Screen share tab.
  *
  * Everything else renders as every other summary surface does, through the
  * shared rehype chain, with one difference: the only picture a summary shows is
@@ -90,7 +90,7 @@ export const summaryUrlTransform = (url, key, node) => {
 
 const hasLink = (frame) => Boolean(frame?.ThumbnailSignedUrl || frame?.ImageSignedUrl);
 
-export const KeyframeImage = ({ callId, frameId, alt = '', loadFrame = loadKeyframe }) => {
+export const KeyframeImage = ({ callId, frameId, alt = '', loadFrame = loadKeyframe, onSelect = undefined }) => {
   const batch = useContext(SummaryFrames);
   const inBatch = Boolean(batch?.requested.has(frameId));
   // A frame read by itself: on its own, or again after its link stopped working.
@@ -135,7 +135,14 @@ export const KeyframeImage = ({ callId, frameId, alt = '', loadFrame = loadKeyfr
       href={frame.ImageSignedUrl || frame.ThumbnailSignedUrl}
       target="_blank"
       rel="noopener noreferrer"
-      title="Open full size"
+      title={onSelect ? 'Show on the Screen share tab' : 'Open full size'}
+      onClick={(event) => {
+        // A plain click shows the frame on the page; a modified one (a new
+        // tab, a new window) still opens the full-size image.
+        if (!onSelect || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        onSelect(frameId);
+      }}
     >
       <img
         src={frame.ThumbnailSignedUrl || frame.ImageSignedUrl}
@@ -155,6 +162,8 @@ KeyframeImage.propTypes = {
   frameId: PropTypes.string.isRequired,
   alt: PropTypes.string,
   loadFrame: PropTypes.func,
+  // Called with the FrameId on a plain click, instead of opening the full-size image.
+  onSelect: PropTypes.func,
 };
 
 /**
@@ -188,7 +197,9 @@ const componentsFor = (callId, loadFrame, keyframes, onKeyframeSelect) => {
           </span>
         );
       }
-      return <KeyframeImage callId={callId} frameId={frameId} alt={alt} loadFrame={loadFrame} />;
+      return (
+        <KeyframeImage callId={callId} frameId={frameId} alt={alt} loadFrame={loadFrame} onSelect={onKeyframeSelect} />
+      );
     }
     // Not a frame of this meeting: never fetched, whatever its address.
     return alt ? <span>{alt}</span> : null;
@@ -258,7 +269,7 @@ SummaryMarkdown.propTypes = {
   loadFrames: PropTypes.func,
   // How a key frame is shown: as the picture, as a link to the Screen share tab, or as its alt text.
   keyframes: PropTypes.oneOf(['image', 'link', 'text']),
-  // Called with the FrameId when a 'link' is followed.
+  // Called with the FrameId when a 'link' is followed, or a picture clicked.
   onKeyframeSelect: PropTypes.func,
 };
 

@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   TAB_DETAILS,
-  TAB_OVERVIEW,
+  TAB_SUMMARY,
   TAB_SCREEN_SHARE,
   TAB_TRANSCRIPT,
   availableTabs,
@@ -23,20 +23,19 @@ describe('meeting tabs', () => {
   });
 
   it('offers Screen share only for a meeting with key frames', () => {
-    expect(availableTabs({ hasKeyframes: false })).toEqual([TAB_OVERVIEW, TAB_TRANSCRIPT, TAB_DETAILS]);
-    expect(availableTabs({ hasKeyframes: true })).toEqual([
-      TAB_OVERVIEW,
-      TAB_TRANSCRIPT,
-      TAB_SCREEN_SHARE,
-      TAB_DETAILS,
-    ]);
+    expect(availableTabs({ hasKeyframes: false })).toEqual([TAB_SUMMARY, TAB_TRANSCRIPT, TAB_DETAILS]);
+    expect(availableTabs({ hasKeyframes: true })).toEqual([TAB_SUMMARY, TAB_TRANSCRIPT, TAB_SCREEN_SHARE, TAB_DETAILS]);
   });
 
   it('shows a requested tab the meeting has, and the default for one it does not', () => {
-    expect(resolveTab(TAB_OVERVIEW)).toBe(TAB_OVERVIEW);
+    expect(resolveTab(TAB_SUMMARY)).toBe(TAB_SUMMARY);
     expect(resolveTab(TAB_DETAILS, { isLive: true })).toBe(TAB_DETAILS);
     expect(resolveTab(TAB_SCREEN_SHARE, { hasKeyframes: true })).toBe(TAB_SCREEN_SHARE);
     expect(resolveTab(TAB_SCREEN_SHARE, { hasKeyframes: false })).toBe(TAB_TRANSCRIPT);
-    expect(resolveTab('summary')).toBe(TAB_TRANSCRIPT);
+    expect(resolveTab('agenda')).toBe(TAB_TRANSCRIPT);
+  });
+
+  it('opens the Summary tab for a link saved when it was called Overview', () => {
+    expect(resolveTab('overview')).toBe(TAB_SUMMARY);
   });
 });

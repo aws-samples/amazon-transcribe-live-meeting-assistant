@@ -119,7 +119,7 @@ describe('AgendaPanel', () => {
   });
 });
 
-describe('AgendaPanel on the Overview tab', () => {
+describe('AgendaPanel on the Summary tab', () => {
   it('is one line, with its actions, for a meeting with no agenda', () => {
     const { container } = render(
       <AgendaPanel item={{ callId: 'c1' }} onSave={vi.fn()} onDerive={vi.fn()} readOnly={false} compactWhenEmpty />,
