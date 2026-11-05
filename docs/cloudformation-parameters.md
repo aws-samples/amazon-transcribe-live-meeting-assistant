@@ -468,7 +468,7 @@ Console label: *Enable voice enrollment (stores biometric data)*
 - **Allowed values:** `true`, `false`
 - **Kind:** Resource. Decides whether the enrollment table, the consent log and the enrollment portal exist.
 
-Let people enrol their voice so they are labelled by name in meetings from their first word. A voiceprint is biometric data about a person: while this is false the enrollment table, the consent log and the consent portal do not exist in the deployment at all. Turning it on creates obligations that are yours -- biometric data is separately regulated in many jurisdictions and typically requires informed consent before collection, a published retention schedule and deletion on request. See docs/voice-enrollment.md. Matching also needs EnableMicrovmAsr=true, since Amazon Transcribe exposes no speaker embedding.
+Let people enroll their voice so they are labelled by name in meetings from their first word. A voiceprint is biometric data about a person: while this is false the enrollment table, the consent log and the consent portal do not exist in the deployment at all. Turning it on creates obligations that are yours -- biometric data is separately regulated in many jurisdictions and typically requires informed consent before collection, a published retention schedule and deletion on request. See docs/voice-enrollment.md. Matching also needs EnableMicrovmAsr=true, since Amazon Transcribe exposes no speaker embedding.
 
 ### `VoiceEnrollmentRetentionDays`
 

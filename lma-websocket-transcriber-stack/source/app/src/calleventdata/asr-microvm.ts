@@ -115,7 +115,7 @@ interface AsrSessionOptions {
     /** Cap on distinct voices for this channel; 0 discovers as many as appear. */
     maxSpeakers: number;
     /**
-     * Voices somebody consented to enrol, so their speech carries their name
+     * Voices somebody consented to enroll, so their speech carries their name
      * from the first word instead of `spk_0` until a human renames it.
      *
      * Empty unless the deployment has voice enrollment switched on AND the

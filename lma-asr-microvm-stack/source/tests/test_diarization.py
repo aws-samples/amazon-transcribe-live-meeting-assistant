@@ -1570,7 +1570,7 @@ def test_an_enrolled_voice_is_recognised_from_the_first_utterance() -> None:
 
 
 def test_a_voice_unlike_any_enrolled_one_still_mints_a_new_label() -> None:
-    """Enrolment must not capture everybody who speaks."""
+    """Enrollment must not capture everybody who speaks."""
     registry = SpeakerRegistry(threshold=0.5)
     registry.enroll("Sarah Lee", [1.0, 0.0])
     assert registry.assign([0.0, 1.0]) == "spk_0"
@@ -1634,7 +1634,7 @@ def test_reaching_the_cap_never_puts_an_enrolled_name_on_unmatched_speech() -> N
 
     Force-assigning to a seeded identity would attribute words to a named,
     identifiable person who may not be in the meeting at all -- the opposite of
-    what enrolment is for, and worse than an extra spk_N.
+    what enrollment is for, and worse than an extra spk_N.
     """
     registry = SpeakerRegistry(threshold=0.95, max_speakers=1)
     registry.enroll("Sarah Lee", [1.0, 0.0])
@@ -1651,7 +1651,7 @@ def test_reaching_the_cap_never_puts_an_enrolled_name_on_unmatched_speech() -> N
 
 
 def test_an_enrolled_voice_still_wins_on_a_real_match_at_the_cap() -> None:
-    """The cap must not stop enrolment working -- only stop it guessing."""
+    """The cap must not stop enrollment working -- only stop it guessing."""
     registry = SpeakerRegistry(threshold=0.5, max_speakers=1)
     registry.enroll("Sarah Lee", [1.0, 0.0])
     assert registry.assign([0.0, 1.0]) == "spk_0"
@@ -1738,7 +1738,7 @@ def test_a_session_seeded_with_an_enrolled_voice_labels_it_by_name() -> None:
 
 
 def test_an_unenrolled_voice_in_a_seeded_session_still_gets_a_label() -> None:
-    """Enrolment must not capture everybody who happens to speak."""
+    """Enrollment must not capture everybody who happens to speak."""
     inner = ScriptedRecognizer([[_final(0, "hello", 0.0, 1.0)]])
     embedder = ScriptedEmbedder([VOICE_B])
     rec = _recognizer(

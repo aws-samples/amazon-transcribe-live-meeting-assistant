@@ -172,7 +172,7 @@ def asr_embedding_available():
     """Whether there is an engine that can compute a voiceprint.
 
     Read from the environment rather than attempted and caught, so somebody is
-    told the deployment cannot enrol voices instead of being told their
+    told the deployment cannot enroll voices instead of being told their
     recordings were unusable.
     """
     return bool(
@@ -269,7 +269,7 @@ def store_voiceprint(event, who):
     args = (event.get("arguments") or {}).get("input") or {}
     subject_id = who["sub"]
     if not pure.may_grant(pure.ACTION_GRANTED, subject_id, who["sub"], who["groups"]):
-        return {"Success": False, "Message": "only you can enrol your own voice"}
+        return {"Success": False, "Message": "only you can enroll your own voice"}
 
     existing = read_enrollment(subject_id)
     if not pure.may_store_voiceprint(
@@ -304,7 +304,7 @@ def store_voiceprint(event, who):
         # sends somebody off to re-record audio that was never the problem.
         return {
             "Success": False,
-            "Message": "voice enrolment needs the on-demand speech engine, which is not deployed",
+            "Message": "voice enrollment needs the on-demand speech engine, which is not deployed",
         }
 
     try:

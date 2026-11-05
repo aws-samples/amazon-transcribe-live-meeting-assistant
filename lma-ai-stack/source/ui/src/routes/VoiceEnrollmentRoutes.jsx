@@ -7,7 +7,7 @@
  * The enrollment portal's own layout, deliberately without the meetings
  * navigation.
  *
- * Enrolment is somebody's own business: the page shows them their own record
+ * Enrollment is somebody's own business: the page shows them their own record
  * and nothing about anybody else's, and the actions on it are theirs alone.
  * The usual side navigation is hidden so the page reads as the single,
  * self-contained task it is.

@@ -77,7 +77,7 @@ export const generateNavigationItems = (settings, isAdmin) => {
   if (`${settings?.VoiceEnrollmentAvailable}` === 'true') {
     navigationItems.push({
       type: 'link',
-      text: 'Enrol My Voice',
+      text: 'Enroll My Voice',
       href: `#${VOICE_ENROLLMENT_PATH}`,
       external: true,
     });

@@ -215,7 +215,7 @@ def test_a_launcher_that_errors_yields_no_session(monkeypatch: pytest.MonkeyPatc
 
 
 def test_each_enrolment_uses_its_own_session_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Two enrolments must not collide on one call id in the launcher."""
+    """Two enrollments must not collide on one call id in the launcher."""
     fake, _ = install(monkeypatch)
     client.embed_utterances([CLIP, CLIP, CLIP])
     client.embed_utterances([CLIP, CLIP, CLIP])
@@ -226,7 +226,7 @@ def test_each_enrolment_uses_its_own_session_id(monkeypatch: pytest.MonkeyPatch)
 def test_empty_vectors_are_dropped_but_a_usable_one_is_enough(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A clip the embedder could not use must not drag the whole enrolment down."""
+    """A clip the embedder could not use must not drag the whole enrollment down."""
     install(monkeypatch, vectors=[[], [0.5, 0.5], []])
     assert client.embed_utterances([CLIP, CLIP, CLIP]) == [[0.5, 0.5]]
 
@@ -273,7 +273,7 @@ def test_too_much_audio_in_total_acquires_nothing(monkeypatch: pytest.MonkeyPatc
 
 
 def test_a_realistic_enrolment_is_still_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The bounds must not refuse the enrolment the portal actually asks for.
+    """The bounds must not refuse the enrollment the portal actually asks for.
 
     Six clips of about five seconds is what reading the script produces, and it
     measured 1.16 MB base64 against a live stack.

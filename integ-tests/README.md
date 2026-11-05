@@ -114,7 +114,7 @@ appeared in the UI. The probe is reusable standalone:
 
 ## Voice enrollment consent lifecycle
 
-`test_voice_enrollment_consent_lifecycle` grants consent, enrols a voice from
+`test_voice_enrollment_consent_lifecycle` grants consent, enrolls a voice from
 Polly-synthesised speech, and withdraws — then reads DynamoDB to check what was
 actually stored, because the stored records are what the consent terms promise.
 It exists as an integration test rather than more unit tests precisely because

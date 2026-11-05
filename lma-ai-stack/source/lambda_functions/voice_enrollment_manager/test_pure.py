@@ -518,7 +518,7 @@ def test_a_pending_consent_to_superseded_words_is_asked_again() -> None:
 
 
 def test_a_pending_consent_to_the_current_words_is_not_disturbed() -> None:
-    """Somebody mid-enrolment must not be sent back to the terms for no reason."""
+    """Somebody mid-enrollment must not be sent back to the terms for no reason."""
     assert pure.needs_reconsent(_states()["pending, terms current"], 1, CURRENT_WORDS, NOW) is False
 
 

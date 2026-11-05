@@ -208,7 +208,7 @@ class SpeakerRegistry:
     numpy, no native clustering) so the whole policy — the part that decides what
     the client actually sees — is unit-testable without model weights.
 
-    Why a running centroid rather than a single enrolment vector: a speaker's
+    Why a running centroid rather than a single enrollment vector: a speaker's
     embeddings vary across utterances (loudness, phonetic content, channel), so
     averaging every accepted embedding into the centroid tightens the identity as
     the conversation proceeds and keeps later matches stable. (sherpa-onnx's own
@@ -745,7 +745,7 @@ class DiarizingRecognizer(Recognizer):
             max_speakers=max_speakers,
             require_corroboration=require_corroboration,
         )
-        # Voices somebody consented to enrol are seeded before any audio
+        # Voices somebody consented to enroll are seeded before any audio
         # arrives, so their speech carries their name from the first word rather
         # than spk_0 until a human names it. A malformed seed is skipped rather
         # than failing the session: losing a name is a far smaller harm than

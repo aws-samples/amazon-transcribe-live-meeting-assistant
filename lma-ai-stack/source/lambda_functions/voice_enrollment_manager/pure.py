@@ -13,7 +13,7 @@ therefore first-party: the enrollee authenticates as themselves, is shown the
 terms, and performs an explicit affirmative action. Everything below enforces
 that, and records it in a form an auditor can rely on.
 
-Enrolment is limited to people who already have an account in the deployment.
+Enrollment is limited to people who already have an account in the deployment.
 The external participant and the contractor in a meeting room -- who are who
 this feature would be most useful for -- are deliberately not served, because
 reaching them means issuing them credentials to this deployment.
