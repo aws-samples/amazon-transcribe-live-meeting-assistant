@@ -42,7 +42,7 @@ import logging
 import os
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Mapping, Optional
 
 import boto3
@@ -108,8 +108,7 @@ def _caller(event: Mapping[str, Any]) -> Dict[str, Any]:
     """Who is asking, from the AppSync ``identity`` block only.
 
     ``identity.username`` is the value ``getCall`` and the Virtual Participant
-    resolvers compare Owner and SharedWith with, so this function answers the
-    same callers they do.
+    resolvers compare Owner and SharedWith with.
     """
     identity = event.get("identity") or {}
     claims = identity.get("claims") or {}
@@ -161,9 +160,11 @@ def _owner_or_shared(item: Mapping[str, Any], username: str) -> bool:
 
 
 def require_call_access(caller: Mapping[str, Any], call_id: str) -> None:
-    """The ``getCall`` rule: an Admin, the meeting's owner, or someone it is shared with.
+    """The meeting must exist and pass the ``getCall`` rule.
 
-    The meeting is read for an Admin as well, so a diagnosis names one that exists.
+    Every caller reaching this is an Admin (``start_troubleshooting`` checks the
+    group first); the owner and SharedWith terms keep the rule the same as
+    ``getCall``'s.
     """
     item = (
         DYNAMODB.get_item(
@@ -176,16 +177,15 @@ def require_call_access(caller: Mapping[str, Any], call_id: str) -> None:
     )
     if item and (caller["is_admin"] or _owner_or_shared(item, caller["username"])):
         return
-    # The same answer for a meeting that does not exist as for one the caller
-    # may not see, so this field cannot be used to learn which meetings exist.
+    # One answer whether the meeting is missing or not readable by the caller.
     LOGGER.info("refused a diagnosis of a meeting to %s", caller["subject"] or "(none)")
     raise ForbiddenError("Unauthorized: you do not have access to this meeting")
 
 
 def require_vp_access(caller: Mapping[str, Any], vp_id: str) -> None:
-    """An Admin, the Virtual Participant's owner, or someone it is shared with.
+    """The Virtual Participant must exist and pass the ``getVirtualParticipant`` rule.
 
-    The record is read for an Admin as well, so a diagnosis names one that exists.
+    As for meetings, every caller reaching this is an Admin.
     """
     item = (
         DYNAMODB.get_item(
@@ -313,12 +313,11 @@ def start_troubleshooting(input_data: Mapping[str, Any], caller: Mapping[str, An
         _finish(job_id, FAILED, error="The diagnosis could not be started.")
         raise
     LOGGER.info(
-        "started troubleshooting job %s for %s (call=%s vp=%s admin=%s)",
+        "started troubleshooting job %s for %s (call=%s vp=%s)",
         job_id,
         caller["subject"] or "(none)",
         bool(call_id),
         bool(vp_id),
-        caller["is_admin"],
     )
     return _job_shape(item)
 
@@ -383,18 +382,20 @@ def _finish(
 
 
 def _claim(job_id: str) -> Optional[Dict[str, Any]]:
-    """Move the job from PENDING to RUNNING, or None if it is not PENDING."""
+    """Move the job from PENDING to RUNNING, or None if it is not PENDING or is stale."""
     try:
         return DYNAMODB.update_item(
             TableName=JOBS_TABLE,
             Key={"JobId": {"S": job_id}},
             UpdateExpression="SET #s = :running, #u = :u",
-            ConditionExpression="#s = :pending",
+            # A job the page already reads as failed (stale) is not started.
+            ConditionExpression="#s = :pending AND #u > :fresh",
             ExpressionAttributeNames={"#s": "Status", "#u": "UpdatedAt"},
             ExpressionAttributeValues={
                 ":running": {"S": RUNNING},
                 ":pending": {"S": PENDING},
                 ":u": {"S": _iso(_now())},
+                ":fresh": {"S": _iso(_now() - timedelta(seconds=STALE_AFTER_SECONDS))},
             },
             ReturnValues="ALL_NEW",
         ).get("Attributes")

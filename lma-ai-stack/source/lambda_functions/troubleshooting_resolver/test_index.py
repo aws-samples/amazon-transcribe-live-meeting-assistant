@@ -81,8 +81,11 @@ class FakeDynamoDB:
         job = self.jobs[request["Key"]["JobId"]["S"]]
         names = request["ExpressionAttributeNames"]
         values = request["ExpressionAttributeValues"]
-        if request.get("ConditionExpression") == "#s = :pending":
+        condition = request.get("ConditionExpression") or ""
+        if condition.startswith("#s = :pending"):
             if job["Status"]["S"] != values[":pending"]["S"]:
+                raise _conditional_failure("UpdateItem")
+            if ":fresh" in condition and not job["UpdatedAt"]["S"] > values[":fresh"]["S"]:
                 raise _conditional_failure("UpdateItem")
         assignments = request["UpdateExpression"][len("SET ") :].split(", ")
         for assignment in assignments:
@@ -450,4 +453,17 @@ def test_an_appsync_request_is_never_treated_as_a_worker(
             },
             None,
         )
+    assert agent.invocations == []
+
+
+def test_a_worker_event_for_a_stale_job_does_not_run_it(
+    ddb: FakeDynamoDB, lam: FakeLambda, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A queued worker event delivered after the page reads the job as failed is dropped."""
+    job = _start(ADMIN, Question="x")
+    old = datetime.now(timezone.utc) - timedelta(seconds=index.STALE_AFTER_SECONDS + 60)
+    ddb.jobs[job["JobId"]]["UpdatedAt"] = {"S": index._iso(old)}
+    agent = FakeLambda(_agent_response(200, {"answer": "## Root Cause\nx"}))
+    monkeypatch.setattr(index, "AGENT_LAMBDA", agent)
+    _run_worker(job["JobId"])
     assert agent.invocations == []

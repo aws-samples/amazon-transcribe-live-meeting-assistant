@@ -58,7 +58,6 @@ describe('side navigation visibility', () => {
         .map((item) => item.href.slice(1));
 
     expect(hrefs(true)).toContain(TROUBLESHOOTING_PATH);
-    // One meeting or Virtual Participant is diagnosed from its own page instead.
     expect(hrefs(false)).not.toContain(TROUBLESHOOTING_PATH);
   });
 

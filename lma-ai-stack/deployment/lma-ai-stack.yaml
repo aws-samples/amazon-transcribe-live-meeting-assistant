@@ -6096,13 +6096,16 @@ Resources:
       - TroubleshootingResolverFunctionLogGroup
 
   # A worker is a diagnosis; Lambda retrying an asynchronous invocation would
-  # run the same diagnosis again from the start and pay for it twice.
+  # run the same diagnosis again from the start and pay for it twice. A worker
+  # event still queued when the job reads as failed (STALE_AFTER_SECONDS, 420 s)
+  # is discarded, so a job the page has given up on never runs later.
   TroubleshootingResolverFunctionInvokeConfig:
     Type: AWS::Lambda::EventInvokeConfig
     Properties:
       FunctionName: !Ref TroubleshootingResolverFunction
       Qualifier: "$LATEST"
       MaximumRetryAttempts: 0
+      MaximumEventAgeInSeconds: 360
 
   TroubleshootingResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
