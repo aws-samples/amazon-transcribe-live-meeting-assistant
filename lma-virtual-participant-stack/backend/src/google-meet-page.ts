@@ -209,6 +209,19 @@ export const MEET_IN_PAGE_SELECTORS = {
      */
     audioIndicator: '[jscontroller="ES310d"]',
     /**
+     * The tile's audio-level indicator as a live meeting showed it: an element
+     * holding the level bars, present on every participant's tile but the VP's
+     * own. Observed (one live meeting) carrying `silentIndicatorClass` while the
+     * participant was silent. ASSUMPTION (verify live): the class is dropped
+     * while the participant is heard; see `meetIndicatorSpeaking`.
+     */
+    levelIndicator: '.IisKdb',
+    /**
+     * The class the level indicator carried while the participant was silent.
+     * A class name, not a selector, since it is looked for in a class list.
+     */
+    silentIndicatorClass: 'gjg47c',
+    /**
      * Elements inside a tile that show the speaking indicator while that
      * participant is heard. ASSUMPTION (verify live): Meet's speaking indicator
      * carries one of these generated class names in the current release. They
@@ -422,6 +435,85 @@ export function isOwnMeetName(name: string | null | undefined, identities: reado
 export interface MeetTileReading {
     name: string | null;
     speaking: boolean;
+}
+
+/** What the speaker poll reads of one tile's speaking signals. */
+export interface MeetTileSignals {
+    /** The level indicator's class list (`levelIndicator`), or null when the tile has none. */
+    indicatorClasses: string | null;
+    /** Whether that indicator is rendered. */
+    indicatorVisible: boolean;
+    /** The page's observer saw the tile's indicator change to a heard state in the last moment. */
+    heardRecently: boolean;
+    /** One of the `speakingIndicator` elements is visible in the tile. */
+    speakingClassVisible: boolean;
+}
+
+/**
+ * Whether a level indicator with these classes shows its participant heard: it
+ * is there, rendered, and does not carry the silent class. A tile with no
+ * indicator (the VP's own) is never heard this way.
+ */
+export function meetIndicatorSpeaking(
+    classes: string | null | undefined,
+    visible: boolean,
+    silentClass: string = MEET_IN_PAGE_SELECTORS.silentIndicatorClass,
+): boolean {
+    if (classes === null || classes === undefined || !visible) return false;
+    return !classes.split(/\s+/).includes(silentClass);
+}
+
+/** Whether a tile reads as speaking: by its level indicator, the observer, or a speaking class. */
+export function meetTileSpeaking(signals: MeetTileSignals): boolean {
+    return (
+        meetIndicatorSpeaking(signals.indicatorClasses, signals.indicatorVisible)
+        || signals.heardRecently
+        || signals.speakingClassVisible
+    );
+}
+
+/**
+ * The one named participant other than the VP, when there is exactly one, or
+ * null. Several tiles under one name (a camera and a screen share) are one
+ * participant.
+ */
+export function meetSoleOtherParticipant(
+    tiles: readonly MeetTileReading[],
+    identities: readonly string[],
+): string | null {
+    const others = new Set<string>();
+    for (const tile of tiles) {
+        const name = cleanMeetParticipantName(tile.name);
+        if (name && !isOwnMeetName(name, identities)) others.add(name);
+    }
+    return others.size === 1 ? [...others][0] : null;
+}
+
+/** The speaker the poll reports, and what it was decided from. */
+export interface MeetSpeakerChoice {
+    speaker: string;
+    /** `tile`: a tile reads as speaking. `sole-participant`: the only other person present. */
+    source: 'tile' | 'sole-participant';
+}
+
+/**
+ * The speaker to report, or null to leave the current one.
+ *
+ * A tile that reads as speaking decides it (`pickMeetActiveSpeaker`). When none
+ * does and exactly one named participant other than the VP is in the meeting,
+ * that participant is the speaker: whoever is heard from the meeting is them.
+ * This keeps a two-person meeting attributed when the speaking indicator is not
+ * read (its class names changed), and changes nothing once there are more.
+ */
+export function chooseMeetSpeaker(
+    tiles: readonly MeetTileReading[],
+    identities: readonly string[],
+    current: string | null,
+): MeetSpeakerChoice | null {
+    const picked = pickMeetActiveSpeaker(tiles, identities, current);
+    if (picked) return { speaker: picked, source: 'tile' };
+    const sole = meetSoleOtherParticipant(tiles, identities);
+    return sole ? { speaker: sole, source: 'sole-participant' } : null;
 }
 
 /**

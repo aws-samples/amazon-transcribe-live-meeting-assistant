@@ -56,12 +56,13 @@ import {
     MEET_SELECTORS,
     MeetScreen,
     MeetTileReading,
+    chooseMeetSpeaker,
     classifyMeetScreenText,
     isMeetRefusalRedirect,
     isOwnMeetName,
+    meetTileSpeaking,
     parseGoogleMeetMeeting,
     parseMeetParticipantCount,
-    pickMeetActiveSpeaker,
     senderFromMeetGroupHeader,
     timeFromMeetGroupHeader,
 } from './google-meet-page.js';
@@ -72,7 +73,20 @@ export const MEET_REFUSAL_RETRIES = 4;
 /** The pause before each of those retries. */
 export const MEET_REFUSAL_BACKOFF_MS = [4_000, 8_000, 15_000, 20_000];
 
-/** The page state `logTileActivity` keeps on `window` for its two-minute count. */
+/** One tile as the speaker poll uses it: the reading, its id, and the level indicator's classes. */
+interface MeetTile extends MeetTileReading {
+    id: string;
+    indicatorClasses: string | null;
+    classes?: string;
+}
+
+/** Tile speaking-state changes logged per meeting; the rest are counted, not logged. */
+const MAX_LOGGED_SPEAKING_CHANGES = 50;
+
+/** When `logTileActivity` writes its first report. */
+const TILE_ACTIVITY_FIRST_REPORT_MS = 45_000;
+
+/** The page state `logTileActivity` keeps on `window` for its counts. */
 interface MeetActivityWindow {
     __lmaMeetActivity?: Record<string, Record<string, number>>;
     __lmaMeetActivityObserver?: MutationObserver;
@@ -533,7 +547,14 @@ export default class GoogleMeet {
         // Not a branch of the chain below, so the question is still recorded as
         // meeting chat.
         if (chatQuestion && this.freshToggle(message, sender)) {
-            void startChatAnswer(chatQuestion, sender, 'google-meet', (messages) => this.sendMessages(page, messages));
+            void startChatAnswer(chatQuestion, sender, 'google-meet', async (messages) => {
+                await this.sendMessages(page, messages);
+                // Added to the transcript when the question was (meeting-chat.ts).
+                meetingChat.offerAnswer(
+                    { platform: 'google-meet', text: message, sender, id: reading.id ?? null },
+                    messages,
+                );
+            });
         }
         if (matchesEndCommand(message)) {
             if (this.endHandled) return;
@@ -587,14 +608,15 @@ export default class GoogleMeet {
 
     /**
      * Once per meeting, at debug level: which elements inside each tile change
-     * attributes over two minutes, counted per tile, with the element's tag,
-     * class, jscontroller and the attribute. The element whose changes follow a
-     * participant's speech is the speaking indicator; this is how a live run
-     * shows which one it is when Meet changes its page. The observer is
-     * disconnected and its counts deleted after that one read, so it does no
-     * work for the rest of the meeting.
+     * attributes, counted per tile, with the element's tag, class, jscontroller
+     * and the attribute. The element whose changes follow a participant's
+     * speech is the speaking indicator; this is how a live run shows which one
+     * it is when Meet changes its page. Reported twice: for the first
+     * `TILE_ACTIVITY_FIRST_REPORT_MS`, and for the rest of the meeting when it
+     * ends (`ended` resolves), or once, when the meeting ends sooner. The
+     * observer is disconnected and its counts deleted at the end.
      */
-    private async logTileActivity(page: Page): Promise<void> {
+    private async logTileActivity(page: Page, ended: Promise<void>): Promise<void> {
         const started = await page
             .evaluate((tileSel: string) => {
                 const w = window as unknown as MeetActivityWindow;
@@ -602,6 +624,8 @@ export default class GoogleMeet {
                 const activity: Record<string, Record<string, number>> = {};
                 w.__lmaMeetActivity = activity;
                 const observer = new MutationObserver((mutations) => {
+                    const counts = w.__lmaMeetActivity;
+                    if (!counts) return;
                     for (const m of mutations) {
                         const el = m.target as Element;
                         const tile = el.closest?.(tileSel);
@@ -610,8 +634,8 @@ export default class GoogleMeet {
                         const cls = typeof (el as HTMLElement).className === 'string' ? (el as HTMLElement).className : '';
                         const key = `${el.tagName.toLowerCase()}.${cls.split(' ').slice(0, 3).join('.')}` +
                             `[jsc=${el.getAttribute('jscontroller') || ''}] @${m.attributeName}`;
-                        const counts = (activity[id] ??= {});
-                        counts[key] = (counts[key] ?? 0) + 1;
+                        const perTile = (counts[id] ??= {});
+                        perTile[key] = (perTile[key] ?? 0) + 1;
                     }
                 });
                 observer.observe(document.body, { subtree: true, attributes: true });
@@ -620,39 +644,70 @@ export default class GoogleMeet {
             }, MEET_IN_PAGE_SELECTORS.participantTile)
             .catch(() => false);
         if (!started) return;
-        await new Promise((r) => setTimeout(r, 120_000));
-        const activity = await page
-            .evaluate(() => {
-                const w = window as unknown as MeetActivityWindow;
-                const counts = w.__lmaMeetActivity ?? {};
-                w.__lmaMeetActivityObserver?.disconnect();
-                delete w.__lmaMeetActivityObserver;
-                delete w.__lmaMeetActivity;
-                return counts;
-            })
-            .catch(() => ({}) as Record<string, Record<string, number>>);
-        for (const [tile, counts] of Object.entries(activity)) {
-            const top = Object.entries(counts)
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 15)
-                .map(([k, n]) => `${n}× ${k}`)
-                .join(' | ');
-            log.debug(`[meet] tile ${tile} activity over 2 min: ${top}`);
+
+        // The counts so far, reset; with `stop`, the observer is removed too.
+        const take = (stop: boolean) =>
+            page
+                .evaluate((stopObserving: boolean) => {
+                    const w = window as unknown as MeetActivityWindow;
+                    const counts = w.__lmaMeetActivity ?? {};
+                    if (stopObserving) {
+                        w.__lmaMeetActivityObserver?.disconnect();
+                        delete w.__lmaMeetActivityObserver;
+                        delete w.__lmaMeetActivity;
+                    } else {
+                        w.__lmaMeetActivity = {};
+                    }
+                    return counts;
+                }, stop)
+                .catch(() => ({}) as Record<string, Record<string, number>>);
+        const report = (activity: Record<string, Record<string, number>>, span: string) => {
+            for (const [tile, counts] of Object.entries(activity)) {
+                const top = Object.entries(counts)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 15)
+                    .map(([k, n]) => `${n}× ${k}`)
+                    .join(' | ');
+                log.debug(`[meet] tile ${tile} activity ${span}: ${top}`);
+            }
+        };
+
+        let timer: NodeJS.Timeout | undefined;
+        const endedFirst = await Promise.race([
+            ended.then(() => true),
+            new Promise<boolean>((resolve) => {
+                timer = setTimeout(() => resolve(false), TILE_ACTIVITY_FIRST_REPORT_MS);
+                timer.unref?.();
+            }),
+        ]);
+        clearTimeout(timer);
+        if (endedFirst) {
+            report(await take(true), 'until the meeting ended');
+            return;
         }
+        report(await take(false), `over the first ${TILE_ACTIVITY_FIRST_REPORT_MS / 1000} s`);
+        await ended;
+        report(await take(true), 'from then until the meeting ended');
     }
 
     /**
      * Once per meeting, at debug level: the structure of the first two tiles
-     * (tag, class, data-* and aria attributes, and leaf text), so a live run can
-     * confirm which element holds the name and which shows the speaking state.
+     * (tag, class, jscontroller, data-* and aria attributes, and leaf text), so
+     * a live run can confirm which element holds the name and which shows the
+     * speaking state.
      */
     private async logTileStructure(page: Page): Promise<void> {
         const outline = await page
             .evaluate((tileSel: string) => {
                 const describe = (el: Element, depth: number): string[] => {
-                    if (depth > 9) return [];
+                    if (depth > 12) return [];
                     const attrs = Array.from(el.attributes)
-                        .filter((a) => a.name === 'class' || a.name.startsWith('data-') || a.name.startsWith('aria-') || a.name === 'role')
+                        .filter((a) =>
+                            a.name === 'class' ||
+                            a.name === 'jscontroller' ||
+                            a.name.startsWith('data-') ||
+                            a.name.startsWith('aria-') ||
+                            a.name === 'role')
                         .map((a) => `${a.name}="${a.value.slice(0, 60)}"`)
                         .join(' ');
                     const own = Array.from(el.childNodes)
@@ -666,24 +721,36 @@ export default class GoogleMeet {
                 };
                 return Array.from(document.querySelectorAll(tileSel))
                     .slice(0, 2)
-                    .map((t) => describe(t, 0).slice(0, 120).join('\n'));
+                    .map((t) => describe(t, 0).slice(0, 160).join('\n'));
             }, MEET_IN_PAGE_SELECTORS.participantTile)
             .catch(() => [] as string[]);
         outline.forEach((tile, i) => log.debug(`[meet] tile ${i} structure:\n${tile}`));
     }
 
     /**
-     * The participant tiles, for the active-speaker poll. `withClasses` adds the
-     * class names found in each tile, for the one diagnostic line; it is left
-     * off the once-a-second reads.
+     * The participant tiles, for the active-speaker poll, with whether each
+     * reads as speaking (`meetTileSpeaking`) and the level indicator's class
+     * list, for the line logged when a tile's state changes. `withClasses` adds
+     * the class names found in each tile, for the one diagnostic line; it is
+     * left off the once-a-second reads.
      */
-    private async readTiles(page: Page, withClasses = false): Promise<Array<MeetTileReading & { classes?: string }>> {
-        return page
+    private async readTiles(page: Page, withClasses = false): Promise<MeetTile[]> {
+        const raw = await page
             .evaluate(
-                (sels: { tile: string; names: readonly string[]; speaking: readonly string[]; indicator: string; withClasses: boolean }) => {
-                    // Install, once, an observer that stamps a tile whenever its
-                    // audio-level indicator changes class while visible: that is
-                    // the participant being heard.
+                (sels: {
+                    tile: string;
+                    names: readonly string[];
+                    speaking: readonly string[];
+                    indicator: string;
+                    level: string;
+                    silent: string;
+                    withClasses: boolean;
+                }) => {
+                    // Install, once, an observer that stamps a tile when its
+                    // audio indicator shows the participant heard while visible:
+                    // the jscontroller indicator on any class change, the level
+                    // indicator when its class list changes to one without the
+                    // silent class.
                     const w = window as unknown as { __lmaMeetHeard?: Record<string, number> };
                     if (!w.__lmaMeetHeard) {
                         w.__lmaMeetHeard = {};
@@ -691,15 +758,31 @@ export default class GoogleMeet {
                         new MutationObserver((mutations) => {
                             for (const m of mutations) {
                                 const el = m.target as HTMLElement;
-                                if (m.attributeName !== 'class' || !el.matches?.(sels.indicator)) continue;
+                                if (m.attributeName !== 'class' || !el.matches) continue;
+                                const level = el.matches(sels.level);
+                                if (!level && !el.matches(sels.indicator)) continue;
                                 if (el.offsetParent === null) continue;
+                                if (level && (el.classList.contains(sels.silent) || m.oldValue === el.className)) continue;
                                 const id = el.closest(sels.tile)?.getAttribute('data-participant-id');
                                 if (id) heard[id] = Date.now();
                             }
-                        }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
+                        }).observe(document.body, {
+                            subtree: true,
+                            attributes: true,
+                            attributeFilter: ['class'],
+                            attributeOldValue: true,
+                        });
                     }
                     const heard = w.__lmaMeetHeard;
-                    const out: Array<{ name: string | null; speaking: boolean; classes?: string }> = [];
+                    const out: Array<{
+                        id: string;
+                        name: string | null;
+                        indicatorClasses: string | null;
+                        indicatorVisible: boolean;
+                        heardRecently: boolean;
+                        speakingClassVisible: boolean;
+                        classes?: string;
+                    }> = [];
                     const tiles = Array.from(document.querySelectorAll(sels.tile)).slice(0, 49);
                     for (const tile of tiles) {
                         const r = (tile as HTMLElement).getBoundingClientRect();
@@ -714,14 +797,20 @@ export default class GoogleMeet {
                             }
                         }
                         const id = tile.getAttribute('data-participant-id') || '';
-                        const speaking =
-                            Date.now() - (heard[id] ?? 0) < 1500 ||
-                            sels.speaking.some((sel) => {
+                        const level = tile.querySelector(sels.level) as HTMLElement | null;
+                        const reading = {
+                            id,
+                            name,
+                            indicatorClasses: level ? (typeof level.className === 'string' ? level.className : '') : null,
+                            indicatorVisible: !!level && level.offsetParent !== null,
+                            heardRecently: Date.now() - (heard[id] ?? 0) < 1500,
+                            speakingClassVisible: sels.speaking.some((sel) => {
                                 const el = tile.querySelector(sel) as HTMLElement | null;
                                 return !!el && el.offsetParent !== null;
-                            });
+                            }),
+                        };
                         if (!sels.withClasses) {
-                            out.push({ name, speaking });
+                            out.push(reading);
                             continue;
                         }
                         // For the one-off diagnostic line: the class names in the
@@ -731,7 +820,7 @@ export default class GoogleMeet {
                                 .slice(0, 60)
                                 .flatMap((el) => Array.from(el.classList)),
                         )).slice(0, 40).join(' ');
-                        out.push({ name, speaking, classes });
+                        out.push({ ...reading, classes });
                     }
                     return out;
                 },
@@ -740,10 +829,19 @@ export default class GoogleMeet {
                     names: MEET_IN_PAGE_SELECTORS.tileName,
                     speaking: MEET_IN_PAGE_SELECTORS.speakingIndicator,
                     indicator: MEET_IN_PAGE_SELECTORS.audioIndicator,
+                    level: MEET_IN_PAGE_SELECTORS.levelIndicator,
+                    silent: MEET_IN_PAGE_SELECTORS.silentIndicatorClass,
                     withClasses,
                 },
             )
             .catch(() => []);
+        return raw.map(({ id, name, indicatorClasses, classes, ...signals }) => ({
+            id,
+            name,
+            speaking: meetTileSpeaking({ indicatorClasses, ...signals }),
+            indicatorClasses,
+            ...(classes === undefined ? {} : { classes }),
+        }));
     }
 
     /** One reading of the People count, corroborated by the Leave call button when absent. */
@@ -1061,6 +1159,10 @@ export default class GoogleMeet {
         const timers: NodeJS.Timeout[] = [];
         const stopTimers = () => timers.forEach((t) => clearInterval(t));
         page.once('close', stopTimers);
+        // Resolved when the meeting ends, for the diagnostics that report then.
+        let signalMeetingEnded: () => void = () => {};
+        const meetingEndedSignal = new Promise<void>((resolve) => (signalMeetingEnded = resolve));
+        let tileActivity: Promise<void> = Promise.resolve();
 
         try {
             // Attendee watchdog: Teams' debounced decision (decideAttendeeAction),
@@ -1120,6 +1222,11 @@ export default class GoogleMeet {
             }
             let tilesLogged = false;
             let speakerPollInFlight = false;
+            // Each tile's last speaking state, by tile id, for the INFO line
+            // logged when it changes (at most MAX_LOGGED_SPEAKING_CHANGES).
+            const tileSpeaking = new Map<string, boolean>();
+            let speakingChangesLogged = 0;
+            const sourcesLogged = new Set<string>();
             log.info('Listening for speaker changes.');
             timers.push(setInterval(async () => {
                 if (page.isClosed() || speakerPollInFlight) return;
@@ -1130,9 +1237,36 @@ export default class GoogleMeet {
                         tilesLogged = true;
                         log.info(`[meet] participant tiles: ${JSON.stringify(tiles.slice(0, 3))}`);
                         void this.logTileStructure(page);
-                        void this.logTileActivity(page);
+                        tileActivity = this.logTileActivity(page, meetingEndedSignal);
                     }
-                    const speaker = pickMeetActiveSpeaker(tiles, this.ownIdentities(), lastMeetingSpeaker);
+                    for (const tile of tiles) {
+                        if (!tile.id || tileSpeaking.get(tile.id) === tile.speaking) continue;
+                        const first = !tileSpeaking.has(tile.id);
+                        tileSpeaking.set(tile.id, tile.speaking);
+                        // A tile first seen silent is not a change worth a line.
+                        if ((first && !tile.speaking) || speakingChangesLogged > MAX_LOGGED_SPEAKING_CHANGES) continue;
+                        speakingChangesLogged += 1;
+                        if (speakingChangesLogged > MAX_LOGGED_SPEAKING_CHANGES) {
+                            log.info(`[meet] ${MAX_LOGGED_SPEAKING_CHANGES} tile speaking changes logged; not logging more`);
+                            continue;
+                        }
+                        log.info(
+                            `[meet] tile ${tile.id.split('/').pop()} (${tile.name ?? 'no name'}) `
+                                + `speaking=${tile.speaking} indicator=${JSON.stringify(tile.indicatorClasses)}`,
+                        );
+                    }
+                    const choice = chooseMeetSpeaker(tiles, this.ownIdentities(), lastMeetingSpeaker);
+                    if (choice && !sourcesLogged.has(choice.source)) {
+                        // Logged the first time each source decides the speaker,
+                        // never per poll.
+                        sourcesLogged.add(choice.source);
+                        log.info(
+                            choice.source === 'sole-participant'
+                                ? '[meet] no tile reads as speaking; reporting the one other participant as the speaker'
+                                : '[meet] the active speaker is read from the tiles',
+                        );
+                    }
+                    const speaker = choice?.speaker ?? null;
                     if (speaker && speaker !== lastMeetingSpeaker) {
                         lastMeetingSpeaker = speaker;
                         if (!(voiceAssistant.isEnabled() && agentSpeakingDetector.isSpeaking())) await report(speaker);
@@ -1244,6 +1378,9 @@ export default class GoogleMeet {
         } finally {
             details.start = false;
             stopTimers();
+            // The tile diagnostics' last report; bounded, since the page may be going.
+            signalMeetingEnded();
+            await Promise.race([tileActivity, new Promise((r) => setTimeout(r, 3000))]);
         }
     }
 }

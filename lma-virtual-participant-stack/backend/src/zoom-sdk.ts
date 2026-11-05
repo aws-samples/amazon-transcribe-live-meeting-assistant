@@ -416,7 +416,14 @@ export default class ZoomSdk {
                 // Not a branch of the chain below, so the question is still
                 // recorded as meeting chat.
                 if (chatQuestion) {
-                    void startChatAnswer(chatQuestion, sender, 'zoom-sdk', (messages) => this.sendMessages(page, messages));
+                    void startChatAnswer(chatQuestion, sender, 'zoom-sdk', async (messages) => {
+                        await this.sendMessages(page, messages);
+                        // Added to the transcript when the question was (meeting-chat.ts).
+                        meetingChat.offerAnswer(
+                            { platform: 'zoom-sdk', text: body, sender, id: chat.id == null ? null : String(chat.id) },
+                            messages,
+                        );
+                    });
                 }
                 if (assistantToggle) {
                     await this.sendMessages(

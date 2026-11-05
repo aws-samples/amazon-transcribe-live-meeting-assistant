@@ -821,7 +821,15 @@ export default class Teams {
         // Not a branch of the chain below, so the question is still recorded as
         // meeting chat.
         if (chatQuestion) {
-            void startChatAnswer(chatQuestion, null, 'teams', (messages) => this.sendMessages(page, messages));
+            void startChatAnswer(chatQuestion, null, 'teams', async (messages) => {
+                await this.sendMessages(page, messages);
+                // Added to the transcript when the question was (meeting-chat.ts),
+                // which is offered with the row's author and id.
+                meetingChat.offerAnswer(
+                    { platform: 'teams', text: message, sender: row.author ?? null, id: row.id ?? null },
+                    messages,
+                );
+            });
         }
         if (matchesEndCommand(message)) {
             log.info(`LMA Virtual Participant has been asked to leave the meeting: ${JSON.stringify(message)}`);

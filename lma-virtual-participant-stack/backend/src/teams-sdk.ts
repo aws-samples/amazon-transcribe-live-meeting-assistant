@@ -456,7 +456,11 @@ export default class TeamsSdk {
                     // Not a branch of the chain below, so the question is still
                     // recorded as meeting chat.
                     if (chatQuestion) {
-                        void startChatAnswer(chatQuestion, sender, 'teams-sdk', (messages) => this.sendMessages(page, messages));
+                        void startChatAnswer(chatQuestion, sender, 'teams-sdk', async (messages) => {
+                            await this.sendMessages(page, messages);
+                            // Added to the transcript when the question was (meeting-chat.ts).
+                            meetingChat.offerAnswer({ platform: 'teams-sdk', text: body, sender, id: chat.id ?? null }, messages);
+                        });
                     }
                     if (assistantToggle) {
                         await this.sendMessages(

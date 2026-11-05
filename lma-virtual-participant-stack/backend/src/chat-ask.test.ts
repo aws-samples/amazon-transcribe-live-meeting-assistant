@@ -59,8 +59,60 @@ test('the other chat commands win over @LMA', () => {
     }
 });
 
-test('LMA without @ or "ask" is not a question, and nor is a mention mid-sentence', () => {
-    for (const message of ['LMA what are the action items', 'thanks LMA', 'I asked @LMA earlier', 'LMA asked me', '@LMA', 'LMA ask']) {
+test('LMA followed by a question is a question, as LMA ask is', () => {
+    for (const [message, question] of [
+        ['LMA what was just discussed?', 'what was just discussed?'],
+        ['lma, did we agree on the budget?', 'did we agree on the budget?'],
+        ['LMA: what are the action items', 'what are the action items'],
+        ["LMA what's next", "what's next"],
+        ['LMA summarize the last ten minutes', 'summarize the last ten minutes'],
+        ['LMA the deadline is Friday, right?', 'the deadline is Friday, right?'],
+    ]) {
+        assert.deepEqual(parseChatQuestion(message, true), { question, explicit: false }, message);
+    }
+});
+
+test('the chat commands still win over a bare LMA question', () => {
+    for (const message of [
+        'LMA help',
+        'LMA help?',
+        'LMA leave',
+        'LMA leave?',
+        'LMA pause',
+        'LMA start?',
+        'LMA translate',
+        'LMA translate French?',
+        'LMA listen',
+        'LMA consent',
+        'LMA object?',
+        'LMA no consent',
+    ]) {
+        assert.equal(parseChatQuestion(message, true), null, `"${message}" was taken as a question`);
+    }
+});
+
+test('a bare LMA question needs the meeting assistant, and is not explicit', () => {
+    assert.equal(parseChatQuestion('LMA what was just discussed?', false), null);
+    assert.deepEqual(parseChatQuestion('LMA ask what was just discussed?', false), {
+        question: 'what was just discussed?',
+        explicit: true,
+    });
+});
+
+test('LMA without @, "ask" or a question is not a question, and nor is a mention mid-sentence', () => {
+    for (const message of [
+        'LMA is great',
+        'LMA looks useful',
+        'LMA?',
+        'LMA',
+        'thanks LMA',
+        'is LMA recording this?',
+        'I asked @LMA earlier',
+        'LMA asked me',
+        'lmao what?',
+        '@LMA',
+        'LMA ask',
+    ]) {
         const parsed = parseChatQuestion(message, true);
         if (message === 'LMA ask') {
             assert.deepEqual(parsed, { question: '', explicit: true }, 'a bare "LMA ask" is answered with how to use it');

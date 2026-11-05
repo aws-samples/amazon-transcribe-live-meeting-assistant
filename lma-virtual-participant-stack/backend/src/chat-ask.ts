@@ -5,8 +5,9 @@
  */
 
 /**
- * `LMA ask <question>` (and `@LMA <question>`): a question typed in the meeting
- * chat, answered in the meeting chat by the Meeting Assistant.
+ * `LMA ask <question>` (and `@LMA <question>`, and `LMA <question>?`): a
+ * question typed in the meeting chat, answered in the meeting chat by the
+ * Meeting Assistant.
  *
  * The answer comes from the same Strands meeting-assist Lambda the voice
  * assistant's lookup tool calls (`STRANDS_LAMBDA_ARN`), with the meeting's
@@ -38,6 +39,7 @@ import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { details, matchesChatCommand, matchesEndCommand } from './details.js';
 import { parseAssistantChatCommand } from './assistant-toggles.js';
 import { normalizeChatText } from './chat-text.js';
+import { classifyChatReply } from './consent-matcher.js';
 import { toSpokenText } from './spoken-text.js';
 import { createLogger } from './logger.js';
 
@@ -87,12 +89,36 @@ export const ANSWER_PREFIX = 'Live Meeting Assistant';
 
 export interface ChatQuestion {
     question: string;
-    /** `LMA ask ...` rather than `@LMA ...`. */
+    /** `LMA ask ...` rather than `@LMA ...` or `LMA <question>?`. */
     explicit: boolean;
 }
 
 const EXPLICIT_ASK = /^\s*@?lma\b[\s,:;.!-]*ask\b[\s,:;.!?-]*(.*)$/is;
 const MENTION = /^\s*@lma\b[\s,:;.!-]*(.*)$/is;
+const ADDRESSED = /^\s*lma\b[\s,:;.!-]*(.*)$/is;
+
+/**
+ * The words a bare `LMA <text>` may start with to be read as a question
+ * without a question mark: the question words, and the requests participants
+ * type to an assistant ("LMA summarize the last ten minutes").
+ */
+const QUESTION_STARTS: ReadonlySet<string> = new Set([
+    'what', 'whats', 'who', 'whos', 'whom', 'whose', 'when', 'where', 'why', 'how', 'which',
+    'summarize', 'summarise', 'recap', 'explain', 'list', 'tell',
+]);
+
+/**
+ * Whether the text after a bare "LMA" reads as a question: it ends with a
+ * question mark, or starts with one of `QUESTION_STARTS`. "LMA is great" and
+ * "LMA asked me" are someone talking about LMA, not to it.
+ */
+export function readsAsQuestion(text: string): boolean {
+    const trimmed = text.trim();
+    if (!/[a-z0-9]/i.test(trimmed)) return false;
+    if (/\?[\s"')\]]*$/.test(trimmed)) return true;
+    const first = normalizeChatText(trimmed.replace(/['’]/g, '')).split(' ')[0];
+    return QUESTION_STARTS.has(first);
+}
 
 /** Whether `message` is one of the messages the VP itself posts, as configured. */
 function isOwnStatusMessage(message: string): boolean {
@@ -101,7 +127,12 @@ function isOwnStatusMessage(message: string): boolean {
         .some((own) => own.trim() === text);
 }
 
-/** Whether `message` is one of the other chat commands, which win over a question. */
+/**
+ * Whether `message` is one of the other chat commands, which win over a
+ * question: the dismissal, assistant-mode, help, pause and resume commands, and
+ * the built-in consent replies ("LMA consent", "LMA object"), which are
+ * commands even while no consent flow is running to act on them.
+ */
 function isOtherChatCommand(message: string): boolean {
     return (
         matchesEndCommand(message)
@@ -109,6 +140,7 @@ function isOtherChatCommand(message: string): boolean {
         || matchesChatCommand(message, details.helpCommand)
         || matchesChatCommand(message, details.pauseCommand)
         || matchesChatCommand(message, details.startCommand)
+        || classifyChatReply(message, [], []) !== null
     );
 }
 
@@ -118,8 +150,10 @@ function isOtherChatCommand(message: string): boolean {
  * `LMA ask <question>` (also `@LMA ask`, `LMA, ask:`) always is. `@LMA
  * <question>` is one only when the text is not another chat command, so
  * `@LMA help` is still help and `@LMA translate` still changes mode. A bare
- * "LMA <words>" is not a question: without the `@` or the word "ask" it is as
- * likely to be someone talking about LMA as to it.
+ * "LMA <words>" (LMA first) is one when it is not another command and reads as
+ * a question (`readsAsQuestion`): "LMA what was just discussed?" is, "LMA is
+ * great" is not, since without the `@`, the word "ask" or the shape of a
+ * question it is as likely to be someone talking about LMA as to it.
  *
  * Neither form can match a message this module posts, because those all start
  * with `ANSWER_PREFIX`. With no Strands meeting assistant only the explicit
@@ -139,6 +173,10 @@ export function parseChatQuestion(message: string, available: boolean = chatAskA
     const mention = MENTION.exec(message);
     if (mention && mention[1].trim() && !isOtherChatCommand(message)) {
         return { question: mention[1].trim(), explicit: false };
+    }
+    const addressed = ADDRESSED.exec(message);
+    if (addressed && readsAsQuestion(addressed[1]) && !isOtherChatCommand(message)) {
+        return { question: addressed[1].trim(), explicit: false };
     }
     return null;
 }

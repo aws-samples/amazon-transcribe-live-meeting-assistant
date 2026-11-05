@@ -20,10 +20,14 @@ import {
     MEET_IN_PAGE_SELECTORS,
     MEET_SCREEN_PHRASES,
     MEET_SELECTORS,
+    chooseMeetSpeaker,
     classifyMeetScreenText,
     cleanMeetParticipantName,
     isMeetRefusalRedirect,
     isOwnMeetName,
+    meetIndicatorSpeaking,
+    meetSoleOtherParticipant,
+    meetTileSpeaking,
     normalizeMeetText,
     parseGoogleMeetMeeting,
     parseMeetParticipantCount,
@@ -308,11 +312,12 @@ test('selectors run inside the page are plain CSS', () => {
     }
 });
 
-test('the selectors avoid generated class names except for the speaking indicator', () => {
-    // Meet's class names change between releases. Only the speaking indicator
-    // has no accessible equivalent, and it is logged so a live run can check it.
+test('the selectors avoid generated class names except for the speaking indicators', () => {
+    // Meet's class names change between releases. Only the speaking and level
+    // indicators have no accessible equivalent, and they are logged so a live
+    // run can check them.
     for (const [key, value] of Object.entries({ ...MEET_SELECTORS, ...MEET_IN_PAGE_SELECTORS })) {
-        if (key === 'speakingIndicator' || key === 'tileName') continue;
+        if (key === 'speakingIndicator' || key === 'levelIndicator' || key === 'tileName') continue;
         for (const selector of Array.isArray(value) ? value : [value]) {
             assert.ok(!/(^|[\s>+~])\.[A-Za-z]/.test(selector), `${key}: "${selector}" depends on a class name`);
         }
@@ -332,4 +337,74 @@ test('the time a message group header shows is read when there is exactly one', 
     assert.equal(timeFromMeetGroupHeader('Alice Smith'), null);
     assert.equal(timeFromMeetGroupHeader('Alice 10:32 AM Bob 10:33 AM'), null);
     assert.equal(timeFromMeetGroupHeader(null), null);
+});
+
+// ------------------------------------------------- the level indicator and the fallback
+
+// The class list a live meeting showed on a silent participant's level indicator.
+const SILENT_LEVEL = 'IisKdb GF8M7d  gjg47c YFyDbd iPFm3e VeFZv';
+
+test('the level indicator reads as speaking when it is shown without the silent class', () => {
+    assert.equal(MEET_IN_PAGE_SELECTORS.levelIndicator, '.IisKdb');
+    assert.equal(MEET_IN_PAGE_SELECTORS.silentIndicatorClass, 'gjg47c');
+    assert.equal(meetIndicatorSpeaking(SILENT_LEVEL, true), false, 'the silent class list');
+    assert.equal(meetIndicatorSpeaking('IisKdb GF8M7d YFyDbd iPFm3e VeFZv', true), true);
+    assert.equal(meetIndicatorSpeaking('IisKdb GF8M7d YFyDbd', false), false, 'not rendered');
+    assert.equal(meetIndicatorSpeaking(null, true), false, "no indicator (the VP's own tile)");
+    // A class that merely contains the silent one is not it.
+    assert.equal(meetIndicatorSpeaking('IisKdb xgjg47cx', true), true);
+});
+
+test('a tile is speaking by its level indicator, the observer, or a speaking class', () => {
+    const silent = { indicatorClasses: SILENT_LEVEL, indicatorVisible: true, heardRecently: false, speakingClassVisible: false };
+    assert.equal(meetTileSpeaking(silent), false);
+    assert.equal(meetTileSpeaking({ ...silent, indicatorClasses: 'IisKdb GF8M7d' }), true);
+    assert.equal(meetTileSpeaking({ ...silent, heardRecently: true }), true);
+    assert.equal(meetTileSpeaking({ ...silent, speakingClassVisible: true }), true);
+    assert.equal(meetTileSpeaking({ ...silent, indicatorClasses: null }), false);
+});
+
+test('the one named participant other than the VP is found, and only when there is exactly one', () => {
+    const ids = ['LMA (Bob)', 'LMA'];
+    assert.equal(
+        meetSoleOtherParticipant([{ name: 'LMA (Bob)', speaking: false }, { name: 'Alice', speaking: false }], ids),
+        'Alice',
+    );
+    assert.equal(
+        meetSoleOtherParticipant([{ name: 'Alice', speaking: false }, { name: 'Alice (Presentation)', speaking: false }], ids),
+        'Alice',
+        'two tiles of one participant',
+    );
+    assert.equal(meetSoleOtherParticipant([{ name: 'Alice', speaking: false }, { name: 'Carol', speaking: false }], ids), null);
+    assert.equal(meetSoleOtherParticipant([{ name: 'LMA (Bob)', speaking: false }, { name: null, speaking: false }], ids), null);
+    assert.equal(meetSoleOtherParticipant([], ids), null);
+});
+
+test('with no tile speaking, the one other participant is reported as the speaker', () => {
+    const ids = ['LMA (Bob)', 'LMA'];
+    const two = [
+        { name: 'LMA (Bob)', speaking: false },
+        { name: 'Alice', speaking: false },
+    ];
+    assert.deepEqual(chooseMeetSpeaker(two, ids, null), { speaker: 'Alice', source: 'sole-participant' });
+    // The VP's own tile reading as speaking changes nothing.
+    assert.deepEqual(chooseMeetSpeaker([{ ...two[0], speaking: true }, two[1]], ids, null), {
+        speaker: 'Alice',
+        source: 'sole-participant',
+    });
+});
+
+test('a speaking tile wins over the fallback, and with two others and none speaking nobody is reported', () => {
+    const ids = ['LMA'];
+    assert.deepEqual(chooseMeetSpeaker([{ name: 'Alice', speaking: true }], ids, null), { speaker: 'Alice', source: 'tile' });
+    const three = [
+        { name: 'LMA', speaking: false },
+        { name: 'Alice', speaking: false },
+        { name: 'Carol', speaking: false },
+    ];
+    assert.equal(chooseMeetSpeaker(three, ids, 'Alice'), null, 'the current speaker is left as it is');
+    assert.deepEqual(chooseMeetSpeaker([three[0], three[1], { ...three[2], speaking: true }], ids, 'Alice'), {
+        speaker: 'Carol',
+        source: 'tile',
+    });
 });

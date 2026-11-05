@@ -1771,7 +1771,11 @@ export default class Zoom {
             // Not a branch of the chain below: a question is still meeting chat,
             // and is recorded as such.
             if (chatQuestion) {
-                void startChatAnswer(chatQuestion, sender, 'zoom', (messages) => this.sendMessages(page, messages));
+                void startChatAnswer(chatQuestion, sender, 'zoom', async (messages) => {
+                    await this.sendMessages(page, messages);
+                    // Added to the transcript when the question was (meeting-chat.ts).
+                    meetingChat.offerAnswer({ platform: 'zoom', text: body, sender, id: messageId }, messages);
+                });
             }
             if (matchesEndCommand(body)) {
                 log.info(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);

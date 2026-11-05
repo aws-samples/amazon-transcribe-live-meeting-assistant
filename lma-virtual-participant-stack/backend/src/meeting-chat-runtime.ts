@@ -27,4 +27,5 @@ export const meetingChat = new MeetingChatCapture({
     timelineSeconds: () => transcriptionService.timelineSeconds(),
     send: (segment) => kinesisStreamManager.sendChatSegment(segment),
     ownIdentities: () => [details.lmaIdentity, details.scribeIdentity, details.scribeName],
+    ownName: () => details.scribeIdentity || details.scribeName,
 });
