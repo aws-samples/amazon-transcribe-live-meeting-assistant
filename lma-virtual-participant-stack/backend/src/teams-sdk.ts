@@ -10,6 +10,7 @@ import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { noteSentChat } from './meeting-chat.js';
 import { meetingChat } from './meeting-chat-runtime.js';
+import { chatAddressing } from './chat-addressing.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startTeamsSdkServer, TeamsSdkServerHandle } from './teams-sdk-server.js';
@@ -437,7 +438,26 @@ export default class TeamsSdk {
 
                 for (const chat of snap.chats) {
                     const sender = chat.senderName || null;
-                    const body = chat.text || '';
+                    const rawBody = chat.text || '';
+                    // Which LMA VP the message is for, when there are several
+                    // (chat-addressing.ts). One for another VP, or the bare
+                    // "LMA" with several here, is meeting chat only.
+                    const route = chatAddressing.route(rawBody, sender);
+                    if (!route.act) {
+                        meetingChat.offer({
+                            platform: 'teams-sdk',
+                            text: rawBody,
+                            commandText: route.text,
+                            sender,
+                            id: chat.id ?? null,
+                            platformTime: chat.time ?? null,
+                            audience: 'everyone',
+                            links: chat.links,
+                        });
+                        continue;
+                    }
+                    // Read with its address reduced to "LMA".
+                    const body = route.text;
                     // A consent reply, or "LMA start" while consent is withheld.
                     if (await meetingConsent.handleChat(sender, body)) continue;
                     if (matchesEndCommand(body)) {
@@ -462,7 +482,7 @@ export default class TeamsSdk {
                             // transcript when the question was (meeting-chat.ts).
                             if (answered) {
                                 meetingChat.offerAnswer(
-                                    { platform: 'teams-sdk', text: body, sender, id: chat.id ?? null },
+                                    { platform: 'teams-sdk', text: rawBody, sender, id: chat.id ?? null },
                                     messages,
                                 );
                             }
@@ -491,7 +511,8 @@ export default class TeamsSdk {
                         // Meeting chat, for the transcript (meeting-chat.ts decides).
                         meetingChat.offer({
                             platform: 'teams-sdk',
-                            text: body,
+                            text: rawBody,
+                            commandText: body,
                             sender,
                             id: chat.id ?? null,
                             platformTime: chat.time ?? null,
@@ -505,6 +526,13 @@ export default class TeamsSdk {
                 pollsSinceLonelyCheck += 1;
                 if (pollsSinceLonelyCheck >= 10) {
                     pollsSinceLonelyCheck = 0;
+                    // The call's participant list decides which other LMA VPs
+                    // are here (chat-addressing.ts).
+                    chatAddressing.noteRoster(
+                        await page
+                            .evaluate(() => (window as any).__lmaParticipantNames?.() ?? null)
+                            .catch(() => null),
+                    );
                     if (snap.count >= 0 && snap.count <= 1) {
                         consecutiveLonely += 1;
                         if (consecutiveLonely >= POLLS_BEFORE_LONELY) {

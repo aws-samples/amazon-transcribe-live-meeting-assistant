@@ -6,6 +6,7 @@ import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { chatHelpMessages } from './chat-help.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
+import { chatAddressing } from './chat-addressing.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { clickWithDomFallback, POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
@@ -234,6 +235,16 @@ export default class Chime {
                     sender = this.prevSender;
                 }
                 this.prevSender = sender;
+
+                // Which LMA VP the message is for, when there are several
+                // (chat-addressing.ts); read from here on with its address
+                // reduced to "LMA". One for another VP, or the bare "LMA" with
+                // several here, is not read for the commands.
+                if (text) {
+                    const route = chatAddressing.route(text, sender === 'Amazon Chime' ? null : sender);
+                    if (!route.act) return;
+                    text = route.text;
+                }
 
                 // A consent reply, or "LMA start" while consent is withheld. Chime's
                 // own system messages go through too, without a sender, so a

@@ -27,6 +27,16 @@ import { ASSISTANT_CHAT_COMMANDS } from './assistant-toggles.js';
 import type { VoiceAssistantProvider } from './voice-assistant-interface.js';
 import { chatAskAvailable } from './chat-ask.js';
 import { CONSENT_HELP_LINE, consentHelpActive } from './consent-help.js';
+import { preferredVpHandle } from './vp-handle.js';
+import { normalizeChatText } from './chat-text.js';
+
+/** The name to add after "LMA" to address this VP, or null when its display name names nobody. */
+export function addressingHandle(): string | null {
+    const handle = preferredVpHandle(details.scribeIdentity);
+    if (handle) return handle;
+    const name = details.scribeIdentity.trim();
+    return name && normalizeChatText(name) !== 'lma' ? name : null;
+}
 
 /** What the help reply needs to know about the voice assistant. */
 export type ChatHelpAssistant = Pick<VoiceAssistantProvider, 'isEnabled' | 'supportsModeChanges'>;
@@ -67,6 +77,16 @@ export function chatHelpMessages(
             + ask
             + `${typed(details.helpCommand)} to show this list.`,
     ];
+
+    // Addressing this VP by name, for a meeting with more than one
+    // (chat-addressing.ts). Not listed for a display name that names nobody.
+    const handle = addressingHandle();
+    if (handle) {
+        messages.push(
+            `With more than one LMA in the meeting, add my name after "LMA": "LMA ${handle} help", `
+                + `or mention me (@${details.scribeIdentity}).`,
+        );
+    }
 
     if (assistant.isEnabled() && assistant.supportsModeChanges()) {
         const modes = ASSISTANT_CHAT_COMMANDS.map((entry) => `${typed(entry.phrases[0])} (${entry.summary})`);

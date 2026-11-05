@@ -9,6 +9,7 @@ import { toolbarPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { noteSentChat } from './meeting-chat.js';
 import { meetingChat } from './meeting-chat-runtime.js';
+import { chatAddressing } from './chat-addressing.js';
 import { simliAvatar } from './simli-avatar.js';
 import {
     findElementWithFallback,
@@ -1757,7 +1758,26 @@ export default class Zoom {
         await page.exposeFunction('messageChange', async (message: string, messageId?: string | null, links?: string[]) => {
             // `message` is the row's aria-label, sender and recipient included.
             // Every command below is matched against the body alone.
-            const { sender, recipient, body, time } = parseZoomChatLabel(message);
+            const { sender, recipient, body: rawBody, time } = parseZoomChatLabel(message);
+            // Which LMA VP the message is for, when there are several
+            // (chat-addressing.ts). One for another VP, or the bare "LMA" with
+            // several here, is meeting chat only.
+            const route = chatAddressing.route(rawBody, sender);
+            if (!route.act) {
+                meetingChat.offer({
+                    platform: 'zoom',
+                    text: rawBody,
+                    commandText: route.text,
+                    sender,
+                    id: messageId,
+                    platformTime: time,
+                    audience: zoomChatAudience(recipient),
+                    links,
+                });
+                return;
+            }
+            // Read with its address reduced to "LMA".
+            const body = route.text;
             // A consent reply, or "LMA start" while consent is withheld.
             if (await meetingConsent.handleChat(sender, body)) return;
             // Checked ahead of pause/resume so an assistant-mode toggle lands
@@ -1776,7 +1796,7 @@ export default class Zoom {
                     // The meeting assistant's answer, not a notice, is added to the
                     // transcript when the question was (meeting-chat.ts).
                     if (answered) {
-                        meetingChat.offerAnswer({ platform: 'zoom', text: body, sender, id: messageId }, messages);
+                        meetingChat.offerAnswer({ platform: 'zoom', text: rawBody, sender, id: messageId }, messages);
                     }
                 });
             }
@@ -1813,7 +1833,8 @@ export default class Zoom {
                 // state, the setting).
                 meetingChat.offer({
                     platform: 'zoom',
-                    text: body,
+                    text: rawBody,
+                    commandText: body,
                     sender,
                     id: messageId,
                     platformTime: time,

@@ -10,6 +10,7 @@ import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { ChatAudience, noteSentChat } from './meeting-chat.js';
 import { meetingChat } from './meeting-chat-runtime.js';
+import { chatAddressing } from './chat-addressing.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startZoomSdkServer, ZoomSdkServerHandle } from './zoom-sdk-server.js';
 import { POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
@@ -397,7 +398,27 @@ export default class ZoomSdk {
 
             for (const chat of snap.chats) {
                 const sender = chat.senderName || null;
-                const body = chat.text || '';
+                const rawBody = chat.text || '';
+                const chatId = chat.id == null ? null : String(chat.id);
+                const audience = zoomSdkChatAudience(chat.receiverId, chat.receiverName);
+                // Which LMA VP the message is for, when there are several
+                // (chat-addressing.ts). One for another VP, or the bare "LMA"
+                // with several here, is meeting chat only.
+                const route = chatAddressing.route(rawBody, sender);
+                if (!route.act) {
+                    meetingChat.offer({
+                        platform: 'zoom-sdk',
+                        text: rawBody,
+                        commandText: route.text,
+                        sender,
+                        id: chatId,
+                        platformTime: chat.time ?? null,
+                        audience,
+                    });
+                    continue;
+                }
+                // Read with its address reduced to "LMA".
+                const body = route.text;
                 // A consent reply, or "LMA start" while consent is withheld.
                 if (await meetingConsent.handleChat(sender, body)) continue;
                 if (matchesEndCommand(body)) {
@@ -422,7 +443,7 @@ export default class ZoomSdk {
                         // transcript when the question was (meeting-chat.ts).
                         if (answered) {
                             meetingChat.offerAnswer(
-                                { platform: 'zoom-sdk', text: body, sender, id: chat.id == null ? null : String(chat.id) },
+                                { platform: 'zoom-sdk', text: rawBody, sender, id: chatId },
                                 messages,
                             );
                         }
@@ -451,11 +472,12 @@ export default class ZoomSdk {
                     // Meeting chat, for the transcript (meeting-chat.ts decides).
                     meetingChat.offer({
                         platform: 'zoom-sdk',
-                        text: body,
+                        text: rawBody,
+                        commandText: body,
                         sender,
-                        id: chat.id == null ? null : String(chat.id),
+                        id: chatId,
                         platformTime: chat.time ?? null,
-                        audience: zoomSdkChatAudience(chat.receiverId, chat.receiverName),
+                        audience,
                     });
                 }
             }
