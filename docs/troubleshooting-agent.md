@@ -99,7 +99,7 @@ deployment.
 The job then runs in an asynchronous invocation of the same resolver function,
 which invokes the agent synchronously, once, and writes the answer to the job.
 Neither invocation is retried, because a retry is a second diagnosis paid for
-from the start. Jobs are kept in the `<AI stack>-TroubleshootingJobs` DynamoDB
+from the start. Jobs are kept in the AI stack's `TroubleshootingJobsTable` DynamoDB
 table for seven days, then removed by its time-to-live setting. A job that is
 still `PENDING` or `RUNNING` seven minutes after it last changed is reported as
 `FAILED` with "The diagnosis did not finish", since the function that ran it

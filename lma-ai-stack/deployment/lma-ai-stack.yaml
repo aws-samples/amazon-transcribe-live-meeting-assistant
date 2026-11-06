@@ -6033,7 +6033,6 @@ Resources:
     DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
     UpdateReplacePolicy: Retain
     Properties:
-      TableName: !Sub "${AWS::StackName}-TroubleshootingJobs"
       AttributeDefinitions:
         - AttributeName: JobId
           AttributeType: S
