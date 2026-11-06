@@ -195,6 +195,9 @@ $util.qr( $conditions.add("#conditionMeetingTime = :conditionMeetingTimeAsRead")
 #end
 
 $util.qr( $setValues.put("updatedAt", $util.time.nowISO8601()) )
+## A note from an earlier edit that its schedule could not be moved no longer
+## applies; the scheduler writes a new one if this edit's move fails too.
+$util.qr( $removeNames.add("errorMessage") )
 
 #set( $expNames = {} )
 #set( $expValues = {} )

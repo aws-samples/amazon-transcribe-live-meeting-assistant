@@ -821,7 +821,8 @@ const VirtualParticipantDetails = () => {
       ...prev,
       {
         type: 'success',
-        content: 'Launch settings saved. The scheduled launch uses them.',
+        content:
+          'Launch settings saved. The scheduled launch is updated in a few seconds; check this page for a note if it could not be.',
         dismissible: true,
         id: `edit-success-${Date.now()}`,
         onDismiss: () => setNotifications((items) => items.filter((n) => !n.id.startsWith('edit-success-'))),

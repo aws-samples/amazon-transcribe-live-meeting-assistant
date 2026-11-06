@@ -67,7 +67,7 @@ export const scheduledEditInput = (
   const { meetingId, meetingPassword, passwordApplies } = submittedMeetingFields(form);
 
   if (form.meetingName !== (vp.meetingName || '')) input.meetingName = form.meetingName;
-  if (form.meetingPlatform !== vp.meetingPlatform) input.meetingPlatform = form.meetingPlatform;
+  if (form.meetingPlatform !== (vp.meetingPlatform || 'ZOOM')) input.meetingPlatform = form.meetingPlatform;
   if (meetingId !== (vp.meetingId || '')) input.meetingId = meetingId;
   if (!passwordApplies && vp.hasMeetingPassword) {
     input.clearMeetingPassword = true;
