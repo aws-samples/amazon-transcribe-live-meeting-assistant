@@ -18,10 +18,14 @@ import logging
 from datetime import datetime
 from bedrock_compat import (
     MEETING_ASSIST_FALLBACK_MAX_TOKENS,
+    PROMPT_CACHE_MESSAGES,
+    PROMPT_CACHE_SYSTEM,
+    PROMPT_CACHE_TOOLS,
     accepts_temperature,
     build_inference_config,
     claude_major_version,
     extract_text,
+    prompt_cache_sections,
 )
 import tavily_secret
 from configuration_settings import read_setting
@@ -101,6 +105,58 @@ def configured_agent_model_id() -> str:
         'meetingAssistModelId',
         default=DEFAULT_AGENT_MODEL_ID,
     )
+
+
+def prompt_caching_enabled() -> bool:
+    """Whether the assistant marks its prompt for Amazon Bedrock prompt caching.
+
+    The Meeting Assistant section's switch on the Configuration page, else the
+    shipped default (on). Read per answer, like the model.
+    """
+    return bool(read_setting('meeting_assist', 'promptCachingEnabled', default=True))
+
+
+def prompt_cache_plan(
+    model_id: str, system_prompt: str, enabled: bool = True
+) -> Tuple[Optional[Dict[str, Any]], Any]:
+    """The prompt caching of one answer: CacheConfig arguments, and the system prompt.
+
+    Returns ``(cache_config_kwargs, system_prompt)``. ``cache_config_kwargs`` is
+    None when the Strands BedrockModel should get no ``cache_config``; otherwise
+    the keyword arguments of the ``strands.models.CacheConfig`` to pass it. The
+    system prompt is returned as given, or as Converse system blocks ending in a
+    cache point.
+
+    Where the cache points go is bedrock_compat.prompt_cache_sections()'s
+    decision, since a point a model does not accept fails the request:
+
+    * Claude 4 and later take points in tools, system and messages, which is what
+      Strands' ``CacheConfig(strategy="anthropic")`` places: one after the tool
+      definitions, one after the system prompt, and one at the end of the last
+      user message, moved forward on every model call. That last one is what
+      pays off most often. An answer that uses a tool is several model calls,
+      each resending the one before it plus the tool's result, so the second and
+      later calls read what the earlier ones wrote -- including a transcript a
+      tool returned. The strategy is named rather than ``"auto"`` so the decision
+      stays with prompt_cache_sections() and not with the SDK's model list.
+    * The Nova models take a point in the system prompt only, so they get one
+      there and no ``cache_config``, which would also place the message point
+      they reject after a tool result.
+
+    A cache point only takes effect once the prefix before it reaches the
+    model's minimum (4,096 tokens for Claude Haiku 4.5, 512 to 1,024 for later
+    Claude models, about 1,000 for Nova); below it the request is answered
+    normally and nothing is cached or charged as a cache write.
+    """
+    sections = prompt_cache_sections(model_id) if enabled else frozenset()
+    if PROMPT_CACHE_SYSTEM in sections and PROMPT_CACHE_MESSAGES in sections:
+        return {
+            'strategy': 'anthropic',
+            'tools_ttl': PROMPT_CACHE_TOOLS in sections,
+        }, system_prompt
+    if PROMPT_CACHE_SYSTEM in sections:
+        return None, [{'text': system_prompt}, {'cachePoint': {'type': 'default'}}]
+    return None, system_prompt
 
 
 def configured_kb_model_id() -> str:
@@ -2268,7 +2324,7 @@ def handler(event, context):
         # Initialize Strands Agent
         try:
             from strands import Agent
-            from strands.models import BedrockModel
+            from strands.models import BedrockModel, CacheConfig
             
             # message_id and subscriber_id were resolved above, from the same event.
 
@@ -2296,6 +2352,22 @@ def handler(event, context):
             }
             if accepts_temperature(model_id):
                 model_kwargs['temperature'] = AGENT_TEMPERATURE
+
+            # Prompt caching, on the models that support it, unless the Meeting
+            # Assistant section turns it off. See prompt_cache_plan().
+            cache_config_kwargs, system_prompt = prompt_cache_plan(
+                model_id,
+                (get_meeting_assistant_prompt_with_tools() if tools else get_meeting_assistant_prompt())
+                + (MEETING_CHAT_SCOPE_NOTE if meeting_chat_scope else ''),
+                enabled=prompt_caching_enabled(),
+            )
+            if cache_config_kwargs is not None:
+                model_kwargs['cache_config'] = CacheConfig(**cache_config_kwargs)
+                logger.info(f"Prompt caching: {cache_config_kwargs}")
+            elif isinstance(system_prompt, list):
+                logger.info("Prompt caching: system prompt cache point only")
+            else:
+                logger.info("Prompt caching: off for this model or by configuration")
             bedrock_model = BedrockModel(**model_kwargs)
             if guardrail_config:
                 logger.info(
@@ -2316,10 +2388,7 @@ def handler(event, context):
             # Cached MCPClients will be restarted on next invocation via load_tools() -> start().
             agent = Agent(
                 model=bedrock_model,
-                system_prompt=(
-                    (get_meeting_assistant_prompt_with_tools() if tools else get_meeting_assistant_prompt())
-                    + (MEETING_CHAT_SCOPE_NOTE if meeting_chat_scope else '')
-                ),
+                system_prompt=system_prompt,
                 tools=tools if tools else None,
                 hooks=[thinking_hook]  # Add hook provider to track all tool usage
             )

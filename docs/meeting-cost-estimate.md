@@ -131,6 +131,14 @@ higher), so each is listed separately.
 A test fails if an Amazon Nova or Anthropic model id is added to `lma-main.yaml`
 without a price.
 
+Bedrock reports prompt-cache tokens separately from ordinary input, and they are
+billed at their own rates, so a Bedrock line can carry `cacheReadInputTokens` and
+`cacheWriteInputTokens` beside `inputTokens`. The table prices both for every model
+the [meeting assistant caches on](meeting-assistant.md#prompt-caching). Nova Micro,
+Nova Lite and Nova Pro list a cache write at zero and a cache read at a quarter of the
+input price; those three cache prices were read from the Price List API on
+2026-11-06, after the rest of the table.
+
 ### Regions
 
 Prices are listed for **us-east-1** and **us-west-2**. `regions.default` holds the

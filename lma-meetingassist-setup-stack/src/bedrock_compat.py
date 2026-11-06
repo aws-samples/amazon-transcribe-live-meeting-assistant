@@ -38,6 +38,13 @@ at each call site:
     the call sites' to choose; see ``SUMMARY_MAX_TOKENS`` and friends below for
     the sizes and the measurements behind them.
 
+``prompt_cache_sections``
+    Which parts of a Converse request may carry a ``cachePoint``. Claude 4 and
+    later take one in ``toolConfig``, ``system`` and ``messages``; the Amazon Nova
+    models that cache take one in ``system`` only, as far as LMA uses them; every
+    other model takes none. A cache point a model does not accept fails the
+    request, so the answer is decided here rather than by each caller.
+
 This file is duplicated **verbatim** into every deployment package that needs it:
 five Lambda directories under ``lma-ai-stack/source/lambda_functions/`` and the
 meeting-assist function's ``src`` directory in ``lma-meetingassist-setup-stack``.
@@ -123,6 +130,63 @@ def accepts_temperature(model_id: str) -> bool:
     if major is None:
         return True
     return major < _TEMPERATURE_DROPPED_AT_MAJOR
+
+
+# The parts of a Converse request a ``cachePoint`` block can go in, in the order
+# Bedrock reads them: a cache point covers everything before it, across sections.
+PROMPT_CACHE_TOOLS = "tools"
+PROMPT_CACHE_SYSTEM = "system"
+PROMPT_CACHE_MESSAGES = "messages"
+
+# First Claude major generation LMA sends cache points to. Every Claude model the
+# stack parameters offer is generation 4 or later, and Amazon Bedrock lists prompt
+# caching in all three sections for all of them.
+_PROMPT_CACHE_FROM_CLAUDE_MAJOR = 4
+
+# The Amazon Nova models Amazon Bedrock lists for explicit prompt caching, matched
+# with or without an inference-profile prefix. Nova Premier is not on that list.
+_NOVA_PROMPT_CACHE_MODELS = (
+    "amazon.nova-micro-v1:0",
+    "amazon.nova-lite-v1:0",
+    "amazon.nova-pro-v1:0",
+    "amazon.nova-2-lite-v1:0",
+)
+
+
+def prompt_cache_sections(model_id: str) -> frozenset[str]:
+    """The request sections ``model_id`` accepts a ``cachePoint`` in; empty for none.
+
+    The failure directions decide the treatment of an id this does not
+    recognise, as for ``accepts_temperature``, but they point the other way here:
+    a cache point sent to a model that does not take one is rejected with a
+    ValidationException, while leaving one out only means the prefix is billed
+    at the ordinary input rate. So caching is on only for models known to take
+    it, and an unrecognised id gets none.
+
+    Claude 4 and later, including generations newer than this code, take cache
+    points in tools, system and messages. Claude 3.x is not offered by the stack
+    and is left out rather than assumed.
+
+    The Nova models are documented as taking cache points in system and
+    messages, but not in ``toolConfig``: a cache point there is rejected as an
+    extraneous key (measured against Nova Micro and Nova 2 Lite in us-east-1). A
+    cache point in a user message that carries a ``toolResult``, which is where
+    an agent's automatic message cache point lands on every turn after a tool
+    call, is rejected the same way (measured against Nova Lite through the
+    Strands Agents SDK). So only the system prompt is offered for them. Bedrock reads ``toolConfig`` ahead of
+    ``system``, so the prefix a system cache point closes includes the tool
+    definitions.
+    """
+    if not model_id:
+        return frozenset()
+    major = claude_major_version(model_id)
+    if major is not None:
+        if major >= _PROMPT_CACHE_FROM_CLAUDE_MAJOR:
+            return frozenset({PROMPT_CACHE_TOOLS, PROMPT_CACHE_SYSTEM, PROMPT_CACHE_MESSAGES})
+        return frozenset()
+    if any(model_id == nova or model_id.endswith(f".{nova}") for nova in _NOVA_PROMPT_CACHE_MODELS):
+        return frozenset({PROMPT_CACHE_SYSTEM})
+    return frozenset()
 
 
 def build_inference_config(

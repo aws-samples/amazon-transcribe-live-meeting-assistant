@@ -613,6 +613,7 @@ def test_the_handler_gives_the_knowledge_base_tools_the_knowledge_base_model(
 
     monkeypatch.setattr(strands_stub, "Agent", StubAgent, raising=False)
     monkeypatch.setattr(strands_stub.models, "BedrockModel", StubBedrockModel, raising=False)
+    monkeypatch.setattr(strands_stub.models, "CacheConfig", dict, raising=False)
 
     result = strands_module.handler(
         {

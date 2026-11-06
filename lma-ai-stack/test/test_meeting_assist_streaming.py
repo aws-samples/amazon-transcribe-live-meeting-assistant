@@ -391,6 +391,7 @@ def _stub_agent(strands_stub, monkeypatch, chunks: tuple[str, ...]) -> list[str]
 
     monkeypatch.setattr(strands_stub, "Agent", StubAgent, raising=False)
     monkeypatch.setattr(strands_stub.models, "BedrockModel", StubBedrockModel, raising=False)
+    monkeypatch.setattr(strands_stub.models, "CacheConfig", dict, raising=False)
     return entry_points
 
 
