@@ -1183,10 +1183,10 @@ export class NovaAgent implements VoiceAssistantProvider {
     });
 
     const finalSystemPrompt = this.buildSystemPromptContent();
-    log.info('📋 Final system prompt being sent to Nova:');
-    log.info('─'.repeat(80));
-    log.info(finalSystemPrompt);
-    log.info('─'.repeat(80));
+    log.debug('📋 Final system prompt being sent to Nova:');
+    log.debug('─'.repeat(80));
+    log.debug(finalSystemPrompt);
+    log.debug('─'.repeat(80));
     log.info(`   Total length: ${finalSystemPrompt.length} characters`);
     
     this.addEventToQueue({
@@ -1517,7 +1517,8 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   private addToConversationHistory(role: 'USER' | 'ASSISTANT', content: string): void {
     if (role === 'USER' && this.isTranslatorTriggerUtterance(content)) {
-      log.info(`💬 Skipping translator trigger utterance from history: "${content.substring(0, 60)}..."`);
+      log.info(`💬 Skipping translator trigger utterance from history (${content.length} characters)`);
+      log.debug(`💬 Skipped utterance: "${content.substring(0, 60)}..."`);
       return;
     }
 
@@ -2343,7 +2344,8 @@ export class NovaAgent implements VoiceAssistantProvider {
                 && !skipForTranslatorMuted && !unheardReply
               ) {
                 this.addToConversationHistory(currentTurn.role, currentTurn.content.trim());
-                log.info(`💬 Saved ${currentTurn.role} turn to history: "${currentTurn.content.substring(0, 50)}..."`);
+                log.info(`💬 Saved ${currentTurn.role} turn to history (${currentTurn.content.length} characters)`);
+                log.debug(`💬 Saved turn: "${currentTurn.content.substring(0, 50)}..."`);
                 if (currentTurn.role === 'ASSISTANT') {
                   // What the assistant actually said, for the transcript path
                   // when no ASR source is transcribing its voice. Not published
@@ -2382,7 +2384,8 @@ export class NovaAgent implements VoiceAssistantProvider {
             }
           } catch (e) {
             // Not JSON, might be raw data
-            log.info('Non-JSON response:', textResponse.substring(0, 100));
+            log.info(`Non-JSON response (${textResponse.length} characters)`);
+            log.debug('Non-JSON response:', textResponse.substring(0, 100));
           }
         } else if (event.modelStreamErrorException) {
           log.error('Model stream error:', event.modelStreamErrorException);
@@ -2594,7 +2597,8 @@ export class NovaAgent implements VoiceAssistantProvider {
     const contentObject = JSON.parse(toolUseContent.content);
     const query = contentObject.query;
     
-    log.info(`Query for Strands agent: ${query}`);
+    log.info(`Query for Strands agent: ${String(query ?? '').length} characters`);
+    log.debug(`Query for Strands agent: ${query}`);
 
     // Build payload for direct Strands agent invocation
     // The Strands agent Lambda expects: text, call_id, conversation_history, etc.
@@ -2624,7 +2628,8 @@ export class NovaAgent implements VoiceAssistantProvider {
     // Parse the Lambda response
     const responsePayload = JSON.parse(new TextDecoder().decode(response.Payload));
     
-    log.info('Strands agent response received:', JSON.stringify(responsePayload).substring(0, 200));
+    log.info(`Strands agent response received (status ${response.StatusCode ?? 'unknown'})`);
+    log.debug('Strands agent response:', JSON.stringify(responsePayload).substring(0, 200));
     
     // The answer is written for the meeting chat, in markdown. Nova Sonic is
     // handed it to speak, and given a markdown answer late in a session it
@@ -2924,7 +2929,8 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
 
-    log.info('📤 Sending text message to Nova:', text);
+    log.info(`📤 Sending text message to Nova (${text.length} characters)`);
+    log.debug('📤 Text message to Nova:', text);
     
     // Track user message in conversation history
     this.addToConversationHistory('USER', text);
@@ -3397,7 +3403,8 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (initialContext) {
       const question = this.extractQuestion(initialContext);
       if (question && question.length > 5) {
-        log.info('📝 Sending initial question to Nova:', question);
+        log.info(`📝 Sending initial question to Nova (${question.length} characters)`);
+        log.debug('📝 Initial question to Nova:', question);
         this.sendUserMessage(question);
       }
     }

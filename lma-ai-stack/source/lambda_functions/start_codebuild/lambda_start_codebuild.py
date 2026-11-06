@@ -12,7 +12,7 @@ from botocore.config import Config as BotoCoreConfig
 from crhelper import CfnResource
 
 LOGGER = logging.getLogger(__name__)
-LOG_LEVEL = getenv("LOG_LEVEL", "DEBUG")
+LOG_LEVEL = getenv("LOG_LEVEL", "INFO")
 HELPER = CfnResource(
     json_logging=True,
     log_level=LOG_LEVEL,

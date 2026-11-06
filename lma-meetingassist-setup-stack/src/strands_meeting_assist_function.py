@@ -495,7 +495,7 @@ class ThinkingStepHookProvider:
                 tool_input = event.tool_use.arguments
             
             logger.info(f"   Tool name: {tool_name}")
-            logger.info(f"   Tool input: {tool_input}")
+            logger.debug(f"   Tool input: {tool_input}")
             
             thinking_step = {
                 'type': 'tool_use',
@@ -618,7 +618,8 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
                 }
                 send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
             
-            logger.info(f"Document search tool executing: {query}")
+            logger.info(f"Document search tool executing: query of {len(query or '')} characters")
+            logger.debug(f"Document search query: {query}")
 
             # The knowledge base generates its answer with its own model, not the
             # agent's. See kb_model_supports_retrieve_and_generate().
@@ -653,7 +654,8 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
                 }
                 send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
             
-            logger.info(f"Document search result: {result[:100]}...")
+            logger.info(f"Document search result: {len(result)} characters")
+            logger.debug(f"Document search result: {result[:100]}...")
             return result
             
         except Exception as e:
@@ -876,7 +878,8 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
                 }
                 send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
             
-            logger.info(f"Meeting history tool executing: {query} for user: {user_email}")
+            logger.info(f"Meeting history tool executing: query of {len(query or '')} characters for user: {user_email}")
+            logger.debug(f"Meeting history query: {query}")
             logger.info(f"🔍 DEBUG: KB Configuration:")
             logger.info(f"   transcript_kb_id: {transcript_kb_id}")
             logger.info(f"   kb_region: {kb_region}")
@@ -913,7 +916,7 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
             
             apply_kb_guardrail(kb_input)
 
-            logger.info(f"🔍 DEBUG: KB Input: {json.dumps(kb_input, indent=2)}")
+            logger.debug(f"🔍 DEBUG: KB Input: {json.dumps(kb_input, indent=2)}")
 
             response = bedrock_agent_runtime.retrieve_and_generate(**kb_input)
             
@@ -923,10 +926,11 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
             
             # Check if this is a guardrail response
             if "Sorry, I am unable to assist you with this request" in result:
-                logger.error(f"❌ GUARDRAIL TRIGGERED! Response: {result}")
+                logger.error(f"❌ GUARDRAIL TRIGGERED! Response of {len(result)} characters")
                 logger.error(f"   This indicates the Knowledge Base has guardrails blocking the query")
-                logger.error(f"   Query: {query}")
                 logger.error(f"   User email filter: {user_email}")
+                logger.debug(f"   Guardrail response: {result}")
+                logger.debug(f"   Query: {query}")
             
             # Send tool result thinking step
             if call_id and message_id and APPSYNC_GRAPHQL_URL:
@@ -940,7 +944,8 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
                 }
                 send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
             
-            logger.info(f"Meeting history result: {result[:100]}...")
+            logger.info(f"Meeting history result: {len(result)} characters")
+            logger.debug(f"Meeting history result: {result[:100]}...")
             return result
             
         except Exception as e:
@@ -1934,14 +1939,15 @@ def query_knowledge_base(user_input: str, call_id: str) -> str:
 
         apply_kb_guardrail(kb_input)
 
-        logger.info(f"Querying KB with input: {kb_input}")
+        logger.debug(f"Querying KB with input: {kb_input}")
         
         response = bedrock_agent_runtime.retrieve_and_generate(**kb_input)
         
         # Extract response text
         kb_response = response.get("output", {}).get("text", "")
         
-        logger.info(f"KB response: {kb_response}")
+        logger.info(f"KB response: {len(kb_response)} characters")
+        logger.debug(f"KB response: {kb_response}")
         
         return kb_response
         
@@ -2161,7 +2167,8 @@ def handler(event, context):
                             logger.info(f"🔧 Sending tool_use thinking step: web_search")
                             send_thinking_step_to_appsync(_call_id, _message_id, thinking_step, sequence)
                         
-                        logger.info(f"Web search tool executing: {query}")
+                        logger.info(f"Web search tool executing: query of {len(query or '')} characters")
+                        logger.debug(f"Web search query: {query}")
 
                         # Fetched from Secrets Manager on the first search and
                         # cached for the life of this execution environment.
@@ -2775,7 +2782,8 @@ Please provide a helpful response based on the meeting context. Keep it concise 
         # Extract response text, leaving out any reasoning block
         response_text = extract_text(response)
 
-        logger.info(f"Fallback Bedrock response: {response_text}")
+        logger.info(f"Fallback Bedrock response: {len(response_text or '')} characters")
+        logger.debug(f"Fallback Bedrock response: {response_text}")
         
         return {
             'message': response_text,

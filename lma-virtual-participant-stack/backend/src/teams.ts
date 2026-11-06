@@ -744,7 +744,7 @@ export default class Teams {
                     .evaluate((el) => ((el as HTMLElement).innerText || el.textContent || '').trim().slice(0, 120))
                     .catch(() => '');
                 const ok = typed.includes(message.slice(0, Math.min(20, message.length)));
-                log.info(`Composer content after insert: "${typed}" (matches=${ok}).`);
+                log.info(`Composer content after insert: ${typed.length} characters (matches=${ok}).`);
 
                 // Submit. Click the real Send button (primary), fall back to
                 // Enter. Then verify the composer cleared (message left the box).
@@ -857,7 +857,7 @@ export default class Teams {
             });
         }
         if (matchesEndCommand(message)) {
-            log.info(`LMA Virtual Participant has been asked to leave the meeting: ${JSON.stringify(message)}`);
+            log.info(`LMA Virtual Participant has been asked to leave the meeting (message of ${String(message ?? '').length} characters)`);
             try {
                 await this.sendMessages(page, exitMessagesFor(null));
             } catch (e) {

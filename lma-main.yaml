@@ -802,18 +802,18 @@ Parameters:
 
   LogLevel:
     Type: String
-    Default: DEBUG
+    Default: INFO
     AllowedValues:
       - DEBUG
       - INFO
       - WARN
       - ERROR
     Description: >-
-      Logging level for the Lambda functions and containers. DEBUG, the default
-      for now while issues are being diagnosed, also logs meeting content: the
-      summary prompt with its transcript, meeting assistant requests and answers,
-      and the voice assistants' heard and spoken text. Set WARN or ERROR for
-      production deployments.
+      Logging level for the Lambda functions and containers. At INFO (the
+      default) and above, log lines record identifiers, sizes and outcomes rather
+      than meeting content. DEBUG also logs meeting content: the summary prompt
+      with its transcript, meeting assistant requests and answers, and the voice
+      assistants' heard and spoken text; use it only while diagnosing a problem.
 
   AppSyncFieldLogLevel:
     Type: String
