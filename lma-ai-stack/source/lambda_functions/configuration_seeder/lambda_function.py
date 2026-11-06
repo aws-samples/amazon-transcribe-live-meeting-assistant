@@ -38,8 +38,8 @@ Then, after those writes (``settle_profiles``), the deployment is left running
 as IDP's do: on the default profile, which every release rewrites, unless an
 Admin changed something. A ``custom`` profile holding settings is stored as a
 full copy and stays active; one holding none is deleted and the default is
-activated. And each shipped preset the deployment can run is written as a
-read-only Managed profile (``write_managed_profiles``).
+activated. And each shipped organization preset the deployment can run is
+written as a read-only Managed profile (``write_managed_profiles``).
 
 Whenever ``Config#custom`` is absent and a deployment already has prompt
 templates in the old per-store table, this adopts them into the profile so the
@@ -108,14 +108,15 @@ from lma_config import (  # from the configuration layer
     apply_preset,
     codec,
     full_section,
+    organization_presets,
     parameter_defaults,
     preset_by_id,
     preset_offered,
     registered_sections,
-    shipped_presets,
     shipped_setting_defaults,
     validate_section,
 )
+from lma_config.presets import ORGANIZATION as ORGANIZATION_KIND
 
 # pylint: enable=import-error
 
@@ -607,16 +608,18 @@ def read_custom_configuration(uri: str, *, client: Any = None) -> Dict[str, Any]
 def write_managed_profiles(
     store: ConfigurationStore, baseline: Mapping[str, Any], settings: Mapping[str, Any]
 ) -> str:
-    """Write each shipped preset this deployment offers as a Managed profile.
+    """Write each shipped organization preset this deployment offers as a Managed profile.
 
     The preset applied over the baseline. A preset needing something the
     deployment lacks (see ``preset_offered``) is not written, and a Managed
     profile for a preset no longer shipped or offered is retired unless it is
-    active. Reported as ``id=outcome`` pairs.
+    active. Add-on presets are applied in the editor over whatever profile is
+    open, so they have no Managed profile, and one an earlier release wrote for
+    an add-on is retired the same way. Reported as ``id=outcome`` pairs.
     """
     outcomes: Dict[str, str] = {}
     written = set()
-    for preset in shipped_presets():
+    for preset in organization_presets():
         if not preset_offered(preset, dict(settings)):
             outcomes[preset["Id"]] = "not-offered"
             continue
@@ -637,6 +640,37 @@ def write_managed_profiles(
                 "retired" if store.retire_managed_profile(profile.name) else "kept-active"
             )
     return ",".join(f"{name}={outcome}" for name, outcome in sorted(outcomes.items()))
+
+
+#: The ConfigurationPreset value for the shipped defaults, and the default.
+STANDARD_PRESET = "standard"
+
+#: Values that also mean the Standard preset: an empty property, and ``none``,
+#: the value before the organization presets were added, which a stack deployed
+#: then keeps as its parameter value.
+STANDARD_ALIASES = ("", "none")
+
+
+def deploy_time_preset(choice: str) -> Dict[str, Any]:
+    """The preset the ConfigurationPreset stack parameter names.
+
+    An organization preset id, or ``none`` or nothing for Standard. An add-on id
+    is accepted too: a stack deployed while the parameter offered the add-ons
+    keeps one as its value, and it is applied as it was then, over the shipped
+    defaults, so that stack's default configuration does not change on update.
+
+    Raises:
+        InvalidPreset: no preset ships with that id.
+    """
+    preset = preset_by_id(STANDARD_PRESET if choice in STANDARD_ALIASES else choice)
+    if preset["Kind"] != ORGANIZATION_KIND:
+        LOGGER.warning(
+            "ConfigurationPreset names the add-on %s; it is applied over the shipped defaults "
+            "as before. Organization presets are the deploy-time choices now, and add-ons are "
+            "applied on the Configuration page",
+            preset["Id"],
+        )
+    return preset
 
 
 def seed(
@@ -671,18 +705,16 @@ def seed(
     # CustomConfigPath file over that, as IDP's deployments choose their
     # default configuration. Both are part of what the deployment was deployed
     # with, so both belong in the baseline.
-    preset_applied = "none"
-    if configuration_preset and configuration_preset != "none":
-        chosen = preset_by_id(configuration_preset)
-        if not preset_offered(chosen, dict(deployment_settings or {})):
-            raise InvalidConfiguration(
-                [
-                    f"ConfigurationPreset: {configuration_preset} sets something this deployment "
-                    "does not include (the on-demand ASR preset needs EnableMicrovmAsr)"
-                ]
-            )
-        baseline = apply_preset(baseline, chosen)
-        preset_applied = configuration_preset
+    chosen = deploy_time_preset(configuration_preset)
+    if not preset_offered(chosen, dict(deployment_settings or {})):
+        raise InvalidConfiguration(
+            [
+                f"ConfigurationPreset: {chosen['Id']} sets something this deployment "
+                "does not include (the on-demand ASR preset needs EnableMicrovmAsr)"
+            ]
+        )
+    baseline = apply_preset(baseline, chosen)
+    preset_applied = chosen["Id"]
     if custom_sections:
         for name, values in custom_sections.items():
             baseline[name] = full_section(name, values, baseline.get(name))

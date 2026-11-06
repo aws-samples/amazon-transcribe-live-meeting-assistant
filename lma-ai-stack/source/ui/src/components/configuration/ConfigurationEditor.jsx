@@ -16,6 +16,7 @@ import {
   Header,
   Input,
   Modal,
+  RadioGroup,
   SegmentedControl,
   SpaceBetween,
   Spinner,
@@ -33,8 +34,10 @@ import {
   deepEqual,
   effectiveSection,
   exportDocument,
+  groupPresets,
   isAvailable,
   isPresetOffered,
+  presetKind,
   readExport,
   rebaseSection,
   storedSection,
@@ -118,7 +121,9 @@ const ConfigurationEditor = ({
   const [label, setLabel] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
-  const [preset, setPreset] = useState(null);
+  // The Apply a preset dialog, and the preset chosen in it.
+  const [presetOpen, setPresetOpen] = useState(false);
+  const [presetChoice, setPresetChoice] = useState(null);
   // Saving the editor's contents, unsaved edits included, as a new profile.
   const [saveAsOpen, setSaveAsOpen] = useState(false);
   const [saveAsName, setSaveAsName] = useState('');
@@ -422,8 +427,16 @@ const ConfigurationEditor = ({
       section: sections.find((candidate) => candidate.name === name),
     }));
 
+  const preset = (presetOpen && doc?.presets?.find((entry) => entry.Id === presetChoice)) || null;
+
+  const openPresets = () => {
+    setPresetChoice(null);
+    setPresetOpen(true);
+  };
+
   // A preset, like an import, only changes the page.
   const applyPreset = () => {
+    if (!preset) return;
     const next = {};
     presetSections(preset).forEach(({ name, section }) => {
       if (section) {
@@ -448,7 +461,7 @@ const ConfigurationEditor = ({
         .filter(Boolean)
         .join(' '),
     });
-    setPreset(null);
+    setPresetOpen(false);
   };
 
   const openSave = () => {
@@ -598,15 +611,9 @@ const ConfigurationEditor = ({
                   ? [
                       {
                         id: 'presets',
-                        text: 'Apply a preset',
+                        text: 'Apply a preset…',
                         disabled: readOnly,
                         disabledReason: COPY_TO_CHANGE,
-                        items: doc.presets.map((entry) => ({
-                          id: `preset:${entry.Id}`,
-                          text: entry.Title,
-                          disabled: !isPresetOffered(entry, sections, settings),
-                          disabledReason: 'It sets something this deployment does not include.',
-                        })),
                       },
                     ]
                   : []),
@@ -628,9 +635,7 @@ const ConfigurationEditor = ({
                 else if (detail.id === 'import') fileInput.current?.click();
                 else if (detail.id === 'save-as') openSaveAs();
                 else if (detail.id === 'reset-all') resetAll();
-                else if (detail.id.startsWith('preset:')) {
-                  setPreset(doc.presets.find((entry) => `preset:${entry.Id}` === detail.id));
-                }
+                else if (detail.id === 'presets') openPresets();
               }}
             >
               Actions
@@ -815,37 +820,64 @@ const ConfigurationEditor = ({
       />
 
       <Modal
-        visible={Boolean(preset)}
-        onDismiss={() => setPreset(null)}
-        header={preset ? `Apply "${preset.Title}"?` : ''}
+        visible={presetOpen}
+        onDismiss={() => setPresetOpen(false)}
+        header="Apply a preset"
+        size="large"
         footer={
           <Box float="right">
             <SpaceBetween direction="horizontal" size="xs">
-              <Button variant="link" onClick={() => setPreset(null)}>
+              <Button variant="link" onClick={() => setPresetOpen(false)}>
                 Cancel
               </Button>
-              <Button variant="primary" onClick={applyPreset}>
+              <Button variant="primary" onClick={applyPreset} disabled={!preset}>
                 Apply to the page
               </Button>
             </SpaceBetween>
           </Box>
         }
       >
-        <SpaceBetween size="m">
-          <Box>{preset?.Description}</Box>
-          <ul>
-            {presetSections(preset).map(({ name, section }) => (
-              <li key={name}>
-                {section
-                  ? `${sectionLabel(section)}: ${
-                      preset.Sections[name].mode === 'replace'
-                        ? 'replaced by the preset'
-                        : 'the settings the preset names change, and the others stay'
-                    }`
-                  : `${name}: not in this deployment, so left out`}
-              </li>
-            ))}
-          </ul>
+        <SpaceBetween size="l">
+          {groupPresets(doc?.presets).map((group) => (
+            <FormField key={group.kind} label={group.label} description={group.description}>
+              <RadioGroup
+                ariaLabel={group.label}
+                value={preset && presetKind(preset) === group.kind ? preset.Id : null}
+                onChange={({ detail }) => setPresetChoice(detail.value)}
+                items={group.presets.map((entry) => {
+                  const offeredHere = isPresetOffered(entry, sections, settings);
+                  return {
+                    value: entry.Id,
+                    label: entry.Title,
+                    description: offeredHere
+                      ? entry.Description
+                      : `${entry.Description} Not offered here: it sets something this deployment does not include.`,
+                    disabled: !offeredHere,
+                  };
+                })}
+              />
+            </FormField>
+          ))}
+          {preset && (
+            <SpaceBetween size="xs">
+              <Box variant="h4">{`What "${preset.Title}" changes`}</Box>
+              <ul>
+                {presetSections(preset).map(({ name, section }) => (
+                  <li key={name}>
+                    {section
+                      ? `${sectionLabel(section)}: ${
+                          preset.Sections[name].mode === 'replace'
+                            ? 'replaced by the preset'
+                            : `${Object.keys(preset.Sections[name].values || {})
+                                .map((key) => section.schema?.properties?.[key]?.title || key)
+                                .join(', ')} change, and the others stay`
+                        }`
+                      : `${name}: not in this deployment, so left out`}
+                  </li>
+                ))}
+              </ul>
+            </SpaceBetween>
+          )}
           <Box>Nothing is saved until you review the changes and save them.</Box>
         </SpaceBetween>
       </Modal>

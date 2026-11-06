@@ -183,13 +183,14 @@ A deployment holds several **profiles**, each a complete configuration, and one
 of them is **active**: the one every meeting uses. They work as IDP's do.
 
 - **default** is the deployment default: the release's shipped settings, the
-  preset and file the `ConfigurationPreset` and `CustomConfigPath` stack
-  parameters name, and the stack parameters that are defaults of settings. Every
-  stack update rewrites it, so it is read-only. A new deployment runs on it.
-- **Managed** profiles are the shipped presets (for example
-  `translator-voice-assistant`), each the default with the preset applied. They
-  are read-only and rewritten by every stack update too. Activate one to use it
-  as it is.
+  organization preset and file the `ConfigurationPreset` and `CustomConfigPath`
+  stack parameters name, and the stack parameters that are defaults of settings.
+  Every stack update rewrites it, so it is read-only. A new deployment runs on it.
+- **Managed** profiles are the shipped organization presets (`standard`,
+  `internal-meetings-notify` and `regulated-consent-required`; see
+  [Organization presets and add-ons](#organization-presets-and-add-ons)), each
+  the default with the preset applied. They are read-only and rewritten by every
+  stack update too. Activate one to use it as it is.
 - **Custom** profiles are yours. Choose **Create profile** in the profile list
   to copy any profile, change its settings and save them, then **Activate** it. A Custom
   profile is a full copy: a later release's new defaults do not change a setting
@@ -354,23 +355,74 @@ select **Save changes**.
   **Import** in the Configuration Profiles list: it reads the file the same way,
   asks for the new profile's name, and creates it with the file's changes over
   the deployment defaults.
-- **Apply a preset** applies one of the configurations LMA ships:
-  - **Healthcare summary** — the summary sections of the healthcare prompt domain,
-    with the other shipped sections turned off;
-  - **Translator voice assistant** — Nova Sonic's Translator meeting mode between
-    English and Spanish;
-  - **On-demand speech engine with voice separation** — offered only where the
-    engine is deployed. A preset is offered only where the deployment has every
-    setting it changes.
+- **Apply a preset…** opens a dialog listing the presets LMA ships in two
+  groups, **Organization presets** and **Add-ons**, each with its description
+  (see [Organization presets and add-ons](#organization-presets-and-add-ons)).
+  A preset is offered only where the deployment has every setting it changes.
+  Once you choose one, the dialog lists the settings it changes in each section,
+  or says that it replaces a section.
 
-  The dialog says which sections a preset changes, and whether it replaces a
-  section or changes only the settings it names.
+### Organization presets and add-ons
 
-Each preset is also stored as a read-only **Managed** profile of the same name,
-which the deployment rewrites on every stack update; activate it as it is, or
-copy it to a Custom profile to change it. To start a new deployment from a preset,
-or from a configuration file of your own, set the `ConfigurationPreset` and
-`CustomConfigPath` stack parameters; see
+An **organization preset** is a complete organizational default for consent,
+retention and privacy. All three set the same settings, listed below, and change
+only those, so applying one sets every one of them whichever organization preset
+was applied before, and every other setting stays as it is. They are the choices
+of the `ConfigurationPreset` stack parameter, and each is also stored as a
+read-only **Managed** profile of the same name, which the deployment rewrites on
+every stack update; activate it as it is, or copy it to a Custom profile to
+change it.
+
+| Setting | Standard (`standard`, the default) | Internal meetings – notify participants (`internal-meetings-notify`) | Regulated – consent required, transcript not retained (`regulated-consent-required`) |
+|---|---|---|---|
+| Meeting Consent › Consent mode | Off | Notify | Opt-in |
+| Meeting Consent › Consent rule (opt-in) | Each participant consents | Each participant consents | Each participant consents |
+| Meeting Consent › Allow a different choice per meeting | On | On | Off (a meeting may only use this mode or a stricter one) |
+| Meeting Consent › Keep evidence screenshots | On | On | On |
+| Meeting Consent › Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse the meeting |
+| Meeting Consent › Virtual Participant leaves after an objection | Off | Off | On |
+| Retention › Delete the transcript after the summary | Off | Off | 15 minutes after the summary |
+| Meeting Recording › Record meeting audio | On | On | Off |
+| Virtual Participant › Add the meeting chat to the transcript | On | On | Off |
+| Amazon Transcribe › Redact personal information | Off | Off | On |
+| Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment |
+
+Standard holds the shipped defaults, so applying it in the editor puts these
+settings back after another organization preset changed them. The layer's tests
+hold each preset to exactly the values in this table.
+
+Some controls are stack parameters rather than settings. They are not part of
+any profile, so no preset can set them, and a deployment that needs the
+Regulated preset's posture also sets them when the stack is deployed or updated:
+
+- `LogLevel` — `INFO` (the default) or `WARN`. `DEBUG` logs meeting content.
+- `MeetingRecordExpirationInDays` and `TranscriptionExpirationInDays` — the
+  longest meeting records and transcript segments are kept, which the Retention
+  section can shorten but not lengthen (see
+  [Retention: settings the stack limits](#retention-settings-the-stack-limits)).
+- `AudioRecordingExpirationInDays` and `CloudWatchLogsExpirationInDays` — how
+  long recordings and logs are kept.
+- `EnableVideoRecording` — meeting video from the Virtual Participant and the
+  Desktop Capture App. A Virtual Participant's video is also chosen per meeting.
+
+Where each service that receives meeting content runs is listed in
+[Where meeting content is processed](infrastructure-and-security.md#where-meeting-content-is-processed).
+The consent settings are described in [Meeting Consent](meeting-consent.md), and
+the deletion in [Transcript Deletion After the Summary](transcript-deletion.md).
+
+An **add-on** changes one feature and is applied over whatever profile is open.
+Add-ons are offered in the editor only; they are not deploy-time choices and have
+no Managed profile.
+
+| Add-on | What it changes |
+|---|---|
+| Healthcare summary | Replaces the summary sections with the healthcare prompt domain's (summary, details, and SOAP and BIRP notes), turning the other shipped sections off |
+| Translator voice assistant | Sets Nova Sonic's meeting mode to Translator, between English and Spanish, with the shipped trigger phrases |
+| On-demand speech engine with voice separation | Moves streaming meetings and Virtual Participants onto the on-demand speech engine, and turns on Virtual Participant voice separation. Offered only where the engine is deployed |
+
+To start a new deployment from an organization preset, or from a configuration
+file of your own, set the `ConfigurationPreset` and `CustomConfigPath` stack
+parameters; see
 [Choosing the default configuration at deploy time](configuration-store.md#choosing-the-default-configuration-at-deploy-time).
 
 ## Changing a setting outside the web UI

@@ -12,6 +12,20 @@ applies it to the page as unsaved changes, which the administrator reviews and
 saves like any other edit, so it is checked against the schemas and recorded as
 a revision.
 
+A preset is one of two kinds, named by its ``kind``:
+
+``organization``
+    A complete organizational default for consent, retention and privacy. Every
+    organization preset sets the same settings, each section by ``merge``, so
+    applying one sets all of them, whichever was applied before, and leaves every
+    other setting as it is. They are the choices of the ConfigurationPreset stack
+    parameter, and the seeder writes each as a Managed profile.
+``add-on``
+    A change to one feature, applied over whatever profile is open. Offered in
+    the editor only.
+
+An optional integer ``order`` places a preset among those of its kind.
+
 A preset names the sections it changes, and for each one how:
 
 ``merge``
@@ -42,6 +56,13 @@ PRESET_ID = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 PRESET_MODES = ("merge", "replace")
 
+ORGANIZATION = "organization"
+ADD_ON = "add-on"
+PRESET_KINDS = (ORGANIZATION, ADD_ON)
+
+_REQUIRED_KEYS = {"title", "description", "kind", "sections"}
+_OPTIONAL_KEYS = {"order"}
+
 
 class InvalidPreset(ConfigurationError):
     """A shipped preset is malformed. A release with one should fail its tests."""
@@ -50,8 +71,20 @@ class InvalidPreset(ConfigurationError):
 def _checked(preset_id: str, document: Any) -> Dict[str, Any]:
     if not PRESET_ID.match(preset_id):
         raise InvalidPreset(f"preset id {preset_id!r} is not lower-case words joined by hyphens")
-    if not isinstance(document, dict) or set(document) != {"title", "description", "sections"}:
-        raise InvalidPreset(f"preset {preset_id}: needs exactly title, description and sections")
+    if (
+        not isinstance(document, dict)
+        or not _REQUIRED_KEYS <= set(document)
+        or set(document) - _REQUIRED_KEYS - _OPTIONAL_KEYS
+    ):
+        raise InvalidPreset(
+            f"preset {preset_id}: needs exactly title, description, kind and sections, "
+            "and may have an order"
+        )
+    if document["kind"] not in PRESET_KINDS:
+        raise InvalidPreset(f"preset {preset_id}: kind must be one of {PRESET_KINDS}")
+    order = document.get("order", 0)
+    if not isinstance(order, int) or isinstance(order, bool):
+        raise InvalidPreset(f"preset {preset_id}: order must be an integer")
     sections = document["sections"]
     if not isinstance(sections, dict) or not sections:
         raise InvalidPreset(f"preset {preset_id}: sections must name at least one section")
@@ -66,12 +99,35 @@ def _checked(preset_id: str, document: Any) -> Dict[str, Any]:
         # A preset's values are stored, after the editor applies them, as part
         # of a section's delta, so each must be valid on its own.
         validate_section(name, change["values"])
+        if document["kind"] == ORGANIZATION and change["mode"] != "merge":
+            raise InvalidPreset(f"preset {preset_id}: an organization preset only merges")
     return {
         "Id": preset_id,
         "Title": document["title"],
         "Description": document["description"],
+        "Kind": document["kind"],
+        "Order": order,
         "Sections": sections,
     }
+
+
+def _settings_named(preset: Dict[str, Any]) -> List[str]:
+    return sorted(
+        f"{name}.{key}" for name, change in preset["Sections"].items() for key in change["values"]
+    )
+
+
+def _check_organization_presets(presets: List[Dict[str, Any]]) -> None:
+    organization = [preset for preset in presets if preset["Kind"] == ORGANIZATION]
+    if not organization:
+        return
+    expected = _settings_named(organization[0])
+    for preset in organization[1:]:
+        if _settings_named(preset) != expected:
+            raise InvalidPreset(
+                f"preset {preset['Id']}: an organization preset must set the same settings "
+                f"as {organization[0]['Id']}"
+            )
 
 
 @lru_cache(maxsize=1)
@@ -80,6 +136,7 @@ def _load() -> str:
         _checked(path.stem, json.loads(path.read_text(encoding="utf-8")))
         for path in sorted(PRESET_DIR.glob("*.json"))
     ]
+    _check_organization_presets(presets)
     return json.dumps(presets, sort_keys=True)
 
 
@@ -92,11 +149,19 @@ def shipped_presets() -> List[Dict[str, Any]]:
     return json.loads(_load())
 
 
+def organization_presets() -> List[Dict[str, Any]]:
+    """The shipped organization presets, in their ``order``."""
+    return sorted(
+        (preset for preset in shipped_presets() if preset["Kind"] == ORGANIZATION),
+        key=lambda preset: (preset["Order"], preset["Id"]),
+    )
+
+
 # ── applying a preset ──────────────────────────────────────────────────────
 #
 # The same rules the configuration editor applies (config-model.js:
 # isPresetOffered, replacedSection and applyPresetSection), for the deploy-time
-# seeder, which writes each preset as a Managed profile and may build the
+# seeder, which writes each organization preset as a Managed profile and may build the
 # baseline itself from one (the ConfigurationPreset stack parameter).
 
 

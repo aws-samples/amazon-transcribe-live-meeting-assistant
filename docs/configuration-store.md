@@ -593,15 +593,30 @@ revision that can be compared and restored like any other.
   settings it names change and every other one stays; `replace` makes the section
   exactly its values, with every shipped entry it does not name turned off where
   the section can turn one off. A setting the deployment does not offer is left
-  out. The layer's tests hold every preset to that shape and its values to the
-  section schemas, and the healthcare preset to the prompts the healthcare domain
-  ships.
+  out. A preset also has a `kind`, served as `Kind`, and may have an integer
+  `order`, served as `Order`, which places it among presets of its kind:
+  - `organization` — a complete organizational default for consent, retention
+    and privacy. Every organization preset sets the same settings, each section
+    by `merge`, which the layer checks when it loads them, so applying one sets
+    all of them whichever was applied before. They are the `ConfigurationPreset`
+    stack parameter's choices and are written as Managed profiles.
+  - `add-on` — a change to one feature, applied in the editor over the profile
+    open. No Managed profile is written for one.
 
-| Preset | What it changes |
-|---|---|
-| Healthcare summary | Replaces the summary sections with the healthcare domain's — summary, details, and SOAP and BIRP notes — turning the other shipped sections off |
-| Translator voice assistant | Sets the Nova Sonic meeting mode to Translator, English and Spanish, with the shipped trigger phrases |
-| On-demand speech engine with voice separation | Moves streaming meetings and Virtual Participants onto the on-demand engine, and turns on Virtual Participant voice separation. Offered only where the engine is deployed |
+  The layer's tests hold every preset to that shape and its values to the
+  section schemas, each organization preset to the values the
+  [Configuration Guide](configuration-guide.md#organization-presets-and-add-ons)
+  lists, Standard to the shipped defaults, and the healthcare add-on to the
+  prompts the healthcare domain ships.
+
+| Preset | Kind | What it changes |
+|---|---|---|
+| Standard | organization | The consent, retention and privacy settings the organization presets set, at their shipped defaults |
+| Internal meetings – notify participants | organization | Meeting Consent mode Notify; audio recorded and the meeting chat captured; the rest at their defaults |
+| Regulated – consent required, transcript not retained | organization | Meeting Consent mode Opt-in, stricter-only per meeting, clients without a consent step refused, the Virtual Participant leaving after an objection; the transcript deleted 15 minutes after the summary; no audio recording or chat capture; redaction on; Amazon Bedrock within the deployment's geography |
+| Healthcare summary | add-on | Replaces the summary sections with the healthcare domain's — summary, details, and SOAP and BIRP notes — turning the other shipped sections off |
+| Translator voice assistant | add-on | Sets the Nova Sonic meeting mode to Translator, English and Spanish, with the shipped trigger phrases |
+| On-demand speech engine with voice separation | add-on | Moves streaming meetings and Virtual Participants onto the on-demand engine, and turns on Virtual Participant voice separation. Offered only where the engine is deployed |
 
 **Why import does not create a profile.** The plan for this store has an import
 route into a *new* profile rather than apply in place, so that importing cannot
@@ -811,13 +826,16 @@ across the sections of stores that moved in after the profile existed:
   defaults, then the preset the `ConfigurationPreset` stack parameter names,
   then the file `CustomConfigPath` names, if any. See
   [Choosing the default configuration at deploy time](#choosing-the-default-configuration-at-deploy-time).
-- **One Managed profile per shipped preset** — `Config#<preset id>`, the preset
-  applied over the baseline, rewritten on every run and recorded as a revision
-  when its content changes. A preset is written only where the deployment can run
-  it (the on-demand ASR preset needs the ASR engine). A Managed profile for a
-  preset a release no longer ships is deleted, unless it is the active profile.
-  A Custom profile already holding a preset's name is left alone, and reported
-  as `name-in-use`. Reported as the `ManagedProfiles` attribute.
+- **One Managed profile per shipped organization preset** — `Config#<preset id>`,
+  the preset applied over the baseline, rewritten on every run and recorded as a
+  revision when its content changes. A preset is written only where the
+  deployment can run it. A Managed profile for a preset a release no longer
+  ships, or no longer writes, is deleted, unless it is the active profile: that
+  includes the Managed profiles earlier 0.4.0 pre-releases wrote for the add-on
+  presets, which stay while one is active and are deleted by the first update
+  after another profile is activated. A Custom profile already holding a preset's
+  name is left alone, and reported as `name-in-use`. Reported as the
+  `ManagedProfiles` attribute.
 - **`Config#custom`** — written only on a table that has never been seeded
   (no `Config#__active`): a new deployment, an upgrade from a release with no
   configuration store, or a table restored empty, so a stack update never
@@ -845,8 +863,17 @@ across the sections of stores that moved in after the profile existed:
 Two stack parameters decide what `Config#default` holds, as IDP's
 `ConfigurationPreset` and `CustomConfigPath` do:
 
-- **`ConfigurationPreset`** — `none` (the shipped defaults) or the id of a
-  shipped preset, which is applied over them.
+- **`ConfigurationPreset`** — the id of an organization preset, applied over
+  the shipped defaults: `standard` (the default, which is the shipped defaults),
+  `internal-meetings-notify` or `regulated-consent-required`; see
+  [Organization presets and add-ons](configuration-guide.md#organization-presets-and-add-ons).
+  The parameter also accepts the values it offered in earlier 0.4.0
+  pre-releases, so that a stack deployed with one can be updated without
+  choosing again: `none` is read as `standard`, and an add-on id is applied over
+  the shipped defaults as it was then, so that stack's default configuration
+  does not change. The seeder logs a warning for an add-on id. To move such a
+  stack onto an organization preset, choose one and apply the add-on in the
+  editor.
 - **`CustomConfigPath`** — an `s3://bucket/key` of a JSON or YAML file laid over
   the result: an object of section name to settings, or a file exported from the
   Configuration page (`"format": "lma-configuration-profile"`), whose `sections`

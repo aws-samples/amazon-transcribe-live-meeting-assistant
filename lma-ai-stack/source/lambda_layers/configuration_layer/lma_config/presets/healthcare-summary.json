@@ -1,6 +1,7 @@
 {
   "title": "Healthcare summary",
   "description": "The summary sections the healthcare prompt domain ships: a summary, the details, and SOAP and BIRP clinical notes. The other shipped sections are turned off. The same prompts a stack deployed with Domain set to Healthcare uses.",
+  "kind": "add-on",
   "sections": {
     "summary_prompt_templates": {
       "mode": "replace",
