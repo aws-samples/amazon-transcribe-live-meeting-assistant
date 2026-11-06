@@ -26,10 +26,14 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("LMA_EVALUATE_APPSYNC") != "1",
-    reason="evaluates templates with the AppSync API; set LMA_EVALUATE_APPSYNC=1 to run",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        os.environ.get("LMA_EVALUATE_APPSYNC") != "1",
+        reason="evaluates templates with the AppSync API; set LMA_EVALUATE_APPSYNC=1 to run",
+    ),
+    # Allowed to call AWS; see scripts/testing/no_real_aws.py.
+    pytest.mark.real_aws,
+]
 
 APPSYNC = Path(__file__).resolve().parents[1] / "source" / "appsync"
 

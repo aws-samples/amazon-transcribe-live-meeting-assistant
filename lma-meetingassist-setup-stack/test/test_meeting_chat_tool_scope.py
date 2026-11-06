@@ -30,6 +30,7 @@ import pytest
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 import strands_meeting_assist_function as handler_module  # noqa: E402
+import strands_stand_in  # noqa: E402 -- scripts/testing, on the path via conftest.py
 
 ALL_TOOLS = {
     "mcp_server",
@@ -71,17 +72,11 @@ def built(monkeypatch):
         def __call__(self, _message):
             return types.SimpleNamespace(text="answer")
 
-    strands = types.ModuleType("strands")
-    strands.Agent = FakeAgent
-    strands.tool = lambda fn: fn
-    strands_models = types.ModuleType("strands.models")
-    strands_models.BedrockModel = lambda **kwargs: kwargs
-    strands_models.CacheConfig = lambda **kwargs: ("CacheConfig", kwargs)
-    strands.models = strands_models
+    strands = strands_stand_in.install(monkeypatch)
+    monkeypatch.setattr(strands, "Agent", FakeAgent)
+    monkeypatch.setattr(strands.models, "BedrockModel", lambda **kwargs: kwargs)
     tavily = types.ModuleType("tavily")
     tavily.TavilyClient = object
-    monkeypatch.setitem(sys.modules, "strands", strands)
-    monkeypatch.setitem(sys.modules, "strands.models", strands_models)
     monkeypatch.setitem(sys.modules, "tavily", tavily)
 
     # Every tool group's precondition, met.

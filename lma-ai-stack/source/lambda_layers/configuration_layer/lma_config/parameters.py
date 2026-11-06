@@ -44,7 +44,7 @@ from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
 from botocore.exceptions import BotoCoreError, ClientError
 
 from .errors import ConfigurationError, ConfigurationTableNotConfigured, InvalidConfiguration
-from .schema import limited_settings_of, validate_section
+from .schema import limited_settings_of, offered_settings, validate_section
 from .sections import section_spec
 from .store import TABLE_NAME_ENV_VAR, ConfigurationStore
 
@@ -320,7 +320,7 @@ def _configured(entry: ParameterDefault, store: Optional[ConfigurationStore], en
     reader = store if store is not None else _shared_store()
     if reader is not None:
         try:
-            values = reader.get_section(section).values
+            values = offered_settings(section, reader.get_section(section).values)
         except (ClientError, BotoCoreError, ConfigurationTableNotConfigured, ConfigurationError):
             LOGGER.warning(
                 "could not read the %s configuration section; using %s for %s",

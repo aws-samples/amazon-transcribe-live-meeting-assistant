@@ -272,7 +272,16 @@ cd lma-websocket-transcriber-stack/source/app && npm ci && npm test && npm run s
 cd lma-browser-extension-stack && npm install && CI=true npm test && CI=false npm run build
 ```
 
-None of these need AWS credentials or Docker. The local image builds
+None of these need AWS credentials or Docker. The Python unit-test roots also
+refuse to reach AWS: the `conftest.py` of each one loads
+`scripts/testing/no_real_aws.py`, which replaces the credentials with fake ones
+and fails any test that sends a request through botocore, even when the code
+under test catches the error. A test that has to call AWS for real (the AppSync
+template evaluations run with `LMA_EVALUATE_APPSYNC=1`) carries
+`@pytest.mark.real_aws`; tests using botocore's `Stubber` or moto need nothing.
+Tests of the meeting assistant and the troubleshooting agent stand the Strands
+SDK in with `scripts/testing/strands_stand_in.py`, which is held equal to every
+name the code imports from `strands`. The local image builds
 (`make docker-build-check`) do, so they are run manually. The integration tests
 do too, and run on a nightly GitLab schedule against a long-lived stack —
 `make integ-tests` remains the way to run them by hand, and

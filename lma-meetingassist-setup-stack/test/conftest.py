@@ -49,3 +49,15 @@ CONFIGURATION_LAYER = (
 
 if str(CONFIGURATION_LAYER) not in sys.path:
     sys.path.insert(0, str(CONFIGURATION_LAYER))
+
+# No test here sends a request to AWS (scripts/testing/no_real_aws.py). The same
+# directory holds strands_stand_in, the stand-in for the strands SDK these tests use.
+_GUARD_DIR = Path(__file__).resolve().parents[2] / "scripts" / "testing"
+if str(_GUARD_DIR) not in sys.path:
+    sys.path.append(str(_GUARD_DIR))
+
+# The guard's pytest_configure hook and its autouse fixture.
+from no_real_aws import *
+from no_real_aws import activate
+
+activate()
