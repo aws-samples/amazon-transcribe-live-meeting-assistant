@@ -69,7 +69,6 @@ CASE_MODELS = (
     "amazon.nova-lite-v1:0",
     "amazon.nova-micro-v1:0",
     "global.amazon.nova-2-lite-v1:0",
-    "us.amazon.nova-premier-v1:0",
     "us.anthropic.claude-haiku-5-5",
     "global.anthropic.claude-opus-5-5",
 )
