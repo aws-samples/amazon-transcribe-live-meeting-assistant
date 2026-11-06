@@ -1430,10 +1430,6 @@ def _scheduler_source(raw: str) -> str:
     for i, line in enumerate(lines):
         if "ZipFile: |" not in line:
             continue
-        # Several inline functions exist in this template; pick the scheduler by
-        # the API only it calls.
-        if not any("create_schedule" in nxt for nxt in lines[i : i + 200]):
-            continue
         indent = len(line) - len(line.lstrip()) + 2
         body = []
         for candidate in lines[i + 1 :]:
@@ -1443,7 +1439,10 @@ def _scheduler_source(raw: str) -> str:
             if len(candidate) - len(candidate.lstrip()) < indent:
                 break
             body.append(candidate[indent:])
-        return "\n".join(body)
+        # Several inline functions exist in this template; pick the scheduler by
+        # the API only it calls.
+        if any("scheduler_client.create_schedule(" in code for code in body):
+            return "\n".join(body)
     raise AssertionError("could not find the VPScheduler inline code")
 
 
@@ -1624,6 +1623,159 @@ def test_scheduled_launch_fires_before_the_meeting_starts(raw: str) -> None:
         ).replace(tzinfo=timezone.utc)
         meeting = datetime.fromtimestamp(1788299100, tz=timezone.utc)
         assert 0 < (meeting - fires_at).total_seconds() <= 300, launch_type
+
+
+# Moving a schedule. updateScheduledVirtualParticipant changes the launch
+# settings of a row that is still SCHEDULED; the stream delivers that as a
+# MODIFY, and the scheduler rewrites the one schedule named for the VP.
+
+
+class _ScheduleNotFound(Exception):
+    pass
+
+
+class _MovableScheduler(_FakeScheduler):
+    """Also captures update_schedule, and can answer that there is no schedule."""
+
+    class exceptions:  # noqa: N801 -- mirrors the boto3 client attribute
+        ResourceNotFoundException = _ScheduleNotFound
+
+    def __init__(self, missing: bool = False) -> None:
+        super().__init__()
+        self.updated: list[dict] = []
+        self.missing = missing
+
+    def update_schedule(self, **kwargs):  # noqa: ANN003
+        if self.missing:
+            raise _ScheduleNotFound("no schedule")
+        self.updated.append(kwargs)
+        return {"ScheduleArn": "arn:aws:scheduler:::schedule/g/n"}
+
+
+def _future_row(**changes) -> dict:
+    """SCHEDULED_ROW, still waiting, with a meeting an hour away."""
+    import time
+
+    row = {
+        **SCHEDULED_ROW,
+        "status": {"S": "SCHEDULED"},
+        "meetingTime": {"N": str(int(time.time()) + 3600)},
+    }
+    row.update(changes)
+    return row
+
+
+def _run_modify(raw: str, old: dict, new: dict, missing: bool = False, launch_type="FARGATE"):
+    """Execute the inline scheduler on one MODIFY event."""
+    import types
+    from unittest import mock
+
+    fake = _MovableScheduler(missing=missing)
+    dynamodb = mock.Mock()
+    module = types.ModuleType("vpscheduler")
+    env = {**SCHEDULER_ENV, "VP_LAUNCH_TYPE": launch_type, "VP_TABLE_NAME": "vp-table"}
+    clients = {"scheduler": fake, "dynamodb": dynamodb}
+    with mock.patch.dict("os.environ", env, clear=False), mock.patch(
+        "boto3.client",
+        side_effect=lambda service, *a, **k: clients.get(service, mock.Mock()),
+    ):
+        exec(compile(_scheduler_source(raw), "vpscheduler", "exec"), module.__dict__)
+        record = {
+            "eventName": "MODIFY",
+            "dynamodb": {"Keys": {"id": {"S": "vp-1"}}, "OldImage": old, "NewImage": new},
+        }
+        result = module.lambda_handler({"Records": [record]}, None)
+    assert result["statusCode"] == 200, result
+    return fake, dynamodb
+
+
+@pytest.mark.parametrize("launch_type", ["FARGATE", "MICROVM"])
+def test_a_changed_time_moves_the_one_schedule(raw: str, launch_type: str) -> None:
+    old = _future_row()
+    new_time = int(old["meetingTime"]["N"]) + 1800
+    new = _future_row(meetingTime={"N": str(new_time)}, meetingId={"S": "999"})
+    fake, dynamodb = _run_modify(raw, old, new, launch_type=launch_type)
+
+    assert fake.created == [], "a move must never create a second schedule"
+    assert len(fake.updated) == 1
+    schedule = fake.updated[0]
+    assert schedule["Name"] == "vp-1"
+    assert schedule["GroupName"] == SCHEDULER_ENV["SCHEDULE_GROUP_NAME"]
+    fires_at = datetime.strptime(schedule["ScheduleExpression"], "at(%Y-%m-%dT%H:%M:%S)")
+    assert fires_at.replace(tzinfo=timezone.utc).timestamp() == new_time - 120
+    assert "999" in schedule["Target"]["Input"]
+    assert str(new_time) in schedule["Target"]["Input"]
+    dynamodb.update_item.assert_not_called()
+
+
+def test_a_moved_schedule_is_defined_as_a_new_one_would_be(raw: str) -> None:
+    old = _future_row()
+    new = _future_row(meetingName={"S": "Renamed"})
+    fake, _ = _run_modify(raw, old, new)
+    created = _run_scheduler(raw, "FARGATE")
+    assert set(fake.updated[0]) == set(created)
+    assert fake.updated[0]["ActionAfterCompletion"] == "DELETE"
+
+
+def test_a_schedule_that_is_gone_is_not_recreated(raw: str) -> None:
+    """Already fired (and deleted itself) or cancelled: creating one would
+    launch the VP a second time."""
+    old = _future_row()
+    new = _future_row(meetingId={"S": "999"})
+    fake, dynamodb = _run_modify(raw, old, new, missing=True)
+
+    assert fake.created == []
+    dynamodb.update_item.assert_called_once()
+    note = dynamodb.update_item.call_args.kwargs
+    assert note["ConditionExpression"] == "#s = :scheduled"
+    assert "launches as it was scheduled before" in note["ExpressionAttributeValues"][":e"]["S"]
+
+
+def test_a_new_fire_time_already_due_is_not_applied(raw: str) -> None:
+    import time
+
+    old = _future_row()
+    new = _future_row(meetingTime={"N": str(int(time.time()) + 60)})
+    fake, dynamodb = _run_modify(raw, old, new)
+
+    assert fake.updated == [] and fake.created == []
+    dynamodb.update_item.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "old_changes,new_changes",
+    [
+        # The launch, cancellation or the VP's own progress.
+        ({}, {"status": {"S": "INITIALIZING"}}),
+        ({}, {"status": {"S": "CANCELLED"}}),
+        ({"status": {"S": "INITIALIZING"}}, {"status": {"S": "JOINING"}}),
+        # Writes that leave the launch fields alone.
+        ({}, {"SharedWith": {"S": "bob@example.com"}}),
+        ({}, {"agenda": {"S": "Read by the VP from the row"}}),
+        ({}, {"consentMode": {"S": "notify"}}),
+        ({}, {"errorMessage": {"S": "a note"}}),
+    ],
+)
+def test_other_writes_leave_the_schedule_alone(
+    raw: str, old_changes: dict, new_changes: dict
+) -> None:
+    old = _future_row(**old_changes)
+    new = {**old, **new_changes}
+    fake, dynamodb = _run_modify(raw, old, new)
+    assert fake.updated == [] and fake.created == []
+    dynamodb.update_item.assert_not_called()
+
+
+def test_the_scheduler_may_move_its_schedules_and_note_the_row(template: dict) -> None:
+    policies = template["Resources"]["VirtualParticipantSchedulerRole"]["Properties"]["Policies"]
+    statements = policies[0]["PolicyDocument"]["Statement"]
+    actions = {a for s in statements for a in s["Action"]}
+    assert "scheduler:UpdateSchedule" in actions
+    assert "dynamodb:UpdateItem" in actions
+    env = template["Resources"]["VirtualParticipantSchedulerFunction"]["Properties"][
+        "Environment"
+    ]["Variables"]
+    assert "VP_TABLE_NAME" in env
 
 
 def test_scheduler_lambda_can_pass_the_launcher_invoke_role(template: dict) -> None:
