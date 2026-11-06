@@ -13,7 +13,11 @@ from bedrock_compat import INVITATION_PARSER_MAX_TOKENS, build_inference_config,
 from botocore.config import Config
 
 # pylint: disable=import-error
-from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
+from lma_config import (  # configuration layer
+    LANGUAGE_MODELS,
+    read_setting,
+    resolve_model_id,
+)
 
 # pylint: enable=import-error
 
@@ -50,10 +54,14 @@ def get_generated_text(response):
 
 def call_bedrock(prompt_data):
     """Call Bedrock to parse meeting invitation"""
-    modelId = read_setting(
-        LANGUAGE_MODELS.name,
-        "summaryModelId",
-        default=FALLBACK_MODEL_ID,
+    # Run within the Amazon Bedrock Models section's Model inference geography.
+    modelId = resolve_model_id(
+        read_setting(
+            LANGUAGE_MODELS.name,
+            "summaryModelId",
+            default=FALLBACK_MODEL_ID,
+        ),
+        region=BEDROCK_REGION,
     )
     logger.info(f"Bedrock request - ModelId: {modelId}")
 

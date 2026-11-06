@@ -157,6 +157,17 @@ is guessed from a similar-looking entry. A line with no price is reported as
 unpriced, shown without a cost, left out of every total and counted in
 `UnpricedCount`. A plausible wrong number is worse than a visible gap.
 
+One exception, for Amazon Bedrock models, is always named on the line it applies
+to. The price table lists each model's `global.` and `us.` profiles and its plain
+id where Amazon Bedrock sells one, while the **Model inference geography** setting
+(see [Where meeting content is processed](infrastructure-and-security.md#where-meeting-content-is-processed))
+can also run the same model through its `eu.`, `apac.`, `jp.`, `au.`, `ca.` or
+`in.` profile, or as its plain in-Region id. A line for such an id is priced at the
+same model's `global.` price, else its plain id's, else its `us.` profile's, and its
+note says which. It is never priced as a different model. For the models in the
+shipped table the `us.` profiles are listed at 10% above the `global.` ones, so an
+estimate for a geography profile priced this way is likely low by about that much.
+
 A unit named in `nonChargeableUnits` (the `images` the meeting assistant sends,
 for example) is shown with no cost and is not counted as unpriced. Changes to the
 price table replace a list rather than merging into it, so a custom

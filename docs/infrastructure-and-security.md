@@ -19,6 +19,7 @@ title: "Infrastructure & Security"
 - [IAM](#iam)
 - [Observability](#observability)
 - [Data Retention](#data-retention)
+- [Where meeting content is processed](#where-meeting-content-is-processed)
 - [Related Documentation](#related-documentation)
 
 ## Overview
@@ -389,6 +390,112 @@ The MCP API Gateway includes the following security controls regardless of WAF e
 | CloudWatch logs | Configurable | `CloudWatchLogsExpirationInDays` parameter |
 
 The stack parameter **EnableDataRetentionOnDelete** controls whether DynamoDB tables, S3 buckets, and KMS keys are retained when the stack is deleted. When enabled, these resources persist after stack deletion to prevent data loss.
+
+## Where meeting content is processed
+
+Meeting content here means a meeting's audio, its transcript, the text and images
+of its shared screen, its chat, and anything derived from them, such as summaries
+and assistant answers. This section lists every place LMA sends it, so that a
+deployment with a data-residency requirement can check each one.
+
+### The AWS Region of the stack
+
+LMA's own resources all run in the AWS Region the stack is deployed to: the
+WebSocket transcriber, the Virtual Participant tasks, the Lambda functions, the
+optional on-demand speech engine (see [MicroVM ASR](microvm-asr.md)), and the
+DynamoDB tables, S3 buckets, Kinesis stream and AppSync API that store and carry
+meeting content. The web UI is served through CloudFront, whose edge locations
+cache the UI's static files only; meeting content reaches the browser from the
+Region's AppSync API.
+
+### Amazon Transcribe
+
+Streaming transcription, from the WebSocket transcriber and from the Virtual
+Participant, and the transcription of uploaded recordings, call Amazon Transcribe
+in the stack's Region. Live translation on the meeting page calls Amazon Translate
+in the same Region from the browser.
+
+### Amazon Bedrock
+
+Every Amazon Bedrock model LMA calls runs where the **Model inference geography**
+setting allows. The setting is in the **Amazon Bedrock Models** section of
+**Configuration ▸ Configuration** and applies to the summaries and meeting insights
+(summaries, invitation parsing, speaker naming, the agenda, and the transcript
+search tools), the meeting assistant and the troubleshooting agent, the meeting
+assistant's knowledge bases, key frame text, the Meeting Consent section's
+evidence check model, and the Virtual Participant's page-automation model.
+
+| Value | Where inference runs |
+|-------|----------------------|
+| **Global** (default) | Each model id is used as chosen. The shipped defaults are `global.` cross-Region inference profiles, which Amazon Bedrock may serve from any commercial AWS Region. |
+| **Same geography as this deployment** | Within the geography of the stack's Region. A model whose id routes outside it (a `global.` profile, or another geography's) is run as the same model through the geography's inference profile, or as the in-Region model. |
+| **In-region only** | In the stack's Region only, using the plain model id. Amazon Bedrock offers most Claude models in a Region only through inference profiles, so this value usually needs an Amazon Nova model. |
+
+The geography of each Region, narrowest first:
+
+| Stack Region | Inference profiles used under **Same geography** |
+|--------------|-------------------------------------------------|
+| `us-*` | `us.` (Regions in the United States) |
+| `us-gov-*` | `us-gov.` (AWS GovCloud (US) Regions) |
+| `ca-*` | `ca.` (Regions in Canada) |
+| `eu-*` | `eu.` (Regions in Europe) |
+| `ap-northeast-1`, `ap-northeast-3` | `jp.` (Japan), then `apac.` |
+| `ap-southeast-2`, `ap-southeast-4` | `au.` (Australia), then `apac.` |
+| `ap-south-1`, `ap-south-2` | `in.` (India), then `apac.` |
+| other `ap-*` | `apac.` (Regions in Asia Pacific) |
+| any other Region | none: the in-Region model id |
+
+A model id that is already within the geography, such as a `us.` profile in a
+`us-east-1` deployment, is used as chosen. The setting decides where a model runs
+and never which model: a model chosen on the page is only ever addressed through a
+different profile of the same model.
+
+**When the geography has no id for a model, the feature reports an error instead
+of calling Amazon Bedrock outside it.** Which profiles exist depends on the model
+and on the Region. For example, at the time of writing there is no Japan or APAC
+profile for Claude Sonnet 5.5, so a Tokyo deployment under **Same geography** needs
+another summary model. The section shows, before a change is saved, the id each
+feature will run as and which features have no id in the selected geography.
+
+Which ids exist is read from a catalogue shipped with LMA
+(`lma_config/bedrock_inference_catalog.json`), built from the Amazon Bedrock
+`ListInferenceProfiles` and `ListFoundationModels` APIs by
+`scripts/bedrock_inference_catalog.py`. For a Region the catalogue does not list,
+the geography's profile id is built by rule and used unchecked, with a warning in
+the function's log.
+
+The setting does not apply to the following, which have their own controls:
+
+- **Amazon Nova Sonic**, the voice assistant, runs in the Region the
+  `AmazonNovaSonicRegion` stack parameter names (this stack's Region when blank).
+- **Amazon Titan Text Embeddings**, which indexes knowledge-base documents and
+  meeting transcripts, runs in the knowledge base's Region.
+- A Bedrock Knowledge Base or Guardrail you supply runs where that resource is.
+
+Deploy-time model validation (the `ModelValidation` parameter) calls the shipped
+`global.` defaults once, with a fixed question and no meeting content.
+
+The meeting cost estimate prices an id the setting produces that the price table
+does not list at the same model's listed price; see
+[Meeting Cost Estimate](meeting-cost-estimate.md#how-a-line-is-priced).
+
+### Optional integrations outside AWS
+
+Each of these receives meeting content only when it is configured, and from then on
+for every meeting that uses it:
+
+| Integration | Enabled by | What it receives |
+|-------------|-----------|------------------|
+| Tavily web search | The `TavilyApiKey` stack parameter | The search queries the meeting assistant writes, which can quote the meeting. See [Meeting Assistant](meeting-assistant.md#tavily-web-search). |
+| ElevenLabs voice assistant | **Voice assistant** set to ElevenLabs in the Virtual Participant section, with the `ElevenLabsApiKey` (or `ElevenLabsApiKeySecretArn`) stack parameter | The meeting audio the voice assistant listens to, and its conversation. See [ElevenLabs Setup](elevenlabs-setup.md). |
+| Simli avatar | The `SimliApiKey` (or `SimliApiKeySecretArn`) stack parameter and a Simli face ID | The voice assistant's spoken replies, which it renders as the avatar's video. See [Simli Avatar Setup](simli-avatar-setup.md). |
+| Azure Communication Services | An ACS connection string (`AcsConnectionString` or `AcsConnectionStringSecretArn`) | The Teams meeting's audio, video and chat, which a Virtual Participant joins through ACS instead of the Teams web client. See [Teams ACS SDK](teams-acs-sdk.md). |
+| MCP servers | An MCP server added on the MCP Servers page | The tool calls the meeting assistant makes to it, which can quote the meeting. See [MCP Servers](mcp-servers.md). |
+| Lambda hook functions | The `TranscriptLambdaHookFunctionArn`, `StartOfCallLambdaHookFunctionArn`, `EndOfCallLambdaHookFunctionArn` and `PostCallSummaryLambdaHookFunctionArn` stack parameters | Transcript segments, meeting events or the summary, in your own Lambda functions, which may send them on. See [Lambda Hook Functions](lambda-hook-functions.md). |
+
+The meeting platform itself (Zoom, Microsoft Teams, Google Meet, Amazon Chime or
+Webex) hosts the meeting a Virtual Participant joins, under that platform's own
+terms.
 
 ## Related Documentation
 

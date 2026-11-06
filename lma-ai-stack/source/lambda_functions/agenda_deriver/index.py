@@ -38,7 +38,11 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 # pylint: disable=import-error
-from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
+from lma_config import (  # configuration layer
+    LANGUAGE_MODELS,
+    read_setting,
+    resolve_model_id,
+)
 from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # configuration layer
 
 # pylint: enable=import-error
@@ -238,12 +242,16 @@ def call_bedrock(prompt, call_id):
     Temperature 0 where the model accepts it: this is extraction. Sized like a
     summary section, which reads a transcript of the same order. The model is the
     summaries' one: the Amazon Bedrock Models section's value on the
-    Configuration page, else the shipped default in setting_defaults.json.
+    Configuration page, else the shipped default in setting_defaults.json, run
+    within the section's Model inference geography.
     """
-    model_id = read_setting(
-        LANGUAGE_MODELS.name,
-        "summaryModelId",
-        default=FALLBACK_MODEL_ID,
+    model_id = resolve_model_id(
+        read_setting(
+            LANGUAGE_MODELS.name,
+            "summaryModelId",
+            default=FALLBACK_MODEL_ID,
+        ),
+        region=BEDROCK_REGION,
     )
     response = bedrock.converse(
         modelId=model_id,

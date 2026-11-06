@@ -10,7 +10,10 @@
 
 import React from 'react';
 import PropTypes from 'prop-types';
-import { Alert, KeyValuePairs, StatusIndicator } from '@cloudscape-design/components';
+import { Alert, Box, KeyValuePairs, StatusIndicator } from '@cloudscape-design/components';
+
+import awsExports from '../../aws-exports';
+import { GEOGRAPHY, GLOBAL, IN_REGION, describeScope, resolveForGeography } from './inference-geography';
 
 // The Virtual Participant's own fallback when nothing sets the mode.
 const DEFAULT_ACTIVATION_MODE = 'wake_phrase';
@@ -88,6 +91,102 @@ const SETTINGS = PropTypes.shape({
 
 AsrEngineNotice.propTypes = { settings: SETTINGS };
 
+// The model settings the Model inference geography applies to, as the page
+// labels them. The consent evidence check model is the Meeting Consent
+// section's, and is shown from that section as saved.
+const MODEL_FEATURES = [
+  ['summaryModelId', 'Summaries and meeting insights'],
+  ['meetingAssistModelId', 'Meeting assistant'],
+  ['knowledgeBaseModelId', 'Meeting assistant knowledge bases'],
+  ['keyframeTextModelId', 'Key frame text'],
+];
+
+const GEOGRAPHY_LABELS = {
+  [GLOBAL]: 'Global',
+  [GEOGRAPHY]: 'Same geography as this deployment',
+  [IN_REGION]: 'In-region only',
+};
+
+/** Each feature's model and how it runs under the section's geography, as edited. */
+export const modelPlacements = (values = {}, configuration = {}, region = '') => {
+  const geography = values.inferenceGeography || GLOBAL;
+  const features = MODEL_FEATURES.map(([setting, label]) => [label, values[setting]]);
+  const verifier = configuration?.meeting_consent?.verifierModelId;
+  if (verifier) features.push(['Consent evidence check (Meeting Consent section)', verifier]);
+  return features
+    .filter(([, modelId]) => modelId)
+    .map(([label, modelId]) => ({ label, chosen: modelId, ...resolveForGeography(modelId, geography, region) }));
+};
+
+const Placement = ({ placement, region }) => {
+  if (placement.unavailable) {
+    return (
+      <StatusIndicator type="error">
+        {`${placement.chosen} has no Amazon Bedrock id in this geography; choose another model`}
+      </StatusIndicator>
+    );
+  }
+  const scope = describeScope(placement.modelId, region);
+  return (
+    <>
+      <Box variant="code">{placement.modelId}</Box>
+      {` runs in ${scope}`}
+      {placement.modelId !== placement.chosen && ` (chosen: ${placement.chosen})`}
+      {!placement.verified && placement.modelId !== placement.chosen && (
+        <>
+          {' '}
+          <StatusIndicator type="warning">
+            not checked against this Region&apos;s Amazon Bedrock listing
+          </StatusIndicator>
+        </>
+      )}
+    </>
+  );
+};
+
+Placement.propTypes = {
+  placement: PropTypes.shape({
+    chosen: PropTypes.string,
+    modelId: PropTypes.string,
+    verified: PropTypes.bool,
+    unavailable: PropTypes.bool,
+  }).isRequired,
+  region: PropTypes.string.isRequired,
+};
+
+// Where each model of the section runs inference, under the geography as edited,
+// so the effect of a change is visible before it is saved.
+const LanguageModelsNotice = ({ values = {}, configuration = {}, region = awsExports.aws_project_region || '' }) => {
+  const geography = values.inferenceGeography || GLOBAL;
+  const placements = modelPlacements(values, configuration, region);
+  const unavailable = placements.filter((placement) => placement.unavailable);
+  return (
+    <>
+      {unavailable.length > 0 && (
+        <Alert type="warning" header="Some features have no model in the selected geography">
+          {`Under ${GEOGRAPHY_LABELS[geography] || geography} in ${region}, ` +
+            `${unavailable.map((placement) => placement.label).join(', ')} ` +
+            `${unavailable.length === 1 ? 'reports an error' : 'report an error'} instead of calling Amazon Bedrock ` +
+            'outside it. Choose a model offered in this geography, or another geography.'}
+        </Alert>
+      )}
+      <KeyValuePairs
+        columns={1}
+        items={placements.map((placement) => ({
+          label: placement.label,
+          value: <Placement placement={placement} region={region} />,
+        }))}
+      />
+    </>
+  );
+};
+
+LanguageModelsNotice.propTypes = {
+  values: PropTypes.shape({ inferenceGeography: PropTypes.string }),
+  configuration: PropTypes.shape({}),
+  region: PropTypes.string,
+};
+
 // Why a section a link asked for is not shown, where its schema's
 // availableWhen does not hold in this deployment.
 // No shipped section is withheld today; the asr_engine section hides only its
@@ -97,11 +196,12 @@ export const UNAVAILABLE_REASONS = {};
 const NOTICES = {
   nova_sonic_config: NovaSonicNotice,
   asr_engine: AsrEngineNotice,
+  language_models: LanguageModelsNotice,
 };
 
-const SectionNotice = ({ section, settings = {}, configuration = {} }) => {
+const SectionNotice = ({ section, settings = {}, configuration = {}, values = {}, region = undefined }) => {
   const Notice = NOTICES[section];
-  return Notice ? <Notice settings={settings} configuration={configuration} /> : null;
+  return Notice ? <Notice settings={settings} configuration={configuration} values={values} region={region} /> : null;
 };
 
 SectionNotice.propTypes = {
@@ -109,6 +209,10 @@ SectionNotice.propTypes = {
   settings: SETTINGS,
   // Every section's values as saved, for a notice that depends on another section.
   configuration: PropTypes.shape({}),
+  // This section's values as edited, for a notice that previews them.
+  values: PropTypes.shape({}),
+  // The deployment's Region; the build's when not given.
+  region: PropTypes.string,
 };
 
 export default SectionNotice;

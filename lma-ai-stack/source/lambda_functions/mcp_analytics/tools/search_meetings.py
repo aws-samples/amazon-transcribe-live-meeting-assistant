@@ -30,16 +30,30 @@ def _configured_model_id() -> str:
     tests, load this module without needing the layer.
     """
     # pylint: disable-next=import-error,import-outside-toplevel
-    from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
+    from lma_config import LANGUAGE_MODELS, read_setting, resolve_model_id
 
-    value = read_setting(LANGUAGE_MODELS.name, "summaryModelId")
+    # Run within the section's Model inference geography.
+    value = resolve_model_id(
+        read_setting(LANGUAGE_MODELS.name, "summaryModelId"),
+        region=os.environ.get("AWS_REGION", ""),
+    )
     return (value or "").strip()
 
 
 # Bedrock inference profile prefixes (cross-region routing).
 # Model IDs starting with these prefixes must use an inference-profile ARN,
 # not a foundation-model ARN.
-_INFERENCE_PROFILE_PREFIXES = ("us.", "eu.", "apac.", "global.")
+_INFERENCE_PROFILE_PREFIXES = (
+    "us.",
+    "us-gov.",
+    "eu.",
+    "apac.",
+    "jp.",
+    "au.",
+    "ca.",
+    "in.",
+    "global.",
+)
 
 
 def _build_model_arn(model_id: str, region: str, account_id: str) -> str:

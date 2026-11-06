@@ -97,9 +97,12 @@ export default defineConfig(({ mode }) => ({
     // to `.js` files too. On Vite 8 the plugin wires up Oxc's automatic JSX
     // runtime and `optimizeDeps.rolldownOptions.transform.jsx`, replacing the
     // Vite 7 `esbuild` / `optimizeDeps.esbuildOptions` approach.
+    // A regular expression, not the glob '**/*.{js,jsx}': the plugin appends
+    // `{?*,}` to a glob so it matches ids with a query, and in that glob `?`
+    // matches any character, so `.json` files were transformed as JSX too.
     react({
       jsxRuntime: 'automatic',
-      include: '**/*.{js,jsx}',
+      include: /\.jsx?$/,
     }),
   ],
 

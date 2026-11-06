@@ -220,7 +220,8 @@ def test_every_model_a_deployment_can_choose_has_a_price(seeder) -> None:
     )
     offered = {
         model
-        for setting in schema["properties"].values()
+        for name, setting in schema["properties"].items()
+        if name.endswith("ModelId")
         for model in setting.get("enum", [])
         if model
     }

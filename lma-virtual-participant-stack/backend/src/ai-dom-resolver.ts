@@ -15,6 +15,7 @@ import { buildClaudeInvokeParams } from './bedrock-model-compat.js';
 import { CONTEXT_PAGE_AUTOMATION, anthropicUsage, currentCallId, recordMetering } from './metering.js';
 import { POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
 import { createLogger } from './logger.js';
+import { resolveModelId } from './inference-geography.js';
 
 const log = createLogger('ai-dom-resolver');
 
@@ -126,6 +127,18 @@ const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 const TTL_DAYS = 30;
 
 const memoryCache = new Map<string, CacheEntry>();
+
+// The id the resolver calls Amazon Bedrock with: DEFAULT_MODEL_ID run within the
+// Configuration page's Model inference geography, decided at the first call.
+let resolvedModelId: Promise<string> | null = null;
+function domResolverModelId(): Promise<string> {
+  if (!resolvedModelId) {
+    resolvedModelId = resolveModelId(DEFAULT_MODEL_ID, AWS_REGION);
+    // A refusal is not retried for the rest of the meeting, and is reported by
+    // each call the same way a failed Bedrock call is.
+  }
+  return resolvedModelId;
+}
 
 // Race a browser-call promise against a wall-clock timeout. evaluate /
 // screenshot / boundingBox can hang for tens of seconds when the page's
@@ -477,14 +490,15 @@ async function invokeClaude(
   userContent.push({ type: 'text', text: prompt });
   messages.push({ role: 'user', content: userContent });
 
+  const modelId = await domResolverModelId();
   const body = {
     anthropic_version: 'bedrock-2023-05-31',
-    ...buildClaudeInvokeParams(DEFAULT_MODEL_ID),
+    ...buildClaudeInvokeParams(modelId),
     messages,
   };
 
   const command = new InvokeModelCommand({
-    modelId: DEFAULT_MODEL_ID,
+    modelId,
     body: JSON.stringify(body),
     contentType: 'application/json',
     accept: 'application/json',
@@ -497,7 +511,7 @@ async function invokeClaude(
   void recordMetering(
     currentCallId(),
     CONTEXT_PAGE_AUTOMATION,
-    `bedrock/${DEFAULT_MODEL_ID}`,
+    `bedrock/${modelId}`,
     anthropicUsage((parsed as { usage?: unknown }).usage),
   );
   const text = parsed.content

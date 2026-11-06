@@ -28,6 +28,7 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 # pylint: disable=import-error
+from lma_config import resolve_model_id  # configuration layer
 from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # configuration layer
 
 # pylint: enable=import-error
@@ -89,7 +90,9 @@ def verify(event: Dict[str, Any]) -> Dict[str, Any]:
     image_format = pure.image_format(data)
     if image_format is None:
         raise VerificationError("the evidence is not a JPEG, PNG, GIF or WebP image")
-    model_id = event.get("ModelId") or FALLBACK_MODEL_ID
+    # The Meeting Consent section's model, run within the Amazon Bedrock Models
+    # section's Model inference geography.
+    model_id = resolve_model_id(event.get("ModelId") or FALLBACK_MODEL_ID, region=BEDROCK_REGION)
     participants = [str(p) for p in event.get("Participants") or []]
     prompt = pure.build_prompt(
         event.get("NoticeText"),
