@@ -26,6 +26,7 @@ import useUserGroups from '../../hooks/use-user-groups';
 import useSettingsContext from '../../contexts/settings';
 import StatusTimeline from './StatusTimeline';
 import VNCViewer from './VNCViewer';
+import DiagnoseButton from '../troubleshooting/DiagnoseButton';
 import LaunchSettings from './LaunchSettings';
 import { canManageVirtualParticipant } from './vp-access';
 
@@ -943,6 +944,12 @@ const VirtualParticipantDetails = () => {
                   Call Details (Not Available)
                 </Button>
               )}
+              <DiagnoseButton
+                vpId={vpDetails.id || vpId}
+                resourceLabel={
+                  vpDetails.meetingName ? `the Virtual Participant for ${vpDetails.meetingName}` : undefined
+                }
+              />
             </SpaceBetween>
           }
         >

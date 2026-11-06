@@ -11,19 +11,18 @@ parameters, and reports a cause with the evidence it rests on.
 
 ENTRY POINTS
 ------------
-This increment deliberately ships **no** user-facing entry point. There is no
-AppSync resolver, no function URL and no API Gateway route, so the only way to
-invoke this function is an IAM principal holding ``lambda:InvokeFunction`` on
-it, and the stack grants that to no principal. (A principal with a broad
-account-level policy, such as an administrator role, has it already — this is
-the absence of a grant, not a barrier.) The two entry points the design
-calls for (an Admin-only stack-wide page, and a per-resource "Diagnose" button
-available to the resource owner) are a separate change, because each needs an
-authorization decision re-checked in this function and neither is testable
-without the UI.
+The web UI reaches this function through the AI stack's troubleshooting
+resolver (``lma-ai-stack/source/lambda_functions/troubleshooting_resolver``),
+behind the ``startTroubleshooting`` and ``getTroubleshootingJob`` AppSync
+fields: the Troubleshooting page and the Diagnose button on a meeting or
+Virtual Participant, both for the Admin group. That resolver checks the
+caller's group before it records a job; its role is the one
+the stack grants ``lambda:InvokeFunction`` on this function, and it invokes it
+synchronously, once per job. There is no function URL and no API Gateway
+route. (A principal with a broad account-level policy, such as an
+administrator role, can also invoke it directly with the AWS CLI or SDK.)
 
-The event shape below is the shape those resolvers will send, so that the
-authorization work is the only thing left to add:
+The event shape:
 
     {
       "query":      "why did virtual participant <id> fail to join?",
@@ -1165,11 +1164,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     see the module docstring.
 
     **An error body carries a fixed message and an exception type, never the
-    exception's text.** The same rule the thinking-step stream follows, and for
-    a reason that is about to matter more: today this body only reaches an IAM
-    principal holding ``lambda:InvokeFunction``, but the resolvers the design
-    calls for will forward it to a browser, and a botocore message can carry an
-    account-specific ARN. The full text goes to the log, which is where someone
+    exception's text.** The same rule the thinking-step stream follows: the
+    troubleshooting resolver forwards ``error`` to the browser, and a botocore
+    message can carry an account-specific ARN. The full text goes to the log, which is where someone
     diagnosing the diagnoser should be looking anyway.
     """
     try:

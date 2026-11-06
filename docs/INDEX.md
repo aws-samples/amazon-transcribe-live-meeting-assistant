@@ -89,7 +89,7 @@ title: "LMA Documentation"
 - [Meeting Cost Estimate](meeting-cost-estimate.md) — The itemised estimate of what each meeting cost: what is metered and how, the price table and where its prices come from, changing a price, and what the estimate leaves out
 - [Monitoring & Alerting](monitoring.md) — The operational alerts SNS topic and its alarms, the CloudWatch dashboard, how to subscribe a team rather than one person, and why an unconfirmed email subscription delivers nothing
 - [Troubleshooting](troubleshooting.md) — Monitoring, CloudWatch logs, common issues, cost assessment
-- [AI Troubleshooting Agent](troubleshooting-agent.md) — The read-only diagnostic agent: how to invoke it, the four log and record tools it uses, where its system prompt lives and how to tune it without redeploying, and the spend limits that bound a run
+- [AI Troubleshooting Agent](troubleshooting-agent.md) — The read-only diagnostic agent: the Admin Troubleshooting page and Diagnose button, how to invoke it directly, the four log and record tools it uses, where its system prompt lives and how to tune it without redeploying, and the spend limits that bound a run
 - [Cleanup](cleanup.md) — Deleting stacks and retained resources
 
 ### Development

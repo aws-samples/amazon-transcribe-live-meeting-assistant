@@ -26,6 +26,7 @@ import ConfigurationRoutes from './ConfigurationRoutes';
 import movedConfigurationRoutes from './moved-configuration-routes';
 import EmbedRoutes from './EmbedRoutes';
 import VoiceEnrollmentRoutes from './VoiceEnrollmentRoutes';
+import TroubleshootingRoutes from './TroubleshootingRoutes';
 import ManualActionAlerts from '../components/virtual-participant-layout/ManualActionAlerts';
 
 import {
@@ -44,6 +45,7 @@ import {
   CONFIGURATION_PATH,
   EMBED_PATH,
   VOICE_ENROLLMENT_PATH,
+  TROUBLESHOOTING_PATH,
 } from './constants';
 
 const logger = new ConsoleLogger('AuthRoutes');
@@ -94,6 +96,7 @@ const AuthRoutes = ({ redirectParam }) => {
         <Route path={`${CONFIGURATION_PATH}/*`} element={<ConfigurationRoutes />} />
         <Route path={`${EMBED_PATH}/*`} element={<EmbedRoutes />} />
         <Route path={`${VOICE_ENROLLMENT_PATH}/*`} element={<VoiceEnrollmentRoutes />} />
+        <Route path={`${TROUBLESHOOTING_PATH}/*`} element={<TroubleshootingRoutes />} />
         <Route path="*" element={<Navigate to={DEFAULT_PATH} replace />} />
       </Routes>
     </SettingsContext.Provider>

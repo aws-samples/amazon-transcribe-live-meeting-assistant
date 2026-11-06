@@ -37,6 +37,9 @@ The left sidebar organizes the application into the following sections:
 - **Meeting List** — View and manage all accessible meetings
 - **Meetings Query Tool** — Advanced search and filtering across meetings
 
+### Troubleshooting (admin only)
+- **Troubleshooting** — Ask the AI troubleshooting agent why something in the deployment failed; it reads the deployment's logs, Virtual Participant records and stack parameters and answers with a root cause and its evidence (see [AI Troubleshooting Agent](troubleshooting-agent.md#the-troubleshooting-page))
+
 ### Configuration (admin only)
 - **View / Edit Configuration** — The configuration profiles, and every runtime setting of the one open in one place: summary prompts, chat buttons, Nova Sonic, transcription engine, meeting cost prices and more, with each profile's saved revisions to view, compare, label and restore (see [Configuration Guide](configuration-guide.md))
 - **MCP Servers** — Install and manage MCP server integrations
@@ -94,6 +97,7 @@ Click a VP from the list to open its detail page. The page shows:
 - **Live Virtual Participant View** — embedded noVNC viewer of the VP's Chrome window. Toggle **View Only** off to interact with the VP's browser (type a 2FA code, solve a CAPTCHA, click through SSO).
 - **Troubleshooting** card — when a VP fails, the human-readable `errorMessage` written by the VP backend is displayed here, along with common solutions for that error class.
 - **Status history** with timestamps for each state transition.
+- **Diagnose** in the page header — runs the AI troubleshooting agent's diagnosis of this Virtual Participant: whether it joined, and if it failed or ended early, why. Shown to Admins only; see [AI Troubleshooting Agent › The Diagnose button](troubleshooting-agent.md#the-diagnose-button).
 
 ## Meeting Detail Page
 
@@ -147,6 +151,10 @@ assistant is a panel beside the tabs, on every tab; see
   (beta)**. See [Transcript Downloads](#transcript-downloads). **Delete
   meeting** is in the **⋮** menu. Share and Delete open the same dialogs as on the
   meeting list.
+- **Diagnose** — runs the AI troubleshooting agent's diagnosis of this meeting:
+  whether it was captured and transcribed from start to end, and if anything
+  failed, why. Shown to Admins only; see
+  [AI Troubleshooting Agent › The Diagnose button](troubleshooting-agent.md#the-diagnose-button).
 
 #### Duration
 

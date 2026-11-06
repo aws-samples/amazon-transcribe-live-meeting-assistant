@@ -21,9 +21,10 @@
  * The actions are the meeting's: Assistant, which opens and closes the
  * meeting assistant's panel (when the assistant is enabled), Share, Download
  * (the summary and the transcript, each as Markdown, Word or text, the
- * transcript as Excel too, or copied as Markdown) and, under the "more" menu,
- * Delete. Share
- * and Delete are the meeting list's own dialogs (common/meeting-controls.js).
+ * transcript as Excel too, or copied as Markdown), Diagnose (the troubleshooting
+ * agent's diagnosis of this meeting, for Admins; troubleshooting/DiagnoseButton.jsx)
+ * and, under the "more" menu, Delete. Share and Delete are the meeting list's own
+ * dialogs (common/meeting-controls.js).
  */
 import React, { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
@@ -45,6 +46,7 @@ import useCallsContext from '../../contexts/calls';
 import { shareModal, deleteModal } from '../common/meeting-controls';
 import { InfoLink } from '../common/info-link';
 import { DONE_STATUS } from '../common/get-recording-status';
+import DiagnoseButton from '../troubleshooting/DiagnoseButton';
 import { formatDuration, formatMeetingStart, meetingTitle } from '../common/meeting-header';
 import { consentSummary } from '../common/meeting-context';
 import { CallCostBreakdown, costSummaryText } from './CallCostPanel';
@@ -233,6 +235,7 @@ const MeetingHeader = ({
               <ButtonDropdown items={downloadItems} onItemClick={onDownload}>
                 Download
               </ButtonDropdown>
+              <DiagnoseButton callId={item.callId} resourceLabel={title} />
               <ButtonDropdown
                 variant="icon"
                 ariaLabel="More actions"

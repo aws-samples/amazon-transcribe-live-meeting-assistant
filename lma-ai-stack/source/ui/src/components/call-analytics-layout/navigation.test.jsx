@@ -13,6 +13,7 @@ import {
   DESKTOP_CAPTURE_APP_PATH,
   NOVA_SONIC_CONFIG_PATH,
   TRANSCRIPT_SUMMARY_PATH,
+  TROUBLESHOOTING_PATH,
   VOICE_ENROLLMENT_PATH,
 } from '../../routes/constants';
 
@@ -47,6 +48,17 @@ describe('side navigation visibility', () => {
     [ASR_CONFIG_PATH, NOVA_SONIC_CONFIG_PATH, TRANSCRIPT_SUMMARY_PATH].forEach((path) => {
       expect(hrefs({ AsrEngineAvailable: 'true' })).not.toContain(path);
     });
+  });
+
+  it('offers the Troubleshooting page to admins only', () => {
+    const hrefs = (isAdmin) =>
+      generateNavigationItems({}, isAdmin)
+        .flatMap((entry) => (entry.type === 'section' ? entry.items : [entry]))
+        .filter((item) => item.type === 'link')
+        .map((item) => item.href.slice(1));
+
+    expect(hrefs(true)).toContain(TROUBLESHOOTING_PATH);
+    expect(hrefs(false)).not.toContain(TROUBLESHOOTING_PATH);
   });
 
   it('offers the enrollment portal only where the deployment stores voiceprints', () => {
