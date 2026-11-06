@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('aws-amplify/api', () => ({ generateClient: () => ({ graphql: vi.fn() }) }));
 
-const { fetchAllTranscriptSegments, isRequestTimeout, mapTranscriptSegmentValue } = await import(
+const { fetchAllTranscriptSegments, isRequestTimeout, mapTranscriptSegmentValue, mergeCallUpdate } = await import(
   './use-calls-graphql-api'
 );
 
@@ -56,5 +56,32 @@ describe('fetchAllTranscriptSegments', () => {
       { callId: 'c1', nextToken: 't1' },
       { callId: 'c1', nextToken: 't2' },
     ]);
+  });
+});
+
+describe('mergeCallUpdate', () => {
+  const recorded = {
+    CallId: 'c1',
+    Status: 'STARTED',
+    CaptureSource: 'VIRTUAL_PARTICIPANT',
+    TranscriptionEngine: 'MICROVM_ASR',
+    TranscriptionLanguage: '',
+    SpeakerSeparation: 'REMOTE',
+    ExpiresAfter: 1800000000,
+  };
+
+  it('keeps the recorded capture context when a live update leaves it out', () => {
+    const merged = mergeCallUpdate(recorded, { CallId: 'c1', Status: 'TRANSCRIBING' });
+    expect(merged.Status).toBe('TRANSCRIBING');
+    expect(merged.CaptureSource).toBe('VIRTUAL_PARTICIPANT');
+    expect(merged.TranscriptionEngine).toBe('MICROVM_ASR');
+    expect(merged.TranscriptionLanguage).toBe('');
+    expect(merged.SpeakerSeparation).toBe('REMOTE');
+    expect(merged.ExpiresAfter).toBe(1800000000);
+  });
+
+  it('takes a capture field the update does carry', () => {
+    const merged = mergeCallUpdate(recorded, { CallId: 'c1', TranscriptionEngine: 'TRANSCRIBE' });
+    expect(merged.TranscriptionEngine).toBe('TRANSCRIBE');
   });
 });
