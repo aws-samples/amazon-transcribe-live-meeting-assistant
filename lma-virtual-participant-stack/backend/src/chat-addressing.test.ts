@@ -13,16 +13,26 @@
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { ChatAddressing, resolveChatAddress, routeChatMessage } from './chat-addressing.js';
+import {
+    ChatAddressing,
+    PEER_TTL_MS,
+    chatAddressing,
+    isVpExitMessage,
+    resolveChatAddress,
+    routeChatMessage,
+} from './chat-addressing.js';
 import { QUESTION_STARTS, parseChatQuestion } from './chat-ask.js';
 import { ASSISTANT_CHAT_COMMANDS } from './assistant-toggles.js';
-import { END_COMMAND_VERBS, details, matchesChatCommand, matchesEndCommand } from './details.js';
+import { DEFAULT_EXIT_MESSAGE, END_COMMAND_VERBS, details, exitMessagesFor, matchesChatCommand, matchesEndCommand } from './details.js';
+import { chatHelpMessages } from './chat-help.js';
 import { classifyChatReply } from './consent-matcher.js';
 import { isLmaChatCommand } from './meeting-chat.js';
 import {
     RESERVED_HANDLE_WORDS,
+    addressingVpHandle,
     isLmaVpName,
     preferredVpHandle,
+    setVpPeerNames,
     vpHandles,
     withoutVpAddress,
 } from './vp-handle.js';
@@ -231,4 +241,115 @@ test('every platform handler routes chat through the addressing before its comma
 
 test('the introduction and the help tell people the name to address this VP by', () => {
     assert.ok(details.introMessages[0].includes(`"LMA ${preferredVpHandle(details.scribeIdentity) ?? details.scribeIdentity} leave"`));
+});
+
+// ---------------------------------------------------------------- two VPs for two Bobs
+
+const SMITH = 'LMA (Bob Smith)';
+
+test('the longest handle wins across every VP, so "LMA Bob Smith" is Bob Smith\'s VP\'s', () => {
+    assert.equal(resolveChatAddress('LMA Bob Smith leave', BOB, [SMITH]).kind, 'other');
+    assert.equal(routeChatMessage('LMA Bob Smith leave', 'Carol', BOB, [SMITH]).act, false);
+    const atSmith = routeChatMessage('LMA Bob Smith leave', 'Carol', SMITH, [BOB]);
+    assert.equal(atSmith.act, true);
+    assert.equal(atSmith.text, 'LMA leave');
+    assert.equal(routeChatMessage('LMA Bob Strahan leave', 'Carol', BOB, [SMITH]).act, true);
+    assert.equal(routeChatMessage('LMA Bob Strahan leave', 'Carol', SMITH, [BOB]).act, false);
+});
+
+test('a short handle two VPs answer to reaches neither', () => {
+    for (const message of ['LMA Bob leave', '@LMA bob help', 'LMA (Bob) leave', 'LMA (bob) what was decided?']) {
+        for (const [self, other] of [[BOB, SMITH], [SMITH, BOB]]) {
+            const route = routeChatMessage(message, 'Carol', self, [other]);
+            assert.equal(route.act, false, `${message} reached ${self}`);
+            assert.equal(route.reason, 'ambiguous');
+        }
+    }
+    // Their full names, typed or mentioned, still reach each.
+    assert.equal(routeChatMessage('@LMA (Bob Smith) leave', 'Carol', SMITH, [BOB]).act, true);
+    assert.equal(routeChatMessage('LMA (Bob Strahan) leave', 'Carol', BOB, [SMITH]).act, true);
+    assert.equal(routeChatMessage('LMA (Bob Strahan) leave', 'Carol', SMITH, [BOB]).act, false);
+    // With only one Bob in the meeting, "LMA Bob" is his again.
+    assert.equal(routeChatMessage('LMA Bob leave', 'Carol', BOB, [ALICE]).act, true);
+});
+
+test('the name to add after "LMA" is the owner part whole when another VP shares the short one', () => {
+    assert.equal(addressingVpHandle(BOB, []), 'Bob');
+    assert.equal(addressingVpHandle(BOB, [ALICE]), 'Bob');
+    assert.equal(addressingVpHandle(BOB, [SMITH]), '(Bob Strahan)');
+    assert.equal(addressingVpHandle(SMITH, [BOB]), '(Bob Smith)');
+    assert.equal(addressingVpHandle(BOB, [BOB]), 'Bob', 'its own name is not another VP');
+    // And that form reaches only this VP.
+    assert.equal(routeChatMessage('LMA (Bob Strahan) leave', 'Carol', BOB, [SMITH]).act, true);
+});
+
+test('the introduction and the help name this VP against the other VPs known when they are posted', () => {
+    let asked = 0;
+    setVpPeerNames(() => {
+        asked += 1;
+        return [];
+    });
+    try {
+        void details.introMessages[0];
+        assert.ok(asked > 0, 'the introduction is filled in when it is read');
+        const before = asked;
+        void chatHelpMessages({ isEnabled: () => false, supportsModeChanges: () => false });
+        assert.ok(asked > before, 'the help reply is too');
+    } finally {
+        setVpPeerNames(() => chatAddressing.peers());
+    }
+});
+
+// ---------------------------------------------------------------- forgetting a VP
+
+test('a VP not seen for PEER_TTL_MS stops counting, and the bare "LMA" is answered again', () => {
+    let now = 1_000_000;
+    const addressing = new ChatAddressing(() => BOB, () => [], () => now);
+    addressing.route('Hello. I am an AI Live Meeting Assistant (LMA).', ALICE);
+    assert.equal(addressing.route('LMA leave', 'Carol').act, false);
+    now += PEER_TTL_MS - 1;
+    assert.deepEqual(addressing.peers(), [ALICE]);
+    now += 1;
+    assert.deepEqual(addressing.peers(), []);
+    assert.equal(addressing.route('LMA leave', 'Carol').act, true);
+});
+
+test('each sighting of a VP, as a sender, speaker or tile, keeps it counted', () => {
+    let now = 0;
+    const addressing = new ChatAddressing(() => BOB, () => [], () => now);
+    addressing.notePeer(ALICE);
+    for (let i = 0; i < 5; i += 1) {
+        now += PEER_TTL_MS - 1;
+        addressing.notePeer(ALICE);
+    }
+    assert.deepEqual(addressing.peers(), [ALICE]);
+    now += PEER_TTL_MS - 1;
+    addressing.route('Live Meeting Assistant: the answer.', ALICE);
+    now += PEER_TTL_MS - 1;
+    assert.deepEqual(addressing.peers(), [ALICE], 'its chat message was a sighting');
+});
+
+test('a participant list, where there is one, is not expired', () => {
+    let now = 0;
+    const addressing = new ChatAddressing(() => BOB, () => [], () => now);
+    addressing.noteRoster([ALICE]);
+    now += PEER_TTL_MS * 3;
+    assert.deepEqual(addressing.peers(), [ALICE]);
+});
+
+test("another deployment's VP is known to leave by the default exit message or its acknowledgement", () => {
+    const configured = ['Bye from our assistant.'];
+    assert.equal(isVpExitMessage(DEFAULT_EXIT_MESSAGE, configured), true);
+    assert.equal(isVpExitMessage('live meeting assistant has left the room', configured), true);
+    assert.equal(isVpExitMessage('Bye from our assistant.', configured), true);
+    for (const message of exitMessagesFor('Carol Diaz')) assert.equal(isVpExitMessage(message, []), true, message);
+    assert.equal(isVpExitMessage('Live Meeting Assistant started.', configured), false);
+    assert.equal(isVpExitMessage('Thanks all', configured), false);
+
+    const addressing = new ChatAddressing(() => BOB, () => configured);
+    addressing.notePeer(ALICE);
+    addressing.notePeer(SMITH);
+    addressing.route("Thanks Carol — I'll head out now.", ALICE);
+    addressing.route(DEFAULT_EXIT_MESSAGE, SMITH);
+    assert.deepEqual(addressing.peers(), []);
 });

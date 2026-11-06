@@ -3,7 +3,7 @@
 import './stack-settings.js';
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeChatText } from './chat-text.js';
-import { preferredVpHandle } from './vp-handle.js';
+import { addressingVpHandle } from './vp-handle.js';
 
 export interface MeetingInvite {
   meetingId: string;
@@ -110,6 +110,9 @@ export const DEFAULT_INTRO_MESSAGE =
   'If there is more than one LMA here, add my name: "LMA {LMA_HANDLE} leave". ' +
   'To learn more please visit: https://amazon.com/live-meeting-assistant.';
 
+/** The exit message when the deployment sets none. */
+export const DEFAULT_EXIT_MESSAGE = 'Live Meeting Assistant has left the room.';
+
 /**
  * The dismissal verbs matchesEndCommand accepts beside the "LMA" addressee.
  * The first is the canonical form: the one the introduction and the help
@@ -136,21 +139,20 @@ class DetailsManager {
 
     // Replace the {LMA_USER} placeholder in messages, and {LMA_HANDLE} with
     // the name to add after "LMA" to address this VP when there are several
-    // (vp-handle.ts; chat-addressing.ts): the owner's first name or email
-    // local part, else the whole display name.
+    // (vp-handle.ts `addressingVpHandle`; chat-addressing.ts): the owner's
+    // first name or email local part, or the owner part whole when another
+    // VP in the meeting answers to that too, else the whole display name.
     const lmaHandle = () => {
       const displayName = lmaIdentity.replace(/{LMA_USER}/g, lmaUser);
-      return preferredVpHandle(displayName) ?? displayName;
+      return addressingVpHandle(displayName);
     };
     const replacePlaceholders = (message: string): string => {
       return message.replace(/{LMA_USER}/g, lmaUser).replace(/{LMA_HANDLE}/g, () => lmaHandle());
     };
 
     // Messages Configuration
-    const introMessage = replacePlaceholders(
-      process.env.INTRO_MESSAGE ||
-      DEFAULT_INTRO_MESSAGE
-    );
+    const introTemplate = process.env.INTRO_MESSAGE || DEFAULT_INTRO_MESSAGE;
+    const introMessage = replacePlaceholders(introTemplate);
     const startRecordingMessage = replacePlaceholders(
       process.env.START_RECORDING_MESSAGE || 'Live Meeting Assistant started.'
     );
@@ -158,7 +160,7 @@ class DetailsManager {
       process.env.STOP_RECORDING_MESSAGE || 'Live Meeting Assistant stopped.'
     );
     const exitMessage = replacePlaceholders(
-      process.env.EXIT_MESSAGE || 'Live Meeting Assistant has left the room.'
+      process.env.EXIT_MESSAGE || DEFAULT_EXIT_MESSAGE
     );
 
     const zoomSdkCredsPresent = !!((process.env.ZOOM_MEETING_SDK_CLIENT_ID || '').trim() && (process.env.ZOOM_MEETING_SDK_CLIENT_SECRET || '').trim());
@@ -242,6 +244,21 @@ class DetailsManager {
       enableVideoRecording: process.env.ENABLE_VIDEO_RECORDING !== 'false',
       tmpRecordingFilename: `/tmp/${meetingName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.wav`,
     };
+
+    // The introduction is filled in when it is read, not once at start, so its
+    // {LMA_HANDLE} reflects the other VPs known when it is posted. Assigning
+    // a list replaces it, as for the other message lists.
+    if (introTemplate.includes('{LMA_HANDLE}')) {
+      let assigned: string[] | null = null;
+      Object.defineProperty(this._details, 'introMessages', {
+        get: () => assigned ?? [replacePlaceholders(introTemplate)],
+        set: (messages: string[]) => {
+          assigned = messages;
+        },
+        enumerable: true,
+        configurable: true,
+      });
+    }
   }
 
   get details(): MeetingDetails {

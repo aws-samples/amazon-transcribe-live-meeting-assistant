@@ -27,13 +27,16 @@ import { ASSISTANT_CHAT_COMMANDS } from './assistant-toggles.js';
 import type { VoiceAssistantProvider } from './voice-assistant-interface.js';
 import { chatAskAvailable } from './chat-ask.js';
 import { CONSENT_HELP_LINE, consentHelpActive } from './consent-help.js';
-import { preferredVpHandle } from './vp-handle.js';
+import { addressingVpHandle, preferredVpHandle } from './vp-handle.js';
 import { normalizeChatText } from './chat-text.js';
 
-/** The name to add after "LMA" to address this VP, or null when its display name names nobody. */
+/**
+ * The name to add after "LMA" to address this VP (vp-handle.ts
+ * `addressingVpHandle`: the owner part whole when another VP shares the short
+ * one), or null when its display name names nobody.
+ */
 export function addressingHandle(): string | null {
-    const handle = preferredVpHandle(details.scribeIdentity);
-    if (handle) return handle;
+    if (preferredVpHandle(details.scribeIdentity)) return addressingVpHandle(details.scribeIdentity);
     const name = details.scribeIdentity.trim();
     return name && normalizeChatText(name) !== 'lma' ? name : null;
 }
