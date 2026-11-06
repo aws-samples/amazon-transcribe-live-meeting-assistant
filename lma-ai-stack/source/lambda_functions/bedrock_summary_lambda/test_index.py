@@ -204,8 +204,15 @@ def install(
 
 
 def prompts_sent(bedrock):
-    """The prompt text of each request, in the order Bedrock received them."""
-    return [request["messages"][0]["content"][0]["text"] for request in bedrock.requests]
+    """The prompt text of each request, in the order Bedrock received them.
+
+    A section sent with a prompt cache point carries its prompt in two text
+    blocks either side of the point; the text the model reads is the two joined.
+    """
+    return [
+        "".join(block["text"] for block in request["messages"][0]["content"] if "text" in block)
+        for request in bedrock.requests
+    ]
 
 
 # --------------------------------------------------------------------------
@@ -1859,3 +1866,253 @@ def test_a_slides_section_of_a_meeting_with_chat_keeps_its_pictures(monkeypatch)
     assert index.generate_summary("T", None, keyframes=frames, chat=CHAT, chat_links=[]) == (
         "**[00:30] Budget**\n\n![Slide at 00:30](keyframe:f1)"
     )
+
+
+# --------------------------------------------------------------------------
+# Prompt caching across the sections of one summary
+# --------------------------------------------------------------------------
+
+CLAUDE = "global.anthropic.claude-sonnet-5-5"
+SHIPPED_TEMPLATES = {
+    key: value.replace("<br>", "\n")
+    for key, value in json.loads(
+        (
+            HERE.parent / "configuration_seeder" / "defaults" / "LLMPromptSummaryTemplate.json"
+        ).read_text()
+    ).items()
+}
+LONG_TRANSCRIPT = "\n".join(f"Speaker {n % 3}: point number {n}" for n in range(400))
+TIMED = "[00:00] Speaker 0: hello"
+AGENDA = "Budget\nHiring"
+FRAMES = [{"FrameId": "f1", "Timestamp": 30, "SlideText": "Budget", "Said": "ok"}]
+CHAT_LINES = "[00:10] Ana: see the doc"
+TRANSCRIPT_SECTIONS = ("SUMMARY", "DETAILS", "ACTIONS", "AGENDA COVERAGE")
+
+
+def _shipped_summary(monkeypatch, model):
+    bedrock, _ = install(monkeypatch, model=model)
+    index.generate_summary(
+        LONG_TRANSCRIPT,
+        json.dumps(SHIPPED_TEMPLATES),
+        agenda=AGENDA,
+        keyframes=FRAMES,
+        timed_transcript=TIMED,
+        chat=CHAT_LINES,
+        chat_links=[],
+    )
+    return bedrock
+
+
+def _sections_sent(bedrock):
+    return dict(zip(SHIPPED_TEMPLATES, (r["messages"][0]["content"] for r in bedrock.requests)))
+
+
+def test_sections_that_quote_the_transcript_share_a_cached_prefix(monkeypatch) -> None:
+    sent = _sections_sent(_shipped_summary(monkeypatch, CLAUDE))
+    heads = set()
+    for name in TRANSCRIPT_SECTIONS:
+        content = sent[name]
+        assert len(content) == 3, name
+        assert content[1] == {"cachePoint": {"type": "default"}}
+        head, tail = content[0]["text"], content[2]["text"]
+        assert head.endswith(f"<transcript>\n{LONG_TRANSCRIPT}\n</transcript>")
+        assert LONG_TRANSCRIPT not in tail
+        heads.add(head)
+    # Word for word the same, which is what makes the later sections read the cache.
+    assert len(heads) == 1
+
+
+def test_sections_whose_prefix_no_other_section_shares_get_no_cache_point(monkeypatch) -> None:
+    """A cache write costs more than ordinary input, and nothing would read it."""
+    sent = _sections_sent(_shipped_summary(monkeypatch, CLAUDE))
+    for name in ("SCREEN SHARE SUMMARY", "CHAPTERS", "CHAT & SHARED LINKS"):
+        assert len(sent[name]) == 1, name
+        assert "cachePoint" not in sent[name][0]
+
+
+def test_a_cached_section_asks_the_model_exactly_what_the_uncached_one_did(monkeypatch) -> None:
+    cached = prompts_sent(_shipped_summary(monkeypatch, CLAUDE))
+    uncached = prompts_sent(_shipped_summary(monkeypatch, MODEL_ID))
+    assert cached == uncached
+    assert len(cached) == len(SHIPPED_TEMPLATES)
+
+
+def test_the_system_prompt_is_sent_ahead_of_the_cached_prefix(monkeypatch) -> None:
+    bedrock = _shipped_summary(monkeypatch, CLAUDE)
+    assert {json.dumps(r["system"]) for r in bedrock.requests} == {
+        json.dumps([{"text": index.SYSTEM_PROMPT}])
+    }
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "amazon.nova-pro-v1:0",  # takes a cache point in the system prompt only
+        "us.amazon.nova-premier-v1:0",  # takes none
+        "anthropic.claude-3-haiku-20240307-v1:0",  # not offered; assumed to take none
+    ],
+)
+def test_a_model_without_message_cache_points_is_sent_each_prompt_whole(monkeypatch, model) -> None:
+    bedrock = _shipped_summary(monkeypatch, model)
+    assert all(len(r["messages"][0]["content"]) == 1 for r in bedrock.requests)
+
+
+def test_claude_4_models_are_sent_the_cache_point_too(monkeypatch) -> None:
+    sent = _sections_sent(
+        _shipped_summary(monkeypatch, "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+    )
+    assert sent["SUMMARY"][1] == {"cachePoint": {"type": "default"}}
+
+
+def test_a_summary_of_one_section_gets_no_cache_point(monkeypatch) -> None:
+    bedrock, _ = install(monkeypatch, model=CLAUDE)
+    index.generate_summary(LONG_TRANSCRIPT, SHIPPED_TEMPLATES["SUMMARY"])
+    assert len(bedrock.requests[0]["messages"][0]["content"]) == 1
+
+
+def test_custom_templates_sharing_a_prefix_are_cached_and_others_are_not(monkeypatch) -> None:
+    templates = {
+        "A": "Transcript:\n{transcript}\nList the risks.",
+        "B": "Transcript:\n{transcript}\nList the decisions.",
+        # The same placeholder after different words: a different prefix.
+        "C": "Meeting record:\n{transcript}\nList the questions.",
+        # No placeholder at all, and nothing after the placeholder.
+        "D": "Say hello.",
+        "E": "Summarise this:\n{transcript}",
+    }
+    bedrock, _ = install(monkeypatch, model=CLAUDE)
+    index.generate_summary("T1\nT2", json.dumps(templates))
+    contents = [r["messages"][0]["content"] for r in bedrock.requests]
+    assert contents[0] == [
+        {"text": "Transcript:\nT1\nT2"},
+        {"cachePoint": {"type": "default"}},
+        {"text": "\nList the risks."},
+    ]
+    assert contents[1][0] == contents[0][0] and contents[1][2] == {"text": "\nList the decisions."}
+    assert contents[2:] == [
+        [{"text": "Meeting record:\nT1\nT2\nList the questions."}],
+        [{"text": "Say hello."}],
+        [{"text": "Summarise this:\nT1\nT2"}],
+    ]
+
+
+def test_an_empty_shared_prefix_is_not_sent_as_its_own_block(monkeypatch) -> None:
+    """Bedrock refuses an empty text block, so a prefix that renders to nothing is not split."""
+    templates = {"A": "{transcript}\nOne.", "B": "{transcript}\nTwo."}
+    bedrock, _ = install(monkeypatch, model=CLAUDE)
+    index.generate_summary("", json.dumps(templates))
+    assert [r["messages"][0]["content"] for r in bedrock.requests] == [
+        [{"text": "\nOne."}],
+        [{"text": "\nTwo."}],
+    ]
+
+
+def test_a_placeholder_inside_the_tail_is_still_filled(monkeypatch) -> None:
+    templates = {
+        "A": "<t>\n{transcript}\n</t>\nCompare with {agenda}.",
+        "B": "<t>\n{transcript}\n</t>\nList.",
+    }
+    bedrock, _ = install(monkeypatch, model=CLAUDE)
+    index.generate_summary("T", json.dumps(templates), agenda="Budget")
+    first = bedrock.requests[0]["messages"][0]["content"]
+    assert first[0] == {"text": "<t>\nT\n</t>"}
+    assert first[2] == {"text": "\nCompare with 1. Budget."}
+
+
+@pytest.mark.parametrize(
+    "template, expected",
+    [
+        ("A\n<x>\n{transcript}\n</x>\n\nDo it.", ("A\n<x>\n{transcript}\n</x>", "\n\nDo it.")),
+        ("{chat} then {transcript}", ("{chat}", " then {transcript}")),
+        (
+            "Head {timed_transcript}</transcript> tail",
+            ("Head {timed_transcript}</transcript>", " tail"),
+        ),
+        ("No placeholder.", None),
+        ("Ends with it: {transcript}\n</x>\n", None),
+    ],
+)
+def test_a_template_is_split_after_its_first_placeholder(template, expected) -> None:
+    assert index.split_template(template) == expected
+
+
+def test_a_model_that_refuses_a_system_prompt_keeps_the_cache_point(monkeypatch) -> None:
+    refusal = ClientError(
+        {"Error": {"Code": "ValidationException", "Message": "This model doesn't support system"}},
+        "Converse",
+    )
+
+    class RefusesSystem(FakeBedrock):
+        def converse(self, **kwargs):
+            if "system" in kwargs:
+                self.requests.append(kwargs)
+                raise refusal
+            return super().converse(**kwargs)
+
+    model = "global.anthropic.claude-test-5-5"
+    monkeypatch.setattr(index, "MODELS_WITHOUT_SYSTEM_PROMPT", set())
+    bedrock, _ = install(monkeypatch, bedrock=RefusesSystem(), model=model)
+    index.generate_summary(
+        "T", json.dumps({"A": "<t>{transcript}</t> one", "B": "<t>{transcript}</t> two"})
+    )
+    answered = [r for r in bedrock.requests if "system" not in r]
+    assert [r["messages"][0]["content"] for r in answered] == [
+        [
+            {"text": f"{index.SYSTEM_PROMPT}\n\n<t>T</t>"},
+            {"cachePoint": {"type": "default"}},
+            {"text": " one"},
+        ],
+        [
+            {"text": f"{index.SYSTEM_PROMPT}\n\n<t>T</t>"},
+            {"cachePoint": {"type": "default"}},
+            {"text": " two"},
+        ],
+    ]
+
+
+def test_cache_reads_and_writes_are_metered_per_section(monkeypatch) -> None:
+    """Bedrock bills cache tokens at their own rates, so each is recorded apart from input."""
+
+    class CachingBedrock(FakeBedrock):
+        def converse(self, **kwargs):
+            self.requests.append(kwargs)
+            first = len(self.requests) == 1
+            return {
+                "output": {"message": {"content": [{"text": "a summary"}]}},
+                "usage": {
+                    "inputTokens": 60,
+                    "outputTokens": 400,
+                    "cacheReadInputTokens": 0 if first else 18000,
+                    "cacheWriteInputTokens": 18000 if first else 0,
+                },
+            }
+
+    install(
+        monkeypatch,
+        bedrock=CachingBedrock(),
+        templates=ddb_item(
+            **{"1#Summary": "<t>{transcript}</t> p", "2#Actions": "<t>{transcript}</t> q"}
+        ),
+        custom=ddb_item(),
+        model=CLAUDE,
+    )
+    metering = FakeMeteringTable()
+    monkeypatch.setattr(
+        index, "METERING", index.MeteringWriter("calls", source="test", client=metering)
+    )
+    index.handler({"CallId": CALL_ID}, None)
+    assert [item["Usage"]["M"] for item in metering.items] == [
+        {
+            "inputTokens": {"N": "60"},
+            "outputTokens": {"N": "400"},
+            "cacheWriteInputTokens": {"N": "18000"},
+            "requests": {"N": "1"},
+        },
+        {
+            "inputTokens": {"N": "60"},
+            "outputTokens": {"N": "400"},
+            "cacheReadInputTokens": {"N": "18000"},
+            "requests": {"N": "1"},
+        },
+    ]
+    assert {item["Service"]["S"] for item in metering.items} == {f"bedrock/{CLAUDE}"}
