@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import {
+  nameableVoiceKeys,
   parseSpeakerIdentities,
   resolveSpeakerName,
   serializeSpeakerIdentities,
@@ -23,8 +24,9 @@ import {
 } from './speaker-modes';
 
 const FIXTURES = path.join(__dirname, '../../../../../../test-fixtures');
-// The same table lma_speakers is tested against.
+// The same tables lma_speakers and the speaker-name resolver are tested against.
 const TABLE = JSON.parse(readFileSync(path.join(FIXTURES, 'speaker-modes.json'), 'utf-8'));
+const NAMEABLE = JSON.parse(readFileSync(path.join(FIXTURES, 'nameable-voices.json'), 'utf-8'));
 
 const segmentsOf = (c) =>
   c.segments.map((s, index) => ({
@@ -71,6 +73,14 @@ describe('speaker modes, by the shared table', () => {
   it.each(TABLE.roomNames.rooms)('%s reads as a room', (name) => expect(looksLikeRoom(name)).toBe(true));
   it.each(TABLE.roomNames.people)('%s does not read as a room', (name) => expect(looksLikeRoom(name)).toBe(false));
   it.each(TABLE.roomNames.unknown)('"%s" stands for nobody', (name) => expect(isUnknownName(name)).toBe(true));
+});
+
+describe('voices waiting for a name, by the table the resolver is tested against', () => {
+  NAMEABLE.cases.forEach((c) => {
+    it(c.name, () => {
+      expect([...nameableVoiceKeys(segmentsOf(c), identitiesOf(c))].sort()).toEqual(c.keys);
+    });
+  });
 });
 
 describe('storing a mode', () => {

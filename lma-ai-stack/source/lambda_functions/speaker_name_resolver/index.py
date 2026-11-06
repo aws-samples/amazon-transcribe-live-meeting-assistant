@@ -240,6 +240,48 @@ def call_bedrock(prompt, call_id=None):
     return extract_text(response)
 
 
+# Must select every field onUpdateCall selects. AppSync publishes a mutation's
+# own response to that subscription's subscribers, and a field the subscription
+# selects that the mutation did not arrives as null; the meeting page replaces
+# its copy of the meeting with what arrives, so a two-field payload would read as
+# a meeting with no status -- no longer in progress -- in every open page. The
+# UI's own updateSpeakerIdentities.js selects the same set for the same reason.
+_CALL_FIELDS = """
+      PK
+      SK
+      CallId
+      AgentId
+      CallSummaryText
+      CallSummaryState
+      SpeakerIdentities
+      Agenda
+      AgendaSource
+      AgendaUpdatedBy
+      AgendaUpdatedAt
+      Status
+      UpdatedAt
+      CreatedAt
+      CustomerPhoneNumber
+      SystemPhoneNumber
+      RecordingUrl
+      VideoRecordingUrl
+      Owner
+      SharedWith
+      TotalConversationDurationMillis
+      Sentiment {
+        OverallSentiment { REMOTE LOCAL AGENT CALLER }
+        SentimentByPeriod {
+          QUARTER {
+            REMOTE { BeginOffsetMillis EndOffsetMillis Score }
+            LOCAL { BeginOffsetMillis EndOffsetMillis Score }
+            AGENT { BeginOffsetMillis EndOffsetMillis Score }
+            CALLER { BeginOffsetMillis EndOffsetMillis Score }
+          }
+        }
+      }
+"""
+
+
 def write_identities(call_id, identities):
     """Store the map through AppSync, so subscribers re-label without polling.
 
@@ -247,11 +289,11 @@ def write_identities(call_id, identities):
     `onUpdateCall` publish, and every open meeting page would keep showing voice
     ids until it was reloaded.
     """
-    query = """
-      mutation UpdateSpeakerIdentities($input: UpdateSpeakerIdentitiesInput!) {
-        updateSpeakerIdentities(input: $input) { CallId SpeakerIdentities }
-      }
-    """
+    query = (
+        "mutation UpdateSpeakerIdentities($input: UpdateSpeakerIdentitiesInput!) {\n"
+        "  updateSpeakerIdentities(input: $input) {" + _CALL_FIELDS + "  }\n"
+        "}\n"
+    )
     payload = json.dumps(
         {
             "query": query,
@@ -280,13 +322,44 @@ def write_identities(call_id, identities):
     return body
 
 
+#: Why a pass ended as it did, returned as ``Reason`` so a caller can act on it
+#: without parsing ``Message``. The Speakers panel's automatic passes stop on
+#: ALREADY_NAMED and MEETING_ENDED, and pause on NO_EVIDENCE and NO_GROWTH until
+#: the transcript grows.
+REASON_NAMED = "NAMED"
+REASON_NO_EVIDENCE = "NO_EVIDENCE"
+REASON_ALREADY_NAMED = "ALREADY_NAMED"
+REASON_COOLDOWN = "COOLDOWN"
+REASON_NO_GROWTH = "NO_GROWTH"
+REASON_MEETING_ENDED = "MEETING_ENDED"
+REASON_NOT_PERMITTED = "NOT_PERMITTED"
+REASON_NO_SUCH_MEETING = "NO_SUCH_MEETING"
+REASON_FAILED = "FAILED"
+
+#: The meeting status after which a browser's automatic pass is declined.
+ENDED_STATUS = "ENDED"
+
+
+def _result(ok, code, message, applied=()):
+    return {"ok": ok, "code": code, "reason": message, "applied": list(applied)}
+
+
 def resolve(call_id, identity=None, force=False, final=False):
     """Run one naming pass. Returns a small result object for the caller."""
     meeting = read_meeting(call_id)
     if meeting is None:
-        return {"ok": False, "reason": "no such meeting", "applied": []}
+        return _result(False, REASON_NO_SUCH_MEETING, "no such meeting")
     if not caller_may_edit(meeting, identity):
-        return {"ok": False, "reason": "not permitted", "applied": []}
+        return _result(False, REASON_NOT_PERMITTED, "not permitted")
+
+    # A browser's automatic pass is for a meeting in progress: the backend runs
+    # the end-of-meeting pass itself. A page whose copy of the meeting never saw
+    # it end -- a tab left open in the background whose subscription dropped --
+    # would otherwise keep asking for as long as it stays open. The button
+    # (`force`) still works on an ended meeting.
+    if identity is not None and not force and meeting.get("Status") == ENDED_STATUS:
+        LOGGER.info("Declining an automatic pass for %s: the meeting has ended", call_id)
+        return _result(True, REASON_MEETING_ENDED, "the meeting has ended")
 
     identities = pure.parse_identities(meeting.get("SpeakerIdentities"))
     all_turns = pure.build_turns(read_segments(call_id))
@@ -295,6 +368,15 @@ def resolve(call_id, identity=None, force=False, final=False):
     # limit, because both sides of the comparison saturated at it.
     total_turns = len(all_turns)
     turns = pure.select_turns(all_turns, MAX_TURNS)
+
+    # Checked before the cost gates, because it is free and its answer is the
+    # most useful one: on a Virtual Participant meeting every voice already
+    # carries the platform's name for it, and what is left to tidy is how those
+    # voices are grouped (the Transcript tab's One person / Several people),
+    # which no naming pass can do.
+    if not pure.unresolved_voices(turns, identities, all_turns):
+        LOGGER.info("Nothing to name for %s: every voice has a name", call_id)
+        return _result(True, REASON_ALREADY_NAMED, "every voice already has a name")
 
     now_iso = datetime.now(timezone.utc).isoformat()
     # The end-of-meeting pass skips both gates. It runs once per meeting, is not
@@ -305,7 +387,7 @@ def resolve(call_id, identity=None, force=False, final=False):
         LOGGER.info(
             "Declining a pass for %s: one ran less than %ds ago", call_id, PASS_COOLDOWN_SECONDS
         )
-        return {"ok": True, "reason": "a pass ran very recently", "applied": []}
+        return _result(True, REASON_COOLDOWN, "a pass ran very recently")
     # `force` means a person pressed the button, and it has to bypass this gate
     # as well as the model shortcut. On an ended meeting the transcript can never
     # grow again, so without the bypass every press after the first pass was
@@ -315,7 +397,7 @@ def resolve(call_id, identity=None, force=False, final=False):
     # above still applies, so this is not a way to spend without limit.
     if not final and not force and not pure.transcript_has_grown(identities, total_turns):
         LOGGER.info("Declining a pass for %s: nobody has spoken since the last one", call_id)
-        return {"ok": True, "reason": "nothing new said since the last pass", "applied": []}
+        return _result(True, REASON_NO_GROWTH, "nothing new said since the last pass")
 
     # `final` counts as force here too. The end-of-meeting pass is the
     # once-per-meeting authoritative one, and skipping it on a cheap heuristic
@@ -324,7 +406,7 @@ def resolve(call_id, identity=None, force=False, final=False):
     # engineering" -- would never be found at all.
     if not pure.worth_a_model_call(turns, identities, force=force or final, all_turns=all_turns):
         LOGGER.info("Nothing to name for %s (turns=%d, forced=%s)", call_id, len(turns), force)
-        return {"ok": True, "reason": "nothing to name", "applied": []}
+        return _result(True, REASON_NO_EVIDENCE, "nothing to name")
 
     labels = pure.unresolved_voices(turns, identities, all_turns)
     prompt = pure.build_prompt(turns, labels, identities.get("candidates") or [])
@@ -358,7 +440,7 @@ def resolve(call_id, identity=None, force=False, final=False):
     # pass cost a model call either way, and leaving no stamp would let the next
     # request pay for another immediately.
     write_identities(call_id, pure.stamp_pass(merged, now_iso, total_turns))
-    return {"ok": True, "reason": "ok", "applied": applied}
+    return _result(True, REASON_NAMED if applied else REASON_NO_EVIDENCE, "ok", applied)
 
 
 def handler(event, context):  # pylint: disable=unused-argument
@@ -396,10 +478,12 @@ def handler(event, context):  # pylint: disable=unused-argument
             "Success": False,
             "Message": "could not identify speakers just now",
             "NamesApplied": 0,
+            "Reason": REASON_FAILED,
         }
 
     return {
         "Success": result["ok"],
         "Message": result["reason"],
         "NamesApplied": len(result["applied"]),
+        "Reason": result["code"],
     }

@@ -209,7 +209,8 @@ const channelLabelBases = (segments) => {
   const bases = {};
   const voiceIds = {};
   (segments ?? []).forEach((segment) => {
-    if (segment.isPartial || !isNameable(segment)) {
+    // A segment with no words is not a voice: the resolver's turns skip it too.
+    if (segment.isPartial || !isNameable(segment) || !`${segment.transcript ?? ''}`.trim()) {
       return;
     }
     const { base, suffix } = splitDiarizationLabel(segment.speaker);
@@ -230,6 +231,40 @@ const channelLabelBases = (segments) => {
     }
   });
   return out;
+};
+
+/**
+ * The voices still waiting for a name: what an automatic naming pass could work on.
+ *
+ * The same rule as unresolved_voices in the speaker-name resolver, and tested
+ * against the same table (test-fixtures/nameable-voices.json). The Speakers
+ * panel runs automatic passes while this is not empty, so a looser count here
+ * than there means a panel asking, for as long as it is open, for passes the
+ * resolver declines: a roster name with a voice label is already named, and only
+ * placeholders and a channel's own label split into voices are open. A voice
+ * holding an unconfirmed suggestion is still open; one a person settled (named
+ * by hand, or locked) or merged into another is not.
+ */
+export const nameableVoiceKeys = (segments, identities) => {
+  const map = identities ?? emptyIdentities();
+  const spoken = (segments ?? []).filter(
+    (segment) => !segment.isPartial && isNameable(segment) && `${segment.transcript ?? ''}`.trim(),
+  );
+  const labels = channelLabelBases(spoken);
+  const keys = [];
+  [...spoken]
+    .sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0))
+    .forEach((segment) => {
+      const key = speakerKey(segment.channel, segment.speaker);
+      if (keys.includes(key) || own(map.merges, key)) return;
+      const entry = own(map.identities, key);
+      if (entry?.locked === true || entry?.source === 'manual') return;
+      if (typeof entry?.name === 'string' && entry.name && entry.status !== 'proposed') return;
+      const { base } = splitDiarizationLabel(`${segment.speaker ?? ''}`.trim());
+      if (!PLACEHOLDER_BASES.includes(base) && !labels.has(`${canonicalChannel(segment.channel)}#${base}`)) return;
+      keys.push(key);
+    });
+  return keys;
 };
 
 /**

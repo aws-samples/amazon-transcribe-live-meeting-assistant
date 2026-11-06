@@ -85,12 +85,29 @@ const CallDetails = () => {
       const summaryChanged =
         (callDetails?.callSummaryText !== undefined && call.callSummaryText !== callDetails.callSummaryText) ||
         (callDetails?.callSummaryState !== undefined && call.callSummaryState !== callDetails.callSummaryState);
-      if (timestampAdvanced || speakerNamesChanged || summaryChanged) {
+      // A meeting that started or ended is a change whatever its UpdatedAt says.
+      // An update that carries no status at all ('Unknown') says nothing about it.
+      const statusChanged =
+        callDetails?.recordingStatusLabel !== 'Unknown' &&
+        call.recordingStatusLabel !== callDetails?.recordingStatusLabel;
+      if (timestampAdvanced || speakerNamesChanged || summaryChanged || statusChanged) {
         logger.debug('Updating call', callDetails);
         setCall(callDetails);
       }
     }
   }, [calls, callId]);
+
+  /**
+   * Read the meeting again, for a part of the page that has learned the copy it
+   * holds is stale: the Speakers panel, when the backend says the meeting has
+   * ended while this page still shows it in progress. That happens when the
+   * page's subscription dropped -- a tab left in the background, a laptop that
+   * slept -- and missed the update that ended it.
+   */
+  const refreshCall = async () => {
+    const [fresh] = mapCallsAttributes(await getCallDetailsFromCallIds([callId]));
+    if (fresh) setCall(fresh);
+  };
 
   return (
     call && (
@@ -99,6 +116,7 @@ const CallDetails = () => {
         setToolsOpen={setToolsOpen}
         callTranscriptPerCallId={callTranscriptPerCallId}
         getCallDetailsFromCallIds={getCallDetailsFromCallIds}
+        onRefreshMeeting={refreshCall}
         // The meeting's own page keeps the selected tab in the URL (?tab=...).
         tabInUrl
       />

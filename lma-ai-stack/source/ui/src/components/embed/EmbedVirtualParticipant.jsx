@@ -297,7 +297,12 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
     const summaryChanged =
       (callDetails?.callSummaryText !== undefined && call.callSummaryText !== callDetails.callSummaryText) ||
       (callDetails?.callSummaryState !== undefined && call.callSummaryState !== callDetails.callSummaryState);
-    if (timestampAdvanced || speakerNamesChanged || summaryChanged) {
+    // A meeting that started or ended is a change whatever its UpdatedAt says
+    // (CallDetails.js); an update carrying no status says nothing about it.
+    const statusChanged =
+      callDetails?.recordingStatusLabel !== 'Unknown' &&
+      call.recordingStatusLabel !== callDetails?.recordingStatusLabel;
+    if (timestampAdvanced || speakerNamesChanged || summaryChanged || statusChanged) {
       setCall(callDetails);
       if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
         setLiveTranscriptCallId(effectiveCallId);

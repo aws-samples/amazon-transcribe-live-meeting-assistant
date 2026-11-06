@@ -45,6 +45,7 @@ import {
   buildSpeakerRoster,
   formatTalkTime,
   hasMultipleVoicesOnAChannel,
+  nameableVoiceKeys,
   parseAttendeeList,
   parseSpeakerIdentities,
   serializeSpeakerIdentities,
@@ -68,6 +69,45 @@ const LIVE_PASS_INTERVAL_MS = 45000;
 
 /** How long the outcome of a pass stays in the panel header. */
 const STATUS_VISIBLE_MS = 20000;
+
+/**
+ * The resolver's answers that end the automatic passes (see `Reason` in
+ * resolveSpeakerNames): nothing is left to name, or the meeting is over and the
+ * backend runs the end-of-meeting pass itself. Its answers that mean "nothing
+ * yet" pause them until the transcript grows instead, because a pass over the
+ * same transcript cannot find anything the last one did not.
+ */
+const STOP_REASONS = ['ALREADY_NAMED', 'MEETING_ENDED'];
+const PAUSE_REASONS = ['NO_EVIDENCE', 'NO_GROWTH', 'COOLDOWN'];
+
+const PLATFORM_NAMED = 'Every voice already has a name from the meeting platform.';
+const TIDY_HINT = 'Use One person / Several people on the Transcript tab to tidy voice labels.';
+
+/** What the header says after a pass, by the resolver's reason. */
+export const identifyOutcome = (result, roster) => {
+  if (!result?.Success) return { type: 'error', text: 'Could not identify speakers' };
+  if (result.NamesApplied > 0) {
+    return {
+      type: 'success',
+      text: `Identified ${result.NamesApplied} ${result.NamesApplied === 1 ? 'speaker' : 'speakers'}`,
+    };
+  }
+  if (result.Reason === 'ALREADY_NAMED') {
+    // On a Virtual Participant meeting every voice carries the name the meeting
+    // platform showed; what is left is how a name's voices are grouped.
+    const fromPlatform = (roster ?? []).some((row) => !row.name);
+    return {
+      type: 'info',
+      text: fromPlatform ? `${PLATFORM_NAMED} ${TIDY_HINT}` : 'Every voice already has a name.',
+    };
+  }
+  if (result.Reason === 'COOLDOWN')
+    return { type: 'info', text: 'Speakers were looked for moments ago. Try again shortly.' };
+  if (result.Reason === 'MEETING_ENDED') return { type: 'info', text: 'The meeting has ended.' };
+  // The honest answer, rather than silence: the transcript so far simply does
+  // not say who these people are.
+  return { type: 'info', text: 'Nothing in the transcript names them yet' };
+};
 
 const SpeakerRow = ({
   row,
@@ -187,7 +227,16 @@ const SpeakerRow = ({
   );
 };
 
-const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, onIdentify, readOnly, isLive }) => {
+const SpeakerIdentitiesPanel = ({
+  item,
+  segments,
+  setToolsOpen,
+  onSave,
+  onIdentify,
+  readOnly,
+  isLive,
+  onMeetingEnded = undefined,
+}) => {
   const identities = useMemo(() => parseSpeakerIdentities(item.speakerIdentities), [item.speakerIdentities]);
   const roster = useMemo(
     () => buildSpeakerRoster(segments, identities, item.remoteParticipantName),
@@ -212,11 +261,27 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, onIdenti
   const statusTimerRef = useRef(undefined);
   useEffect(() => () => clearTimeout(statusTimerRef.current), []);
 
-  // A voice holding an unconfirmed SUGGESTION is still open: the backend treats
-  // it that way too, specifically so a later self-introduction can upgrade a
-  // guess. Counting it as named would stop the automatic passes exactly when
-  // they still have something to find.
-  const unnamedCount = roster.filter((row) => row.isPlaceholder && (!row.name || row.status === 'proposed')).length;
+  // The voices an automatic pass could still name, by the resolver's own rule
+  // (nameableVoiceKeys, tested against the same table as the resolver). A voice
+  // holding an unconfirmed SUGGESTION is still open, so a later
+  // self-introduction can upgrade a guess; a roster name with a voice label is
+  // not, because no pass will ever work on it.
+  const unnamedCount = useMemo(() => nameableVoiceKeys(segments, identities).length, [segments, identities]);
+
+  // Automatic passes stop for good when the resolver says nothing is left to
+  // name (until a new voice appears) or that the meeting is over, and pause
+  // after one that found nothing until the transcript grows. Read from the
+  // interval callback through refs, like identifyingRef.
+  const [stoppedAtVoices, setStoppedAtVoices] = useState(null);
+  const autoStopped = stoppedAtVoices !== null && stoppedAtVoices === roster.length;
+  const segmentCount = (segments ?? []).length;
+  const segmentCountRef = useRef(segmentCount);
+  segmentCountRef.current = segmentCount;
+  const pausedAtSegmentsRef = useRef(null);
+  const onMeetingEndedRef = useRef(onMeetingEnded);
+  onMeetingEndedRef.current = onMeetingEnded;
+  const rosterLengthRef = useRef(roster.length);
+  rosterLengthRef.current = roster.length;
 
   /**
    * Run a naming pass and say what came back.
@@ -236,18 +301,22 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, onIdenti
     setIdentifyStatus(null);
     try {
       const result = await identify({ force });
-      if (!result?.Success) {
-        setIdentifyStatus({ type: 'error', text: 'Could not identify speakers' });
-      } else if (result.NamesApplied > 0) {
-        setIdentifyStatus({
-          type: 'success',
-          text: `Identified ${result.NamesApplied} ${result.NamesApplied === 1 ? 'speaker' : 'speakers'}`,
-        });
+      const reason = result?.Reason;
+      if (STOP_REASONS.includes(reason)) {
+        setStoppedAtVoices(rosterLengthRef.current);
+        // The page's copy of the meeting missed its end -- its subscription can
+        // drop while a tab sits in the background -- so have it read again.
+        if (reason === 'MEETING_ENDED') onMeetingEndedRef.current?.();
+      } else if (PAUSE_REASONS.includes(reason) || (result?.Success && !result.NamesApplied)) {
+        pausedAtSegmentsRef.current = segmentCountRef.current;
       } else {
-        // The honest answer, rather than silence: the transcript so far simply
-        // does not say who these people are.
-        setIdentifyStatus({ type: 'info', text: 'Nothing in the transcript names them yet' });
+        pausedAtSegmentsRef.current = null;
       }
+      // A pass somebody asked for always says how it went. An automatic one
+      // that was declined (the meeting is over, or a pass ran moments ago)
+      // says nothing: nobody asked.
+      const declined = STOP_REASONS.includes(reason) || reason === 'NO_GROWTH' || reason === 'COOLDOWN';
+      if (force || !declined) setIdentifyStatus(identifyOutcome(result, roster));
       // Cleared after a while so a stale "Identified 2 speakers" does not sit in
       // the header for the rest of the meeting.
       clearTimeout(statusTimerRef.current);
@@ -265,16 +334,18 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, onIdenti
    * meeting, which is also when seeing the names appear is worth anything. The
    * end-of-meeting pass covers a meeting nobody had open. Passes stop once every
    * voice is named, and are not forced, so the backend's own "is there anything
-   * here worth a model call" shortcut still applies.
+   * here worth a model call" shortcut still applies. They also stop when the
+   * resolver answers that nothing is left to name or that the meeting has
+   * ended, and wait after a pass that found nothing until somebody speaks.
    */
   useEffect(() => {
-    if (!isLive || readOnly || unnamedCount === 0) {
+    if (!isLive || readOnly || unnamedCount === 0 || autoStopped) {
       return undefined;
     }
     const timer = setInterval(() => {
-      if (!identifyingRef.current) {
-        runIdentify(false);
-      }
+      if (identifyingRef.current) return;
+      if (pausedAtSegmentsRef.current !== null && pausedAtSegmentsRef.current === segmentCountRef.current) return;
+      runIdentify(false);
     }, LIVE_PASS_INTERVAL_MS);
     return () => clearInterval(timer);
     // Keyed only on whether a pass is wanted at all. Neither runIdentify nor
@@ -282,7 +353,7 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, onIdenti
     // so depending on either rebuilt the timer on every arriving transcript
     // segment and it only ever elapsed during silence -- precisely when there is
     // nothing new to read. Both are reached through refs instead.
-  }, [isLive, readOnly, unnamedCount]);
+  }, [isLive, readOnly, unnamedCount, autoStopped]);
 
   const namedCount = roster.filter((row) => row.name).length;
 

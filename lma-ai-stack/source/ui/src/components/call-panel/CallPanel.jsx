@@ -1717,6 +1717,7 @@ export const CallPanel = ({
   getCallDetailsFromCallIds,
   tabInUrl = false,
   assistantDefaultOpen = undefined,
+  onRefreshMeeting = undefined,
 }) => {
   const { currentCredentials, user } = useAppContext();
   const { isAdmin: isAdminUser } = useUserGroups();
@@ -2404,6 +2405,7 @@ export const CallPanel = ({
         onIdentify={identifySpeakers}
         readOnly={speakerNamesReadOnly}
         isLive={isLive}
+        onMeetingEnded={onRefreshMeeting}
       />
       {showConsentRecordPanel && (
         <div id={CONSENT_RECORD_ID}>

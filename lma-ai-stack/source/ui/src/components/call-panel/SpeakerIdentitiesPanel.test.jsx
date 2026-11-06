@@ -32,6 +32,7 @@ const SEGMENTS = [
     endTime: 4,
     isPartial: false,
     segmentId: 's1',
+    transcript: 'Shall we start?',
   },
   {
     channel: 'REMOTE',
@@ -40,6 +41,7 @@ const SEGMENTS = [
     endTime: 11,
     isPartial: false,
     segmentId: 's2',
+    transcript: 'Next item.',
   },
   {
     channel: 'REMOTE',
@@ -48,6 +50,7 @@ const SEGMENTS = [
     endTime: 7,
     isPartial: false,
     segmentId: 's3',
+    transcript: 'Sounds good.',
   },
 ];
 
@@ -375,6 +378,114 @@ describe('identifying speakers from the transcript', () => {
       renderPanel({ isLive: false });
       vi.advanceTimersByTime(120000);
       expect(onIdentify).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('what the resolver answered, and when automatic passes stop', () => {
+  const ROSTER = [
+    { channel: 'REMOTE', speaker: 'Bob Strahan (spk_0)', startTime: 0, endTime: 4, transcript: 'Hi', segmentId: 'r1' },
+    { channel: 'REMOTE', speaker: 'Bob Strahan (spk_1)', startTime: 5, endTime: 6, transcript: 'ok', segmentId: 'r2' },
+    { channel: 'REMOTE', speaker: 'Chris Lott (spk_0)', startTime: 7, endTime: 9, transcript: 'Yo', segmentId: 'r3' },
+  ];
+
+  it('says the voices are named by the platform, and points at the toggle', async () => {
+    renderPanel({ segments: ROSTER, identifyResult: { Success: true, NamesApplied: 0, Reason: 'ALREADY_NAMED' } });
+    fireEvent.click(screen.getByText('Identify speakers').closest('button'));
+    await waitFor(() =>
+      expect(screen.getByText(/Every voice already has a name from the meeting platform/)).toBeTruthy(),
+    );
+    expect(screen.getByText(/One person \/ Several people/)).toBeTruthy();
+    expect(screen.queryByText(/Nothing in the transcript names them yet/)).toBeNull();
+  });
+
+  it('keeps "nothing names them" for a transcript that names nobody', async () => {
+    renderPanel({ identifyResult: { Success: true, NamesApplied: 0, Reason: 'NO_EVIDENCE' } });
+    fireEvent.click(screen.getByText('Identify speakers').closest('button'));
+    await waitFor(() => expect(screen.getByText(/Nothing in the transcript names them yet/)).toBeTruthy());
+  });
+
+  it('runs no automatic pass on a meeting whose voices all carry roster names', () => {
+    vi.useFakeTimers();
+    try {
+      renderPanel({ isLive: true, segments: ROSTER });
+      vi.advanceTimersByTime(300000);
+      expect(onIdentify).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops for good when the resolver says nothing is left to name', async () => {
+    vi.useFakeTimers();
+    try {
+      renderPanel({ isLive: true, identifyResult: { Success: true, NamesApplied: 0, Reason: 'ALREADY_NAMED' } });
+      await vi.advanceTimersByTimeAsync(46000);
+      expect(onIdentify).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(600000);
+      expect(onIdentify).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops, and has the meeting read again, when the resolver says it has ended', async () => {
+    vi.useFakeTimers();
+    try {
+      onSave = vi.fn();
+      onIdentify = vi.fn().mockResolvedValue({ Success: true, NamesApplied: 0, Reason: 'MEETING_ENDED' });
+      const onMeetingEnded = vi.fn();
+      render(
+        <SpeakerIdentitiesPanel
+          item={ITEM}
+          segments={SEGMENTS}
+          setToolsOpen={() => {}}
+          onSave={onSave}
+          onIdentify={onIdentify}
+          readOnly={false}
+          isLive
+          onMeetingEnded={onMeetingEnded}
+        />,
+      );
+      await vi.advanceTimersByTimeAsync(46000);
+      expect(onMeetingEnded).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(600000);
+      expect(onIdentify).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits after a pass that found nothing until somebody speaks', async () => {
+    vi.useFakeTimers();
+    try {
+      onSave = vi.fn();
+      onIdentify = vi.fn().mockResolvedValue({ Success: true, NamesApplied: 0, Reason: 'NO_EVIDENCE' });
+      const panel = (segments) => (
+        <SpeakerIdentitiesPanel
+          item={ITEM}
+          segments={segments}
+          setToolsOpen={() => {}}
+          onSave={onSave}
+          onIdentify={onIdentify}
+          readOnly={false}
+          isLive
+        />
+      );
+      const { rerender } = render(panel(SEGMENTS));
+      await vi.advanceTimersByTimeAsync(46000);
+      expect(onIdentify).toHaveBeenCalledTimes(1);
+      // A tab whose transcript is not growing -- a quiet meeting, or one whose
+      // subscription dropped -- asks no more.
+      await vi.advanceTimersByTimeAsync(600000);
+      expect(onIdentify).toHaveBeenCalledTimes(1);
+      rerender(
+        panel([...SEGMENTS, { ...SEGMENTS[0], segmentId: 's4', startTime: 20, endTime: 22, transcript: 'I am Sarah' }]),
+      );
+      await vi.advanceTimersByTimeAsync(46000);
+      expect(onIdentify).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
