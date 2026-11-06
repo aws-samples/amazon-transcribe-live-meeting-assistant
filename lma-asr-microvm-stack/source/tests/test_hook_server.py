@@ -271,6 +271,12 @@ def test_concurrent_ready_requests_run_one_warm_decode() -> None:
     assert started.wait(5)
     second = threading.Thread(target=lambda: results.append(hooks.on_ready()))
     second.start()
+    # The second request has to be waiting on the first before the first is
+    # allowed to finish; otherwise it could arrive after the warm-up and pass
+    # without the two ever overlapping.
+    second.join(0.2)
+    assert second.is_alive()
+    assert hooks._warmup.locked()
     release.set()
     first.join(5)
     second.join(5)
