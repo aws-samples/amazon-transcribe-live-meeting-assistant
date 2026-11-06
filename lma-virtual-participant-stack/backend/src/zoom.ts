@@ -1801,7 +1801,7 @@ export default class Zoom {
                 });
             }
             if (matchesEndCommand(body)) {
-                log.info(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
+                log.info(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'} (message of ${String(body ?? '').length} characters)`);
                 await this.sendMessages(page, exitMessagesFor(sender));
                 details.start = false;
                 this.requestEnd({

@@ -166,7 +166,7 @@ through these places, each with its own lifetime:
 | The Kinesis call data stream | 24 hours, the shortest Kinesis allows | Nothing; records age out on their own |
 | The meetings table's DynamoDB stream | 24 hours | Nothing; records age out on their own |
 | The meetings table's point-in-time recovery | 35 days: deleted items can be restored from a backup until then | Point-in-time recovery is a safety protection and stays on. If your policy forbids restorable copies, raise it with whoever owns the deployment's backup policy |
-| Lambda and container logs | `CloudWatchLogsExpirationInDays` | Set `LogLevel` to `WARN` or `ERROR`. At `DEBUG`, currently its default, functions log the transcript text they handle |
+| Lambda and container logs | `CloudWatchLogsExpirationInDays` | Keep `LogLevel` at `INFO` (the default) or above. At `DEBUG`, functions log the transcript text they handle |
 | The GraphQL API's log group, `/aws/appsync/apis/<api id>` | `CloudWatchLogsExpirationInDays` | Keep `AppSyncFieldLogLevel` at `ERROR` (the default) or `NONE`. At `DEBUG` or `ALL`, the API logs each request's content, transcript segments included |
 | Amazon Bedrock model invocation logging | As configured for the account | Off by default. If the account has it on, every prompt is logged, including summary prompts that contain the whole transcript |
 | The summary | Kept with the meeting | Summary prompts can be written not to quote the transcript; see [Transcript Summarization](transcript-summarization.md) |

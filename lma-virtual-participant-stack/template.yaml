@@ -1293,6 +1293,25 @@ Resources:
                   - kinesis:PutRecord
                 Resource:
                   - !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${CallDataStreamName}"
+              # The recordings bucket and the call data stream are encrypted
+              # with the stack's customer-managed key. This role is used by the
+              # ECS tasks and by the running MicroVM alike.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "s3.${AWS::Region}.${AWS::URLSuffix}"
+              - Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "kinesis.${AWS::Region}.${AWS::URLSuffix}"
         - PolicyName: TranscribePolicy
           PolicyDocument:
             Version: 2012-10-17

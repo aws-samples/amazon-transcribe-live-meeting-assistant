@@ -476,10 +476,11 @@ function applyPromptMode(
     return defaultPrompt;
   }
 
-  log.info('   Custom prompt content:');
-  log.info('   ┌' + '─'.repeat(78));
-  log.info('   │ ' + customPrompt.substring(0, 200) + (customPrompt.length > 200 ? '...' : ''));
-  log.info('   └' + '─'.repeat(78));
+  log.info(`   Custom prompt: ${customPrompt.length} characters`);
+  log.debug('   Custom prompt content:');
+  log.debug('   ┌' + '─'.repeat(78));
+  log.debug('   │ ' + customPrompt.substring(0, 200) + (customPrompt.length > 200 ? '...' : ''));
+  log.debug('   └' + '─'.repeat(78));
 
   let result: string;
   switch (mode) {

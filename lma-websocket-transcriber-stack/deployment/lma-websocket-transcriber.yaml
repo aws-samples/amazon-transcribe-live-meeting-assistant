@@ -1253,6 +1253,26 @@ Resources:
             Condition:
               StringEquals:
                 "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+          # The recordings bucket and the call data stream are encrypted with
+          # the stack's customer-managed key: recordings and consent evidence
+          # are written (and multipart uploads completed) through Amazon S3, and
+          # transcript events are put on the stream through Kinesis.
+          - Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Effect: Allow
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+            Condition:
+              StringEquals:
+                "kms:ViaService": !Sub "s3.${AWS::Region}.${AWS::URLSuffix}"
+          - Action:
+              - kms:Encrypt
+              - kms:GenerateDataKey
+            Effect: Allow
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+            Condition:
+              StringEquals:
+                "kms:ViaService": !Sub "kinesis.${AWS::Region}.${AWS::URLSuffix}"
           - Action:
               - logs:CreateLogStream
               - logs:PutLogEvents

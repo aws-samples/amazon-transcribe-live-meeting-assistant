@@ -258,7 +258,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
         this.ws.on('message', async (data: Buffer) => {
           try {
             const message = JSON.parse(data.toString());
-            log.info('📨 WebSocket message:', JSON.stringify(message).substring(0, 200));
+            log.debug('📨 WebSocket message:', JSON.stringify(message).substring(0, 200));
             await this.handleWebSocketMessage(message);
           } catch (error) {
             log.info('📨 Binary data received:', data.length, 'bytes');
@@ -295,7 +295,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     
     // Log full message for debugging tool calls
     if (message.type && (message.type.includes('tool') || message.type === 'client_tool_call')) {
-      log.info('📋 Full tool message:', JSON.stringify(message));
+      log.debug('📋 Full tool message:', JSON.stringify(message));
     }
 
     switch (message.type) {
@@ -381,7 +381,8 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
         break;
 
       default:
-        log.info('📨 Unknown message type:', message.type, JSON.stringify(message).substring(0, 200));
+        log.info('📨 Unknown message type:', message.type);
+        log.debug('📨 Unknown message:', JSON.stringify(message).substring(0, 200));
     }
   }
 
@@ -461,7 +462,8 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       throw new Error('Missing required parameter: query');
     }
     
-    log.info(`Query for Strands agent: ${query}`);
+    log.info(`Query for Strands agent: ${String(query ?? '').length} characters`);
+    log.debug(`Query for Strands agent: ${query}`);
 
     // Build payload for Strands agent invocation
     const callId = process.env.VP_CALL_ID || process.env.MEETING_NAME || 'elevenlabs-voice-agent';
@@ -490,7 +492,8 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     // Parse the Lambda response
     const responsePayload = JSON.parse(new TextDecoder().decode(response.Payload));
     
-    log.info('Strands agent response received:', JSON.stringify(responsePayload).substring(0, 200));
+    log.info(`Strands agent response received (status ${response.StatusCode ?? 'unknown'})`);
+    log.debug('Strands agent response:', JSON.stringify(responsePayload).substring(0, 200));
     
     // The answer is written for the meeting chat, in markdown, and the
     // ElevenLabs agent speaks it: reduced to spoken text, as the Nova Sonic
@@ -566,7 +569,8 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       return;
     }
 
-    log.info('📤 Sending text message to agent:', text);
+    log.info(`📤 Sending text message to agent (${text.length} characters)`);
+    log.debug('📤 Text message to agent:', text);
     
     // Correct format per ElevenLabs API docs
     const message = {
@@ -790,7 +794,8 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     if (initialContext) {
       const question = this.extractQuestion(initialContext);
       if (question && question.length > 5) {
-        log.info('📝 Sending initial question to agent:', question);
+        log.info(`📝 Sending initial question to agent (${question.length} characters)`);
+        log.debug('📝 Initial question to agent:', question);
         // Send as text message - agent will respond with voice
         this.sendUserMessage(question);
       }

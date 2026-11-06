@@ -461,7 +461,7 @@ export default class TeamsSdk {
                     // A consent reply, or "LMA start" while consent is withheld.
                     if (await meetingConsent.handleChat(sender, body)) continue;
                     if (matchesEndCommand(body)) {
-                        log.info(`[teams-sdk] asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
+                        log.info(`[teams-sdk] asked to leave by ${sender || 'a participant'} (message of ${String(body ?? '').length} characters)`);
                         await this.sendMessages(page, exitMessagesFor(sender));
                         details.start = false;
                         this.requestEnd({ reason: 'end-command', trigger: 'chat', requestedBy: sender, matchedMessage: body });

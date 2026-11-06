@@ -1088,7 +1088,7 @@ export class TranscriptionService {
         const timestamp = Date.now();
         
         if (transcript) {
-            log.info(`📝 Transcribed: "${transcript}" (IsPartial: ${isPartial})`);
+            log.debug(`📝 Transcribed: "${transcript}" (IsPartial: ${isPartial})`);
         }
         
         // Detect wake phrase in partials to pre-warm the voice agent connection
@@ -1328,7 +1328,8 @@ export class TranscriptionService {
             .map(t => t.text)
             .join(' ');
         
-        log.info('🎤 Wake phrase detected — activating immediately with context:', contextTranscript);
+        log.info(`🎤 Wake phrase detected — activating immediately with ${contextTranscript.length} characters of context`);
+        log.debug('🎤 Wake phrase context:', contextTranscript);
         
         // Activate voice assistant with context (connection already pre-warmed).
         // No duration: the provider applies the deployment's configured
@@ -1415,7 +1416,8 @@ export class TranscriptionService {
             return 0;
         }
         const text = open.result.Alternatives?.[0]?.Transcript || '';
-        log.info(`🌐 Closing in-progress segment before its final arrives: "${text}"`);
+        log.info(`🌐 Closing in-progress segment before its final arrives (${text.length} characters)`);
+        log.debug(`🌐 In-progress segment text: "${text}"`);
         try {
             const end = await sendAddTranscriptSegment(open.speaker, open.result, open.timeOffsetSeconds);
             this.processTranscriptResult(open.result);
@@ -1523,7 +1525,8 @@ export class TranscriptionService {
         this.agentSpeechStartedAt = null;
         this.assistantRows += 1;
         const speaker = this.vpName();
-        log.info(`🌐 Assistant turn written to the transcript (${start.toFixed(2)}-${end.toFixed(2)}s): "${text}"`);
+        log.info(`🌐 Assistant turn written to the transcript (${start.toFixed(2)}-${end.toFixed(2)}s, ${text.length} characters)`);
+        log.debug(`🌐 Assistant turn text: "${text}"`);
         sendAsrTranscriptSegment({
             channel: LOCAL_CHANNEL,
             segmentId: `assistant-${this.assistantRows}-${start.toFixed(3)}`,

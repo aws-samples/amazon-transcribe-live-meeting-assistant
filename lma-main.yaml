@@ -802,18 +802,18 @@ Parameters:
 
   LogLevel:
     Type: String
-    Default: DEBUG
+    Default: INFO
     AllowedValues:
       - DEBUG
       - INFO
       - WARN
       - ERROR
     Description: >-
-      Logging level for the Lambda functions and containers. DEBUG, the default
-      for now while issues are being diagnosed, also logs meeting content: the
-      summary prompt with its transcript, meeting assistant requests and answers,
-      and the voice assistants' heard and spoken text. Set WARN or ERROR for
-      production deployments.
+      Logging level for the Lambda functions and containers. At INFO (the
+      default) and above, log lines record identifiers, sizes and outcomes rather
+      than meeting content. DEBUG also logs meeting content: the summary prompt
+      with its transcript, meeting assistant requests and answers, and the voice
+      assistants' heard and spoken text; use it only while diagnosing a problem.
 
   AppSyncFieldLogLevel:
     Type: String
@@ -1450,6 +1450,21 @@ Resources:
               - kms:Decrypt
               - kms:GenerateDataKey*
             Resource: "*"
+          # The recordings bucket policy lets Amazon Transcribe read uploaded
+          # media and write batch transcripts, and the bucket's objects are
+          # encrypted with this key.
+          - Sid: Allow Transcribe To Use Recordings Bucket Objects
+            Effect: Allow
+            Principal:
+              Service: !Sub "transcribe.${AWS::URLSuffix}"
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
           - Sid: Allow S3 Vectors indexing service
             Effect: Allow
             Principal:
@@ -1890,9 +1905,12 @@ Resources:
       RetentionPeriodHours: 24
       StreamModeDetails:
         StreamMode: ON_DEMAND
+      # Encrypted with the stack's customer-managed key. Changing the key is an
+      # in-place update: records written before it stay encrypted with the
+      # previous key until they age out of the 24-hour retention period.
       StreamEncryption:
         EncryptionType: KMS
-        KeyId: alias/aws/kinesis
+        KeyId: !GetAtt CustomerManagedEncryptionKey.Arn
 
   # Initialise LMASettingsParameter as empty (so it never gets replaced)
   # and use CR UpdateLMASettingsFunction to add/update values
@@ -2376,10 +2394,16 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+      # Objects are written with the stack's customer-managed key. An S3 Bucket
+      # Key keeps the number of KMS requests (and their cost) low. Objects
+      # written before this setting keep the encryption they were written with
+      # until they are rewritten or expire.
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt CustomerManagedEncryptionKey.Arn
+            BucketKeyEnabled: true
       LoggingConfiguration:
         DestinationBucketName: !Ref LoggingBucket
         LogFilePrefix: "recordings-bucket-logs/"

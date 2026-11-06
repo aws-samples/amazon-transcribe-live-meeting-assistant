@@ -583,7 +583,7 @@ export default class GoogleMeet {
         if (matchesEndCommand(message)) {
             if (this.endHandled) return;
             this.endHandled = true;
-            log.info(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(message)}`);
+            log.info(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'} (message of ${String(message ?? '').length} characters)`);
             details.start = false;
             // The goodbye goes out before the exit is signalled, since teardown
             // closes the page; bounded so a missing composer cannot hold the exit.

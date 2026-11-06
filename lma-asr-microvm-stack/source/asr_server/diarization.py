@@ -988,11 +988,12 @@ class DiarizingRecognizer(Recognizer):
             if not text or text == row.text:
                 continue
             _LOG.info(
-                "correcting committed segment %d: %r -> %r",
+                "correcting committed segment %d: %d -> %d characters",
                 row.segment,
-                row.text,
-                text,
+                len(row.text),
+                len(text),
             )
+            _LOG.debug("committed segment %d text: %r -> %r", row.segment, row.text, text)
             row.text = text
             corrections.append(
                 Event(

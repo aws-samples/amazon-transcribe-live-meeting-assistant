@@ -59,10 +59,10 @@ The Live Meeting Assistant (LMA) demonstrates strong alignment with AWS Well-Arc
   - Implement and document deletion capabilities: meeting-level deletion via AppSync mutations, bulk TTL-based expiration, S3 object lifecycle transitions
   - Consider enabling [Amazon Macie](https://docs.aws.amazon.com/macie/latest/user/what-is-macie.html) on recording S3 buckets to automatically discover PII in stored audio transcripts
 - **Production Logging Security**:
-  - **Set `LogLevel` to WARN or ERROR for production deployments** to prevent sensitive meeting content from being logged
+  - **Keep `LogLevel` at INFO (the default) or above for production deployments.** At INFO and above, the functions and containers log identifiers, sizes and outcomes rather than transcript text, prompts, model output or chat messages; that content is written only at DEBUG, which is for diagnosing a problem
   - The three inline Lambda functions in `lma-main.yaml` that configure the Python `logging` module — the KMS key monitor, the S3 bucket cleanup handler and the recordings-bucket notification handler — read their level from the `LOG_LEVEL` environment variable, which the template wires to the stack's `LogLevel` parameter, so setting `LogLevel` applies to them. The remaining inline functions in that template are CloudFormation custom resources that use `print()` rather than a logger, so their output appears regardless of `LogLevel`; what they print is the custom-resource event (stack parameters and resource properties), not meeting content
   - Secret-valued stack parameters are routed to the nested stacks that need them rather than to these custom resources, whose events carry only structural values — stack and resource names, lengths, language and model selections, LMA settings and S3 notification properties. Keep that separation when adding a custom resource: pass a secret by reference (an SSM parameter name or a Secrets Manager ARN) so the resource reads it at runtime
-  - INFO level logging in the Call Event Processor can inadvertently capture full transcript segments, meeting summaries, participant names, and discussion content
+  - Log lines at INFO and above carry identifiers such as call IDs, user email addresses and participant names; treat the log groups as holding personal data
   - Implement log filtering and masking for any essential INFO-level logs that must be retained
   - Regularly audit CloudWatch log groups to ensure no meeting content or PII is being captured at production log levels
 - **CloudFront Security Enhancement**:

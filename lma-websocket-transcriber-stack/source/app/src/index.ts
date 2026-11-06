@@ -98,7 +98,7 @@ const CPU_HEALTH_THRESHOLD = parseInt(
     10
 );
 const LOCAL_TEMP_DIR = process.env['LOCAL_TEMP_DIR'] || '/tmp/';
-const WS_LOG_LEVEL = (process.env['WS_LOG_LEVEL'] || 'debug').toLowerCase();
+const WS_LOG_LEVEL = (process.env['WS_LOG_LEVEL'] || 'info').toLowerCase();
 const LOG_FORMAT = process.env['LOG_FORMAT'] || 'json';
 const WS_LOG_INTERVAL = parseInt(process.env['WS_LOG_INTERVAL'] || '120', 10);
 // How long a meeting whose audio connection closed without an END waits for its

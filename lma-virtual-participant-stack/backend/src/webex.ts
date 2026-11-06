@@ -914,7 +914,7 @@ export default class Webex {
                 // (it can emit duplicate add events) — only act on the first.
                 if (this.endHandled) return;
                 this.endHandled = true;
-                log.info(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(message)}`);
+                log.info(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'} (message of ${String(message ?? '').length} characters)`);
                 details.start = false;
                 // Post the goodbye BEFORE signalling exit — requestEnd triggers
                 // teardown which closes the page, and a goodbye sent after that

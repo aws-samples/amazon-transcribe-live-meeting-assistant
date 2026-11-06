@@ -268,7 +268,7 @@ export default class Chime {
                     void startChatAnswer(chatQuestion, sender, 'chime', (messages) => this.sendMessages(page, messages));
                 }
                 if (text && matchesEndCommand(text)) {
-                    log.info(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(text)}`);
+                    log.info(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'} (message of ${String(text ?? '').length} characters)`);
                     await this.sendMessages(page, exitMessagesFor(sender));
                     details.start = false;
                     this.requestEnd({

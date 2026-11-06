@@ -61,6 +61,10 @@ UPLOADS_PENDING_PREFIX = os.environ.get("UPLOADS_PENDING_PREFIX", "lma-uploads-p
 TRANSCRIPTS_PREFIX = os.environ.get("TRANSCRIPTS_PREFIX", "lma-transcripts/")
 DEFAULT_LANGUAGE_CODE = os.environ.get("DEFAULT_LANGUAGE_CODE", "en-US")
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+# The stack's customer-managed key. Amazon Transcribe encrypts the transcript it
+# writes with SSE-S3 unless the job names a key, so the job names this one and
+# the transcript is encrypted with the same key as the rest of the bucket.
+OUTPUT_ENCRYPTION_KMS_KEY_ID = os.environ.get("OUTPUT_ENCRYPTION_KMS_KEY_ID", "")
 
 # Transcribe job name == callId. Must be 1-200 chars, alphanumeric + ._-
 TRANSCRIBE_JOB_NAME_RE = re.compile(r"^[a-zA-Z0-9._-]{1,200}$")
@@ -210,6 +214,8 @@ def _start_transcription_job(job: dict) -> str:
     }
     if settings:
         params["Settings"] = settings
+    if OUTPUT_ENCRYPTION_KMS_KEY_ID:
+        params["OutputEncryptionKMSKeyId"] = OUTPUT_ENCRYPTION_KMS_KEY_ID
 
     logger.info("StartTranscriptionJob: %s", json.dumps(params, default=str))
     try:

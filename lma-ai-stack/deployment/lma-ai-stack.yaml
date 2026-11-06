@@ -2277,6 +2277,85 @@ Resources:
       StreamARN: !Ref CallDataStreamArn
       ConsumerName: DataStreamConsumer
 
+  # The recordings bucket (S3BucketName) and the call data stream are encrypted
+  # with the stack's customer-managed key. Each role that reads or writes either
+  # one uses the key through that service, so the grants below are scoped by
+  # kms:ViaService to Amazon S3 and Kinesis respectively. A role that gains
+  # access to the bucket or the stream must be added to the matching list.
+  # Functions whose role SAM generates (CallEventProcessorFunction,
+  # VirtualParticipantManagerFunction, MCPServerAnalyticsFunction) carry the
+  # grant in their own Policies instead. test_recordings_and_stream_encryption.py
+  # checks that every role is covered one way or the other.
+  RecordingsBucketEncryptionKeyPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: RecordingsBucketEncryptionKey
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+            Condition:
+              StringEquals:
+                "kms:ViaService": !Sub "s3.${AWS::Region}.${AWS::URLSuffix}"
+          # Amazon Transcribe uses the key named as a batch job's
+          # OutputEncryptionKMSKeyId with the permissions of the role that
+          # started the job (the upload processor).
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:DescribeKey
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+            Condition:
+              StringEquals:
+                "kms:ViaService": !Sub "transcribe.${AWS::Region}.${AWS::URLSuffix}"
+      Roles:
+        - !If
+          - ShouldEnableBedrockSummarizer
+          - !Ref BedrockSummaryLambdaExecutionRole
+          - !Ref AWS::NoValue
+        - !Ref MeetingControlsResolverFunctionExecutionRole
+        - !Ref UploadMeetingInitiatorFunctionExecutionRole
+        - !Ref UploadMeetingProcessorFunctionExecutionRole
+        - !Ref UploadMeetingFinalizerFunctionExecutionRole
+        - !Ref TranscriptDeletionFunctionExecutionRole
+        - !Ref KeyframeTextExtractorFunctionExecutionRole
+        - !Ref VideoKeyframesResolverFunctionExecutionRole
+        - !Ref MeetingConsentResolverFunctionExecutionRole
+        - !Ref ConsentEvidenceVerifierFunctionExecutionRole
+        - !Ref UploadManifestLambdaRole
+
+  CallDataStreamEncryptionKeyPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: CallDataStreamEncryptionKey
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Producers need kms:GenerateDataKey and consumers kms:Decrypt; both
+          # sets are granted so a role that does both is covered by one list.
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:Encrypt
+              - kms:GenerateDataKey
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+            Condition:
+              StringEquals:
+                "kms:ViaService": !Sub "kinesis.${AWS::Region}.${AWS::URLSuffix}"
+      Roles:
+        - !Ref AsyncAgentAssistOrchestratorExecutionRole
+        - !Ref AsyncTranscriptSummaryOrchestratorExecutionRole
+        - !Ref MeetingControlsResolverFunctionExecutionRole
+        - !Ref UploadMeetingProcessorFunctionExecutionRole
+        - !Ref UploadMeetingFinalizerFunctionExecutionRole
+        - !Ref StaleMeetingReaperFunctionExecutionRole
+
 
   FetchTranscript:
     Type: AWS::Serverless::Function
@@ -2879,6 +2958,15 @@ Resources:
               Condition:
                 StringEquals:
                   "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+            # The call data stream this function consumes (through
+            # DataStreamConsumer) is encrypted with the customer-managed key.
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+              Condition:
+                StringEquals:
+                  "kms:ViaService": !Sub "kinesis.${AWS::Region}.${AWS::URLSuffix}"
             - Effect: Allow
               Action:
                 - appsync:GraphQL
@@ -3977,6 +4065,7 @@ Resources:
           UPLOADS_PENDING_PREFIX: lma-uploads-pending/
           TRANSCRIPTS_PREFIX: !Ref TranscriptFilePrefix
           DEFAULT_LANGUAGE_CODE: "en-US"
+          OUTPUT_ENCRYPTION_KMS_KEY_ID: !Ref CustomerManagedEncryptionKeyArn
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingProcessorFunction
@@ -9896,6 +9985,15 @@ Resources:
                 - kinesis:PutRecords
                 - kinesis:DescribeStream
               Resource: !Ref CallDataStreamArn
+            # The call data stream is encrypted with the customer-managed key.
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:GenerateDataKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+              Condition:
+                StringEquals:
+                  "kms:ViaService": !Sub "kinesis.${AWS::Region}.${AWS::URLSuffix}"
             - Effect: Allow
               Action:
                 - ecs:ListClusters

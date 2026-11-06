@@ -180,6 +180,9 @@ Conditions:
       - Condition: IsChunkingStrategyDefault
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasEncryptionKey: !Not [!Equals [!Ref CustomerManagedEncryptionKeyArn, ""]]
+  HasS3DataSourceAndEncryptionKey: !And
+    - !Condition IsS3DataSource
+    - !Condition HasEncryptionKey
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
 
 Resources:
@@ -335,6 +338,24 @@ Resources:
                   Resource:
                     - !Sub "arn:aws:s3:::${pKnowledgeBaseBucketName}/*"
                     - !Sub "${S3VectorBucket.VectorBucketArn}/*"
+          - !Ref "AWS::NoValue"
+        # The transcript knowledge base reads the recordings bucket, whose
+        # objects are encrypted with the stack's customer-managed key. Decrypt
+        # only, and only through Amazon S3.
+        - !If
+          - HasS3DataSourceAndEncryptionKey
+          - PolicyName: s3-read-encrypted-objects
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Sid: S3ObjectKeyDecrypt
+                  Effect: Allow
+                  Action:
+                    - kms:Decrypt
+                  Resource: !Ref CustomerManagedEncryptionKeyArn
+                  Condition:
+                    StringEquals:
+                      "kms:ViaService": !Sub "s3.${AWS::Region}.${AWS::URLSuffix}"
           - !Ref "AWS::NoValue"
 
   #
