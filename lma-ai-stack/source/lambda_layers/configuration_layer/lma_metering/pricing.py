@@ -35,6 +35,16 @@ it. Nothing is guessed from a similar-looking entry, because a plausible wrong
 price is worse than a visible gap. A unit with no price is reported as
 *unpriced* and left out of every total, and the count of unpriced lines travels
 with the result so a reader of the estimate can tell the total is incomplete.
+
+One exception, for Amazon Bedrock models only, and always named on the line it
+applies to: the price table lists the ``global.``, ``us.`` and plain ids of each
+model, while the Model inference geography setting can also produce the same
+model's ``eu.``, ``apac.``, ``jp.``, ``au.``, ``ca.`` or ``in.`` profile, or its plain
+in-region id. Such an id is priced as the same model under another id (see
+:func:`lma_config.inference_geography.price_stand_ins`) and its line's note says
+which. It is the same model, so the price is of the right order; the table's
+``us.`` profiles are listed at 10% above its ``global.`` ones, so an estimate for
+another geography's profile priced this way is likely low by about that much.
 """
 
 from __future__ import annotations
@@ -46,6 +56,7 @@ from boto3.dynamodb.types import TypeDeserializer
 
 # The merge the configuration store applies between baseline and profile, used
 # for the region overlay too so the two layers cannot come to merge differently.
+from lma_config.inference_geography import price_stand_ins
 from lma_config.store import deep_merge
 
 from .records import CONTEXTS, counter_usage, metering_pk
@@ -71,6 +82,20 @@ def prices_for_region(pricing: Mapping[str, Any], region: str) -> Tuple[Dict[str
     priced = set(pricing.get("pricedRegions") or [])
     own = region in priced or region in regions
     return deep_merge(base, regions.get(region) or {}), own
+
+
+def _price_entry(prices: Mapping[str, Any], service: str) -> Tuple[Any, Optional[str]]:
+    """The price entry of ``service``, and a note when it is another id's."""
+    entry = prices.get(service)
+    if entry is not None:
+        return entry, None
+    for stand_in in price_stand_ins(service):
+        if isinstance(prices.get(stand_in), Mapping):
+            return prices[stand_in], (
+                f"Priced at the listed price of {stand_in.partition('/')[2]}, the same model: "
+                "the price table does not list this id, whose own price may be higher."
+            )
+    return None, None
 
 
 def _plain(value: Any) -> Any:
@@ -174,7 +199,7 @@ def estimate_call_cost(
         prices, own = price_cache[region]
         if not own:
             fallback_regions.add(region)
-        entry = prices.get(service)
+        entry, stand_in_note = _price_entry(prices, service)
         details = ", ".join(f"{k}: {v}" for k, v in sorted(bucket["details"].items()))
         for unit in sorted(bucket["usage"]):
             quantity = bucket["usage"][unit]
@@ -188,7 +213,7 @@ def estimate_call_cost(
                 "Cost": None,
                 "Chargeable": unit not in non_chargeable,
                 "Priced": False,
-                "Note": notes.get(service) or None,
+                "Note": " ".join(n for n in (notes.get(service), stand_in_note) if n) or None,
                 "Details": details or None,
             }
             if unit in non_chargeable:

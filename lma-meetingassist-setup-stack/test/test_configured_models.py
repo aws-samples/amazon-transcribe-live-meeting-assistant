@@ -98,3 +98,44 @@ def test_without_the_configuration_layer_the_environment_is_read(monkeypatch) ->
         == "d"
     )
     monkeypatch.delitem(sys.modules, "configuration_settings")
+
+
+def test_the_models_run_within_the_configured_geography(configured, monkeypatch) -> None:
+    configured(
+        {
+            "inferenceGeography": "geography",
+            "meetingAssistModelId": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+            "knowledgeBaseModelId": "global.anthropic.claude-sonnet-4-6",
+        }
+    )
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
+    monkeypatch.delenv("KB_REGION", raising=False)
+    assert assistant.configured_agent_model_id() == "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
+    assert assistant.configured_kb_model_id() == "eu.anthropic.claude-sonnet-4-6"
+    assert troubleshooting.configured_model_id() == "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+
+def test_the_knowledge_base_model_check_ignores_the_profile_prefix() -> None:
+    for prefix in ("us.", "global.", "eu.", ""):
+        model_id = f"{prefix}anthropic.claude-opus-4-1-20250805-v1:0"
+        assert not assistant.kb_model_supports_retrieve_and_generate(model_id)
+    assert assistant.build_kb_model_arn("jp.anthropic.claude-sonnet-4-6", "ap-northeast-1", "123456789012") == (
+        "arn:aws:bedrock:ap-northeast-1:123456789012:inference-profile/jp.anthropic.claude-sonnet-4-6"
+    )
+
+
+def test_without_the_configuration_layer_model_ids_are_used_as_given(monkeypatch) -> None:
+    import importlib
+    import sys
+
+    monkeypatch.setitem(sys.modules, "lma_config", None)  # makes the import fail
+    monkeypatch.delitem(sys.modules, "configuration_settings", raising=False)
+    fallback = importlib.import_module("configuration_settings")
+    assert fallback.resolve_model_id("global.anthropic.claude-sonnet-5-5", region="eu-west-1") == (
+        "global.anthropic.claude-sonnet-5-5"
+    )
+    assert fallback.base_model_id("au.anthropic.claude-sonnet-5-5") == "anthropic.claude-sonnet-5-5"
+    assert fallback.model_arn("amazon.nova-lite-v1:0", "us-east-1", "1") == (
+        "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0"
+    )
+    monkeypatch.delitem(sys.modules, "configuration_settings")

@@ -28,7 +28,7 @@ from bedrock_compat import (
     prompt_cache_sections,
 )
 import tavily_secret
-from configuration_settings import read_setting
+from configuration_settings import base_model_id, model_arn, read_setting, resolve_model_id
 import call_metering
 import meeting_agenda
 import meeting_frames
@@ -98,12 +98,16 @@ def configured_agent_model_id() -> str:
 
     The Amazon Bedrock Models section's value on the Configuration page, else
     the shipped default in setting_defaults.json. Read per request, so a change
-    reaches the assistant within the section's cache tier.
+    reaches the assistant within the section's cache tier. Run within the
+    section's Model inference geography, from this function's own region.
     """
-    return read_setting(
-        'language_models',
-        'meetingAssistModelId',
-        default=DEFAULT_AGENT_MODEL_ID,
+    return resolve_model_id(
+        read_setting(
+            'language_models',
+            'meetingAssistModelId',
+            default=DEFAULT_AGENT_MODEL_ID,
+        ),
+        region=os.environ.get('AWS_REGION', ''),
     )
 
 
@@ -163,12 +167,15 @@ def configured_kb_model_id() -> str:
     """The model the knowledge-base tools generate with.
 
     As configured_agent_model_id(), for the section's knowledge-base model
-    setting.
+    setting, from the knowledge base's region.
     """
-    return read_setting(
-        'language_models',
-        'knowledgeBaseModelId',
-        default=DEFAULT_KB_MODEL_ID,
+    return resolve_model_id(
+        read_setting(
+            'language_models',
+            'knowledgeBaseModelId',
+            default=DEFAULT_KB_MODEL_ID,
+        ),
+        region=os.environ.get('KB_REGION') or os.environ.get('AWS_REGION', ''),
     )
 
 
@@ -188,9 +195,10 @@ KB_CUSTOM_PROMPTS_ASSUMED_FROM_MAJOR = 5
 # measurement found the two profile forms of one model behaving alike, and
 # withholding a tool for an id LMA does not offer anywhere is the harmless
 # direction to be wrong in.
+# Matched without the inference-profile prefix, so the geography the Model
+# inference geography setting runs a model in cannot change the answer.
 KB_MODELS_REQUIRING_CUSTOM_PROMPTS = frozenset({
-    'us.anthropic.claude-opus-4-1-20250805-v1:0',
-    'global.anthropic.claude-opus-4-1-20250805-v1:0',
+    'anthropic.claude-opus-4-1-20250805-v1:0',
 })
 
 # Upper bound on Query pages for one meeting's transcript. A 1 MB page holds a
@@ -241,12 +249,10 @@ def build_kb_model_arn(model_id: str, kb_region: str, kb_account_id: str) -> str
     """The ``modelArn`` a RetrieveAndGenerate call generates its answer with.
 
     A bare foundation-model id is addressed in the model catalogue, which has no
-    account in its ARN; anything else is an inference profile, which lives in the
+    account in its ARN; an inference profile, of any prefix, lives in the
     deployment's own account.
     """
-    if model_id.startswith("anthropic"):
-        return f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
-    return f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
+    return model_arn(model_id, kb_region, kb_account_id)
 
 
 def kb_model_supports_retrieve_and_generate(model_id: str) -> bool:
@@ -281,7 +287,7 @@ def kb_model_supports_retrieve_and_generate(model_id: str) -> bool:
     lies -- there is no generational boundary to claim. Anything that is not a
     Claude model keeps the knowledge base's defaults.
     """
-    if model_id in KB_MODELS_REQUIRING_CUSTOM_PROMPTS:
+    if base_model_id(model_id) in KB_MODELS_REQUIRING_CUSTOM_PROMPTS:
         return False
     major = claude_major_version(model_id)
     if major is None:

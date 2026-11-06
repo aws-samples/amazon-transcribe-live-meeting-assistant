@@ -11,8 +11,20 @@
   "mergeStrategy": "merge",
   "type": "object",
   "properties": {
-    "summaryModelId": {
+    "inferenceGeography": {
       "order": 0,
+      "type": "string",
+      "title": "Model inference geography",
+      "description": "Where Amazon Bedrock may run the models below and the Meeting Consent section's evidence check model. Global: each model id is used as chosen, and a global. inference profile may run inference in any commercial AWS Region. Same geography as this deployment: inference stays within the geography of this deployment's Region (the United States, Europe, Canada, Asia Pacific, or Japan, Australia or India where Amazon Bedrock has a profile for that country); a model whose id routes outside it is run as the same model through the geography's inference profile, or as the in-region model. In-region only: inference stays in this deployment's Region, which most Claude models are not offered in on demand. A feature whose model has no id in the selected geography reports an error rather than leaving it; the notice above lists them. Amazon Nova Sonic, the voice assistant, runs in the Region set by the AmazonNovaSonicRegion stack parameter and is not affected.",
+      "enum": ["global", "geography", "in_region"],
+      "enumLabels": {
+        "global": "Global (any commercial AWS Region)",
+        "geography": "Same geography as this deployment",
+        "in_region": "In-region only"
+      }
+    },
+    "summaryModelId": {
+      "order": 1,
       "type": "string",
       "title": "Summaries and meeting insights",
       "description": "Writes the end-of-meeting summary, reads pasted meeting invitations, names speakers from what they say, derives the agenda, and answers questions over past meeting transcripts.",
@@ -41,7 +53,7 @@
       ]
     },
     "meetingAssistModelId": {
-      "order": 1,
+      "order": 2,
       "type": "string",
       "title": "Meeting assistant",
       "description": "Answers in the meeting assistant chat, for the voice assistant's lookups and for questions typed in the meeting chat, and runs the troubleshooting agent. It answers mid-meeting, so time to the first word matters more here than for summaries.",
@@ -70,7 +82,7 @@
       ]
     },
     "knowledgeBaseModelId": {
-      "order": 2,
+      "order": 3,
       "type": "string",
       "title": "Meeting assistant knowledge bases",
       "description": "Writes the answer the document-search and past-meeting-search tools return from what they retrieve. Only models verified to work with a Bedrock knowledge base are offered.",
@@ -85,7 +97,7 @@
       ]
     },
     "keyframeTextModelId": {
-      "order": 3,
+      "order": 4,
       "type": "string",
       "title": "Key frame text",
       "description": "Reads the text of each key frame of the shared screen, once, when the frame is stored. Image-capable models only.",

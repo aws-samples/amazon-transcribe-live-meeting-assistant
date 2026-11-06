@@ -62,7 +62,7 @@ const ConfigurationSection = ({
         }
       >
         <SpaceBetween size="l">
-          <SectionNotice section={name} settings={settings} configuration={saved} />
+          <SectionNotice section={name} settings={settings} configuration={saved} values={values} />
           {problems.length > 0 && (
             <Alert type="error" header="This section cannot be saved as it is">
               <ul>

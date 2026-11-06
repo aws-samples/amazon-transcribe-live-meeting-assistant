@@ -76,6 +76,45 @@ def test_usage_is_summed_by_context_and_service() -> None:
     assert totals[("SpeakerNaming", "bedrock/m", "us-east-1")]["usage"] == {"inputTokens": 7.0}
 
 
+GEO_TABLE: Dict[str, Any] = {
+    **TABLE,
+    "regions": {
+        "default": {
+            "bedrock/global.anthropic.claude-sonnet-5-5": {
+                "inputTokens": 0.000002,
+                "outputTokens": 0.00001,
+            },
+        }
+    },
+}
+
+
+def test_a_geography_profile_is_priced_as_the_same_models_global_profile_and_says_so() -> None:
+    result = pricing.estimate_call_cost(
+        "c1",
+        [record("Summary", "bedrock/eu.anthropic.claude-sonnet-5-5", {"inputTokens": 1000})],
+        GEO_TABLE,
+        "eu-west-1",
+        now=NOW,
+    )
+    (line,) = result["Items"]
+    assert line["Priced"] and line["UnitPrice"] == 0.000002
+    assert "global.anthropic.claude-sonnet-5-5" in line["Note"]
+    assert result["UnpricedCount"] == 0
+
+
+def test_a_different_model_is_never_a_stand_in() -> None:
+    result = pricing.estimate_call_cost(
+        "c1",
+        [record("Summary", "bedrock/eu.anthropic.claude-haiku-5-5", {"inputTokens": 1000})],
+        GEO_TABLE,
+        "eu-west-1",
+        now=NOW,
+    )
+    assert result["UnpricedCount"] == 1
+    assert result["Items"][0]["Note"] is None
+
+
 def test_the_estimate_multiplies_each_unit_by_its_price() -> None:
     result = pricing.estimate_call_cost(
         "c",

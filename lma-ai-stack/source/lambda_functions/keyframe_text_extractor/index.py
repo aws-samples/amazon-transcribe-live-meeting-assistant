@@ -41,7 +41,11 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 # pylint: disable=import-error
-from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
+from lma_config import (  # configuration layer
+    LANGUAGE_MODELS,
+    read_setting,
+    resolve_model_id,
+)
 from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # configuration layer
 
 # pylint: enable=import-error
@@ -86,12 +90,16 @@ def model_id() -> str:
     """The model that reads key frames.
 
     The Amazon Bedrock Models section's value on the Configuration page, else
-    the shipped default in setting_defaults.json.
+    the shipped default in setting_defaults.json, run within the section's
+    Model inference geography.
     """
-    return read_setting(
-        LANGUAGE_MODELS.name,
-        "keyframeTextModelId",
-        default=FALLBACK_MODEL_ID,
+    return resolve_model_id(
+        read_setting(
+            LANGUAGE_MODELS.name,
+            "keyframeTextModelId",
+            default=FALLBACK_MODEL_ID,
+        ),
+        region=REGION,
     )
 
 

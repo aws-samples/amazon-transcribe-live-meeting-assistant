@@ -80,7 +80,7 @@ import troubleshooting_prompt
 from bedrock_compat import accepts_temperature
 from botocore.config import Config as BotoCoreConfig
 
-from configuration_settings import read_setting
+from configuration_settings import read_setting, resolve_model_id
 from troubleshooting_config import AgentLimits
 from troubleshooting_discovery import classify_log_group
 from troubleshooting_tools import ToolError, TroubleshootingTools
@@ -1053,12 +1053,16 @@ def configured_model_id() -> str:
     """The model the agent runs on: the meeting assistant's.
 
     The Amazon Bedrock Models section's value on the Configuration page, else
-    the shipped default in setting_defaults.json.
+    the shipped default in setting_defaults.json, run within the section's Model
+    inference geography.
     """
-    return read_setting(
-        "language_models",
-        "meetingAssistModelId",
-        default=FALLBACK_MODEL_ID,
+    return resolve_model_id(
+        read_setting(
+            "language_models",
+            "meetingAssistModelId",
+            default=FALLBACK_MODEL_ID,
+        ),
+        region=os.environ.get("AWS_REGION", ""),
     )
 
 

@@ -11,7 +11,14 @@ import boto3
 from botocore.config import Config
 
 # pylint: disable=import-error
-from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
+from lma_config import (  # configuration layer
+    LANGUAGE_MODELS,
+    read_setting,
+    resolve_model_id,
+)
+from lma_config import (
+    model_arn as bedrock_model_arn,
+)
 
 # pylint: enable=import-error
 
@@ -31,14 +38,14 @@ def model_arn():
     The model is the summaries' one: the Amazon Bedrock Models section's value
     on the Configuration page, else the shipped default in setting_defaults.json.
     Read per request, so a change reaches this function within the section's
-    cache tier rather than at its next cold start.
+    cache tier rather than at its next cold start. Run within the section's
+    Model inference geography; a plain model id is addressed as a foundation
+    model and any other as an inference profile.
     """
-    model_id = read_setting(LANGUAGE_MODELS.name, "summaryModelId")
-    # if model id starts with Anthropic it is the legacy 3.0 models - use the model Id for the ARN
-    # else it is an Inference Profile and use the profile's ARN
-    if model_id.startswith("anthropic"):
-        return f"arn:aws:bedrock:{KB_REGION}::foundation-model/{model_id}"
-    return f"arn:aws:bedrock:{KB_REGION}:{KB_ACCOUNT_ID}:inference-profile/{model_id}"
+    model_id = resolve_model_id(
+        read_setting(LANGUAGE_MODELS.name, "summaryModelId"), region=KB_REGION
+    )
+    return bedrock_model_arn(model_id, KB_REGION, KB_ACCOUNT_ID)
 
 
 KB_CLIENT = boto3.client(

@@ -38,6 +38,15 @@ from .errors import (
     RevisionNotFound,
     UnknownConfigurationSection,
 )
+from .inference_geography import (
+    ModelResolution,
+    ModelUnavailableInGeography,
+    base_model_id,
+    is_inference_profile,
+    model_arn,
+    resolve_for_geography,
+    resolve_model_id,
+)
 from .keys import (
     ACTIVE_POINTER_KEY,
     CONFIG_PREFIX,
@@ -165,6 +174,8 @@ __all__ = [
     "InvalidConfiguration",
     "InvalidPreset",
     "InvalidProfileName",
+    "ModelResolution",
+    "ModelUnavailableInGeography",
     "ParameterDefault",
     "ReservedProfileName",
     "ResolvedDocument",
@@ -178,6 +189,11 @@ __all__ = [
     "SectionSpec",
     "UnknownConfigurationSection",
     "apply_parameter_defaults",
+    "base_model_id",
+    "is_inference_profile",
+    "model_arn",
+    "resolve_for_geography",
+    "resolve_model_id",
     "deep_merge",
     "deletion_delay_minutes",
     "diff_bodies",

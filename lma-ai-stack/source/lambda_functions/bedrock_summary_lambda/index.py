@@ -23,6 +23,7 @@ from lma_config import (  # configuration layer
     SUMMARY_PROMPT_TEMPLATES,
     ConfigurationStore,
     read_setting,
+    resolve_model_id,
 )
 from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # configuration layer
 
@@ -288,12 +289,17 @@ def summary_model_id():
     The Amazon Bedrock Models section's value on the Configuration page, else the
     shipped default in setting_defaults.json. Read through the summariser's own
     store, so it shares the prompt templates' cached document rather than adding
-    a read.
+    a read. Run within the section's Model inference geography
+    (lma_config.resolve_model_id).
     """
-    return read_setting(
-        LANGUAGE_MODELS.name,
-        "summaryModelId",
-        default=FALLBACK_MODEL_ID,
+    return resolve_model_id(
+        read_setting(
+            LANGUAGE_MODELS.name,
+            "summaryModelId",
+            default=FALLBACK_MODEL_ID,
+            store=CONFIG_STORE,
+        ),
+        region=BEDROCK_REGION,
         store=CONFIG_STORE,
     )
 

@@ -1,5 +1,9 @@
 {
   "language_models": {
+    "inferenceGeography": {
+      "type": "string",
+      "default": "global"
+    },
     "summaryModelId": {
       "type": "string",
       "default": "global.anthropic.claude-sonnet-5-5",

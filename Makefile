@@ -66,6 +66,7 @@ PYTHON_LINT_PATHS := \
 	$(CURDIR)/$(LAMBDA_LAYERS_DIR) \
 	$(CURDIR)/scripts/pr_review \
 	$(CURDIR)/scripts/cloudformation_parameters_doc.py \
+	$(CURDIR)/scripts/bedrock_inference_catalog.py \
 	$(CURDIR)/scripts/ux_recorder.py \
 	$(CURDIR)/scripts/ux_recorder_cdp.py \
 	$(CURDIR)/scripts/ux_recorder_render.py \
