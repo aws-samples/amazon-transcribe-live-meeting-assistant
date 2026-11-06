@@ -32,6 +32,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import wave
 from collections.abc import Callable
@@ -44,14 +45,13 @@ HOOK_PORT = int(os.environ.get("HOOK_PORT", "9000"))
 ASR_PORT = int(os.environ.get("ASR_PORT", "8080"))
 MODEL_DIR = Path(os.environ.get("ASR_MODEL_DIR", "/opt/models"))
 WARM_WAV = MODEL_DIR / "test_wavs" / "warm.wav"
-SPEAKER_MODEL = Path(
-    os.environ.get("ASR_SPEAKER_MODEL", str(MODEL_DIR / "speaker_embedding.onnx"))
-)
+SPEAKER_MODEL = Path(os.environ.get("ASR_SPEAKER_MODEL", str(MODEL_DIR / "speaker_embedding.onnx")))
 DIARIZER_DIR = MODEL_DIR / "diarizer"
 
 
 def speaker_labels_baked() -> bool:
     return SPEAKER_MODEL.is_file() or any(DIARIZER_DIR.glob("*.onnx"))
+
 
 BOOT_TIMEOUT_S = float(os.environ.get("ASR_BOOT_TIMEOUT_S", "540"))
 EXERCISE_TIMEOUT_S = float(os.environ.get("ASR_EXERCISE_TIMEOUT_S", "180"))
@@ -92,9 +92,7 @@ def warm_pcm() -> bytes:
                     and wav.getframerate() == SAMPLE_RATE
                 ):
                     return wav.readframes(wav.getnframes())
-                log(
-                    f"{WARM_WAV} is not 16 kHz mono 16-bit; using a synthetic tone instead"
-                )
+                log(f"{WARM_WAV} is not 16 kHz mono 16-bit; using a synthetic tone instead")
         except (OSError, wave.Error) as exc:
             log(f"could not read {WARM_WAV} ({exc}); using a synthetic tone instead")
 
@@ -177,8 +175,17 @@ class Hooks:
         self._boot_timeout_s = boot_timeout_s
         self._asr: subprocess.Popen | None = None
         self.state = HookState()
+        # The hook server answers each request on its own thread, and Lambda
+        # calls /ready again when an answer is slow. One warm-up at a time: a
+        # second request waits for the first and reuses its result, instead of
+        # running a second decode beside it on the same CPUs.
+        self._warmup = threading.Lock()
 
     def on_ready(self) -> int:
+        with self._warmup:
+            return self._ready()
+
+    def _ready(self) -> int:
         self.state.hooks_seen.append("ready")
         if not self.state.spawned:
             self._deps.log("starting the ASR server")
@@ -193,6 +200,10 @@ class Hooks:
         return 200 if self.state.warm else 503
 
     def on_validate(self) -> int:
+        with self._warmup:
+            return self._validate()
+
+    def _validate(self) -> int:
         self.state.hooks_seen.append("validate")
         if not self._deps.asr_listening():
             self._deps.log("ASR server is not listening; cannot sample snapshot pages")
