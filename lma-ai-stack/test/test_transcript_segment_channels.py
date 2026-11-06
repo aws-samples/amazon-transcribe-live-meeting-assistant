@@ -328,6 +328,7 @@ def test_add_transcript_segment_stores_each_older_speech_name_under_the_current_
         assert rewrite.end() < put_item, f"the {older} rewrite comes after the PutItem"
 
 
+@pytest.mark.real_aws  # allowed to call AWS; see scripts/testing/no_real_aws.py
 @pytest.mark.skipif(
     os.environ.get("LMA_EVALUATE_APPSYNC") != "1",
     reason="evaluates templates with the AppSync API; set LMA_EVALUATE_APPSYNC=1 to run",
@@ -360,6 +361,7 @@ def test_the_evaluated_segment_write_stores_the_current_channel_name(sent: str) 
     assert stored == {"S": OLDER_TO_CURRENT.get(sent, sent)}
 
 
+@pytest.mark.real_aws  # allowed to call AWS; see scripts/testing/no_real_aws.py
 @pytest.mark.skipif(
     os.environ.get("LMA_EVALUATE_APPSYNC") != "1",
     reason="evaluates templates with the AppSync API; set LMA_EVALUATE_APPSYNC=1 to run",
@@ -396,6 +398,7 @@ def test_each_segment_query_reads_the_page_its_nextToken_names(schema, field_nam
     assert '"nextToken": $util.toJson($util.defaultIfNullOrEmpty($ctx.args.nextToken, null))' in text
 
 
+@pytest.mark.real_aws  # allowed to call AWS; see scripts/testing/no_real_aws.py
 @pytest.mark.skipif(
     os.environ.get("LMA_EVALUATE_APPSYNC") != "1",
     reason="evaluates templates with the AppSync API; set LMA_EVALUATE_APPSYNC=1 to run",

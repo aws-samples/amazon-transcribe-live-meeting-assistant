@@ -70,7 +70,8 @@ PYTHON_LINT_PATHS := \
 	$(CURDIR)/scripts/ux_recorder_cdp.py \
 	$(CURDIR)/scripts/ux_recorder_render.py \
 	$(CURDIR)/scripts/ux_test_session.py \
-	$(CURDIR)/scripts/tests
+	$(CURDIR)/scripts/tests \
+	$(CURDIR)/scripts/testing
 
 # CloudFormation templates to validate
 CFN_TEMPLATES := \
@@ -382,7 +383,10 @@ test-cli: ## Run LMA CLI unit tests
 # imports, so each directory must be run with that dir on sys.path — a single
 # top-level `pytest lambda_functions/` collides on duplicate module names. This
 # target discovers every dir containing test_*.py and runs pytest from within
-# it. No AWS required (the suites mock boto3 / set dummy env).
+# it. No AWS required (the suites mock boto3 / set dummy env), and none reached:
+# lma-ai-stack/conftest.py, the ASR Lambdas' and the meeting-assist tests'
+# conftest.py load scripts/testing/no_real_aws.py, which fails a test that sends
+# a request to AWS.
 #
 # LAMBDA_LAYERS_DIR is searched too. The layer holds the code the Lambdas share
 # (transcript normalisation, the TTLs, the AppSync helpers), so a test there

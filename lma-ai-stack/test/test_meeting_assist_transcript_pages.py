@@ -23,11 +23,11 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
-import types
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import strands_stand_in  # scripts/testing, put on the path by lma-ai-stack/conftest.py
 
 REPO = Path(__file__).resolve().parents[2]
 FUNCTION_SRC = REPO / "lma-meetingassist-setup-stack" / "src"
@@ -40,12 +40,17 @@ CALL_ID = "call-1"
 
 
 @pytest.fixture(scope="module")
-def strands_module():
+def strands_stub():
+    """The stand-in for `strands` (scripts/testing/strands_stand_in.py), for this module."""
+    with strands_stand_in.installed() as stub:
+        yield stub
+
+
+@pytest.fixture(scope="module")
+def strands_module(strands_stub):
     """The meeting-assist Lambda's module, imported by path under its own name."""
     os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
     os.environ.setdefault("AWS_REGION", "us-east-1")
-    stub = sys.modules.setdefault("strands", types.ModuleType("strands"))
-    stub.tool = lambda func: func
 
     if str(FUNCTION_SRC) not in sys.path:
         sys.path.append(str(FUNCTION_SRC))

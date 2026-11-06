@@ -121,10 +121,15 @@ def test_the_response_does_not_return_the_password(resources: dict) -> None:
 
 # ── evaluated by AppSync ────────────────────────────────────────────────────
 
-evaluated = pytest.mark.skipif(
+_when_asked = pytest.mark.skipif(
     os.environ.get("LMA_EVALUATE_APPSYNC") != "1",
     reason="evaluates templates with the AppSync API; set LMA_EVALUATE_APPSYNC=1 to run",
 )
+
+
+def evaluated(test):
+    """Run only when asked, and allowed to call AWS (see scripts/testing/no_real_aws.py)."""
+    return pytest.mark.real_aws(_when_asked(test))
 
 
 @pytest.fixture(scope="module")

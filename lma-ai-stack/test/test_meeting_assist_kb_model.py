@@ -56,11 +56,11 @@ import importlib.util
 import json
 import os
 import sys
-import types
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import strands_stand_in  # scripts/testing, put on the path by lma-ai-stack/conftest.py
 
 REPO = Path(__file__).resolve().parents[2]
 FUNCTION_SRC = REPO / "lma-meetingassist-setup-stack" / "src"
@@ -288,27 +288,16 @@ def test_the_function_reads_the_agent_model_from_the_agent_setting(strands_modul
 
 @pytest.fixture(scope="module")
 def strands_stub():
-    """A stand-in for the `strands` package, which ships in a Lambda layer.
+    """The stand-in for the `strands` package, which ships in a Lambda layer.
 
-    Provides the two entry points this module reaches for: the `tool` decorator
-    (the real one returns a callable wrapper, so returning the function itself
-    keeps a tool body directly callable) and `strands.models`, whose `BedrockModel`
-    the handler constructs. `Agent` is left for the handler test to supply.
-
-    The object registered in sys.modules is the one returned, so that a second
-    test file standing `strands` in does not end up patching a different object
-    from the one `from strands import Agent` resolves to. That shared object is
-    why the registration reuses an existing `strands` entry rather than replacing
-    it, and it means these fixtures would take over a real `strands` if the SDK
-    were installed here. That is intended: these tests call tool bodies directly,
-    which needs `tool` to be the identity function rather than the SDK's wrapper,
-    so the stub is wanted whether or not the package is present. The suites are
-    the no-AWS static job, which installs no Lambda-layer packages.
+    scripts/testing/strands_stand_in.py, which covers every name the function
+    imports from it: `tool` is the identity, so a tool body stays directly
+    callable, and `Agent` is left for the handler test to replace. Registered for
+    this module only, so the next suite sees whatever was there before -- the real
+    SDK, where it is installed.
     """
-    stub = sys.modules.setdefault("strands", types.ModuleType("strands"))
-    stub.tool = lambda func: func
-    stub.models = sys.modules.setdefault("strands.models", types.ModuleType("strands.models"))
-    return stub
+    with strands_stand_in.installed() as stub:
+        yield stub
 
 
 @pytest.fixture(scope="module")
@@ -613,7 +602,6 @@ def test_the_handler_gives_the_knowledge_base_tools_the_knowledge_base_model(
 
     monkeypatch.setattr(strands_stub, "Agent", StubAgent, raising=False)
     monkeypatch.setattr(strands_stub.models, "BedrockModel", StubBedrockModel, raising=False)
-    monkeypatch.setattr(strands_stub.models, "CacheConfig", dict, raising=False)
 
     result = strands_module.handler(
         {

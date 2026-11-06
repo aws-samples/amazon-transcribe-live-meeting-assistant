@@ -31,7 +31,7 @@ os.environ.setdefault("CONFIGURATION_TABLE_NAME", "lma-configuration")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ["EVENT_SOURCING_TABLE"] = "calls"
 
-from lma_config import codec  # noqa: E402
+from lma_config import codec, parameters  # noqa: E402
 from lma_config.keys import ACTIVE_POINTER_KEY, DEFAULT_KEY  # noqa: E402
 from lma_config.store import ConfigurationStore  # noqa: E402
 from lma_metering import build_item  # noqa: E402
@@ -111,6 +111,10 @@ def tables(monkeypatch: pytest.MonkeyPatch):
         codec.KEY_ATTRIBUTE: {"S": ACTIVE_POINTER_KEY},
         "ActiveProfile": {"S": "custom"},
     }
+    # build_item reads the meeting retention through read_setting; without this
+    # its per-process store would be built against the real table named above.
+    # A store of its own, so its cache is not the resolver's.
+    monkeypatch.setattr(parameters, "_SHARED_STORE", ConfigurationStore("cfg", client=config))
     calls = FakeCallsTable()
     calls.metering.append(
         build_item(
