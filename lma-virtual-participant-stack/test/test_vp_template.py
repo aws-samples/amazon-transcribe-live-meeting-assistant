@@ -1705,6 +1705,22 @@ def test_a_changed_time_moves_the_one_schedule(raw: str, launch_type: str) -> No
     assert fires_at.replace(tzinfo=timezone.utc).timestamp() == new_time - 120
     assert "999" in schedule["Target"]["Input"]
     assert str(new_time) in schedule["Target"]["Input"]
+    # A successful move clears any earlier note that the schedule was not moved.
+    dynamodb.update_item.assert_called_once()
+    cleared = dynamodb.update_item.call_args.kwargs
+    assert cleared["UpdateExpression"] == "REMOVE #e"
+    assert cleared["ExpressionAttributeNames"]["#e"] == "errorMessage"
+    assert cleared["ConditionExpression"] == "#s = :scheduled AND attribute_exists(#e)"
+
+
+def test_an_edit_that_moves_nothing_keeps_an_earlier_schedule_note(raw: str) -> None:
+    """The note from a failed move still applies when the next edit changes only the agenda."""
+    note = {"S": "The changed launch settings were saved, but ... launches as it was scheduled before."}
+    old = _future_row(errorMessage=note)
+    new = _future_row(errorMessage=note, agenda={"S": "1. Budget"})
+    fake, dynamodb = _run_modify(raw, old, new)
+
+    assert fake.updated == [] and fake.created == []
     dynamodb.update_item.assert_not_called()
 
 

@@ -110,3 +110,20 @@ export const scheduledEditInput = (
 
   return Object.keys(input).length ? { id: vp.id, ...input } : null;
 };
+
+// The edit input fields that make the scheduler move the launch schedule
+// (LAUNCH_FIELDS in the VPScheduler function); the agenda and the consent choice
+// are read from the row when the Virtual Participant starts.
+const LAUNCH_INPUT_FIELDS = [
+  'meetingName',
+  'meetingPlatform',
+  'meetingId',
+  'meetingPassword',
+  'clearMeetingPassword',
+  'meetingTime',
+  'enableVideoRecording',
+  'useStoredZoomAccount',
+];
+
+/** Whether an edit input changes a value the launch schedule carries. */
+export const movesLaunchSchedule = (input) => LAUNCH_INPUT_FIELDS.some((name) => name in (input || {}));

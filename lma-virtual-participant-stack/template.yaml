@@ -4063,6 +4063,27 @@ Resources:
                   logger.error(f"Could not record on VP {vp_id} that its schedule was not moved: {e}")
 
 
+          def _clear_schedule_note(vp_id):
+              """Remove an earlier note that the schedule was not moved, once it has been.
+
+              Only a successful move clears it: an edit that changes no launch field
+              moves nothing, so a note from an earlier failed move still applies.
+              """
+              try:
+                  dynamodb_client.update_item(
+                      TableName=os.environ['VP_TABLE_NAME'],
+                      Key={'id': {'S': vp_id}},
+                      UpdateExpression='REMOVE #e',
+                      ConditionExpression='#s = :scheduled AND attribute_exists(#e)',
+                      ExpressionAttributeNames={'#e': 'errorMessage', '#s': 'status'},
+                      ExpressionAttributeValues={':scheduled': {'S': 'SCHEDULED'}},
+                  )
+              except dynamodb_client.exceptions.ConditionalCheckFailedException:
+                  pass
+              except Exception as e:
+                  logger.error(f"Could not clear the schedule note on VP {vp_id}: {e}")
+
+
           def _move_schedule(vp_id, new_image):
               """Rewrite the existing schedule for a changed row; never create one.
 
@@ -4088,6 +4109,7 @@ Resources:
                   _note_schedule_not_moved(vp_id, 'the schedule update failed')
                   return False
               logger.info(f"Moved schedule for VP {vp_id} to {params['ScheduleExpression']}")
+              _clear_schedule_note(vp_id)
               return True
 
 
