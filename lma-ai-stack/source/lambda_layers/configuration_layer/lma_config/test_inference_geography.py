@@ -8,15 +8,19 @@
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 
 import pytest
+from botocore.exceptions import ClientError, EndpointConnectionError
 
 from lma_config import inference_geography as geo
-from lma_config import schema
+from lma_config import parameters, schema
+from lma_config.errors import ConfigurationTableNotConfigured, InvalidConfiguration
 from lma_config.inference_geography import (
     GEOGRAPHY,
     GLOBAL,
     IN_REGION,
+    InferenceGeographyUnreadable,
     ModelUnavailableInGeography,
     resolve_for_geography,
 )
@@ -59,6 +63,15 @@ def test_model_arn_addresses_profiles_and_models() -> None:
     assert geo.model_arn(NOVA_LITE, "us-east-1", "123456789012") == (
         "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0"
     )
+
+
+def test_model_arn_uses_the_regions_partition() -> None:
+    assert geo.model_arn("us-gov.anthropic.claude-sonnet-4-5", "us-gov-west-1", "123456789012") == (
+        "arn:aws-us-gov:bedrock:us-gov-west-1:123456789012:inference-profile/"
+        "us-gov.anthropic.claude-sonnet-4-5"
+    )
+    assert geo.model_arn(NOVA_LITE, "cn-north-1", "123456789012").startswith("arn:aws-cn:bedrock:")
+    assert geo.model_arn(NOVA_LITE, "us-gov-east-1", "1", partition="aws").startswith("arn:aws:")
 
 
 @pytest.mark.parametrize(
@@ -256,6 +269,51 @@ def test_resolve_model_id_logs_a_change_once(monkeypatch, caplog) -> None:
 def test_configured_geography_defaults_to_global_without_a_table(monkeypatch) -> None:
     monkeypatch.delenv("CONFIGURATION_TABLE_NAME", raising=False)
     assert geo.configured_geography() == GLOBAL
+
+
+class _Store:
+    def __init__(self, values=None, error=None):
+        self.values, self.error = values or {}, error
+
+    def get_section(self, _name):
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(values=self.values)
+
+
+def test_configured_geography_reads_the_saved_value() -> None:
+    assert geo.configured_geography(_Store({"inferenceGeography": IN_REGION})) == IN_REGION
+
+
+def test_configured_geography_is_global_when_the_setting_is_unset() -> None:
+    assert geo.configured_geography(_Store({})) == GLOBAL
+    assert geo.configured_geography(_Store({"inferenceGeography": None})) == GLOBAL
+
+
+def test_configured_geography_is_global_when_no_table_is_configured() -> None:
+    store = _Store(error=ConfigurationTableNotConfigured("no table"))
+    assert geo.configured_geography(store) == GLOBAL
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ClientError({"Error": {"Code": "AccessDeniedException", "Message": "no"}}, "GetItem"),
+        EndpointConnectionError(endpoint_url="https://dynamodb.example"),
+        InvalidConfiguration("stored document is malformed"),
+    ],
+)
+def test_configured_geography_raises_when_a_configured_table_cannot_be_read(error) -> None:
+    with pytest.raises(InferenceGeographyUnreadable) as raised:
+        geo.configured_geography(_Store(error=error))
+    assert raised.value.__cause__ is error
+
+
+def test_resolve_model_id_raises_when_the_setting_cannot_be_read(monkeypatch) -> None:
+    error = ClientError({"Error": {"Code": "ThrottlingException", "Message": "slow"}}, "GetItem")
+    monkeypatch.setattr(parameters, "_SHARED_STORE", _Store(error=error))
+    with pytest.raises(InferenceGeographyUnreadable):
+        geo.resolve_model_id(SONNET, region="eu-west-1")
 
 
 # ── pricing stand-ins ───────────────────────────────────────────────────────

@@ -45,12 +45,17 @@ geography, and a fallback that leaves it would make the setting's promise
 depend on log monitoring. The Configuration page shows, before a change is
 saved, which features have no model in the selected geography.
 
+For the same reason, a configuration table that is configured but cannot be
+read raises :class:`InferenceGeographyUnreadable` rather than reading as
+``global``. Only a deployment with no configuration table, or one where the
+setting was never saved, runs as ``global``.
+
 Which ids exist comes from ``bedrock_inference_catalog.json`` beside this
 module, rebuilt from the Amazon Bedrock listing APIs by
 ``scripts/bedrock_inference_catalog.py``. For a region the catalogue has no
 entry for, or a model it does not list, the id is built by rule (the
-geography's broadest... no: its first profile prefix, else the plain id) and
-used unchecked, with a warning; that id either works or fails, and in neither
+geography's first, narrowest, profile prefix, else the plain id) and used
+unchecked, with a warning; that id either works or fails, and in neither
 case does inference leave the geography.
 
 Two ports of :func:`resolve_for_geography` exist, each with a byte-identical
@@ -92,6 +97,16 @@ class ModelUnavailableInGeography(ValueError):
     A ``ValueError`` rather than a :class:`~lma_config.errors.ConfigurationError`
     on purpose: ``read_setting`` treats a configuration error as "use the shipped
     default", and the shipped default is a ``global.`` id.
+    """
+
+
+class InferenceGeographyUnreadable(RuntimeError):
+    """The configuration table is configured, and reading the setting from it failed.
+
+    Raised instead of reading the setting as ``global``, which would run the call
+    outside a geography an administrator may have chosen. Not a
+    :class:`~lma_config.errors.ConfigurationError`, for the reason
+    :class:`ModelUnavailableInGeography` gives.
     """
 
 
@@ -143,12 +158,23 @@ def is_inference_profile(model_id: str) -> bool:
     return split_model_id(model_id)[0] is not None
 
 
-def model_arn(model_id: str, region: str, account_id: str, partition: str = "aws") -> str:
+def partition_of(region: str) -> str:
+    """The AWS partition ``region`` belongs to (``aws``, ``aws-us-gov``, ``aws-cn``)."""
+    if region.startswith("us-gov-"):
+        return "aws-us-gov"
+    if region.startswith("cn-"):
+        return "aws-cn"
+    return "aws"
+
+
+def model_arn(model_id: str, region: str, account_id: str, partition: Optional[str] = None) -> str:
     """The ARN of ``model_id`` as a knowledge base's ``modelArn`` takes it.
 
     An inference profile lives in the calling account; a foundation model is in
-    the region's model catalogue, which has no account in its ARN.
+    the region's model catalogue, which has no account in its ARN. ``partition``
+    defaults to ``region``'s.
     """
+    partition = partition or partition_of(region)
     if is_inference_profile(model_id):
         return f"arn:{partition}:bedrock:{region}:{account_id}:inference-profile/{model_id}"
     return f"arn:{partition}:bedrock:{region}::foundation-model/{model_id}"
@@ -257,12 +283,37 @@ def _log_once(resolution: ModelResolution) -> None:
 
 
 def configured_geography(store: Any = None) -> str:
-    """The saved Model inference geography; ``global`` when unset or unreadable."""
+    """The saved Model inference geography.
+
+    ``global`` when there is no configuration table or the setting is unset (or
+    holds a value that is not a geography).
+
+    Raises:
+        InferenceGeographyUnreadable: the configuration table is configured and
+            reading the section from it failed.
+    """
     # Imported here: parameters imports the store, which this module must not
     # need for its pure functions (the Configuration page's tests load them).
-    from .parameters import read_setting  # pylint: disable=import-outside-toplevel
+    # pylint: disable=import-outside-toplevel
+    from botocore.exceptions import BotoCoreError, ClientError
 
-    value = read_setting(GEOGRAPHY_SECTION, GEOGRAPHY_SETTING, default=GLOBAL, store=store)
+    from .errors import ConfigurationError, ConfigurationTableNotConfigured
+    from .parameters import _shared_store  # pylint: disable=protected-access
+
+    reader = store if store is not None else _shared_store()
+    if reader is None:
+        return GLOBAL
+    try:
+        values = reader.get_section(GEOGRAPHY_SECTION).values
+    except ConfigurationTableNotConfigured:
+        return GLOBAL
+    except (ClientError, BotoCoreError, ConfigurationError) as error:
+        raise InferenceGeographyUnreadable(
+            f"could not read the Model inference geography (the {GEOGRAPHY_SECTION} "
+            f"configuration section): {error}. The Amazon Bedrock call is not made, so "
+            "that it cannot run outside the geography the setting may hold."
+        ) from error
+    value = values.get(GEOGRAPHY_SETTING)
     return value if value in GEOGRAPHIES else GLOBAL
 
 
@@ -274,6 +325,7 @@ def resolve_model_id(model_id: str, *, region: str = "", store: Any = None) -> s
 
     Raises:
         ModelUnavailableInGeography: see :func:`resolve_for_geography`.
+        InferenceGeographyUnreadable: see :func:`configured_geography`.
     """
     geography = configured_geography(store)
     if geography == GLOBAL or not model_id:

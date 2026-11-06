@@ -82,6 +82,13 @@ class TestBuildModelArn(unittest.TestCase):
         )
         self.assertIn(":inference-profile/", arn)
 
+    def test_govcloud_arn_uses_the_govcloud_partition(self):
+        """A GovCloud Region's ARN is in the aws-us-gov partition."""
+        arn = search_meetings._build_model_arn(
+            "us-gov.anthropic.claude-sonnet-4-5", "us-gov-west-1", ACCOUNT
+        )
+        self.assertTrue(arn.startswith("arn:aws-us-gov:bedrock:us-gov-west-1:"))
+
 
 class TestExecuteResolvesArn(unittest.TestCase):
     """Verify execute() builds the right ARN for the configured model."""

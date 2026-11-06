@@ -40,33 +40,17 @@ def _configured_model_id() -> str:
     return (value or "").strip()
 
 
-# Bedrock inference profile prefixes (cross-region routing).
-# Model IDs starting with these prefixes must use an inference-profile ARN,
-# not a foundation-model ARN.
-_INFERENCE_PROFILE_PREFIXES = (
-    "us.",
-    "us-gov.",
-    "eu.",
-    "apac.",
-    "jp.",
-    "au.",
-    "ca.",
-    "in.",
-    "global.",
-)
-
-
 def _build_model_arn(model_id: str, region: str, account_id: str) -> str:
-    """Build the correct Bedrock model ARN based on the model ID prefix.
+    """The inference-profile or foundation-model ARN of ``model_id``.
 
-    Inference profiles (prefixed with region codes like ``us.``, ``eu.``,
-    ``apac.``, or ``global.``) must be referenced via the
-    ``inference-profile`` ARN path. Plain foundation model IDs use the
-    ``foundation-model`` ARN path.
+    The configuration layer's ``model_arn``, which knows the profile prefixes
+    from the shipped catalogue; imported here for the reason
+    :func:`_configured_model_id` gives.
     """
-    if any(model_id.startswith(p) for p in _INFERENCE_PROFILE_PREFIXES):
-        return f"arn:aws:bedrock:{region}:{account_id}:inference-profile/{model_id}"
-    return f"arn:aws:bedrock:{region}::foundation-model/{model_id}"
+    # pylint: disable-next=import-error,import-outside-toplevel
+    from lma_config import model_arn
+
+    return model_arn(model_id, region, account_id)
 
 
 def execute(

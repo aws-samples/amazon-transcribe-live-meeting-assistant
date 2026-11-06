@@ -12,7 +12,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { GEOGRAPHY, GLOBAL, IN_REGION, resolveForGeography, resolveModelId } from './inference-geography.js';
+import {
+    GEOGRAPHY,
+    GLOBAL,
+    IN_REGION,
+    InferenceGeographyUnreadable,
+    configuredGeography,
+    resolveForGeography,
+    resolveModelId,
+} from './inference-geography.js';
 
 interface Case {
     region: string;
@@ -50,4 +58,56 @@ test('the DOM resolver model runs within the geography it is configured for', as
 
 test('a geography with no id for the model is refused rather than called outside it', async () => {
     await assert.rejects(resolveModelId(HAIKU, 'us-east-1', async () => IN_REGION), /Model inference geography/);
+});
+
+const reading = (values: Record<string, unknown>) => () => ({
+    getSection: async () => ({ values }) as never,
+});
+
+async function withTable<T>(tableName: string | undefined, body: () => Promise<T>): Promise<T> {
+    const saved = process.env.CONFIGURATION_TABLE_NAME;
+    if (tableName === undefined) delete process.env.CONFIGURATION_TABLE_NAME;
+    else process.env.CONFIGURATION_TABLE_NAME = tableName;
+    try {
+        return await body();
+    } finally {
+        if (saved === undefined) delete process.env.CONFIGURATION_TABLE_NAME;
+        else process.env.CONFIGURATION_TABLE_NAME = saved;
+    }
+}
+
+test('the geography is Global when no configuration table is configured', async () => {
+    await withTable(undefined, async () => {
+        assert.equal(await configuredGeography('eu-west-1', reading({ inferenceGeography: IN_REGION })), GLOBAL);
+    });
+});
+
+test('the saved geography is read, and an unset one is Global', async () => {
+    await withTable('config-table', async () => {
+        assert.equal(await configuredGeography('eu-west-1', reading({ inferenceGeography: IN_REGION })), IN_REGION);
+        assert.equal(await configuredGeography('eu-west-1', reading({})), GLOBAL);
+    });
+});
+
+test('a configured table whose read fails raises rather than reading as Global', async () => {
+    const failure = new Error('AccessDeniedException');
+    const failing = () => ({
+        getSection: async () => {
+            throw failure;
+        },
+    });
+    await withTable('config-table', async () => {
+        await assert.rejects(configuredGeography('eu-west-1', failing), (err: unknown) => {
+            assert.ok(err instanceof InferenceGeographyUnreadable);
+            assert.equal((err as Error).cause, failure);
+            return true;
+        });
+    });
+});
+
+test('a setting that cannot be read stops the model call', async () => {
+    const unreadable = async () => {
+        throw new InferenceGeographyUnreadable(new Error('throttled'));
+    };
+    await assert.rejects(resolveModelId(HAIKU, 'eu-west-1', unreadable), InferenceGeographyUnreadable);
 });
