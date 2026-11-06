@@ -814,16 +814,17 @@ const VirtualParticipantDetails = () => {
     loadVpDetails();
   };
 
-  const handleScheduledEditSaved = (updated) => {
+  const handleScheduledEditSaved = (updated, movesSchedule) => {
     setShowEdit(false);
     if (updated) setVpDetails((prev) => ({ ...prev, ...updated }));
     setNotifications((prev) => [
       ...prev,
       {
         type: 'success',
-        content:
-          'Launch settings saved. The scheduled launch is updated in a few seconds; ' +
-          'check this page for a note if it could not be.',
+        content: movesSchedule
+          ? 'Launch settings saved. The scheduled launch is updated in a few seconds; ' +
+            'check this page for a note if it could not be.'
+          : 'Launch settings saved. The Virtual Participant reads them when it starts.',
         dismissible: true,
         id: `edit-success-${Date.now()}`,
         onDismiss: () => setNotifications((items) => items.filter((n) => !n.id.startsWith('edit-success-'))),

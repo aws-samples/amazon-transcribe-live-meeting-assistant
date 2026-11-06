@@ -5,7 +5,13 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { canEditScheduled, editFormFrom, editWindowOpen, scheduledEditInput } from './scheduled-edit';
+import {
+  canEditScheduled,
+  editFormFrom,
+  editWindowOpen,
+  movesLaunchSchedule,
+  scheduledEditInput,
+} from './scheduled-edit';
 import { formDateAndTime, meetingTimeError } from './vp-form';
 
 const HOUR_AHEAD = Math.floor(Date.now() / 1000 / 60) * 60 + 3600;
@@ -142,5 +148,14 @@ describe('meetingTimeError', () => {
     expect(meetingTimeError('2026-11-10', '12:01', 2, now)).toMatch(/at least two minutes/);
     expect(meetingTimeError('2026-11-10', '12:0', 2, now)).toMatch(/incomplete/);
     expect(meetingTimeError('', '12:30', 2, now)).toMatch(/date first/);
+  });
+});
+
+describe('movesLaunchSchedule', () => {
+  it('is true for a launch field and false for the agenda or consent alone', () => {
+    expect(movesLaunchSchedule({ meetingTime: 1 })).toBe(true);
+    expect(movesLaunchSchedule({ clearMeetingPassword: true })).toBe(true);
+    expect(movesLaunchSchedule({ agenda: '1. Budget' })).toBe(false);
+    expect(movesLaunchSchedule({ consentMode: 'notify', consentRule: 'owner_attests' })).toBe(false);
   });
 });

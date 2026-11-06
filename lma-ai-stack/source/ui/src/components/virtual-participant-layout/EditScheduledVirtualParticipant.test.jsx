@@ -75,7 +75,7 @@ describe('EditScheduledVirtualParticipant', () => {
     typeInto('Enter meeting name', 'New');
     fireEvent.click(screen.getByText('Save changes'));
 
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith({ id: 'vp-1', meetingName: 'New' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith({ id: 'vp-1', meetingName: 'New' }, true));
     const call = graphqlMock.mock.calls.find(([request]) => /updateScheduledVirtualParticipant/.test(request.query));
     expect(call[0].variables).toEqual({ input: { id: 'vp-1', meetingName: 'New' } });
   });

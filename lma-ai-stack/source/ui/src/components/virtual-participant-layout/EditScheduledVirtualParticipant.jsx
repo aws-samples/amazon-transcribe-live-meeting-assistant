@@ -13,7 +13,7 @@ import VirtualParticipantFormFields from './VirtualParticipantFormFields';
 import ZoomCredentialsManager from './ZoomCredentialsManager';
 import { meetingConsentChoiceAvailable } from './meeting-consent-options';
 import { EDIT_MIN_LEAD_MINUTES, formFieldsAreValid, meetingTimeError } from './vp-form';
-import { editFormFrom, scheduledEditInput } from './scheduled-edit';
+import { editFormFrom, movesLaunchSchedule, scheduledEditInput } from './scheduled-edit';
 
 const client = generateClient();
 const logger = new ConsoleLogger('EditScheduledVirtualParticipant');
@@ -92,7 +92,7 @@ const EditScheduledVirtualParticipant = ({ vp, visible, onDismiss, onSaved, zoom
     setError('');
     try {
       const result = await client.graphql({ query: updateScheduledVirtualParticipantMutation, variables: { input } });
-      onSaved(result?.data?.updateScheduledVirtualParticipant || null);
+      onSaved(result?.data?.updateScheduledVirtualParticipant || null, movesLaunchSchedule(input));
     } catch (err) {
       logger.error('Failed to update scheduled Virtual Participant', err);
       setError(errorText(err));
