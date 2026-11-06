@@ -3,6 +3,7 @@
 import './stack-settings.js';
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeChatText } from './chat-text.js';
+import { preferredVpHandle } from './vp-handle.js';
 
 export interface MeetingInvite {
   meetingId: string;
@@ -106,6 +107,7 @@ export interface MeetingDetails {
 export const DEFAULT_INTRO_MESSAGE =
   'Hello. I am an AI Live Meeting Assistant (LMA). I was invited by {LMA_USER} to join this call. ' +
   'Type "LMA leave" in chat to remove me, or "LMA help" to see the other commands. ' +
+  'If there is more than one LMA here, add my name: "LMA {LMA_HANDLE} leave". ' +
   'To learn more please visit: https://amazon.com/live-meeting-assistant.';
 
 /**
@@ -132,9 +134,16 @@ class DetailsManager {
     const lmaIdentity = process.env.LMA_IDENTITY || 'LMA ({LMA_USER})';
     const lmaUser = userName;
 
-    // Replace {LMA_USER} placeholder in messages
+    // Replace the {LMA_USER} placeholder in messages, and {LMA_HANDLE} with
+    // the name to add after "LMA" to address this VP when there are several
+    // (vp-handle.ts; chat-addressing.ts): the owner's first name or email
+    // local part, else the whole display name.
+    const lmaHandle = () => {
+      const displayName = lmaIdentity.replace(/{LMA_USER}/g, lmaUser);
+      return preferredVpHandle(displayName) ?? displayName;
+    };
     const replacePlaceholders = (message: string): string => {
-      return message.replace(/{LMA_USER}/g, lmaUser);
+      return message.replace(/{LMA_USER}/g, lmaUser).replace(/{LMA_HANDLE}/g, () => lmaHandle());
     };
 
     // Messages Configuration

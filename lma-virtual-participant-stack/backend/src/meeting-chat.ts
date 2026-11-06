@@ -71,6 +71,7 @@ import { parseAssistantChatCommand } from './assistant-toggles.js';
 import { ChatPlatform, isOwnChatSender, parseChatQuestion } from './chat-ask.js';
 import { classifyChatReply, normalizeReplyText } from './consent-matcher.js';
 import { MEETING_CHAT_CHANNEL } from './channels.js';
+import { withoutVpAddress } from './vp-handle.js';
 import type { TranscriptSegment } from './kinesis-stream.js';
 import { createLogger } from './logger.js';
 
@@ -130,6 +131,12 @@ export interface IncomingChat {
     links?: readonly string[];
     /** Read from what the chat panel already held when the VP first read it. */
     history?: boolean;
+    /**
+     * The text to read for an LMA command, when it differs from `text`: the
+     * message with its address reduced to "LMA" (chat-addressing.ts), so a
+     * command for another LMA VP stays out like one for this VP.
+     */
+    commandText?: string;
 }
 
 /** What happened to an offered message. */
@@ -164,8 +171,10 @@ export type ChatOutcome =
  * one state ("LMA start" only resumes a paused meeting). This decides what
  * stays out of the transcript, and that does not depend on the state.
  */
-export function isLmaChatCommand(text: string): boolean {
-    if (!text || !text.trim()) return false;
+export function isLmaChatCommand(message: string): boolean {
+    if (!message || !message.trim()) return false;
+    // A command for another LMA VP ("LMA (Alice) leave") is a command too.
+    const text = withoutVpAddress(message);
     if (matchesEndCommand(text)) return true;
     if (parseAssistantChatCommand(text) !== null) return true;
     for (const command of [details.helpCommand, details.pauseCommand, details.startCommand]) {
@@ -432,7 +441,7 @@ export class MeetingChatCapture {
         if (!text) return 'empty';
         if (this.alreadySeen(chat, text)) return 'duplicate';
         if (this.isOwn(chat.sender, text)) return 'own';
-        if (isLmaChatCommand(text)) return 'command';
+        if (isLmaChatCommand(text) || (chat.commandText && isLmaChatCommand(chat.commandText))) return 'command';
         if (chat.audience === 'direct') return 'direct';
         // Only a message the handler shows was sent to everyone: a Zoom label
         // in another language, or an SDK payload naming no receiver, may be a

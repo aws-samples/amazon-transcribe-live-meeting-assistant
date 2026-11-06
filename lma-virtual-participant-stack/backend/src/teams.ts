@@ -12,6 +12,7 @@ import { toolbarPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { noteSentChat } from './meeting-chat.js';
 import { meetingChat } from './meeting-chat-runtime.js';
+import { chatAddressing } from './chat-addressing.js';
 import { simliAvatar } from './simli-avatar.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { findElementWithFallback, classifyJoinState, isResolverEnabled } from './ai-dom-resolver.js';
@@ -806,8 +807,29 @@ export default class Teams {
     // end command ("LMA leave/end"), pause/resume, and transcript capture.
     // Teams chat text doesn't expose the sender on the same node, so we use the
     // lenient matcher and a generic farewell.
-    private async handleIncomingMessage(page: Page, message: string, row: TeamsChatRow = {}): Promise<void> {
-        if (!message) return;
+    private async handleIncomingMessage(page: Page, rawMessage: string, row: TeamsChatRow = {}): Promise<void> {
+        if (!rawMessage) return;
+        // Which LMA VP the message is for, when there are several
+        // (chat-addressing.ts). The row's author is used here, as for the
+        // capture: only to tell another VP's messages and name. One for another
+        // VP, or the bare "LMA" with several here, is meeting chat only.
+        const route = chatAddressing.route(rawMessage, row.author ?? null);
+        if (!route.act) {
+            meetingChat.offer({
+                platform: 'teams',
+                text: rawMessage,
+                commandText: route.text,
+                sender: row.author ?? null,
+                id: row.id ?? null,
+                platformTime: row.time ?? null,
+                audience: 'everyone',
+                links: row.links,
+                history: row.history,
+            });
+            return;
+        }
+        // Read with its address reduced to "LMA".
+        const message = route.text;
         // A consent reply, or "LMA start" while consent is withheld. No sender,
         // for the reason above.
         if (await meetingConsent.handleChat(null, message)) return;
@@ -828,7 +850,7 @@ export default class Teams {
                 // which is offered with the row's author and id.
                 if (answered) {
                     meetingChat.offerAnswer(
-                        { platform: 'teams', text: message, sender: row.author ?? null, id: row.id ?? null },
+                        { platform: 'teams', text: rawMessage, sender: row.author ?? null, id: row.id ?? null },
                         messages,
                     );
                 }
@@ -875,7 +897,8 @@ export default class Teams {
             // the row's author is not confirmed against a live meeting.
             meetingChat.offer({
                 platform: 'teams',
-                text: message,
+                text: rawMessage,
+                commandText: message,
                 sender: row.author ?? null,
                 id: row.id ?? null,
                 platformTime: row.time ?? null,

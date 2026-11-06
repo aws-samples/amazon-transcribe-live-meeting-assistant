@@ -102,7 +102,7 @@ const ADDRESSED = /^\s*lma\b[\s,:;.!-]*(.*)$/is;
  * without a question mark: the question words, and the requests participants
  * type to an assistant ("LMA summarize the last ten minutes").
  */
-const QUESTION_STARTS: ReadonlySet<string> = new Set([
+export const QUESTION_STARTS: ReadonlySet<string> = new Set([
     'what', 'whats', 'who', 'whos', 'whom', 'whose', 'when', 'where', 'why', 'how', 'which',
     'summarize', 'summarise', 'recap', 'explain', 'list', 'tell',
 ]);

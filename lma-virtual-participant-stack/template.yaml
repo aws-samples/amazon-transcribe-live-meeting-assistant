@@ -23,7 +23,9 @@ Parameters:
       (Optional) ARN of the Strands agent Lambda function (ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN).
       When provided, enables Nova voice agent to delegate complex queries to the Strands agent.
 
-  # {LMA_USER} token is replaced by user's name at runtime.
+  # {LMA_USER} token is replaced by user's name at runtime, and {LMA_HANDLE}
+  # by the name to add after "LMA" to address this VP (the owner's first name
+  # or email local part).
 
   LMAIdentity:
     Type: String
@@ -35,6 +37,7 @@ Parameters:
       Hello. I am an AI Live Meeting Assistant (LMA).
       I was invited by {LMA_USER} to join this call.
       Type "LMA leave" in chat to remove me, or "LMA help" to see the other commands.
+      If there is more than one LMA here, add my name: "LMA {LMA_HANDLE} leave".
       To learn more please visit: https://amazon.com/live-meeting-assistant.
 
   StartRecordingMessage:

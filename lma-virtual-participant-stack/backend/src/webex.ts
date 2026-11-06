@@ -14,6 +14,7 @@ import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { toolbarPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { meetingChat } from './meeting-chat-runtime.js';
+import { chatAddressing } from './chat-addressing.js';
 import { simliAvatar } from './simli-avatar.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
@@ -874,6 +875,23 @@ export default class Webex {
             ) {
                 return;
             }
+            // Which LMA VP the message is for, when there are several
+            // (chat-addressing.ts). One for another VP, or the bare "LMA" with
+            // several here, is observed for the diagnostics only.
+            const route = chatAddressing.route(message, sender);
+            if (!route.act) {
+                meetingChat.observe({
+                    platform: 'webex',
+                    text: message,
+                    sender,
+                    id: messageId,
+                    links,
+                    audience: privateMark ? 'direct' : undefined,
+                });
+                return;
+            }
+            // Read from here on with its address reduced to "LMA".
+            message = route.text;
             // A consent reply, or "LMA start" while consent is withheld.
             if (await meetingConsent.handleChat(sender, message)) return;
             // Checked ahead of pause/resume so an assistant-mode toggle lands

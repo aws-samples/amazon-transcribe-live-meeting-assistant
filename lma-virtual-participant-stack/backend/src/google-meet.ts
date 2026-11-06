@@ -38,6 +38,7 @@ import { toolbarPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { noteSentChat } from './meeting-chat.js';
 import { meetingChat } from './meeting-chat-runtime.js';
+import { chatAddressing } from './chat-addressing.js';
 import { simliAvatar } from './simli-avatar.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { classifyJoinState, findElementWithFallback, isResolverEnabled } from './ai-dom-resolver.js';
@@ -58,6 +59,7 @@ import {
     MeetTileReading,
     chooseMeetSpeaker,
     classifyMeetScreenText,
+    cleanMeetParticipantName,
     isMeetRefusalRedirect,
     isOwnMeetName,
     meetTileSpeaking,
@@ -532,10 +534,29 @@ export default class GoogleMeet {
     private async handleIncomingMessage(
         page: Page,
         sender: string | null,
-        message: string,
+        rawMessage: string,
         reading: Partial<MeetChatReading> = {},
     ): Promise<void> {
-        if (isOwnMeetName(sender, this.ownIdentities()) || isOwnMeetMessage(message)) return;
+        if (isOwnMeetName(sender, this.ownIdentities()) || isOwnMeetMessage(rawMessage)) return;
+        // Which LMA VP the message is for, when there are several
+        // (chat-addressing.ts). One for another VP, or the bare "LMA" with
+        // several here, is meeting chat only.
+        const route = chatAddressing.route(rawMessage, sender);
+        if (!route.act) {
+            meetingChat.offer({
+                platform: 'google-meet',
+                text: rawMessage,
+                commandText: route.text,
+                sender,
+                id: reading.id ?? null,
+                platformTime: reading.time ?? null,
+                audience: 'everyone',
+                links: reading.links,
+            });
+            return;
+        }
+        // Read with its address reduced to "LMA".
+        const message = route.text;
         // The consent flow gets no sender on Meet. The sender reading has not
         // been confirmed against a live meeting, and a consent recorded for the
         // wrong person is worse than one not recorded: so, as on the Teams
@@ -553,7 +574,7 @@ export default class GoogleMeet {
                 // transcript when the question was (meeting-chat.ts).
                 if (answered) {
                     meetingChat.offerAnswer(
-                        { platform: 'google-meet', text: message, sender, id: reading.id ?? null },
+                        { platform: 'google-meet', text: rawMessage, sender, id: reading.id ?? null },
                         messages,
                     );
                 }
@@ -597,7 +618,8 @@ export default class GoogleMeet {
             // has no private messages in a meeting's chat.
             meetingChat.offer({
                 platform: 'google-meet',
-                text: message,
+                text: rawMessage,
+                commandText: message,
                 sender,
                 id: reading.id ?? null,
                 platformTime: reading.time ?? null,
@@ -1228,6 +1250,10 @@ export default class GoogleMeet {
                 speakerPollInFlight = true;
                 try {
                     const tiles = await this.readTiles(page, !tilesLogged);
+                    // Another LMA VP's tile (chat-addressing.ts). Noted, not
+                    // taken as the whole list: a large meeting shows only some
+                    // of its participants as tiles.
+                    for (const tile of tiles) chatAddressing.notePeer(cleanMeetParticipantName(tile.name));
                     if (!tilesLogged && tiles.length > 0) {
                         tilesLogged = true;
                         log.info(`[meet] participant tiles: ${JSON.stringify(tiles.slice(0, 3))}`);
