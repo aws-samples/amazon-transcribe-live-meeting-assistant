@@ -1771,10 +1771,13 @@ export default class Zoom {
             // Not a branch of the chain below: a question is still meeting chat,
             // and is recorded as such.
             if (chatQuestion) {
-                void startChatAnswer(chatQuestion, sender, 'zoom', async (messages) => {
+                void startChatAnswer(chatQuestion, sender, 'zoom', async (messages, answered) => {
                     await this.sendMessages(page, messages);
-                    // Added to the transcript when the question was (meeting-chat.ts).
-                    meetingChat.offerAnswer({ platform: 'zoom', text: body, sender, id: messageId }, messages);
+                    // The meeting assistant's answer, not a notice, is added to the
+                    // transcript when the question was (meeting-chat.ts).
+                    if (answered) {
+                        meetingChat.offerAnswer({ platform: 'zoom', text: body, sender, id: messageId }, messages);
+                    }
                 });
             }
             if (matchesEndCommand(body)) {

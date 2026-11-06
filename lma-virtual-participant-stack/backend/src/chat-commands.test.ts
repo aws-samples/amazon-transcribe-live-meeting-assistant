@@ -372,7 +372,7 @@ test('every platform handler answers chat questions with startChatAnswer under i
         // question still reaches the branch that records meeting chat.
         assert.ok(!/else if \(chatQuestion/.test(src), `${file} answers a question instead of recording it`);
         assert.ok(
-            src.includes(`'${platform}', (messages) =>`) || src.includes(`'${platform}', async (messages) =>`),
+            [`'${platform}', (messages) =>`, `'${platform}', async (messages, answered) =>`].some((form) => src.includes(form)),
             `${file} does not answer chat questions as '${platform}'`,
         );
     }

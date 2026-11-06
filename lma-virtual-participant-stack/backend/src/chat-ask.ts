@@ -140,6 +140,11 @@ function isOtherChatCommand(message: string): boolean {
         || matchesChatCommand(message, details.helpCommand)
         || matchesChatCommand(message, details.pauseCommand)
         || matchesChatCommand(message, details.startCommand)
+        // Only the built-in phrases, by design: the deployment's own consent
+        // phrases are replies only while a consent flow runs, and the flow
+        // (meeting-consent.ts) reads every message before this parser does,
+        // so a configured phrase never gets here while it is a reply.
+        // isLmaChatCommand (meeting-chat.ts) draws the same line.
         || classifyChatReply(message, [], []) !== null
     );
 }
@@ -279,6 +284,20 @@ export const askStrandsMeetingAssistant: AskMeetingAssistant = async (question) 
     throw new Error(`meeting assistant returned no answer (statusCode=${body?.statusCode ?? '-'} keys=${shape})`);
 };
 
+/** What the answerer replies to a question; see `respond` in `createChatAnswerer`. */
+export interface ChatReply {
+    messages: string[];
+    /**
+     * The messages are the meeting assistant's answer. False for the VP's own
+     * notices (no assistant, paused, rate limited, busy, too long, failed),
+     * which are posted but are not an answer to add to the transcript.
+     */
+    answered: boolean;
+}
+
+/** Nothing to post. */
+const noReply = (): ChatReply => ({ messages: [], answered: false });
+
 /**
  * One answerer per meeting: the per-sender rate limit and the one-at-a-time
  * rule live here, with the agent call injectable for tests.
@@ -306,28 +325,31 @@ export function createChatAnswerer(
     let busy = false;
 
     /**
-     * The messages to post for a question, or none. Resolves once the agent
-     * has answered (or failed); never rejects.
+     * The reply to a question: the messages to post (or none), and whether
+     * they are the meeting assistant's answer rather than a notice (a refusal,
+     * a rate limit, a failure). Resolves once the agent has answered (or
+     * failed); never rejects.
      */
-    async function answer(
+    async function respond(
         parsed: ChatQuestion,
         sender: string | null | undefined,
         platform: ChatPlatform,
-    ): Promise<string[]> {
-        if (isOwnChatSender(sender)) return [];
+    ): Promise<ChatReply> {
+        if (isOwnChatSender(sender)) return noReply();
         const limit = CHAT_MESSAGE_LIMITS[platform];
-        const reply = (text: string) => splitForChat(text, limit, 1);
+        // A notice from the VP, never the agent's answer.
+        const reply = (text: string): ChatReply => ({ messages: splitForChat(text, limit, 1), answered: false });
 
         if (!available()) {
             // Only an explicit `LMA ask` is told; an `@LMA` aside is left alone.
             return parsed.explicit
                 ? reply('questions in the chat need the Strands meeting assistant, which this deployment does not use.')
-                : [];
+                : noReply();
         }
         if (paused()) {
             return parsed.explicit
                 ? reply('the transcript is paused; ask again after someone types "LMA start".')
-                : [];
+                : noReply();
         }
         if (!parsed.question) {
             return reply('type your question after "LMA ask", for example "LMA ask what did we decide about the budget?"');
@@ -342,13 +364,13 @@ export function createChatAnswerer(
         if (last !== undefined && at - last < intervalMs) {
             // Told once per window, so repeated asking does not become a
             // stream of refusals.
-            if (toldToWait.has(key)) return [];
+            if (toldToWait.has(key)) return noReply();
             toldToWait.add(key);
             return reply(`one question every ${Math.round(intervalMs / 1000)} seconds, please.`);
         }
         if (busy) {
             // Once per sender per answer in progress, for the same reason.
-            if (toldBusy.has(key)) return [];
+            if (toldBusy.has(key)) return noReply();
             toldBusy.add(key);
             return reply('still answering the previous question; ask again in a moment.');
         }
@@ -376,11 +398,13 @@ export function createChatAnswerer(
             // Read rather than spoken, so links keep their addresses.
             const plain = toSpokenText(raw, { keepUrls: true });
             const messages = splitForChat(plain || 'I have no answer to that.', limit);
+            // An answer with no text left once reduced to plain text is posted
+            // as a notice, not recorded as the agent's answer.
             log.info(
                 `[chat-ask] answered platform=${platform} chars=${plain.length} messages=${messages.length}`
                     + ` ms=${now() - started}`,
             );
-            return messages;
+            return { messages, answered: plain.length > 0 };
         } catch (error) {
             log.warn('[chat-ask] the meeting assistant did not answer:', error);
             return reply('I could not get an answer from the meeting assistant just now.');
@@ -389,7 +413,16 @@ export function createChatAnswerer(
         }
     }
 
-    return { answer };
+    /** The messages to post for a question, or none; see `respond`. */
+    async function answer(
+        parsed: ChatQuestion,
+        sender: string | null | undefined,
+        platform: ChatPlatform,
+    ): Promise<string[]> {
+        return (await respond(parsed, sender, platform)).messages;
+    }
+
+    return { answer, respond };
 }
 
 export type ChatAnswerer = ReturnType<typeof createChatAnswerer>;
@@ -397,19 +430,21 @@ export type ChatAnswerer = ReturnType<typeof createChatAnswerer>;
 const meetingAnswerer: ChatAnswerer = createChatAnswerer();
 
 /**
- * Answer a chat question in the background and post the reply with `send`.
- * Returns at once; errors are logged, never thrown into the chat handler.
+ * Answer a chat question in the background and post the reply with `send`,
+ * which is told whether the reply is the meeting assistant's answer (see
+ * `ChatReply.answered`): only an answer is added to the transcript. Returns at
+ * once; errors are logged, never thrown into the chat handler.
  */
 export function startChatAnswer(
     parsed: ChatQuestion,
     sender: string | null | undefined,
     platform: ChatPlatform,
-    send: (messages: string[]) => Promise<void>,
+    send: (messages: string[], answered: boolean) => Promise<void>,
     answerer: ChatAnswerer = meetingAnswerer,
 ): Promise<void> {
     log.info(`[chat-ask] question platform=${platform} explicit=${parsed.explicit} chars=${parsed.question.length}`);
     return answerer
-        .answer(parsed, sender, platform)
-        .then((messages) => (messages.length ? send(messages) : undefined))
+        .respond(parsed, sender, platform)
+        .then((reply) => (reply.messages.length ? send(reply.messages, reply.answered) : undefined))
         .catch((error) => log.warn('[chat-ask] could not post the answer:', error));
 }

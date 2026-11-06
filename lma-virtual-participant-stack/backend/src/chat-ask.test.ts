@@ -299,10 +299,32 @@ test('an empty or overlong question is answered without asking the agent', async
 
 test('startChatAnswer posts the answer through the platform send and never throws', async () => {
     const { a } = answerer('Posted.');
-    const sent: string[][] = [];
-    await startChatAnswer(Q('q'), 'Alice', 'zoom', async (m) => void sent.push(m), a);
-    assert.deepEqual(sent, [['Live Meeting Assistant: Posted.']]);
+    const sent: Array<[string[], boolean]> = [];
+    await startChatAnswer(Q('q'), 'Alice', 'zoom', async (m, answered) => void sent.push([m, answered]), a);
+    assert.deepEqual(sent, [[['Live Meeting Assistant: Posted.'], true]]);
 
     const { a: b } = answerer('Posted.');
     await startChatAnswer(Q('q'), 'Alice', 'zoom', async () => { throw new Error('page closed'); }, b);
+});
+
+test("respond says which replies are the assistant's answer and which are the VP's notices", async () => {
+    const { a, advance } = answerer('An answer.');
+    assert.deepEqual(await a.respond(Q('one'), 'Alice', 'zoom'), { messages: ['Live Meeting Assistant: An answer.'], answered: true });
+    const tooSoon = await a.respond(Q('two'), 'Alice', 'zoom');
+    assert.equal(tooSoon.answered, false);
+    assert.match(tooSoon.messages[0], /one question every/);
+    assert.deepEqual(await a.respond(Q('three'), 'Alice', 'zoom'), { messages: [], answered: false });
+    assert.equal((await a.respond(Q('x'.repeat(501)), 'Bob', 'zoom')).answered, false);
+    assert.equal((await a.respond(Q(''), 'Bob', 'zoom')).answered, false);
+    advance(20_000);
+
+    const { a: failing } = answerer(new Error('down'));
+    assert.equal((await failing.respond(Q('q'), 'Alice', 'zoom')).answered, false);
+    // An answer with no text once reduced to plain text is posted as a notice.
+    const { a: empty } = answerer('**');
+    const reply = await empty.respond(Q('q'), 'Alice', 'zoom');
+    assert.equal(reply.answered, false);
+    assert.deepEqual(reply.messages, ['Live Meeting Assistant: I have no answer to that.']);
+    const none = createChatAnswerer(async () => 'unused', { available: () => false });
+    assert.equal((await none.respond(Q('q', true), 'Alice', 'zoom')).answered, false);
 });
