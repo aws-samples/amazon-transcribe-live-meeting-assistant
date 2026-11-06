@@ -49,10 +49,14 @@ import {
   parseSpeakerIdentities,
   resolveSpeaker,
   serializeSpeakerIdentities,
+  speakerGroups,
   speakerRowLabel,
+  withSpeakerName,
 } from '../common/speaker-identities';
+import { speakerChipLayout, withSpeakerMode } from '../common/speaker-modes';
 import SpeakerIdentitiesPanel from './SpeakerIdentitiesPanel';
 import SpeakerAssignmentModal from './SpeakerAssignmentModal';
+import TranscriptSpeakerChips from './TranscriptSpeakerChips';
 import AgendaPanel from './AgendaPanel';
 import ConsentPanel from './ConsentPanel';
 import ConsentPauseAlert from './ConsentPauseAlert';
@@ -843,6 +847,9 @@ const TranscriptToolbar = ({
   onShowChatChange = () => {},
   editableSpeakers = null,
   onEditSpeaker = undefined,
+  chipEntries = null,
+  onSetSpeakerMode = undefined,
+  onRenameVoices = undefined,
 }) => {
   let countText = '';
   if (query.trim()) {
@@ -851,6 +858,10 @@ const TranscriptToolbar = ({
   const toggleSpeaker = (name, pressed) =>
     onSpeakersChange(pressed ? [...selectedSpeakers, name] : selectedSpeakers.filter((n) => n !== name));
   const canEdit = Boolean(onEditSpeaker && editableSpeakers?.size);
+  // The chips, grouped by platform name; one plain chip per name when the
+  // caller has not grouped them.
+  const entries = chipEntries ?? speakerNames.map((name) => ({ type: 'name', name, keys: [] }));
+  const hasGroups = entries.some((entry) => entry.type === 'group');
   return (
     <div className="transcript-toolbar" data-testid="transcript-toolbar">
       <div className="transcript-search">
@@ -882,9 +893,9 @@ const TranscriptToolbar = ({
           {countText}
         </span>
       </div>
-      {(speakerNames.length > 1 || hasChat || (canEdit && speakerNames.length > 0)) && (
+      {(speakerNames.length > 1 || hasChat || hasGroups || (canEdit && speakerNames.length > 0)) && (
         <div className="transcript-speaker-filter" role="group" aria-label="Show speakers">
-          {(speakerNames.length > 1 || canEdit) && (
+          {(speakerNames.length > 1 || canEdit || hasGroups) && (
             <>
               {speakerNames.length > 1 && (
                 <ToggleButton
@@ -895,32 +906,16 @@ const TranscriptToolbar = ({
                   All
                 </ToggleButton>
               )}
-              {speakerNames.map((name) => (
-                <span key={name} className="transcript-speaker-chip">
-                  {speakerNames.length > 1 ? (
-                    <ToggleButton
-                      pressed={selectedSpeakers.includes(name)}
-                      onChange={({ detail }) => toggleSpeaker(name, detail.pressed)}
-                    >
-                      {name}
-                    </ToggleButton>
-                  ) : (
-                    <Box variant="span" fontSize="body-s">
-                      {name}
-                    </Box>
-                  )}
-                  {/* Rename, combine or separate this speaker's voices, here
-                      rather than on the Details tab. */}
-                  {canEdit && editableSpeakers.has(name) && (
-                    <Button
-                      variant="icon"
-                      iconName="edit"
-                      ariaLabel={`Name or combine ${name}`}
-                      onClick={() => onEditSpeaker(name)}
-                    />
-                  )}
-                </span>
-              ))}
+              <TranscriptSpeakerChips
+                entries={entries}
+                filterable={speakerNames.length > 1}
+                selectedSpeakers={selectedSpeakers}
+                onToggleSpeaker={toggleSpeaker}
+                editableSpeakers={canEdit ? editableSpeakers : null}
+                onEditSpeaker={canEdit ? onEditSpeaker : undefined}
+                onSetMode={onSetSpeakerMode}
+                onRenameVoices={onRenameVoices}
+              />
             </>
           )}
           {/* The meeting chat is shown or hidden on its own, whichever speakers are chosen. */}
@@ -1116,6 +1111,15 @@ const CallInProgressTranscript = ({
     runTranslation();
   }, [callTranscriptPerCallId, translateOn, targetLanguage]);
 
+  // Whether each platform name's voices are one person or several, decided over
+  // the whole transcript (speaker-modes.js). Recomputed as segments arrive, so
+  // a live meeting's lines are relabelled when a second voice becomes a real
+  // share of a name's speech, and whenever the map changes.
+  const groups = useMemo(
+    () => speakerGroups(getSegments(), speakerIdentities),
+    [callTranscriptPerCallId, callId, speakerIdentities],
+  );
+
   const getTurnByTurnSegments = () =>
     transcriptChannels
       .map((c) => {
@@ -1169,8 +1173,12 @@ const CallInProgressTranscript = ({
           t,
           speakerIdentities,
           t.channel === 'REMOTE' ? item.remoteParticipantName : undefined,
+          groups,
         );
         t.speaker = resolved.name;
+        // The platform name this line was shown under as one person or
+        // several, for the grouped speaker chips.
+        t.speakerGroup = resolved.group;
         t.speakerLocked = resolved.locked;
         // A name given to this segment alone, not to its voice.
         t.speakerOverridden = resolved.overridden;
@@ -1208,6 +1216,21 @@ const CallInProgressTranscript = ({
     () => (onSaveSpeakerIdentities && !readOnly ? new Set(voiceKeysByName.keys()) : null),
     [voiceKeysByName, onSaveSpeakerIdentities, readOnly],
   );
+  // The chips, grouped by platform name, with each group's One person /
+  // Several people toggle.
+  const chipEntries = useMemo(
+    () => speakerChipLayout(turnByTurnSegments.filter(isSpeechSegment), groups),
+    [turnByTurnSegments, groups],
+  );
+  const canWriteSpeakers = Boolean(onSaveSpeakerIdentities && !readOnly);
+  // One write each: the chosen mode, or the name for every voice behind a chip
+  // (an empty name returns them to "Voice N").
+  const setSpeakerMode = (key, mode) =>
+    onSaveSpeakerIdentities(serializeSpeakerIdentities(withSpeakerMode(speakerIdentities, key, mode)));
+  const renameVoices = (keys, name) =>
+    onSaveSpeakerIdentities(
+      serializeSpeakerIdentities(keys.reduce((map, key) => withSpeakerName(map, key, name), speakerIdentities)),
+    );
   // The meeting's voices as the Speakers panel lists them, read when the modal opens.
   const roster = useMemo(
     () =>
@@ -1402,6 +1425,9 @@ const CallInProgressTranscript = ({
         onShowChatChange={setShowChat}
         editableSpeakers={editableSpeakers}
         onEditSpeaker={editableSpeakers ? setEditingSpeaker : undefined}
+        chipEntries={chipEntries}
+        onSetSpeakerMode={canWriteSpeakers ? setSpeakerMode : undefined}
+        onRenameVoices={canWriteSpeakers ? renameVoices : undefined}
       />
       {editingRows.length > 0 && (
         <SpeakerAssignmentModal

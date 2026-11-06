@@ -15,16 +15,17 @@ from botocore.exceptions import ClientError
 
 # The channel names and their older spellings (configuration layer).
 from lma_channels import (  # pylint: disable=import-error
-    REMOTE,
     STORED_SPEECH_CHANNELS,
     STORED_TRANSCRIPT_CHANNELS,
-    canonical_channel,
-    canonical_keyed,
     is_chat_channel,
 )
 
 # The web addresses in a chat message, by rule (configuration layer).
 from lma_chat_links import extract_links  # pylint: disable=import-error
+
+# Who spoke each line: the meeting's speaker identity map and speaker modes,
+# applied the same way the UI applies them (configuration layer).
+from lma_speakers import speaker_namer  # pylint: disable=import-error
 
 # grab environment variables
 LCA_CALL_EVENTS_TABLE = os.environ["LCA_CALL_EVENTS_TABLE"]
@@ -225,7 +226,7 @@ def timed_transcript(segments, lines, frames):
 MAX_SAID_CHARS = 3000
 
 
-def attach_said(frames, segments, condense, include_speaker, metadata):
+def attach_said(frames, segments, condense, include_speaker, metadata, name_speaker=None):
     """Give each frame "Said": the transcript spoken while it was on screen.
 
     A frame is on screen from its Timestamp until the next frame's, and the last
@@ -243,115 +244,33 @@ def attach_said(frames, segments, condense, include_speaker, metadata):
         if index >= 0:
             by_frame[index].append(row)
     for frame, rows in zip(frames, by_frame):
-        said = "".join(preprocess_transcripts(rows, condense, include_speaker, metadata)).strip()
+        said = "".join(
+            preprocess_transcripts(rows, condense, include_speaker, metadata, name_speaker)
+        ).strip()
         frame["Said"] = said[:MAX_SAID_CHARS]
     return frames
 
 
-# Trailing voice id the transcriber appends when speaker separation is on, e.g.
-# 'Other Participant (spk_0)'. Mirrors splitDiarizationLabel in the UI.
-DIARIZATION_LABEL = re.compile(r"^(.*?)(\s*\(spk_\d+\))$")
+def speaker_namer_for(segments, metadata):
+    """Names each segment's speaker as the meeting page does.
 
-# The placeholder the transcriber writes for the remote side of a streaming
-# meeting before anyone has been named.
-DEFAULT_OTHER_SPEAKER_NAME = "Other Participant"
+    This function is the single chokepoint for every LLM-facing transcript --
+    the summary prompts, the knowledge-base export and the meeting assistant's
+    summary all come through here -- so if names were resolved only in the
+    browser, the UI would show 'Bob' while every summary still said 'spk_0'.
+    The rules (the identity map, and whether the voices under one name are one
+    person or several) are lma_speakers', shared with the UI.
 
-
-def split_diarization_label(speaker):
-    """Split a stored speaker into its base name and its voice id."""
-    match = DIARIZATION_LABEL.match(speaker or "")
-    return (match.group(1), match.group(2)) if match else (speaker or "", "")
-
-
-def parse_speaker_identities(raw):
-    """Read the meeting's speaker identity map, tolerating anything.
-
-    Python twin of ui/src/components/common/speaker-identities.js. It has to exist
-    separately because this function is the single chokepoint for every LLM-facing
-    transcript -- the summary prompts, the knowledge-base export and the meeting
-    assistant all come through here. If names were resolved only in the browser,
-    the UI would show 'Bob' while every summary still said 'spk_0'.
-
-    A meeting written before this feature has no attribute, and a blob from a newer
-    version may carry unknown keys. Both must yield a transcript rather than an
-    error, so every failure returns the empty map.
+    The name the user typed for the remote side on the Stream Audio form stands
+    in for the 'Other Participant' placeholder on the REMOTE channel, as it does
+    on screen.
     """
-    empty = {"identities": {}, "merges": {}, "segmentOverrides": {}}
-    if not raw:
-        return empty
-    try:
-        parsed = json.loads(raw) if isinstance(raw, str) else raw
-    except (ValueError, TypeError):
-        logger.warning("Ignoring unparseable SpeakerIdentities")
-        return empty
-    if not isinstance(parsed, dict):
-        return empty
-    out = {
-        key: parsed[key] if isinstance(parsed.get(key), dict) else {}
-        for key in ("identities", "merges", "segmentOverrides")
-    }
-    # A map written before 0.4.0 keys its voices under the older channel names.
-    out["identities"] = canonical_keyed(out["identities"])
-    out["merges"] = canonical_keyed(out["merges"], values_are_keys=True)
-    return out
-
-
-def speaker_key(channel, speaker):
-    """Key for one voice: its channel plus the speaker string AS STORED.
-
-    Voice ids are numbered per channel and restart at spk_0, so including the
-    stored base name is what keeps 'Alice (spk_0)' and 'Bob (spk_0)' apart.
-    """
-    return f"{canonical_channel(channel) or ''}#{(speaker or '').strip()}"
-
-
-def resolve_merge_target(key, merges):
-    """Follow a merge chain to the key that holds the name, stopping on a cycle."""
-    current = key
-    seen = {current}
-    while merges.get(current) and merges[current] not in seen:
-        current = merges[current]
-        seen.add(current)
-    return current
-
-
-def resolve_speaker_name(row, identities, fallback_name):
-    """Display name for one segment, applying the meeting's identity map.
-
-    Must agree with resolveSpeaker in the UI's speaker-identities.js for the same
-    inputs, including the fallback rules -- a divergence means the transcript on
-    screen and the transcript the summary prompts read disagree about who spoke.
-    """
-    override = identities["segmentOverrides"].get(row.get("SegmentId"))
-    if override:
-        return override
-
-    stored = row.get("Speaker") or ""
-    channel = canonical_channel(row.get("Channel"))
-    target = resolve_merge_target(speaker_key(channel, stored), identities["merges"])
-    entry = identities["identities"].get(target)
-    if isinstance(entry, dict) and entry.get("name"):
-        return entry["name"]
-
-    # No mapping. Keep the voice id: two voices on one channel differ only by it,
-    # so dropping it would read as one person in every summary.
-    base, suffix = split_diarization_label(stored)
-    # The participant name from the Stream Audio form is the REMOTE side's name,
-    # so it substitutes only on the REMOTE channel; applying it to the local
-    # microphone channel would label that channel with the wrong person.
-    if base == DEFAULT_OTHER_SPEAKER_NAME and channel == REMOTE and fallback_name:
-        return f"{fallback_name}{suffix}"
-    # A segment with no recorded speaker stays unlabelled, which is this
-    # function's long-standing contract: better an unattributed line than an
-    # invented one.
-    #
-    # This is the one place the UI resolver deliberately differs. There, an empty
-    # stored speaker takes the same branch as the placeholder, so a REMOTE-channel
-    # segment renders under the Stream Audio participant name (and otherwise under
-    # the generic placeholder) -- a transcript row has to put something in its
-    # speaker column, whereas a prompt line reads better with no attribution than
-    # with a guessed one.
-    return stored
+    call_metadata = metadata or {}
+    return speaker_namer(
+        [row for row in segments if not is_chat_channel(row.get("Channel"))],
+        call_metadata.get("SpeakerIdentities"),
+        call_metadata.get("CustomerPhoneNumber"),
+    )
 
 
 # ── the meeting chat ─────────────────────────────────────────────────────────
@@ -459,14 +378,18 @@ def chat_links(rows):
     return links
 
 
-def preprocess_transcripts(transcripts, condense, includeSpeaker, metadata=None):
+def preprocess_transcripts(transcripts, condense, includeSpeaker, metadata=None, name_speaker=None):
+    """One text line per segment, "<speaker>: <text>" with includeSpeaker.
+
+    ``name_speaker`` names a segment's speaker. It is built from the WHOLE
+    transcript (see speaker_namer_for), because whether the voices under one
+    name are one person or several is a property of the meeting: a caller
+    formatting an excerpt -- one key frame's speech -- passes the meeting's.
+    Without it, one is built from ``transcripts``.
+    """
     data = []
-    call_metadata = metadata or {}
-    identities = parse_speaker_identities(call_metadata.get("SpeakerIdentities"))
-    # The name the user typed for the remote side on the Stream Audio form. The UI
-    # has always substituted it for the placeholder; doing it here too is what
-    # stops a summary naming someone the transcript on screen does not.
-    fallback_name = call_metadata.get("CustomerPhoneNumber")
+    if name_speaker is None:
+        name_speaker = speaker_namer_for(transcripts, metadata)
     transcripts.sort(key=lambda x: x["EndTime"])
     for row in transcripts:
         if is_chat_channel(row.get("Channel")):
@@ -486,7 +409,7 @@ def preprocess_transcripts(transcripts, condense, includeSpeaker, metadata=None)
                 transcript = "MeetingAssistant: " + transcript
             else:
                 # Add the 'Speaker:' prefix for Transcript segments if "Speaker" field is present
-                speakerName = resolve_speaker_name(row, identities, fallback_name)
+                speakerName = name_speaker(row)
                 if speakerName:
                     transcript = speakerName.strip() + ": " + transcript
 
@@ -554,7 +477,12 @@ def lambda_handler(event, context):
     chat_rows = [row for row in rows if is_chat_channel(row.get("Channel"))] if include_chat else []
     chat_in_text, chat_omitted = bounded_chat(chat_rows)
     segments = speech + chat_in_text
-    transcripts = preprocess_transcripts(segments, preProcess, includeSpeaker, metadata)
+    # Named from the whole of the speech, once, for the transcript and the key
+    # frames alike.
+    name_speaker = speaker_namer_for(speech, metadata)
+    transcripts = preprocess_transcripts(
+        segments, preProcess, includeSpeaker, metadata, name_speaker
+    )
     transcript_string = "".join(transcripts)
     response = {"transcript": transcript_string, "metadata": metadata}
     keyframes = None
@@ -566,7 +494,9 @@ def lambda_handler(event, context):
         response["timedTranscript"] = timed_transcript(segments, transcripts, keyframes)
     if data.get("IncludeKeyframes"):
         # What was said while each frame was up: speech, not the chat.
-        response["keyframes"] = attach_said(keyframes, speech, preProcess, includeSpeaker, metadata)
+        response["keyframes"] = attach_said(
+            keyframes, speech, preProcess, includeSpeaker, metadata, name_speaker
+        )
     if include_chat:
         response["chat"] = chat_document(chat_in_text, chat_omitted)
         response["chatLinks"] = chat_links(chat_rows)

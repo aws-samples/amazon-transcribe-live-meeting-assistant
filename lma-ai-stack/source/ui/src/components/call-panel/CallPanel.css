@@ -281,3 +281,25 @@ mark.transcript-search-match {
   display: inline-flex;
   align-items: center;
 }
+
+/* The chips of one platform name's voices, with its One person / Several people
+   toggle, kept together and set apart from the other speakers. */
+.transcript-speaker-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid #c6c6cd;
+  border-radius: 8px;
+}
+
+.awsui-dark-mode .transcript-speaker-group {
+  border-color: #414d5c;
+}
+
+/* A voice being named in place: room for the name. */
+.transcript-speaker-chip-editing {
+  gap: 4px;
+  min-width: 12rem;
+}

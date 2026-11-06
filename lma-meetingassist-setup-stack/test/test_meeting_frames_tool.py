@@ -215,6 +215,23 @@ def test_only_https_links_are_downloaded():
 # ── the tool, through the handler module ────────────────────────────────────
 
 
+class FakeDynamo:
+    """Stands in for the boto3 DynamoDB resource: one meeting record, by key."""
+
+    def __init__(self, record: Dict[str, Any]):
+        self.record = record
+
+    def Table(self, _name):  # noqa: N802 - boto3's name
+        record = self.record
+
+        class _Table:
+            @staticmethod
+            def get_item(**_kwargs):
+                return {"Item": record} if record else {}
+
+        return _Table()
+
+
 @pytest.fixture
 def tool(monkeypatch):
     strands_stand_in.install(monkeypatch)
@@ -222,6 +239,8 @@ def tool(monkeypatch):
     monkeypatch.setattr(handler_module.meeting_frames, "load_keyframes", lambda _run, _cid: list(FRAMES))
     monkeypatch.setattr(handler_module.meeting_frames, "download_image", lambda url: b"jpeg-bytes")
     monkeypatch.setattr(handler_module, "query_transcript_items", lambda *_a: list(SEGMENTS))
+    # The meeting record the speaker names are read from: a meeting with none.
+    monkeypatch.setattr(handler_module, "dynamodb", FakeDynamo({}))
     metered: List[Any] = []
     monkeypatch.setattr(handler_module.call_metering, "record", lambda *a, **kw: metered.append((a, kw)) or True)
 

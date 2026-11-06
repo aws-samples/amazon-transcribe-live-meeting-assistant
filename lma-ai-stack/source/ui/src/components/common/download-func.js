@@ -6,7 +6,7 @@
 /* eslint-disable indent */
 import * as XLSX from 'xlsx';
 import { canonicalChannel, isChatChannel, isSpeechChannel, REMOTE_CHANNEL } from './channels';
-import { parseSpeakerIdentities, resolveSpeakerName } from './speaker-identities';
+import { parseSpeakerIdentities, resolveSpeakerName, speakerGroups } from './speaker-identities';
 import { keyframeImagesAsText, summarySections } from './summary';
 import { consentAsText } from './meeting-consent';
 import { meetingTitle } from './meeting-header';
@@ -202,13 +202,18 @@ export const transcriptDownloadRows = (callTranscriptPerCallId, meeting) => {
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
   const transcriptChannels = Object.keys(transcriptsForThisCallId);
 
-  const currentTurnByTurnSegments = transcriptChannels
+  const allSegments = transcriptChannels
     .map((c) => {
       const { segments } = transcriptsForThisCallId[c];
       return segments;
     })
     // sort entries by end time
-    .reduce((p, c) => [...p, ...c].sort((a, b) => a.endTime - b.endTime), [])
+    .reduce((p, c) => [...p, ...c].sort((a, b) => a.endTime - b.endTime), []);
+  // Whether each platform name's voices are one person or several, decided over
+  // the whole transcript exactly as the Transcript tab decides it.
+  const groups = speakerGroups(allSegments, speakerIdentities);
+
+  const currentTurnByTurnSegments = allSegments
     // only extract the start time, end time, speaker and transcript
     .map((c) => {
       const { channel, startTime, endTime } = c;
@@ -224,6 +229,7 @@ export const transcriptDownloadRows = (callTranscriptPerCallId, meeting) => {
           c,
           speakerIdentities,
           canonicalChannel(channel) === REMOTE_CHANNEL ? remoteParticipantName : undefined,
+          groups,
         );
       } else if (isChatChannel(channel)) {
         // Under the sender the meeting's chat gave, marked as chat, on one line.

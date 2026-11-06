@@ -28,6 +28,9 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional
 # repeated back is not one the meeting stated.
 from lma_channels import is_speech_channel  # pylint: disable=import-error
 
+# Who spoke each line, named as the meeting page names them (configuration layer).
+from lma_speakers import speaker_namer  # pylint: disable=import-error
+
 #: Upper bound on the transcript text handed to the model: roughly the first half
 #: hour of conversation. Agendas are stated at the start of a meeting, so a long
 #: meeting is cut from the end, keeping its opening. Bounded this tightly because
@@ -66,9 +69,21 @@ def _seconds(value: Any) -> float:
         return 0.0
 
 
-def build_transcript(segments: Iterable[Mapping[str, Any]]) -> str:
+def build_transcript(
+    segments: Iterable[Mapping[str, Any]],
+    speaker_identities: Any = None,
+    participant_name: Optional[str] = None,
+) -> str:
     """Final speech segments in start order, one "[MM:SS] Speaker: text" line each,
-    cut to MAX_TRANSCRIPT_CHARS from the end."""
+    cut to MAX_TRANSCRIPT_CHARS from the end.
+
+    Speakers are named through the meeting's speaker identity map and speaker
+    modes (``speaker_identities``, the stored JSON), the way the transcript on the
+    meeting page names them; ``participant_name`` is the name typed for the remote
+    side on the Stream Audio form.
+    """
+    segments = list(segments)
+    name_speaker = speaker_namer(segments, speaker_identities, participant_name)
     rows = []
     for segment in segments:
         if segment.get("IsPartial") or not is_speech_channel(segment.get("Channel")):
@@ -78,7 +93,7 @@ def build_transcript(segments: Iterable[Mapping[str, Any]]) -> str:
             continue
         start = _seconds(segment.get("StartTime"))
         rows.append(
-            (_seconds(segment.get("EndTime")), start, segment.get("Speaker") or "Unknown", text)
+            (_seconds(segment.get("EndTime")), start, name_speaker(segment) or "Unknown", text)
         )
     # By start time, the time each line shows, so the times read forwards where
     # two channels overlap.

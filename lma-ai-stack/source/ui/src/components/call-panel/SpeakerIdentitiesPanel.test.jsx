@@ -218,6 +218,7 @@ describe('SpeakerIdentitiesPanel', () => {
       'merges',
       'rejected',
       'segmentOverrides',
+      'speakerModes',
       'version',
     ]);
   });

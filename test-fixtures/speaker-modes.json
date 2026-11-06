@@ -1,0 +1,304 @@
+{
+  "description": "Transcript segments, a meeting's speaker identity map, and who each segment is shown as. Read by lma_speakers' tests (lma-ai-stack/source/lambda_layers/configuration_layer/lma_speakers) and by the tests of its UI twin, speaker-modes.js (lma-ai-stack/source/ui/src/components/common/speaker-modes.test.js), so the transcript on screen, the downloads and every LLM-facing transcript name the same people. Segment times are seconds; `names` is one entry per segment, in order; `groups` lists every name that carries voice labels, with its mode and its voices in Voice 1, Voice 2... order.",
+  "roomNames": {
+    "rooms": [
+      "ConfRm_1",
+      "Conference Room B",
+      "conf-12",
+      "Zoom Room 4",
+      "Teams Room - Seattle",
+      "Meeting Room",
+      "Rm 101",
+      "Boardroom",
+      "Huddle 3",
+      "SEA54-12.401",
+      "NYC10_3_201",
+      "BLDG-3-ROOM",
+      "Floor 5 East",
+      "Polycom Studio",
+      "Logitech Rally Bar",
+      "Surface Hub 2S",
+      "Neat Bar"
+    ],
+    "people": [
+      "Bob Strahan",
+      "Chris Lott",
+      "Jeremy [C] Feldman",
+      "Mark Broomfield",
+      "Roomi Patel",
+      "Polly Smith",
+      "Lobbyist Jones",
+      "Kim Rmani",
+      "alex@example.com",
+      "LMA (strahanr@amazon.com)",
+      "Bob2"
+    ],
+    "unknown": ["", "Unknown", "UNKNOWN SPEAKER", "none", "Other Participant", "Other participants", "Others", "Me"]
+  },
+  "cases": [
+    {
+      "name": "an individual with a spurious second voice is one person",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_0)", "start": 0, "end": 100},
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_1)", "start": 100, "end": 101},
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_0)", "start": 101, "end": 200}
+      ],
+      "names": ["Bob Strahan", "Bob Strahan", "Bob Strahan"],
+      "groups": {"REMOTE#Bob Strahan": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0", "spk_1"]}}
+    },
+    {
+      "name": "a room name keeps its voices apart",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "ConfRm_1 (spk_0)", "start": 0, "end": 10},
+        {"channel": "REMOTE", "speaker": "ConfRm_1 (spk_1)", "start": 10, "end": 20},
+        {"channel": "REMOTE", "speaker": "ConfRm_1 (spk_0)", "start": 20, "end": 30}
+      ],
+      "names": ["ConfRm_1 · Voice 1", "ConfRm_1 · Voice 2", "ConfRm_1 · Voice 1"],
+      "groups": {"REMOTE#ConfRm_1": {"mode": "several", "default": "several", "reason": "room-name", "voices": ["spk_0", "spk_1"]}}
+    },
+    {
+      "name": "two voices each with a real share of the speech are several people",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Jeremy (spk_0)", "start": 0, "end": 90},
+        {"channel": "REMOTE", "speaker": "Jeremy (spk_1)", "start": 90, "end": 200}
+      ],
+      "names": ["Jeremy · Voice 1", "Jeremy · Voice 2"],
+      "groups": {"REMOTE#Jeremy": {"mode": "several", "default": "several", "reason": "several-voices", "voices": ["spk_0", "spk_1"]}}
+    },
+    {
+      "name": "a second voice under 60 seconds does not count",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Alex (spk_0)", "start": 0, "end": 100},
+        {"channel": "REMOTE", "speaker": "Alex (spk_1)", "start": 100, "end": 159.9}
+      ],
+      "names": ["Alex", "Alex"],
+      "groups": {"REMOTE#Alex": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0", "spk_1"]}}
+    },
+    {
+      "name": "a second voice of exactly 60 seconds and 20 percent counts",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Alex (spk_0)", "start": 0, "end": 240},
+        {"channel": "REMOTE", "speaker": "Alex (spk_1)", "start": 240, "end": 300}
+      ],
+      "names": ["Alex · Voice 1", "Alex · Voice 2"],
+      "groups": {"REMOTE#Alex": {"mode": "several", "default": "several", "reason": "several-voices", "voices": ["spk_0", "spk_1"]}}
+    },
+    {
+      "name": "a second voice under 20 percent of the name's speech does not count",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Alex (spk_0)", "start": 0, "end": 400},
+        {"channel": "REMOTE", "speaker": "Alex (spk_1)", "start": 400, "end": 470}
+      ],
+      "names": ["Alex", "Alex"],
+      "groups": {"REMOTE#Alex": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0", "spk_1"]}}
+    },
+    {
+      "name": "voices are numbered in the order they were first heard",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Room A (spk_3)", "start": 0, "end": 10},
+        {"channel": "REMOTE", "speaker": "Room A (spk_1)", "start": 10, "end": 20}
+      ],
+      "names": ["Room A · Voice 1", "Room A · Voice 2"],
+      "groups": {"REMOTE#Room A": {"mode": "several", "default": "several", "reason": "room-name", "voices": ["spk_3", "spk_1"]}}
+    },
+    {
+      "name": "Unknown, none and a channel's Others label keep their voice labels",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Unknown (spk_0)", "start": 0, "end": 100},
+        {"channel": "REMOTE", "speaker": "Unknown (spk_1)", "start": 100, "end": 101},
+        {"channel": "REMOTE", "speaker": "none (spk_1)", "start": 101, "end": 200},
+        {"channel": "REMOTE", "speaker": "Others (spk_0)", "start": 200, "end": 900},
+        {"channel": "REMOTE", "speaker": "Others (spk_1)", "start": 900, "end": 930}
+      ],
+      "names": ["Unknown (spk_0)", "Unknown (spk_1)", "none (spk_1)", "Others (spk_0)", "Others (spk_1)"],
+      "groups": {}
+    },
+    {
+      "name": "the Stream Audio participant name stands in for the remote placeholder only",
+      "fallbackName": "Sam",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Other Participant (spk_0)", "start": 0, "end": 10},
+        {"channel": "LOCAL", "speaker": "Other Participant (spk_1)", "start": 10, "end": 20},
+        {"channel": "LOCAL", "speaker": "Me (spk_0)", "start": 20, "end": 30}
+      ],
+      "names": ["Sam (spk_0)", "Other Participant (spk_1)", "Me (spk_0)"],
+      "groups": {}
+    },
+    {
+      "name": "a person switched to several people shows each voice",
+      "identities": {"speakerModes": {"REMOTE#Bob": {"mode": "several", "source": "manual"}}},
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Bob (spk_0)", "start": 0, "end": 100},
+        {"channel": "REMOTE", "speaker": "Bob (spk_1)", "start": 100, "end": 101}
+      ],
+      "names": ["Bob · Voice 1", "Bob · Voice 2"],
+      "groups": {"REMOTE#Bob": {"mode": "several", "default": "one", "reason": "one-person", "voices": ["spk_0", "spk_1"]}}
+    },
+    {
+      "name": "a room switched to one person shows the bare name",
+      "identities": {"speakerModes": {"REMOTE#ConfRm_1": {"mode": "one", "source": "manual"}}},
+      "segments": [
+        {"channel": "REMOTE", "speaker": "ConfRm_1 (spk_0)", "start": 0, "end": 10},
+        {"channel": "REMOTE", "speaker": "ConfRm_1 (spk_1)", "start": 10, "end": 20}
+      ],
+      "names": ["ConfRm_1", "ConfRm_1"],
+      "groups": {"REMOTE#ConfRm_1": {"mode": "one", "default": "several", "reason": "room-name", "voices": ["spk_0", "spk_1"]}}
+    },
+    {
+      "name": "a voice of a room can be named on its own",
+      "identities": {"identities": {"REMOTE#ConfRm_1 (spk_1)": {"name": "Alice", "status": "confirmed", "source": "manual"}}},
+      "segments": [
+        {"channel": "REMOTE", "speaker": "ConfRm_1 (spk_0)", "start": 0, "end": 10},
+        {"channel": "REMOTE", "speaker": "ConfRm_1 (spk_1)", "start": 10, "end": 20},
+        {"channel": "REMOTE", "speaker": "ConfRm_1 (spk_1)", "start": 20, "end": 30}
+      ],
+      "names": ["ConfRm_1 · Voice 1", "Alice", "Alice"],
+      "groups": {"REMOTE#ConfRm_1": {"mode": "several", "default": "several", "reason": "room-name", "voices": ["spk_0", "spk_1"]}}
+    },
+    {
+      "name": "one person goes by the name its voices were given",
+      "identities": {"identities": {"REMOTE#Bob Strahan (spk_0)": {"name": "Bob", "status": "confirmed", "source": "self-introduction"}}},
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_0)", "start": 0, "end": 100},
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_1)", "start": 100, "end": 101}
+      ],
+      "names": ["Bob", "Bob"],
+      "groups": {"REMOTE#Bob Strahan": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0", "spk_1"]}}
+    },
+    {
+      "name": "voices given different names are several people",
+      "identities": {"identities": {
+        "REMOTE#Front Desk (spk_0)": {"name": "Monsor", "status": "proposed", "source": "addressed-by-name"},
+        "REMOTE#Front Desk (spk_1)": {"name": "Spencer", "status": "proposed", "source": "addressed-by-name"}
+      }},
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Front Desk (spk_0)", "start": 0, "end": 300},
+        {"channel": "REMOTE", "speaker": "Front Desk (spk_1)", "start": 300, "end": 310},
+        {"channel": "REMOTE", "speaker": "Front Desk (spk_2)", "start": 310, "end": 311}
+      ],
+      "names": ["Monsor", "Spencer", "Front Desk · Voice 3"],
+      "groups": {"REMOTE#Front Desk": {"mode": "several", "default": "several", "reason": "named-voices", "voices": ["spk_0", "spk_1", "spk_2"]}}
+    },
+    {
+      "name": "a map written before 0.4.0 under the older channel names still applies",
+      "identities": {
+        "identities": {"CALLER#Bob (spk_1)": {"name": "Robert"}},
+        "speakerModes": {"CALLER#ConfRm_2": {"mode": "one"}}
+      },
+      "segments": [
+        {"channel": "CALLER", "speaker": "Bob (spk_0)", "start": 0, "end": 100},
+        {"channel": "CALLER", "speaker": "Bob (spk_1)", "start": 100, "end": 101},
+        {"channel": "CALLER", "speaker": "ConfRm_2 (spk_0)", "start": 101, "end": 110},
+        {"channel": "CALLER", "speaker": "ConfRm_2 (spk_1)", "start": 110, "end": 120}
+      ],
+      "names": ["Robert", "Robert", "ConfRm_2", "ConfRm_2"],
+      "groups": {
+        "REMOTE#Bob": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0", "spk_1"]},
+        "REMOTE#ConfRm_2": {"mode": "one", "default": "several", "reason": "room-name", "voices": ["spk_0", "spk_1"]}
+      }
+    },
+    {
+      "name": "a voice merged into another person stays that person",
+      "identities": {
+        "identities": {"REMOTE#Alice (spk_0)": {"name": "Alice Wong", "status": "confirmed"}},
+        "merges": {"REMOTE#Bob (spk_1)": "REMOTE#Alice (spk_0)"}
+      },
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Bob (spk_0)", "start": 0, "end": 100},
+        {"channel": "REMOTE", "speaker": "Bob (spk_1)", "start": 100, "end": 105},
+        {"channel": "REMOTE", "speaker": "Alice (spk_0)", "start": 105, "end": 120}
+      ],
+      "names": ["Bob", "Alice Wong", "Alice Wong"],
+      "groups": {
+        "REMOTE#Bob": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0", "spk_1"]},
+        "REMOTE#Alice": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0"]}
+      }
+    },
+    {
+      "name": "a voice merged within a room shows as the voice it was merged into",
+      "identities": {"merges": {"REMOTE#ConfRm_1 (spk_2)": "REMOTE#ConfRm_1 (spk_1)"}},
+      "segments": [
+        {"channel": "REMOTE", "speaker": "ConfRm_1 (spk_0)", "start": 0, "end": 10},
+        {"channel": "REMOTE", "speaker": "ConfRm_1 (spk_1)", "start": 10, "end": 20},
+        {"channel": "REMOTE", "speaker": "ConfRm_1 (spk_2)", "start": 20, "end": 30}
+      ],
+      "names": ["ConfRm_1 · Voice 1", "ConfRm_1 · Voice 2", "ConfRm_1 · Voice 2"],
+      "groups": {"REMOTE#ConfRm_1": {"mode": "several", "default": "several", "reason": "room-name", "voices": ["spk_0", "spk_1", "spk_2"]}}
+    },
+    {
+      "name": "a name given to one segment wins",
+      "identities": {"segmentOverrides": {"s2": "Pat"}},
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Bob (spk_0)", "start": 0, "end": 100, "segmentId": "s1"},
+        {"channel": "REMOTE", "speaker": "Bob (spk_1)", "start": 100, "end": 101, "segmentId": "s2"}
+      ],
+      "names": ["Bob", "Pat"],
+      "groups": {"REMOTE#Bob": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0", "spk_1"]}}
+    },
+    {
+      "name": "the local microphone channel is treated the same way",
+      "segments": [
+        {"channel": "LOCAL", "speaker": "bob@example.com (spk_0)", "start": 0, "end": 200},
+        {"channel": "LOCAL", "speaker": "bob@example.com (spk_1)", "start": 200, "end": 202},
+        {"channel": "REMOTE", "speaker": "bob@example.com (spk_0)", "start": 202, "end": 210},
+        {"channel": "LOCAL", "speaker": "Huddle 2 (spk_0)", "start": 210, "end": 220}
+      ],
+      "names": ["bob@example.com", "bob@example.com", "bob@example.com", "Huddle 2 · Voice 1"],
+      "groups": {
+        "LOCAL#bob@example.com": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0", "spk_1"]},
+        "REMOTE#bob@example.com": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0"]},
+        "LOCAL#Huddle 2": {"mode": "several", "default": "several", "reason": "room-name", "voices": ["spk_0"]}
+      }
+    },
+    {
+      "name": "lines with the bare name belong to the name's group",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Room B", "start": 0, "end": 10},
+        {"channel": "REMOTE", "speaker": "Room B (spk_0)", "start": 10, "end": 20},
+        {"channel": "REMOTE", "speaker": "Dana", "start": 20, "end": 30},
+        {"channel": "REMOTE", "speaker": "Dana (spk_4)", "start": 30, "end": 40}
+      ],
+      "names": ["Room B", "Room B · Voice 1", "Dana", "Dana"],
+      "groups": {
+        "REMOTE#Room B": {"mode": "several", "default": "several", "reason": "room-name", "voices": ["spk_0"]},
+        "REMOTE#Dana": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_4"]}
+      }
+    },
+    {
+      "name": "a partial segment is named but does not count",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Bob (spk_0)", "start": 0, "end": 10},
+        {"channel": "REMOTE", "speaker": "Bob", "start": 10, "end": 500, "isPartial": true}
+      ],
+      "names": ["Bob", "Bob"],
+      "groups": {"REMOTE#Bob": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0"]}}
+    },
+    {
+      "name": "a mode the reader does not know is ignored",
+      "identities": {"speakerModes": {"REMOTE#ConfRm_1": {"mode": "maybe"}, "REMOTE#Bob": "several"}},
+      "segments": [
+        {"channel": "REMOTE", "speaker": "ConfRm_1 (spk_0)", "start": 0, "end": 10},
+        {"channel": "REMOTE", "speaker": "Bob (spk_0)", "start": 10, "end": 20},
+        {"channel": "REMOTE", "speaker": "Bob (spk_1)", "start": 20, "end": 21}
+      ],
+      "names": ["ConfRm_1 · Voice 1", "Bob", "Bob"],
+      "groups": {
+        "REMOTE#ConfRm_1": {"mode": "several", "default": "several", "reason": "room-name", "voices": ["spk_0"]},
+        "REMOTE#Bob": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0", "spk_1"]}
+      }
+    },
+    {
+      "name": "a map that cannot be read is no map",
+      "identities": "not json",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "ConfRm_1 (spk_0)", "start": 0, "end": 10},
+        {"channel": "REMOTE", "speaker": "Bob (spk_0)", "start": 10, "end": 20}
+      ],
+      "names": ["ConfRm_1 · Voice 1", "Bob"],
+      "groups": {
+        "REMOTE#ConfRm_1": {"mode": "several", "default": "several", "reason": "room-name", "voices": ["spk_0"]},
+        "REMOTE#Bob": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0"]}
+      }
+    }
+  ]
+}

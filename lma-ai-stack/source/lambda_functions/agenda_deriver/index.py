@@ -327,7 +327,11 @@ def derive(call_id, identity=None, automatic=False):
             LOGGER.info("Agenda pass for %s already ran, or the meeting has an agenda", call_id)
             return {"ok": True, "reason": "already attempted", "derived": False}
 
-    transcript = pure.build_transcript(read_segments(call_id))
+    transcript = pure.build_transcript(
+        read_segments(call_id),
+        meeting.get("SpeakerIdentities"),
+        meeting.get("CustomerPhoneNumber"),
+    )
     if not transcript:
         return {"ok": True, "reason": "nothing has been said in the meeting yet", "derived": False}
 

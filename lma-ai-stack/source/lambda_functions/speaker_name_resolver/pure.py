@@ -217,8 +217,8 @@ def shortcut_is_meaningful_for(text):
 def parse_identities(raw):
     """Read the stored map, tolerating anything.
 
-    Same contract as parseSpeakerIdentities in the UI and the twin in
-    FetchTranscript: a meeting that predates the feature has no attribute, and a
+    Same contract as parseSpeakerIdentities in the UI and parse_speaker_identities
+    in the configuration layer's lma_speakers: a meeting that predates the feature has no attribute, and a
     blob written by a newer version may carry keys this does not know. Both must
     yield a usable map rather than an error -- a pass that cannot read the
     existing names would re-propose names a human has already settled.
@@ -241,7 +241,14 @@ def parse_identities(raw):
         return empty
     if not isinstance(parsed, dict):
         return empty
-    out = dict(empty)
+    # Sections this module does not work on -- the per-name speaker modes the
+    # Transcript tab writes, and whatever a newer version adds -- are carried
+    # through untouched. A pass writes the whole map back, so anything dropped
+    # here would be erased from the meeting by the next pass.
+    out = {key: value for key, value in parsed.items() if key not in empty and key != "lastPass"}
+    out.update(empty)
+    if isinstance(out.get("speakerModes"), dict):
+        out["speakerModes"] = canonical_keyed(out["speakerModes"])
     out["version"] = parsed.get("version", 1)
     candidates = parsed.get("candidates")
     out["candidates"] = (
@@ -793,7 +800,11 @@ def merge_applied_onto(latest, applied_entries):
     changed are applied, onto whatever is stored now, and a name that arrived in
     the meantime wins because it is settled and this is not.
     """
-    merged = {
+    # Every section this function does not change -- the speaker modes among
+    # them -- goes back as it was read.
+    merged = {**latest}
+    merged.pop("lastPass", None)
+    merged |= {
         "version": latest.get("version", 1),
         "candidates": list(latest.get("candidates") or []),
         "identities": dict(latest.get("identities") or {}),
