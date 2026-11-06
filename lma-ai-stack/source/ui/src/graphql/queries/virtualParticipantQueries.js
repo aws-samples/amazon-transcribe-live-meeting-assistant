@@ -15,7 +15,7 @@ export const deleteVirtualParticipants = /* GraphQL */ `
 `;
 
 // Query to list Virtual Participants with VNC fields for CallPanel preview, and the
-// platform the meeting page's header shows
+// platform and video recording choice the meeting page shows
 export const listVirtualParticipants = /* GraphQL */ `
   query ListVirtualParticipants {
     listVirtualParticipants {
@@ -31,6 +31,7 @@ export const listVirtualParticipants = /* GraphQL */ `
       manualActionStartTime
       meetingName
       meetingPlatform
+      enableVideoRecording
     }
   }
 `;

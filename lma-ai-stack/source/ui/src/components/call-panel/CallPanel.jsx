@@ -49,11 +49,15 @@ import {
   parseSpeakerIdentities,
   resolveSpeaker,
   serializeSpeakerIdentities,
+  speakerRowLabel,
 } from '../common/speaker-identities';
 import SpeakerIdentitiesPanel from './SpeakerIdentitiesPanel';
 import SpeakerAssignmentModal from './SpeakerAssignmentModal';
 import AgendaPanel from './AgendaPanel';
 import ConsentPanel from './ConsentPanel';
+import ConsentPauseAlert from './ConsentPauseAlert';
+import CaptureContextPanel, { CONSENT_SETTING_ID } from './CaptureContextPanel';
+import { consentEnforced } from '../common/meeting-context';
 import TranscriptDeletionNotice from './TranscriptDeletionNotice';
 import useMeetingConsent from '../../hooks/use-meeting-consent';
 import CallCostPanel from './CallCostPanel';
@@ -155,6 +159,9 @@ const ASSISTANT_GAP_PX = 12;
  * mark lands, and is a safety net for the case where it never does.
  */
 const REGENERATE_HANDOVER_MS = 30000;
+
+// Where the consent record is on the Details tab, for the links that open it.
+const CONSENT_RECORD_ID = 'meeting-consent-record';
 
 const EDIT_AFTER_MEETING_REASON =
   'Available once the meeting has ended, so the end-of-meeting summary cannot replace your text.';
@@ -2202,12 +2209,26 @@ export const CallPanel = ({
     [item, durationMillis],
   );
   const platform = platformLabel(meetingVp?.meetingPlatform);
-  const speakers = buildSpeakerRoster(transcriptSegmentsForCall, speakerIdentities, item.remoteParticipantName).map(
-    (row) => ({
-      key: row.key,
-      label: row.name || (row.voiceId ? `${row.defaultName} ${row.voiceId}` : row.defaultName),
-    }),
-  );
+  const roster = buildSpeakerRoster(transcriptSegmentsForCall, speakerIdentities, item.remoteParticipantName);
+  const speakers = roster.map((row) => ({ key: row.key, label: speakerRowLabel(row) }));
+
+  // The consent record is shown on the Details tab when consent was enforced
+  // for the meeting (or could not be read); the header's indicator and the
+  // paused-transcription alert open it, or the consent setting when it was off.
+  const showConsentRecordPanel = Boolean(meetingConsent.error) || consentEnforced(meetingConsent.consent?.Mode);
+  const [consentScrollRequest, setConsentScrollRequest] = useState(null);
+  const showConsent = useCallback(() => {
+    setActiveTab(TAB_DETAILS);
+    setConsentScrollRequest({ at: Date.now() });
+  }, [setActiveTab]);
+  useEffect(() => {
+    if (!consentScrollRequest || activeTab !== TAB_DETAILS) return;
+    const target =
+      document.getElementById(showConsentRecordPanel ? CONSENT_RECORD_ID : CONSENT_SETTING_ID) ||
+      document.getElementById(CONSENT_SETTING_ID);
+    target?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    setConsentScrollRequest(null);
+  }, [consentScrollRequest, activeTab, showConsentRecordPanel]);
   const cost = useCallCost(
     item.callId,
     `${item.recordingStatusLabel || ''}|${(item.callSummaryText || '').length}|${item.callSummaryState || ''}`,
@@ -2341,6 +2362,14 @@ export const CallPanel = ({
         onPlay={canPlayRecording ? playOnTranscriptTab : undefined}
         audioDefaultReason={audioDefaultReason}
       />
+      <CaptureContextPanel
+        item={item}
+        vp={meetingVp}
+        platform={platform}
+        roster={roster}
+        consentState={meetingConsent}
+        onShowConsentRecord={showConsentRecordPanel ? showConsent : undefined}
+      />
       <SpeakerIdentitiesPanel
         item={item}
         segments={transcriptSegmentsForCall}
@@ -2350,12 +2379,16 @@ export const CallPanel = ({
         readOnly={speakerNamesReadOnly}
         isLive={isLive}
       />
-      <ConsentPanel
-        state={meetingConsent}
-        canEdit={!speakerNamesReadOnly}
-        isOwner={!!user?.username && item.owner === user.username}
-        isAdmin={!!isAdminUser}
-      />
+      {showConsentRecordPanel && (
+        <div id={CONSENT_RECORD_ID}>
+          <ConsentPanel
+            state={meetingConsent}
+            canEdit={!speakerNamesReadOnly}
+            isOwner={!!user?.username && item.owner === user.username}
+            isAdmin={!!isAdminUser}
+          />
+        </div>
+      )}
       <CallCostPanel callId={item.callId} state={cost} />
     </SpaceBetween>
   );
@@ -2437,7 +2470,8 @@ export const CallPanel = ({
             platform={platform}
             speakers={speakers}
             cost={cost}
-            consent={meetingConsent.consent}
+            consentState={meetingConsent}
+            onShowConsent={showConsent}
             callTranscriptPerCallId={callTranscriptPerCallId}
             getCallDetailsFromCallIds={getCallDetailsFromCallIds}
             setToolsOpen={setToolsOpen}
@@ -2454,6 +2488,12 @@ export const CallPanel = ({
             }
           />
         </div>
+        <ConsentPauseAlert
+          isLive={isLive}
+          consentState={meetingConsent}
+          startedAt={item.initiationTimeStamp}
+          onShowRecord={showConsentRecordPanel ? showConsent : undefined}
+        />
         <div ref={bodyRef} className={bodyClass}>
           <div className="meeting-main">
             <Tabs

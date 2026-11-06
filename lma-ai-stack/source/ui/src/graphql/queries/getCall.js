@@ -20,6 +20,9 @@ export default /* GraphQL */ `
       AgendaUpdatedAt
       TranscriptDeletionScheduledFor
       TranscriptDeletedAt
+      TranscriptSegmentsDeleted
+      TranscriptFilesDeleted
+      ExpiresAfter
       CreatedAt
       CustomerPhoneNumber
       Status

@@ -180,6 +180,24 @@ describe('summarySections', () => {
     expect(summarySections(edited, ['CHAPTERS'])).toHaveLength(4);
   });
 
+  it.each([
+    ['**Chapters**', 'bold, in mixed case'],
+    ['#### chapters', 'a level-4 heading, in lower case'],
+  ])('makes CHAPTERS a section of its own under %s (%s), so it can be left out', (heading) => {
+    const edited = ['**SUMMARY**', '', 'We met.', '', heading, '', '- [00:00] Welcome', '- [05:12] Budget'].join('\n');
+    expect(summarySections(edited)).toEqual([
+      { title: 'SUMMARY', markdown: 'We met.' },
+      { title: 'CHAPTERS', markdown: '- [00:00] Welcome\n- [05:12] Budget' },
+    ]);
+    // The chapter lines are not left in SUMMARY when the page shows them as the Chapters list.
+    expect(summarySections(edited, ['CHAPTERS'])).toEqual([{ title: 'SUMMARY', markdown: 'We met.' }]);
+  });
+
+  it('makes AGENDA COVERAGE a section of its own in any case and at any heading level', () => {
+    const edited = '**SUMMARY**\n\nWe met.\n\n##### Agenda coverage:\n\n- **Budget**: Covered';
+    expect(summarySections(edited, ['AGENDA COVERAGE'])).toEqual([{ title: 'SUMMARY', markdown: 'We met.' }]);
+  });
+
   it('reads a document with no headings as one Summary section, and nothing as no sections', () => {
     expect(summarySections('Just a note.')).toEqual([{ title: 'Summary', markdown: 'Just a note.' }]);
     expect(summarySections(HAND_EDITED).map((s) => s.title)).toEqual(['Migration review']);
