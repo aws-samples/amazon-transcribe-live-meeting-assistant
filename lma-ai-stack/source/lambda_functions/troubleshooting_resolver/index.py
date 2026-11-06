@@ -493,6 +493,21 @@ def handler(event: Dict[str, Any], context: Any) -> Optional[Dict[str, Any]]:
         run_worker(str((event.get(WORKER_KEY) or {}).get("JobId") or ""))
         return None
 
+    try:
+        return _resolve(event)
+    except (ForbiddenError, ValueError):
+        # Messages written here, for the caller.
+        raise
+    except Exception as error:  # pylint: disable=broad-except
+        # Anything else (an AWS error, say) is logged, and the caller gets a
+        # fixed message rather than the error's own text.
+        LOGGER.exception("troubleshooting request failed")
+        raise RuntimeError(
+            "The diagnosis service could not complete the request. Try again."
+        ) from error
+
+
+def _resolve(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     field = ((event.get("info") or {}).get("fieldName") or "").strip()
     caller = _caller(event)
     arguments = event.get("arguments") or {}

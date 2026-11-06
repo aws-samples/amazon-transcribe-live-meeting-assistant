@@ -304,7 +304,7 @@ def test_a_worker_that_cannot_be_started_fails_the_job(
         ClientError({"Error": {"Code": "TooManyRequestsException", "Message": "x"}}, "Invoke")
     )
     monkeypatch.setattr(index, "LAMBDA", failing)
-    with pytest.raises(ClientError):
+    with pytest.raises(RuntimeError):
         _start(ADMIN, Question="x")
     (stored,) = ddb.jobs.values()
     assert stored["Status"]["S"] == "FAILED"
@@ -467,3 +467,24 @@ def test_a_worker_event_for_a_stale_job_does_not_run_it(
     monkeypatch.setattr(index, "AGENT_LAMBDA", agent)
     _run_worker(job["JobId"])
     assert agent.invocations == []
+
+
+def test_an_aws_error_reaches_the_caller_as_a_fixed_message(
+    ddb: FakeDynamoDB, lam: FakeLambda
+) -> None:
+    def failing_put(**_request: Any) -> Dict[str, Any]:
+        raise ClientError(
+            {
+                "Error": {
+                    "Code": "InternalServerError",
+                    "Message": "table arn:aws:dynamodb:x:1:table/t is down",
+                }
+            },
+            "PutItem",
+        )
+
+    ddb.put_item = failing_put
+    with pytest.raises(RuntimeError) as raised:
+        _start(ADMIN, Question="x")
+    assert "arn:" not in str(raised.value)
+    assert "could not complete the request" in str(raised.value)

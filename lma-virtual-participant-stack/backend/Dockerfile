@@ -46,9 +46,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # lays the binary down in step with the client that launches it.
 #
 # History: it once drifted to 0.3.31 here vs npm 0.5.x, and was realigned at
-# 0.5.10. At 0.6.4 (matching package.json) both wrappers still pin the same free
-# binary as 0.5.10 did (chromium-146.0.7680.177.5 on linux-x64,
-# 146.0.7680.177.3 on linux-arm64), so the patched browser — and therefore the
+# 0.5.10. At 0.6.5 (matching package.json) both wrappers still pin the same free
+# binary as 0.5.10 did (chromium-146.0.7680.177.5 on linux-x64, confirmed in a
+# 0.6.5 image build; 146.0.7680.177.3 on linux-arm64 as of 0.6.4, not re-checked
+# at 0.6.5), so the patched browser — and therefore the
 # fingerprint surface — is unchanged; only the wrapper moved. `cloakbrowser info`
 # below prints the installed build, so a binary change shows up in the build log.
 # The CLI keeps the `install`/`info` subcommands used below, and its free-tier

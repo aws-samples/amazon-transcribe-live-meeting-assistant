@@ -109,8 +109,9 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	TranscriptionEngine: String
 	# The Amazon Transcribe language setting the meeting used: a language code
 	# such as en-US, or identify-language / identify-multiple-languages when
-	# Transcribe identified the language. Absent for MICROVM_ASR, whose model
-	# sets the language.
+	# Transcribe identified the language. Not set for MICROVM_ASR, whose model
+	# sets the language; a meeting moved to the MicroVM after START can keep the
+	# value START recorded, so read it only when TranscriptionEngine is TRANSCRIBE.
 	TranscriptionLanguage: String
 	# Which channels speaker separation (diarization) was asked for: BOTH,
 	# REMOTE (the meeting audio), LOCAL (the microphone) or NONE.

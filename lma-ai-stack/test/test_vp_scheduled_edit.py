@@ -199,7 +199,9 @@ def test_the_owner_changes_every_field(appsync, write_vtl: str) -> None:
     # The owner's Zoom account, from the row.
     assert values[":userZoomSub"] == {"S": "sub-owner"}
     assert names["#meetingPassword"] == "meetingPassword"
-    assert "REMOVE" not in request["update"]["expression"]
+    # Only an earlier note that the schedule could not be moved is removed.
+    assert request["update"]["expression"].split("REMOVE", 1)[1].strip() == "#errorMessage"
+    assert names["#errorMessage"] == "errorMessage"
     condition = request["condition"]
     assert "#conditionStatus = :conditionScheduled" in condition["expression"]
     assert "#conditionOwner = :conditionCaller" in condition["expression"]
