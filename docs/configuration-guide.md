@@ -393,11 +393,17 @@ troubleshooting agent) offer the same list but have different defaults, because
 they are chosen for different jobs. The first defaults to
 `global.anthropic.claude-sonnet-5-5`: summarisation is batch work where the
 quality of the answer is what matters. The second
-defaults to `global.anthropic.claude-haiku-4-5-20251001-v1:0`, because the
-assistant answers mid-meeting and is sometimes spoken aloud, so its time to first
-token matters most; measured against a real transcript it begins replying in about
-0.9 s, against 1.2 s for Sonnet 5.5 and 2.7 s for Haiku 5.5, both of which reason
-before answering.
+defaults to `global.anthropic.claude-haiku-5-5`, run at a low reasoning effort
+(**Meeting Assistant › Reasoning effort**). The assistant answers mid-meeting and
+is sometimes spoken aloud, so its default is chosen on answer quality, time to the
+first word and cost together. Over thirteen meeting-assistant requests against
+real meeting transcripts, Claude Haiku 5.5 at low effort gave the answer judged
+better than Claude Haiku 4.5's on ten, at about a tenth of the cost, because its
+per-token prices are a tenth of Haiku 4.5's. The trade-off is latency: its median
+time to the first word of an answer was 3.3 s, against 2.1 s for Haiku 4.5, since
+the Claude 5 generation reasons before it answers. A deployment where the fastest
+reply matters more than answer quality can choose
+`global.anthropic.claude-haiku-4-5-20251001-v1:0` instead.
 
 Summaries cost more on Sonnet 5.5 than on Haiku 4.5 — roughly 27% more input
 tokens, and two to three times the output tokens, for a noticeably longer
