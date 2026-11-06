@@ -56,7 +56,17 @@ logger = logging.getLogger(__name__)
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 # signature_version=s3v4 is required for presigned URLs on KMS-encrypted buckets.
-s3_client = boto3.client("s3", config=Config(signature_version="s3v4", region_name=AWS_REGION))
+# The regional endpoint matters for the browser PUT: a URL on the global
+# endpoint (<bucket>.s3.amazonaws.com) gets a 307 redirect to the regional one
+# for a bucket outside us-east-1 until its DNS settles (up to a day after it is
+# created), and a browser does not follow a redirect on a CORS request, so the
+# upload fails as a network error.
+s3_client = boto3.client(
+    "s3",
+    region_name=AWS_REGION,
+    endpoint_url=f"https://s3.{AWS_REGION}.amazonaws.com",
+    config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}),
+)
 ddb = boto3.resource("dynamodb")
 job_table = ddb.Table(EVENT_SOURCING_TABLE)
 

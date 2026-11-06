@@ -30,6 +30,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from botocore.exceptions import ClientError
@@ -286,6 +287,52 @@ def test_a_long_filename_is_truncated_but_keeps_its_extension(env) -> None:
     name = result["uploadKey"].rsplit("/", 1)[-1]
     assert len(name) == 128
     assert name.endswith(".mp4")
+
+
+REGIONS = pytest.mark.parametrize("region", ["eu-west-1", "us-east-1"])
+
+
+@REGIONS
+def test_the_s3_client_signs_for_the_regional_virtual_hosted_endpoint(region) -> None:
+    """A URL on the global endpoint is redirected (307) to the regional one for a
+    bucket outside us-east-1 until its DNS settles, and a browser does not follow
+    a redirect on a CORS request, so the upload fails as a network error.
+    us-east-1 is covered too, since the regional endpoint is built the same way
+    there rather than special-cased."""
+    with (
+        mock.patch("boto3.client") as client,
+        mock.patch("boto3.resource"),
+        mock.patch.dict(os.environ, {"AWS_REGION": region}),
+    ):
+        _load_by_path(f"upload_meeting_initiator_index_{region}", HERE / "index.py")
+    kwargs = client.call_args.kwargs
+    assert kwargs["region_name"] == region
+    assert kwargs["endpoint_url"] == f"https://s3.{region}.amazonaws.com"
+    assert kwargs["config"].s3 == {"addressing_style": "virtual"}
+    assert kwargs["config"].signature_version == "s3v4"
+
+
+@REGIONS
+def test_the_presigned_url_names_the_bucket_on_the_regional_endpoint(region) -> None:
+    """Signed by the real botocore client (locally, with no AWS call): the browser
+    PUTs to ``<bucket>.s3.<region>.amazonaws.com``, signed for the same region, in
+    us-east-1 as well as elsewhere."""
+    fake_credentials = {
+        "AWS_REGION": region,
+        "AWS_ACCESS_KEY_ID": "AKIDEXAMPLE",
+        "AWS_SECRET_ACCESS_KEY": "not-a-real-secret",  # pragma: allowlist secret
+    }
+    with mock.patch("boto3.resource"), mock.patch.dict(os.environ, fake_credentials):
+        module = _load_by_path(f"upload_meeting_initiator_index_signed_{region}", HERE / "index.py")
+        url = module._generate_presigned_put_url("lma-uploads-pending/call-abc/a.mp3", "audio/mpeg")
+    parsed = urlparse(url)
+    assert parsed.scheme == "https"
+    assert parsed.netloc == f"{BUCKET}.s3.{region}.amazonaws.com"
+    assert parsed.path == "/lma-uploads-pending/call-abc/a.mp3"
+    query = parse_qs(parsed.query)
+    assert query["X-Amz-Algorithm"] == ["AWS4-HMAC-SHA256"]
+    assert f"/{region}/s3/aws4_request" in query["X-Amz-Credential"][0]
+    assert "content-type" in query["X-Amz-SignedHeaders"][0].split(";")
 
 
 # ---------------------------------------------------------------------------
