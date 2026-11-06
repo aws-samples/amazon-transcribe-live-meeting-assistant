@@ -9242,6 +9242,12 @@ Resources:
         #if($ctx.error)
           $util.error($ctx.error.message, $ctx.error.type)
         #end
+        ## No read returns the meeting password, including this answer and the
+        ## onCreateVirtualParticipant message published from it; the field
+        ## answers null. The launch paths take it from their own input.
+        #if( $ctx.result )
+          $util.qr( $ctx.result.remove("meetingPassword") )
+        #end
         $util.toJson($ctx.result)
 
   UpdateVirtualParticipantResolver:

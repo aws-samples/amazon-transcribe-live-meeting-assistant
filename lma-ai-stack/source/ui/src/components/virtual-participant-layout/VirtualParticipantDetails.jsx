@@ -27,6 +27,7 @@ import useSettingsContext from '../../contexts/settings';
 import StatusTimeline from './StatusTimeline';
 import VNCViewer from './VNCViewer';
 import LaunchSettings from './LaunchSettings';
+import { canManageVirtualParticipant } from './vp-access';
 
 const client = generateClient();
 // VNC WebSocket URL is published by the backend in the vncEndpoint field
@@ -587,9 +588,10 @@ ErrorTroubleshooting.propTypes = {
   canAcknowledge: PropTypes.bool,
 };
 
-const ActionButtons = ({ vpDetails, onRefresh, onEnd, onCancelSchedule }) => {
-  const canEnd = ['JOINING', 'JOINED', 'ACTIVE'].includes(vpDetails.status);
-  const canCancelSchedule = vpDetails.status === 'SCHEDULED' && vpDetails.isScheduled;
+export const ActionButtons = ({ vpDetails, onRefresh, onEnd, onCancelSchedule, canManage = false }) => {
+  // Ending and cancelling are for the owner and Admins.
+  const canEnd = canManage && ['JOINING', 'JOINED', 'ACTIVE'].includes(vpDetails.status);
+  const canCancelSchedule = canManage && vpDetails.status === 'SCHEDULED' && vpDetails.isScheduled;
 
   return (
     <Container header={<Header variant="h3">Actions</Header>}>
@@ -633,6 +635,7 @@ ActionButtons.propTypes = {
   onRefresh: PropTypes.func.isRequired,
   onEnd: PropTypes.func.isRequired,
   onCancelSchedule: PropTypes.func.isRequired,
+  canManage: PropTypes.bool,
 };
 
 const VirtualParticipantDetails = () => {
@@ -1074,6 +1077,7 @@ const VirtualParticipantDetails = () => {
         onRefresh={handleRefresh}
         onEnd={handleEnd}
         onCancelSchedule={handleCancelSchedule}
+        canManage={canManageVirtualParticipant(vpDetails, { username: user?.username, isAdmin })}
       />
     </SpaceBetween>
   );

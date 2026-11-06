@@ -15,8 +15,7 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const { input } = ctx.arguments;
 
-  console.log('=== deleteVirtualParticipants RESOLVER CALLED ===');
-  console.log('Input:', JSON.stringify(input));
+  console.log('deleteVirtualParticipants', JSON.stringify(input.ids));
 
   return {
     operation: 'Invoke',
@@ -38,7 +37,10 @@ export function response(ctx) {
   }
 
   if (result.statusCode !== 200) {
-    util.error(result.body.error || 'Failed to delete Virtual Participants', 'InternalError');
+    util.error(
+      result.body.error || 'Failed to delete Virtual Participants',
+      result.body.errorType || 'InternalError',
+    );
   }
 
   return result.body;

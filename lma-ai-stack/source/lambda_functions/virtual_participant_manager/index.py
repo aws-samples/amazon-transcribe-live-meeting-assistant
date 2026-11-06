@@ -27,6 +27,31 @@ dynamodb = boto3.resource("dynamodb")
 scheduler = boto3.client("scheduler")
 
 
+class NotAuthorizedError(Exception):
+    """The caller may not change this Virtual Participant."""
+
+
+def caller_may_change(identity: Optional[Dict[str, Any]], vp: Optional[Dict[str, Any]]) -> bool:
+    """The "Virtual Participant owner condition" of the AppSync templates.
+
+    A signed-in caller who is not an Admin may change a Virtual Participant only
+    as its Owner. Admins, and backend roles with IAM credentials (the Virtual
+    Participant task and the Lambdas that launch and manage it), may change any.
+    A backend role is detected as the templates detect it: by an assumed-role ARN.
+    """
+    identity = identity or {}
+    user_arn = identity.get("userArn") or ""
+    if ":assumed-role/" in user_arn:
+        return True
+    groups = identity.get("groups") or (identity.get("claims") or {}).get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [group.strip() for group in groups.split(",") if group.strip()]
+    if "Admin" in groups:
+        return True
+    username = identity.get("username")
+    return bool(username) and bool(vp) and vp.get("Owner") == username
+
+
 class VirtualParticipantManager:
     def __init__(self, table_name: str):
         self.table = dynamodb.Table(table_name)
@@ -48,16 +73,33 @@ class VirtualParticipantManager:
             return None
 
     def end_virtual_participant(
-        self, vp_id: str, end_reason: str, ended_by: str = None
+        self,
+        vp_id: str,
+        end_reason: str,
+        ended_by: str = None,
+        identity: Optional[Dict[str, Any]] = None,
+        vp: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """End a Virtual Participant with ECS container termination and Kinesis END event"""
+        """End a Virtual Participant with ECS container termination and Kinesis END event.
+
+        `identity` is the AppSync caller's; when given, the caller must be the
+        Virtual Participant's owner, an Admin or a backend role. `vp` is the row
+        when the caller has already read it.
+        """
 
         current_time = self.get_current_timestamp()
 
         logger.info(f"Ending Virtual Participant {vp_id}")
 
         # Get VP details
-        vp = self.get_virtual_participant(vp_id)
+        if vp is None:
+            vp = self.get_virtual_participant(vp_id)
+        if identity is not None and not caller_may_change(identity, vp):
+            # Told the same way whether or not the row exists.
+            raise NotAuthorizedError(
+                f"User {identity.get('username')} is not authorized to change "
+                f"Virtual Participant {vp_id}"
+            )
         if not vp:
             raise ValueError(f"Virtual Participant {vp_id} not found")
 
@@ -240,9 +282,6 @@ class VirtualParticipantManager:
     def cancel_eventbridge_schedule(self, vp_id: str) -> bool:
         """Cancel EventBridge schedule for a scheduled VP"""
         try:
-            # Debug all environment variables
-            logger.info(f"All environment variables: {dict(os.environ)}")
-
             schedule_group_name = os.environ.get("VP_SCHEDULE_GROUP_NAME")
             logger.info(f"VP_SCHEDULE_GROUP_NAME from environment: '{schedule_group_name}'")
 
@@ -283,13 +322,19 @@ _INACTIVE_VP_STATUSES = {"ENDED", "COMPLETED", "FAILED", "CANCELLED"}
 
 
 def _delete_virtual_participants(
-    vp_manager: "VirtualParticipantManager", vp_ids, ended_by: Optional[str] = None
+    vp_manager: "VirtualParticipantManager",
+    vp_ids,
+    ended_by: Optional[str] = None,
+    identity: Optional[Dict[str, Any]] = None,
 ):
     """Delete one or more Virtual Participants.
 
     For any VP that is not already in a terminal state, end_virtual_participant
     is invoked first to clean up ECS task, ALB resources and any EventBridge
     schedule. The DynamoDB record is then removed.
+
+    Each id is judged on its own against `identity`: a Virtual Participant the
+    caller may not change is left as it is and reported as not authorized.
     """
 
     deleted = []
@@ -298,6 +343,11 @@ def _delete_virtual_participants(
     for vp_id in vp_ids:
         try:
             vp = vp_manager.get_virtual_participant(vp_id)
+            if identity is not None and not caller_may_change(identity, vp):
+                # Told the same way whether or not the row exists.
+                logger.warning(f"VP {vp_id}: caller may not delete it")
+                errors.append({"id": vp_id, "error": "not authorized"})
+                continue
             if not vp:
                 logger.warning(f"VP {vp_id} not found - treating as already deleted")
                 deleted.append(vp_id)
@@ -311,6 +361,7 @@ def _delete_virtual_participants(
                         vp_id=vp_id,
                         end_reason="Deleted by user",
                         ended_by=ended_by,
+                        vp=vp,
                     )
                 except Exception as end_err:  # noqa: BLE001
                     # Log but continue - we still want to attempt the delete so
@@ -357,6 +408,7 @@ def lambda_handler(event, context):
                 vp_id=input_data["id"],
                 end_reason=input_data["endReason"],
                 ended_by=input_data.get("endedBy"),
+                identity=event.get("identity") or {},
             )
 
             logger.info("VP termination completed successfully")
@@ -374,7 +426,9 @@ def lambda_handler(event, context):
                 claims.get("email") or claims.get("cognito:username") or identity.get("username")
             )
 
-            result = _delete_virtual_participants(vp_manager, ids, ended_by=ended_by)
+            result = _delete_virtual_participants(
+                vp_manager, ids, ended_by=ended_by, identity=identity
+            )
 
             logger.info("VP deletion completed successfully")
 
@@ -382,6 +436,10 @@ def lambda_handler(event, context):
             raise ValueError(f"Unknown operation: {operation}")
 
         return {"statusCode": 200, "body": result}
+
+    except NotAuthorizedError as e:
+        logger.warning(str(e))
+        return {"statusCode": 403, "body": {"error": str(e), "errorType": "AuthorizationError"}}
 
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}")

@@ -40,10 +40,13 @@
 ## END SharedWith entries
 ## Answered from the row rather than stored: whether a meeting password was
 ## given, and for scheduled rows written before useStoredZoomAccount was
-## recorded, the Zoom account choice that userZoomSub stands for.
+## recorded, the Zoom account choice that userZoomSub stands for. No read
+## returns the meeting password itself: the field answers null to every
+## caller, and the Virtual Participant gets it from its launch input instead.
 #if( $context.result )
   #set( $hasMeetingPassword = !$util.isNullOrBlank($context.result.meetingPassword) )
   $util.qr( $context.result.put("hasMeetingPassword", $hasMeetingPassword) )
+  $util.qr( $context.result.remove("meetingPassword") )
   #if( $util.isNull($context.result.useStoredZoomAccount) && !$util.isNullOrBlank($context.result.userZoomSub) )
     $util.qr( $context.result.put("useStoredZoomAccount", true) )
   #end

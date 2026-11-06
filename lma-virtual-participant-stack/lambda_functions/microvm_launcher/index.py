@@ -265,11 +265,22 @@ def _logging_config() -> dict | None:
     return {"cloudWatch": {"logGroup": log_group}}
 
 
+# A meeting ID can be a join link, which can carry the meeting password in its
+# query string; only its host is logged.
+LINK_KEYS = {"MEETING_ID"}
+
+
+def _loggable(key, value):
+    if key in SECRET_KEYS:
+        return f"<redacted:{len(value)}>"
+    if key in LINK_KEYS and "://" in value:
+        host = value.split("://", 1)[1].split("/", 1)[0].split("?", 1)[0]
+        return f"<link:{host.rsplit('@', 1)[-1]}>"
+    return value
+
+
 def _redact(config):
-    return {
-        k: (f"<redacted:{len(v)}>" if k in SECRET_KEYS else v)
-        for k, v in config.items()
-    }
+    return {k: _loggable(k, v) for k, v in config.items()}
 
 
 def _extract(payload):

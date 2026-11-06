@@ -112,3 +112,20 @@ def test_the_client_sends_the_logging_member_in_the_request_body(module) -> None
         )
     _, _, body = called.call_args[0]
     assert json.loads(json.dumps(body))["logging"] == {"cloudWatch": {"logGroup": LOG_GROUP}}
+
+
+def test_the_per_meeting_config_is_logged_without_credentials(module) -> None:
+    logged = module._redact(
+        {
+            "MEETING_ID": "https://user:pw@example.zoom.us/j/123?pwd=abc",
+            "MEETING_PASSWORD": "secret",
+            "MEETING_NAME": "Weekly sync",
+        }
+    )
+    assert logged["MEETING_ID"] == "<link:example.zoom.us>"
+    assert logged["MEETING_PASSWORD"] == "<redacted:6>"
+    assert logged["MEETING_NAME"] == "Weekly sync"
+
+
+def test_a_numeric_meeting_id_is_logged_as_it_is(module) -> None:
+    assert module._redact({"MEETING_ID": "1234567890"}) == {"MEETING_ID": "1234567890"}

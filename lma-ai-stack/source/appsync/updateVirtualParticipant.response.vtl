@@ -59,4 +59,9 @@
 #end
 ## END SharedWith published
 #end
+## No read returns the meeting password: the field answers null to every
+## caller. The Virtual Participant gets it from its launch input instead.
+#if( $ctx.result )
+  $util.qr( $ctx.result.remove("meetingPassword") )
+#end
 $util.toJson($ctx.result)

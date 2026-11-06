@@ -13,10 +13,8 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const { input } = ctx.arguments;
   
-  // Add debugging to see if this resolver is being called
-  console.log('=== APPSYNC JS RESOLVER CALLED ===');
-  console.log('Input:', JSON.stringify(input));
-  console.log('Identity:', JSON.stringify(ctx.identity));
+  // The Virtual Participant id only: the identity and input stay out of the logs.
+  console.log('endVirtualParticipant', input.id);
   
   // Invoke Lambda function for enhanced VP management
   return {
@@ -74,12 +72,19 @@ export function response(ctx) {
   }
 
   if (result.statusCode !== 200) {
-    util.error(result.body.error || 'Failed to end Virtual Participant', 'InternalError');
+    util.error(
+      result.body.error || 'Failed to end Virtual Participant',
+      result.body.errorType || 'InternalError',
+    );
   }
 
   // Published to the onUpdateVirtualParticipant subscription, filtered on
   // SharedWith in subscription.js; the row stores it as a comma-separated string.
   const body = result.body;
+  // No read returns the meeting password; the field answers null.
+  if (body) {
+    body.meetingPassword = null;
+  }
   if (body && body.SharedWith !== undefined && body.SharedWith !== null) {
     body.SharedWith = publishedSharedWith(body.SharedWith);
   }

@@ -465,7 +465,9 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	meetingName: String
 	meetingPlatform: String
 	meetingId: String
-	meetingPassword: String
+	# Always null: the meeting password is stored for the launch paths, which
+	# read it from the row or their input, and no read returns it.
+	meetingPassword: String @deprecated(reason: "Always null; the meeting password is not returned by reads.")
 	meetingTime: AWSTimestamp
 	scheduledFor: AWSDateTime
 	isScheduled: Boolean
