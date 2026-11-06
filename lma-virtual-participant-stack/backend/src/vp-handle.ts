@@ -131,3 +131,32 @@ export function sameVpName(name: string | null | undefined, displayName: string 
 export function withoutVpAddress(message: string): string {
     return cleanChatSpacing(message || '').replace(/(^|[^\p{L}\p{N}])(@?lma)\s*\([^()]{1,100}\)/iu, '$1$2');
 }
+
+/** The other LMA VPs' display names, as chat-addressing.ts knows them; see `setVpPeerNames`. */
+let peerNames: () => readonly string[] = () => [];
+
+/**
+ * Where `addressingVpHandle` reads the other VPs from. chat-addressing.ts sets
+ * it, so details.ts and chat-help.ts can name this VP without importing it.
+ */
+export function setVpPeerNames(names: () => readonly string[]): void {
+    peerNames = names;
+}
+
+/**
+ * The name to tell people to add after "LMA" to address this VP (the intro's
+ * `{LMA_HANDLE}`, the help reply): `preferredVpHandle`, unless another VP in
+ * the meeting answers to that short handle too (two VPs for two Bobs), in which
+ * case the owner part whole in parentheses, "(Bob Strahan)", which is this VP's
+ * alone. The display name itself when it names nobody in particular.
+ */
+export function addressingVpHandle(displayName: string, peers: readonly string[] = peerNames()): string {
+    const short = preferredVpHandle(displayName);
+    if (!short) return displayName;
+    const others = new Set(
+        peers.filter((peer) => !sameVpName(peer, displayName)).flatMap((peer) => vpHandles(peer)),
+    );
+    if (!others.has(normalizeChatText(short))) return short;
+    const owner = ownerPart(displayName);
+    return owner ? `(${owner.trim()})` : displayName;
+}

@@ -45,14 +45,17 @@
  */
 import { normalizeChatText } from './chat-text.js';
 import { onParticipantSeen } from './consent-roster.js';
-import { details } from './details.js';
+import { DEFAULT_EXIT_MESSAGE, details } from './details.js';
 import { createLogger } from './logger.js';
-import { cleanChatSpacing, isLmaVpName, sameVpName, vpHandles } from './vp-handle.js';
+import { cleanChatSpacing, isLmaVpName, sameVpName, setVpPeerNames, vpHandles } from './vp-handle.js';
 
 const log = createLogger('chat-addressing');
 
-/** Who a message is addressed to. */
-export type ChatAddressKind = 'self' | 'other' | 'bare' | 'none';
+/**
+ * Who a message is addressed to. `ambiguous`: by a short handle that this VP
+ * and another both answer to ("LMA Bob" with two Bobs' VPs in the meeting).
+ */
+export type ChatAddressKind = 'self' | 'other' | 'ambiguous' | 'bare' | 'none';
 
 export interface ChatAddress {
     kind: ChatAddressKind;
@@ -65,7 +68,7 @@ export interface ChatRoute extends ChatAddress {
     /** Whether this VP reads the message for its commands, questions and consent replies. */
     act: boolean;
     /** Why it does not, for the debug line. */
-    reason?: 'other-vp' | 'several-vps' | 'from-vp';
+    reason?: 'other-vp' | 'several-vps' | 'ambiguous' | 'from-vp';
 }
 
 function escapeRegExp(text: string): string {
@@ -133,21 +136,27 @@ export function resolveChatAddress(message: string, self: string, peers: readonl
     const before = clean.slice(0, end);
     const after = clean.slice(end);
 
-    // A parenthesised name: this VP's when it is its owner part or a handle.
+    // Every VP's handles, this one's and the others', in one list.
+    const mine = new Set(vpHandles(self));
+    const theirs = new Set(peers.filter((peer) => !sameVpName(peer, self)).flatMap((peer) => vpHandles(peer)));
+    const owner = (handle: string): ChatAddressKind => {
+        if (mine.has(handle)) return theirs.has(handle) ? 'ambiguous' : 'self';
+        return 'other';
+    };
+
+    // A parenthesised name: this VP's when it is its owner part or a handle,
+    // unless another VP answers to it too.
     const paren = /^\s*\(([^()]{1,100})\)/.exec(after);
     if (paren) {
-        const inner = normalizeChatText(paren[1]);
-        const mine = vpHandles(self).includes(inner);
-        return { kind: mine ? 'self' : 'other', text: `${before}${after.slice(paren[0].length)}` };
+        return { kind: owner(normalizeChatText(paren[1])), text: `${before}${after.slice(paren[0].length)}` };
     }
 
-    // A handle: this VP's, then the others'. Longest first within each.
-    for (const [kind, names] of [['self', [self]], ['other', peers.filter((p) => !sameVpName(p, self))]] as const) {
-        const handles = names.flatMap((name) => vpHandles(name)).sort((a, b) => b.length - a.length);
-        for (const handle of handles) {
-            const match = handlePattern(handle).exec(after);
-            if (match) return { kind, text: `${before}${after.slice(match[0].length)}` };
-        }
+    // A handle, longest first across every VP, so "LMA Bob Smith" is Bob
+    // Smith's VP's even though Bob Strahan's answers to "LMA Bob".
+    const handles = [...new Set([...mine, ...theirs])].sort((a, b) => b.length - a.length);
+    for (const handle of handles) {
+        const match = handlePattern(handle).exec(after);
+        if (match) return { kind: owner(handle), text: `${before}${after.slice(match[0].length)}` };
     }
     return { kind: 'bare', text: clean };
 }
@@ -167,6 +176,7 @@ export function routeChatMessage(
         return { ...address, act: false, reason: 'from-vp' };
     }
     if (address.kind === 'other') return { ...address, act: false, reason: 'other-vp' };
+    if (address.kind === 'ambiguous') return { ...address, act: false, reason: 'ambiguous' };
     if (address.kind === 'bare' && peers.some((peer) => !sameVpName(peer, self))) {
         return { ...address, act: false, reason: 'several-vps' };
     }
@@ -174,12 +184,46 @@ export function routeChatMessage(
 }
 
 /**
+ * How long another LMA VP is counted after it was last seen (as a chat sender,
+ * a speaker or a Google Meet tile), on the joins with no participant list.
+ *
+ * Ten minutes. While a VP is present on Google Meet its tile is read every
+ * second, and a VP with a voice assistant is seen whenever that speaks, so it
+ * is refreshed long before then. On the Zoom and Teams browser joins a VP with
+ * no voice assistant may be seen only once, as the sender of its introduction;
+ * after this long it is no longer counted and every VP answers a bare "LMA"
+ * again, which is how a meeting with one VP behaves, and is the safer way to
+ * be wrong: a VP that left without its exit message (removed, or stopped)
+ * would otherwise keep this one from answering a bare "LMA leave" for the rest
+ * of the meeting. Ten minutes covers the start of a meeting, when people
+ * address the VPs after reading their introductions, and the help reply and a
+ * VP's answers in the chat each count as a sighting again.
+ */
+export const PEER_TTL_MS = 10 * 60_000;
+
+/** The acknowledgement that comes before the exit message (details.ts `exitMessagesFor`), normalised. */
+const EXIT_ACKNOWLEDGEMENT = /^thanks .+ i ll head out now$/;
+
+/**
+ * Whether `message`, posted by another VP, is one it posts as it leaves: this
+ * deployment's exit messages, the default exit message (another VP may be
+ * another deployment's, with the default), or the acknowledgement it posts to
+ * whoever asked it to leave.
+ */
+export function isVpExitMessage(message: string, exitMessages: readonly string[]): boolean {
+    const text = normalizeChatText(message || '');
+    if (!text) return false;
+    if ([...exitMessages, DEFAULT_EXIT_MESSAGE].some((exit) => normalizeChatText(exit) === text)) return true;
+    return EXIT_ACKNOWLEDGEMENT.test(text);
+}
+
+/**
  * The other LMA VPs this one knows of, and the routing of each chat message.
  * One per meeting; the handlers use `chatAddressing`.
  */
 export class ChatAddressing {
-    /** Seen by name in the chat or as a speaker, by normalised name. */
-    private readonly seen = new Map<string, string>();
+    /** Seen by name in the chat, as a speaker or as a tile, by normalised name, with when last seen. */
+    private readonly seen = new Map<string, { name: string; at: number }>();
     /** The platform's whole participant list, where a handler reads one. */
     private roster: string[] | null = null;
     private lastCount = 0;
@@ -187,6 +231,8 @@ export class ChatAddressing {
     constructor(
         private readonly selfName: () => string,
         private readonly exitMessages: () => readonly string[] = () => [],
+        private readonly now: () => number = Date.now,
+        private readonly ttlMs: number = PEER_TTL_MS,
     ) {}
 
     /**
@@ -198,14 +244,13 @@ export class ChatAddressing {
         return !!name && isLmaVpName(name) && normalizeChatText(name) !== 'lma' && !sameVpName(name, this.selfName());
     }
 
-    /** A participant name seen in the meeting (a chat sender, a speaker). */
+    /** A participant name seen in the meeting (a chat sender, a speaker, a tile); refreshes a known VP. */
     notePeer(name: string | null | undefined): void {
         if (!this.isPeer(name)) return;
         const key = normalizeChatText(name);
-        if (!this.seen.has(key)) {
-            this.seen.set(key, cleanChatSpacing(name).trim());
-            this.logCount();
-        }
+        const known = this.seen.has(key);
+        this.seen.set(key, { name: cleanChatSpacing(name).trim(), at: this.now() });
+        if (!known) this.logCount();
     }
 
     /**
@@ -218,10 +263,19 @@ export class ChatAddressing {
         this.logCount();
     }
 
-    /** The other LMA VPs' display names. */
+    /** The other LMA VPs' display names: the list where one is read, else those seen within `ttlMs`. */
     peers(): string[] {
         if (this.roster !== null) return [...this.roster];
-        return [...this.seen.values()];
+        const at = this.now();
+        let expired = false;
+        for (const [key, entry] of this.seen) {
+            if (at - entry.at >= this.ttlMs) {
+                this.seen.delete(key);
+                expired = true;
+            }
+        }
+        if (expired) this.logCount();
+        return [...this.seen.values()].map((entry) => entry.name);
     }
 
     /** Whether this VP acts on `message` from `sender`, and the text it reads it as. */
@@ -229,19 +283,16 @@ export class ChatAddressing {
         this.notePeer(sender);
         const route = routeChatMessage(message, sender, this.selfName(), this.peers());
         // A VP that posts its exit message has left.
-        if (route.reason === 'from-vp' && sender) {
-            const text = normalizeChatText(message);
-            if (this.exitMessages().some((exit) => normalizeChatText(exit) === text)) {
-                this.seen.delete(normalizeChatText(sender));
-                this.logCount();
-            }
+        if (route.reason === 'from-vp' && sender && isVpExitMessage(message, this.exitMessages())) {
+            this.seen.delete(normalizeChatText(sender));
+            this.logCount();
         }
         if (!route.act) log.debug(`[chat-addressing] not for this VP (${route.reason}, address=${route.kind})`);
         return route;
     }
 
     private logCount(): void {
-        const count = this.peers().length;
+        const count = this.roster !== null ? this.roster.length : this.seen.size;
         if (count === this.lastCount) return;
         this.lastCount = count;
         log.info(
@@ -261,3 +312,5 @@ export const chatAddressing = new ChatAddressing(
 
 // The names the platform shows as speaking.
 onParticipantSeen((name) => chatAddressing.notePeer(name));
+// The intro's {LMA_HANDLE} and the help reply name this VP against the others.
+setVpPeerNames(() => chatAddressing.peers());
