@@ -498,6 +498,19 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	# the agenda.
 	consentMode: String
 	consentRule: String
+	# The IANA time zone of the browser that scheduled the meeting (for example
+	# "America/New_York"), so the time can be shown as it was entered. Absent for
+	# immediate launches and for rows written before it was recorded.
+	scheduledTimeZone: String
+	# Whether the launching user chose to join a Zoom meeting with their stored
+	# Zoom account rather than as a guest. Absent when the form did not offer the
+	# choice (other platforms, the Zoom Meeting SDK, older rows).
+	# getVirtualParticipant also answers it for scheduled rows written before it
+	# was recorded, from whether userZoomSub is set.
+	useStoredZoomAccount: Boolean
+	# Whether a meeting password was given. Answered by getVirtualParticipant
+	# from the row, so a reader can show that one was set without reading it.
+	hasMeetingPassword: Boolean
 	createdAt: AWSDateTime
 	updatedAt: AWSDateTime
 	CallId: ID
@@ -575,6 +588,12 @@ input CreateVirtualParticipantInput {
 	# resolver when the VP starts the meeting's consent.
 	consentMode: String
 	consentRule: String
+	# Optional: the IANA time zone the scheduled time was entered in, and
+	# whether a Zoom meeting is joined with the user's stored Zoom account.
+	# Stored on the row for the Virtual Participant page; neither launch path
+	# reads them.
+	scheduledTimeZone: String
+	useStoredZoomAccount: Boolean
 }
 
 input UpdateVirtualParticipantInput {

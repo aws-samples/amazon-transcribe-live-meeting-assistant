@@ -26,6 +26,7 @@ import useUserGroups from '../../hooks/use-user-groups';
 import useSettingsContext from '../../contexts/settings';
 import StatusTimeline from './StatusTimeline';
 import VNCViewer from './VNCViewer';
+import LaunchSettings from './LaunchSettings';
 
 const client = generateClient();
 // VNC WebSocket URL is published by the backend in the vncEndpoint field
@@ -54,6 +55,14 @@ const getVirtualParticipant = `
       vncPort
       vncReady
       userAcknowledgedFailure
+      enableVideoRecording
+      agenda
+      agendaSource
+      consentMode
+      consentRule
+      scheduledTimeZone
+      useStoredZoomAccount
+      hasMeetingPassword
     }
   }
 `;
@@ -966,6 +975,9 @@ const VirtualParticipantDetails = () => {
       <Container header={<Header variant="h3">Connection Details</Header>}>
         <ConnectionDetails vpDetails={vpDetails} />
       </Container>
+
+      {/* What the Create Virtual Participant form asked for. */}
+      <LaunchSettings vp={vpDetails} />
 
       {/* VNC Live View - Show when VNC is ready and VP is active.
           FAILED is intentionally included: the VP container waits up to

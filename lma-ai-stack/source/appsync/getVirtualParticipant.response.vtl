@@ -38,6 +38,16 @@
   #end
 #end
 ## END SharedWith entries
+## Answered from the row rather than stored: whether a meeting password was
+## given, and for scheduled rows written before useStoredZoomAccount was
+## recorded, the Zoom account choice that userZoomSub stands for.
+#if( $context.result )
+  #set( $hasMeetingPassword = !$util.isNullOrBlank($context.result.meetingPassword) )
+  $util.qr( $context.result.put("hasMeetingPassword", $hasMeetingPassword) )
+  #if( $util.isNull($context.result.useStoredZoomAccount) && !$util.isNullOrBlank($context.result.userZoomSub) )
+    $util.qr( $context.result.put("useStoredZoomAccount", true) )
+  #end
+#end
 #if($context.identity.userArn)
   ## IAM authenticated request (Lambda function) - allow unrestricted access
   $util.toJson($context.result)

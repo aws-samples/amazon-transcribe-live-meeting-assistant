@@ -9148,7 +9148,8 @@ Resources:
         
         #if($ctx.args.input.meetingTime)
           $util.qr($input.put("meetingTime", $ctx.args.input.meetingTime))
-          #set($meetingTimeMillis = $util.math.multiply($ctx.args.input.meetingTime, 1000))
+          ## Plain arithmetic: $util.math.multiply answers null for an epoch time.
+          #set($meetingTimeMillis = $ctx.args.input.meetingTime * 1000)
           #set($scheduledDateTime = $util.time.epochMilliSecondsToISO8601($meetingTimeMillis))
           $util.qr($input.put("scheduledFor", $scheduledDateTime))
         #end
@@ -9214,6 +9215,19 @@ Resources:
             $util.error("consentRule is only used with consentMode opt_in", "BadRequest")
           #end
           $util.qr($input.put("consentRule", $ctx.args.input.consentRule))
+        #end
+
+        ## Recorded for the Virtual Participant page only: the time zone the
+        ## scheduled time was entered in, and the Zoom account choice. Neither
+        ## launch path reads them.
+        #if(!$util.isNullOrBlank($ctx.args.input.scheduledTimeZone))
+          #if($ctx.args.input.scheduledTimeZone.length() > 64)
+            $util.error("scheduledTimeZone is longer than 64 characters", "BadRequest")
+          #end
+          $util.qr($input.put("scheduledTimeZone", $ctx.args.input.scheduledTimeZone))
+        #end
+        #if(!$util.isNull($ctx.args.input.useStoredZoomAccount))
+          $util.qr($input.put("useStoredZoomAccount", $ctx.args.input.useStoredZoomAccount))
         #end
 
         {

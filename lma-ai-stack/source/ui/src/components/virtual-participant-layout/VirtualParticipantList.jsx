@@ -587,10 +587,20 @@ const VirtualParticipantList = () => {
       // Stored on the VP row too, and read by the VP when it starts.
       Object.assign(vpInput, meetingConsentInput(meetingConsentChoice));
 
+      // Recorded so the Virtual Participant page can show the Zoom account
+      // choice; only where the form offers it.
+      if (createForm.meetingPlatform === 'ZOOM' && !zoomSdkEnabled) {
+        vpInput.useStoredZoomAccount = !!userZoomSub;
+      }
+
       // Add scheduling fields if this is a scheduled VP
       if (isScheduled && meetingTimestamp) {
         vpInput.meetingTime = meetingTimestamp;
         vpInput.isScheduled = true;
+        // The date and time fields are read in this browser's time zone; it is
+        // recorded so the Virtual Participant page can show the time as entered.
+        const { timeZone } = Intl.DateTimeFormat().resolvedOptions();
+        if (timeZone) vpInput.scheduledTimeZone = timeZone;
         // Persist userSub / userZoomSub on the row so the VPScheduler
         // Lambda can plumb LMA_USER_SUB and ZOOM_CREDENTIALS_SECRET_NAME
         // to the launched ECS task at meeting time. Immediate (non-scheduled)
