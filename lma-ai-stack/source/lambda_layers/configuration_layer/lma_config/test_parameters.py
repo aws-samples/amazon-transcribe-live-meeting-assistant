@@ -194,10 +194,12 @@ def test_a_value_that_is_not_its_type_is_left_out(monkeypatch):
 def test_a_reader_prefers_the_section(monkeypatch):
     entry = _entry()
     monkeypatch.setenv("SOME_ENV", "from-env")
-    store = _Store({entry.section: {entry.setting: "from-store"}})
-    assert parameters.read_setting(
-        entry.section, entry.setting, env_var="SOME_ENV", store=store
-    ) == ("from-store")
+    stored = _valid_value(entry)
+    store = _Store({entry.section: {entry.setting: stored}})
+    assert (
+        parameters.read_setting(entry.section, entry.setting, env_var="SOME_ENV", store=store)
+        == stored
+    )
 
 
 def test_a_reader_falls_back_to_the_environment_when_the_section_lacks_the_setting(monkeypatch):
@@ -351,3 +353,54 @@ def test_a_setting_is_either_shipped_or_parameter_backed_never_both():
     }
     backed = {(entry.section, entry.setting) for entry in parameters.parameter_defaults()}
     assert not shipped & backed
+
+
+# ── a stored value no longer offered ────────────────────────────────────────
+
+#: Offered when saved, since taken off the list (end of life on Amazon Bedrock).
+WITHDRAWN_MODELS = ("us.anthropic.claude-opus-4-20250514-v1:0", "us.amazon.nova-premier-v1:0")
+
+
+@pytest.mark.parametrize("model_id", WITHDRAWN_MODELS)
+def test_the_end_of_life_models_are_not_offered_for_any_setting(model_id):
+    for name in schema.section_schemas():
+        for setting, spec in schema.section_schema(name).get("properties", {}).items():
+            assert model_id not in spec.get("enum", []), (name, setting)
+
+
+@pytest.mark.parametrize("model_id", WITHDRAWN_MODELS)
+def test_a_stored_model_no_longer_offered_is_read_as_the_default(model_id, caplog):
+    store = _Store({"language_models": {"meetingAssistModelId": model_id}})
+    shipped = parameters.shipped_setting_defaults()["language_models"]["meetingAssistModelId"]
+    with caplog.at_level("WARNING"):
+        assert (
+            parameters.read_setting("language_models", "meetingAssistModelId", store=store)
+            == shipped
+        )
+        assert (
+            parameters.read_setting(
+                "language_models", "meetingAssistModelId", default="caller", store=store
+            )
+            == "caller"
+        )
+    assert model_id in caplog.text and "meetingAssistModelId" in caplog.text
+
+
+def test_a_stored_model_still_offered_is_used():
+    offered = schema.section_schema("language_models")["properties"]["summaryModelId"]["enum"][0]
+    store = _Store({"language_models": {"summaryModelId": offered}})
+    assert parameters.read_setting("language_models", "summaryModelId", store=store) == offered
+
+
+def test_only_the_setting_no_longer_offered_is_left_out():
+    values = {
+        "summaryModelId": "us.amazon.nova-premier-v1:0",
+        "meetingAssistModelId": "amazon.nova-micro-v1:0",
+    }
+    assert schema.offered_settings("language_models", values) == {
+        "meetingAssistModelId": "amazon.nova-micro-v1:0"
+    }
+    # A setting with no list of choices is never left out.
+    assert schema.offered_settings("retention", {"transcriptionExpirationInDays": 3}) == {
+        "transcriptionExpirationInDays": 3
+    }

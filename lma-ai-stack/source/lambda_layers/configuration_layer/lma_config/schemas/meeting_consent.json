@@ -93,7 +93,6 @@
       "enum": [
         "amazon.nova-lite-v1:0",
         "amazon.nova-pro-v1:0",
-        "us.amazon.nova-premier-v1:0",
         "global.amazon.nova-2-lite-v1:0",
         "us.amazon.nova-2-lite-v1:0",
         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",

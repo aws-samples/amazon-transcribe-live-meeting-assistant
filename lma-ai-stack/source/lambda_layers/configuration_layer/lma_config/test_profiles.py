@@ -253,12 +253,12 @@ def test_a_section_saved_as_a_delta_into_a_full_copy_is_completed(store):
     store.write_section(
         "trial",
         "language_models",
-        {"summaryModelId": "us.amazon.nova-premier-v1:0"},
+        {"summaryModelId": "us.amazon.nova-2-lite-v1:0"},
         updated_by="a",
         expected_version=None,
     )
     assert _body(store, "trial")["language_models"] == {
-        "summaryModelId": "us.amazon.nova-premier-v1:0",
+        "summaryModelId": "us.amazon.nova-2-lite-v1:0",
         "meetingAssistModelId": "amazon.nova-micro-v1:0",
     }
 
@@ -288,7 +288,7 @@ def test_a_full_copy_keeps_its_format_and_origin_across_saves(store):
     store.write_section(
         "trial",
         "language_models",
-        {"summaryModelId": "us.amazon.nova-premier-v1:0"},
+        {"summaryModelId": "us.amazon.nova-2-lite-v1:0"},
         updated_by="b",
         expected_version=None,
     )

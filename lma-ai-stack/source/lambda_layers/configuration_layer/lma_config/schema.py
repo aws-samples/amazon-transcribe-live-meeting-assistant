@@ -42,6 +42,7 @@ apart unnoticed.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 from decimal import Decimal
@@ -53,6 +54,8 @@ from .errors import InvalidConfiguration, UnknownConfigurationSection
 from .sections import registered_sections, section_spec
 
 SCHEMA_DIR = Path(__file__).resolve().parent / "schemas"
+
+LOGGER = logging.getLogger(__name__)
 
 #: Validation keywords the validator implements. A schema using any other
 #: keyword that is not a UI annotation fails the layer's tests.
@@ -444,6 +447,46 @@ def validate_section(name: str, values: Any) -> None:
     problems = check(schema, values, (name,))
     if problems:
         raise InvalidConfiguration(problems)
+
+
+@lru_cache(maxsize=None)
+def _choices_of(name: str) -> Dict[str, Tuple[Any, ...]]:
+    """Each top-level setting of section ``name`` that lists its values, with those values."""
+    properties = section_schema(name).get("properties", {})
+    return {
+        setting: tuple(spec["enum"])
+        for setting, spec in properties.items()
+        if isinstance(spec, Mapping) and isinstance(spec.get("enum"), list)
+    }
+
+
+def offered_settings(name: str, values: Mapping[str, Any]) -> Dict[str, Any]:
+    """``values`` without any setting whose stored value is no longer one of its choices.
+
+    A save is checked against the schema, so a stored value outside a setting's
+    ``enum`` is one that was offered when it was saved and has since been taken
+    off the list: an Amazon Bedrock model that has reached the end of its life,
+    say. A reader should not use it, so it is left out here and the reader falls
+    back as it would for a setting the section does not hold: to the caller's
+    default, then the shipped one. The profile is not changed; the Configuration
+    page shows the stored value as not one of the choices until an administrator
+    picks another.
+    """
+    choices = _choices_of(name)
+    kept: Dict[str, Any] = {}
+    for setting, value in values.items():
+        options = choices.get(setting)
+        if options is not None and not any(_same(value, option) for option in options):
+            LOGGER.warning(
+                "%s › %s is %s, which is no longer one of its choices; using its default "
+                "until another is chosen on the Configuration page",
+                name,
+                setting,
+                _json(value),
+            )
+            continue
+        kept[setting] = value
+    return kept
 
 
 def limited_settings(schema: Mapping[str, Any]) -> List[str]:

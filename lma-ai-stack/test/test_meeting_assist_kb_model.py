@@ -113,9 +113,9 @@ KB_MODELS_VERIFIED_REFUSED = (
 # measured in has no inference profile for this model at all, so whether a
 # knowledge base would accept it is unknown. Unknown is treated as not offered,
 # for the same reason the Nova models are not offered: an unverified value in
-# this setting is the failure it exists to prevent. It remains selectable for
-# the agent, where it is reached through Converse and is unaffected by any of
-# this.
+# this setting is the failure it exists to prevent. The model has since reached
+# the end of its life on Amazon Bedrock and is not offered for any setting; it
+# stays named here so it cannot return to this one unmeasured.
 KB_MODELS_UNVERIFIABLE = ("us.anthropic.claude-opus-4-20250514-v1:0",)
 
 

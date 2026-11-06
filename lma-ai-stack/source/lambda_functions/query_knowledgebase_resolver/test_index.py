@@ -71,7 +71,7 @@ def test_without_a_configured_model_the_shipped_default_is_used(store) -> None:
 
 
 def test_the_model_is_read_for_each_request(store) -> None:
-    store({"summaryModelId": "us.amazon.nova-pro-v1:0"})
+    store({"summaryModelId": "us.anthropic.claude-opus-4-6-v1"})
     first = index.model_arn()
     store({"summaryModelId": "us.anthropic.claude-sonnet-4-6"})
     assert first != index.model_arn()

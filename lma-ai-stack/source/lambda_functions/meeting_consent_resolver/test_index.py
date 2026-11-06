@@ -198,6 +198,15 @@ def test_unreadable_settings_refuse_rather_than_default_to_off(dynamo, monkeypat
     assert dynamo.consent() is None
 
 
+def test_a_verifier_model_no_longer_offered_is_read_as_the_default(dynamo, monkeypatch) -> None:
+    settings(monkeypatch, verifierModelId="us.amazon.nova-premier-v1:0")
+    result = call("getMeetingConsent", user(OWNER))
+    assert result["Settings"]["VerifierModelId"] == "amazon.nova-lite-v1:0"
+    settings(monkeypatch, verifierModelId="amazon.nova-pro-v1:0")
+    result = call("getMeetingConsent", user(OWNER))
+    assert result["Settings"]["VerifierModelId"] == "amazon.nova-pro-v1:0"
+
+
 # ── starting ───────────────────────────────────────────────────────────────
 
 
