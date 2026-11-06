@@ -385,6 +385,26 @@ Resources:
                   - !Sub
                     - "arn:${AWS::Partition}:s3:::${bucket}/lma-video-recordings/*"
                     - bucket: !Ref S3BucketName
+              # The recording objects are encrypted with the stack's
+              # customer-managed key, so a signed GET also needs kms:Decrypt.
+              # Decrypt only, only through Amazon S3, and only for objects of
+              # this bucket (the S3 encryption context is the bucket ARN with an
+              # S3 Bucket Key, the object ARN without one).
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "s3.${AWS::Region}.${AWS::URLSuffix}"
+                  StringLike:
+                    "kms:EncryptionContext:aws:s3:arn":
+                      - !Sub
+                        - "arn:${AWS::Partition}:s3:::${bucket}"
+                        - bucket: !Ref S3BucketName
+                      - !Sub
+                        - "arn:${AWS::Partition}:s3:::${bucket}/*"
+                        - bucket: !Ref S3BucketName
         - PolicyName: accessParameterStore
           PolicyDocument:
             Version: 2012-10-17

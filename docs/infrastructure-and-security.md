@@ -71,6 +71,37 @@ LMA uses **Amazon Cognito User Pool** for authentication with the following feat
 - **Customer-managed KMS key** encrypts DynamoDB tables, S3 buckets, and CloudWatch Log groups
 - All sensitive data is encrypted using AES-256 via KMS
 
+#### Recordings bucket and call data stream
+
+The recordings bucket (audio and video recordings, batch transcripts, key
+frames, consent evidence and pending uploads) uses SSE-KMS with the stack's
+customer-managed key, with an S3 Bucket Key to keep the number of KMS requests
+low. Amazon Transcribe batch jobs for uploaded meetings name the same key as
+their output encryption key. The Kinesis call data stream is encrypted with the
+same key.
+
+Each role that reads or writes the bucket or the stream is granted the key only
+through that service (`kms:ViaService` for Amazon S3 or Kinesis). The web UI's
+Cognito identity-pool role, which signs playback URLs for recordings, is granted
+`kms:Decrypt` only, through Amazon S3, and only for objects of the recordings
+bucket. The transcript knowledge base's service role is granted `kms:Decrypt`
+through Amazon S3.
+
+When you update an existing stack:
+
+- **Existing objects keep the encryption they were written with** (SSE-S3)
+  until they are rewritten or expire under the bucket's lifecycle rules. New
+  objects are written with the customer-managed key. To re-encrypt existing
+  objects, copy them onto themselves (for example with S3 Batch Operations or
+  `aws s3 cp --recursive` with `--sse aws:kms --sse-kms-key-id <key-arn>`).
+- **The stream's key is changed in place.** The stream is not replaced and keeps
+  its shards and consumers; records written before the change stay encrypted
+  with the previous key until they age out of the 24-hour retention period.
+- If you read the recordings bucket from outside the stack (for example the
+  Amazon QuickSight manifest in the stack outputs, Amazon Athena, or your own
+  tooling), the reading principal needs `kms:Decrypt` on the stack's key, whose
+  alias is `alias/<stack-name>-encryption-key`.
+
 ### In Transit
 
 - **HTTPS/TLS** for all connections including WebSocket, AppSync, and CloudFront

@@ -566,6 +566,22 @@ def test_the_transcript_is_written_where_stage_three_reads_it(env) -> None:
     assert index.TRANSCRIPTS_PREFIX == "lma-transcripts/"
 
 
+def test_the_transcript_is_encrypted_with_the_configured_key(env, monkeypatch) -> None:
+    """With a key configured, the job names it as the output encryption key."""
+    key_arn = "test-output-key"  # any value; the processor passes it through
+    monkeypatch.setattr(index, "OUTPUT_ENCRYPTION_KMS_KEY_ID", key_arn)
+    _, _, transcribe = env
+    index.lambda_handler(s3_event(), None)
+    assert transcribe.params["OutputEncryptionKMSKeyId"] == key_arn
+
+
+def test_no_output_key_is_named_when_none_is_configured(env, monkeypatch) -> None:
+    monkeypatch.setattr(index, "OUTPUT_ENCRYPTION_KMS_KEY_ID", "")
+    _, _, transcribe = env
+    index.lambda_handler(s3_event(), None)
+    assert "OutputEncryptionKMSKeyId" not in transcribe.params
+
+
 def test_the_job_is_tagged_so_stage_three_can_recognize_it(env) -> None:
     """Stage 3's EventBridge rule sees every Transcribe job in the account; the
     ``lma:source`` tag is how it tells ours apart from anyone else's."""
