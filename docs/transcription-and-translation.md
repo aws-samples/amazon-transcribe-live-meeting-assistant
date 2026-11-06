@@ -128,6 +128,55 @@ Meeting Summary panel to refresh it -- see
 The transcript on the meeting page, the download, and the assistant's
 questions about the current meeting are all live and need no such step.
 
+### One person or several people
+
+On a [Virtual Participant](virtual-participant.md) meeting, and on any meeting
+whose channel carries a real name, a voice label is added to the name the
+meeting platform showed: `Bob Strahan (spk_0)`. For an individual the label is
+noise — speaker separation routinely splits one person's voice into two or three
+labels — while for a conference room (`ConfRm_1`) the labels are the only thing
+telling the people in it apart. So each name that carries voice labels is shown
+in one of two ways:
+
+- **One person** — every line under the name shows the name alone: `Bob Strahan`.
+  If its voices have been given a name (by you, or by **Identify speakers**) and
+  they agree on it, that name is shown instead.
+- **Several people** — each voice is shown on its own, as `ConfRm_1 · Voice 1`,
+  `ConfRm_1 · Voice 2` and so on, numbered in the order the voices were first
+  heard, until it is named. Naming one renames every line that voice spoke.
+
+With no choice made, LMA decides from the transcript. A name is shown as
+several people when any of these holds, and as one person otherwise:
+
+| Rule | Example |
+|---|---|
+| The name reads as a room or a room device | `ConfRm_1`, `Conference Room B`, `Zoom Room 4`, `Huddle 3`, `SEA54-12.401`, `BLDG-3-ROOM`, `Polycom Studio` |
+| Two or more of its voices each spoke for at least 20% of the name's speech **and** at least 60 seconds | a shared seat where two people talk at length |
+| Its voices were given different names | voice 1 named *Priya*, voice 2 named *Sam* |
+
+The room-name patterns, the names that stand for nobody, and the two thresholds
+are kept in one file, `speaker_mode_rules.json` in the configuration layer's
+`lma_speakers` module (with a byte-identical copy for the web UI), so they are
+easy to extend. Because the voice-share rule is evaluated over the whole
+transcript, a live meeting's lines can change from one person to several when a
+second voice becomes a real share of a name's speech.
+
+Names that stand for nobody in particular — `Unknown`, `none`, the default
+`Other Participant`, `Other participants`, `Others` and `Me` labels — are never
+grouped: their voice labels are kept, because they are the only way to tell the
+people behind them apart, and those voices are named as described above.
+
+Correcting the default is one click: on the **Transcript** tab, the speaker chips
+are grouped by name, and each name with two or more voices (or shown as several
+people) has a **One person | Several people** toggle; in **Several people** each
+voice's chip has a pencil to name it in place. See
+[Transcript tab](web-ui-guide.md#transcript-tab). The choice is stored with the
+meeting's speaker names, so like them it reaches the transcript download, the
+summary (after **Regenerate**), the agenda, and the Meeting Assistant. Changing it
+never rewrites the stored transcript, and it can be changed back at any time.
+Only the meeting's owner, an Admin, and anyone the meeting is shared with can
+change it.
+
 ### Finding the names automatically
 
 Most meetings start with people saying who they are, to each other rather than to
@@ -142,6 +191,17 @@ the summary reads names rather than voice ids. The in-meeting passes only happen
 while somebody has the meeting page open, which is also the only time watching a
 name appear is worth anything; a meeting nobody watched is covered by the
 end-of-meeting pass.
+
+The automatic passes stop as soon as there is nothing for them to do. When every
+voice already has a name — on a Virtual Participant meeting every voice carries
+the name the meeting platform showed — the panel says *Every voice already has a
+name from the meeting platform* and stops; what is left to tidy there is how a
+name's voices are grouped, which is the **One person | Several people** toggle
+above. They also stop once the meeting has ended (the end-of-meeting pass covers
+it), and after a pass that found nothing they wait until somebody speaks again.
+**Identify speakers** always answers when pressed. *Nothing in the transcript
+names them yet* means there are voices to name but nothing said so far names
+them.
 
 Two kinds of evidence are used, and they are **not** treated the same way:
 

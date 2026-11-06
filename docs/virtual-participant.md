@@ -71,6 +71,16 @@ Name them on the
 [Speakers panel](transcription-and-translation.md#naming-the-voices), which
 lists one row per voice and relabels every segment that voice produced.
 
+The voice ids are shown only where they tell people apart. Each roster name is
+shown as **one person** — `Bob Strahan` for every line, however many voice ids
+separation gave him — unless it reads as a room (`Conference Room`, `ConfRm_1`,
+a room device) or two of its voices each spoke at length, in which case it is
+shown as **several people**: `Conference Room · Voice 1`, `Voice 2`. The
+**One person | Several people** toggle beside the name's chips on the
+**Transcript** tab corrects either guess in one click, and in **Several people**
+each voice can be named in place; see
+[One person or several people](transcription-and-translation.md#one-person-or-several-people).
+
 The other two naming routes do **not** apply to a Virtual Participant today, and
 it is worth knowing which:
 [naming from what people say](transcription-and-translation.md#finding-the-names-automatically)
