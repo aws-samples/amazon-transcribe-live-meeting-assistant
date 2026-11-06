@@ -64,6 +64,8 @@ class Harness:
             sleep=self._sleep,
             now=lambda: self.clock,
             log=self.messages.append,
+            # The warm-up runs inline here, so one call shows its outcome.
+            run_in_background=lambda work: work(),
         )
 
     def _spawn(self):
@@ -245,42 +247,47 @@ def test_the_warm_exercise_asks_for_speaker_labels_when_a_diarizer_is_baked(
     assert hook_server.speaker_labels_baked() is True
 
 
-def test_concurrent_ready_requests_run_one_warm_decode() -> None:
-    """A /ready retried while the first decodes waits for it instead of decoding beside it."""
+def test_ready_answers_while_the_warm_decode_runs_and_starts_only_one() -> None:
+    """Lambda's retries get 503 at once while the decode runs, then 200."""
     import threading
 
     harness = Harness()
-    started = threading.Event()
     release = threading.Event()
-    running = []
+    started = threading.Event()
 
     def slow_exercise() -> bool:
-        running.append(1)
-        assert len(running) == 1, "two warm decodes ran at once"
         started.set()
         release.wait(5)
         harness.exercises += 1
-        running.pop()
         return True
 
-    harness.deps.exercise = slow_exercise
-    hooks = Hooks(harness.deps)
-    results: list[int] = []
-    first = threading.Thread(target=lambda: results.append(hooks.on_ready()))
-    first.start()
-    assert started.wait(5)
-    second = threading.Thread(target=lambda: results.append(hooks.on_ready()))
-    second.start()
-    # The second request has to be waiting on the first before the first is
-    # allowed to finish; otherwise it could arrive after the warm-up and pass
-    # without the two ever overlapping.
-    second.join(0.2)
-    assert second.is_alive()
-    assert hooks._warmup.locked()
-    release.set()
-    first.join(5)
-    second.join(5)
+    threads: list[threading.Thread] = []
 
-    assert results == [200, 200]
+    def in_thread(work):
+        thread = threading.Thread(target=work)
+        threads.append(thread)
+        thread.start()
+
+    harness.deps.exercise = slow_exercise
+    harness.deps.run_in_background = in_thread
+    hooks = Hooks(harness.deps)
+
+    assert hooks.on_ready() == 503
+    assert started.wait(5)
+    # Retries while the decode runs are answered at once and start nothing.
+    assert hooks.on_ready() == 503
+    assert hooks.on_ready() == 503
+    assert len(threads) == 1
+    release.set()
+    threads[0].join(5)
+    assert hooks.on_ready() == 200
     assert harness.exercises == 1
-    assert harness.spawns == 1
+
+
+def test_a_ready_request_waits_only_briefly_for_the_listener() -> None:
+    """A model that takes minutes to load does not hold a request open."""
+    harness = Harness(listening_after=10_000)
+    hooks = Hooks(harness.deps)
+
+    assert hooks.on_ready() == 503
+    assert sum(harness.sleeps) <= 10
