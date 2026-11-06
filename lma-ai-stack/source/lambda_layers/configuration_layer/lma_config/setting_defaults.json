@@ -73,6 +73,10 @@
       "type": "string",
       "default": "(OK|Okay)[.,! ]*[Aa]ssistant",
       "formerParameter": "AssistantWakePhraseRegEx"
+    },
+    "promptCachingEnabled": {
+      "type": "boolean",
+      "default": true
     }
   },
   "meeting_processing": {

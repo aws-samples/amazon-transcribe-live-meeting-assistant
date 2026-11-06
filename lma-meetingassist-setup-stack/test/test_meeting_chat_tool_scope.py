@@ -76,6 +76,7 @@ def built(monkeypatch):
     strands.tool = lambda fn: fn
     strands_models = types.ModuleType("strands.models")
     strands_models.BedrockModel = lambda **kwargs: kwargs
+    strands_models.CacheConfig = lambda **kwargs: ("CacheConfig", kwargs)
     strands.models = strands_models
     tavily = types.ModuleType("tavily")
     tavily.TavilyClient = object
@@ -136,6 +137,7 @@ def built(monkeypatch):
         return {
             "tools": {tool.__name__ for tool in agent["tools"] or []},
             "system_prompt": agent["system_prompt"],
+            "model": agent["model"],
         }
 
     return run

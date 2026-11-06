@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lma:configuration/meeting_assist",
   "title": "Meeting assistant",
-  "description": "When a transcript wakes the meeting assistant. The default is the shipped value, or the default profile's; a value set here is used instead until it is reset.",
+  "description": "When a transcript wakes the meeting assistant, and whether its answers use Amazon Bedrock prompt caching. The default is the shipped value, or the default profile's; a value set here is used instead until it is reset.",
   "sectionLabel": "Meeting Assistant",
-  "appliesText": "A saved change applies within about five minutes, to transcript segments processed after that.",
+  "appliesText": "A saved change applies within about five minutes, to transcript segments processed and answers started after that.",
   "order": 9,
   "collapsible": true,
   "defaultExpanded": false,
@@ -19,6 +19,12 @@
       "examples": ["(OK|Okay)[.,! ]*[Aa]ssistant"],
       "minLength": 1,
       "maxLength": 256
+    },
+    "promptCachingEnabled": {
+      "order": 1,
+      "type": "boolean",
+      "title": "Use Amazon Bedrock prompt caching",
+      "description": "Mark the assistant's instructions, tool definitions and, on Claude models, the conversation so far as cacheable, so the model calls of one answer, and answers given within a few minutes of each other, read the repeated part from the cache at a lower price instead of paying for it again. Applies only to the meeting assistant models that support prompt caching (Claude 4 and later, Nova Micro, Lite and Pro, and Nova 2 Lite); other models are unaffected. The answers themselves do not change."
     }
   },
   "additionalProperties": false

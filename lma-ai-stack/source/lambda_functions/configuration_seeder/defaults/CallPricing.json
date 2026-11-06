@@ -11,15 +11,21 @@
     "default": {
       "bedrock/amazon.nova-lite-v1:0": {
         "inputTokens": 6e-08,
-        "outputTokens": 2.4e-07
+        "outputTokens": 2.4e-07,
+        "cacheReadInputTokens": 1.5e-08,
+        "cacheWriteInputTokens": 0.0
       },
       "bedrock/amazon.nova-micro-v1:0": {
         "inputTokens": 3.5e-08,
-        "outputTokens": 1.4e-07
+        "outputTokens": 1.4e-07,
+        "cacheReadInputTokens": 8.75e-09,
+        "cacheWriteInputTokens": 0.0
       },
       "bedrock/amazon.nova-pro-v1:0": {
         "inputTokens": 8e-07,
-        "outputTokens": 3.2e-06
+        "outputTokens": 3.2e-06,
+        "cacheReadInputTokens": 2e-07,
+        "cacheWriteInputTokens": 0.0
       },
       "bedrock/global.amazon.nova-2-lite-v1:0": {
         "inputTokens": 3e-07,

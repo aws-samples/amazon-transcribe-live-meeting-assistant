@@ -18,6 +18,7 @@ title: "Meeting Assistant"
   - [Web Crawler](#web-crawler)
 - [Model Selection](#model-selection)
   - [The knowledge-base model](#the-knowledge-base-model)
+  - [Prompt caching](#prompt-caching)
 - [Bedrock Guardrails](#bedrock-guardrails)
 - [Custom LLM Prompt Templates](#custom-llm-prompt-templates)
 - [Chat Shortcut Button Configuration](#chat-shortcut-button-configuration)
@@ -118,6 +119,26 @@ Whether a knowledge base can generate with a given model is a property of that i
 The setting defaults to `global.anthropic.claude-haiku-4-5-20251001-v1:0`. Releases before v0.4.0 had no separate model for this job and these tools generated with the meeting assistant's model, so a deployment that selected a non-default agent model needed this one set when it updated -- see the [v0.4.0 migration notes](stack-updates-and-upgrades.md#v040) for which value to choose. Because the two settings are independent, you can run the agent on any model it supports -- including the Claude 5 generation, which is not offered for retrieval -- and leave retrieval on a model that works; the knowledge-base tools keep working either way. Enable access to both models in the Amazon Bedrock console for your region before you choose them. A model chosen on the Configuration page is not checked before it is used: a model the account cannot invoke makes the assistant or the tool fail when it next runs, with the Bedrock error in its log.
 
 If the knowledge-base model is ever set to a model a knowledge base cannot generate with, the affected tool is not offered to the agent at all, and the function's log records the model ID and where to change it: **Amazon Bedrock Models › Meeting assistant knowledge bases** on the Configuration page. Past meetings can still be listed chronologically in that state, because the `recent_meetings_list` tool reads DynamoDB and does not involve a knowledge base.
+
+### Prompt caching
+
+The assistant marks the stable part of each request for [Amazon Bedrock prompt caching](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html), so a model call that repeats it reads it from the cache at a lower price instead of being billed for it again as ordinary input. The answers themselves do not change. It is on by default and is switched by **Meeting Assistant › Use Amazon Bedrock prompt caching** on the Configuration page, which applies within about five minutes to answers started after that.
+
+What is cached depends on the model, because a request carrying a cache point that the model does not accept is rejected:
+
+| Meeting assistant model | Cache points |
+|---|---|
+| Claude 4 and later (Haiku 4.5, Sonnet 4.5, Sonnet 4.6, Opus 4.1, Opus 4.6, and the 5.5 models) | After the tool definitions, after the system prompt, and at the end of the latest user message, moved forward on each model call |
+| Nova Micro, Nova Lite, Nova Pro and Nova 2 Lite | After the system prompt only, which also covers the tool definitions ahead of it. Nova rejects a cache point among the tool definitions or beside a tool result |
+| Any other model, including Nova Premier | None; the request is sent as before |
+
+The decision is made in `bedrock_compat.prompt_cache_sections`, so a model added to the selectable list later gets no cache points until it is known to accept them.
+
+Most of the saving comes inside a single answer. An answer that uses a tool is several model calls, and each one resends everything the call before it sent plus the tool's result, which is often a slice of the transcript. With the cache point at the end of the latest message, the second and later calls read the earlier part from the cache. Answers within about five minutes of each other (the cache's lifetime, renewed by each read) can also share the cached instructions and tool definitions.
+
+A cache point takes effect only once everything before it reaches the model's minimum: 4,096 tokens for Claude Haiku 4.5, 512 to 1,024 for the later Claude models, and about 1,000 for Nova. Measured in us-east-1, the assistant's instructions and built-in tool definitions come to about 3,800 tokens on Claude Haiku 4.5, so on the default model they are not cached by themselves; they are cached as part of the longer prefix once a tool has returned a result. A request below the minimum is answered normally, with nothing cached and no cache-write charge.
+
+On Claude a cache write is billed at 1.25 times the input price and a cache read at a tenth of it or less; on Nova a write costs nothing and a read is 75% off. A written prefix that is never read again therefore costs a little more on Claude than it would have without caching. That is the case the switch is for. The [meeting cost estimate](meeting-cost-estimate.md) records and prices cache reads and writes separately from ordinary input.
 
 ## Bedrock Guardrails
 

@@ -315,3 +315,62 @@ def test_every_budget_leaves_room_for_reasoning(compat, name) -> None:
     reason, because maxTokens is a ceiling and not a reservation.
     """
     assert getattr(compat, name) > 2048
+
+
+# ── which models take prompt cache points ───────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "us.anthropic.claude-opus-4-1-20250805-v1:0",
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "global.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-opus-4-6-v1",
+        "global.anthropic.claude-haiku-5-5",
+        "us.anthropic.claude-sonnet-5-5",
+        "global.anthropic.claude-opus-5-5",
+        # A later generation is assumed to keep prompt caching.
+        "global.anthropic.claude-haiku-9-1",
+    ],
+)
+def test_claude_4_and_later_take_cache_points_in_every_section(compat, model_id) -> None:
+    assert compat.prompt_cache_sections(model_id) == {
+        compat.PROMPT_CACHE_TOOLS,
+        compat.PROMPT_CACHE_SYSTEM,
+        compat.PROMPT_CACHE_MESSAGES,
+    }
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "amazon.nova-micro-v1:0",
+        "amazon.nova-lite-v1:0",
+        "amazon.nova-pro-v1:0",
+        "us.amazon.nova-pro-v1:0",
+        "global.amazon.nova-2-lite-v1:0",
+        "us.amazon.nova-2-lite-v1:0",
+    ],
+)
+def test_the_caching_nova_models_take_a_system_cache_point_only(compat, model_id) -> None:
+    """Nova rejects a cache point in toolConfig, and one beside a toolResult."""
+    assert compat.prompt_cache_sections(model_id) == {compat.PROMPT_CACHE_SYSTEM}
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "us.amazon.nova-premier-v1:0",
+        "amazon.nova-2-sonic-v1:0",
+        "anthropic.claude-3-haiku-20240307-v1:0",
+        "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+        "amazon.nova-lite-v1:0-extra",
+        "meta.llama3-70b-instruct-v1:0",
+        "",
+    ],
+)
+def test_a_model_not_known_to_cache_gets_no_cache_points(compat, model_id) -> None:
+    """A cache point a model does not accept fails the request, so unknown means none."""
+    assert compat.prompt_cache_sections(model_id) == frozenset()

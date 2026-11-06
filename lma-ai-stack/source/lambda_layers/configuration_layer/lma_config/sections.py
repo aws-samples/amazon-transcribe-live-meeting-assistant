@@ -319,15 +319,21 @@ VIRTUAL_PARTICIPANT = register(
 )
 
 #: The phrase that wakes the meeting assistant, as a regular expression matched
-#: against each finished transcript segment by the call event processor.
+#: against each finished transcript segment by the call event processor; and
+#: whether the Strands meeting assistant marks its prompt for Amazon Bedrock
+#: prompt caching, read by it once per answer.
 #:
-#: Standard tier: the processor reads it once per batch of segments, nobody is
-#: waiting on a change, and five minutes is what the page says.
+#: Standard tier: the processor reads the phrase once per batch of segments and
+#: the assistant reads the switch once per answer, nobody is waiting on a
+#: change, and five minutes is what the page says.
 MEETING_ASSIST = register(
     SectionSpec(
         name="meeting_assist",
         cache_tier=CacheTier.STANDARD,
-        description="The phrase that wakes the meeting assistant in a transcript.",
+        description=(
+            "The phrase that wakes the meeting assistant in a transcript, and whether its "
+            "answers use Amazon Bedrock prompt caching."
+        ),
     )
 )
 
