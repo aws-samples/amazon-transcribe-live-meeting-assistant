@@ -26,8 +26,9 @@ on this page is legal advice.
 **Current state:** the consent settings, the consent record and its API, the
 evidence check and the meeting page's Consent section are in place. The
 **Virtual Participant** runs the consent flow: it posts the notice in the
-meeting chat, reads the replies there, and withholds or stops recording and
-transcription accordingly (see [Virtual Participant](#virtual-participant)).
+meeting chat, reads the replies typed there or said aloud, and withholds or
+stops recording and transcription accordingly (see
+[Virtual Participant](#virtual-participant)).
 **Stream Audio** and the **Desktop Capture App** run it too: they show the
 notice, ask the user to confirm, and the WebSocket transcriber records that on
 the meeting and withholds or stops recording and transcription accordingly (see
@@ -42,7 +43,7 @@ transcriber treats a client that shows no consent step is a setting. See
 |---|---|---|
 | **Off** | Nothing | Always. This is how LMA behaves when consent has never been set up, and the shipped default. |
 | **Notify** | A notice that the meeting is recorded and transcribed, and how to object | From the start, until a participant objects. An objection stops recording and transcription, and is recorded. |
-| **Opt-in** | A request to agree, with the phrase to reply | Not until the consent rule below is met. An objection from anybody stops it again. |
+| **Opt-in** | A request to agree, with the phrase to reply | Not until the consent rule below is met. An objection from anybody stops it again. A Virtual Participant still sends the meeting audio to the transcription engine while it waits, only to hear replies said aloud; see [Spoken replies](#spoken-replies). |
 
 An opt-in meeting is granted by one of two **consent rules**:
 
@@ -117,9 +118,10 @@ after an objection. Under Regulated, Stream Audio and the Desktop Capture App
 cannot collect each participant's consent, so Start is refused from them (see
 [Stream Audio and the Desktop Capture App](#stream-audio-and-the-desktop-capture-app)),
 and a Virtual Participant on the
-Teams browser, Webex or Google Meet join never meets the each-participant rule
-and cannot move to owner-attests, so its meeting is not transcribed (see
-[What each platform supports](#what-each-platform-supports)).
+Webex join never meets the each-participant rule and cannot move to
+owner-attests, so its meeting is not transcribed (see
+[What each platform supports](#what-each-platform-supports)). On the Teams
+browser join the rule is met only by consent said aloud.
 **Regulated – notify with opt-out, transcript not retained** sets the same as
 Regulated except the mode, which is Notify: capture runs from the start and
 stops when a participant objects, and a meeting may use Notify or the stricter
@@ -144,7 +146,7 @@ the `ConfigurationPreset` stack parameter; see
 | Keep evidence screenshots | Whether evidence images stay with the meeting, or are deleted once checked | On |
 | Evidence check model | The Amazon Bedrock vision model that checks evidence images; see [Checking evidence with a vision model](#checking-evidence-with-a-vision-model) | Amazon Nova Lite |
 | Streaming clients without a consent step | What the WebSocket transcriber does, in Notify or Opt-in, with a meeting from a client that shows no consent step: **Accept with a warning** (captured as before, with no consent record, and a warning logged) or **Refuse** (not recorded or transcribed, and the client is told why). See [Clients without a consent step](#clients-without-a-consent-step) | Accept with a warning |
-| Virtual Participant leaves after an objection | Whether a Virtual Participant leaves the meeting after a participant objects in the chat, rather than staying in it without recording | Off |
+| Virtual Participant leaves after an objection | Whether a Virtual Participant leaves the meeting after a participant objects, in the chat or aloud, rather than staying in it without recording | Off |
 
 In the two texts, `{LMA_USER}` is the person using LMA in the meeting,
 `{meeting}` the meeting's name, and `{consent_phrase}` and `{objection_phrase}`
@@ -235,7 +237,7 @@ replies are read.
 
 | Capture method | Notice | Replies | Status |
 |---|---|---|---|
-| **Virtual Participant** | Posted in the meeting chat when the Virtual Participant is admitted, and again when somebody joins | Read from the meeting chat by display name; an attestation or an objection made in the meeting page's Consent section (or through the API); screenshots of the chat and the participant list kept as evidence | Available. See [Virtual Participant](#virtual-participant) for what each platform supports. Replies are not read from what is said yet. |
+| **Virtual Participant** | Posted in the meeting chat when the Virtual Participant is admitted, and again when somebody joins | Read from the meeting chat by display name, and from what is said, under the name of the participant shown speaking; an attestation or an objection made in the meeting page's Consent section (or through the API); screenshots of the chat and the participant list kept as evidence | Available. See [Virtual Participant](#virtual-participant) for what each platform supports. |
 | **Stream Audio** | Shown to the LMA user, with a copy button, to read out or post in their meeting | Attested by the LMA user, who owns the meeting (opt-in is met by the rule **The meeting owner attests**); an objection is reported with **Participant objected** | Available. See [Stream Audio and the Desktop Capture App](#stream-audio-and-the-desktop-capture-app). |
 | **Desktop Capture App** (macOS and Windows) | As for Stream Audio, with a copy button | As for Stream Audio; evidence is a frame of the screen-video source selected in the app | Available in builds that include it. Earlier builds show no consent step and are treated as [clients without a consent step](#clients-without-a-consent-step). See [The Desktop Capture App](#the-desktop-capture-app). |
 | **Browser extension** | As for Stream Audio | As for Stream Audio | Not available yet; treated as a client without a consent step. |
@@ -279,8 +281,9 @@ read its own row before joining, where a per-meeting choice would be stored:
 it then withholds capture until a later read succeeds (see
 [Choosing the mode for one meeting](#choosing-the-mode-for-one-meeting)). In every other mode it posts
 the notice in the meeting chat once it is admitted, records that it did, keeps
-the participant list on the record current, reads replies in the chat, and acts
-on `CaptureAllowed` in every answer the API gives.
+the participant list on the record current, reads replies typed in the chat
+and listens for replies said aloud (see [Spoken replies](#spoken-replies)), and
+acts on `CaptureAllowed` in every answer the API gives.
 
 What "capture" means here is everything the VP takes from the meeting: the
 transcript, the audio recording, the meeting chat it adds to the transcript
@@ -294,8 +297,8 @@ starting after consent is the same path as resuming after a pause.
 The **Create Virtual Participant** form has a **Meeting consent** choice: the
 deployment's setting (the default), Off, Notify, Opt-in with each participant
 consenting, or Opt-in with the meeting owner attesting. The each-participant
-choice is not offered for Webex or Google Meet, and for Teams it is marked as needing the join
-through Azure Communication Services (see
+choice is not offered for Webex, and for Teams it carries a note that on the
+Teams browser join participants consent aloud (see
 [What each platform supports](#what-each-platform-supports)). Any choice other
 than the deployment's is stored on the VP's row (`consentMode` and `consentRule` in
 `createVirtualParticipant`) and read by the VP when it starts, so scheduled
@@ -334,12 +337,15 @@ When somebody joins later, the notice is posted again, at most once a minute.
 
 ### Opt-in
 
-An opt-in meeting starts with capture withheld: the VP joins, but sends no audio
-to Amazon Transcribe, writes no recording, does not start the voice assistant or
-the screen recording, and adds no chat messages to the transcript; messages
-sent while capture is withheld are not added later either. Because nothing is
-transcribed, the VP sends the meeting's `START` event itself, which creates the
-meeting record its consent needs, and then posts the consent request. The VP's
+An opt-in meeting starts with capture withheld: the VP joins, but writes no
+transcript and no recording, does not start the voice assistant or the screen
+recording, and adds no chat messages to the transcript; messages sent while
+capture is withheld are not added later either. It does send the meeting audio
+to the meeting's transcription engine, on a session of its own, but only to
+hear consent replies and objections said aloud: everything else it hears is
+discarded inside the VP (see [Spoken replies](#spoken-replies)). Because nothing
+is transcribed, the VP sends the meeting's `START` event itself, which creates
+the meeting record its consent needs, and then posts the consent request. The VP's
 detail line on the Virtual Participants page reads **Waiting for consent: …**
 with what it is waiting for, and an `LMA start` typed in the chat is answered
 with *"Live Meeting Assistant cannot start until consent is given."* When the
@@ -350,7 +356,8 @@ VP was waiting, it says that consent was given but stays paused until
 `LMA start`.
 
 - **Each participant consents.** Every participant listed as present must reply
-  with consent in the chat (see [Replies in the chat](#replies-in-the-chat)).
+  with consent, in the chat or aloud (see [Replies in the chat](#replies-in-the-chat)
+  and [Spoken replies](#spoken-replies)).
   Each consent is acknowledged with who is still awaited, for example *"Thank
   you, Bo Chen. Still waiting for Cy Diaz and 1 unidentified participant."*
   When somebody joins while the meeting is being recorded, the record lists one
@@ -364,25 +371,30 @@ VP was waiting, it says that consent was given but stays paused until
   with **Attest that everyone agreed** in the meeting page's Consent section
   (see [On the meeting page](#on-the-meeting-page)), or with
   `attestMeetingConsent` through the API. The VP reads the record every 10
-  seconds, so an attestation reaches it within about that long. Chat replies are
-  still read and recorded as evidence, but no chat reply is taken as the owner's
-  attestation: the chat shows a display name, which cannot be matched reliably
-  to the LMA user who owns the meeting.
+  seconds, so an attestation reaches it within about that long. Replies are
+  still read and recorded as evidence, but no reply is taken as the owner's
+  attestation: the chat and the speaker indicator show a display name, which
+  cannot be matched reliably to the LMA user who owns the meeting.
 
 ### Objections
 
-In every mode an objection in the chat stops capture at once, before anything
-is written: the VP turns the transcript and recording off and stops the screen
-recording, then posts *"<name> objected. Live Meeting Assistant has stopped
-recording and transcribing this meeting."*, records the objection (the sender's
-display name, the words, `chat` as the source and the time) and keeps evidence
-screenshots. The detail line reads **Not recording: a participant objected to
-recording.**
+In every mode an objection, typed in the chat or said aloud, stops capture at
+once, before anything is written: the VP turns the transcript and recording off
+and stops the screen recording, then posts *"<name> objected. Live Meeting
+Assistant has stopped recording and transcribing this meeting."*, records the
+objection (the sender's or speaker's display name, the words, `chat` or `voice`
+as the source, and the time) and keeps evidence screenshots. The detail line
+reads **Not recording: a participant objected to recording.** A spoken
+objection's own words were said while the meeting was being captured, so they
+are the last line of its transcript. An objection said aloud and also typed in
+the chat, by the same participant or with either one unnamed, within 30 seconds
+and while capture is still stopped by the first, is acted on and recorded once.
 
 - With **Virtual Participant leaves after an objection** off (the default) the
-  VP stays. Each participant's latest reply is the one that counts, so if the
-  objector later replies with consent, capture resumes, as the acknowledgement
-  says. The transcript and the audio recording resume; the screen recording does
+  VP stays, and listens for spoken replies while capture is stopped. Each
+  participant's latest reply is the one that counts, so if the objector later
+  replies with consent, in the chat or aloud, capture resumes, as the
+  acknowledgement says. The transcript and the audio recording resume; the screen recording does
   not. It stops for the rest of the meeting the first time capture is withheld
   after it started, and what it recorded until then is kept on the meeting as
   usual.
@@ -415,19 +427,94 @@ and an `LMA` addressee may stand anywhere in it.
 
 This is stricter than the reading in [How a reply is read](#how-a-reply-is-read),
 which looks for a phrase anywhere in a reply; the VP does not use that reading
-for the chat. `LMA consent`, `LMA no consent` and `LMA object` work whatever
+for the chat or for speech. `LMA consent`, `LMA no consent` and `LMA object` work whatever
 phrases are configured, so they are the forms to suggest when a deployment's
 phrases are long or in another language.
 
 A consent reply needs a sender. One whose sender the platform does not show is
 not recorded, and under the each-participant rule it is answered with *"Live
 Meeting Assistant could not tell who sent that reply, so it was not recorded as
-consent."* An objection without a sender still stops capture, and is recorded
+consent."*, followed on the Teams browser join, which shows no chat senders, by
+*"Say "I consent" aloud instead."* (with the deployment's first consent phrase).
+An objection without a sender still stops capture, and is recorded
 for *Unidentified participant*. A sender whose display name reads as one of the
 list's placeholders (*Unidentified participant 1*) is not counted as present
 and their consent is not recorded, so a name cannot fill the seat it reads as. A reply that a chat
 observer reports twice within five seconds is acted on once, and the VP never
 reads its own messages as replies.
+
+### Spoken replies
+
+The VP also reads replies said aloud, on every join and with either
+transcription engine, and every notice it posts is followed by *"Replies may be
+typed in this chat or said aloud."*
+
+**What counts as a spoken reply.** A spoken reply is read exactly as a chat
+message is (see [Replies in the chat](#replies-in-the-chat)), with the
+deployment's phrases: the whole utterance, as the speech engine finalises it,
+must be the reply. *"I consent."*, *"Stop recording!"*, *"LMA consent"* and
+*"LMA, please stop recording now"* are replies; *"I agree with what Bo said"* is
+not. Objections are looked for first. Speech engines often write `LMA` as its
+letters, so *"L M A"* and *"L.M.A."* are read as `LMA`. Only final results are
+read, never the engine's partial results. Because people say short sentences
+far more often than they type them, a bare utterance that is exactly an
+objection phrase, such as *"I don't agree."* in a discussion, is read as an
+objection; a deployment where that is a problem can remove such phrases from
+**Objection phrases** and rely on `LMA object` and the other phrases.
+
+**Who said it.** A spoken reply is attributed to the participant the VP shows
+as speaking during it, the same name the transcript gives that audio: on Amazon
+Transcribe, the active speaker the platform showed for most of the utterance;
+on the MicroVM engine, the attendee the row is named after, without the
+engine's voice label (`spk_0`), which is not a name. A named speaker also
+counts as seen for [Who is present](#who-is-present). A reply whose speaker the
+VP cannot name (nobody was shown speaking yet, or the platform shows a
+placeholder) is handled as a chat reply without a sender: a consent is not
+recorded, and under the each-participant rule the chat says *"Live Meeting
+Assistant heard consent said aloud but could not tell who said it, so it was
+not recorded."*; an objection still stops capture and is recorded for
+*Unidentified participant*. Each reply is recorded with `voice` as its source.
+The VP's own voice assistant is never read: it is not in the meeting audio the
+VP listens to, it has its own channel or session on both engines, and a reply
+attributed to one of the VP's own names is ignored.
+
+**While capture runs** (Notify, or Opt-in after consent), the VP reads the
+final participant results of the meeting's ongoing transcription, and acts on a
+spoken objection exactly as on one in the chat.
+
+**While consent is awaited** (Opt-in before consent, after an objection, or
+after somebody joins under the each-participant rule), nothing is captured, so
+the VP opens a separate session to the meeting's transcription engine, Amazon
+Transcribe or the MicroVM engine, chosen as transcription chooses it, and
+streams the meeting audio to it from the moment it is admitted. With Amazon
+Transcribe this is its own streaming request, with the meeting's language
+settings; with the MicroVM engine it is its own session, on the MicroVM the
+meeting's transcription uses when one is running, or else on one launched for
+the meeting and then kept for its transcription once consent is given. If no
+MicroVM can be started, Amazon Transcribe is used, as for transcription. Every
+final result is attributed and read as above, and then discarded inside the VP:
+
+- what it heard is **not** written to Kinesis, so it never reaches the
+  transcript, the summary or anything built from the transcript;
+- it is not written to the audio recording, which records silence while
+  capture is withheld, and it does not reach the voice assistant;
+- it is not logged, at any log level, including `DEBUG`;
+- only a reply is kept, as an event on the consent record, with the words that
+  were read as the reply.
+
+When consent is given, the listening session is closed before capture starts,
+and transcription opens sessions of its own, so no audio heard while consent was
+awaited reaches the transcript.
+
+**What this means for processing.** While consent is awaited the meeting audio
+is processed by the transcription engine, although nothing is kept apart from
+the reply events. With Amazon Transcribe, that audio is sent to the Amazon
+Transcribe streaming service in this deployment's Region, as the meeting's
+transcription would be, and it is billed and appears in the meeting's
+[cost estimate](meeting-cost-estimate.md) as Amazon Transcribe streaming. With
+the MicroVM engine it stays on the MicroVM, which runs, and is billed, from the
+time the VP is admitted rather than from when consent is given. Choose the
+mode with this in mind; there is no setting yet that turns the listening off.
 
 ### Who is present
 
@@ -437,9 +524,10 @@ rule, so it is never allowed to be shorter than the meeting:
 - **Where the platform gives a list of names** that accounts for everybody the
   attendee count shows (the Teams join through Azure Communication Services),
   the list is those names.
-- **Where it gives only a count** (the Chime, Zoom and Teams browser joins, and
-  the Zoom Meeting SDK join), the list is the names the VP has seen since the
-  count last went up, as the active speaker or as a chat sender, plus one
+- **Where it gives only a count** (the Chime, Zoom, Teams and Google Meet
+  browser joins, and the Zoom Meeting SDK join), the list is the names the VP
+  has seen since the count last went up, as the active speaker, as the speaker
+  of a spoken reply, or as a chat sender, plus one
   *Unidentified participant N* for each seat no name accounts for. An
   unidentified participant can never consent, so the meeting is not granted
   until everybody present has spoken or written in the chat, and consented.
@@ -451,15 +539,14 @@ rule, so it is never allowed to be shorter than the meeting:
   consented.
 - **Where it gives neither** (the Webex browser join), the names seen can never
   be shown to be everybody, so one unidentified participant is always listed
-  and the each-participant rule is never met from the chat. The detail line
-  says so. Use the owner-attests rule on Webex.
-- **Where the platform shows no chat sender** (the Teams browser join), no
-  consent reply can be attributed, so the each-participant rule is not met
-  either, and the detail line says that instead. The Google Meet join is
-  treated the same way: it reads a sender for each chat message, but that
-  reading has not yet been confirmed in a live meeting, and a consent recorded
-  for the wrong person would be worse than none, so consent replies on Meet are
-  read without a sender.
+  and the each-participant rule is never met, whether replies are typed or
+  said. The detail line says so. Use the owner-attests rule on Webex.
+- **Where the platform shows no chat sender** (the Teams browser join), a
+  consent typed in the chat cannot be attributed, but one said aloud can, under
+  the name the platform shows speaking. So the each-participant rule is met
+  when every participant present has said their consent while the VP could see
+  who was speaking, and the detail line adds that on this platform consent is
+  given aloud.
 
 The count is the one each platform handler already reads to leave a meeting it
 is alone in: whenever the count on the page changes on the Chime and Zoom
@@ -475,21 +562,26 @@ identities are never listed.
 
 ### What each platform supports
 
-| Join | Chat sender | Who is present | Each participant consents | Participant list screenshot |
-|---|---|---|---|---|
-| Chime | Shown | Count | Yes | The chat and the attendee list are on screen together, so one screenshot has both |
-| Zoom (browser) | Shown | Count | Yes | The participants pane is opened, shot and closed again |
-| Zoom (Meeting SDK) | Shown | Count | Yes | One screenshot of LMA's SDK page |
-| Teams (browser) | **Not shown** | Count | **No**: consent replies cannot be attributed, so the rule is never met | The People pane is opened and shot, then the chat reopened |
-| Teams (Azure Communication Services) | Shown | Names | Yes | One screenshot of LMA's SDK page |
-| Webex (browser) | Shown | **None** | **No**: see [Who is present](#who-is-present) | The participants panel is opened, shot and closed again |
-| Google Meet (browser) | Read, but **not used for consent** | Count | **No**: consent replies are read without a sender, as on the Teams browser join | The People panel is opened and shot, then the chat reopened |
+| Join | Chat sender | Spoken replies | Who is present | Each participant consents | Participant list screenshot |
+|---|---|---|---|---|---|
+| Chime | Shown | Read, under the active speaker | Count | Yes | The chat and the attendee list are on screen together, so one screenshot has both |
+| Zoom (browser) | Shown | Read, under the active speaker | Count | Yes | The participants pane is opened, shot and closed again |
+| Zoom (Meeting SDK) | Shown | Read, under the active speaker | Count | Yes | One screenshot of LMA's SDK page |
+| Teams (browser) | **Not shown** | Read, under the active speaker | Count | Yes, **aloud only**: a typed consent cannot be attributed | The People pane is opened and shot, then the chat reopened |
+| Teams (Azure Communication Services) | Shown | Read, under the active speaker | Names | Yes | One screenshot of LMA's SDK page |
+| Webex (browser) | Shown | Read, under the active speaker | **None** | **No**: see [Who is present](#who-is-present) | The participants panel is opened, shot and closed again |
+| Google Meet (browser) | Shown (read from the message group's header) | Read, under the speaking tile | Count | Yes | The People panel is opened and shot, then the chat reopened |
 
-Notify, owner-attests and objections work on every join. Opening and closing
-panels is best effort: a button the VP cannot find means a chat screenshot
-without a participant list, never a held-up meeting. The panel buttons and the
-participant-name reading were written against each platform's current page
-and have not all been exercised in a live meeting yet.
+Notify, owner-attests and objections, typed or said, work on every join.
+Opening and closing panels is best effort: a button the VP cannot find means a
+chat screenshot without a participant list, never a held-up meeting. The panel
+buttons, the participant-name reading, and spoken replies on every join were
+written against each platform's current page and have not all been exercised
+in a live meeting yet. On Google Meet in particular, neither the chat sender
+reading nor the speaking-tile reading has been confirmed in a live meeting (see
+[Google Meet](virtual-participant.md#google-meet) in the Virtual Participant guide), so a
+reply there could be recorded under the wrong name until they are; use the
+owner-attests rule on Meet where that matters.
 
 ### Evidence screenshots
 
@@ -512,13 +604,17 @@ that objection's screenshots.
 
 ### Not done yet
 
-- Replies are read from the chat only, not from what is said, and the notice is
-  posted in the chat only, not spoken by the voice assistant. Because the
-  notice texts are shared with Stream Audio, where the LMA user hears the
-  meeting, the shipped Notify text invites an objection "in the chat or" out
-  loud; the VP follows every notice with *"Live Meeting Assistant reads replies
-  in this chat; an objection made out loud takes effect when <LMA user> records
-  it in LMA."*, which **Record an objection** in the Consent section does.
+- The notice is posted in the chat only, not spoken by the voice assistant, so
+  a participant who cannot see the chat hears no request to reply.
+- [Spoken replies](#spoken-replies) have not been exercised in a live meeting
+  on any join or with either engine yet. How reliably a short reply is heard,
+  and how often it is attributed to the right speaker, depends on each
+  platform's speaker indicator and has not been measured.
+- There is no setting that turns off listening for spoken replies while
+  consent is awaited: a Virtual Participant in an opt-in meeting always sends
+  the meeting audio to the transcription engine while it waits.
+- Spoken replies are not read while the transcript is paused with `LMA pause`
+  (nothing is sent to the engine then); replies in the chat still are.
 - The screen recording does not resume once capture has been withheld after it
   started (see [Objections](#objections)).
 
@@ -984,9 +1080,12 @@ also holds the reply classifier described above.
   themselves, two people can show the same name, and a guest's name is whatever
   they typed. A reply is recorded under the name its sender showed when it was
   sent, and two participants showing one name are counted as one.
-- **Speech is read as words.** A spoken reply is only as reliable as its
-  transcript; a reply in a language the transcription is not set up for may not
-  be read at all.
+- **Speech is read as words, and attributed by the speaker indicator.** A
+  spoken reply is only as reliable as its transcript; a reply in a language the
+  transcription is not set up for may not be read at all. It is recorded under
+  the name the platform showed speaking, which can be wrong when people speak
+  over each other or the indicator lags, and is missing when nobody was shown
+  speaking.
 - **A model's reading is supporting evidence.** The evidence check reports
   what a vision model read in a screenshot. It can misread small or partly
   hidden text, and it never changes a meeting's status.
@@ -1000,8 +1099,8 @@ also holds the reply classifier described above.
 - **Not every capture method runs the flow yet.** See
   [Flows by capture method](#flows-by-capture-method).
 - **What the Virtual Participant can see differs by platform.** Who is present
-  and who sent a chat message come from the meeting page, and not every
-  platform shows both; see
+  and who sent a chat message or is speaking come from the meeting page, and not every
+  platform shows all three; see
   [What each platform supports](#what-each-platform-supports).
 - **The record is meeting data.** It is kept and deleted with the meeting, and
   anyone the meeting is shared with can read it, including participants' names

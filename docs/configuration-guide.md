@@ -389,11 +389,12 @@ change it.
 Under the Regulated preset nothing is recorded or transcribed until each
 participant consents. Stream Audio and the Desktop Capture App cannot collect
 each participant's consent, so Start is refused from them; use a Virtual
-Participant on a join that supports each-participant consent. A Virtual Participant on a join that cannot
-match consent replies to participants (Teams in the browser, Webex and Google
-Meet) never meets the each-participant rule, and with a different choice per
-meeting turned off the meeting cannot move to the less strict owner-attests
-rule, so such a meeting is not transcribed. See
+Participant on a join that supports each-participant consent. A Virtual
+Participant on the Webex join cannot tell who is present, so it never meets the
+each-participant rule, and with a different choice per meeting turned off the
+meeting cannot move to the less strict owner-attests rule, so such a meeting is
+not transcribed. On the Teams browser join, which shows no chat sender, the rule
+is met only by consent said aloud. See
 [What each platform supports](meeting-consent.md#what-each-platform-supports).
 
 The Regulated notify preset keeps the Regulated preset's retention and privacy

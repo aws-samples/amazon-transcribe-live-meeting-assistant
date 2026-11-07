@@ -67,6 +67,22 @@ test('releasing capture switches details.start on and restarts transcription, as
     assert.match(hold, /details\.start = false;/);
 });
 
+test('while capture is withheld the runtime listens for spoken replies with the consent listener', () => {
+    const runtime = source('consent-runtime.ts');
+    const listen = runtime.slice(runtime.indexOf('listen: (on) => {'), runtime.indexOf('release: () => {'));
+    assert.match(listen, /if \(on\) consentListener\.start\(\);/);
+    assert.match(listen, /else void consentListener\.stop\(\);/);
+    assert.match(runtime, /engines: transcriptionService\.consentListenerEngines\(\)/);
+});
+
+test('Google Meet reads consent replies under the chat sender, as Zoom and Chime do', () => {
+    const meet = source('google-meet.ts');
+    assert.match(meet, /await meetingConsent\.handleChat\(sender, message\)/);
+    assert.doesNotMatch(meet, /sendersHidden: true/);
+    // The Teams browser join still shows no chat sender.
+    assert.match(source('teams.ts'), /sendersHidden: true/);
+});
+
 test("the flow's defaults are the ones the configuration seeder ships", () => {
     const shipped = JSON.parse(
         source('../../../lma-ai-stack/source/lambda_functions/configuration_seeder/defaults/MeetingConsent.json'),
