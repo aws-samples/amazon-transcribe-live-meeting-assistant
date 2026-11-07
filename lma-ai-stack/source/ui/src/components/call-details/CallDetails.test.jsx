@@ -88,4 +88,15 @@ describe('the meeting page follows the meeting', () => {
     expect(getCallDetailsFromCallIds).toHaveBeenLastCalledWith([CALL_ID]);
     expect(getByTestId('panel').textContent).toBe('Done');
   });
+
+  it('keeps a re-read ended meeting when an older in-progress copy arrives', async () => {
+    const { rerender, view, getByTestId, getCallDetailsFromCallIds } = renderPage();
+    await waitFor(() => expect(getByTestId('panel').textContent).toBe('In Progress'));
+    getCallDetailsFromCallIds.mockResolvedValue([meeting({ Status: 'ENDED', UpdatedAt: '2026-11-03T15:00:00.000Z' })]);
+    await act(() => panel.props.onRefreshMeeting());
+    expect(getByTestId('panel').textContent).toBe('Done');
+    context.value = { ...context.value, calls: [meeting()] };
+    rerender(view());
+    await waitFor(() => expect(getByTestId('panel').textContent).toBe('Done'));
+  });
 });
