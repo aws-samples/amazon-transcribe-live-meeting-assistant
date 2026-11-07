@@ -289,45 +289,69 @@ def test_a_long_filename_is_truncated_but_keeps_its_extension(env) -> None:
     assert name.endswith(".mp4")
 
 
-REGIONS = pytest.mark.parametrize("region", ["eu-west-1", "us-east-1"])
+def _isolated_aws_env(region: str) -> dict[str, str]:
+    """The process environment with every ``AWS_*`` variable replaced: dummy keys,
+    the region under test, and no config or credentials file, so neither the
+    environment nor ``~/.aws`` of whoever runs the tests (a profile, a session
+    token, an endpoint override, FIPS or dual-stack) changes the URL."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("AWS_")}
+    env.update(
+        {
+            "AWS_REGION": region,
+            "AWS_DEFAULT_REGION": region,
+            "AWS_ACCESS_KEY_ID": "AKIDEXAMPLE",
+            "AWS_SECRET_ACCESS_KEY": "not-a-real-secret",  # pragma: allowlist secret
+            "AWS_CONFIG_FILE": os.devnull,
+            "AWS_SHARED_CREDENTIALS_FILE": os.devnull,
+        }
+    )
+    return env
 
 
-@REGIONS
-def test_the_s3_client_signs_for_the_regional_virtual_hosted_endpoint(region) -> None:
-    """A URL on the global endpoint is redirected (307) to the regional one for a
-    bucket outside us-east-1 until its DNS settles, and a browser does not follow
-    a redirect on a CORS request, so the upload fails as a network error.
-    us-east-1 is covered too, since the regional endpoint is built the same way
-    there rather than special-cased."""
+def test_the_s3_client_leaves_the_host_to_botocore() -> None:
+    """Without an addressing style botocore presigns on the global endpoint, which
+    S3 redirects (307) for a bucket outside us-east-1 until its DNS settles, and a
+    browser does not follow a redirect on a CORS request, so the upload fails as a
+    network error. No endpoint_url: a fixed one would give every partition the
+    commercial DNS suffix."""
     with (
         mock.patch("boto3.client") as client,
         mock.patch("boto3.resource"),
-        mock.patch.dict(os.environ, {"AWS_REGION": region}),
+        mock.patch.dict(os.environ, {"AWS_REGION": "eu-west-1"}),
     ):
-        _load_by_path(f"upload_meeting_initiator_index_{region}", HERE / "index.py")
+        _load_by_path("upload_meeting_initiator_index_client", HERE / "index.py")
     kwargs = client.call_args.kwargs
-    assert kwargs["region_name"] == region
-    assert kwargs["endpoint_url"] == f"https://s3.{region}.amazonaws.com"
-    assert kwargs["config"].s3 == {"addressing_style": "virtual"}
+    assert kwargs["region_name"] == "eu-west-1"
+    assert "endpoint_url" not in kwargs
+    assert kwargs["config"].s3 == {
+        "addressing_style": "virtual",
+        "us_east_1_regional_endpoint": "regional",
+    }
     assert kwargs["config"].signature_version == "s3v4"
 
 
-@REGIONS
-def test_the_presigned_url_names_the_bucket_on_the_regional_endpoint(region) -> None:
+@pytest.mark.parametrize(
+    ("region", "host_suffix"),
+    [
+        ("eu-west-1", "s3.eu-west-1.amazonaws.com"),
+        ("us-east-1", "s3.us-east-1.amazonaws.com"),
+        ("us-gov-west-1", "s3.us-gov-west-1.amazonaws.com"),
+        ("cn-north-1", "s3.cn-north-1.amazonaws.com.cn"),
+    ],
+)
+def test_the_presigned_url_names_the_bucket_on_the_regional_endpoint(region, host_suffix) -> None:
     """Signed by the real botocore client (locally, with no AWS call): the browser
-    PUTs to ``<bucket>.s3.<region>.amazonaws.com``, signed for the same region, in
-    us-east-1 as well as elsewhere."""
-    fake_credentials = {
-        "AWS_REGION": region,
-        "AWS_ACCESS_KEY_ID": "AKIDEXAMPLE",
-        "AWS_SECRET_ACCESS_KEY": "not-a-real-secret",  # pragma: allowlist secret
-    }
-    with mock.patch("boto3.resource"), mock.patch.dict(os.environ, fake_credentials):
+    PUTs to the bucket on its Region's own endpoint, signed for the same Region,
+    in us-east-1 as well as elsewhere, and with the partition's DNS suffix."""
+    with (
+        mock.patch("boto3.resource"),
+        mock.patch.dict(os.environ, _isolated_aws_env(region), clear=True),
+    ):
         module = _load_by_path(f"upload_meeting_initiator_index_signed_{region}", HERE / "index.py")
         url = module._generate_presigned_put_url("lma-uploads-pending/call-abc/a.mp3", "audio/mpeg")
     parsed = urlparse(url)
     assert parsed.scheme == "https"
-    assert parsed.netloc == f"{BUCKET}.s3.{region}.amazonaws.com"
+    assert parsed.netloc == f"{BUCKET}.{host_suffix}"
     assert parsed.path == "/lma-uploads-pending/call-abc/a.mp3"
     query = parse_qs(parsed.query)
     assert query["X-Amz-Algorithm"] == ["AWS4-HMAC-SHA256"]

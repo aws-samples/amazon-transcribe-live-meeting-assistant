@@ -61,11 +61,19 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 # for a bucket outside us-east-1 until its DNS settles (up to a day after it is
 # created), and a browser does not follow a redirect on a CORS request, so the
 # upload fails as a network error.
+#
+# Without an addressing style botocore presigns on that global endpoint, so the
+# style is set to virtual, and us-east-1 is asked for its regional endpoint too.
+# The host itself is left to botocore's endpoint rules, which give each
+# partition its own DNS suffix (amazonaws.com.cn in China, for one); no
+# endpoint_url is set, since one would fix the suffix for every partition.
 s3_client = boto3.client(
     "s3",
     region_name=AWS_REGION,
-    endpoint_url=f"https://s3.{AWS_REGION}.amazonaws.com",
-    config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}),
+    config=Config(
+        signature_version="s3v4",
+        s3={"addressing_style": "virtual", "us_east_1_regional_endpoint": "regional"},
+    ),
 )
 ddb = boto3.resource("dynamodb")
 job_table = ddb.Table(EVENT_SOURCING_TABLE)
