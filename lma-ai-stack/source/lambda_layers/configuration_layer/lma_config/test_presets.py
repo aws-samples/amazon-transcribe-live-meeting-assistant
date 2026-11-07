@@ -74,10 +74,25 @@ PRESET_VALUES = {
         "transcription": {"contentRedactionEnabled": True},
         "language_models": {"inferenceGeography": "geography"},
     },
+    "regulated-notify": {
+        "meeting_consent": {
+            "mode": "notify",
+            "consentRule": "each_participant",
+            "allowPerMeetingOverride": False,
+            "keepEvidenceScreenshots": True,
+            "clientsWithoutConsent": "reject",
+            "leaveOnObjection": True,
+        },
+        "retention": {"transcriptDeletionAfterSummary": "after_15_minutes"},
+        "recording": {"recordAudio": False},
+        "virtual_participant": {"captureMeetingChat": False},
+        "transcription": {"contentRedactionEnabled": True},
+        "language_models": {"inferenceGeography": "geography"},
+    },
 }
 
 
-def test_the_presets_are_standard_internal_and_regulated_in_that_order():
+def test_the_presets_are_standard_internal_regulated_and_regulated_notify_in_that_order():
     assert [preset["Id"] for preset in library.shipped_presets()] == list(PRESET_VALUES)
     assert {path.stem for path in library.PRESET_DIR.glob("*.json")} == set(PRESET_VALUES)
     for preset in library.shipped_presets():
@@ -104,8 +119,9 @@ def test_the_standard_preset_holds_the_shipped_defaults():
         assert values == {key: shipped[name][key] for key in values}, name
 
 
-def test_the_regulated_preset_names_the_controls_set_at_deploy_time():
-    description = preset_by_id("regulated-consent-required")["Description"]
+@pytest.mark.parametrize("preset_id", ["regulated-consent-required", "regulated-notify"])
+def test_the_regulated_presets_name_the_controls_set_at_deploy_time(preset_id):
+    description = preset_by_id(preset_id)["Description"]
     for control in (
         "LogLevel",
         "MeetingRecordExpirationInDays",
@@ -116,6 +132,13 @@ def test_the_regulated_preset_names_the_controls_set_at_deploy_time():
         "docs/infrastructure-and-security.md",
     ):
         assert control in description, control
+
+
+def test_regulated_notify_differs_from_regulated_only_in_the_consent_mode():
+    """The two Regulated presets keep the same posture apart from when capture starts."""
+    regulated = json.loads(json.dumps(PRESET_VALUES["regulated-consent-required"]))
+    regulated["meeting_consent"]["mode"] = "notify"
+    assert PRESET_VALUES["regulated-notify"] == regulated
 
 
 @pytest.mark.parametrize(

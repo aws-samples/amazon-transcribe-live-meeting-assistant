@@ -119,7 +119,14 @@ cannot collect each participant's consent, so Start is refused from them (see
 and a Virtual Participant on the
 Teams browser, Webex or Google Meet join never meets the each-participant rule
 and cannot move to owner-attests, so its meeting is not transcribed (see
-[What each platform supports](#what-each-platform-supports)). **Standard** puts
+[What each platform supports](#what-each-platform-supports)).
+**Regulated – notify with opt-out, transcript not retained** sets the same as
+Regulated except the mode, which is Notify: capture runs from the start and
+stops when a participant objects, and a meeting may use Notify or the stricter
+Opt-in, not Off. Notify and objections work on every Virtual Participant join,
+and Stream Audio and the Desktop Capture App run their notify step and capture
+from Start, while clients without a consent step are still refused (see
+[Clients without a consent step](#clients-without-a-consent-step)). **Standard** puts
 back the shipped defaults. Apply one from
 the editor's **Actions ▸ Apply a preset…**, or choose one at deploy time with
 the `ConfigurationPreset` stack parameter; see

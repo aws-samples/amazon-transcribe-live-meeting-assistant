@@ -1,0 +1,48 @@
+{
+  "title": "Regulated – notify with opt-out, transcript not retained",
+  "description": "For meetings where participants have to be told and may object, and as little meeting content as possible is kept. Recording and transcription run from the start and stop when a participant objects: Meeting Consent mode Notify, a meeting may only use this mode or a stricter one (Opt-in), streaming clients without a consent step are refused, the Virtual Participant leaves after an objection, and evidence screenshots are kept. A Virtual Participant posts the notice in the meeting chat and reads objections there on every join. Stream Audio and the Desktop Capture App show the notice for the LMA user to share in the meeting and capture from the start; an objection takes effect when the user records it with Participant objected. Clients that show no consent step (the browser extension, the Stream Audio embed and Desktop Capture App builds from before the consent step) are refused. See \"Stream Audio and the Desktop Capture App\" in docs/meeting-consent.md. The transcript is deleted 15 minutes after the summary is written, meeting audio is not recorded, personal information is redacted from transcripts (in en-US, en-AU, en-GB and es-US), the meeting chat is not added to the transcript, and Amazon Bedrock models run within this deployment's geography. Every other setting stays as it is. Some controls are stack parameters rather than settings, so they are not part of any profile and have to be set when the stack is deployed or updated: LogLevel (INFO or WARN; DEBUG logs meeting content), the retention periods MeetingRecordExpirationInDays, TranscriptionExpirationInDays, AudioRecordingExpirationInDays and CloudWatchLogsExpirationInDays, and EnableVideoRecording (meeting video from the Virtual Participant and the Desktop Capture App). See \"Where meeting content is processed\" in docs/infrastructure-and-security.md.",
+  "order": 3,
+  "sections": {
+    "meeting_consent": {
+      "mode": "merge",
+      "values": {
+        "mode": "notify",
+        "consentRule": "each_participant",
+        "allowPerMeetingOverride": false,
+        "keepEvidenceScreenshots": true,
+        "clientsWithoutConsent": "reject",
+        "leaveOnObjection": true
+      }
+    },
+    "retention": {
+      "mode": "merge",
+      "values": {
+        "transcriptDeletionAfterSummary": "after_15_minutes"
+      }
+    },
+    "recording": {
+      "mode": "merge",
+      "values": {
+        "recordAudio": false
+      }
+    },
+    "virtual_participant": {
+      "mode": "merge",
+      "values": {
+        "captureMeetingChat": false
+      }
+    },
+    "transcription": {
+      "mode": "merge",
+      "values": {
+        "contentRedactionEnabled": true
+      }
+    },
+    "language_models": {
+      "mode": "merge",
+      "values": {
+        "inferenceGeography": "geography"
+      }
+    }
+  }
+}

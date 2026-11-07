@@ -295,6 +295,7 @@ Parameters:
       - standard
       - internal-meetings-notify
       - regulated-consent-required
+      - regulated-notify
       - none
     Description: >-
       The configuration preset the deployment's default configuration is built
