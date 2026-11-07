@@ -54,6 +54,13 @@ try:
 except ImportError:  # deployed on its own, without the layer; kept equal to it
     STORED_SPEECH_CHANNELS = ("REMOTE", "LOCAL", "CALLER", "AGENT")
 
+# Who spoke each line, named as the meeting page names them: the meeting's speaker
+# identity map and speaker modes (AI stack's configuration layer).
+try:
+    from lma_speakers import speaker_namer
+except ImportError:  # deployed on its own, without the layer: speakers as stored
+    speaker_namer = None
+
 # Import MCP server loader
 try:
     from mcp_server_loader import load_account_mcp_servers
@@ -1807,6 +1814,7 @@ def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id:
                     logger.warning(f"Meeting frames tool: transcript unreadable, frames go without it: {str(e)}")
             result = meeting_frames.build_tool_result(
                 selected, segments, images,
+                name_speaker=meeting_speaker_namer(call_id, dynamodb_table_name, segments),
                 total_frames=len(shared), send_images=send_images, show_inline=show_inline,
                 at_time=at_seconds, look=look_at_pictures,
                 first_frame_at=min(
@@ -1891,6 +1899,34 @@ def query_transcript_items(call_id: str, dynamodb_table_name: str) -> List[Dict[
     return items
 
 
+def meeting_speaker_namer(call_id: str, dynamodb_table_name: str, items: List[Dict[str, Any]]):
+    """A function naming each transcript segment's speaker as the meeting page does.
+
+    Applies the meeting's speaker identity map and speaker modes (lma_speakers,
+    shared with the UI and FetchTranscript), so the assistant says "Bob" where the
+    transcript on screen says "Bob" rather than "Bob (spk_1)". ``items`` must be
+    the whole transcript: whether the voices under one name are one person or
+    several is decided from all of them. Without the configuration layer, or if
+    the meeting record cannot be read, speakers are named as stored.
+    """
+    if speaker_namer is None or not dynamodb_table_name:
+        return meeting_frames.stored_speaker
+    record: Dict[str, Any] = {}
+    try:
+        response = dynamodb.Table(dynamodb_table_name).get_item(
+            Key={'PK': f'c#{call_id}', 'SK': f'c#{call_id}'},
+            ProjectionExpression='SpeakerIdentities, CustomerPhoneNumber',
+        )
+        record = response.get('Item') or {}
+    except Exception as e:
+        logger.warning(f"Speaker names unreadable for {call_id}, using the stored speakers: {str(e)}")
+    if not isinstance(record, dict):
+        # Whatever it is, it is not a meeting record: name by the defaults alone.
+        record = {}
+    name = speaker_namer(items, record.get('SpeakerIdentities'), record.get('CustomerPhoneNumber'))
+    return lambda item: name(item) or 'Unknown'
+
+
 def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str, with_timestamps: bool = False) -> str:
     """
     Fetch the meeting transcript from DynamoDB.
@@ -1908,9 +1944,10 @@ def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str, with_timest
         # times, so the times read in order where two channels overlap.
         items = sorted(items, key=lambda x: x.get('StartTime' if with_timestamps else 'EndTime', 0))
 
+        name_speaker = meeting_speaker_namer(call_id, dynamodb_table_name, items)
         transcript_parts = []
         for item in items:
-            speaker = item.get('Speaker', 'Unknown')
+            speaker = name_speaker(item)
             transcript = item.get('Transcript', '')
             channel = item.get('Channel', '')
             prefix = f"{meeting_agenda.format_elapsed(item.get('StartTime'))} " if with_timestamps else ''

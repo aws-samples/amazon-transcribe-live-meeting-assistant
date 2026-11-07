@@ -352,6 +352,20 @@ pass over chat messages, since they were typed rather than heard.
   in the transcript. Choosing speakers shows only their segments (and hides the
   assistant's answers); choosing **All** shows everything again. The search
   works within the speakers chosen.
+- **One person | Several people** — the chips are grouped by the name the
+  meeting platform showed, and a name that speaker separation heard several
+  voices under has this toggle beside it. **One person** shows every line under
+  the name alone (`Bob Strahan`, not `Bob Strahan (spk_0)` and `(spk_1)`);
+  **Several people** gives each voice a chip of its own — `ConfRm_1 · Voice 1`,
+  `Voice 2` — with a pencil to name that voice in place, which renames every line
+  it spoke (clear the name to go back to *Voice N*; **More options** opens the
+  speaker's dialog). LMA picks a default for each name — several people for a
+  room or a room device, or when two voices each spoke at length, one person
+  otherwise — so the toggle is only needed where that guess is wrong; see
+  [One person or several people](transcription-and-translation.md#one-person-or-several-people).
+  The choice is saved with the meeting and applies to the downloads, the summary
+  and the Meeting Assistant too. It can be changed by the same people who can
+  name speakers.
 - **Naming a speaker from its chip** — for those who can name the meeting's
   speakers (its owner, an Admin, and anyone it is shared with), the pencil
   beside a chip opens that speaker's dialog: give the voice a name (which

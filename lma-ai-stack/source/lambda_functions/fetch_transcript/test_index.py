@@ -1413,3 +1413,68 @@ def test_the_response_log_does_not_carry_chat_text(monkeypatch, capsys) -> None:
     log = out.split("Fetch Transcript response:", 1)[1]
     assert "secret" not in log and "example.com" not in log
     assert "1 chat message(s)" in log and "1 link(s)" in log
+
+
+# --------------------------------------------------------------------------
+# Speaker modes: the voices under one platform name are one person or several
+# (lma_speakers, shared with the UI through test-fixtures/speaker-modes.json).
+# --------------------------------------------------------------------------
+
+
+def test_an_individuals_voices_are_shown_under_the_name_alone(monkeypatch) -> None:
+    install(
+        monkeypatch,
+        items=[
+            segment("shall we start", 100, speaker="Bob Strahan (spk_0)", StartTime=Decimal("0")),
+            segment("mm", 101, speaker="Bob Strahan (spk_1)", StartTime=Decimal("100")),
+        ],
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == "\nBob Strahan: shall we start\nBob Strahan: mm"
+
+
+def test_a_rooms_voices_are_kept_apart_and_named_one_by_one(monkeypatch) -> None:
+    install(
+        monkeypatch,
+        items=[
+            segment("hello from the room", 10, speaker="ConfRm_1 (spk_0)", StartTime=Decimal("0")),
+            segment("and me", 20, speaker="ConfRm_1 (spk_1)", StartTime=Decimal("10")),
+        ],
+        metadata=metadata_with(
+            identities(identities={"REMOTE#ConfRm_1 (spk_1)": {"name": "Alice"}})
+        ),
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == "\nConfRm_1 · Voice 1: hello from the room\nAlice: and me"
+
+
+def test_a_chosen_mode_outranks_the_default(monkeypatch) -> None:
+    install(
+        monkeypatch,
+        items=[
+            segment("hello from the room", 10, speaker="ConfRm_1 (spk_0)", StartTime=Decimal("0")),
+            segment("and me", 20, speaker="ConfRm_1 (spk_1)", StartTime=Decimal("10")),
+        ],
+        metadata=metadata_with(identities(speakerModes={"REMOTE#ConfRm_1": {"mode": "one"}})),
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == "\nConfRm_1: hello from the room\nConfRm_1: and me"
+
+
+def test_a_key_frames_speech_is_named_from_the_whole_meeting(monkeypatch) -> None:
+    """A frame's excerpt holds one voice of two; it is still named as one of two."""
+    install(
+        monkeypatch,
+        items=[
+            segment("first", 90, speaker="Jo (spk_0)", StartTime=Decimal("0")),
+            segment("second", 200, speaker="Jo (spk_1)", StartTime=Decimal("90")),
+        ],
+    )
+    monkeypatch.setattr(
+        index, "get_keyframes", lambda callid: [{"FrameId": "1", "Timestamp": 80.0}]
+    )
+    response = index.lambda_handler(
+        {"CallId": CALL_ID, "IncludeSpeaker": True, "IncludeKeyframes": True}, None
+    )
+    assert response["keyframes"][0]["Said"] == "Jo · Voice 2: second"
+    assert response["transcript"] == "\nJo · Voice 1: first\nJo · Voice 2: second"

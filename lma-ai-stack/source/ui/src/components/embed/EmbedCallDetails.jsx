@@ -47,7 +47,7 @@ import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 import { CallPanel } from '../call-panel/CallPanel';
 import { getMarkdownSummary } from '../common/summary';
 import { COMPREHEND_PII_TYPES, LANGUAGE_CODES } from '../common/constants';
-import { parseSpeakerIdentities, resolveSpeakerName } from '../common/speaker-identities';
+import { parseSpeakerIdentities, resolveSpeakerName, speakerGroups } from '../common/speaker-identities';
 import { SentimentIcon } from '../sentiment-icon/SentimentIcon';
 import { getWeightedSentimentLabel } from '../common/sentiment';
 import onCreateCall from '../../graphql/queries/onCreateCall';
@@ -333,12 +333,16 @@ const EmbedTranscriptPanel = ({ item, callTranscriptPerCallId }) => {
   };
 
   const getTurnByTurnSegments = useCallback(() => {
-    const segments = transcriptChannels
+    const allSegments = transcriptChannels
       .map((c) => {
         const { segments: segs } = transcriptsForThisCallId[c];
         return segs;
       })
-      .reduce((p, c) => [...p, ...c].sort((a, b) => a.endTime - b.endTime), [])
+      .reduce((p, c) => [...p, ...c].sort((a, b) => a.endTime - b.endTime), []);
+    // One person or several per platform name, over the whole transcript, as the
+    // meeting page decides it.
+    const groups = speakerGroups(allSegments, speakerIdentities);
+    const segments = allSegments
       .reduce((accumulator, current) => {
         if (
           // prettier-ignore
@@ -368,6 +372,7 @@ const EmbedTranscriptPanel = ({ item, callTranscriptPerCallId }) => {
           t,
           speakerIdentities,
           t.channel === 'REMOTE' ? item.remoteParticipantName : undefined,
+          groups,
         );
         return t;
       })
@@ -649,7 +654,12 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
       const summaryChanged =
         (callDetails?.callSummaryText !== undefined && call.callSummaryText !== callDetails.callSummaryText) ||
         (callDetails?.callSummaryState !== undefined && call.callSummaryState !== callDetails.callSummaryState);
-      if (timestampAdvanced || speakerNamesChanged || summaryChanged) {
+      // A meeting that started or ended is a change whatever its UpdatedAt says
+      // (CallDetails.js); an update carrying no status says nothing about it.
+      const statusChanged =
+        callDetails?.recordingStatusLabel !== 'Unknown' &&
+        call.recordingStatusLabel !== callDetails?.recordingStatusLabel;
+      if (timestampAdvanced || speakerNamesChanged || summaryChanged || statusChanged) {
         setCall(callDetails);
         if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
           setLiveTranscriptCallId(callId);

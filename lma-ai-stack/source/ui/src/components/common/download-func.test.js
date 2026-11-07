@@ -63,6 +63,42 @@ describe('transcriptDownloadRows', () => {
     const alice = transcriptDownloadRows(TRANSCRIPT, MEETING).find((r) => r.speaker === 'Alice (chat)');
     expect(alice.startTimestamp).toBe('00:10.0');
   });
+
+  describe('speaker modes, as the Transcript tab shows them', () => {
+    const DIARIZED = {
+      [CALL_ID]: {
+        REMOTE: {
+          segments: [
+            segment('d1', 'REMOTE', 'Bob Strahan (spk_0)', 'Shall we start?', 0, 100),
+            segment('d2', 'REMOTE', 'Bob Strahan (spk_1)', 'Yes.', 100, 101),
+            segment('d3', 'REMOTE', 'ConfRm_1 (spk_0)', 'Hello.', 101, 110),
+            segment('d4', 'REMOTE', 'ConfRm_1 (spk_1)', 'Hi.', 110, 120),
+          ],
+        },
+      },
+    };
+    const speakers = (meeting) => transcriptDownloadRows(DIARIZED, meeting).map((r) => r.speaker);
+
+    it("shows one person's voices under the name and a room's voices apart", () => {
+      expect(speakers(MEETING)).toEqual(['Bob Strahan', 'Bob Strahan', 'ConfRm_1 · Voice 1', 'ConfRm_1 · Voice 2']);
+    });
+
+    it('applies a chosen mode and the names given to voices', () => {
+      const chosen = {
+        ...MEETING,
+        speakerIdentities: JSON.stringify({
+          identities: { 'REMOTE#ConfRm_1 (spk_1)': { name: 'Priya' } },
+          speakerModes: { 'REMOTE#Bob Strahan': { mode: 'several' } },
+        }),
+      };
+      expect(speakers(chosen)).toEqual([
+        'Bob Strahan · Voice 1',
+        'Bob Strahan · Voice 2',
+        'ConfRm_1 · Voice 1',
+        'Priya',
+      ]);
+    });
+  });
 });
 
 describe('the text and Word downloads', () => {

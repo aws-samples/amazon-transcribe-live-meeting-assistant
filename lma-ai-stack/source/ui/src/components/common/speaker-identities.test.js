@@ -256,9 +256,10 @@ describe('buildSpeakerRoster', () => {
 
   it('treats a custom channel label split into several voices as waiting for names', () => {
     const custom = [
-      { channel: 'REMOTE', speaker: 'Others (spk_0)', startTime: 0, endTime: 2, isPartial: false },
-      { channel: 'REMOTE', speaker: 'Others (spk_1)', startTime: 3, endTime: 4, isPartial: false },
-      { channel: 'LOCAL', speaker: 'me@example.com', startTime: 5, endTime: 6, isPartial: false },
+      // With words: as in the resolver, a segment with none is not a voice.
+      { channel: 'REMOTE', speaker: 'Others (spk_0)', startTime: 0, endTime: 2, isPartial: false, transcript: 'Hi' },
+      { channel: 'REMOTE', speaker: 'Others (spk_1)', startTime: 3, endTime: 4, isPartial: false, transcript: 'Yo' },
+      { channel: 'LOCAL', speaker: 'me@example.com', startTime: 5, endTime: 6, isPartial: false, transcript: 'Ok' },
     ];
     const roster = buildSpeakerRoster(custom, emptyIdentities(), 'Others');
     expect(roster.map((r) => [r.key, r.isPlaceholder])).toEqual([

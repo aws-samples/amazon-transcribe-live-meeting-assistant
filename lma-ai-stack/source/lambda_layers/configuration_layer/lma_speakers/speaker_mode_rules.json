@@ -1,0 +1,17 @@
+{
+  "description": "How a speaker name carrying several voice labels is shown by default: as one person (the bare name) or as several people (one entry per voice). Read by lma_speakers (this directory) and, as a byte-identical copy, by the UI's speaker-modes.js (lma-ai-stack/source/ui/src/components/common/speaker-mode-rules.json); lma_speakers' tests hold the two copies equal. Patterns are matched case-insensitively against the platform name with its voice label removed, and must mean the same thing to Python's re and to JavaScript's RegExp: plain character classes, groups and alternation only.",
+  "unknownNames": ["", "unknown", "unknown speaker", "none", "null", "other participant", "other participants", "others", "me"],
+  "roomNamePatterns": [
+    {"pattern": "(^|[^a-z])(room|rooms|rm)([^a-z]|$)", "matches": "Room 4, Meeting Room, Zoom Room, Teams Room, Rm 101"},
+    {"pattern": "(^|[^a-z])conf", "matches": "ConfRm_1, Conference Room B, Conf-12"},
+    {"pattern": "board ?room|class ?room|war ?room|huddle", "matches": "Boardroom, Huddle 3, War room"},
+    {"pattern": "(^|[^a-z])(bldg|building|floor|flr|lobby|auditorium)([^a-z]|$)", "matches": "BLDG-3-ROOM, Floor 5 East, Lobby"},
+    {"pattern": "^[a-z]{2,6}[0-9]{1,4}[-_ .][0-9]{1,3}([-_.][0-9a-z]{1,5})+$", "matches": "SEA54-12.401, NYC10_3_201"},
+    {"pattern": "polycom|crestron|logitech|yealink|jabra|speakerphone|surface hub|meeting owl|owl labs|neat (bar|board|frame)|webex (board|desk)|(^|[^a-z])(mtr|poly)([^a-z]|$)", "matches": "Polycom Studio, Logitech Rally, Surface Hub, Neat Bar"}
+  ],
+  "severalVoices": {
+    "minVoices": 2,
+    "minShareOfName": 0.2,
+    "minSeconds": 60
+  }
+}

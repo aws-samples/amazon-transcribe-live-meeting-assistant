@@ -156,10 +156,22 @@ def select_frames(
     return spans[-count:]
 
 
+def stored_speaker(segment: Mapping[str, Any]) -> str:
+    """A segment's speaker as the transcriber wrote it."""
+    return segment.get("Speaker") or "Unknown"
+
+
 def transcript_between(
-    segments: Iterable[Mapping[str, Any]], start: float, end: Optional[float]
+    segments: Iterable[Mapping[str, Any]],
+    start: float,
+    end: Optional[float],
+    name_speaker: Callable[[Mapping[str, Any]], str] = stored_speaker,
 ) -> str:
-    """What was said between two times, one "[MM:SS] Speaker: text" line per segment."""
+    """What was said between two times, one "[MM:SS] Speaker: text" line per segment.
+
+    ``name_speaker`` names each line's speaker; the meeting assistant passes one
+    that applies the meeting's speaker names (see meeting_speaker_namer there).
+    """
     lines: List[str] = []
     timed: List[Tuple[float, Mapping[str, Any]]] = []
     for seg in segments:
@@ -172,7 +184,7 @@ def transcript_between(
     for t, seg in sorted(timed, key=lambda pair: pair[0]):
         if t < start or (end is not None and t >= end):
             continue
-        speaker = "MeetingAssistant" if seg.get("Channel") == "AGENT_ASSISTANT" else seg.get("Speaker") or "Unknown"
+        speaker = "MeetingAssistant" if seg.get("Channel") == "AGENT_ASSISTANT" else name_speaker(seg) or "Unknown"
         lines.append(f"[{format_time(t)}] {speaker}: {seg.get('Transcript', '')}")
     text = "\n".join(lines)
     if len(text) > MAX_TRANSCRIPT_CHARS:
@@ -218,6 +230,7 @@ def build_tool_result(
     at_time: Optional[float] = None,
     first_frame_at: Optional[float] = None,
     look: bool = False,
+    name_speaker: Callable[[Mapping[str, Any]], str] = stored_speaker,
 ) -> Dict[str, Any]:
     """The Strands tool result: a text block per frame and, where needed, its image.
 
@@ -293,7 +306,7 @@ def build_tool_result(
             lines.append(f"Text on it:\n{slide_text}" if slide_text.strip() else "It has no readable text.")
         else:
             lines.append("Its text has not been read yet.")
-        said = transcript_between(segment_list, went_up, until)
+        said = transcript_between(segment_list, went_up, until, name_speaker)
         lines.append(f"What was said while it was on screen:\n{said}" if said else "Nothing was said while it was on screen.")
         wanted = send_images and needs_picture(frame, look)
         image = images.get(frame_id) if frame_id in pictured else None

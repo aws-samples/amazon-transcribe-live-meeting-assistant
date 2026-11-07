@@ -1,0 +1,129 @@
+{
+  "description": "Which voices in a transcript are still waiting for a name: what the speaker-name resolver works on (unresolved_voices in lma-ai-stack/source/lambda_functions/speaker_name_resolver/pure.py, which answers ALREADY_NAMED when there are none) and what the Speakers panel counts before it runs automatic passes (nameableVoiceKeys in lma-ai-stack/source/ui/src/components/common/speaker-identities.js). Both are tested against this table so they cannot drift apart: when they disagree, the panel keeps asking for passes the resolver will never run. `keys` is the expected set of voice keys, sorted.",
+  "cases": [
+    {
+      "name": "platform names with voice labels are already named",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_0)", "start": 0, "transcript": "Hi all"},
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_1)", "start": 5, "transcript": "ok"},
+        {"channel": "REMOTE", "speaker": "Chris Lott (spk_0)", "start": 10, "transcript": "Morning"}
+      ],
+      "keys": []
+    },
+    {
+      "name": "the remote placeholder's voices need names",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Other Participant (spk_0)", "start": 0, "transcript": "Hi"},
+        {"channel": "REMOTE", "speaker": "Other Participant (spk_1)", "start": 5, "transcript": "Hello"}
+      ],
+      "keys": ["REMOTE#Other Participant (spk_0)", "REMOTE#Other Participant (spk_1)"]
+    },
+    {
+      "name": "a whole channel's own label split into voices needs names",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Others (spk_0)", "start": 0, "transcript": "Hi"},
+        {"channel": "REMOTE", "speaker": "Others (spk_1)", "start": 5, "transcript": "Hello"},
+        {"channel": "LOCAL", "speaker": "bob@example.com", "start": 7, "transcript": "Hey"}
+      ],
+      "keys": ["REMOTE#Others (spk_0)", "REMOTE#Others (spk_1)"]
+    },
+    {
+      "name": "a label stops being the channel's once another name appears on it",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "none (spk_1)", "start": 14, "transcript": "Grim, unforbidding"},
+        {"channel": "REMOTE", "speaker": "none (spk_0)", "start": 64, "transcript": "Like an English rain"},
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_0)", "start": 424, "transcript": "OK"}
+      ],
+      "keys": []
+    },
+    {
+      "name": "before another name appears the label is the channel's",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "none (spk_1)", "start": 14, "transcript": "Grim, unforbidding"},
+        {"channel": "REMOTE", "speaker": "none (spk_0)", "start": 64, "transcript": "Like an English rain"}
+      ],
+      "keys": ["REMOTE#none (spk_0)", "REMOTE#none (spk_1)"]
+    },
+    {
+      "name": "one voice under a channel's label is not a split",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Others (spk_0)", "start": 0, "transcript": "Hi"}
+      ],
+      "keys": []
+    },
+    {
+      "name": "a segment with no words is not a voice",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Others (spk_0)", "start": 0, "transcript": "Hi"},
+        {"channel": "REMOTE", "speaker": "Others (spk_1)", "start": 5, "transcript": "   "}
+      ],
+      "keys": []
+    },
+    {
+      "name": "partial segments are not voices",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Others (spk_0)", "start": 0, "transcript": "Hi"},
+        {"channel": "REMOTE", "speaker": "Others (spk_1)", "start": 5, "transcript": "Hel", "isPartial": true}
+      ],
+      "keys": []
+    },
+    {
+      "name": "the microphone placeholder needs a name",
+      "segments": [
+        {"channel": "LOCAL", "speaker": "Me (spk_0)", "start": 0, "transcript": "Hi"},
+        {"channel": "LOCAL", "speaker": "Me", "start": 3, "transcript": "Testing"}
+      ],
+      "keys": ["LOCAL#Me", "LOCAL#Me (spk_0)"]
+    },
+    {
+      "name": "a confirmed name settles a voice and a suggestion does not",
+      "identities": {"identities": {
+        "REMOTE#Other Participant (spk_0)": {"name": "Sarah", "status": "confirmed"},
+        "REMOTE#Other Participant (spk_1)": {"name": "Priya", "status": "proposed"}
+      }},
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Other Participant (spk_0)", "start": 0, "transcript": "Hi"},
+        {"channel": "REMOTE", "speaker": "Other Participant (spk_1)", "start": 5, "transcript": "Hello"}
+      ],
+      "keys": ["REMOTE#Other Participant (spk_1)"]
+    },
+    {
+      "name": "a voice settled by hand or locked is not reopened",
+      "identities": {"identities": {
+        "REMOTE#Other Participant (spk_0)": {"name": "", "source": "manual"},
+        "REMOTE#Other Participant (spk_1)": {"name": "Priya", "status": "proposed", "locked": true}
+      }},
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Other Participant (spk_0)", "start": 0, "transcript": "Hi"},
+        {"channel": "REMOTE", "speaker": "Other Participant (spk_1)", "start": 5, "transcript": "Hello"}
+      ],
+      "keys": []
+    },
+    {
+      "name": "a merged voice is named through the voice it was merged into",
+      "identities": {"merges": {"REMOTE#Other Participant (spk_1)": "REMOTE#Other Participant (spk_0)"}},
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Other Participant (spk_0)", "start": 0, "transcript": "Hi"},
+        {"channel": "REMOTE", "speaker": "Other Participant (spk_1)", "start": 5, "transcript": "Hello"}
+      ],
+      "keys": ["REMOTE#Other Participant (spk_0)"]
+    },
+    {
+      "name": "segments and names under the channel names used before 0.4.0",
+      "identities": {"identities": {"CALLER#Other Participant (spk_0)": {"name": "Sarah", "status": "confirmed"}}},
+      "segments": [
+        {"channel": "CALLER", "speaker": "Other Participant (spk_0)", "start": 0, "transcript": "Hi"},
+        {"channel": "CALLER", "speaker": "Other Participant (spk_1)", "start": 5, "transcript": "Hello"}
+      ],
+      "keys": ["REMOTE#Other Participant (spk_1)"]
+    },
+    {
+      "name": "the meeting chat and the assistant are not voices",
+      "segments": [
+        {"channel": "MEETING_CHAT", "speaker": "Other Participant (spk_0)", "start": 0, "transcript": "Hi"},
+        {"channel": "AGENT_ASSISTANT", "speaker": "Other Participant (spk_1)", "start": 5, "transcript": "Hello"}
+      ],
+      "keys": []
+    }
+  ]
+}

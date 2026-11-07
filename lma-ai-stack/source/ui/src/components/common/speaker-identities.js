@@ -23,17 +23,25 @@
  *
  * Four places read a speaker and so must resolve through here: the live
  * transcript (CallPanel), the transcript download (download-func), the
- * embeddable transcript (EmbedCallDetails), and -- in Python, see the twin in
- * lambda_functions/fetch_transcript -- every LLM-facing transcript. A read point
- * that skips resolution shows voice ids while the others show names, which is
- * worse than showing voice ids everywhere.
+ * embeddable transcript (EmbedCallDetails), and -- in Python, see the twin,
+ * lma_speakers in the configuration layer -- every LLM-facing transcript. A read
+ * point that skips resolution shows voice ids while the others show names, which
+ * is worse than showing voice ids everywhere.
+ *
+ * Each of them passes `speakerGroups` (speaker-modes.js) over the whole
+ * transcript as resolveSpeaker's last argument, which is what shows one
+ * person's several voice labels under one name and a room's voices apart.
  *
  * These helpers are pure and import no UI, so they stay unit-testable and usable
  * from the non-React embed path.
  */
 import { canonicalChannel, canonicalKeyed, isSpeechChannel, REMOTE_CHANNEL } from './channels';
 import { DEFAULT_DESKTOP_SYSTEM_LABEL, DEFAULT_LOCAL_SPEAKER_NAME, DEFAULT_OTHER_SPEAKER_NAME } from './constants';
+import { own, resolveMergeTarget, speakerKey } from './speaker-keys';
+import { resolveInGroup, speakerGroups } from './speaker-modes';
 import { splitDiarizationLabel } from './utilities';
+
+export { resolveMergeTarget, speakerKey, speakerGroups };
 
 /** Current shape of the stored JSON. Bump when a migration is needed. */
 export const SPEAKER_IDENTITIES_VERSION = 1;
@@ -48,25 +56,14 @@ export const emptyIdentities = () => ({
   // Names a user has rejected for a voice, so an automatic pass does not propose
   // the same one straight back. Keyed the same way as `identities`.
   rejected: {},
+  // Per platform name (`<channel>#<name>`): whether its voices are one person or
+  // several, when somebody chose (speaker-modes.js).
+  speakerModes: {},
   // When the backend last ran a naming pass, and how long the transcript was.
   // Carried through parse and serialize rather than dropped: a UI write that
   // lost it would reset the backend's own cost bound on every rename.
   lastPass: undefined,
 });
-
-/**
- * Key for one voice: its channel, by its current name, plus the speaker string AS STORED.
- *
- * Keying on the channel and voice id alone would collide: ids are numbered per
- * channel and restart at spk_0, so on a Virtual Participant meeting -- where the
- * base name comes from the meeting roster -- 'Alice (spk_0)' and 'Bob (spk_0)'
- * are two people sharing one key. Including the stored base name keeps them
- * apart.
- *
- * A '#' inside a name does not need escaping: the key is only ever built and
- * looked up by this function, and nothing parses a name back out of it.
- */
-export const speakerKey = (channel, speaker) => `${canonicalChannel(channel) ?? ''}#${(speaker ?? '').trim()}`;
 
 /**
  * Parse the stored JSON, tolerating anything.
@@ -94,7 +91,12 @@ export const parseSpeakerIdentities = (raw) => {
   }
   // A map written before 0.4.0 keys its voices under the older channel names
   // (CALLER#..., AGENT#...). Re-keyed here, so the next write stores the current ones.
+  // Keys this version does not know are carried through, so a write from here
+  // does not erase what a newer version stored.
+  const known = Object.keys(emptyIdentities());
+  const unknown = Object.fromEntries(Object.entries(source).filter(([key]) => !known.includes(key)));
   return {
+    ...unknown,
     version: source.version ?? SPEAKER_IDENTITIES_VERSION,
     candidates: Array.isArray(source.candidates) ? source.candidates.filter((c) => typeof c === 'string') : [],
     identities: canonicalKeyed(source.identities && typeof source.identities === 'object' ? source.identities : {}),
@@ -102,36 +104,15 @@ export const parseSpeakerIdentities = (raw) => {
     segmentOverrides:
       source.segmentOverrides && typeof source.segmentOverrides === 'object' ? source.segmentOverrides : {},
     rejected: canonicalKeyed(source.rejected && typeof source.rejected === 'object' ? source.rejected : {}),
+    speakerModes: canonicalKeyed(
+      source.speakerModes && typeof source.speakerModes === 'object' ? source.speakerModes : {},
+    ),
     lastPass: source.lastPass && typeof source.lastPass === 'object' ? source.lastPass : undefined,
   };
 };
 
 export const serializeSpeakerIdentities = (identities) =>
   JSON.stringify({ ...emptyIdentities(), ...identities, version: SPEAKER_IDENTITIES_VERSION });
-
-/**
- * Follow the merge chain to the key that actually holds the name.
- *
- * Merges exist because splitting one person across two voice ids is the common
- * diarization failure, and naming both 'Bob' without merging leaves two Bob rows
- * that then confuse every summary. The chain is followed with a visit set rather
- * than one hop: merging A into B and later B into C is a legitimate sequence, and
- * a cycle (however it got written) must terminate rather than hang the render.
- */
-const own = (map, key) =>
-  key !== undefined && Object.prototype.hasOwnProperty.call(map ?? {}, key) ? map[key] : undefined;
-
-export const resolveMergeTarget = (key, merges) => {
-  let current = key;
-  const seen = new Set([current]);
-  let next = own(merges, current);
-  while (next && !seen.has(next)) {
-    current = next;
-    seen.add(current);
-    next = own(merges, current);
-  }
-  return current;
-};
 
 /**
  * The key a name for this segment must be STORED under.
@@ -156,8 +137,13 @@ export const identityKeyFor = ({ channel, speaker }, identities) =>
  * Preserving that substitution here is what lets this replace the ad-hoc version
  * the transcript used to do inline: a stored 'Other Participant (spk_0)' with no
  * mapping still renders as '<their name> (spk_0)', label intact.
+ *
+ * `groups` is speakerGroups over the whole transcript. With it, a platform name's
+ * voices are shown as one person or several (speaker-modes.js); `group` in the
+ * result is the group key the segment was resolved under, if any. Without it,
+ * every voice label is shown, as before speaker modes existed.
  */
-export const resolveSpeaker = ({ channel, speaker, segmentId }, identities, fallbackName) => {
+export const resolveSpeaker = ({ channel, speaker, segmentId }, identities, fallbackName, groups = undefined) => {
   const map = identities ?? emptyIdentities();
 
   const target = resolveMergeTarget(speakerKey(channel, speaker), map.merges);
@@ -167,6 +153,11 @@ export const resolveSpeaker = ({ channel, speaker, segmentId }, identities, fall
   const override = own(map.segmentOverrides, segmentId);
   if (override) {
     return { name: override, status: 'confirmed', overridden: true, locked };
+  }
+
+  const inGroup = resolveInGroup({ channel, speaker }, map, groups);
+  if (inGroup) {
+    return { ...inGroup, overridden: false };
   }
 
   if (entry && entry.name) {
@@ -189,8 +180,8 @@ export const resolveSpeaker = ({ channel, speaker, segmentId }, identities, fall
 };
 
 /** Convenience wrapper for the call sites that only want the string. */
-export const resolveSpeakerName = (segment, identities, fallbackName) =>
-  resolveSpeaker(segment, identities, fallbackName).name;
+export const resolveSpeakerName = (segment, identities, fallbackName, groups = undefined) =>
+  resolveSpeaker(segment, identities, fallbackName, groups).name;
 
 /** Whether a segment's channel carries a nameable human voice: the two speech channels. */
 const isNameable = (segment) => isSpeechChannel(segment.channel);
@@ -218,7 +209,8 @@ const channelLabelBases = (segments) => {
   const bases = {};
   const voiceIds = {};
   (segments ?? []).forEach((segment) => {
-    if (segment.isPartial || !isNameable(segment)) {
+    // A segment with no words is not a voice: the resolver's turns skip it too.
+    if (segment.isPartial || !isNameable(segment) || !`${segment.transcript ?? ''}`.trim()) {
       return;
     }
     const { base, suffix } = splitDiarizationLabel(segment.speaker);
@@ -239,6 +231,40 @@ const channelLabelBases = (segments) => {
     }
   });
   return out;
+};
+
+/**
+ * The voices still waiting for a name: what an automatic naming pass could work on.
+ *
+ * The same rule as unresolved_voices in the speaker-name resolver, and tested
+ * against the same table (test-fixtures/nameable-voices.json). The Speakers
+ * panel runs automatic passes while this is not empty, so a looser count here
+ * than there means a panel asking, for as long as it is open, for passes the
+ * resolver declines: a roster name with a voice label is already named, and only
+ * placeholders and a channel's own label split into voices are open. A voice
+ * holding an unconfirmed suggestion is still open; one a person settled (named
+ * by hand, or locked) or merged into another is not.
+ */
+export const nameableVoiceKeys = (segments, identities) => {
+  const map = identities ?? emptyIdentities();
+  const spoken = (segments ?? []).filter(
+    (segment) => !segment.isPartial && isNameable(segment) && `${segment.transcript ?? ''}`.trim(),
+  );
+  const labels = channelLabelBases(spoken);
+  const keys = [];
+  [...spoken]
+    .sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0))
+    .forEach((segment) => {
+      const key = speakerKey(segment.channel, segment.speaker);
+      if (keys.includes(key) || own(map.merges, key)) return;
+      const entry = own(map.identities, key);
+      if (entry?.locked === true || entry?.source === 'manual') return;
+      if (typeof entry?.name === 'string' && entry.name && entry.status !== 'proposed') return;
+      const { base } = splitDiarizationLabel(`${segment.speaker ?? ''}`.trim());
+      if (!PLACEHOLDER_BASES.includes(base) && !labels.has(`${canonicalChannel(segment.channel)}#${base}`)) return;
+      keys.push(key);
+    });
+  return keys;
 };
 
 /**

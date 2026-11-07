@@ -67,6 +67,22 @@ def test_the_transcript_includes_speech_stored_under_the_older_channel_names():
     )
 
 
+def test_speakers_are_named_as_the_meeting_page_names_them():
+    """The identity map and speaker modes apply: one person's voices read as one name,
+    a room's stay apart, and a voice given a name is shown under it."""
+    segments = [
+        seg(3, "Shall we start?", speaker="Bob Strahan (spk_0)", channel="REMOTE"),
+        seg(6, "Yes.", speaker="Bob Strahan (spk_1)", channel="REMOTE"),
+        seg(9, "From the room.", speaker="ConfRm_1 (spk_0)", channel="REMOTE"),
+        seg(12, "Me too.", speaker="ConfRm_1 (spk_1)", channel="REMOTE"),
+    ]
+    stored = json.dumps({"identities": {"REMOTE#ConfRm_1 (spk_1)": {"name": "Priya"}}})
+    assert pure.build_transcript(segments, stored) == (
+        "[00:03] Bob Strahan: Shall we start?\n[00:06] Bob Strahan: Yes.\n"
+        "[00:09] ConfRm_1 · Voice 1: From the room.\n[00:12] Priya: Me too."
+    )
+
+
 def test_a_long_meeting_keeps_its_opening():
     segments = [seg(i, "word " * 50) for i in range(2000)]
     transcript = pure.build_transcript(segments)

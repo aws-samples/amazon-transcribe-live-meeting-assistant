@@ -1123,6 +1123,88 @@ describe('naming a speaker from the Transcript tab', () => {
     renderPage({ transcript: LINES, item: { ...ITEM, owner: 'someone-else' } });
     expect(screen.queryByRole('button', { name: /^Name or combine/ })).toBeNull();
   });
+
+  describe('one person or several people per platform name', () => {
+    // A Virtual Participant meeting: an individual whose voice was split into two
+    // labels, and a conference room with two people in it.
+    const VP = {
+      [ITEM.callId]: {
+        REMOTE: {
+          segments: [
+            { ...line('v1', 'REMOTE', 'Bob Strahan (spk_0)', 'Shall we start?', 0), endTime: 100 },
+            { ...line('v2', 'REMOTE', 'Bob Strahan (spk_1)', 'Yes.', 1), startTime: 100, endTime: 101 },
+            { ...line('v3', 'REMOTE', 'ConfRm_1 (spk_0)', 'Hello from the room.', 2), startTime: 101, endTime: 110 },
+            { ...line('v4', 'REMOTE', 'ConfRm_1 (spk_1)', 'And me.', 3), startTime: 110, endTime: 120 },
+          ],
+        },
+      },
+    };
+    const page = (item = ITEM) => (
+      <MemoryRouter initialEntries={['/calls/m?tab=transcript']}>
+        <CallPanel
+          item={item}
+          callTranscriptPerCallId={VP}
+          setToolsOpen={vi.fn()}
+          getCallDetailsFromCallIds={vi.fn()}
+          tabInUrl
+        />
+      </MemoryRouter>
+    );
+    const groupOf = (base) => screen.getByRole('group', { name: `Voices under ${base}` });
+    const transcriptText = () => screen.getByTestId('transcript-scroll').textContent;
+
+    it("shows an individual's voices under the name and a room's voices apart", () => {
+      callsContext.value = { calls: [], sendUpdateSpeakerIdentities: vi.fn() };
+      render(page());
+      expect(within(groupOf('Bob Strahan')).getByText('Bob Strahan')).toBeTruthy();
+      expect(within(groupOf('ConfRm_1')).getByText('ConfRm_1 · Voice 1')).toBeTruthy();
+      expect(within(groupOf('ConfRm_1')).getByText('ConfRm_1 · Voice 2')).toBeTruthy();
+      expect(transcriptText()).not.toContain('spk_');
+    });
+
+    it('stores the choice with one click, and the lines follow it', async () => {
+      const sendUpdateSpeakerIdentities = vi.fn().mockResolvedValue(true);
+      callsContext.value = { calls: [], sendUpdateSpeakerIdentities };
+      const { rerender } = render(page());
+      fireEvent.click(within(groupOf('Bob Strahan')).getByRole('button', { name: 'Several people' }));
+      await waitFor(() => expect(sendUpdateSpeakerIdentities).toHaveBeenCalledTimes(1));
+      const [, serialized] = sendUpdateSpeakerIdentities.mock.calls[0];
+      expect(JSON.parse(serialized).speakerModes['REMOTE#Bob Strahan']).toMatchObject({
+        mode: 'several',
+        source: 'manual',
+      });
+      // The write comes back through onUpdateCall as the meeting's new map.
+      rerender(page({ ...ITEM, speakerIdentities: serialized }));
+      expect(within(groupOf('Bob Strahan')).getByText('Bob Strahan · Voice 1')).toBeTruthy();
+      expect(within(groupOf('Bob Strahan')).getByText('Bob Strahan · Voice 2')).toBeTruthy();
+    });
+
+    it("renames one of a room's voices in place, for every line it spoke", async () => {
+      const sendUpdateSpeakerIdentities = vi.fn().mockResolvedValue(true);
+      callsContext.value = { calls: [], sendUpdateSpeakerIdentities };
+      const { rerender } = render(page());
+      fireEvent.click(within(groupOf('ConfRm_1')).getByRole('button', { name: 'Rename ConfRm_1 · Voice 2' }));
+      const field = within(groupOf('ConfRm_1')).getByRole('textbox', { name: 'Name for ConfRm_1 · Voice 2' });
+      fireEvent.change(field, { target: { value: 'Priya' } });
+      fireEvent.keyDown(field, { key: 'Enter', keyCode: 13 });
+      await waitFor(() => expect(sendUpdateSpeakerIdentities).toHaveBeenCalledTimes(1));
+      const [, serialized] = sendUpdateSpeakerIdentities.mock.calls[0];
+      expect(JSON.parse(serialized).identities['REMOTE#ConfRm_1 (spk_1)']).toMatchObject({
+        name: 'Priya',
+        source: 'manual',
+      });
+      rerender(page({ ...ITEM, speakerIdentities: serialized }));
+      expect(within(groupOf('ConfRm_1')).getByText('Priya')).toBeTruthy();
+      expect(transcriptText()).toContain('Priya');
+    });
+
+    it('offers the toggle and the renames only to those who may name speakers', () => {
+      callsContext.value = { calls: [], sendUpdateSpeakerIdentities: vi.fn() };
+      render(page({ ...ITEM, owner: 'someone-else' }));
+      expect(within(groupOf('Bob Strahan')).getByRole('button', { name: 'Several people' }).disabled).toBe(true);
+      expect(screen.queryByRole('button', { name: /^Rename / })).toBeNull();
+    });
+  });
 });
 
 describe('the consent that applied to the meeting', () => {

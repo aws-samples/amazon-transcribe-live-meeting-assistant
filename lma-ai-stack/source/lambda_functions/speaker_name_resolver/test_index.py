@@ -186,7 +186,7 @@ def install(
 def test_self_introductions_are_named_and_written(monkeypatch: pytest.MonkeyPatch) -> None:
     _, _, written = install(monkeypatch)
     result = index.handler({"CallId": CALL_ID}, None)
-    assert result == {"Success": True, "Message": "ok", "NamesApplied": 2}
+    assert result == {"Success": True, "Message": "ok", "NamesApplied": 2, "Reason": "NAMED"}
     (call_id, identities) = written[0]
     assert call_id == CALL_ID
     assert identities["identities"][SPK0]["name"] == "Sarah Lee"
@@ -304,7 +304,7 @@ def test_names_are_read_past_a_reasoning_block(monkeypatch: pytest.MonkeyPatch) 
         ],
     )
     result = index.handler({"CallId": CALL_ID}, None)
-    assert result == {"Success": True, "Message": "ok", "NamesApplied": 2}
+    assert result == {"Success": True, "Message": "ok", "NamesApplied": 2, "Reason": "NAMED"}
     assert written[0][1]["identities"][SPK0]["name"] == "Sarah Lee"
 
 
@@ -387,8 +387,120 @@ def test_an_already_named_meeting_does_not_call_the_model(
         },
     }
     _, bedrock, _ = install(monkeypatch, meeting=named)
-    index.handler({"CallId": CALL_ID}, None)
+    result = index.handler({"CallId": CALL_ID}, None)
     assert bedrock.prompts == []
+    assert result["Reason"] == "ALREADY_NAMED"
+
+
+# --------------------------------------------------------------------------
+# Why a pass did nothing: the Reason the Speakers panel acts on
+# --------------------------------------------------------------------------
+
+BROWSER = {"username": OWNER}
+
+
+def browser_pass(force=False):
+    return {"arguments": {"input": {"CallId": CALL_ID, "Force": force}}, "identity": BROWSER}
+
+
+def test_platform_names_with_voice_labels_are_already_named(monkeypatch) -> None:
+    """A Virtual Participant meeting: every voice carries a roster name, so no
+    pass has anything to name -- even when the button is pressed -- and the
+    answer says so rather than that the transcript names nobody."""
+    roster = [
+        segment_row("Bob Strahan (spk_0)", 0, "Hi, I'm Bob"),
+        segment_row("Bob Strahan (spk_1)", 5, "anyway"),
+        segment_row("Chris Lott (spk_0)", 10, "Hello, I'm Chris"),
+    ]
+    _, bedrock, written = install(monkeypatch, segments=roster)
+    result = index.handler(browser_pass(force=True), None)
+    assert result["Reason"] == "ALREADY_NAMED"
+    assert result["Success"] is True and result["NamesApplied"] == 0
+    assert bedrock.prompts == [] and written == []
+
+
+def test_already_named_is_answered_before_the_cooldown(monkeypatch) -> None:
+    """A pass inside the cooldown still learns that nothing is left to name, so
+    the panel can stop asking instead of retrying after the cooldown."""
+    recent = {
+        **MEETING_ROW,
+        "SpeakerIdentities": {"S": json.dumps({"lastPass": {"at": _now_iso(), "turns": 1}})},
+    }
+    install(monkeypatch, meeting=recent, segments=[segment_row("Chris Lott (spk_0)", 0, "Hi")])
+    assert index.handler(browser_pass(), None)["Reason"] == "ALREADY_NAMED"
+
+
+def test_a_transcript_that_names_nobody_is_no_evidence(monkeypatch) -> None:
+    quiet = [
+        segment_row("Other Participant (spk_0)", 0, "the numbers moved three percent"),
+        segment_row("Other Participant (spk_1)", 5, "look at the second chart"),
+    ]
+    install(monkeypatch, segments=quiet)
+    assert index.handler(browser_pass(), None)["Reason"] == "NO_EVIDENCE"
+
+
+def test_a_model_pass_that_names_nobody_is_no_evidence(monkeypatch) -> None:
+    install(monkeypatch, answer="[]")
+    assert index.handler(browser_pass(), None)["Reason"] == "NO_EVIDENCE"
+
+
+def test_an_automatic_pass_on_an_ended_meeting_is_declined(monkeypatch) -> None:
+    ended = {**MEETING_ROW, "Status": {"S": "ENDED"}}
+    _, bedrock, written = install(monkeypatch, meeting=ended)
+    result = index.handler(browser_pass(), None)
+    assert result["Reason"] == "MEETING_ENDED"
+    assert bedrock.prompts == [] and written == []
+
+
+def test_the_button_is_answered_on_a_meeting_whose_status_is_ended(monkeypatch) -> None:
+    ended = {**MEETING_ROW, "Status": {"S": "ENDED"}}
+    _, bedrock, _ = install(monkeypatch, meeting=ended)
+    result = index.handler(browser_pass(force=True), None)
+    assert result["Reason"] == "NAMED"
+    assert bedrock.prompts
+
+
+def test_the_end_of_meeting_pass_runs_on_an_ended_meeting(monkeypatch) -> None:
+    ended = {**MEETING_ROW, "Status": {"S": "ENDED"}}
+    _, bedrock, _ = install(monkeypatch, meeting=ended)
+    result = index.handler({"CallId": CALL_ID, "Trigger": "meeting-end"}, None)
+    assert result["Reason"] == "NAMED"
+
+
+def test_the_cooldown_and_no_growth_have_their_own_reasons(monkeypatch) -> None:
+    recent = {
+        **MEETING_ROW,
+        "SpeakerIdentities": {"S": json.dumps({"lastPass": {"at": _now_iso(), "turns": 1}})},
+    }
+    install(monkeypatch, meeting=recent)
+    assert index.handler(browser_pass(), None)["Reason"] == "COOLDOWN"
+    stale = {
+        **MEETING_ROW,
+        "SpeakerIdentities": {
+            "S": json.dumps({"lastPass": {"at": "2026-01-01T00:00:00+00:00", "turns": 2}})
+        },
+    }
+    install(monkeypatch, meeting=stale)
+    assert index.handler(browser_pass(), None)["Reason"] == "NO_GROWTH"
+
+
+def test_the_write_selects_every_field_the_subscription_does():
+    """A field onUpdateCall selects that the write did not arrives as null in every
+    open meeting page, which then reads the meeting as having no status."""
+    subscription = (
+        HERE.parents[1] / "ui" / "src" / "graphql" / "queries" / "onUpdateCall.js"
+    ).read_text(encoding="utf-8")
+    selected = {
+        line.strip()
+        for line in subscription.splitlines()
+        if line.strip() and line.strip()[0].isupper()
+    }
+    assert sorted(field for field in selected if field not in index._CALL_FIELDS) == []
+
+
+def test_a_failed_pass_says_so(monkeypatch) -> None:
+    install(monkeypatch, error=RuntimeError("bedrock unavailable"))
+    assert index.handler(browser_pass(), None)["Reason"] == "FAILED"
 
 
 def test_a_meeting_that_does_not_exist_is_reported_not_raised(
