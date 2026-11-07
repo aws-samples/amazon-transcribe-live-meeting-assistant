@@ -47,8 +47,10 @@ saved, which features have no model in the selected geography.
 
 For the same reason, a configuration table that is configured but cannot be
 read raises :class:`InferenceGeographyUnreadable` rather than reading as
-``global``. Only a deployment with no configuration table, or one where the
-setting was never saved, runs as ``global``.
+``global``, whatever the setting holds; this includes deployments that never
+saved the setting, because the read fails before its value is known. Only a
+deployment with no configuration table, or one whose table is read and has no
+saved setting, runs as ``global``.
 
 Which ids exist comes from ``bedrock_inference_catalog.json`` beside this
 module, rebuilt from the Amazon Bedrock listing APIs by

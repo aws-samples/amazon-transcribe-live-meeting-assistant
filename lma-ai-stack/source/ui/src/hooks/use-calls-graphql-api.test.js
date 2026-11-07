@@ -84,4 +84,34 @@ describe('mergeCallUpdate', () => {
     const merged = mergeCallUpdate(recorded, { CallId: 'c1', TranscriptionEngine: 'TRANSCRIBE' });
     expect(merged.TranscriptionEngine).toBe('TRANSCRIBE');
   });
+
+  const withAgenda = {
+    CallId: 'c1',
+    Agenda: ['Launch date'],
+    AgendaSource: 'MANUAL',
+    AgendaUpdatedBy: 'owner@example.com',
+    AgendaUpdatedAt: '2026-11-01T10:00:00Z',
+  };
+
+  it('keeps all four agenda fields when an update carries no AgendaUpdatedAt', () => {
+    const merged = mergeCallUpdate(withAgenda, { CallId: 'c1', Status: 'TRANSCRIBING' });
+    expect(merged.Agenda).toEqual(['Launch date']);
+    expect(merged.AgendaSource).toBe('MANUAL');
+    expect(merged.AgendaUpdatedBy).toBe('owner@example.com');
+    expect(merged.AgendaUpdatedAt).toBe('2026-11-01T10:00:00Z');
+  });
+
+  it('takes all four agenda fields from an update with AgendaUpdatedAt, so a cleared agenda stays cleared', () => {
+    const merged = mergeCallUpdate(withAgenda, {
+      CallId: 'c1',
+      Agenda: null,
+      AgendaSource: null,
+      AgendaUpdatedBy: 'admin@example.com',
+      AgendaUpdatedAt: '2026-11-01T11:00:00Z',
+    });
+    expect(merged.Agenda).toBeNull();
+    expect(merged.AgendaSource).toBeNull();
+    expect(merged.AgendaUpdatedBy).toBe('admin@example.com');
+    expect(merged.AgendaUpdatedAt).toBe('2026-11-01T11:00:00Z');
+  });
 });

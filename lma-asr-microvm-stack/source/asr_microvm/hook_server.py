@@ -11,7 +11,7 @@ every MicroVM created from the image:
     Returning 200 is the instant Lambda takes the Firecracker snapshot. So this
     only returns 200 once the ASR server is listening AND a full decode has run
     through it, which puts the model weights and the ONNX arenas in the snapshot.
-    503 asks Lambda to retry. Each request is answered within a few seconds:
+    503 asks Lambda to retry. Each request is answered within about ten seconds:
     loading the model can take minutes, so the hook does not hold a request
     open for it. The warm-up decode runs in the background once the server
     listens, and a later request is answered 200 when it has finished.
@@ -70,8 +70,9 @@ BYTES_PER_SAMPLE = 2
 # real time still dropped a frame because the bundled WAV is 67 frames against a
 # 64-slot queue. Dropped audio corrupts the warm transcript and under-samples the
 # pages /validate exists to make Lambda prefetch, so the exercise sends at the rate
-# a real client would. It costs nothing: the hook is already bounded by the decode
-# (~7s), against a 900s timeout.
+# a real client would. The decode runs in the background, not on a /ready request,
+# so pacing only lengthens the warm-up (~7s); the image's 900s
+# ReadyTimeoutInSeconds covers the whole series of /ready retries around it.
 WARM_PACING_S = float(os.environ.get("ASR_WARM_PACING_S", str(CHUNK_MS / 1000)))
 
 

@@ -1906,8 +1906,9 @@ def meeting_speaker_namer(call_id: str, dynamodb_table_name: str, items: List[Di
     shared with the UI and FetchTranscript), so the assistant says "Bob" where the
     transcript on screen says "Bob" rather than "Bob (spk_1)". ``items`` must be
     the whole transcript: whether the voices under one name are one person or
-    several is decided from all of them. Without the configuration layer, or if
-    the meeting record cannot be read, speakers are named as stored.
+    several is decided from all of them. Without the configuration layer, speakers
+    are named as stored; if the meeting record cannot be read, the default modes
+    apply with no names.
     """
     if speaker_namer is None or not dynamodb_table_name:
         return meeting_frames.stored_speaker

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import subprocess
 import sys
 import textwrap
@@ -45,6 +46,10 @@ def test_a_request_to_aws_is_refused():
     del blocked[before:]
 
 
+@pytest.mark.skipif(
+    os.environ.get(no_real_aws.REAL_CREDENTIALS_ENV_VAR) == "1",
+    reason=f"{no_real_aws.REAL_CREDENTIALS_ENV_VAR}=1 keeps the caller's own credentials",
+)
 def test_the_session_signs_with_fake_credentials():
     credentials = boto3.Session().get_credentials()
     assert credentials.access_key == no_real_aws.FAKE_CREDENTIALS["AWS_ACCESS_KEY_ID"]

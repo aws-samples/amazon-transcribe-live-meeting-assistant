@@ -859,7 +859,11 @@ Two stack parameters decide what `Config#default` holds, as IDP's
   [Configuration presets](configuration-guide.md#configuration-presets). `none`,
   the parameter's value in earlier 0.4.0 pre-releases, is also accepted and read
   as `standard`, so a stack deployed with it can be updated without choosing
-  again.
+  again. The three ids earlier pre-releases also offered
+  (`healthcare-summary`, `translator-voice-assistant` and
+  `on-demand-asr-with-voice-separation`) are no longer allowed values: a stack
+  deployed with one of them has to set `ConfigurationPreset` to `standard` (or
+  `none`) on its next update, which otherwise fails on the parameter value.
 - **`CustomConfigPath`** — an `s3://bucket/key` of a JSON or YAML file laid over
   the result: an object of section name to settings, or a file exported from the
   Configuration page (`"format": "lma-configuration-profile"`), whose `sections`

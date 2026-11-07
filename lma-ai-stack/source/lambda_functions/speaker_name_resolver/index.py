@@ -324,8 +324,8 @@ def write_identities(call_id, identities):
 
 #: Why a pass ended as it did, returned as ``Reason`` so a caller can act on it
 #: without parsing ``Message``. The Speakers panel's automatic passes stop on
-#: ALREADY_NAMED and MEETING_ENDED, and pause on NO_EVIDENCE and NO_GROWTH until
-#: the transcript grows.
+#: ALREADY_NAMED and MEETING_ENDED, and pause on NO_EVIDENCE, NO_GROWTH and
+#: COOLDOWN until the transcript grows.
 REASON_NAMED = "NAMED"
 REASON_NO_EVIDENCE = "NO_EVIDENCE"
 REASON_ALREADY_NAMED = "ALREADY_NAMED"
