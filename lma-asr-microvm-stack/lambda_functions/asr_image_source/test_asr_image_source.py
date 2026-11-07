@@ -518,8 +518,8 @@ def test_the_shipped_catalog_resolves_with_the_stack_defaults() -> None:
 
     rendered = index.render_model_env(default)
     for key in (
-        "ASR_MODEL_URL",
-        "ASR_MODEL_SHA256",
+        # An archive pins one URL and checksum; a model pinned file by file, one per file.
+        *_model_source_keys(default["model"]),
         "ASR_MODEL_ENCODER_FILE",
         "ASR_MODEL_DECODER_FILE",
         "ASR_MODEL_JOINER_FILE",
@@ -970,3 +970,129 @@ def test_a_two_pass_bundle_reports_the_two_pass_engine() -> None:
 
     assert two_pass["AsrEngine"] == "two_pass"
     assert offline["AsrEngine"] == "accurate"
+
+
+def _model_source_keys(model: dict) -> tuple[str, ...]:
+    """The model.env keys that must be non-empty for ``model``'s weights to be pinned."""
+    if model.get("archive") == index.FILES_ARCHIVE:
+        return tuple(
+            f"ASR_MODEL_{part}_{field}"
+            for part in ("ENCODER", "DECODER", "JOINER", "TOKENS")
+            for field in ("URL", "SHA256")
+        )
+    return ("ASR_MODEL_URL", "ASR_MODEL_SHA256")
+
+
+def _files_pinned(name: str, digit: str) -> dict:
+    return {"path": name, "url": f"https://x.invalid/rev/{name}", "sha256": digit * 64}
+
+
+def _catalog_with_files_model(preview_files: bool = False) -> dict:
+    """The offline model pinned file by file, as a host serving fixed revisions allows."""
+    catalog = _catalog_with_preview()
+    main = next(m for m in catalog["models"] if m["id"] == "offline-model")
+    for key in ("url", "sha256"):
+        main.pop(key)
+    main["archive"] = "files"
+    main["files"] = {
+        "encoder": _files_pinned("e.onnx", "1"),
+        "decoder": _files_pinned("d.onnx", "2"),
+        "joiner": _files_pinned("j.onnx", "3"),
+        "tokens": _files_pinned("t.txt", "4"),
+    }
+    main["warmWav"] = {"url": "https://x.invalid/rev/0.wav", "sha256": "5" * 64}
+    if preview_files:
+        preview = next(m for m in catalog["models"] if m["id"] == "model-a")
+        for key in ("url", "sha256"):
+            preview.pop(key)
+        preview["archive"] = "files"
+        preview["files"] = {
+            key: _files_pinned(name, "6") for key, name in preview["files"].items()
+        }
+    return catalog
+
+
+def test_a_model_pinned_file_by_file_renders_one_url_and_checksum_per_file() -> None:
+    values = _env_values(index.resolve({"BundleId": "bundle-offline"}, _catalog_with_files_model()))
+
+    assert values["ASR_MODEL_ARCHIVE"] == "files"
+    assert values["ASR_MODEL_URL"] == ""
+    # The in-archive names still reach the image, so the runtime layout is unchanged.
+    assert values["ASR_MODEL_ENCODER_FILE"] == "e.onnx"
+    assert values["ASR_MODEL_TOKENS_FILE"] == "t.txt"
+    assert values["ASR_MODEL_ENCODER_URL"] == "https://x.invalid/rev/e.onnx"
+    assert values["ASR_MODEL_JOINER_SHA256"] == "3" * 64
+    assert values["ASR_MODEL_WARM_WAV_SHA256"] == "5" * 64
+
+
+def test_an_archive_model_renders_no_per_file_entries() -> None:
+    """Archive bundles keep their exact model.env, and so their image fingerprint."""
+    values = _env_values(index.resolve({"BundleId": "bundle-a"}, CATALOG))
+
+    assert values["ASR_MODEL_URL"] == "https://example.invalid/model-a.tar.bz2"
+    assert "ASR_MODEL_ENCODER_URL" not in values
+    assert "ASR_MODEL_WARM_WAV_URL" not in values
+
+
+def test_a_preview_model_can_be_pinned_file_by_file() -> None:
+    catalog = _catalog_with_files_model(preview_files=True)
+    values = _env_values(index.resolve({"BundleId": "bundle-two-pass"}, catalog))
+
+    assert values["ASR_PREVIEW_MODEL_ARCHIVE"] == "files"
+    assert values["ASR_PREVIEW_MODEL_ENCODER_FILE"] == "encoder.int8.onnx"
+    assert values["ASR_PREVIEW_MODEL_TOKENS_URL"] == "https://x.invalid/rev/tokens.txt"
+
+
+def test_a_file_pinned_model_requires_a_checksum_for_every_file() -> None:
+    catalog = _catalog_with_files_model()
+    main = next(m for m in catalog["models"] if m["id"] == "offline-model")
+    del main["files"]["joiner"]["sha256"]
+    with pytest.raises(index.ResolutionError, match="joiner file is missing"):
+        index.resolve({"BundleId": "bundle-offline"}, catalog)
+
+
+def test_a_file_pinned_model_rejects_a_bare_file_name() -> None:
+    catalog = _catalog_with_files_model()
+    main = next(m for m in catalog["models"] if m["id"] == "offline-model")
+    main["files"]["tokens"] = "t.txt"
+    with pytest.raises(index.ResolutionError, match="path, url and sha256"):
+        index.resolve({"BundleId": "bundle-offline"}, catalog)
+
+
+def test_a_file_pinned_warm_wav_requires_a_checksum() -> None:
+    catalog = _catalog_with_files_model()
+    main = next(m for m in catalog["models"] if m["id"] == "offline-model")
+    main["warmWav"] = {"url": "https://x.invalid/rev/0.wav"}
+    with pytest.raises(index.ResolutionError, match="warmWav"):
+        index.resolve({"BundleId": "bundle-offline"}, catalog)
+
+
+def test_a_file_pinned_preview_requires_a_checksum_for_every_file() -> None:
+    catalog = _catalog_with_files_model(preview_files=True)
+    preview = next(m for m in catalog["models"] if m["id"] == "model-a")
+    preview["files"]["decoder"]["sha256"] = ""
+    with pytest.raises(index.ResolutionError, match="decoder file is missing"):
+        index.resolve({"BundleId": "bundle-two-pass"}, catalog)
+
+
+def test_a_qwen3_asr_model_must_come_from_an_archive() -> None:
+    catalog = _catalog_with_qwen()
+    qwen = next(m for m in catalog["models"] if m["id"] == "qwen")
+    for key in ("url", "sha256"):
+        qwen.pop(key, None)
+    qwen["archive"] = "files"
+    qwen["files"] = {key: _files_pinned(name, "7") for key, name in qwen["files"].items()}
+    with pytest.raises(index.ResolutionError, match="tokenizer directory"):
+        index.resolve({"BundleId": "bundle-qwen"}, catalog)
+
+
+def test_every_shipped_file_pinned_model_names_a_fixed_revision() -> None:
+    """A per-file pin is only stable if the URL names a commit, not a branch."""
+    catalog = json.loads((Path(__file__).parents[2] / "source" / "catalog.json").read_text())
+    pinned = [m for m in catalog["models"] if m.get("archive") == index.FILES_ARCHIVE]
+    assert pinned, "expected at least one model pinned file by file"
+    for model in pinned:
+        sources = [*model["files"].values(), *([model["warmWav"]] if "warmWav" in model else [])]
+        for source in sources:
+            assert re.search(r"/resolve/[0-9a-f]{40}/", source["url"]), source["url"]
+            assert re.fullmatch(r"[0-9a-f]{64}", source["sha256"]), source

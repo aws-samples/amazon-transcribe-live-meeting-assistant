@@ -640,3 +640,116 @@ def test_run_refuses_a_diarizer_whose_data_file_is_not_pinned(tmp_path: Path) ->
 
     with mock.patch.object(fetch_model, "download", side_effect=fake_download):
         assert fetch_model.run(["--env-file", str(env_path), "--dest", str(tmp_path / "d")]) == 1
+
+
+FILE_PAYLOADS = {
+    "encoder.int8.onnx": b"encoder",
+    "decoder.int8.onnx": b"decoder",
+    "joiner.int8.onnx": b"joiner",
+    "tokens.txt": b"a b c\n",
+    "0.wav": b"RIFF" + b"\x00" * 40,
+}
+
+
+def files_env(prefix: str = "ASR_MODEL_", warm: bool = True) -> dict[str, str]:
+    """A model pinned file by file: one URL and checksum per file, no archive."""
+    env = {
+        f"{prefix}ID": "test-model",
+        f"{prefix}URL": "",
+        f"{prefix}SHA256": "",
+        f"{prefix}ARCHIVE": "files",
+    }
+    for part, name in (
+        ("ENCODER", "encoder.int8.onnx"),
+        ("DECODER", "decoder.int8.onnx"),
+        ("JOINER", "joiner.int8.onnx"),
+        ("TOKENS", "tokens.txt"),
+    ):
+        env[f"{prefix}{part}_FILE"] = name
+        env[f"{prefix}{part}_URL"] = f"https://example.invalid/rev/{name}"
+        env[f"{prefix}{part}_SHA256"] = hashlib.sha256(FILE_PAYLOADS[name]).hexdigest()
+    if warm:
+        env[f"{prefix}WARM_WAV_URL"] = "https://example.invalid/rev/test_wavs/0.wav"
+        env[f"{prefix}WARM_WAV_SHA256"] = hashlib.sha256(FILE_PAYLOADS["0.wav"]).hexdigest()
+    return env
+
+
+def serve_files(url: str, target: Path) -> str:
+    data = FILE_PAYLOADS[url.rsplit("/", 1)[-1]]
+    target.write_bytes(data)
+    return hashlib.sha256(data).hexdigest()
+
+
+def test_run_lays_out_a_model_pinned_file_by_file_under_the_canonical_names(
+    tmp_path: Path,
+) -> None:
+    """Same layout as an archive model, so the runtime cannot tell the two apart."""
+    env_path = write_env(tmp_path / "model.env", files_env())
+    dest = tmp_path / "opt-models"
+    urls: list[str] = []
+
+    def fake_download(url: str, target: Path) -> str:
+        urls.append(url)
+        return serve_files(url, target)
+
+    with mock.patch.object(fetch_model, "download", side_effect=fake_download):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(dest)]) == 0
+
+    assert (dest / "encoder.onnx").read_bytes() == b"encoder"
+    assert (dest / "decoder.onnx").read_bytes() == b"decoder"
+    assert (dest / "joiner.onnx").read_bytes() == b"joiner"
+    assert (dest / "tokens.txt").read_bytes() == b"a b c\n"
+    assert (dest / "test_wavs" / "warm.wav").read_bytes() == FILE_PAYLOADS["0.wav"]
+    assert not (dest / "encoder.int8.onnx").exists()
+    assert not any(url.endswith(".tar.bz2") for url in urls)
+
+
+def test_a_model_pinned_file_by_file_needs_no_warm_wav(tmp_path: Path) -> None:
+    env_path = write_env(tmp_path / "model.env", files_env(warm=False))
+    dest = tmp_path / "opt-models"
+
+    with mock.patch.object(fetch_model, "download", side_effect=serve_files):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(dest)]) == 0
+
+    assert (dest / "encoder.onnx").is_file()
+    assert not (dest / "test_wavs").exists()
+
+
+def test_a_file_whose_checksum_does_not_match_fails_the_build(tmp_path: Path) -> None:
+    env = files_env()
+    env["ASR_MODEL_ENCODER_SHA256"] = "0" * 64
+    env_path = write_env(tmp_path / "model.env", env)
+
+    with mock.patch.object(fetch_model, "download", side_effect=serve_files):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(tmp_path / "d")]) == 1
+
+
+def test_a_file_without_a_pinned_checksum_fails_the_build(tmp_path: Path) -> None:
+    env = files_env()
+    env["ASR_MODEL_TOKENS_SHA256"] = ""
+    env_path = write_env(tmp_path / "model.env", env)
+
+    with mock.patch.object(fetch_model, "download", side_effect=serve_files):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(tmp_path / "d")]) == 1
+
+
+def test_run_places_a_preview_model_pinned_file_by_file(tmp_path: Path) -> None:
+    main_archive = make_archive(tmp_path)
+    main_digest = hashlib.sha256(main_archive.read_bytes()).hexdigest()
+    env = {**ENV_TEMPLATE, "ASR_MODEL_SHA256": main_digest}
+    env.update(files_env(prefix="ASR_PREVIEW_MODEL_", warm=False))
+    env_path = write_env(tmp_path / "model.env", env)
+    dest = tmp_path / "opt-models"
+
+    def fake_download(url: str, target: Path) -> str:
+        if url.endswith("model.tar.bz2"):
+            target.write_bytes(main_archive.read_bytes())
+            return main_digest
+        return serve_files(url, target)
+
+    with mock.patch.object(fetch_model, "download", side_effect=fake_download):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(dest)]) == 0
+
+    assert (dest / "preview" / "encoder.onnx").read_bytes() == b"encoder"
+    assert (dest / "preview" / "tokens.txt").read_bytes() == b"a b c\n"
+    assert (dest / "test_wavs" / "warm.wav").is_file()  # the authority's, from its archive
