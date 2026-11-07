@@ -13,6 +13,7 @@ export default /* GraphQL */ `
       uploadKey
       contentType
       expiresInSeconds
+      transcriptionLanguage
     }
   }
 `;
