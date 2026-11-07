@@ -38,6 +38,38 @@ const client = generateClient();
  * AppSync reports that as errorType "ExecutionTimeout" with the message
  * "Execution timed out."; both are checked, since the type is not always set.
  */
+/**
+ * A meeting as it reads after an update: the update's fields, with the ones only
+ * getCall selects (and the list keys) kept from what the page already holds when
+ * the update leaves them out.
+ */
+export const mergeCallUpdate = (existing, call) => ({
+  ...call,
+  ListPK: call.ListPK || existing?.ListPK,
+  ListSK: call.ListSK || existing?.ListSK,
+  SpeakerIdentities: call.SpeakerIdentities || existing?.SpeakerIdentities,
+  CallSummaryState: call.CallSummaryState || existing?.CallSummaryState,
+  // Only getCall selects these, so every other update carries them.
+  TranscriptDeletionScheduledFor: call.TranscriptDeletionScheduledFor || existing?.TranscriptDeletionScheduledFor,
+  TranscriptDeletedAt: call.TranscriptDeletedAt || existing?.TranscriptDeletedAt,
+  TranscriptSegmentsDeleted: call.TranscriptSegmentsDeleted ?? existing?.TranscriptSegmentsDeleted,
+  TranscriptFilesDeleted: call.TranscriptFilesDeleted ?? existing?.TranscriptFilesDeleted,
+  ExpiresAfter: call.ExpiresAfter ?? existing?.ExpiresAfter,
+  // Recorded when the meeting starts and selected only by getCall.
+  CaptureSource: call.CaptureSource || existing?.CaptureSource,
+  TranscriptionEngine: call.TranscriptionEngine || existing?.TranscriptionEngine,
+  TranscriptionLanguage: call.TranscriptionLanguage ?? existing?.TranscriptionLanguage,
+  SpeakerSeparation: call.SpeakerSeparation || existing?.SpeakerSeparation,
+  ...(call.AgendaUpdatedAt
+    ? {}
+    : {
+        Agenda: existing?.Agenda,
+        AgendaSource: existing?.AgendaSource,
+        AgendaUpdatedBy: existing?.AgendaUpdatedBy,
+        AgendaUpdatedAt: existing?.AgendaUpdatedAt,
+      }),
+});
+
 export const isRequestTimeout = (error) =>
   (error?.errors || []).some((e) => /timeout/i.test(e?.errorType || '') || /timed out/i.test(e?.message || ''));
 
@@ -176,25 +208,7 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
         ...currentCalls.filter((c) => !callValuesCallIds.includes(c.CallId)),
         ...callValues.map((call) => {
           const existing = currentCalls.find((c) => c.CallId === call.CallId);
-          return {
-            ...call,
-            ListPK: call.ListPK || existing?.ListPK,
-            ListSK: call.ListSK || existing?.ListSK,
-            SpeakerIdentities: call.SpeakerIdentities || existing?.SpeakerIdentities,
-            CallSummaryState: call.CallSummaryState || existing?.CallSummaryState,
-            // Only getCall selects these, so every other update carries them.
-            TranscriptDeletionScheduledFor:
-              call.TranscriptDeletionScheduledFor || existing?.TranscriptDeletionScheduledFor,
-            TranscriptDeletedAt: call.TranscriptDeletedAt || existing?.TranscriptDeletedAt,
-            ...(call.AgendaUpdatedAt
-              ? {}
-              : {
-                  Agenda: existing?.Agenda,
-                  AgendaSource: existing?.AgendaSource,
-                  AgendaUpdatedBy: existing?.AgendaUpdatedBy,
-                  AgendaUpdatedAt: existing?.AgendaUpdatedAt,
-                }),
-          };
+          return mergeCallUpdate(existing, call);
         }),
       ];
     });
