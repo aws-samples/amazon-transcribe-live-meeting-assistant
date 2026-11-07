@@ -17,6 +17,7 @@ title: "Transcript Summarization"
   - [Customizing Prompts](#customizing-prompts)
   - [Chat and Shared Links](#chat-and-shared-links)
   - [Meeting Content Is Quoted Data](#meeting-content-is-quoted-data)
+  - [Prompt Caching](#prompt-caching)
   - [Admin UI](#admin-ui)
 - [LAMBDA Option](#lambda-option)
   - [Lambda Function Requirements](#lambda-function-requirements)
@@ -148,6 +149,18 @@ The Healthcare summary preset and a stack deployed with the healthcare prompt do
 ### Meeting Content Is Quoted Data
 
 What a summary is written from comes from the people in the meeting: what they said, what they typed in the chat, and what their shared screen showed. Every request to the model carries a system prompt saying that this content is quoted data to summarise, that an instruction appearing in it is never to be followed, and that a transcript line beginning `[chat]` was typed rather than spoken. Every model the Configuration page offers for summaries takes a system prompt; a model that refuses one is sent the same text at the head of its prompt instead. This makes prompt injection through meeting content less likely to succeed; it does not rule it out, which is why, in a meeting with chat, links are taken out of every section and the chat section's links are listed by code rather than by the model.
+
+### Prompt Caching
+
+Each section of a summary is a separate model call, and the shipped **SUMMARY**, **DETAILS**, **ACTIONS** and **AGENDA COVERAGE** prompts all begin with the same words followed by the whole quoted transcript. The summarizer sends that shared beginning once at the full input price and lets the other sections read it from the [Amazon Bedrock prompt cache](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html) at a tenth of the input price or less (a twentieth for Claude Sonnet 5.5, in the shipped price table):
+
+- Each prompt template is divided after its first placeholder, and after the closing tag that follows it if there is one (`</transcript>` in the shipped prompts). The part before that point, filled in for the meeting, is the section's prefix; the rest is its instruction.
+- When two or more sections of one summary have the same prefix, word for word, each of them is sent as the prefix, a cache point, and the instruction, as separate text blocks of the one user message. The first such section writes the prefix and the system prompt ahead of it to the cache, and the others read them.
+- A section whose prefix no other section shares is sent as one text block, as before, because a cache write is billed at 1.25 times the input price and nothing would read it. With the shipped prompts that is **CHAPTERS** (which quotes the timed transcript), **SCREEN SHARE SUMMARY** and **CHAT & SHARED LINKS**. So is a prompt with no placeholder, or with nothing after its first one.
+
+The model is asked exactly what it was asked before: the blocks carry the prompt's own text in its own order, and a custom prompt needs no change to benefit, provided it begins the same way as another section's. Caching applies to the summary models that take a cache point in the user message, which are the Claude 4 and later models; the Amazon Nova models are sent each prompt whole. A prefix shorter than the model's minimum cacheable length (from 512 to 4,096 tokens, depending on the model) is answered normally and nothing is cached.
+
+Measured on the transcript of a real 57-minute standup (about 27,500 tokens) with Claude Sonnet 5.5 and the shipped prompts, the meeting had no agenda, slides or chat, so four sections ran. Without caching the four calls sent 114,663 input tokens, about $0.23 of input. With caching the same 114,663 tokens were billed as 27,558 cache-write tokens on **SUMMARY**, 55,116 cache-read tokens on **DETAILS** and **ACTIONS**, and 31,989 ordinary input tokens (almost all of them **CHAPTERS**), about $0.14 of input, a reduction of about 40%. Output, about 4,100 to 4,500 tokens in both runs, is unaffected, so the whole summary went from about $0.27 to about $0.18 in that run. A meeting with an agenda adds a fourth section reading the cache, and saves more. The time each section took was unchanged within the run-to-run variation, since it is dominated by the model's output. The cache tokens are recorded in the meeting's [cost estimate](meeting-cost-estimate.md) at their own prices.
 
 ## LAMBDA Option
 

@@ -12,7 +12,13 @@ import os
 import re
 
 import boto3
-from bedrock_compat import SUMMARY_MAX_TOKENS, build_inference_config, extract_text
+from bedrock_compat import (
+    PROMPT_CACHE_MESSAGES,
+    SUMMARY_MAX_TOKENS,
+    build_inference_config,
+    extract_text,
+    prompt_cache_sections,
+)
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
@@ -318,8 +324,19 @@ def system_prompt_refused(error):
     )
 
 
+def user_content(prompt_data):
+    """The user message's content blocks: a prompt string as one text block, a list as given."""
+    if isinstance(prompt_data, str):
+        return [{"text": prompt_data}]
+    return [dict(block) for block in prompt_data]
+
+
 def converse(model_id, prompt_data):
     """One Converse call, with SYSTEM_PROMPT as its system prompt where the model takes one.
+
+    ``prompt_data`` is the prompt as one string, or as the user message's content
+    blocks when the section is sent with a prompt cache point (see
+    section_requests).
 
     Every model the Configuration page offers for summaries (Amazon Nova and
     Anthropic Claude) takes a system prompt in Converse. A model that refuses one
@@ -328,12 +345,13 @@ def converse(model_id, prompt_data):
     summary does not pay for a refused request per section.
     """
     inference_config = build_inference_config(model_id, SUMMARY_MAX_TOKENS)
+    content = user_content(prompt_data)
     if model_id not in MODELS_WITHOUT_SYSTEM_PROMPT:
         try:
             return bedrock.converse(
                 modelId=model_id,
                 system=[{"text": SYSTEM_PROMPT}],
-                messages=[{"role": "user", "content": [{"text": prompt_data}]}],
+                messages=[{"role": "user", "content": content}],
                 inferenceConfig=inference_config,
             )
         except ClientError as error:
@@ -341,9 +359,12 @@ def converse(model_id, prompt_data):
                 raise
             print(f"{model_id} takes no system prompt; sending it in the user message instead")
             MODELS_WITHOUT_SYSTEM_PROMPT.add(model_id)
+    # The same text at the head of the first block, so a cached prefix stays the
+    # same for every section of the summary.
+    content[0] = {"text": f"{SYSTEM_PROMPT}\n\n{content[0]['text']}"}
     return bedrock.converse(
         modelId=model_id,
-        messages=[{"role": "user", "content": [{"text": f"{SYSTEM_PROMPT}\n\n{prompt_data}"}]}],
+        messages=[{"role": "user", "content": content}],
         inferenceConfig=inference_config,
     )
 
@@ -511,6 +532,83 @@ def chat_section(text, links_text):
     return f"{prose}\n\n{tail}" if prose else tail
 
 
+#: The tag that closes a quoted block straight after its placeholder, as in
+#: "<transcript>\n{transcript}\n</transcript>"; kept with the placeholder.
+CLOSING_TAG = re.compile(r"[ \t]*\r?\n?[ \t]*</[A-Za-z][\w-]*>")
+
+#: Marks the end of the part of a request Amazon Bedrock may cache.
+CACHE_POINT = {"cachePoint": {"type": "default"}}
+
+
+def split_template(prompt):
+    """A template as (head, tail) at its first placeholder, or None to send it whole.
+
+    The head ends with the first placeholder, and with the tag that closes it
+    if one follows. In the shipped templates that makes the head the line that
+    introduces the transcript and the quoted transcript itself, which several
+    sections share word for word, and the tail the instruction that makes the
+    section what it is. The template's text is not changed: head and tail
+    together are exactly the template, and are rendered separately only because
+    no placeholder can straddle the point between them.
+
+    None for a template with no placeholder, or with nothing after the first
+    one: there is no shared part to cache, or nothing to tell sections apart.
+    """
+    match = PLACEHOLDERS.search(prompt)
+    if not match:
+        return None
+    end = match.end()
+    closing = CLOSING_TAG.match(prompt, end)
+    if closing:
+        end = closing.end()
+    if not prompt[end:].strip():
+        return None
+    return prompt[:end], prompt[end:]
+
+
+def section_requests(sections, render, caching):
+    """The prompt of each section, with a cache point after the part they share.
+
+    ``sections`` is a list of (key, template); ``render`` fills a template's
+    placeholders. Returns the prompt data of each section, in the same order:
+    the rendered template as one string, as it was always sent, or as the
+    content blocks [head, cache point, tail] when ``caching`` and another
+    section of this summary renders the same head. The first such section
+    writes the head to the cache and the rest read it, so the meeting's
+    transcript is billed at the full input rate once rather than once per
+    section; the system prompt ahead of it is cached with it. A head no other
+    section shares gets no cache point, since a cache write costs more than
+    ordinary input and nothing would read it.
+
+    The model is asked the same thing either way: the user message's blocks
+    carry the template's text in the template's order. Below the model's
+    minimum cacheable length Amazon Bedrock ignores the cache point and
+    answers normally.
+    """
+    rendered = []
+    for _key, template in sections:
+        parts = split_template(template) if caching else None
+        if parts is None:
+            rendered.append((render(template), None))
+        else:
+            rendered.append((render(parts[0]), render(parts[1])))
+    heads = {}
+    for head, tail in rendered:
+        if tail is not None:
+            heads[head] = heads.get(head, 0) + 1
+    requests = []
+    for head, tail in rendered:
+        if tail is None:
+            requests.append(head)
+        elif heads[head] > 1 and head.strip() and tail.strip():
+            requests.append(
+                [{"text": head}, {"cachePoint": dict(CACHE_POINT["cachePoint"])}, {"text": tail}]
+            )
+        else:
+            requests.append(head + tail)
+    return requests
+
+
 def generate_summary(
     transcript,
     prompt_override,
@@ -533,7 +631,8 @@ def generate_summary(
     slides_text = None
     chat_text = (chat or "").strip() if isinstance(chat, str) else ""
     links_text = links_list(chat_links)
-    result = {}
+    # The sections to write, after the ones with nothing to write from are left out.
+    sections = []
     for item in templates:
         key = list(item.keys())[0]
         prompt = item[key]
@@ -550,22 +649,37 @@ def generate_summary(
         if TIMED_TRANSCRIPT_PLACEHOLDER in prompt and not (timed_transcript or "").strip():
             print(f"Skipping summary section '{key}': no timed transcript.")
             continue
-        from_chat = CHAT_PLACEHOLDER in prompt or CHAT_LINKS_PLACEHOLDER in prompt
-        if from_chat and not chat_text:
+        if (CHAT_PLACEHOLDER in prompt or CHAT_LINKS_PLACEHOLDER in prompt) and not chat_text:
             print(f"Skipping summary section '{key}': nothing was typed in the meeting chat.")
             continue
+        sections.append((key, prompt))
+
+    values = {
+        "{transcript}": transcript,
+        AGENDA_PLACEHOLDER: agenda_text,
+        SLIDES_PLACEHOLDER: slides_text or "",
+        SCREEN_SHARE_PLACEHOLDER: slides_text or "",
+        TIMED_TRANSCRIPT_PLACEHOLDER: timed_transcript or "",
+        CHAT_PLACEHOLDER: chat_text,
+        CHAT_LINKS_PLACEHOLDER: links_text or NO_LINKS_SHARED,
+    }
+
+    def render(template):
         # All placeholders in one pass, so text inserted for one -- an agenda
         # line that reads "{transcript}", say -- is never read as another.
-        values = {
-            "{transcript}": transcript,
-            AGENDA_PLACEHOLDER: agenda_text,
-            SLIDES_PLACEHOLDER: slides_text or "",
-            SCREEN_SHARE_PLACEHOLDER: slides_text or "",
-            TIMED_TRANSCRIPT_PLACEHOLDER: timed_transcript or "",
-            CHAT_PLACEHOLDER: chat_text,
-            CHAT_LINKS_PLACEHOLDER: links_text or NO_LINKS_SHARED,
-        }
-        prompt = PLACEHOLDERS.sub(lambda match: values[match.group(0)], prompt)
+        return PLACEHOLDERS.sub(lambda match: values[match.group(0)], template)
+
+    # A cache point goes in the user message, so only a model that takes one
+    # there is sent one (bedrock_compat.prompt_cache_sections).
+    caching = PROMPT_CACHE_MESSAGES in prompt_cache_sections(model_id)
+    requests = section_requests(sections, render, caching)
+    print(
+        f"Summary sections: {len(requests)}, of which "
+        f"{sum(isinstance(prompt, list) for prompt in requests)} carry a prompt cache point"
+    )
+    result = {}
+    for (key, template), prompt in zip(sections, requests):
+        from_chat = CHAT_PLACEHOLDER in template or CHAT_LINKS_PLACEHOLDER in template
         # The prompt carries the whole transcript, so it is logged at DEBUG only.
         logger.debug("Prompt: %s", prompt)
         response = call_bedrock(prompt, call_id, model_id)

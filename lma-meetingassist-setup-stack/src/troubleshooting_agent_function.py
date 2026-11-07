@@ -100,7 +100,7 @@ APPSYNC_GRAPHQL_URL = os.environ.get("APPSYNC_GRAPHQL_URL", "")
 APPSYNC_API_ID = os.environ.get("APPSYNC_API_ID", "")
 #: The model when the configuration cannot be read; the same value as the
 #: setting's shipped default in setting_defaults.json.
-FALLBACK_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+FALLBACK_MODEL_ID = "global.anthropic.claude-haiku-5-5"
 BEDROCK_GUARDRAIL_ID = os.environ.get("BEDROCK_GUARDRAIL_ID", "").strip()
 BEDROCK_GUARDRAIL_VERSION = os.environ.get("BEDROCK_GUARDRAIL_VERSION", "").strip()
 

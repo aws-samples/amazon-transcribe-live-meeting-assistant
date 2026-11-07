@@ -1893,7 +1893,8 @@ Resources:
       # A model chosen later on the Configuration page is not checked here.
       BedrockModelIds:
         - "global.anthropic.claude-sonnet-5-5" # Summaries and meeting insights
-        - "global.anthropic.claude-haiku-4-5-20251001-v1:0" # Meeting assistant and its knowledge bases
+        - "global.anthropic.claude-haiku-5-5" # Meeting assistant
+        - "global.anthropic.claude-haiku-4-5-20251001-v1:0" # Meeting assistant knowledge bases
         - "amazon.titan-embed-text-v2:0" # Meeting Assistant Bedrock KB embeddings
 
   ##########################################################################

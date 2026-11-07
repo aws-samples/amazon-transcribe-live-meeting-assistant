@@ -17,6 +17,7 @@ title: "Meeting Assistant"
   - [S3 Data Source](#s3-data-source)
   - [Web Crawler](#web-crawler)
 - [Model Selection](#model-selection)
+  - [Reasoning effort](#reasoning-effort)
   - [The knowledge-base model](#the-knowledge-base-model)
   - [Prompt caching](#prompt-caching)
 - [Bedrock Guardrails](#bedrock-guardrails)
@@ -93,7 +94,7 @@ Provide one or more seed URLs for the web crawler to index. Configure the crawl 
 
 ## Model Selection
 
-Choose the Bedrock foundation model that powers the Meeting Assistant. An Admin sets it as **Meeting assistant** in the Amazon Bedrock Models section of the [Configuration page](configuration-guide.md), and a change applies within about five minutes, with no stack update. A new deployment uses Claude Haiku 4.5 (`global.anthropic.claude-haiku-4-5-20251001-v1:0`) until the setting is changed. Supported models include:
+Choose the Bedrock foundation model that powers the Meeting Assistant. An Admin sets it as **Meeting assistant** in the Amazon Bedrock Models section of the [Configuration page](configuration-guide.md), and a change applies within about five minutes, with no stack update. A new deployment uses Claude Haiku 5.5 (`global.anthropic.claude-haiku-5-5`) at a low reasoning effort until the setting is changed; see [Choosing Amazon Bedrock models](configuration-guide.md#choosing-amazon-bedrock-models) for the measurements behind that default. Supported models include:
 
 - Amazon Nova Micro, Nova Lite, Nova Pro and Nova 2 Lite
 - Anthropic Claude Haiku 4.5, Sonnet 4.5, Sonnet 4.6, Opus 4.1 and Opus 4.6
@@ -105,7 +106,19 @@ A model that reaches the end of its life on Amazon Bedrock is taken off these li
 
 The model selection affects response quality, latency, and cost. Lighter models (Nova Micro, Claude Haiku) are faster and less expensive, while more capable models (Claude Opus, Claude Sonnet) provide higher-quality responses for complex queries.
 
-The Claude 5 generation reasons before it answers. That improves answers on questions that need several steps, but the reasoning is itself billed as output, so the same question costs several times as much output as it does on Claude 4.5 at the same size. Claude 5 models also use a different tokenizer that counts a given transcript as roughly a quarter more input tokens. Expect a higher per-meeting bill if you move to one, and treat the quality gain as the thing you are buying.
+The Claude 5 generation reasons before it answers. That improves answers on questions that need several steps, but the reasoning is itself billed as output, so the same question costs several times as much output as it does on Claude 4.5 at the same size. Claude 5 models also use a different tokenizer that counts a given transcript as roughly a quarter more input tokens. Expect a higher per-meeting bill if you move to one from a Claude 4.5 model of the same size, and treat the quality gain as the thing you are buying. Claude Haiku 5.5 is the exception that sets the default: its per-token prices are a tenth of Claude Haiku 4.5's, which more than offsets the extra tokens.
+
+### Reasoning effort
+
+**Meeting Assistant › Reasoning effort** on the Configuration page sets how much a Claude 5 generation model (Claude Haiku, Sonnet and Opus 5.5) reasons before it answers. It is sent to Amazon Bedrock as `output_config.effort` in the request's `additionalModelRequestFields`, on every model call of an answer, and a change applies within about five minutes to answers started after that.
+
+| Value | Effect |
+|---|---|
+| `low` (the default) | Answers soonest and costs least. Measured on Claude Haiku 5.5, it still gave better answers than Claude Haiku 4.5 on most meeting-assistant requests. |
+| `medium` | The model's own default. |
+| `high` | Reasons longest, for questions that need several steps, and costs the most, since reasoning is billed as output. |
+
+The setting is ignored for every other meeting assistant model. Claude Haiku 4.5, Sonnet 4.5, Opus 4.1 and the Amazon Nova models reject the field, and Claude Sonnet 4.6 and Opus 4.6, which accept it, are deliberately left at their own default so that a deployment already running one of them answers as it did before. Reasoning is not turned off altogether at any value: with extended thinking disabled, Claude Haiku 5.5 was measured choosing the assistant's tools less reliably. The troubleshooting agent, which runs on the same model, is not affected by this setting and runs at the model's default effort. The setting composes with prompt caching and with the **Model inference geography** setting: the effort is decided from the model id after the geography mapping, so `us.anthropic.claude-haiku-5-5` is treated the same as `global.anthropic.claude-haiku-5-5`.
 
 ### The knowledge-base model
 

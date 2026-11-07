@@ -374,3 +374,61 @@ def test_the_caching_nova_models_take_a_system_cache_point_only(compat, model_id
 def test_a_model_not_known_to_cache_gets_no_cache_points(compat, model_id) -> None:
     """A cache point a model does not accept fails the request, so unknown means none."""
     assert compat.prompt_cache_sections(model_id) == frozenset()
+
+
+# ── which models take a reasoning effort ────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "global.anthropic.claude-haiku-5-5",
+        # The ids the Model inference geography setting maps the default to.
+        "us.anthropic.claude-haiku-5-5",
+        "eu.anthropic.claude-haiku-5-5",
+        "jp.anthropic.claude-haiku-5-5",
+        "anthropic.claude-haiku-5-5",
+        "global.anthropic.claude-sonnet-5-5",
+        "us.anthropic.claude-opus-5-5",
+        # A later generation is assumed to keep the field.
+        "global.anthropic.claude-haiku-9-1",
+    ],
+)
+@pytest.mark.parametrize("effort", ["low", "medium", "high", "xhigh", "max"])
+def test_claude_5_and_later_are_sent_the_reasoning_effort(compat, model_id, effort) -> None:
+    assert compat.accepts_reasoning_effort(model_id)
+    assert compat.additional_request_fields(model_id, effort) == {
+        "output_config": {"effort": effort}
+    }
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        # Rejects output_config.effort (measured).
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "us.anthropic.claude-opus-4-1-20250805-v1:0",
+        # Accepts it, but is left at its own default so its answers do not change.
+        "global.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-opus-4-6-v1",
+        # Rejects the whole output_config key (measured).
+        "amazon.nova-micro-v1:0",
+        "us.amazon.nova-2-lite-v1:0",
+        "",
+    ],
+)
+def test_models_before_claude_5_get_no_additional_request_fields(compat, model_id) -> None:
+    assert not compat.accepts_reasoning_effort(model_id)
+    assert compat.additional_request_fields(model_id, "low") is None
+
+
+@pytest.mark.parametrize("effort", [None, ""])
+def test_no_effort_leaves_the_model_at_its_default(compat, effort) -> None:
+    assert compat.additional_request_fields("global.anthropic.claude-haiku-5-5", effort) is None
+
+
+def test_an_effort_that_is_not_a_level_is_logged_and_not_sent(compat, caplog) -> None:
+    with caplog.at_level("WARNING"):
+        assert compat.additional_request_fields("global.anthropic.claude-haiku-5-5", "Low") is None
+    assert "Ignoring reasoning effort 'Low'" in caplog.text

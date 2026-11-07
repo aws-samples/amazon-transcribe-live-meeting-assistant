@@ -45,6 +45,13 @@ at each call site:
     other model takes none. A cache point a model does not accept fails the
     request, so the answer is decided here rather than by each caller.
 
+``additional_request_fields``
+    The ``additionalModelRequestFields`` that carry a reasoning effort
+    (``output_config.effort``) to the models that take one. Claude 5 and later
+    reason before they answer, and the effort sets how much; a model that does
+    not take the field rejects the request, so it is sent only where it is known
+    to be accepted.
+
 This file is duplicated **verbatim** into every deployment package that needs it:
 five Lambda directories under ``lma-ai-stack/source/lambda_functions/`` and the
 meeting-assist function's ``src`` directory in ``lma-meetingassist-setup-stack``.
@@ -187,6 +194,57 @@ def prompt_cache_sections(model_id: str) -> frozenset[str]:
     if any(model_id == nova or model_id.endswith(f".{nova}") for nova in _NOVA_PROMPT_CACHE_MODELS):
         return frozenset({PROMPT_CACHE_SYSTEM})
     return frozenset()
+
+
+# The reasoning effort levels Amazon Bedrock accepts in ``output_config.effort`` for
+# the Claude 5 generation, lowest first. The model's own default is "medium".
+REASONING_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+
+# First Claude major generation LMA sends a reasoning effort to. Measured against
+# Amazon Bedrock in us-east-1 on 2026-11-06: Claude Haiku, Sonnet and Opus 5.5
+# accept every level above, through both global. and us. profiles. Claude Sonnet
+# 4.6 and Opus 4.6 accept low, medium, high and max too, but they are left at
+# their own default so that a deployment already running one of them answers as
+# it did before; Claude Haiku 4.5, Sonnet 4.5, Opus 4.1 and the Amazon Nova models
+# reject the field.
+_REASONING_EFFORT_FROM_CLAUDE_MAJOR = 5
+
+
+def accepts_reasoning_effort(model_id: str) -> bool:
+    """Whether LMA sends ``output_config.effort`` to ``model_id``.
+
+    Decided from the generation number, as for ``accepts_temperature``, and in
+    the same direction: a later Claude generation is assumed to keep the field,
+    and anything that is not Claude never gets it.
+    """
+    major = claude_major_version(model_id)
+    return major is not None and major >= _REASONING_EFFORT_FROM_CLAUDE_MAJOR
+
+
+def additional_request_fields(
+    model_id: str, reasoning_effort: str | None = None
+) -> dict[str, object] | None:
+    """The ``additionalModelRequestFields`` for ``model_id``, or None for none.
+
+    ``reasoning_effort`` is one of ``REASONING_EFFORT_LEVELS``, or None to leave
+    the model at its default. It is ignored for a model that does not take an
+    effort, and a value that is not a level is logged and ignored rather than
+    sent, since Bedrock would reject the request it was in.
+
+    Extended thinking is not turned off here: with ``thinking`` disabled, Claude
+    Haiku 5.5 was measured choosing tools less reliably as the meeting
+    assistant, so a low effort is the way to make it answer sooner.
+    """
+    if not reasoning_effort or not accepts_reasoning_effort(model_id):
+        return None
+    if reasoning_effort not in REASONING_EFFORT_LEVELS:
+        LOGGER.warning(
+            "Ignoring reasoning effort %r: Amazon Bedrock accepts one of %s",
+            reasoning_effort,
+            ", ".join(REASONING_EFFORT_LEVELS),
+        )
+        return None
+    return {"output_config": {"effort": reasoning_effort}}
 
 
 def build_inference_config(

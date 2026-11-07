@@ -22,6 +22,7 @@ from bedrock_compat import (
     PROMPT_CACHE_SYSTEM,
     PROMPT_CACHE_TOOLS,
     accepts_temperature,
+    additional_request_fields,
     build_inference_config,
     claude_major_version,
     extract_text,
@@ -90,7 +91,7 @@ AGENT_TEMPERATURE = 0.3
 # deployed without the configuration layer); each is the same value as its
 # setting's shipped default in setting_defaults.json.
 DEFAULT_KB_MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
-DEFAULT_AGENT_MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
+DEFAULT_AGENT_MODEL_ID = 'global.anthropic.claude-haiku-5-5'
 
 
 def configured_agent_model_id() -> str:
@@ -118,6 +119,39 @@ def prompt_caching_enabled() -> bool:
     shipped default (on). Read per answer, like the model.
     """
     return bool(read_setting('meeting_assist', 'promptCachingEnabled', default=True))
+
+
+# The reasoning effort when the configuration cannot be read; the same value as
+# the setting's shipped default in setting_defaults.json.
+DEFAULT_REASONING_EFFORT = 'low'
+
+
+def configured_reasoning_effort() -> str:
+    """How much the assistant's model reasons before it answers.
+
+    The Meeting Assistant section's Reasoning effort on the Configuration page,
+    else the shipped default (low). Read per answer, like the model. Sent only to
+    the models that take an effort; see bedrock_compat.additional_request_fields().
+
+    Low is the default because the assistant answers mid-meeting: measured on
+    Claude Haiku 5.5 over thirteen meeting-assistant requests, low effort gave
+    answers judged better than Claude Haiku 4.5's on ten of them at about a
+    tenth of the cost, with a median time to the first word of 3.3 seconds
+    against 2.1 seconds for Claude Haiku 4.5.
+    """
+    value = read_setting('meeting_assist', 'assistantReasoningEffort', default=DEFAULT_REASONING_EFFORT)
+    return value if isinstance(value, str) and value else DEFAULT_REASONING_EFFORT
+
+
+def assistant_request_fields(model_id: str) -> Optional[Dict[str, Any]]:
+    """The Converse additionalModelRequestFields of one answer, or None for none.
+
+    ``model_id`` is the id after the Model inference geography mapping, so the
+    us., eu. and other profile forms of a Claude 5 model are recognised as well
+    as the global. one. The fields go beside any prompt cache points; the two do
+    not interact.
+    """
+    return additional_request_fields(model_id, configured_reasoning_effort())
 
 
 def prompt_cache_plan(
@@ -2366,6 +2400,16 @@ def handler(event, context):
             if accepts_temperature(model_id):
                 model_kwargs['temperature'] = AGENT_TEMPERATURE
 
+            # The reasoning effort, on the models that take one (model_id is the
+            # id after the Model inference geography mapping, so us. and other
+            # profile forms are recognised too). Strands sends it as the Converse
+            # additionalModelRequestFields on every model call of the answer,
+            # beside the cache points below.
+            request_fields = assistant_request_fields(model_id)
+            if request_fields:
+                model_kwargs['additional_request_fields'] = request_fields
+                logger.info(f"Additional request fields: {request_fields}")
+
             # Prompt caching, on the models that support it, unless the Meeting
             # Assistant section turns it off. See prompt_cache_plan().
             cache_config_kwargs, system_prompt = prompt_cache_plan(
@@ -2760,6 +2804,9 @@ Please provide a helpful response based on the meeting context. Keep it concise 
         # the agent one.
         guardrail_config = get_guardrail_config()
         converse_kwargs = {}
+        request_fields = assistant_request_fields(model_id)
+        if request_fields:
+            converse_kwargs['additionalModelRequestFields'] = request_fields
         if guardrail_config:
             converse_kwargs['guardrailConfig'] = {
                 'guardrailIdentifier': guardrail_config['guardrail_id'],

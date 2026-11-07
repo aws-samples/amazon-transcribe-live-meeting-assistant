@@ -83,7 +83,7 @@ key the price table is looked up by.
 | Transcription | `transcribe/streaming-custom-language-model` | `seconds` | WebSocket transcriber | The same seconds again when a custom language model was used. |
 | Transcription | `transcribe/batch` | `seconds` | Upload Audio finalizer | The batch job's duration, read as the end time of the last transcribed word, with the 15-second minimum. Trailing silence, which is billed, is not counted. |
 | Transcription | `lambda-microvm/arm64` | `vcpuSeconds`, `gbSeconds` | WebSocket transcriber, Virtual Participant | When the [MicroVM ASR engine](microvm-asr.md) transcribed the meeting: the MicroVM's configured memory (reported by the launcher; 8 GiB for every bundle today) and its vCPUs at 2 GiB per vCPU, multiplied by the time from the launch request to release. |
-| Summary | `bedrock/<model id>` | `inputTokens`, `outputTokens`, cache units | Meeting summary Lambda | The `usage` block of each Converse call — one per summary section. A regeneration runs every section again and is recorded again. |
+| Summary | `bedrock/<model id>` | `inputTokens`, `outputTokens`, cache units | Meeting summary Lambda | The `usage` block of each Converse call — one per summary section. On a Claude model, the first section that quotes the transcript records it as `cacheWriteInputTokens` and the sections after it that quote it the same way as `cacheReadInputTokens`; see [Prompt Caching](transcript-summarization.md#prompt-caching). A regeneration runs every section again and is recorded again. |
 | SpeakerNaming | `bedrock/<model id>` | as above | Speaker name resolver | Each naming pass's model call. |
 | AgendaDerivation | `bedrock/<model id>` | as above | Agenda deriver | The model call of each pass that read the transcript for a stated agenda: the automatic one, at most once per meeting, and each press of **Derive agenda**. See [Meeting Agenda](meeting-agenda.md#deriving-an-agenda-from-the-transcript). |
 | MeetingAssistant | `bedrock/<model id>` | as above | Strands meeting assistant | The tokens the Strands SDK accumulated over every model call one answer took (an answer that uses tools is several calls), whether asked from the chat panel, by wake phrase or by the voice assistant. When the answer looked at the shared screen, a second record counts the `images` sent; they are billed as the input tokens already counted, so the count is shown and not priced. See [Meeting Video and Key Frames](meeting-video.md#asking-the-assistant-about-the-shared-screen). |
@@ -134,7 +134,7 @@ without a price.
 Bedrock reports prompt-cache tokens separately from ordinary input, and they are
 billed at their own rates, so a Bedrock line can carry `cacheReadInputTokens` and
 `cacheWriteInputTokens` beside `inputTokens`. The table prices both for every model
-the [meeting assistant caches on](meeting-assistant.md#prompt-caching). Nova Micro,
+the [meeting assistant caches on](meeting-assistant.md#prompt-caching), which includes every Claude model the [summarizer caches on](transcript-summarization.md#prompt-caching). Nova Micro,
 Nova Lite and Nova Pro list a cache write at zero and a cache read at a quarter of the
 input price; those three cache prices were read from the Price List API on
 2026-11-06, after the rest of the table.
