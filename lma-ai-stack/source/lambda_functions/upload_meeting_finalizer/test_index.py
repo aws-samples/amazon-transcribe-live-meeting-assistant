@@ -747,7 +747,19 @@ def test_the_recording_url_event_points_at_the_promoted_object(h) -> None:
     payload = h.kinesis.only("ADD_S3_RECORDING_URL")
     assert payload["RecordingUrl"] == f"s3://{BUCKET}/lma-audio-recordings/{CALL_ID}.mp3"
     assert payload["CallId"] == CALL_ID
-    assert payload["CreatedAt"] and payload["UpdatedAt"]
+    assert payload["CreatedAt"]
+
+
+def test_the_recording_url_event_carries_no_updated_at(h) -> None:
+    """updateCall.request.vtl applies an update only when its UpdatedAt is newer
+    than the stored one, and the call event processor runs a batch's records
+    concurrently, so the END sent right after can be applied first. A stamp here
+    would then be refused on every redelivery and the meeting would show no
+    recording; without one the resolver stamps the update when it runs."""
+    h.run()
+    payload = h.kinesis.only("ADD_S3_RECORDING_URL")
+    assert "UpdatedAt" not in payload
+    assert h.kinesis.event_types[-2:] == ["ADD_S3_RECORDING_URL", "END"]
 
 
 def test_a_pending_delete_that_fails_does_not_cost_the_recording(h) -> None:
