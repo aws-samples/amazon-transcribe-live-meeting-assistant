@@ -69,7 +69,6 @@ from .parameters import (
 from .presets import (
     InvalidPreset,
     apply_preset,
-    organization_presets,
     preset_by_id,
     preset_offered,
     shipped_presets,
@@ -216,7 +215,6 @@ __all__ = [
     "section_schemas",
     "section_spec",
     "shipped_presets",
-    "organization_presets",
     "apply_preset",
     "preset_by_id",
     "preset_offered",

@@ -330,43 +330,12 @@ export const isPresetOffered = (preset, sections, settings) =>
     return Object.keys(change?.values || {}).every((key) => isAvailable(section.schema?.properties?.[key], settings));
   });
 
-/**
- * The two kinds of preset, in the order the editor lists them. Organization
- * presets each set the same consent, retention and privacy settings, so
- * applying one sets all of them whichever was applied before; an add-on changes
- * one feature over the profile as it stands.
- */
-export const PRESET_GROUPS = [
-  {
-    kind: 'organization',
-    label: 'Organization presets',
-    description: [
-      'Defaults for consent, retention and privacy. Each one sets the same settings,',
-      'so applying one replaces what another set; every other setting stays.',
-    ].join(' '),
-  },
-  {
-    kind: 'add-on',
-    label: 'Add-ons',
-    description: 'A change to one feature, applied over the profile as it stands.',
-  },
-];
-
-/** A preset's kind; one served without a kind is an add-on. */
-export const presetKind = (preset) => (preset?.Kind === 'organization' ? 'organization' : 'add-on');
-
-/**
- * The presets in their groups, as PRESET_GROUPS with each group's `presets`:
- * by their Order, then title. A group with none is left out.
- */
-export const groupPresets = (presets) => {
-  const byOrder = (a, b) =>
-    (Number(a.Order) || 0) - (Number(b.Order) || 0) || String(a.Title || '').localeCompare(String(b.Title || ''));
-  return PRESET_GROUPS.map((group) => ({
-    ...group,
-    presets: (presets || []).filter((preset) => presetKind(preset) === group.kind).sort(byOrder),
-  })).filter((group) => group.presets.length > 0);
-};
+/** The presets in the order the editor lists them: by their Order, then title. */
+export const orderedPresets = (presets) =>
+  [...(presets || [])].sort(
+    (a, b) =>
+      (Number(a.Order) || 0) - (Number(b.Order) || 0) || String(a.Title || '').localeCompare(String(b.Title || '')),
+  );
 
 /** What applying one section of a preset makes of the section as it stands. */
 export const applyPresetSection = (schema, defaults, current, change, settings) => {

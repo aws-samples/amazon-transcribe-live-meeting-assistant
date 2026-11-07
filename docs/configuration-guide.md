@@ -183,12 +183,12 @@ A deployment holds several **profiles**, each a complete configuration, and one
 of them is **active**: the one every meeting uses. They work as IDP's do.
 
 - **default** is the deployment default: the release's shipped settings, the
-  organization preset and file the `ConfigurationPreset` and `CustomConfigPath`
+  preset and file the `ConfigurationPreset` and `CustomConfigPath`
   stack parameters name, and the stack parameters that are defaults of settings.
   Every stack update rewrites it, so it is read-only. A new deployment runs on it.
-- **Managed** profiles are the shipped organization presets (`standard`,
+- **Managed** profiles are the shipped presets (`standard`,
   `internal-meetings-notify` and `regulated-consent-required`; see
-  [Organization presets and add-ons](#organization-presets-and-add-ons)), each
+  [Configuration presets](#configuration-presets)), each
   the default with the preset applied. They are read-only and rewritten by every
   stack update too. Activate one to use it as it is.
 - **Custom** profiles are yours. Choose **Create profile** in the profile list
@@ -355,19 +355,17 @@ select **Save changes**.
   **Import** in the Configuration Profiles list: it reads the file the same way,
   asks for the new profile's name, and creates it with the file's changes over
   the deployment defaults.
-- **Apply a preset…** opens a dialog listing the presets LMA ships in two
-  groups, **Organization presets** and **Add-ons**, each with its description
-  (see [Organization presets and add-ons](#organization-presets-and-add-ons)).
-  A preset is offered only where the deployment has every setting it changes.
-  Once you choose one, the dialog lists the settings it changes in each section,
-  or says that it replaces a section.
+- **Apply a preset…** opens a dialog listing the presets LMA ships, each with
+  its description (see [Configuration presets](#configuration-presets)). A
+  preset is offered only where the deployment has every setting it changes.
+  Once you choose one, the dialog lists the settings it changes in each
+  section.
 
-### Organization presets and add-ons
+### Configuration presets
 
-An **organization preset** is a complete organizational default for consent,
-retention and privacy. All three set the same settings, listed below, and change
-only those, so applying one sets every one of them whichever organization preset
-was applied before, and every other setting stays as it is. They are the choices
+A **preset** is a complete organizational default for consent, retention and
+privacy. All three set the same settings, listed below, and change only those,
+so applying one sets every one of them whichever preset was applied before, and every other setting stays as it is. They are the choices
 of the `ConfigurationPreset` stack parameter, and each is also stored as a
 read-only **Managed** profile of the same name, which the deployment rewrites on
 every stack update; activate it as it is, or copy it to a Custom profile to
@@ -388,7 +386,7 @@ change it.
 | Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment |
 
 Standard holds the shipped defaults, so applying it in the editor puts these
-settings back after another organization preset changed them. The layer's tests
+settings back after another preset changed them. The layer's tests
 hold each preset to exactly the values in this table.
 
 Some controls are stack parameters rather than settings. They are not part of
@@ -410,17 +408,7 @@ Where each service that receives meeting content runs is listed in
 The consent settings are described in [Meeting Consent](meeting-consent.md), and
 the deletion in [Transcript Deletion After the Summary](transcript-deletion.md).
 
-An **add-on** changes one feature and is applied over whatever profile is open.
-Add-ons are offered in the editor only; they are not deploy-time choices and have
-no Managed profile.
-
-| Add-on | What it changes |
-|---|---|
-| Healthcare summary | Replaces the summary sections with the healthcare prompt domain's (summary, details, and SOAP and BIRP notes), turning the other shipped sections off |
-| Translator voice assistant | Sets Nova Sonic's meeting mode to Translator, between English and Spanish, with the shipped trigger phrases |
-| On-demand speech engine with voice separation | Moves streaming meetings and Virtual Participants onto the on-demand speech engine, and turns on Virtual Participant voice separation. Offered only where the engine is deployed |
-
-To start a new deployment from an organization preset, or from a configuration
+To start a new deployment from a preset, or from a configuration
 file of your own, set the `ConfigurationPreset` and `CustomConfigPath` stack
 parameters; see
 [Choosing the default configuration at deploy time](configuration-store.md#choosing-the-default-configuration-at-deploy-time).

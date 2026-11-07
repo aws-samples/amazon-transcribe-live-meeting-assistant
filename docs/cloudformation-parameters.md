@@ -649,10 +649,10 @@ Specify a comma separated list of two letter country codes (uppercase ISO 3166-1
 Console label: *Configuration Preset*
 
 - **Default:** `standard`
-- **Allowed values:** `standard`, `internal-meetings-notify`, `regulated-consent-required`, `none`, `healthcare-summary`, `on-demand-asr-with-voice-separation`, `translator-voice-assistant`
+- **Allowed values:** `standard`, `internal-meetings-notify`, `regulated-consent-required`, `none`
 - **Kind:** Resource. Decides what the configuration seeder writes as the deployment's default configuration, which is re-written when it changes.
 
-The organization preset the deployment's default configuration is built from, which sets consent, retention and privacy together: standard (the shipped defaults), internal-meetings-notify (participants are notified and may object; audio and the meeting chat are captured) or regulated-consent-required (participants must consent first, the transcript is deleted 15 minutes after the summary, no audio is recorded, personal information is redacted, and Amazon Bedrock runs within this Region's geography; LogLevel and the retention-day parameters are set here, not by the preset). Each organization preset is also offered on the Configuration page as a read-only Managed profile, and add-on presets such as the healthcare summary prompts are applied there. none and the add-on ids are accepted for stacks deployed with them: none is standard, and an add-on is applied over the shipped defaults as before. CustomConfigPath is applied over this when provided.
+The configuration preset the deployment's default configuration is built from, which sets consent, retention and privacy together: standard (the shipped defaults), internal-meetings-notify (participants are notified and may object; audio and the meeting chat are captured) or regulated-consent-required (participants must consent first, the transcript is deleted 15 minutes after the summary, no audio is recorded, personal information is redacted, and Amazon Bedrock runs within this Region's geography; LogLevel and the retention-day parameters are set here, not by the preset). Each preset is also offered on the Configuration page as a read-only Managed profile. none is accepted as standard, for stacks deployed with it. CustomConfigPath is applied over this when provided.
 
 ### `CustomConfigPath`
 

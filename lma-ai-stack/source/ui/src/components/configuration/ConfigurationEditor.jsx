@@ -34,10 +34,9 @@ import {
   deepEqual,
   effectiveSection,
   exportDocument,
-  groupPresets,
   isAvailable,
   isPresetOffered,
-  presetKind,
+  orderedPresets,
   readExport,
   rebaseSection,
   storedSection,
@@ -75,6 +74,11 @@ export const effectiveOf = (doc) =>
       effectiveSection(section.schema, doc.defaults[section.name], doc.custom[section.name]),
     ]),
   );
+
+const PRESETS_DESCRIPTION = [
+  'Defaults for consent, retention and privacy. Each one sets the same settings,',
+  'so applying one replaces what another set; every other setting stays.',
+].join(' ');
 
 const COPY_TO_CHANGE = 'This profile is read-only: copy it to a Custom profile to change it.';
 
@@ -838,26 +842,24 @@ const ConfigurationEditor = ({
         }
       >
         <SpaceBetween size="l">
-          {groupPresets(doc?.presets).map((group) => (
-            <FormField key={group.kind} label={group.label} description={group.description}>
-              <RadioGroup
-                ariaLabel={group.label}
-                value={preset && presetKind(preset) === group.kind ? preset.Id : null}
-                onChange={({ detail }) => setPresetChoice(detail.value)}
-                items={group.presets.map((entry) => {
-                  const offeredHere = isPresetOffered(entry, sections, settings);
-                  return {
-                    value: entry.Id,
-                    label: entry.Title,
-                    description: offeredHere
-                      ? entry.Description
-                      : `${entry.Description} Not offered here: it sets something this deployment does not include.`,
-                    disabled: !offeredHere,
-                  };
-                })}
-              />
-            </FormField>
-          ))}
+          <FormField label="Configuration presets" description={PRESETS_DESCRIPTION}>
+            <RadioGroup
+              ariaLabel="Configuration presets"
+              value={preset ? preset.Id : null}
+              onChange={({ detail }) => setPresetChoice(detail.value)}
+              items={orderedPresets(doc?.presets).map((entry) => {
+                const offeredHere = isPresetOffered(entry, sections, settings);
+                return {
+                  value: entry.Id,
+                  label: entry.Title,
+                  description: offeredHere
+                    ? entry.Description
+                    : `${entry.Description} Not offered here: it sets something this deployment does not include.`,
+                  disabled: !offeredHere,
+                };
+              })}
+            />
+          </FormField>
           {preset && (
             <SpaceBetween size="xs">
               <Box variant="h4">{`What "${preset.Title}" changes`}</Box>
@@ -865,13 +867,9 @@ const ConfigurationEditor = ({
                 {presetSections(preset).map(({ name, section }) => (
                   <li key={name}>
                     {section
-                      ? `${sectionLabel(section)}: ${
-                          preset.Sections[name].mode === 'replace'
-                            ? 'replaced by the preset'
-                            : `${Object.keys(preset.Sections[name].values || {})
-                                .map((key) => section.schema?.properties?.[key]?.title || key)
-                                .join(', ')} change, and the others stay`
-                        }`
+                      ? `${sectionLabel(section)}: ${Object.keys(preset.Sections[name].values || {})
+                          .map((key) => section.schema?.properties?.[key]?.title || key)
+                          .join(', ')} change, and the others stay`
                       : `${name}: not in this deployment, so left out`}
                   </li>
                 ))}

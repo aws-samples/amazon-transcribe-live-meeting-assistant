@@ -12,29 +12,16 @@ applies it to the page as unsaved changes, which the administrator reviews and
 saves like any other edit, so it is checked against the schemas and recorded as
 a revision.
 
-A preset is one of two kinds, named by its ``kind``:
+A preset is a complete organizational default for consent, retention and
+privacy. Every preset sets the same settings, which is checked when they are
+loaded, so applying one sets all of them whichever was applied before. They are
+the choices of the ConfigurationPreset stack parameter, and the seeder writes
+each as a Managed profile. An optional integer ``order`` places a preset in the
+list the editor shows.
 
-``organization``
-    A complete organizational default for consent, retention and privacy. Every
-    organization preset sets the same settings, each section by ``merge``, so
-    applying one sets all of them, whichever was applied before, and leaves every
-    other setting as it is. They are the choices of the ConfigurationPreset stack
-    parameter, and the seeder writes each as a Managed profile.
-``add-on``
-    A change to one feature, applied over whatever profile is open. Offered in
-    the editor only.
-
-An optional integer ``order`` places a preset among those of its kind.
-
-A preset names the sections it changes, and for each one how:
-
-``merge``
-    Its values are laid over the section as it stands, key by key: the settings
-    it names change and every other one stays.
-``replace``
-    The section becomes exactly its values. In a section whose entries the
-    profile can turn off (the summary prompts), every shipped entry the preset
-    does not name is turned off.
+A preset names the sections it changes, each with the mode ``merge``: its
+values are laid over the section as it stands, key by key, so the settings it
+names change and every other one stays.
 """
 
 from __future__ import annotations
@@ -54,13 +41,9 @@ PRESET_DIR = Path(__file__).resolve().parent / "presets"
 #: A preset's id is its file name; restricted so it reads safely in a URL or a log.
 PRESET_ID = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
-PRESET_MODES = ("merge", "replace")
+PRESET_MODES = ("merge",)
 
-ORGANIZATION = "organization"
-ADD_ON = "add-on"
-PRESET_KINDS = (ORGANIZATION, ADD_ON)
-
-_REQUIRED_KEYS = {"title", "description", "kind", "sections"}
+_REQUIRED_KEYS = {"title", "description", "sections"}
 _OPTIONAL_KEYS = {"order"}
 
 
@@ -77,11 +60,9 @@ def _checked(preset_id: str, document: Any) -> Dict[str, Any]:
         or set(document) - _REQUIRED_KEYS - _OPTIONAL_KEYS
     ):
         raise InvalidPreset(
-            f"preset {preset_id}: needs exactly title, description, kind and sections, "
+            f"preset {preset_id}: needs exactly title, description and sections, "
             "and may have an order"
         )
-    if document["kind"] not in PRESET_KINDS:
-        raise InvalidPreset(f"preset {preset_id}: kind must be one of {PRESET_KINDS}")
     order = document.get("order", 0)
     if not isinstance(order, int) or isinstance(order, bool):
         raise InvalidPreset(f"preset {preset_id}: order must be an integer")
@@ -99,13 +80,10 @@ def _checked(preset_id: str, document: Any) -> Dict[str, Any]:
         # A preset's values are stored, after the editor applies them, as part
         # of a section's delta, so each must be valid on its own.
         validate_section(name, change["values"])
-        if document["kind"] == ORGANIZATION and change["mode"] != "merge":
-            raise InvalidPreset(f"preset {preset_id}: an organization preset only merges")
     return {
         "Id": preset_id,
         "Title": document["title"],
         "Description": document["description"],
-        "Kind": document["kind"],
         "Order": order,
         "Sections": sections,
     }
@@ -117,31 +95,33 @@ def _settings_named(preset: Dict[str, Any]) -> List[str]:
     )
 
 
-def _check_organization_presets(presets: List[Dict[str, Any]]) -> None:
-    organization = [preset for preset in presets if preset["Kind"] == ORGANIZATION]
-    if not organization:
+def _check_same_settings(presets: List[Dict[str, Any]]) -> None:
+    if not presets:
         return
-    expected = _settings_named(organization[0])
-    for preset in organization[1:]:
+    expected = _settings_named(presets[0])
+    for preset in presets[1:]:
         if _settings_named(preset) != expected:
             raise InvalidPreset(
-                f"preset {preset['Id']}: an organization preset must set the same settings "
-                f"as {organization[0]['Id']}"
+                f"preset {preset['Id']}: every preset must set the same settings "
+                f"as {presets[0]['Id']}"
             )
 
 
 @lru_cache(maxsize=1)
 def _load() -> str:
-    presets = [
-        _checked(path.stem, json.loads(path.read_text(encoding="utf-8")))
-        for path in sorted(PRESET_DIR.glob("*.json"))
-    ]
-    _check_organization_presets(presets)
+    presets = sorted(
+        (
+            _checked(path.stem, json.loads(path.read_text(encoding="utf-8")))
+            for path in PRESET_DIR.glob("*.json")
+        ),
+        key=lambda preset: (preset["Order"], preset["Id"]),
+    )
+    _check_same_settings(presets)
     return json.dumps(presets, sort_keys=True)
 
 
 def shipped_presets() -> List[Dict[str, Any]]:
-    """Every shipped preset, as a fresh copy, sorted by id.
+    """Every shipped preset, as a fresh copy, in their ``order``.
 
     Raises:
         InvalidPreset: a shipped preset is malformed.
@@ -149,20 +129,12 @@ def shipped_presets() -> List[Dict[str, Any]]:
     return json.loads(_load())
 
 
-def organization_presets() -> List[Dict[str, Any]]:
-    """The shipped organization presets, in their ``order``."""
-    return sorted(
-        (preset for preset in shipped_presets() if preset["Kind"] == ORGANIZATION),
-        key=lambda preset: (preset["Order"], preset["Id"]),
-    )
-
-
 # ── applying a preset ──────────────────────────────────────────────────────
 #
 # The same rules the configuration editor applies (config-model.js:
-# isPresetOffered, replacedSection and applyPresetSection), for the deploy-time
-# seeder, which writes each organization preset as a Managed profile and may build the
-# baseline itself from one (the ConfigurationPreset stack parameter).
+# isPresetOffered and applyPresetSection), for the deploy-time seeder, which
+# writes each preset as a Managed profile and builds the baseline from one (the
+# ConfigurationPreset stack parameter).
 
 
 def _available(schema: Any, settings: Dict[str, Any]) -> bool:
@@ -203,31 +175,18 @@ def _deep_merge(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]
 def apply_preset(body: Dict[str, Any], preset: Dict[str, Any]) -> Dict[str, Any]:
     """``body`` with a preset applied to each section it names.
 
-    "merge" lays the preset's values over the section. "replace", or a section
-    whose schema's mergeStrategy is "replace", makes the section exactly the
-    values: for a merge-strategy section, the shipped section with the values
-    over it and every shipped entry they do not name turned off with the
-    schema's ``disabledValue``, where it has one.
+    The preset's values are laid over each section, except a section whose
+    schema's mergeStrategy is "replace", which becomes exactly the values.
     """
     from .schema import section_schema  # pylint: disable=import-outside-toplevel
 
     result = json.loads(json.dumps(body))
     for name, change in preset["Sections"].items():
-        schema = section_schema(name)
-        current = result.get(name) or {}
         values = json.loads(json.dumps(change["values"]))
-        if schema.get("mergeStrategy") == "replace":
+        if section_schema(name).get("mergeStrategy") == "replace":
             result[name] = values
-        elif change["mode"] == "replace":
-            section = _deep_merge(current, values)
-            disabled = schema.get("disabledValue")
-            if disabled is not None:
-                for key in current:
-                    if key not in values:
-                        section[key] = disabled
-            result[name] = section
         else:
-            result[name] = _deep_merge(current, values)
+            result[name] = _deep_merge(result.get(name) or {}, values)
     return result
 
 

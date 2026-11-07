@@ -150,22 +150,21 @@ const DEFAULTS = {
   },
 };
 
+// Served out of order, to show the editor lists them by Order.
 const PRESETS = [
-  {
-    Id: 'translator-voice-assistant',
-    Title: 'Translator voice assistant',
-    Description: 'Translator mode.',
-    Kind: 'add-on',
-    Order: 0,
-    Sections: { nova_sonic_config: { mode: 'merge', values: { meetingMode: 'translator' } } },
-  },
   {
     Id: 'internal-meetings-notify',
     Title: 'Internal meetings – notify participants',
     Description: 'Participants are notified.',
-    Kind: 'organization',
     Order: 1,
     Sections: { meeting_consent: { mode: 'merge', values: { mode: 'notify' } } },
+  },
+  {
+    Id: 'standard',
+    Title: 'Standard',
+    Description: 'The shipped defaults.',
+    Order: 0,
+    Sections: { meeting_consent: { mode: 'merge', values: { mode: 'off' } } },
   },
 ];
 
@@ -710,35 +709,28 @@ describe('import, export and presets', () => {
     await menuItem('Apply a preset…');
     const dialog = await screen.findByRole('dialog', { name: 'Apply a preset' });
     expect(within(dialog).getByRole('button', { name: 'Apply to the page' }).disabled).toBe(true);
-    fireEvent.click(within(dialog).getByRole('radio', { name: /Translator voice assistant/ }));
-    expect(within(dialog).getByText('What "Translator voice assistant" changes')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('radio', { name: /Internal meetings/ }));
+    expect(within(dialog).getByText('Meeting Consent: Consent mode change, and the others stay')).toBeTruthy();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Apply to the page' }));
     expect(await screen.findByText(/Nothing is saved yet/)).toBeTruthy();
     expect(callsOf('UpdateConfiguration')).toHaveLength(0);
 
     const { comment, sections } = await saveAndRead();
-    expect(comment).toBe('Applied the preset "Translator voice assistant"');
-    expect(sections).toEqual({ nova_sonic_config: { meetingMode: 'translator' } });
+    expect(comment).toBe('Applied the preset "Internal meetings – notify participants"');
+    expect(sections).toEqual({ meeting_consent: { mode: 'notify' } });
   });
 
-  it('lists organization presets and add-ons in their own groups, each with its description', async () => {
+  it('lists the presets as one group, in their order, each with its description', async () => {
     graphqlMock.mockResolvedValueOnce(answer());
     renderEditor();
     await screen.findByText('Nova Sonic Voice Assistant');
     await menuItem('Apply a preset…');
     const dialog = await screen.findByRole('dialog', { name: 'Apply a preset' });
-    const organization = within(dialog).getByRole('radiogroup', { name: 'Organization presets' });
-    const addOns = within(dialog).getByRole('radiogroup', { name: 'Add-ons' });
-    expect(within(organization).getAllByRole('radio')).toHaveLength(1);
-    expect(within(organization).getByText('Participants are notified.')).toBeTruthy();
-    expect(within(addOns).getByText('Translator voice assistant')).toBeTruthy();
-    expect(within(addOns).getByText('Translator mode.')).toBeTruthy();
-    // Organization presets come first.
-    const groups = within(dialog).getAllByRole('radiogroup');
-    expect(groups.indexOf(organization)).toBeLessThan(groups.indexOf(addOns));
-
-    fireEvent.click(within(organization).getByRole('radio', { name: /Internal meetings/ }));
-    expect(within(dialog).getByText('Meeting Consent: Consent mode change, and the others stay')).toBeTruthy();
+    expect(within(dialog).getAllByRole('radiogroup')).toHaveLength(1);
+    const radios = within(dialog).getAllByRole('radio');
+    expect(radios.map((radio) => radio.value)).toEqual(['standard', 'internal-meetings-notify']);
+    expect(within(dialog).getByText('The shipped defaults.')).toBeTruthy();
+    expect(within(dialog).getByText('Participants are notified.')).toBeTruthy();
   });
 
   it('imports a file as unsaved changes, and saves exactly what it held', async () => {

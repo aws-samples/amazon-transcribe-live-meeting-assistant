@@ -1,7 +1,6 @@
 {
   "title": "Internal meetings – notify participants",
   "description": "For meetings among colleagues. Participants are told that the meeting is recorded and transcribed, and an objection from any of them stops it: Meeting Consent mode Notify, with evidence screenshots kept, streaming clients without a consent step accepted with a warning, and a different choice allowed per meeting. Meeting audio is recorded and the meeting chat is added to the transcript. The other settings this preset sets keep their shipped defaults: transcripts are kept for the retention period, personal information is not redacted, and Amazon Bedrock models run as chosen (Global inference geography). Every other setting stays as it is.",
-  "kind": "organization",
   "order": 1,
   "sections": {
     "meeting_consent": {

@@ -1648,10 +1648,9 @@ type ConfigurationDocument @aws_cognito_user_pools {
 	# profile's changes over it as stored.
 	Default: String
 	Custom: String
-	# A JSON list of the presets an editor can apply: {"Id", "Title",
-	# "Description", "Kind", "Order", "Sections"}, where Kind is
-	# "organization" or "add-on" and Sections maps a section name to
-	# {"mode": "merge" | "replace", "values"}. Applying one saves nothing.
+	# A JSON list of the presets an editor can apply, in their order: {"Id",
+	# "Title", "Description", "Order", "Sections"}, where Sections maps a
+	# section name to {"mode": "merge", "values"}. Applying one saves nothing.
 	Presets: String
 }
 
@@ -1799,7 +1798,7 @@ type ConfigurationProfileOutput @aws_cognito_user_pools {
 type ConfigurationProfileSummary @aws_cognito_user_pools {
 	Name: String!
 	# The baseline and the profiles the deployment writes from the shipped
-	# organization presets: read-only, rewritten by every stack update.
+	# presets: read-only, rewritten by every stack update.
 	Managed: Boolean
 	Active: Boolean
 	Description: String

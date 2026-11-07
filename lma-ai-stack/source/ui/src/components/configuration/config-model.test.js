@@ -21,16 +21,15 @@ import {
   differsAt,
   effectiveSection,
   getAt,
-  groupPresets,
   hasAt,
   isAvailable,
   isPresetOffered,
-  presetKind,
   isShown,
   memberSchema,
   mergeDelta,
   nextNumber,
   numberedEntries,
+  orderedPresets,
   orderedProperties,
   applyPresetSection,
   exportDocument,
@@ -310,29 +309,16 @@ describe('presets, export and import', () => {
     });
   });
 
-  it('groups presets into organization presets, then add-ons, each in its order', () => {
+  it('lists presets by their order, then title, without sorting in place', () => {
     const presets = [
-      { Id: 'translator', Title: 'Translator', Kind: 'add-on' },
-      { Id: 'regulated', Title: 'Regulated', Kind: 'organization', Order: 2 },
-      { Id: 'healthcare', Title: 'Healthcare', Kind: 'add-on' },
-      { Id: 'standard', Title: 'Standard', Kind: 'organization', Order: 0 },
-      { Id: 'internal', Title: 'Internal', Kind: 'organization', Order: 1 },
+      { Id: 'regulated', Title: 'Regulated', Order: 2 },
+      { Id: 'b', Title: 'B' },
+      { Id: 'standard', Title: 'Standard', Order: 0 },
+      { Id: 'internal', Title: 'Internal', Order: 1 },
     ];
-    const groups = groupPresets(presets);
-    expect(groups.map((group) => [group.label, group.presets.map((preset) => preset.Id)])).toEqual([
-      ['Organization presets', ['standard', 'internal', 'regulated']],
-      ['Add-ons', ['healthcare', 'translator']],
-    ]);
-    expect(groups.every((group) => group.description)).toBe(true);
-    expect(presets[0].Id).toBe('translator'); // not sorted in place
-  });
-
-  it('treats a preset served without a kind as an add-on, and leaves out an empty group', () => {
-    expect(presetKind({ Id: 'old' })).toBe('add-on');
-    expect(presetKind({ Kind: 'organization' })).toBe('organization');
-    expect(groupPresets([{ Id: 'old', Title: 'Old' }]).map((group) => group.kind)).toEqual(['add-on']);
-    expect(groupPresets([])).toEqual([]);
-    expect(groupPresets(undefined)).toEqual([]);
+    expect(orderedPresets(presets).map((preset) => preset.Id)).toEqual(['b', 'standard', 'internal', 'regulated']);
+    expect(presets[0].Id).toBe('regulated');
+    expect(orderedPresets(undefined)).toEqual([]);
   });
 
   it('exports what each section stores, and imports it back to the same values', () => {

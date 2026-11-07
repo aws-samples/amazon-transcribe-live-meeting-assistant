@@ -1,7 +1,6 @@
 {
   "title": "Standard",
-  "description": "LMA's shipped defaults for consent, retention and privacy: no consent notice (Meeting Consent mode Off), meeting audio recorded, the meeting chat added to the transcript, transcripts kept for the retention period rather than deleted after the summary, no redaction of personal information, and Amazon Bedrock models run as chosen (Global inference geography). Applying it puts each of these settings back to that default, whichever organization preset was applied before; every other setting stays as it is.",
-  "kind": "organization",
+  "description": "LMA's shipped defaults for consent, retention and privacy: no consent notice (Meeting Consent mode Off), meeting audio recorded, the meeting chat added to the transcript, transcripts kept for the retention period rather than deleted after the summary, no redaction of personal information, and Amazon Bedrock models run as chosen (Global inference geography). Applying it puts each of these settings back to that default, whichever preset was applied before; every other setting stays as it is.",
   "order": 0,
   "sections": {
     "meeting_consent": {

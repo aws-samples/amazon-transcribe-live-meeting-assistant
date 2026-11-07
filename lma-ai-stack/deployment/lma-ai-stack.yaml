@@ -296,13 +296,9 @@ Parameters:
       - internal-meetings-notify
       - regulated-consent-required
       - none
-      - healthcare-summary
-      - on-demand-asr-with-voice-separation
-      - translator-voice-assistant
     Description: >-
-      The organization preset the deployment's default configuration is built
-      from; none and the add-on ids are accepted for stacks deployed with them.
-      See lma-main.yaml.
+      The configuration preset the deployment's default configuration is built
+      from; none is accepted as standard. See lma-main.yaml.
 
   CustomConfigPath:
     Type: String

@@ -1,12 +1,11 @@
 # Copyright (c) 2025 Amazon.com
 # This file is licensed under the MIT License.
 # See the LICENSE file in the project root for full license information.
-"""The ConfigurationPreset stack parameter offers the shipped organization presets.
+"""The ConfigurationPreset stack parameter offers the shipped presets.
 
-They come first, in their order, with Standard the default. After them come the
-values the parameter offered before the organization presets were added, which a
-stack deployed then keeps as its value: ``none`` and the add-on ids. The seeder
-accepts each of those (see its tests).
+They come in their order, with Standard first and the default, followed by
+``none``, the parameter's value in earlier pre-releases, which a stack deployed
+then keeps and the seeder reads as Standard.
 """
 
 import json
@@ -32,36 +31,20 @@ def _parameter(template: Path) -> dict:
     return document["Parameters"]["ConfigurationPreset"]
 
 
-def _shipped() -> dict:
-    return {path.stem: json.loads(path.read_text()) for path in PRESETS.glob("*.json")}
-
-
-def _of_kind(kind: str) -> list:
-    presets = [
-        (document.get("order", 0), name)
-        for name, document in _shipped().items()
-        if document["kind"] == kind
-    ]
-    return [name for _order, name in sorted(presets)]
+def _shipped_in_order() -> list:
+    documents = {path.stem: json.loads(path.read_text()) for path in PRESETS.glob("*.json")}
+    return [name for _order, name in sorted((d.get("order", 0), n) for n, d in documents.items())]
 
 
 @pytest.mark.parametrize("template", TEMPLATES, ids=lambda path: path.name)
-def test_the_organization_presets_come_first_and_standard_is_the_default(template) -> None:
-    organization = _of_kind("organization")
-    assert organization[0] == "standard"
+def test_the_parameter_offers_the_shipped_presets_then_none(template) -> None:
+    shipped = _shipped_in_order()
+    assert shipped[0] == "standard"
     parameter = _parameter(template)
     assert parameter["Default"] == "standard"
-    assert parameter["AllowedValues"][: len(organization)] == organization
+    assert parameter["AllowedValues"] == [*shipped, "none"]
 
 
-@pytest.mark.parametrize("template", TEMPLATES, ids=lambda path: path.name)
-def test_the_other_allowed_values_are_none_and_the_add_ons(template) -> None:
-    organization = _of_kind("organization")
-    rest = _parameter(template)["AllowedValues"][len(organization) :]
-    assert rest == ["none", *_of_kind("add-on")]
-
-
-def test_every_shipped_preset_is_valid_json_of_a_known_kind() -> None:
-    for name, document in _shipped().items():
-        assert isinstance(document, dict), name
-        assert document["kind"] in ("organization", "add-on"), name
+def test_every_shipped_preset_is_valid_json() -> None:
+    for path in PRESETS.glob("*.json"):
+        assert isinstance(json.loads(path.read_text()), dict), path.name
