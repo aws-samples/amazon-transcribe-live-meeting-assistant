@@ -89,7 +89,9 @@ const CallDetails = () => {
       // An update that carries no status at all ('Unknown') says nothing about it.
       const statusChanged =
         callDetails?.recordingStatusLabel !== 'Unknown' &&
-        call.recordingStatusLabel !== callDetails?.recordingStatusLabel;
+        call.recordingStatusLabel !== callDetails?.recordingStatusLabel &&
+        // ...unless this copy is older than the one on screen.
+        !(callDetails?.updatedAt && call.updatedAt && callDetails.updatedAt < call.updatedAt);
       if (timestampAdvanced || speakerNamesChanged || summaryChanged || statusChanged) {
         logger.debug('Updating call', callDetails);
         setCall(callDetails);

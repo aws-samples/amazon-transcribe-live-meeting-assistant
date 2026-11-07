@@ -301,7 +301,9 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
     // (CallDetails.js); an update carrying no status says nothing about it.
     const statusChanged =
       callDetails?.recordingStatusLabel !== 'Unknown' &&
-      call.recordingStatusLabel !== callDetails?.recordingStatusLabel;
+      call.recordingStatusLabel !== callDetails?.recordingStatusLabel &&
+      // ...unless this copy is older than the one on screen.
+      !(callDetails?.updatedAt && call.updatedAt && callDetails.updatedAt < call.updatedAt);
     if (timestampAdvanced || speakerNamesChanged || summaryChanged || statusChanged) {
       setCall(callDetails);
       if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
