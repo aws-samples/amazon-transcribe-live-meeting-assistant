@@ -8,14 +8,19 @@ Upload Meeting Initiator — AppSync Lambda resolver for the `createUploadMeetin
 When a signed-in user requests to upload a pre-recorded meeting file, this Lambda:
 
 1. Validates the request (content-type, diarization args).
-2. Generates a deterministic ``callId`` from the supplied meeting topic + timestamp.
-3. Generates a presigned S3 ``PutObject`` URL scoped to the pending-uploads prefix
+2. Decides the transcription language: the request's ``languageCode`` when set,
+   else the Configuration page's Amazon Transcribe settings, refused here when an
+   upload cannot use them.
+3. Generates a deterministic ``callId`` from the supplied meeting topic + timestamp.
+4. Generates a presigned S3 ``PutObject`` URL scoped to the pending-uploads prefix
    (``lma-uploads-pending/<callId>/<filename>``) on the existing recordings bucket.
-4. Persists an ``UploadJob`` row in the EventSourcing DynamoDB table so downstream
+5. Persists an ``UploadJob`` row in the EventSourcing DynamoDB table so downstream
    Lambdas (upload_meeting_processor / upload_meeting_finalizer, Stage 2 & 3) can
-   look up the caller-supplied metadata when the S3 object notification fires.
-5. Returns the ``callId``, presigned URL, bucket, and key to the UI so the browser
-   can PUT the file directly to S3 (bypassing API Gateway / Lambda payload limits).
+   look up the caller-supplied metadata and the language when the S3 object
+   notification fires.
+6. Returns the ``callId``, presigned URL, bucket, key and language to the UI so the
+   browser can PUT the file directly to S3 (bypassing API Gateway / Lambda payload
+   limits).
 
 The actual transcription / event emission happens in later stages of the pipeline;
 this Lambda only sets up the upload handoff.
@@ -30,7 +35,18 @@ from datetime import datetime, timedelta, timezone
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
+from lma_config import (  # configuration layer
+    IDENTIFY_MODES,
+    TRANSCRIPTION,
+    ConfigurationError,
+    ConfigurationStore,
+    ConfigurationTableNotConfigured,
+    offered_settings,
+    shipped_setting_defaults,
+    upload_options_problem,
+)
+from lma_config.transcribe_options import language_options
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -113,6 +129,92 @@ job_table = ddb.Table(EVENT_SOURCING_TABLE)
 # ---------------------------------------------------------------------------
 class ValidationError(Exception):
     """Raised when the mutation input is malformed or fails authorization."""
+
+
+class ConfigurationUnavailableError(Exception):
+    """Raised when the Amazon Transcribe settings cannot be read.
+
+    The upload is refused rather than transcribed in a language the deployment
+    may not have chosen; the caller can try again.
+    """
+
+
+# The setting names an upload reads from the Transcription section.
+_TRANSCRIPTION_SETTINGS = (
+    "languageCode",
+    "languageOptions",
+    "preferredLanguage",
+    "customVocabularyName",
+    "customLanguageModelName",
+)
+_STORE: ConfigurationStore | None = None
+
+
+def _transcription_settings() -> dict:
+    """The active profile's Transcription settings, read now.
+
+    The section's cache tier is immediate, so a change saved on the
+    Configuration page applies to the next upload. A setting the section does
+    not hold, or holds a value no longer offered, is the shipped default.
+    """
+    global _STORE  # noqa: PLW0603 -- one store per process
+    shipped = shipped_setting_defaults()[TRANSCRIPTION.name]
+    try:
+        if _STORE is None:
+            _STORE = ConfigurationStore()
+        values = _STORE.get_section(TRANSCRIPTION.name).values
+    except ConfigurationTableNotConfigured:
+        # A function deployed without the table name; every deployed copy has it.
+        logger.warning(
+            "CONFIGURATION_TABLE_NAME is unset; using the shipped Transcription defaults"
+        )
+        values = {}
+    except (ClientError, BotoCoreError, ConfigurationError) as error:
+        logger.exception("could not read the Transcription settings")
+        raise ConfigurationUnavailableError(
+            "The Amazon Transcribe settings could not be read; try the upload again."
+        ) from error
+    offered = offered_settings(TRANSCRIPTION.name, values)
+    return {
+        setting: offered[setting] if offered.get(setting) is not None else shipped.get(setting)
+        for setting in _TRANSCRIPTION_SETTINGS
+    }
+
+
+def _transcription_language(requested_language_code: str | None) -> dict:
+    """How the upload's language is decided, as the UploadJob row records it.
+
+    - ``LanguageCode``: the language the job runs in, when one is set.
+    - ``LanguageIdentification``: identify-language or identify-multiple-languages,
+      with ``LanguageOptions`` the candidate languages, when it is identified.
+    - ``LanguageSource``: REQUEST when the caller set ``languageCode``, which wins
+      and is not checked against the settings; else CONFIGURATION.
+
+    Raises:
+        ValidationError: the settings combine options an upload cannot use.
+    """
+    if requested_language_code:
+        return {"LanguageCode": requested_language_code, "LanguageSource": "REQUEST"}
+    settings = _transcription_settings()
+    problem = upload_options_problem(settings)
+    if problem:
+        raise ValidationError(
+            "The Amazon Transcribe settings on the Configuration page cannot be used "
+            f"for an upload: {problem}"
+        )
+    language_code = str(settings["languageCode"]).strip()
+    if language_code in IDENTIFY_MODES:
+        return {
+            "LanguageIdentification": language_code,
+            "LanguageOptions": language_options(settings["languageOptions"]),
+            "LanguageSource": "CONFIGURATION",
+        }
+    return {"LanguageCode": language_code, "LanguageSource": "CONFIGURATION"}
+
+
+def _applied_language(language: dict) -> str:
+    """The language the response announces: a language code or an identify mode."""
+    return language.get("LanguageCode") or language["LanguageIdentification"]
 
 
 def _slugify(value: str, fallback: str = "meeting") -> str:
@@ -304,6 +406,7 @@ def _write_upload_job(
     groups: list,
     normalized: dict,
     object_key: str,
+    language: dict,
 ) -> None:
     """Persist the upload-job metadata so downstream Lambdas can look it up.
 
@@ -335,7 +438,12 @@ def _write_upload_job(
         "FileSize": normalized.get("fileSize"),
         "EnableDiarization": normalized["enableDiarization"],
         "MaxSpeakers": normalized["maxSpeakers"],
-        "LanguageCode": normalized.get("languageCode"),
+        # The language as decided when the upload started, so a settings change
+        # saved during the upload does not change it.
+        "LanguageCode": language.get("LanguageCode"),
+        "LanguageIdentification": language.get("LanguageIdentification"),
+        "LanguageOptions": language.get("LanguageOptions"),
+        "LanguageSource": language.get("LanguageSource"),
         "MeetingDateTime": normalized.get("meetingDateTime"),
         "PendingObjectBucket": S3_BUCKET_NAME,
         "PendingObjectKey": object_key,
@@ -385,6 +493,7 @@ def lambda_handler(event, context):  # noqa: ARG001
         owner = _get_username(event)
         groups = _get_user_groups(event)
         normalized = _parse_and_validate_input(event.get("arguments") or {})
+        language = _transcription_language(normalized["languageCode"])
     except ValidationError as err:
         logger.warning("Validation error: %s", err)
         raise
@@ -392,7 +501,7 @@ def lambda_handler(event, context):  # noqa: ARG001
     call_id = _build_call_id(normalized["meetingTopic"], normalized["callerSuppliedCallId"])
     object_key = _build_object_key(call_id, normalized["filename"])
 
-    _write_upload_job(call_id, owner, groups, normalized, object_key)
+    _write_upload_job(call_id, owner, groups, normalized, object_key, language)
     upload_url = _generate_presigned_put_url(object_key, normalized["contentType"])
 
     result = {
@@ -402,13 +511,16 @@ def lambda_handler(event, context):  # noqa: ARG001
         "uploadKey": object_key,
         "contentType": normalized["contentType"],
         "expiresInSeconds": UPLOAD_URL_TTL_SECONDS,
+        "transcriptionLanguage": _applied_language(language),
     }
     logger.info(
-        "Created upload job callId=%s owner=%s key=%s diarize=%s maxSpeakers=%s",
+        "Created upload job callId=%s owner=%s key=%s diarize=%s maxSpeakers=%s language=%s (%s)",
         call_id,
         owner,
         object_key,
         normalized["enableDiarization"],
         normalized["maxSpeakers"],
+        result["transcriptionLanguage"],
+        language["LanguageSource"],
     )
     return result

@@ -3982,6 +3982,11 @@ Resources:
           UPLOAD_URL_TTL_SECONDS: "900"
           UPLOAD_JOB_TTL_DAYS: "14"
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          # The Transcription section, whose language an upload follows.
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+      # lma_config; pure Python, so compatible with this function's arm64.
+      Layers:
+        - !Ref ConfigurationPythonLayer
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingInitiatorFunction
@@ -3998,6 +4003,8 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     DependsOn:
       - UploadMeetingInitiatorFunctionLogGroup
+      # Ordered behind the seeder, like every configuration reader.
+      - SeedConfiguration
 
   UploadMeetingInitiatorFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -4040,6 +4047,13 @@ Resources:
                 Action:
                   - dynamodb:PutItem
                 Resource: !GetAtt EventSourcingTable.Arn
+              # Read-only, on the shared configuration table: the Transcription
+              # section, whose language an upload follows. The KMS grant below
+              # covers decrypting it.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !GetAtt ConfigurationTable.Arn
               # The EventSourcing table is encrypted with a customer-managed KMS key.
               - Effect: Allow
                 Action:
