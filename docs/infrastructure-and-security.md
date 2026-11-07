@@ -486,7 +486,15 @@ of calling Amazon Bedrock outside it.** Which profiles exist depends on the mode
 and on the Region. For example, at the time of writing there is no Japan or APAC
 profile for Claude Sonnet 5.5, so a Tokyo deployment under **Same geography** needs
 another summary model. The section shows, before a change is saved, the id each
-feature will run as and which features have no id in the selected geography.
+feature will run as and which features have no id in the selected geography. It
+also marks an id that the shipped catalogue does not list for the Region, such as
+a plain model id the Region does not offer on demand, because a call with that id
+may fail.
+
+A feature that cannot read the setting from the configuration table (for example
+because the table read is throttled or denied) also reports an error rather than
+running as **Global**. Only a deployment with no configuration table, or one where
+the setting has never been saved, runs as **Global**.
 
 Which ids exist is read from a catalogue shipped with LMA
 (`lma_config/bedrock_inference_catalog.json`), built from the Amazon Bedrock

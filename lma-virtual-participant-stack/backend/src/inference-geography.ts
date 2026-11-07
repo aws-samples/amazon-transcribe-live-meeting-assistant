@@ -104,25 +104,56 @@ export function resolveForGeography(
     return found ? keepAs(found, true) : { modelId: null, verified: true, unavailable: true };
 }
 
-/** The saved geography; Global when unset or unreadable, as in the Python half. */
-export async function configuredGeography(region: string): Promise<string> {
+/**
+ * The configuration table is configured, and reading the setting from it
+ * failed. Thrown instead of reading the setting as Global, which would run the
+ * call outside a geography an administrator may have chosen; as in the Python
+ * half (InferenceGeographyUnreadable).
+ */
+export class InferenceGeographyUnreadable extends Error {
+    constructor(cause: unknown) {
+        super(
+            'could not read the Model inference geography (the Amazon Bedrock Models section): ' +
+                `${cause instanceof Error ? cause.message : String(cause)}. The Amazon Bedrock call is not made, ` +
+                'so that it cannot run outside the geography the setting may hold.',
+            { cause },
+        );
+        this.name = 'InferenceGeographyUnreadable';
+    }
+}
+
+/** What configuredGeography reads the section through; injectable for tests. */
+export type SectionReader = Pick<ConfigurationStore, 'getSection'>;
+
+/**
+ * The saved geography, as in the Python half: Global when there is no
+ * configuration table or the setting is unset (or not a geography).
+ *
+ * @throws InferenceGeographyUnreadable the table is configured and reading the
+ *     section from it failed.
+ */
+export async function configuredGeography(
+    region: string,
+    makeReader: (tableName: string) => SectionReader = (tableName) =>
+        new ConfigurationStore({ tableName, client: new DynamoDBClient({ region }) }),
+): Promise<string> {
     const tableName = process.env.CONFIGURATION_TABLE_NAME || '';
     if (!tableName) return GLOBAL;
+    let value: unknown;
     try {
-        const store = new ConfigurationStore({ tableName, client: new DynamoDBClient({ region }) });
-        const section = await store.getSection<Record<string, unknown>>(LANGUAGE_MODELS);
-        const value = section.values.inferenceGeography;
-        return value === GEOGRAPHY || value === IN_REGION ? value : GLOBAL;
+        const section = await makeReader(tableName).getSection<Record<string, unknown>>(LANGUAGE_MODELS);
+        value = section.values.inferenceGeography;
     } catch (err) {
-        log.warn('[inference-geography] could not read the Amazon Bedrock Models section; using Global', err);
-        return GLOBAL;
+        log.warn('[inference-geography] could not read the Amazon Bedrock Models section', err);
+        throw new InferenceGeographyUnreadable(err);
     }
+    return value === GEOGRAPHY || value === IN_REGION ? value : GLOBAL;
 }
 
 /**
  * The id to call Amazon Bedrock with for modelId under the saved geography.
  * Throws when the geography has no id for the model, rather than calling
- * outside it.
+ * outside it, and InferenceGeographyUnreadable when the setting cannot be read.
  */
 export async function resolveModelId(
     modelId: string,

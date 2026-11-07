@@ -39,6 +39,7 @@ from .errors import (
     UnknownConfigurationSection,
 )
 from .inference_geography import (
+    InferenceGeographyUnreadable,
     ModelResolution,
     ModelUnavailableInGeography,
     base_model_id,
@@ -171,6 +172,7 @@ __all__ = [
     "ConfigurationStore",
     "ConfigurationTableNotConfigured",
     "ConfigurationTooLarge",
+    "InferenceGeographyUnreadable",
     "InvalidConfiguration",
     "InvalidPreset",
     "InvalidProfileName",

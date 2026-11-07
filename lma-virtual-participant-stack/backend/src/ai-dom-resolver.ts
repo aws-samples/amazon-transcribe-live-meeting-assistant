@@ -15,7 +15,7 @@ import { buildClaudeInvokeParams } from './bedrock-model-compat.js';
 import { CONTEXT_PAGE_AUTOMATION, anthropicUsage, currentCallId, recordMetering } from './metering.js';
 import { POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
 import { createLogger } from './logger.js';
-import { resolveModelId } from './inference-geography.js';
+import { InferenceGeographyUnreadable, resolveModelId } from './inference-geography.js';
 
 const log = createLogger('ai-dom-resolver');
 
@@ -133,9 +133,13 @@ const memoryCache = new Map<string, CacheEntry>();
 let resolvedModelId: Promise<string> | null = null;
 function domResolverModelId(): Promise<string> {
   if (!resolvedModelId) {
-    resolvedModelId = resolveModelId(DEFAULT_MODEL_ID, AWS_REGION);
     // A refusal is not retried for the rest of the meeting, and is reported by
-    // each call the same way a failed Bedrock call is.
+    // each call the same way a failed Bedrock call is. A setting that could not
+    // be read is read again at the next call.
+    resolvedModelId = resolveModelId(DEFAULT_MODEL_ID, AWS_REGION).catch((err: unknown) => {
+      if (err instanceof InferenceGeographyUnreadable) resolvedModelId = null;
+      throw err;
+    });
   }
   return resolvedModelId;
 }

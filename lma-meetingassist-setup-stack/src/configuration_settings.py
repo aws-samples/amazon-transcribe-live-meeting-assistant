@@ -58,9 +58,13 @@ except ImportError:  # deployed on its own, without the AI stack's configuration
         return rest if rest and head in _PROFILE_PREFIXES else model_id
 
     def model_arn(  # type: ignore[misc]
-        model_id: str, region: str, account_id: str, partition: str = "aws"
+        model_id: str, region: str, account_id: str, partition: Any = None
     ) -> str:
         """The inference-profile or foundation-model ARN of ``model_id``."""
+        if not partition:
+            partition = (
+                "aws-us-gov" if region.startswith("us-gov-") else "aws-cn" if region.startswith("cn-") else "aws"
+            )
         if base_model_id(model_id) != model_id:
             return f"arn:{partition}:bedrock:{region}:{account_id}:inference-profile/{model_id}"
         return f"arn:{partition}:bedrock:{region}::foundation-model/{model_id}"
