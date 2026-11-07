@@ -1655,7 +1655,12 @@ def _managed(dynamo: FakeDynamo) -> Dict[str, Dict[str, Any]]:
     }
 
 
-PRESETS = ("standard", "internal-meetings-notify", "regulated-consent-required")
+PRESETS = (
+    "standard",
+    "internal-meetings-notify",
+    "regulated-consent-required",
+    "regulated-notify",
+)
 
 #: A preset needing the on-demand ASR engine, for the paths no shipped preset takes.
 NEEDS_ASR = {
@@ -1680,6 +1685,13 @@ def test_each_preset_is_written_as_a_managed_profile(seeder) -> None:
     assert set(dynamo.body("Config#default")) <= set(regulated)
     assert _managed(dynamo)["regulated-consent-required"]["Description"] == (
         "Regulated – consent required, transcript not retained"
+    )
+    assert "regulated-notify=created" in outcome
+    regulated_notify = dynamo.body("Config#regulated-notify")
+    assert regulated_notify["meeting_consent"]["mode"] == "notify"
+    assert regulated_notify["retention"]["transcriptDeletionAfterSummary"] == "after_15_minutes"
+    assert _managed(dynamo)["regulated-notify"]["Description"] == (
+        "Regulated – notify with opt-out, transcript not retained"
     )
 
 
@@ -1735,6 +1747,16 @@ def test_the_configuration_preset_builds_the_baseline(seeder) -> None:
     assert baseline["meeting_consent"]["mode"] == "opt_in"
     assert baseline["recording"]["recordAudio"] is False
     assert outcome["ConfigurationPreset"] == "regulated-consent-required"
+
+
+def test_the_regulated_notify_preset_builds_the_baseline(seeder) -> None:
+    store, dynamo = build_store()
+    outcome = seeder.seed(store, domain="default", configuration_preset="regulated-notify")
+    baseline = dynamo.body("Config#default")
+    assert baseline["meeting_consent"]["mode"] == "notify"
+    assert baseline["meeting_consent"]["clientsWithoutConsent"] == "reject"
+    assert baseline["recording"]["recordAudio"] is False
+    assert outcome["ConfigurationPreset"] == "regulated-notify"
 
 
 @pytest.mark.parametrize("choice", ["", "none", "standard"])

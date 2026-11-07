@@ -607,6 +607,7 @@ revision that can be compared and restored like any other.
 | Standard | The consent, retention and privacy settings the presets set, at their shipped defaults |
 | Internal meetings – notify participants | Meeting Consent mode Notify; audio recorded and the meeting chat captured; the rest at their defaults |
 | Regulated – consent required, transcript not retained | Meeting Consent mode Opt-in, stricter-only per meeting, clients without a consent step refused, the Virtual Participant leaving after an objection; the transcript deleted 15 minutes after the summary; no audio recording or chat capture; redaction on; Amazon Bedrock within the deployment's geography |
+| Regulated – notify with opt-out, transcript not retained | As Regulated, except Meeting Consent mode Notify: capture from the start, stopped by an objection |
 
 **Why import does not create a profile.** The plan for this store has an import
 route into a *new* profile rather than apply in place, so that importing cannot
@@ -855,7 +856,8 @@ Two stack parameters decide what `Config#default` holds, as IDP's
 
 - **`ConfigurationPreset`** — the id of a preset, applied over the shipped
   defaults: `standard` (the default, which is the shipped defaults),
-  `internal-meetings-notify` or `regulated-consent-required`; see
+  `internal-meetings-notify`, `regulated-consent-required` or
+  `regulated-notify`; see
   [Configuration presets](configuration-guide.md#configuration-presets). `none`,
   the parameter's value in earlier 0.4.0 pre-releases, is also accepted and read
   as `standard`, so a stack deployed with it can be updated without choosing

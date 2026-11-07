@@ -187,7 +187,8 @@ of them is **active**: the one every meeting uses. They work as IDP's do.
   stack parameters name, and the stack parameters that are defaults of settings.
   Every stack update rewrites it, so it is read-only. A new deployment runs on it.
 - **Managed** profiles are the shipped presets (`standard`,
-  `internal-meetings-notify` and `regulated-consent-required`; see
+  `internal-meetings-notify`, `regulated-consent-required` and
+  `regulated-notify`; see
   [Configuration presets](#configuration-presets)), each
   the default with the preset applied. They are read-only and rewritten by every
   stack update too. Activate one to use it as it is.
@@ -364,26 +365,26 @@ select **Save changes**.
 ### Configuration presets
 
 A **preset** is a complete organizational default for consent, retention and
-privacy. All three set the same settings, listed below, and change only those,
+privacy. All four set the same settings, listed below, and change only those,
 so applying one sets every one of them whichever preset was applied before, and every other setting stays as it is. They are the choices
 of the `ConfigurationPreset` stack parameter, and each is also stored as a
 read-only **Managed** profile of the same name, which the deployment rewrites on
 every stack update; activate it as it is, or copy it to a Custom profile to
 change it.
 
-| Setting | Standard (`standard`, the default) | Internal meetings – notify participants (`internal-meetings-notify`) | Regulated – consent required, transcript not retained (`regulated-consent-required`) |
-|---|---|---|---|
-| Meeting Consent › Consent mode | Off | Notify | Opt-in |
-| Meeting Consent › Consent rule (opt-in) | Each participant consents | Each participant consents | Each participant consents |
-| Meeting Consent › Allow a different choice per meeting | On | On | Off (a meeting may only use this mode or a stricter one) |
-| Meeting Consent › Keep evidence screenshots | On | On | On |
-| Meeting Consent › Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse the meeting |
-| Meeting Consent › Virtual Participant leaves after an objection | Off | Off | On |
-| Retention › Delete the transcript after the summary | Off | Off | 15 minutes after the summary |
-| Meeting Recording › Record meeting audio | On | On | Off |
-| Virtual Participant › Add the meeting chat to the transcript | On | On | Off |
-| Amazon Transcribe › Redact personal information | Off | Off | On |
-| Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment |
+| Setting | Standard (`standard`, the default) | Internal meetings – notify participants (`internal-meetings-notify`) | Regulated – consent required, transcript not retained (`regulated-consent-required`) | Regulated – notify with opt-out, transcript not retained (`regulated-notify`) |
+|---|---|---|---|---|
+| Meeting Consent › Consent mode | Off | Notify | Opt-in | Notify |
+| Meeting Consent › Consent rule (opt-in) | Each participant consents | Each participant consents | Each participant consents | Each participant consents |
+| Meeting Consent › Allow a different choice per meeting | On | On | Off (a meeting may only use this mode or a stricter one) | Off (a meeting may only use this mode or a stricter one) |
+| Meeting Consent › Keep evidence screenshots | On | On | On | On |
+| Meeting Consent › Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse the meeting | Refuse the meeting |
+| Meeting Consent › Virtual Participant leaves after an objection | Off | Off | On | On |
+| Retention › Delete the transcript after the summary | Off | Off | 15 minutes after the summary | 15 minutes after the summary |
+| Meeting Recording › Record meeting audio | On | On | Off | Off |
+| Virtual Participant › Add the meeting chat to the transcript | On | On | Off | Off |
+| Amazon Transcribe › Redact personal information | Off | Off | On | On |
+| Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment | Same geography as this deployment |
 
 Under the Regulated preset nothing is recorded or transcribed until each
 participant consents. Stream Audio and the Desktop Capture App cannot collect
@@ -395,13 +396,26 @@ meeting turned off the meeting cannot move to the less strict owner-attests
 rule, so such a meeting is not transcribed. See
 [What each platform supports](meeting-consent.md#what-each-platform-supports).
 
+The Regulated notify preset keeps the Regulated preset's retention and privacy
+settings but uses Notify: recording and transcription run from the start, the
+participants are told with the notice, and an objection stops them. A meeting
+may use Notify or the stricter Opt-in, not Off. A Virtual Participant posts the
+notice in the meeting chat and reads objections there on every join, and it
+leaves the meeting after an objection. Stream Audio and the Desktop Capture App
+show the notice for the LMA user to share in the meeting and capture from
+Start; an objection takes effect when the user records it with **Participant
+objected**. Clients that show no consent step (the browser extension, the
+Stream Audio embed and Desktop Capture App builds from before the consent step)
+are refused, as under Regulated. See
+[Stream Audio and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
+
 Standard holds the shipped defaults, so applying it in the editor puts these
 settings back after another preset changed them. The layer's tests
 hold each preset to exactly the values in this table.
 
 Some controls are stack parameters rather than settings. They are not part of
 any profile, so no preset can set them, and a deployment that needs the
-Regulated preset's posture also sets them when the stack is deployed or updated:
+posture of either Regulated preset also sets them when the stack is deployed or updated:
 
 - `LogLevel` — `INFO` (the default) or `WARN`. `DEBUG` logs meeting content.
 - `MeetingRecordExpirationInDays` and `TranscriptionExpirationInDays` — the
