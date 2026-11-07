@@ -2301,19 +2301,6 @@ Resources:
             Condition:
               StringEquals:
                 "kms:ViaService": !Sub "s3.${AWS::Region}.${AWS::URLSuffix}"
-          # Amazon Transcribe uses the key named as a batch job's
-          # OutputEncryptionKMSKeyId with the permissions of the role that
-          # started the job (the upload processor).
-          - Effect: Allow
-            Action:
-              - kms:Decrypt
-              - kms:Encrypt
-              - kms:GenerateDataKey
-              - kms:DescribeKey
-            Resource: !Ref CustomerManagedEncryptionKeyArn
-            Condition:
-              StringEquals:
-                "kms:ViaService": !Sub "transcribe.${AWS::Region}.${AWS::URLSuffix}"
       Roles:
         - !If
           - ShouldEnableBedrockSummarizer
@@ -2329,6 +2316,29 @@ Resources:
         - !Ref MeetingConsentResolverFunctionExecutionRole
         - !Ref ConsentEvidenceVerifierFunctionExecutionRole
         - !Ref UploadManifestLambdaRole
+
+  # Amazon Transcribe uses the key named as a batch job's
+  # OutputEncryptionKMSKeyId with the permissions of the role that started the
+  # job, which is the upload processor alone.
+  TranscribeOutputEncryptionKeyPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: TranscribeOutputEncryptionKey
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:DescribeKey
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+            Condition:
+              StringEquals:
+                "kms:ViaService": !Sub "transcribe.${AWS::Region}.${AWS::URLSuffix}"
+      Roles:
+        - !Ref UploadMeetingProcessorFunctionExecutionRole
 
   CallDataStreamEncryptionKeyPolicy:
     Type: AWS::IAM::Policy
