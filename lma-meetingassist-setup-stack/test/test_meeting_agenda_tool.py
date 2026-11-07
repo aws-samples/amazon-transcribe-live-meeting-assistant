@@ -21,6 +21,7 @@ from typing import Any, Dict, List
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 import meeting_agenda  # noqa: E402
+import strands_stand_in  # noqa: E402 -- scripts/testing, on the path via conftest.py
 import strands_meeting_assist_function as handler_module  # noqa: E402
 
 # ── reading the agenda ──────────────────────────────────────────────────────
@@ -143,12 +144,7 @@ def test_items_split_on_line_breaks_only_as_the_page_does():
 
 
 def _agenda_tool(monkeypatch, table):
-    import sys  # noqa: PLC0415
-    import types  # noqa: PLC0415
-
-    strands = types.ModuleType("strands")
-    strands.tool = lambda fn: fn
-    monkeypatch.setitem(sys.modules, "strands", strands)
+    strands_stand_in.install(monkeypatch)
 
     class FakeResource:
         @staticmethod

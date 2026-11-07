@@ -16,8 +16,6 @@ counted for the cost estimate.
 from __future__ import annotations
 
 import os
-import sys
-import types
 from typing import Any, Dict, List
 
 import pytest
@@ -25,6 +23,7 @@ import pytest
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 import meeting_frames  # noqa: E402
+import strands_stand_in  # noqa: E402 -- scripts/testing, on the path via conftest.py
 import strands_meeting_assist_function as handler_module  # noqa: E402
 
 
@@ -218,9 +217,7 @@ def test_only_https_links_are_downloaded():
 
 @pytest.fixture
 def tool(monkeypatch):
-    strands = types.ModuleType("strands")
-    strands.tool = lambda fn: fn
-    monkeypatch.setitem(sys.modules, "strands", strands)
+    strands_stand_in.install(monkeypatch)
     monkeypatch.setattr(handler_module, "APPSYNC_GRAPHQL_URL", "")  # no thinking steps
     monkeypatch.setattr(handler_module.meeting_frames, "load_keyframes", lambda _run, _cid: list(FRAMES))
     monkeypatch.setattr(handler_module.meeting_frames, "download_image", lambda url: b"jpeg-bytes")

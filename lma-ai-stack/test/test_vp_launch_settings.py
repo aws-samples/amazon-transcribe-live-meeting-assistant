@@ -153,10 +153,16 @@ def test_the_form_sends_the_new_fields() -> None:
 
 # ── evaluated by AppSync ────────────────────────────────────────────────────
 
-evaluated = pytest.mark.skipif(
+_when_asked = pytest.mark.skipif(
     os.environ.get("LMA_EVALUATE_APPSYNC") != "1",
     reason="evaluates templates with the AppSync API; set LMA_EVALUATE_APPSYNC=1 to run",
 )
+
+
+def evaluated(test):
+    """Run only when asked, and allowed to call AWS (see scripts/testing/no_real_aws.py)."""
+    return pytest.mark.real_aws(_when_asked(test))
+
 
 SIGNED_IN = {"username": "owner@example.com", "groups": [], "sub": "sub-1"}
 

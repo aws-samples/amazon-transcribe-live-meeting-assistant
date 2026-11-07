@@ -39,6 +39,7 @@ from .errors import (
     UnknownConfigurationSection,
 )
 from .inference_geography import (
+    InferenceGeographyUnreadable,
     ModelResolution,
     ModelUnavailableInGeography,
     base_model_id,
@@ -76,7 +77,7 @@ from .revisions import (
     RevisionEntry,
     diff_bodies,
 )
-from .schema import section_schema, section_schemas, validate_section
+from .schema import offered_settings, section_schema, section_schemas, validate_section
 from .sections import (
     ASR_ENGINE,
     CALL_PRICING,
@@ -171,6 +172,7 @@ __all__ = [
     "ConfigurationStore",
     "ConfigurationTableNotConfigured",
     "ConfigurationTooLarge",
+    "InferenceGeographyUnreadable",
     "InvalidConfiguration",
     "InvalidPreset",
     "InvalidProfileName",
@@ -204,6 +206,7 @@ __all__ = [
     "shipped_setting_defaults",
     "register",
     "registered_sections",
+    "offered_settings",
     "section_schema",
     "section_schemas",
     "section_spec",

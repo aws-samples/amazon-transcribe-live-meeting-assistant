@@ -96,11 +96,13 @@ Provide one or more seed URLs for the web crawler to index. Configure the crawl 
 
 Choose the Bedrock foundation model that powers the Meeting Assistant. An Admin sets it as **Meeting assistant** in the Amazon Bedrock Models section of the [Configuration page](configuration-guide.md), and a change applies within about five minutes, with no stack update. A new deployment uses Claude Haiku 5.5 (`global.anthropic.claude-haiku-5-5`) at a low reasoning effort until the setting is changed; see [Choosing Amazon Bedrock models](configuration-guide.md#choosing-amazon-bedrock-models) for the measurements behind that default. Supported models include:
 
-- Amazon Nova Micro, Nova Lite, Nova Pro, Nova Premier and Nova 2 Lite
-- Anthropic Claude Haiku 4.5, Sonnet 4.5, Sonnet 4.6, Opus 4, Opus 4.1 and Opus 4.6
+- Amazon Nova Micro, Nova Lite, Nova Pro and Nova 2 Lite
+- Anthropic Claude Haiku 4.5, Sonnet 4.5, Sonnet 4.6, Opus 4.1 and Opus 4.6
 - Anthropic Claude Haiku 5.5, Sonnet 5.5 and Opus 5.5
 
 Each Claude and Nova entry is offered in both its `global.` and its `us.` inference-profile form; pick the one that suits where your deployment runs.
+
+A model that reaches the end of its life on Amazon Bedrock is taken off these lists in the next release. A profile saved with such a model keeps the stored value, and the Configuration page shows it as not one of the choices, but every feature reading the setting uses its default model instead and logs a warning naming the setting, until an Admin picks another model. Claude Opus 4 (`us.anthropic.claude-opus-4-20250514-v1:0`) and Nova Premier (`us.amazon.nova-premier-v1:0`) were removed this way in v0.4.0.
 
 The model selection affects response quality, latency, and cost. Lighter models (Nova Micro, Claude Haiku) are faster and less expensive, while more capable models (Claude Opus, Claude Sonnet) provide higher-quality responses for complex queries.
 
@@ -143,7 +145,7 @@ What is cached depends on the model, because a request carrying a cache point th
 |---|---|
 | Claude 4 and later (Haiku 4.5, Sonnet 4.5, Sonnet 4.6, Opus 4.1, Opus 4.6, and the 5.5 models) | After the tool definitions, after the system prompt, and at the end of the latest user message, moved forward on each model call |
 | Nova Micro, Nova Lite, Nova Pro and Nova 2 Lite | After the system prompt only, which also covers the tool definitions ahead of it. Nova rejects a cache point among the tool definitions or beside a tool result |
-| Any other model, including Nova Premier | None; the request is sent as before |
+| Any other model | None; the request is sent as before |
 
 The decision is made in `bedrock_compat.prompt_cache_sections`, so a model added to the selectable list later gets no cache points until it is known to accept them.
 

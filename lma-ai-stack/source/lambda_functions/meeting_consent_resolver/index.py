@@ -60,6 +60,7 @@ from lma_config import (  # configuration layer
     ConfigurationError,
     ConfigurationStore,
     ConfigurationTableNotConfigured,
+    offered_settings,
 )
 from lma_consent import rules as consent  # configuration layer
 
@@ -178,7 +179,8 @@ def consent_settings() -> Dict[str, Any]:
         raise ConfigurationUnavailableError(
             "the meeting consent settings could not be read; try again"
         ) from error
-    return consent.effective_settings(values)
+    # A verifier model taken off the list since it was saved is the default's.
+    return consent.effective_settings(offered_settings(MEETING_CONSENT.name, values))
 
 
 def settings_out(settings: Mapping[str, Any]) -> Dict[str, Any]:

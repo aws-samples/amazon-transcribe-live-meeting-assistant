@@ -34,11 +34,22 @@ from unittest import mock
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts" / "testing"))
 
 import cognito_test_user  # noqa: E402
 import failure_cause  # noqa: E402
 import junit_summary  # noqa: E402
 import resume_rollback  # noqa: E402
+
+# No test in this module sends a request to AWS (scripts/testing/no_real_aws.py).
+# Only this module: the rest of integ-tests/ calls a deployed stack on purpose and
+# may share the session, so the guard is installed without being made strict, and
+# the fake credentials (so a request reaches the guard rather than failing for
+# want of credentials) are set per test.
+from no_real_aws import _no_real_aws, fake_aws_credentials, install_guard  # noqa: F401
+
+install_guard()
+pytestmark = pytest.mark.usefixtures("fake_aws_credentials")
 
 
 @pytest.fixture(autouse=True)

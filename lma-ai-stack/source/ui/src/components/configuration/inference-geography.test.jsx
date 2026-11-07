@@ -89,4 +89,33 @@ describe('the Amazon Bedrock Models notice', () => {
     );
     expect(screen.getByText('Some features have no model in the selected geography')).toBeTruthy();
   });
+
+  it.each([
+    [IN_REGION, 'eu-west-1'],
+    [GEOGRAPHY, 'ca-central-1'],
+  ])('flags a plain id the Region does not offer under %s in %s', (geography, region) => {
+    const micro = 'amazon.nova-micro-v1:0';
+    const [placement] = modelPlacements({ inferenceGeography: geography, summaryModelId: micro }, {}, region);
+    expect(placement).toMatchObject({ modelId: micro, chosen: micro, verified: false, unavailable: false });
+    render(
+      <SectionNotice
+        section="language_models"
+        values={{ inferenceGeography: geography, summaryModelId: micro }}
+        region={region}
+      />,
+    );
+    expect(screen.getByText(/not in this Region's Amazon Bedrock listing/)).toBeTruthy();
+  });
+
+  it('flags nothing under Global, where no id is checked', () => {
+    render(
+      <SectionNotice section="language_models" values={{ ...values, inferenceGeography: GLOBAL }} region="eu-west-1" />,
+    );
+    expect(screen.queryByText(/Amazon Bedrock listing/)).toBeNull();
+  });
+
+  it('does not flag ids the listing shows for the Region', () => {
+    render(<SectionNotice section="language_models" values={values} region="eu-west-1" />);
+    expect(screen.queryByText(/Amazon Bedrock listing/)).toBeNull();
+  });
 });

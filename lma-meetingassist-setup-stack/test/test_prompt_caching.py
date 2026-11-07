@@ -48,8 +48,9 @@ LANGUAGE_MODELS_SCHEMA = (
 
 #: Meeting assistant models offered that Amazon Bedrock does not list for
 #: explicit prompt caching. A model added to the list must either cache or be
-#: named here, so the choice is made deliberately.
-NOT_CACHED = {"us.amazon.nova-premier-v1:0"}
+#: named here, so the choice is made deliberately. Every model offered today
+#: caches.
+NOT_CACHED: set = set()
 
 
 class _Store:

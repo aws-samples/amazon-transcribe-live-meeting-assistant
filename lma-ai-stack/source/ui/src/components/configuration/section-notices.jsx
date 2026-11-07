@@ -115,7 +115,12 @@ export const modelPlacements = (values = {}, configuration = {}, region = '') =>
   if (verifier) features.push(['Consent evidence check (Meeting Consent section)', verifier]);
   return features
     .filter(([, modelId]) => modelId)
-    .map(([label, modelId]) => ({ label, chosen: modelId, ...resolveForGeography(modelId, geography, region) }));
+    .map(([label, modelId]) => ({
+      label,
+      chosen: modelId,
+      geography,
+      ...resolveForGeography(modelId, geography, region),
+    }));
 };
 
 const Placement = ({ placement, region }) => {
@@ -132,11 +137,15 @@ const Placement = ({ placement, region }) => {
       <Box variant="code">{placement.modelId}</Box>
       {` runs in ${scope}`}
       {placement.modelId !== placement.chosen && ` (chosen: ${placement.chosen})`}
-      {!placement.verified && placement.modelId !== placement.chosen && (
+      {/* Under Global nothing is checked, as before the setting existed. Under
+          the other geographies an id the shipped listing does not show for this
+          Region is flagged whether or not it was changed: a plain id the Region
+          does not offer is kept as chosen, and its call fails. */}
+      {!placement.verified && placement.geography !== GLOBAL && (
         <>
           {' '}
           <StatusIndicator type="warning">
-            not checked against this Region&apos;s Amazon Bedrock listing
+            not in this Region&apos;s Amazon Bedrock listing; the call may fail
           </StatusIndicator>
         </>
       )}
@@ -147,6 +156,7 @@ const Placement = ({ placement, region }) => {
 Placement.propTypes = {
   placement: PropTypes.shape({
     chosen: PropTypes.string,
+    geography: PropTypes.string,
     modelId: PropTypes.string,
     verified: PropTypes.bool,
     unavailable: PropTypes.bool,

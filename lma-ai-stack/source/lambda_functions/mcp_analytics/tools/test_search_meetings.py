@@ -82,6 +82,13 @@ class TestBuildModelArn(unittest.TestCase):
         )
         self.assertIn(":inference-profile/", arn)
 
+    def test_govcloud_arn_uses_the_govcloud_partition(self):
+        """A GovCloud Region's ARN is in the aws-us-gov partition."""
+        arn = search_meetings._build_model_arn(
+            "us-gov.anthropic.claude-sonnet-4-5", "us-gov-west-1", ACCOUNT
+        )
+        self.assertTrue(arn.startswith("arn:aws-us-gov:bedrock:us-gov-west-1:"))
+
 
 class TestExecuteResolvesArn(unittest.TestCase):
     """Verify execute() builds the right ARN for the configured model."""
@@ -129,11 +136,11 @@ class TestExecuteResolvesArn(unittest.TestCase):
 
         class _Store:
             def get_section(self, _name):
-                return SimpleNamespace(values={"summaryModelId": "us.amazon.nova-pro-v1:0"})
+                return SimpleNamespace(values={"summaryModelId": "us.anthropic.claude-sonnet-4-6"})
 
         with patch.object(parameters, "_SHARED_STORE", _Store()):
             model_id = search_meetings._configured_model_id()
-        self.assertEqual(model_id, "us.amazon.nova-pro-v1:0")
+        self.assertEqual(model_id, "us.anthropic.claude-sonnet-4-6")
 
     def test_without_a_configured_model_the_shipped_default_is_used(self):
         class _Store:

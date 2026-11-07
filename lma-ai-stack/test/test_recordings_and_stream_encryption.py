@@ -279,3 +279,19 @@ def test_web_ui_key_grant_is_decrypt_only_for_this_bucket():
     assert _actions(statement) == {"kms:Decrypt"}
     context = statement["Condition"]["StringLike"]["kms:EncryptionContext:aws:s3:arn"]
     assert len(context) == 2
+
+
+def test_only_the_upload_processor_uses_the_key_through_transcribe():
+    """Only the role that starts batch Transcribe jobs uses the key through Transcribe."""
+    resources = _resources(AI_STACK)
+    holders = []
+    for name, resource in resources.items():
+        if resource.get("Type") != "AWS::IAM::Policy":
+            continue
+        for statement in resource["Properties"]["PolicyDocument"]["Statement"]:
+            via = (statement.get("Condition") or {}).get("StringEquals", {}).get("kms:ViaService")
+            if via == {"Fn::Sub": "transcribe.${AWS::Region}.${AWS::URLSuffix}"}:
+                holders.append((name, resource["Properties"]["Roles"]))
+    assert holders == [
+        ("TranscribeOutputEncryptionKeyPolicy", [{"Ref": "UploadMeetingProcessorFunctionExecutionRole"}])
+    ]

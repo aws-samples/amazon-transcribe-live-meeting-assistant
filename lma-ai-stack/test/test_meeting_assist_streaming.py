@@ -58,6 +58,7 @@ import types
 from pathlib import Path
 
 import pytest
+import strands_stand_in  # scripts/testing, put on the path by lma-ai-stack/conftest.py
 
 REPO = Path(__file__).resolve().parents[2]
 FUNCTION_SRC = REPO / "lma-meetingassist-setup-stack" / "src"
@@ -157,16 +158,13 @@ class FakeClientFactory:
 
 @pytest.fixture(scope="module")
 def strands_stub():
-    """The stand-in registered in sys.modules, whichever test file created it.
+    """The stand-in for `strands` (scripts/testing/strands_stand_in.py), for this module.
 
-    Returning the registered object rather than a fresh one matters: the module
-    under test resolves `from strands import Agent` through sys.modules, so a
-    second stub object would be patched while the first stayed in use.
+    The module under test resolves `from strands import Agent` through sys.modules
+    when it runs, so the tests patch the registered object this yields.
     """
-    stub = sys.modules.setdefault("strands", types.ModuleType("strands"))
-    stub.tool = lambda func: func
-    stub.models = sys.modules.setdefault("strands.models", types.ModuleType("strands.models"))
-    return stub
+    with strands_stand_in.installed() as stub:
+        yield stub
 
 
 class UnusedAppsyncClient:
@@ -391,7 +389,6 @@ def _stub_agent(strands_stub, monkeypatch, chunks: tuple[str, ...]) -> list[str]
 
     monkeypatch.setattr(strands_stub, "Agent", StubAgent, raising=False)
     monkeypatch.setattr(strands_stub.models, "BedrockModel", StubBedrockModel, raising=False)
-    monkeypatch.setattr(strands_stub.models, "CacheConfig", dict, raising=False)
     return entry_points
 
 
