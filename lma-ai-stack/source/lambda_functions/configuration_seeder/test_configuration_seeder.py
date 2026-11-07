@@ -30,6 +30,7 @@ recorder.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -1654,32 +1655,41 @@ def _managed(dynamo: FakeDynamo) -> Dict[str, Dict[str, Any]]:
     }
 
 
-def test_each_offered_preset_is_written_as_a_managed_profile(seeder) -> None:
-    store, dynamo = build_store()
-    seeder.seed(store, domain="default")
-    outcome = seeder.write_managed_profiles(
-        store, store.read_profile("default").body, {"AsrEngineAvailable": "true"}
-    )
-    managed = _managed(dynamo)
-    assert {
-        "healthcare-summary",
-        "translator-voice-assistant",
-        "on-demand-asr-with-voice-separation",
-    } <= set(managed)
-    assert "healthcare-summary=created" in outcome
-    translator = dynamo.body("Config#translator-voice-assistant")
-    assert translator["nova_sonic_config"]["meetingMode"] == "translator"
-    # A full copy: every section of the baseline, with the preset over it.
-    assert set(dynamo.body("Config#default")) <= set(translator)
-    assert managed["translator-voice-assistant"]["Description"] == "Translator voice assistant"
+PRESETS = ("standard", "internal-meetings-notify", "regulated-consent-required")
+
+#: A preset needing the on-demand ASR engine, for the paths no shipped preset takes.
+NEEDS_ASR = {
+    "Id": "needs-asr",
+    "Title": "Needs the ASR engine",
+    "Description": "d",
+    "Order": 9,
+    "Sections": {"asr_engine": {"mode": "merge", "values": {"streamingEngineMicrovm": True}}},
+}
 
 
-def test_a_preset_the_deployment_cannot_run_is_not_written(seeder) -> None:
+def test_each_preset_is_written_as_a_managed_profile(seeder) -> None:
     store, dynamo = build_store()
     seeder.seed(store, domain="default")
     outcome = seeder.write_managed_profiles(store, store.read_profile("default").body, {})
-    assert "on-demand-asr-with-voice-separation=not-offered" in outcome
-    assert "Config#on-demand-asr-with-voice-separation" not in dynamo.items
+    assert set(PRESETS) <= set(_managed(dynamo))
+    assert "regulated-consent-required=created" in outcome
+    regulated = dynamo.body("Config#regulated-consent-required")
+    assert regulated["meeting_consent"]["mode"] == "opt_in"
+    assert regulated["retention"]["transcriptDeletionAfterSummary"] == "after_15_minutes"
+    # A full copy: every section of the baseline, with the preset over it.
+    assert set(dynamo.body("Config#default")) <= set(regulated)
+    assert _managed(dynamo)["regulated-consent-required"]["Description"] == (
+        "Regulated – consent required, transcript not retained"
+    )
+
+
+def test_a_preset_the_deployment_cannot_run_is_not_written(seeder, monkeypatch) -> None:
+    monkeypatch.setattr(seeder, "shipped_presets", lambda: [NEEDS_ASR])
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default")
+    outcome = seeder.write_managed_profiles(store, store.read_profile("default").body, {})
+    assert "needs-asr=not-offered" in outcome
+    assert "Config#needs-asr" not in dynamo.items
 
 
 def test_a_second_run_leaves_unchanged_managed_profiles_alone(seeder) -> None:
@@ -1687,40 +1697,64 @@ def test_a_second_run_leaves_unchanged_managed_profiles_alone(seeder) -> None:
     seeder.seed(store, domain="default")
     baseline = store.read_profile("default").body
     seeder.write_managed_profiles(store, baseline, {})
-    assert "translator-voice-assistant=unchanged" in seeder.write_managed_profiles(
+    assert "internal-meetings-notify=unchanged" in seeder.write_managed_profiles(
         store, baseline, {}
     )
 
 
-def test_a_managed_profile_no_longer_shipped_is_retired_unless_active(seeder, monkeypatch) -> None:
+def test_a_managed_profile_no_longer_shipped_is_retired_unless_active(seeder) -> None:
+    """As the Managed profiles earlier pre-releases wrote for presets no longer shipped are."""
     store, dynamo = build_store()
     seeder.seed(store, domain="default")
     baseline = store.read_profile("default").body
-    seeder.write_managed_profiles(store, baseline, {})
-    store.activate_profile("translator-voice-assistant")
-    monkeypatch.setattr(seeder, "shipped_presets", lambda: [])
+    for name in ("earlier-preset", "earlier-active-preset"):
+        store.write_managed_profile(name, dict(baseline), description=name)
+    store.activate_profile("earlier-active-preset")
     outcome = seeder.write_managed_profiles(store, baseline, {})
-    assert "healthcare-summary=retired" in outcome
-    assert "translator-voice-assistant=kept-active" in outcome
-    assert "Config#healthcare-summary" not in dynamo.items
+    assert "earlier-preset=retired" in outcome
+    assert "earlier-active-preset=kept-active" in outcome
+    assert "Config#earlier-preset" not in dynamo.items
+    assert dynamo.metadata("Config#earlier-active-preset").get("Managed")
 
 
 def test_a_custom_profile_holding_a_presets_name_is_left_alone(seeder) -> None:
     store, dynamo = build_store()
     seeder.seed(store, domain="default")
-    store.create_profile("healthcare-summary", updated_by="admin@example.com")
+    store.create_profile("internal-meetings-notify", updated_by="admin@example.com")
     outcome = seeder.write_managed_profiles(store, store.read_profile("default").body, {})
-    assert "healthcare-summary=name-in-use" in outcome
-    assert not dynamo.metadata("Config#healthcare-summary").get("Managed")
+    assert "internal-meetings-notify=name-in-use" in outcome
+    assert not dynamo.metadata("Config#internal-meetings-notify").get("Managed")
 
 
 def test_the_configuration_preset_builds_the_baseline(seeder) -> None:
     store, dynamo = build_store()
     outcome = seeder.seed(
-        store, domain="default", configuration_preset="translator-voice-assistant"
+        store, domain="default", configuration_preset="regulated-consent-required"
     )
-    assert dynamo.body("Config#default")["nova_sonic_config"]["meetingMode"] == "translator"
-    assert outcome["ConfigurationPreset"] == "translator-voice-assistant"
+    baseline = dynamo.body("Config#default")
+    assert baseline["meeting_consent"]["mode"] == "opt_in"
+    assert baseline["recording"]["recordAudio"] is False
+    assert outcome["ConfigurationPreset"] == "regulated-consent-required"
+
+
+@pytest.mark.parametrize("choice", ["", "none", "standard"])
+def test_standard_and_the_earlier_none_both_give_the_shipped_defaults(seeder, choice) -> None:
+    store, dynamo = build_store()
+    outcome = seeder.seed(store, domain="default", configuration_preset=choice)
+    assert outcome["ConfigurationPreset"] == "standard"
+    assert dynamo.body("Config#default") == seeder.shipped_default_body("default")
+
+
+def test_every_value_the_stack_parameter_allows_is_accepted(seeder) -> None:
+    template = Path(__file__).resolve().parents[4] / "lma-main.yaml"
+    allowed = re.search(
+        r"\n  ConfigurationPreset:\n(?:    .*\n)*?    AllowedValues:\n((?:      - .*\n)+)",
+        template.read_text(encoding="utf-8"),
+    )
+    assert allowed, "lma-main.yaml declares ConfigurationPreset with AllowedValues"
+    for choice in re.findall(r"- (\S+)", allowed.group(1)):
+        store, _dynamo = build_store()
+        seeder.seed(store, domain="default", configuration_preset=choice)
 
 
 def test_a_custom_configuration_is_laid_over_the_preset(seeder) -> None:
@@ -1728,11 +1762,11 @@ def test_a_custom_configuration_is_laid_over_the_preset(seeder) -> None:
     outcome = seeder.seed(
         store,
         domain="default",
-        configuration_preset="translator-voice-assistant",
-        custom_sections={"nova_sonic_config": {"translatorLanguageB": "French"}},
+        configuration_preset="internal-meetings-notify",
+        custom_sections={"meeting_consent": {"leaveOnObjection": True}},
     )
-    nova = dynamo.body("Config#default")["nova_sonic_config"]
-    assert (nova["meetingMode"], nova["translatorLanguageB"]) == ("translator", "French")
+    consent = dynamo.body("Config#default")["meeting_consent"]
+    assert (consent["mode"], consent["leaveOnObjection"]) == ("notify", True)
     assert outcome["CustomConfiguration"] == "applied"
 
 
@@ -1792,17 +1826,18 @@ def test_a_removed_profile_is_not_created_again_by_a_later_deployment(seeder) ->
     assert seeder.settle_profiles(store, seeder._adoption_outcomes(again)) == "absent"
 
 
-def test_a_configuration_preset_the_deployment_cannot_run_fails_the_deployment(seeder) -> None:
+def test_a_configuration_preset_the_deployment_cannot_run_fails_the_deployment(
+    seeder, monkeypatch
+) -> None:
+    monkeypatch.setattr(seeder, "preset_by_id", lambda _choice: NEEDS_ASR)
     store, dynamo = build_store()
-    with pytest.raises(seeder.InvalidConfiguration, match="needs EnableMicrovmAsr"):
-        seeder.seed(
-            store, domain="default", configuration_preset="on-demand-asr-with-voice-separation"
-        )
+    with pytest.raises(seeder.InvalidConfiguration, match="does not include"):
+        seeder.seed(store, domain="default", configuration_preset="needs-asr")
     assert "Config#default" not in dynamo.items
     seeder.seed(
         store,
         domain="default",
-        configuration_preset="on-demand-asr-with-voice-separation",
+        configuration_preset="needs-asr",
         deployment_settings={"AsrEngineAvailable": "true"},
     )
     assert "Config#default" in dynamo.items

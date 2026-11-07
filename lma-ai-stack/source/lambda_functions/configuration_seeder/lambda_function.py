@@ -611,8 +611,9 @@ def write_managed_profiles(
 
     The preset applied over the baseline. A preset needing something the
     deployment lacks (see ``preset_offered``) is not written, and a Managed
-    profile for a preset no longer shipped or offered is retired unless it is
-    active. Reported as ``id=outcome`` pairs.
+    profile for a preset no longer shipped or offered, such as one an earlier
+    pre-release wrote, is retired unless it is active. Reported as
+    ``id=outcome`` pairs.
     """
     outcomes: Dict[str, str] = {}
     written = set()
@@ -637,6 +638,24 @@ def write_managed_profiles(
                 "retired" if store.retire_managed_profile(profile.name) else "kept-active"
             )
     return ",".join(f"{name}={outcome}" for name, outcome in sorted(outcomes.items()))
+
+
+#: The ConfigurationPreset value for the shipped defaults, and the default.
+STANDARD_PRESET = "standard"
+
+#: Values that also mean the Standard preset: an empty property, and ``none``,
+#: the parameter's value in earlier pre-releases, which a stack deployed then
+#: keeps as its parameter value.
+STANDARD_ALIASES = ("", "none")
+
+
+def deploy_time_preset(choice: str) -> Dict[str, Any]:
+    """The preset the ConfigurationPreset stack parameter names; ``none`` or nothing is Standard.
+
+    Raises:
+        InvalidPreset: no preset ships with that id.
+    """
+    return preset_by_id(STANDARD_PRESET if choice in STANDARD_ALIASES else choice)
 
 
 def seed(
@@ -671,18 +690,13 @@ def seed(
     # CustomConfigPath file over that, as IDP's deployments choose their
     # default configuration. Both are part of what the deployment was deployed
     # with, so both belong in the baseline.
-    preset_applied = "none"
-    if configuration_preset and configuration_preset != "none":
-        chosen = preset_by_id(configuration_preset)
-        if not preset_offered(chosen, dict(deployment_settings or {})):
-            raise InvalidConfiguration(
-                [
-                    f"ConfigurationPreset: {configuration_preset} sets something this deployment "
-                    "does not include (the on-demand ASR preset needs EnableMicrovmAsr)"
-                ]
-            )
-        baseline = apply_preset(baseline, chosen)
-        preset_applied = configuration_preset
+    chosen = deploy_time_preset(configuration_preset)
+    if not preset_offered(chosen, dict(deployment_settings or {})):
+        raise InvalidConfiguration(
+            [f"ConfigurationPreset: {chosen['Id']} sets something this deployment does not include"]
+        )
+    baseline = apply_preset(baseline, chosen)
+    preset_applied = chosen["Id"]
     if custom_sections:
         for name, values in custom_sections.items():
             baseline[name] = full_section(name, values, baseline.get(name))

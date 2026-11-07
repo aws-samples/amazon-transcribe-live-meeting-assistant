@@ -44,6 +44,14 @@ setting as saved each time a meeting ends or is summarized. A meeting that has
 already ended keeps the deletion time it was given, and a meeting that ended
 while the setting was off keeps its transcript for the days set above.
 
+The **Regulated – consent required, transcript not retained** configuration
+preset sets this to 15 minutes after the summary, together with opt-in consent,
+no audio recording and redaction; **Standard** and **Internal meetings – notify
+participants** set it to Off. See
+[Configuration presets](configuration-guide.md#configuration-presets),
+which also lists the retention stack parameters a preset cannot set, and
+[Meeting Consent](meeting-consent.md).
+
 ## When the transcript is deleted
 
 - **When the summary is stored**, the delay starts counting. With

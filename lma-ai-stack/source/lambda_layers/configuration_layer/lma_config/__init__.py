@@ -67,7 +67,13 @@ from .parameters import (
     read_setting,
     shipped_setting_defaults,
 )
-from .presets import InvalidPreset, apply_preset, preset_by_id, preset_offered, shipped_presets
+from .presets import (
+    InvalidPreset,
+    apply_preset,
+    preset_by_id,
+    preset_offered,
+    shipped_presets,
+)
 from .revisions import (
     DEFAULT_RETAINED_REVISIONS,
     MAX_COMMENT_LENGTH,

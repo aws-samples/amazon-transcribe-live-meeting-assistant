@@ -290,15 +290,15 @@ Parameters:
 
   ConfigurationPreset:
     Type: String
-    Default: none
+    Default: standard
     AllowedValues:
+      - standard
+      - internal-meetings-notify
+      - regulated-consent-required
       - none
-      - healthcare-summary
-      - on-demand-asr-with-voice-separation
-      - translator-voice-assistant
     Description: >-
-      The shipped preset the deployment's default configuration is built from;
-      see lma-main.yaml.
+      The configuration preset the deployment's default configuration is built
+      from; none is accepted as standard. See lma-main.yaml.
 
   CustomConfigPath:
     Type: String

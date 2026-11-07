@@ -29,6 +29,7 @@ import {
   mergeDelta,
   nextNumber,
   numberedEntries,
+  orderedPresets,
   orderedProperties,
   applyPresetSection,
   exportDocument,
@@ -306,6 +307,18 @@ describe('presets, export and import', () => {
       '2#ACTIONS': 'NONE',
       '3#SOAP': 'p',
     });
+  });
+
+  it('lists presets by their order, then title, without sorting in place', () => {
+    const presets = [
+      { Id: 'regulated', Title: 'Regulated', Order: 2 },
+      { Id: 'b', Title: 'B' },
+      { Id: 'standard', Title: 'Standard', Order: 0 },
+      { Id: 'internal', Title: 'Internal', Order: 1 },
+    ];
+    expect(orderedPresets(presets).map((preset) => preset.Id)).toEqual(['b', 'standard', 'internal', 'regulated']);
+    expect(presets[0].Id).toBe('regulated');
+    expect(orderedPresets(undefined)).toEqual([]);
   });
 
   it('exports what each section stores, and imports it back to the same values', () => {

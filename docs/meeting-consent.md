@@ -108,6 +108,16 @@ An Admin sets the deployment's default in the **Meeting Consent** section of
 A saved change applies to meetings whose consent starts after the save; a
 meeting already under way keeps the mode and rule it started with.
 
+The configuration presets set these settings together with the related
+retention and privacy ones: **Internal meetings – notify participants** sets
+Notify, and **Regulated – consent required, transcript not retained** sets
+Opt-in with the each-participant rule, a stricter choice only per meeting,
+clients without a consent step refused and the Virtual Participant leaving
+after an objection. **Standard** puts back the shipped defaults. Apply one from
+the editor's **Actions ▸ Apply a preset…**, or choose one at deploy time with
+the `ConfigurationPreset` stack parameter; see
+[Configuration presets](configuration-guide.md#configuration-presets).
+
 | Setting | Meaning | Shipped default |
 |---|---|---|
 | Consent mode | Off, Notify or Opt-in | Off |
@@ -985,7 +995,10 @@ also holds the reply classifier described above.
 
 ## Related
 
-- [Configuration Guide](configuration-guide.md) — the Meeting Consent section
+- [Configuration Guide](configuration-guide.md) — the Meeting Consent section,
+  and the [configuration presets](configuration-guide.md#configuration-presets)
+  that set it
+- [Transcript Deletion After the Summary](transcript-deletion.md)
 - [Virtual Participant](virtual-participant.md)
 - [Stream Audio](stream-audio.md)
 - [User-Based Access Control](user-based-access-control.md) — who can read a meeting

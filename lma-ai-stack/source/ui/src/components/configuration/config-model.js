@@ -330,6 +330,13 @@ export const isPresetOffered = (preset, sections, settings) =>
     return Object.keys(change?.values || {}).every((key) => isAvailable(section.schema?.properties?.[key], settings));
   });
 
+/** The presets in the order the editor lists them: by their Order, then title. */
+export const orderedPresets = (presets) =>
+  [...(presets || [])].sort(
+    (a, b) =>
+      (Number(a.Order) || 0) - (Number(b.Order) || 0) || String(a.Title || '').localeCompare(String(b.Title || '')),
+  );
+
 /** What applying one section of a preset makes of the section as it stands. */
 export const applyPresetSection = (schema, defaults, current, change, settings) => {
   const values = offered(schema, change.values, settings);

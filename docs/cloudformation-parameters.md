@@ -641,18 +641,18 @@ Specify a comma separated list of two letter country codes (uppercase ISO 3166-1
 
 | Parameter | Default | Kind |
 |---|---|---|
-| [`ConfigurationPreset`](#configurationpreset) | `none` | Resource |
+| [`ConfigurationPreset`](#configurationpreset) | `standard` | Resource |
 | [`CustomConfigPath`](#customconfigpath) | (empty) | Resource |
 
 ### `ConfigurationPreset`
 
 Console label: *Configuration Preset*
 
-- **Default:** `none`
-- **Allowed values:** `none`, `healthcare-summary`, `on-demand-asr-with-voice-separation`, `translator-voice-assistant`
+- **Default:** `standard`
+- **Allowed values:** `standard`, `internal-meetings-notify`, `regulated-consent-required`, `none`
 - **Kind:** Resource. Decides what the configuration seeder writes as the deployment's default configuration, which is re-written when it changes.
 
-The shipped configuration preset the deployment's default configuration is built from: none (the shipped defaults), healthcare-summary (summary prompts for clinical conversations), on-demand-asr-with-voice-separation (meetings transcribed by the on-demand ASR engine with each voice labelled; needs EnableMicrovmAsr) or translator-voice-assistant (the Nova Sonic voice assistant as an English-Spanish translator). Every preset is also offered on the Configuration page as a read-only Managed profile. CustomConfigPath is applied over this when provided.
+The configuration preset the deployment's default configuration is built from, which sets consent, retention and privacy together: standard (the shipped defaults), internal-meetings-notify (participants are notified and may object; audio and the meeting chat are captured) or regulated-consent-required (participants must consent first, the transcript is deleted 15 minutes after the summary, no audio is recorded, personal information is redacted, and Amazon Bedrock runs within this Region's geography; LogLevel and the retention-day parameters are set here, not by the preset). Each preset is also offered on the Configuration page as a read-only Managed profile. none is accepted as standard, for stacks deployed with it. CustomConfigPath is applied over this when provided.
 
 ### `CustomConfigPath`
 
