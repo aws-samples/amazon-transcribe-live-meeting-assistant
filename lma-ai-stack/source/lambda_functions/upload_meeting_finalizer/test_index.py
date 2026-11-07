@@ -34,6 +34,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -216,9 +217,16 @@ class FakeS3:
 class FakeTranscribe:
     """Answers GetTranscriptionJob with a chosen tag set."""
 
-    def __init__(self, tags: list | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        tags: list | None = None,
+        error: Exception | None = None,
+        job: dict | None = None,
+    ) -> None:
         self.tags = OUR_TAGS if tags is None else tags
         self.error = error
+        # Further TranscriptionJob fields, such as the identified language.
+        self.job = job or {}
         self.calls: list[str] = []
 
     def get_transcription_job(self, TranscriptionJobName):  # noqa: N803
@@ -229,6 +237,7 @@ class FakeTranscribe:
             "TranscriptionJob": {
                 "TranscriptionJobName": TranscriptionJobName,
                 "Tags": self.tags,
+                **self.job,
             }
         }
 
@@ -982,6 +991,10 @@ def test_a_row_written_by_stage_one_finalizes_end_to_end(monkeypatch) -> None:
 
     monkeypatch.setattr(initiator, "job_table", CapturingTable())
     monkeypatch.setattr(initiator, "s3_client", StubS3())
+    # Nothing saved in the Transcription section: the shipped en-US applies.
+    monkeypatch.setattr(
+        initiator, "_STORE", SimpleNamespace(get_section=lambda _: SimpleNamespace(values={}))
+    )
     created = initiator.lambda_handler(
         {
             "info": {"fieldName": "createUploadMeeting"},
@@ -1038,3 +1051,123 @@ def test_a_row_written_by_stage_one_finalizes_end_to_end(monkeypatch) -> None:
     assert harness.kinesis.only("END")["AgentId"] == "carol@example.com"
     assert harness.table.final["Status"] == "COMPLETED"
     assert harness.table.final["SegmentCount"] == 2
+
+
+# ---------------------------------------------------------------------------
+# The identified language, for an upload that asked Transcribe to identify it
+# ---------------------------------------------------------------------------
+
+
+def identifying(monkeypatch, mode: str, job: dict, status_row: dict | None = None) -> Harness:
+    """A finalizer for an upload Stage 1 set to identify its language."""
+    harness = Harness(
+        monkeypatch,
+        job_row(
+            LanguageIdentification=mode,
+            LanguageOptions=["de-DE", "ja-JP", "es-US"],
+            LanguageSource="CONFIGURATION",
+            **(status_row or {}),
+        ),
+    )
+    harness.transcribe.job = job
+    return harness
+
+
+def test_the_identified_language_replaces_the_identify_mode_on_the_meeting(monkeypatch) -> None:
+    h = identifying(monkeypatch, "identify-language", {"LanguageCode": "ja-JP"})
+    h.run()
+    assert h.kinesis.only("UPDATE_CAPTURE_CONTEXT") == {
+        "EventType": "UPDATE_CAPTURE_CONTEXT",
+        "CallId": CALL_ID,
+        "TranscriptionLanguage": "ja-JP",
+    }
+
+
+def test_every_identified_language_is_named_most_spoken_first(monkeypatch) -> None:
+    h = identifying(
+        monkeypatch,
+        "identify-multiple-languages",
+        {
+            "LanguageCodes": [
+                {"LanguageCode": "es-US", "DurationInSeconds": 30.5},
+                {"LanguageCode": "de-DE", "DurationInSeconds": 120.0},
+            ]
+        },
+    )
+    h.run()
+    assert h.kinesis.only("UPDATE_CAPTURE_CONTEXT")["TranscriptionLanguage"] == "de-DE, es-US"
+
+
+def test_the_identified_language_is_set_before_the_meeting_ends(monkeypatch) -> None:
+    """END starts the summary, which the meeting's language is part of."""
+    h = identifying(monkeypatch, "identify-language", {"LanguageCode": "de-DE"})
+    h.run()
+    types = h.kinesis.event_types
+    assert types.index("UPDATE_CAPTURE_CONTEXT") < types.index("END")
+
+
+def test_the_language_event_carries_no_updated_at(monkeypatch) -> None:
+    """updateCaptureContext stamps the resolver's own time, so it is never
+    refused for being older than the segments emitted around it."""
+    h = identifying(monkeypatch, "identify-language", {"LanguageCode": "es-US"})
+    h.run()
+    assert "UpdatedAt" not in h.kinesis.only("UPDATE_CAPTURE_CONTEXT")
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"LanguageCode": "it-IT", "LanguageSource": "CONFIGURATION"},
+        {"LanguageCode": "it-IT", "LanguageSource": "REQUEST"},
+        {},
+    ],
+    ids=["configured", "requested", "legacy-row"],
+)
+def test_an_upload_that_named_its_language_keeps_it(monkeypatch, row) -> None:
+    """START already recorded the language the job ran in."""
+    h = Harness(monkeypatch, job_row(**row))
+    h.transcribe.job = {"LanguageCode": "it-IT"}
+    h.run()
+    assert "UPDATE_CAPTURE_CONTEXT" not in h.kinesis.event_types
+
+
+def test_a_job_that_reports_no_language_changes_nothing(monkeypatch) -> None:
+    h = identifying(monkeypatch, "identify-language", {})
+    h.run()
+    assert "UPDATE_CAPTURE_CONTEXT" not in h.kinesis.event_types
+
+
+def test_a_failed_identification_job_changes_no_language(monkeypatch) -> None:
+    h = identifying(monkeypatch, "identify-language", {"LanguageCode": "ja-JP"})
+    h.run(eventbridge_event(status="FAILED", FailureReason="unsupported media"))
+    assert "UPDATE_CAPTURE_CONTEXT" not in h.kinesis.event_types
+
+
+@pytest.mark.parametrize(
+    ("job", "expected"),
+    [
+        ({"LanguageCode": " pt-BR "}, "pt-BR"),
+        ({"LanguageCode": ""}, None),
+        ({"LanguageCodes": [], "LanguageCode": "fr-FR"}, "fr-FR"),
+        (
+            {
+                "LanguageCodes": [
+                    {"LanguageCode": "hi-IN", "DurationInSeconds": 5},
+                    {"LanguageCode": "", "DurationInSeconds": 50},
+                    {"LanguageCode": "hi-IN", "DurationInSeconds": 7},
+                    {"LanguageCode": "en-GB"},
+                ],
+                "LanguageCode": "th-TH",
+            },
+            "hi-IN, en-GB",
+        ),
+    ],
+    ids=["single", "blank", "empty-list", "duplicates-and-blanks"],
+)
+def test_the_identified_language_is_read_from_the_job(job, expected) -> None:
+    row = {"LanguageIdentification": "identify-multiple-languages"}
+    assert index.identified_language(row, job) == expected
+
+
+def test_the_identify_modes_are_the_ones_stage_one_records() -> None:
+    assert set(index.IDENTIFY_MODES) == set(initiator.IDENTIFY_MODES)

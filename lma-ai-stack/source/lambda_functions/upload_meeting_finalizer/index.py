@@ -118,6 +118,39 @@ def meter_batch_job(call_id: str, transcript_json: dict) -> None:
     )
 
 
+#: The identify modes Stage 1 records as the row's LanguageIdentification.
+IDENTIFY_MODES = ("identify-language", "identify-multiple-languages")
+
+
+def identified_language(job: dict, transcription_job: dict) -> str | None:
+    """The language Transcribe identified for an upload that asked it to, or None.
+
+    ``LanguageCodes`` (multiple-language identification) lists every language
+    found with its duration; they are named most-spoken first, comma-separated,
+    as the language options are written. Otherwise the job's ``LanguageCode``.
+    None for an upload that named its language, or a job that reports none.
+    """
+    if (job.get("LanguageIdentification") or "").strip() not in IDENTIFY_MODES:
+        return None
+    found = sorted(
+        (
+            entry
+            for entry in transcription_job.get("LanguageCodes") or []
+            if isinstance(entry.get("LanguageCode"), str) and entry["LanguageCode"].strip()
+        ),
+        key=lambda entry: -float(entry.get("DurationInSeconds") or 0),
+    )
+    codes: list[str] = []
+    for entry in found:
+        code = entry["LanguageCode"].strip()
+        if code not in codes:
+            codes.append(code)
+    if codes:
+        return ", ".join(codes)
+    code = transcription_job.get("LanguageCode")
+    return code.strip() if isinstance(code, str) and code.strip() else None
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -383,6 +416,20 @@ def lambda_handler(event, context):  # noqa: ARG001
     segments = _build_segments(transcript_json, enable_diarization)
     logger.info("Emitting %d transcript segment(s) for %s", len(segments), call_id)
     meter_batch_job(call_id, transcript_json)
+
+    # With language identification the meeting record says "identified by Amazon
+    # Transcribe" since START; now the job says which language(s) it found.
+    language = identified_language(job, tj)
+    if language:
+        logger.info("Transcribe identified %s for %s", language, call_id)
+        _put_kinesis(
+            call_id,
+            {
+                "EventType": "UPDATE_CAPTURE_CONTEXT",
+                "CallId": call_id,
+                "TranscriptionLanguage": language,
+            },
+        )
 
     now = _now_iso()
     for seg in segments:
