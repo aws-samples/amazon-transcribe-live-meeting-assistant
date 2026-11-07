@@ -13,7 +13,7 @@
  * the deployment configured (consent-matcher.ts).
  */
 export const CONSENT_HELP_LINE =
-    'Meeting consent: reply "LMA consent" to agree to recording and transcription, or "LMA no consent" to object.';
+    'Meeting consent: reply "LMA consent" to agree to recording and transcription, or "LMA no consent" to object, typed here or said aloud.';
 
 let consentFlowActive = false;
 
