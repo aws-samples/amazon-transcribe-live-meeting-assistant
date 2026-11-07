@@ -4110,7 +4110,6 @@ Resources:
           S3_BUCKET_NAME: !Ref S3BucketName
           UPLOADS_PENDING_PREFIX: lma-uploads-pending/
           TRANSCRIPTS_PREFIX: !Ref TranscriptFilePrefix
-          DEFAULT_LANGUAGE_CODE: "en-US"
           OUTPUT_ENCRYPTION_KMS_KEY_ID: !Ref CustomerManagedEncryptionKeyArn
       LoggingConfig:
         LogGroup:
