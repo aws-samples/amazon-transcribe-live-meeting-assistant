@@ -79,3 +79,33 @@ def test_any_specific_language_is_usable_with_any_other_option(language_code):
 def test_language_options_are_trimmed_and_empty_entries_dropped():
     assert transcribe_options.language_options(" en-US , ,es-US,") == ["en-US", "es-US"]
     assert transcribe_options.language_options(None) == []
+
+
+# ---------------------------------------------------------------------------
+# What the Configuration page and the upload documentation say about uploads
+# ---------------------------------------------------------------------------
+
+UPLOAD_DOC = HERE.parents[4] / "docs" / "upload-audio.md"
+
+
+def test_the_section_says_when_a_change_reaches_an_upload():
+    schema = section_schema("transcription")
+    assert "uploads started after the save" in schema["appliesText"]
+    assert "an upload already started" in schema["appliesText"]
+
+
+def test_the_section_says_what_an_upload_uses():
+    schema = section_schema("transcription")
+    assert "at least two language options" in schema["description"]
+    assert transcribe_options.MIN_BATCH_LANGUAGE_OPTIONS == 2
+    preferred = schema["properties"]["preferredLanguage"]["description"]
+    assert "Not used by uploads" in preferred
+
+
+def test_the_upload_documentation_lists_each_identify_mode():
+    text = UPLOAD_DOC.read_text(encoding="utf-8")
+    section = text.split("## Transcription Language", 1)[1].split("\n## ", 1)[0]
+    for mode in transcribe_options.IDENTIFY_MODES:
+        assert f"| `{mode}` |" in section, mode
+    assert "at least two" in section
+    assert "does not follow the language set for streaming meetings" not in text

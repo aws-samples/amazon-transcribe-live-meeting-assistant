@@ -253,8 +253,9 @@ export const TRANSCRIPTION = declareSection({
     name: 'transcription',
     cacheTier: 'immediate',
     description:
-        'Amazon Transcribe options for streaming meetings: language or language identification, ' +
-        'content redaction, custom vocabulary and language model, and the default for speaker partitioning.',
+        'Amazon Transcribe options for streaming meetings, and the language of uploads: language or ' +
+        'language identification, content redaction, custom vocabulary and language model, and the ' +
+        'default for speaker partitioning.',
 });
 
 /** Whether a meeting's audio is recorded when its client does not say. Immediate, as in the Python half. */

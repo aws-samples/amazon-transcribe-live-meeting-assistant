@@ -278,9 +278,9 @@ TRANSCRIPTION = register(
         name="transcription",
         cache_tier=CacheTier.IMMEDIATE,
         description=(
-            "Amazon Transcribe options for streaming meetings: language or language "
-            "identification, content redaction, custom vocabulary and language model, and "
-            "the default for speaker partitioning."
+            "Amazon Transcribe options for streaming meetings, and the language of uploads: "
+            "language or language identification, content redaction, custom vocabulary and "
+            "language model, and the default for speaker partitioning."
         ),
     )
 )
