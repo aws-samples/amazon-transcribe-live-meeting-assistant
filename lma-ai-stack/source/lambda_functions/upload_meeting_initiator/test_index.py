@@ -288,6 +288,85 @@ def test_a_long_filename_is_truncated_but_keeps_its_extension(env) -> None:
     assert name.endswith(".mp4")
 
 
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("会议记录.m4a", "recording.m4a"),
+        ("회의 녹음.m4a", "recording.m4a"),
+        ("Встреча 2025-01-02.mp3", "2025-01-02.mp3"),
+        ("συνάντηση.τελική.wav", "recording.wav"),
+        ("Réunion équipe.mp4", "R_union_quipe.mp4"),
+    ],
+    ids=[
+        "non-latin-only",
+        "non-latin-hangul",
+        "non-latin-and-ascii",
+        "non-latin-with-dots",
+        "accented-latin",
+    ],
+)
+def test_a_name_outside_the_character_set_still_keeps_its_extension(
+    env, filename, expected
+) -> None:
+    """The format decides the key's extension, which Stage 3 names the promoted
+    recording after, and the MediaFormat Stage 2 hands Transcribe, so a name made
+    of characters the key cannot carry must lose the name, never the format."""
+    result = invoke(callId="call-abc", filename=filename)
+    assert result["uploadKey"] == f"lma-uploads-pending/call-abc/{expected}"
+
+
+@pytest.mark.parametrize(
+    ("filename", "content_type", "expected_name", "expected_format"),
+    [
+        ("Meeting.M4A", "audio/x-m4a", "Meeting.m4a", "m4a"),
+        (".m4a", "audio/x-m4a", "recording.m4a", "m4a"),
+        ("talk.mp4 ", "video/mp4", "talk.mp4", "mp4"),
+        ("Weekly 1.5 sync", "audio/x-m4a", "Weekly_1.5_sync.m4a", "m4a"),
+        ("notes.txt", "audio/mpeg", "notes.txt.mp3", "mp3"),
+        ("clip", "audio/webm;codecs=opus", "clip.webm", "webm"),
+        ("clip.mp3", "audio/mp4", "clip.mp3", "mp3"),
+        ("clip.mov", "video/quicktime", "clip.mov", None),
+        ("clip", "audio/aac", "clip", None),
+    ],
+    ids=[
+        "extension-in-upper-case",
+        "extension-only-name",
+        "trailing-space",
+        "dotted-name-without-extension",
+        "unsupported-extension-uses-content-type",
+        "content-type-with-parameters",
+        "name-extension-wins-over-content-type",
+        "unsupported-name-and-type",
+        "no-extension-unsupported-type",
+    ],
+)
+def test_the_extension_is_a_supported_media_format_or_absent(
+    env, filename, content_type, expected_name, expected_format
+) -> None:
+    """The extension is taken only from a format Transcribe accepts, from the
+    name first and the content type second; whatever else follows a dot stays
+    part of the name. The same format is stored on the row for Stage 2."""
+    table, _ = env
+    result = invoke(callId="call-abc", filename=filename, contentType=content_type)
+    assert result["uploadKey"] == f"lma-uploads-pending/call-abc/{expected_name}"
+    assert table.item.get("MediaFormat") == expected_format
+    if expected_format is None:
+        assert "MediaFormat" not in table.item
+
+
+@pytest.mark.parametrize(
+    ("content_type", "expected_format"),
+    sorted(index.CONTENT_TYPE_MEDIA_FORMATS.items()),
+)
+def test_every_mapped_content_type_names_a_format_transcribe_accepts(
+    content_type, expected_format
+) -> None:
+    """A mapping to a value Transcribe rejects would turn a valid upload into a
+    failed job, so every target must be one of its MediaFormat values."""
+    assert expected_format in index.SUPPORTED_MEDIA_FORMATS
+    assert index._media_format("recording", content_type) == expected_format
+
+
 # ---------------------------------------------------------------------------
 # callId generation
 # ---------------------------------------------------------------------------
