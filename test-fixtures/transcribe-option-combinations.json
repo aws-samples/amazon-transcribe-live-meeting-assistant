@@ -1,0 +1,107 @@
+{
+  "description": "Amazon Transcribe options of the Transcription section, and why each combination cannot be used: `streaming` for a streaming meeting, `upload` for an Upload Audio recording (a batch job), null when it can be used. Read by lma_config's tests (lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/test_transcribe_options.py) and by the tests of transcribeOptionsProblem in the WebSocket transcriber (lma-websocket-transcriber-stack/source/app/src/config/configuration-store.test.ts), so uploads refuse the same combinations streaming meetings do. An upload does not check the preferred language (batch jobs have none) and needs at least two language options to identify the language.",
+  "cases": [
+    {
+      "name": "a specific language",
+      "options": {"languageCode": "de-DE", "languageOptions": "", "preferredLanguage": "None", "customVocabularyName": "", "customLanguageModelName": ""},
+      "streaming": null,
+      "upload": null
+    },
+    {
+      "name": "a specific language with a custom vocabulary and language model",
+      "options": {"languageCode": "pt-BR", "languageOptions": "", "preferredLanguage": "None", "customVocabularyName": "vocab-1", "customLanguageModelName": "clm-1"},
+      "streaming": null,
+      "upload": null
+    },
+    {
+      "name": "a specific language ignores the language options",
+      "options": {"languageCode": "ja-JP", "languageOptions": "en-US, en-GB", "preferredLanguage": "fr-FR", "customVocabularyName": "", "customLanguageModelName": ""},
+      "streaming": null,
+      "upload": null
+    },
+    {
+      "name": "identification with two languages",
+      "options": {"languageCode": "identify-language", "languageOptions": "ja-JP, es-US", "preferredLanguage": "None", "customVocabularyName": "", "customLanguageModelName": ""},
+      "streaming": null,
+      "upload": null
+    },
+    {
+      "name": "multiple-language identification with three languages",
+      "options": {"languageCode": "identify-multiple-languages", "languageOptions": "en-US,fr-CA,hi-IN", "preferredLanguage": "None", "customVocabularyName": "", "customLanguageModelName": ""},
+      "streaming": null,
+      "upload": null
+    },
+    {
+      "name": "spaces around the language options",
+      "options": {"languageCode": "identify-language", "languageOptions": "  it-IT ,pt-BR  ", "preferredLanguage": "None", "customVocabularyName": "", "customLanguageModelName": ""},
+      "streaming": null,
+      "upload": null
+    },
+    {
+      "name": "an empty preferred language",
+      "options": {"languageCode": "identify-language", "languageOptions": "zh-CN, th-TH", "preferredLanguage": "", "customVocabularyName": "", "customLanguageModelName": ""},
+      "streaming": null,
+      "upload": null
+    },
+    {
+      "name": "a preferred language among the options",
+      "options": {"languageCode": "identify-language", "languageOptions": "en-AU, de-DE", "preferredLanguage": "de-DE", "customVocabularyName": "", "customLanguageModelName": ""},
+      "streaming": null,
+      "upload": null
+    },
+    {
+      "name": "a preferred language that is not an option",
+      "options": {"languageCode": "identify-language", "languageOptions": "en-AU, de-DE", "preferredLanguage": "fr-FR", "customVocabularyName": "", "customLanguageModelName": ""},
+      "streaming": "the preferred language fr-FR is not one of the language options",
+      "upload": null
+    },
+    {
+      "name": "identification with a custom vocabulary",
+      "options": {"languageCode": "identify-language", "languageOptions": "en-US, es-US", "preferredLanguage": "None", "customVocabularyName": "vocab-1", "customLanguageModelName": ""},
+      "streaming": "a custom vocabulary cannot be used with identify-language",
+      "upload": "a custom vocabulary cannot be used with identify-language"
+    },
+    {
+      "name": "multiple-language identification with a custom language model",
+      "options": {"languageCode": "identify-multiple-languages", "languageOptions": "en-US, es-US", "preferredLanguage": "None", "customVocabularyName": "", "customLanguageModelName": "clm-1"},
+      "streaming": "a custom language model cannot be used with identify-multiple-languages",
+      "upload": "a custom language model cannot be used with identify-multiple-languages"
+    },
+    {
+      "name": "a custom vocabulary is named before a custom language model",
+      "options": {"languageCode": "identify-language", "languageOptions": "en-US, es-US", "preferredLanguage": "None", "customVocabularyName": "vocab-1", "customLanguageModelName": "clm-1"},
+      "streaming": "a custom vocabulary cannot be used with identify-language",
+      "upload": "a custom vocabulary cannot be used with identify-language"
+    },
+    {
+      "name": "identification without language options",
+      "options": {"languageCode": "identify-language", "languageOptions": "", "preferredLanguage": "None", "customVocabularyName": "", "customLanguageModelName": ""},
+      "streaming": "identify-language needs language options",
+      "upload": "identify-language needs language options"
+    },
+    {
+      "name": "language options that are only separators",
+      "options": {"languageCode": "identify-multiple-languages", "languageOptions": " , ,", "preferredLanguage": "None", "customVocabularyName": "", "customLanguageModelName": ""},
+      "streaming": "identify-multiple-languages needs language options",
+      "upload": "identify-multiple-languages needs language options"
+    },
+    {
+      "name": "two dialects of one language",
+      "options": {"languageCode": "identify-language", "languageOptions": "en-US, ja-JP, en-GB", "preferredLanguage": "None", "customVocabularyName": "", "customLanguageModelName": ""},
+      "streaming": "the language options name more than one dialect of 'en'",
+      "upload": "the language options name more than one dialect of 'en'"
+    },
+    {
+      "name": "identification with one language option",
+      "options": {"languageCode": "identify-language", "languageOptions": "fr-FR", "preferredLanguage": "None", "customVocabularyName": "", "customLanguageModelName": ""},
+      "streaming": null,
+      "upload": "identify-language needs at least 2 language options for an upload"
+    },
+    {
+      "name": "multiple-language identification with one language option, also preferred",
+      "options": {"languageCode": "identify-multiple-languages", "languageOptions": "it-IT", "preferredLanguage": "it-IT", "customVocabularyName": "", "customLanguageModelName": ""},
+      "streaming": null,
+      "upload": "identify-multiple-languages needs at least 2 language options for an upload"
+    }
+  ]
+}

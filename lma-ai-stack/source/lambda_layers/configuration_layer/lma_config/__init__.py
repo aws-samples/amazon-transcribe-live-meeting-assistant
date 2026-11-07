@@ -122,6 +122,11 @@ from .store import (
     deep_merge,
     full_section,
 )
+from .transcribe_options import (
+    IDENTIFY_MODES,
+    streaming_options_problem,
+    upload_options_problem,
+)
 from .transcript_deletion import (
     SEGMENT_EXPIRY_LIMIT_DAYS,
     SUMMARY_WAIT_MINUTES,
@@ -130,6 +135,7 @@ from .transcript_deletion import (
 
 __all__ = [
     "FULL_COPY",
+    "IDENTIFY_MODES",
     "full_section",
     "ProfileExists",
     "ProfileInUse",
@@ -212,6 +218,8 @@ __all__ = [
     "profile_key",
     "read_setting",
     "shipped_setting_defaults",
+    "streaming_options_problem",
+    "upload_options_problem",
     "register",
     "registered_sections",
     "offered_settings",
