@@ -11,7 +11,10 @@ every MicroVM created from the image:
     Returning 200 is the instant Lambda takes the Firecracker snapshot. So this
     only returns 200 once the ASR server is listening AND a full decode has run
     through it, which puts the model weights and the ONNX arenas in the snapshot.
-    503 asks Lambda to retry.
+    503 asks Lambda to retry. Each request is answered within a few seconds:
+    loading the model can take minutes, so the hook does not hold a request
+    open for it. The warm-up decode runs in the background once the server
+    listens, and a later request is answered 200 when it has finished.
 
 ``/validate``
     Lambda samples which snapshot pages the workload touches here and prefetches
@@ -53,7 +56,9 @@ def speaker_labels_baked() -> bool:
     return SPEAKER_MODEL.is_file() or any(DIARIZER_DIR.glob("*.onnx"))
 
 
-BOOT_TIMEOUT_S = float(os.environ.get("ASR_BOOT_TIMEOUT_S", "540"))
+# How long one /ready request waits for the ASR server to start listening
+# before answering 503 for Lambda to ask again.
+BOOT_TIMEOUT_S = float(os.environ.get("ASR_READY_REQUEST_WAIT_S", "10"))
 EXERCISE_TIMEOUT_S = float(os.environ.get("ASR_EXERCISE_TIMEOUT_S", "180"))
 WARM_TONE_MS = int(os.environ.get("ASR_WARM_TONE_MS", "2000"))
 SAMPLE_RATE = 16000
@@ -158,6 +163,10 @@ class HookDeps:
     sleep: Callable[[float], None] = time.sleep
     now: Callable[[], float] = time.monotonic
     log: Callable[[str], None] = log
+    # Runs the warm-up decode off the request thread.
+    run_in_background: Callable[[Callable[[], None]], None] = lambda work: threading.Thread(
+        target=work, name="asr-warm-up", daemon=True
+    ).start()
 
 
 @dataclass
@@ -176,10 +185,10 @@ class Hooks:
         self._asr: subprocess.Popen | None = None
         self.state = HookState()
         # The hook server answers each request on its own thread, and Lambda
-        # calls /ready again when an answer is slow. One warm-up at a time: a
-        # second request waits for the first and reuses its result, instead of
-        # running a second decode beside it on the same CPUs.
+        # calls /ready again until it gets 200. One warm-up at a time: a request
+        # that arrives while one runs is answered 503 and starts nothing.
         self._warmup = threading.Lock()
+        self._warming = False
 
     def on_ready(self) -> int:
         with self._warmup:
@@ -194,10 +203,20 @@ class Hooks:
         if not self._wait_for_listener():
             self._deps.log("ASR server is not listening yet")
             return 503
-        if not self.state.warm:
+        if not self.state.warm and not self._warming:
+            self._warming = True
+            self._deps.run_in_background(self._warm_up)
+        if self.state.warm:
+            self._deps.log("ready warm=True")
+            return 200
+        self._deps.log("ready: warm-up decode in progress")
+        return 503
+
+    def _warm_up(self) -> None:
+        try:
             self.state.warm = self._deps.exercise()
-        self._deps.log(f"ready warm={self.state.warm}")
-        return 200 if self.state.warm else 503
+        finally:
+            self._warming = False
 
     def on_validate(self) -> int:
         with self._warmup:
