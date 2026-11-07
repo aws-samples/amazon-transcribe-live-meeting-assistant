@@ -295,3 +295,38 @@ def test_only_the_upload_processor_uses_the_key_through_transcribe():
     assert holders == [
         ("TranscribeOutputEncryptionKeyPolicy", [{"Ref": "UploadMeetingProcessorFunctionExecutionRole"}])
     ]
+
+
+def _custom_resource_roles(resources: dict) -> dict[str, str]:
+    """Custom resource name -> the role of the function that serves it."""
+    found: dict[str, str] = {}
+    for name, res in resources.items():
+        if not str(res.get("Type", "")).startswith("Custom::"):
+            continue
+        token = (res.get("Properties") or {}).get("ServiceToken")
+        if not (isinstance(token, dict) and "Fn::GetAtt" in token):
+            continue
+        target = token["Fn::GetAtt"]
+        function = target.split(".")[0] if isinstance(target, str) else target[0]
+        role = (resources.get(function, {}).get("Properties") or {}).get("Role")
+        if isinstance(role, dict) and "Fn::GetAtt" in role:
+            arn = role["Fn::GetAtt"]
+            found[name] = arn.split(".")[0] if isinstance(arn, str) else arn[0]
+    return found
+
+
+def test_custom_resources_wait_for_their_roles_key_policy():
+    resources = _resources(AI_STACK)
+    policies = ("RecordingsBucketEncryptionKeyPolicy", "CallDataStreamEncryptionKeyPolicy")
+    for name, role in _custom_resource_roles(resources).items():
+        depends = resources[name].get("DependsOn") or []
+        depends = {depends} if isinstance(depends, str) else set(depends)
+        for policy in policies:
+            if role in _attached_roles(policy):
+                assert policy in depends, f"{name} must DependsOn {policy}"
+
+
+def test_quicksight_manifest_custom_resource_is_checked():
+    assert _custom_resource_roles(_resources(AI_STACK))["UploadQuickSightManifest"] == (
+        "UploadManifestLambdaRole"
+    )
