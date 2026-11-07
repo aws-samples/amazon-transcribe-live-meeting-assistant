@@ -182,8 +182,13 @@ export const MEET_IN_PAGE_SELECTORS = {
     chatMessage: '[data-message-id]',
     /**
      * The block that groups a run of messages from one sender under a header
-     * with their name and the time. ASSUMPTION (verify live): marked with
-     * `data-sender-id`. When it does not match, messages are read with no sender.
+     * with their name and the time. Checked live (2026-11-07): Meet marks it
+     * with no attribute at all. The header ("Conference Room 4" and "11:02 PM",
+     * or only the time on the reader's own messages) is plain text two levels
+     * above each `data-message-id`, beside the element holding the run of
+     * messages. So the group is found by walking up from the message to the
+     * first ancestor with text outside every message (readMeetChatInPage); this
+     * selector is kept for a page that does mark its groups.
      */
     chatGroup: '[data-sender-id]',
     /**
@@ -396,6 +401,75 @@ export function cleanMeetParticipantName(raw: string | null | undefined): string
  * It must hold exactly one time: a text with two is more than one group, and
  * taking the first name from it would credit one person's message to another.
  */
+/** How far above a chat message its group's header is looked for (it was two levels up, live). */
+export const MEET_CHAT_HEADER_MAX_LEVELS = 4;
+
+/** One chat message as read from the page, before its header is interpreted. */
+export interface MeetChatRaw {
+    header: string | null;
+    text: string;
+    id: string | null;
+    links: string[];
+}
+
+/**
+ * Reads the chat messages not read before, in the page (passed whole to
+ * page.evaluate, so it must not use anything outside its own body).
+ *
+ * Each message's header is the text of its group outside every message: the
+ * group is the element `sels.group` matches when the page marks it, and
+ * otherwise the nearest ancestor, at most `maxLevels` up, that has any such
+ * text. A walk that climbs past one group reaches text with more than one time
+ * in it, which senderFromMeetGroupHeader refuses, so a message is never
+ * credited to a neighbouring group's sender.
+ */
+export function readMeetChatInPage(sels: { message: string; group: string; maxLevels: number }): MeetChatRaw[] {
+    const w = window as any;
+    const seen: Set<string> = (w.__lmaMeetSeen ||= new Set<string>());
+    const isMessage = (el: Element | null): boolean => !!el && el.matches(sels.message);
+    const textOutsideMessages = (root: Node): string => {
+        const parts: string[] = [];
+        const walk = (n: Node): void => {
+            if (n.nodeType === 3) {
+                const piece = (n.textContent || '').trim();
+                if (piece) parts.push(piece);
+                return;
+            }
+            if (n.nodeType === 1 && isMessage(n as Element)) return;
+            for (const c of Array.from(n.childNodes)) walk(c);
+        };
+        walk(root);
+        return parts.join(' ');
+    };
+    const out: MeetChatRaw[] = [];
+    for (const node of Array.from(document.querySelectorAll(sels.message))) {
+        // A message nested in another (a reply or quote) is read as part of it.
+        if (node.parentElement?.closest(sels.message)) continue;
+        const text = ((node as HTMLElement).innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
+        // Not marked seen until it has text, so a row filled in by a later
+        // render is read once it is complete.
+        if (!text || text.length > 2000) continue;
+        const key = node.getAttribute('data-message-id') || `text:${text}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        let header: string | null = null;
+        const marked = node.closest(sels.group);
+        if (marked) {
+            header = textOutsideMessages(marked) || null;
+        } else {
+            let up: Element | null = node.parentElement;
+            for (let level = 0; up && level < sels.maxLevels && !header; level += 1, up = up.parentElement) {
+                header = textOutsideMessages(up) || null;
+            }
+        }
+        const links = Array.from(node.querySelectorAll('a[href]'))
+            .map((a) => (a as HTMLAnchorElement).href)
+            .filter(Boolean);
+        out.push({ header, text, id: node.getAttribute('data-message-id'), links });
+    }
+    return out;
+}
+
 export function senderFromMeetGroupHeader(header: string | null | undefined): string | null {
     const text = (header || '').replace(/\s+/g, ' ').trim();
     if (!text) return null;
