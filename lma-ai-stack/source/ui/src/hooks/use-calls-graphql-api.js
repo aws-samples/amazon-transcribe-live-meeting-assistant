@@ -38,10 +38,33 @@ const client = generateClient();
  * AppSync reports that as errorType "ExecutionTimeout" with the message
  * "Execution timed out."; both are checked, since the type is not always set.
  */
+export const isRequestTimeout = (error) =>
+  (error?.errors || []).some((e) => /timeout/i.test(e?.errorType || '') || /timed out/i.test(e?.message || ''));
+
 /**
  * A meeting as it reads after an update: the update's fields, with the ones only
  * getCall selects (and the list keys) kept from what the page already holds when
  * the update leaves them out.
+ *
+ * An incoming call object replaces the stored one, so a field that the query or
+ * subscription which produced it did not select would otherwise be dropped from
+ * state. ListPK/ListSK come only from the list query, and SpeakerIdentities is
+ * deliberately left out of the list query (it would ship a name map for every
+ * meeting in the range when only the open one needs it), so a list refresh
+ * would otherwise blank the names on the meeting being viewed. The transcript
+ * deletion fields and the capture context are selected only by getCall.
+ *
+ * CallSummaryState is kept for a different reason: the Kinesis pipeline's Call
+ * mutations are published to onUpdateCall too, and they select their own fixed
+ * field list, so a status or aggregation update arriving during a live meeting
+ * would otherwise blank it -- making a hand-edited summary read as generated and
+ * hiding a regeneration in flight.
+ *
+ * The agenda is kept for the same reason, as one unit keyed on AgendaUpdatedAt:
+ * every agenda write sets that timestamp, so an incoming call without one came
+ * from a mutation that did not select the agenda, while one with it is
+ * authoritative for all four fields -- including an agenda that was cleared,
+ * which a per-field `||` would resurrect.
  */
 export const mergeCallUpdate = (existing, call) => ({
   ...call,
@@ -49,7 +72,8 @@ export const mergeCallUpdate = (existing, call) => ({
   ListSK: call.ListSK || existing?.ListSK,
   SpeakerIdentities: call.SpeakerIdentities || existing?.SpeakerIdentities,
   CallSummaryState: call.CallSummaryState || existing?.CallSummaryState,
-  // Only getCall selects these, so every other update carries them.
+  // Only getCall selects these, so they are kept from the existing object when
+  // any other update leaves them out.
   TranscriptDeletionScheduledFor: call.TranscriptDeletionScheduledFor || existing?.TranscriptDeletionScheduledFor,
   TranscriptDeletedAt: call.TranscriptDeletedAt || existing?.TranscriptDeletedAt,
   TranscriptSegmentsDeleted: call.TranscriptSegmentsDeleted ?? existing?.TranscriptSegmentsDeleted,
@@ -69,9 +93,6 @@ export const mergeCallUpdate = (existing, call) => ({
         AgendaUpdatedAt: existing?.AgendaUpdatedAt,
       }),
 });
-
-export const isRequestTimeout = (error) =>
-  (error?.errors || []).some((e) => /timeout/i.test(e?.errorType || '') || /timed out/i.test(e?.message || ''));
 
 /**
  * Every stored segment of a meeting. A long meeting's segments span several
@@ -179,27 +200,8 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
   };
 
   /**
-   * Replace calls in state with freshly fetched ones.
-   *
-   * An incoming call object REPLACES the stored one, so a field that the query or
-   * subscription which produced it did not select would be dropped from state.
-   * The fields listed here are carried over from the existing object for that
-   * reason: ListPK/ListSK come only from the list query, and SpeakerIdentities is
-   * deliberately left out of the list query (it would ship a name map for every
-   * meeting in the range when only the open one needs it), so a list refresh
-   * would otherwise blank the names on the meeting being viewed.
-   *
-   * CallSummaryState is carried over for a different reason: the Kinesis
-   * pipeline's Call mutations are published to onUpdateCall too, and they select
-   * their own fixed field list, so a status or aggregation update arriving
-   * during a live meeting would otherwise blank it -- making a hand-edited
-   * summary read as generated and hiding a regeneration in flight.
-   *
-   * The agenda is carried over for the same reason, as one unit keyed on
-   * AgendaUpdatedAt: every agenda write sets that timestamp, so an incoming call
-   * without one came from a mutation that did not select the agenda, while one
-   * with it is authoritative for all four fields -- including an agenda that
-   * was cleared, which a per-field `||` would resurrect.
+   * Replace calls in state with freshly fetched ones, keeping the fields an
+   * update did not select; see mergeCallUpdate for which and why.
    */
   const setCallsDeduped = (callValues) => {
     setCalls((currentCalls) => {

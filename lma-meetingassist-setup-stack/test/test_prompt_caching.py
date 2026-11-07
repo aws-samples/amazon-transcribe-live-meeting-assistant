@@ -178,6 +178,7 @@ def _request(model_id: str, tool_result: bool):
         reason="strands-agents is not installed (make setup-cli-dev installs the pinned version)",
     )
     import boto3  # pylint: disable=import-outside-toplevel
+    import strands  # pylint: disable=import-outside-toplevel
 
     kwargs, system = assistant.prompt_cache_plan(model_id, PROMPT)
     model_kwargs = {"model_id": model_id, "boto_session": boto3.Session(region_name="us-east-1")}
@@ -201,8 +202,13 @@ def _request(model_id: str, tool_result: bool):
         "description": "Look something up.",
         "inputSchema": {"json": {"type": "object", "properties": {}}},
     }
-    system_blocks = system if isinstance(system, list) else [{"text": system}]
-    return model.format_request(messages, tool_specs=[spec], system_prompt_content=system_blocks)
+    # The system prompt goes through Agent(system_prompt=...) as it does in the
+    # handler, so the test also covers the pinned SDK accepting a list of
+    # system blocks and keeping the cache point in them.
+    agent = strands.Agent(model=model, system_prompt=system, callback_handler=None)
+    return model.format_request(
+        messages, tool_specs=[spec], system_prompt_content=agent.system_prompt_content
+    )
 
 
 def _has_cache_point(blocks) -> bool:

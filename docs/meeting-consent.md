@@ -113,7 +113,12 @@ retention and privacy ones: **Internal meetings – notify participants** sets
 Notify, and **Regulated – consent required, transcript not retained** sets
 Opt-in with the each-participant rule, a stricter choice only per meeting,
 clients without a consent step refused and the Virtual Participant leaving
-after an objection. **Standard** puts back the shipped defaults. Apply one from
+after an objection. Under Regulated, Stream Audio and the Desktop Capture App
+still meet opt-in with the owner's attestation, and a Virtual Participant on the
+Teams browser, Webex or Google Meet join never meets the each-participant rule
+and cannot move to owner-attests, so its meeting is not transcribed (see
+[What each platform supports](#what-each-platform-supports)). **Standard** puts
+back the shipped defaults. Apply one from
 the editor's **Actions ▸ Apply a preset…**, or choose one at deploy time with
 the `ConfigurationPreset` stack parameter; see
 [Configuration presets](configuration-guide.md#configuration-presets).

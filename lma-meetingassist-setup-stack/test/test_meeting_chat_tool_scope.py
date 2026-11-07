@@ -132,7 +132,6 @@ def built(monkeypatch):
         return {
             "tools": {tool.__name__ for tool in agent["tools"] or []},
             "system_prompt": agent["system_prompt"],
-            "model": agent["model"],
         }
 
     return run

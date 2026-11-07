@@ -8,3 +8,11 @@ ignore = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+# Present, even empty, so that every pytest version treats this file as the
+# configuration file for the tests under lma-ai-stack/: it makes this directory
+# the rootdir for the Lambda suites `make test-lambdas` runs from their own
+# directories, so lma-ai-stack/conftest.py (the guard that keeps unit tests off
+# AWS) is loaded for them. Before pytest 8.1 a pyproject.toml without this table
+# is not a configuration file at all.
+[tool.pytest.ini_options]

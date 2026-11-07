@@ -61,8 +61,8 @@ MODEL_SETTINGS = (
 )
 
 #: The models the Configuration page's cases cover: the shipped defaults, and one
-#: of each other shape (a global Nova profile, a Nova profile only the US has, a us. Claude profile, a
-#: plain Nova id, a Claude model only some geographies offer).
+#: of each other shape (a global Nova profile, a us. Claude profile, a plain Nova
+#: id, a Claude model only some geographies offer).
 CASE_MODELS = (
     "global.anthropic.claude-sonnet-5-5",
     "global.anthropic.claude-haiku-4-5-20251001-v1:0",

@@ -493,8 +493,10 @@ may fail.
 
 A feature that cannot read the setting from the configuration table (for example
 because the table read is throttled or denied) also reports an error rather than
-running as **Global**. Only a deployment with no configuration table, or one where
-the setting has never been saved, runs as **Global**.
+running as **Global**, and the call is not made. This includes deployments that
+have never changed the setting: the read fails before the feature knows what the
+setting holds. A deployment with no configuration table, or one whose table is
+read successfully and has never had the setting saved, runs as **Global**.
 
 Which ids exist is read from a catalogue shipped with LMA
 (`lma_config/bedrock_inference_catalog.json`), built from the Amazon Bedrock

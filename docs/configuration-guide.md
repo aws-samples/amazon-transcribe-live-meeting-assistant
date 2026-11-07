@@ -385,6 +385,16 @@ change it.
 | Amazon Transcribe › Redact personal information | Off | Off | On |
 | Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment |
 
+Under the Regulated preset nothing is recorded or transcribed until consent is
+given, but consent is not each participant's own reply on every capture path.
+From Stream Audio and the Desktop Capture App, it is the meeting owner's
+attestation that everyone agreed. A Virtual Participant on a join that cannot
+match consent replies to participants (Teams in the browser, Webex and Google
+Meet) never meets the each-participant rule, and with a different choice per
+meeting turned off the meeting cannot move to the less strict owner-attests
+rule, so such a meeting is not transcribed. See
+[What each platform supports](meeting-consent.md#what-each-platform-supports).
+
 Standard holds the shipped defaults, so applying it in the editor puts these
 settings back after another preset changed them. The layer's tests
 hold each preset to exactly the values in this table.
