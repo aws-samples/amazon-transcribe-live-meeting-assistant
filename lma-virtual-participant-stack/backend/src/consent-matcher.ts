@@ -120,6 +120,25 @@ export function classifyChatReply(
     return null;
 }
 
+/**
+ * `consent`, `objection` or null for one final utterance heard in the meeting,
+ * read exactly as a chat message is (classifyChatReply): the whole utterance
+ * must be the reply.
+ *
+ * The one difference is the addressee: speech recognition often writes "LMA"
+ * as its letters ("L M A", "L.M.A."), so a run of those three single letters
+ * is read as "LMA" before matching.
+ */
+export function classifySpokenReply(
+    utterance: string,
+    consentPhrases: readonly string[],
+    objectionPhrases: readonly string[],
+): ConsentDecision | null {
+    if (!utterance) return null;
+    const spelled = utterance.replace(/(^|[^\p{L}\p{N}])l[\s.]*m[\s.]*a(?=$|[^\p{L}\p{N}])/giu, '$1LMA');
+    return classifyChatReply(spelled, consentPhrases, objectionPhrases);
+}
+
 /** A display name as replies are matched to participants by (lma_consent.normalize_name). */
 export function normalizeParticipantName(name: string | null | undefined): string {
     if (typeof name !== 'string') return '';

@@ -14,6 +14,7 @@ import { test } from 'node:test';
 import {
     atLeastAsStrict,
     classifyChatReply,
+    classifySpokenReply,
     noticeChatMessages,
     normalizeReplyText,
     renderNotice,
@@ -25,6 +26,23 @@ import { DEFAULT_CONSENT_SETTINGS } from './meeting-consent.js';
 const CONSENT = DEFAULT_CONSENT_SETTINGS.consentPhrases;
 const OBJECTION = DEFAULT_CONSENT_SETTINGS.objectionPhrases;
 const classify = (message: string) => classifyChatReply(message, CONSENT, OBJECTION);
+const classifySpoken = (utterance: string) => classifySpokenReply(utterance, CONSENT, OBJECTION);
+
+test('a spoken reply is read as a chat message is: the whole utterance must be the reply', () => {
+    assert.equal(classifySpoken('I consent.'), 'consent');
+    assert.equal(classifySpoken('Stop recording!'), 'objection');
+    assert.equal(classifySpoken('I do not consent.'), 'objection', 'objections first');
+    assert.equal(classifySpoken('I agree with what Bo said about the roadmap.'), null);
+    assert.equal(classifySpoken('Can we record the demo again later?'), null);
+});
+
+test('LMA spelled out by speech recognition is read as the LMA addressee', () => {
+    assert.equal(classifySpoken('L M A consent.'), 'consent');
+    assert.equal(classifySpoken('L.M.A. no consent'), 'objection');
+    assert.equal(classifySpoken('LMA, please stop recording now.'), 'objection');
+    assert.equal(classifySpoken('Elma consent'), null, 'only the three letters');
+    assert.equal(classifySpoken('Film a consent'), null);
+});
 
 test('a configured consent phrase is consent as the whole message, in any case and punctuation', () => {
     for (const message of ['I consent', 'i consent!', '  I CONSENT. ', 'I agree', 'I accept', 'LMA, I consent', '@LMA I agree', 'I consent LMA']) {

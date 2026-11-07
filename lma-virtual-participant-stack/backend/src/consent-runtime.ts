@@ -20,7 +20,8 @@ import { ConfigurationStore, declareSection } from './configuration-store.js';
 import { createConsentApi, signedGraphqlSender } from './consent-api.js';
 import { captureMeetingPanels, EvidencePanels } from './consent-evidence.js';
 import { MeetingConsentFlow, VpConsentChoice } from './meeting-consent.js';
-import { transcriptionService } from './scribe.js';
+import { rosterLagSeconds, transcriptionService } from './scribe.js';
+import { ConsentListener } from './consent-listener.js';
 import { videoRecorder } from './video-recorder.js';
 import { kinesisStreamManager } from './kinesis-stream.js';
 import { createStatusManager } from './status-manager.js';
@@ -50,11 +51,27 @@ const VP_CHOICE_READ_TIMEOUT_MS = 5_000;
 
 const s3 = new S3Client({ region: REGION });
 
+/**
+ * Listens for spoken consent replies while the flow withholds capture, on the
+ * meeting's transcription engine (consent-listener.ts). What it hears goes to
+ * the flow only.
+ */
+const consentListener = new ConsentListener({
+    engines: transcriptionService.consentListenerEngines(),
+    ownIdentities: [details.lmaIdentity, details.scribeIdentity, details.scribeName],
+    lagSeconds: () => rosterLagSeconds(),
+    currentSpeaker: () => transcriptionService.participantSpeaker,
+});
+
 export const meetingConsent = new MeetingConsentFlow({
     capture: {
         isOn: () => details.start,
         hold: () => {
             details.start = false;
+        },
+        listen: (on) => {
+            if (on) consentListener.start();
+            else void consentListener.stop();
         },
         release: () => {
             details.start = true;

@@ -557,12 +557,11 @@ export default class GoogleMeet {
         }
         // Read with its address reduced to "LMA".
         const message = route.text;
-        // The consent flow gets no sender on Meet. The sender reading has not
-        // been confirmed against a live meeting, and a consent recorded for the
-        // wrong person is worse than one not recorded: so, as on the Teams
-        // browser join, a consent reply cannot be attributed (objections still
-        // stop capture), and `sendersHidden` below says so.
-        if (await meetingConsent.handleChat(null, message)) return;
+        // A consent reply, or "LMA start" while consent is withheld, under the
+        // sender read from the message's group header, as on Zoom and Chime. A
+        // header that spans two groups gives no sender, and a consent reply
+        // without one is not recorded (senderFromMeetGroupHeader).
+        if (await meetingConsent.handleChat(sender, message)) return;
         const assistantToggle = parseAssistantChatCommand(message);
         const chatQuestion = assistantToggle ? null : parseChatQuestion(message);
         // Not a branch of the chain below, so the question is still recorded as
@@ -1328,8 +1327,6 @@ export default class GoogleMeet {
         // is reopened after the screenshot of it.
         attachMeetingConsent(page, {
             send: (messages) => this.sendMessages(page, messages),
-            // See handleIncomingMessage: consent replies are read without a sender.
-            sendersHidden: true,
             panels: toolbarPanels(page, {
                 listVisible: [...MEET_SELECTORS.peopleList],
                 open: [...MEET_SELECTORS.peopleButton],
