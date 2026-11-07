@@ -507,8 +507,9 @@ EnableMicrovmAsr parameter is true. Not used by the default Amazon Transcribe pa
 The on-demand ASR MicroVM image downloads the models named by the selected bundle in
 lma-asr-microvm-stack/source/catalog.json from their published source and verifies
 each against a pinned SHA256. The weights are baked into that image inside the
-deploying AWS account; this project distributes no model weights. Each model's own
-license file is copied into the image next to its weights, and the deployed bundle's
+deploying AWS account; this project distributes no model weights. Where a model's
+download ships its own license file, that file is copied into the image next to its
+weights, and the deployed bundle's
 licences are reported in the ASR stack's AsrLicenceSummary and AsrRedistributable
 outputs. The default bundle and every bundle the catalog marks redistributable are
 permissively licensed. One bundle (nemotron-titanet-small) carries weights under the
@@ -534,7 +535,10 @@ Speech recognition:
     https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b
 
   * NVIDIA Parakeet TDT 0.6B v3 and v2 (offline; v2 in parakeet-tdt-v2-titanet-small, v3 in
-    every other bundle whose id starts with parakeet-tdt-v3)
+    every other bundle whose id starts with parakeet-tdt-v3). The int8 ONNX exports are
+    the sherpa-onnx project's, fetched at a fixed commit from
+    https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8 and
+    https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.
     CC-BY-4.0
     https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
     https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2
