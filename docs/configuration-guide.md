@@ -385,10 +385,10 @@ change it.
 | Amazon Transcribe › Redact personal information | Off | Off | On |
 | Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment |
 
-Under the Regulated preset nothing is recorded or transcribed until consent is
-given, but consent is not each participant's own reply on every capture path.
-From Stream Audio and the Desktop Capture App, it is the meeting owner's
-attestation that everyone agreed. A Virtual Participant on a join that cannot
+Under the Regulated preset nothing is recorded or transcribed until each
+participant consents. Stream Audio and the Desktop Capture App cannot collect
+each participant's consent, so Start is refused from them; use a Virtual
+Participant on a join that supports each-participant consent. A Virtual Participant on a join that cannot
 match consent replies to participants (Teams in the browser, Webex and Google
 Meet) never meets the each-participant rule, and with a different choice per
 meeting turned off the meeting cannot move to the less strict owner-attests
