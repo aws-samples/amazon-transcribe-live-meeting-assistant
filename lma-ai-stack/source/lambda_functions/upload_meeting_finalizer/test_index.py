@@ -1171,3 +1171,118 @@ def test_the_identified_language_is_read_from_the_job(job, expected) -> None:
 
 def test_the_identify_modes_are_the_ones_stage_one_records() -> None:
     assert set(index.IDENTIFY_MODES) == set(initiator.IDENTIFY_MODES)
+
+
+class _StartedJobs:
+    """Stage 2's Transcribe client: keeps the StartTranscriptionJob parameters."""
+
+    def __init__(self) -> None:
+        self.params: dict = {}
+
+    def start_transcription_job(self, **params):
+        self.params = params
+        return {}
+
+
+@pytest.mark.parametrize(
+    ("settings", "parameter", "identified", "language"),
+    [
+        (
+            {"languageCode": "identify-language", "languageOptions": "pt-BR, it-IT"},
+            "IdentifyLanguage",
+            {"LanguageCode": "it-IT", "IdentifiedLanguageScore": 0.98},
+            "it-IT",
+        ),
+        (
+            {"languageCode": "identify-multiple-languages", "languageOptions": "fr-FR,en-AU,hi-IN"},
+            "IdentifyMultipleLanguages",
+            {
+                "LanguageCodes": [
+                    {"LanguageCode": "hi-IN", "DurationInSeconds": 12.0},
+                    {"LanguageCode": "fr-FR", "DurationInSeconds": 40.5},
+                ]
+            },
+            "fr-FR, hi-IN",
+        ),
+    ],
+    ids=["identify", "identify-multiple"],
+)
+def test_language_identification_carries_from_the_settings_to_the_meeting(
+    monkeypatch, settings, parameter, identified, language
+) -> None:
+    """All three stages, with only the AWS clients faked: the identify mode Stage 1
+    reads from the Configuration page is the job Stage 2 starts, and the language
+    that job identifies is the one this stage gives the meeting."""
+    # Stage 1: the Configuration page's settings, read when the upload starts.
+    written: list[dict] = []
+    monkeypatch.setattr(
+        initiator,
+        "job_table",
+        SimpleNamespace(put_item=lambda Item, ConditionExpression=None: written.append(Item)),  # noqa: N803
+    )
+    monkeypatch.setattr(
+        initiator,
+        "s3_client",
+        SimpleNamespace(generate_presigned_url=lambda *a, **k: "https://example.invalid/presigned"),
+    )
+    monkeypatch.setattr(
+        initiator, "_STORE", SimpleNamespace(get_section=lambda _: SimpleNamespace(values=settings))
+    )
+    created = initiator.lambda_handler(
+        {
+            "info": {"fieldName": "createUploadMeeting"},
+            "identity": {"username": "dana@example.com", "groups": []},
+            "arguments": {
+                "input": {
+                    "meetingTopic": "Roadmap",
+                    "localSpeakerName": "dana@example.com",
+                    "filename": "roadmap.mp3",
+                    "contentType": "audio/mpeg",
+                    "enableDiarization": True,
+                    "maxSpeakers": 3,
+                }
+            },
+        },
+        None,
+    )
+    row = written[0]
+    call_id = created["callId"]
+    assert created["transcriptionLanguage"] == settings["languageCode"]
+
+    # Stage 2: the file lands and the job starts.
+    stage_two_stream = FakeKinesis()
+    started = _StartedJobs()
+    monkeypatch.setattr(processor, "job_table", FakeTable(row))
+    monkeypatch.setattr(processor, "kinesis_client", stage_two_stream)
+    monkeypatch.setattr(processor, "transcribe_client", started)
+    processor.lambda_handler(
+        {
+            "Records": [
+                {
+                    "s3": {
+                        "bucket": {"name": BUCKET},
+                        "object": {"key": created["uploadKey"], "size": 1024},
+                    }
+                }
+            ]
+        },
+        None,
+    )
+    assert started.params[parameter] is True
+    assert started.params["LanguageOptions"] == row["LanguageOptions"]
+    assert "LanguageCode" not in started.params
+    assert started.params["Settings"]["ShowSpeakerLabels"] is True
+    assert stage_two_stream.only("START")["TranscriptionLanguage"] == settings["languageCode"]
+
+    # Stage 3: the job completes, reporting what it identified.
+    harness = Harness(monkeypatch, row)
+    harness.transcribe.job = {**started.params, **identified}
+    harness.run(eventbridge_event(name=call_id))
+    update = harness.kinesis.only("UPDATE_CAPTURE_CONTEXT")
+    assert update == {
+        "EventType": "UPDATE_CAPTURE_CONTEXT",
+        "CallId": call_id,
+        "TranscriptionLanguage": language,
+    }
+    types = harness.kinesis.event_types
+    assert types.index("UPDATE_CAPTURE_CONTEXT") < types.index("END")
