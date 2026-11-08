@@ -744,9 +744,9 @@ def test_presigned_urls_are_signed_with_sigv4(env) -> None:
         ({"maxSpeakers": 31}, "maxSpeakers must be between 2 and 30"),
         ({"maxSpeakers": "many"}, "maxSpeakers must be an integer"),
         ({"meetingDateTime": "last tuesday"}, "ISO-8601"),
-        ({"languageCode": "e"}, "BCP-47"),
-        ({"languageCode": "en_US"}, "BCP-47"),
-        ({"languageCode": "english!"}, "BCP-47"),
+        ({"languageCode": "e"}, "is not a language Amazon Transcribe can transcribe"),
+        ({"languageCode": "en_US"}, "is not a language Amazon Transcribe can transcribe"),
+        ({"languageCode": "english!"}, "is not a language Amazon Transcribe can transcribe"),
     ],
 )
 def test_malformed_input_is_rejected_before_anything_is_written(env, overrides, message) -> None:
@@ -993,3 +993,52 @@ def test_without_a_configuration_table_the_shipped_defaults_apply(env, monkeypat
     monkeypatch.delenv("CONFIGURATION_TABLE_NAME", raising=False)
     assert invoke()["transcriptionLanguage"] == "en-US"
     assert table.item["LanguageCode"] == "en-US"
+
+
+# ---------------------------------------------------------------------------
+# A requested languageCode: one Amazon Transcribe batch jobs accept
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "language_code",
+    ["zz-ZZ", "en-us", "xx", "identify-language", "en-US, es-US"],
+    ids=["unknown", "wrong-case", "no-region", "identify-mode", "list"],
+)
+def test_a_language_transcribe_does_not_accept_is_refused_before_any_url(
+    env, monkeypatch, language_code
+) -> None:
+    """StartTranscriptionJob would refuse it after the file is uploaded, and the
+    meeting would never end; it is refused before a row or a URL exists."""
+    table, s3_client = env
+    store = configure(monkeypatch, languageCode="ja-JP")
+    with pytest.raises(index.ValidationError, match="is not a language Amazon Transcribe"):
+        invoke(languageCode=language_code)
+    assert table.calls == []
+    assert s3_client.calls == []
+    assert store.reads == 0
+
+
+@pytest.mark.parametrize("language_code", ["nl-NL", "ar-SA", "sv-SE"])
+def test_a_batch_language_the_configuration_page_does_not_offer_is_accepted(
+    env, language_code
+) -> None:
+    """API callers may name any language batch transcription supports, not only the
+    streaming languages the Configuration page lists."""
+    table, _ = env
+    assert invoke(languageCode=language_code)["transcriptionLanguage"] == language_code
+    assert table.item["LanguageCode"] == language_code
+    assert table.item["LanguageSource"] == "REQUEST"
+
+
+def test_every_language_the_configuration_page_offers_is_a_batch_language() -> None:
+    """Otherwise a setting the page accepts would start a job Transcribe refuses."""
+    assert set(SPECIFIC_LANGUAGES) <= index.BATCH_LANGUAGE_CODES
+
+
+def test_the_accepted_languages_come_from_the_transcribe_service_model() -> None:
+    import botocore.session
+
+    model = botocore.session.get_session().get_service_model("transcribe")
+    assert index.BATCH_LANGUAGE_CODES == frozenset(model.shape_for("LanguageCode").enum)
+    assert len(index.BATCH_LANGUAGE_CODES) > len(SPECIFIC_LANGUAGES)

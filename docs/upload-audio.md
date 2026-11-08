@@ -139,8 +139,10 @@ Amazon Transcribe identified; with `identify-multiple-languages`, every
 language found, the most-spoken first.
 
 A client of the `createUploadMeeting` GraphQL mutation can set `languageCode`
-to a language code such as `de-DE`. That language is used, and the
-Configuration page's settings are neither read nor checked. The response's
+to a language code such as `de-DE`: any language Amazon Transcribe batch
+transcription supports, including ones the Configuration page does not offer.
+A code it does not support is refused when the upload starts. That language is
+used, and the Configuration page's settings are neither read nor checked. The response's
 `transcriptionLanguage` is the applied language: a language code, or
 `identify-language` / `identify-multiple-languages`.
 

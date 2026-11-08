@@ -34,6 +34,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import boto3
+import botocore.session
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from lma_config import (  # configuration layer
@@ -93,6 +94,14 @@ CONTENT_TYPE_MEDIA_FORMATS = {
     "audio/webm": "webm",
     "video/webm": "webm",
 }
+
+# The languages a batch transcription job accepts as LanguageCode: the enum in
+# the Amazon Transcribe service model of the botocore this function runs with.
+# A languageCode outside it would be refused by StartTranscriptionJob after the
+# file is uploaded, so it is refused here instead.
+BATCH_LANGUAGE_CODES = frozenset(
+    botocore.session.get_session().get_service_model("transcribe").shape_for("LanguageCode").enum
+)
 
 # ---------------------------------------------------------------------------
 # Logging / clients
@@ -343,8 +352,11 @@ def _parse_and_validate_input(arguments: dict) -> dict:
             raise ValidationError("meetingDateTime must be an ISO-8601 timestamp") from err
 
     language_code = (raw.get("languageCode") or "").strip() or None
-    if language_code and not re.match(r"^[a-zA-Z]{2,3}(-[a-zA-Z0-9]+)*$", language_code):
-        raise ValidationError("languageCode must look like a BCP-47 tag (e.g. en-US)")
+    if language_code and language_code not in BATCH_LANGUAGE_CODES:
+        raise ValidationError(
+            f"languageCode {language_code[:20]!r} is not a language Amazon Transcribe can "
+            "transcribe a recording in (for example en-US)"
+        )
 
     caller_supplied_call_id = (raw.get("callId") or "").strip() or None
     if caller_supplied_call_id and not re.match(
