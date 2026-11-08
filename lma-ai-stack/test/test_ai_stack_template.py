@@ -648,6 +648,19 @@ def test_configuration_readers_are_ordered_behind_the_seeder(resources: dict):
     assert len(readers) >= 2, f"only found {len(readers)} functions reading the config table"
 
 
+def test_the_web_ui_is_built_after_the_graphql_schema(resources: dict):
+    """The UI's queries name fields the schema in the same update adds, and AppSync
+    refuses a query that names a field its schema lacks. Ordering the UI build
+    behind the schema keeps an update from serving a page whose queries fail."""
+    assert resources["AppSyncSchema"]["Type"] == "AWS::AppSync::GraphQLSchema"
+    assert "Condition" not in resources["AppSyncSchema"]
+    build = resources["CodeBuildRun"]
+    assert build["Properties"]["BuildProjectName"] == {"Ref": "LMAUICodeBuildProject"}
+    declared = build.get("DependsOn")
+    declared = [declared] if isinstance(declared, str) else (declared or [])
+    assert "AppSyncSchema" in declared
+
+
 def test_the_upload_initiator_can_read_the_transcription_section(resources: dict):
     """An upload follows the Configuration page's Amazon Transcribe language, read
     by the initiator when the upload starts. Without the table name the function

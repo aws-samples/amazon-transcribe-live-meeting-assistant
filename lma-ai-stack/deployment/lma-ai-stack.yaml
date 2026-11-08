@@ -2214,6 +2214,11 @@ Resources:
 
   CodeBuildRun:
     Type: Custom::CodeBuildRun
+    # The web UI's GraphQL documents ask for the fields the new schema adds,
+    # which AppSync refuses until that schema is in place; building the UI only
+    # after the schema keeps an update from serving a page whose queries fail.
+    DependsOn:
+      - AppSyncSchema
     Properties:
       ServiceToken: !GetAtt LambdaCodeBuildStartBuild.Arn
       BuildProjectName: !Ref LMAUICodeBuildProject
