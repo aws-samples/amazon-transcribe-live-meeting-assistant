@@ -63,7 +63,7 @@ import { ConsentRoster, UNIDENTIFIED_PARTICIPANT, onParticipantSeen } from './co
 import type { ConsentApi, ConsentRecord, RecordEventInput, ReplySource } from './consent-api.js';
 import { ConsentApiError } from './consent-api.js';
 import { consentEvidenceKey, EvidenceShot } from './consent-evidence.js';
-import { CONSENT_HELP_LINE, setConsentHelpActive } from './consent-help.js';
+import { CONSENT_HELP_LINE, CONSENT_HELP_SPOKEN_LINE, setConsentHelpActive } from './consent-help.js';
 import { onSpokenUtterance } from './spoken-replies.js';
 import { createLogger } from './logger.js';
 
@@ -80,6 +80,8 @@ export interface ConsentSettings {
     objectionPhrases: string[];
     allowPerMeetingOverride: boolean;
     leaveOnObjection: boolean;
+    /** Whether replies said aloud are read too (docs/meeting-consent.md, "Spoken replies"). */
+    readSpokenReplies: boolean;
 }
 
 /**
@@ -109,6 +111,7 @@ export const DEFAULT_CONSENT_SETTINGS: ConsentSettings = {
     ],
     allowPerMeetingOverride: true,
     leaveOnObjection: false,
+    readSpokenReplies: true,
 };
 
 /**
@@ -134,6 +137,8 @@ export function effectiveConsentSettings(values: Record<string, unknown> | null 
         allowPerMeetingOverride:
             typeof v.allowPerMeetingOverride === 'boolean' ? v.allowPerMeetingOverride : DEFAULT_CONSENT_SETTINGS.allowPerMeetingOverride,
         leaveOnObjection: typeof v.leaveOnObjection === 'boolean' ? v.leaveOnObjection : DEFAULT_CONSENT_SETTINGS.leaveOnObjection,
+        readSpokenReplies:
+            typeof v.readSpokenReplies === 'boolean' ? v.readSpokenReplies : DEFAULT_CONSENT_SETTINGS.readSpokenReplies,
     };
 }
 
@@ -257,8 +262,16 @@ export interface ConsentFlowDeps {
     noticeRepostMs?: number;
 }
 
-/** Posted after every notice: where replies are read. */
-export const REPLY_CHANNELS_LINE = 'Replies may be typed in this chat or said aloud.';
+/**
+ * Posted after every notice: where replies are read. Spoken replies count only
+ * when addressed to LMA, so the line says how to address it.
+ */
+export const REPLY_CHANNELS_LINE = (consentPhrase: string, objectionPhrase: string): string =>
+    `Replies may be typed in this chat, or said aloud starting with "LMA": say "LMA, ${consentPhrase}" or "LMA, ${objectionPhrase}".`;
+
+/** Posted after every notice where spoken replies are not read. */
+export const CHAT_ONLY_REPLIES_LINE = (lmaUser: string): string =>
+    `Live Meeting Assistant reads replies in this chat; an objection made out loud takes effect when ${lmaUser} records it in LMA.`;
 
 /** Images kept per meeting by this flow; the record keeps 30. */
 export const MAX_EVIDENCE_IMAGES = 24;
@@ -400,6 +413,15 @@ export class MeetingConsentFlow {
      */
     private offChoicePending = false;
 
+    /**
+     * Whether replies said aloud are read: only when the Meeting Consent
+     * section was read and says so. A section that could not be read is not
+     * taken to allow sending the meeting audio anywhere before consent.
+     */
+    get readsSpokenReplies(): boolean {
+        return this.settingsRead?.readSpokenReplies === true;
+    }
+
     private get eachParticipant(): boolean {
         return this.plan.mode === 'opt_in' && this.plan.rule === 'each_participant';
     }
@@ -457,7 +479,7 @@ export class MeetingConsentFlow {
     attach(io: ConsentMeetingIo): void {
         if (!this.active || this.io) return;
         this.io = io;
-        if (!this.offChoicePending) setConsentHelpActive(true);
+        if (!this.offChoicePending) setConsentHelpActive(true, this.readsSpokenReplies);
         this.begun = this.begin().catch((error) => log.error('[consent] the consent flow failed to start:', error));
         if (this.deps.every) {
             this.stopTimers.push(this.deps.every(() => void this.pollOnce(), this.deps.pollMs ?? 10_000));
@@ -591,7 +613,7 @@ export class MeetingConsentFlow {
                 return;
             }
             // Refused, or the record was already in another mode: run that.
-            setConsentHelpActive(true);
+            setConsentHelpActive(true, this.readsSpokenReplies);
         }
         let record = started;
         try {
@@ -661,8 +683,13 @@ export class MeetingConsentFlow {
             messages.push(`Recording starts when ${this.deps.lmaUser} confirms in LMA that everyone has agreed.`);
         }
         // The notice texts are shared with every capture method, which read
-        // replies in different places; this VP reads the chat and listens.
-        messages.push(REPLY_CHANNELS_LINE);
+        // replies in different places; this VP reads the chat, and listens
+        // where the deployment says to.
+        messages.push(
+            this.readsSpokenReplies
+                ? REPLY_CHANNELS_LINE(this.settings.consentPhrases[0] || 'I consent', this.settings.objectionPhrases[0] || 'I object')
+                : CHAT_ONLY_REPLIES_LINE(this.deps.lmaUser),
+        );
         if (this.held && this.noticePosted && this.eachParticipant) {
             messages.push('Recording and transcription are paused until everyone present has consented.');
         }
@@ -688,7 +715,11 @@ export class MeetingConsentFlow {
     /** Whether `text` is something this flow posted (for handlers that see their own messages). */
     isOwnMessage(text: string): boolean {
         const normalized = normalizeReplyText(text || '');
-        return this.posted.has(normalized) || normalized === normalizeReplyText(CONSENT_HELP_LINE);
+        return (
+            this.posted.has(normalized) ||
+            normalized === normalizeReplyText(CONSENT_HELP_LINE) ||
+            normalized === normalizeReplyText(CONSENT_HELP_SPOKEN_LINE)
+        );
     }
 
     /** Runs one API call after the ones before it, and applies the record it answers with. */
@@ -807,9 +838,12 @@ export class MeetingConsentFlow {
         if (this.roster.seats === null && !this.roster.rosterIsComplete && this.clock() - this.attachedAt >= COUNT_GRACE_MS) {
             return 'Waiting for consent: this meeting platform does not show LMA how many people are present, so each participant\'s consent cannot be confirmed.';
         }
+        if (this.io?.sendersHidden && !this.readsSpokenReplies) {
+            return 'Waiting for consent: this meeting platform does not show LMA who sent a chat message, so each participant\'s consent cannot be confirmed. Choose the owner-attests rule for meetings on it, or turn on reading spoken replies.';
+        }
         const waiting = waitingFor(record);
         // Where the chat shows no sender, consent can only be given aloud.
-        const aloud = this.io?.sendersHidden ? ' On this meeting platform consent is given aloud, not in the chat.' : '';
+        const aloud = this.io?.sendersHidden ? ' On this meeting platform consent is given aloud ("LMA, I consent"), not in the chat.' : '';
         if (waiting.length === 0) return `Waiting for consent: no participants are listed yet.${aloud}`;
         return `Waiting for consent: ${waiting.length} of ${(record.Participants ?? []).length} participants present have not consented yet.${aloud}`;
     }
@@ -907,7 +941,7 @@ export class MeetingConsentFlow {
      * on nothing after it being captured.
      */
     handleSpeech(speaker: string | null, text: string | null): ConsentDecision | null {
-        if (!this.active || this.offChoicePending || !text || !text.trim()) return null;
+        if (!this.active || this.offChoicePending || !this.readsSpokenReplies || !text || !text.trim()) return null;
         // The VP's own voice (its voice assistant) is never a reply.
         if (this.roster.isOwnIdentity(speaker)) return null;
         if (speaker && this.roster.isOwn(speaker)) speaker = null;
@@ -961,7 +995,7 @@ export class MeetingConsentFlow {
         const phrase = this.settings.consentPhrases[0] || 'I consent';
         return (
             'Live Meeting Assistant could not tell who sent that reply, so it was not recorded as consent.' +
-            (this.io?.sendersHidden ? ` Say "${phrase}" aloud instead.` : '')
+            (this.io?.sendersHidden && this.readsSpokenReplies ? ` Say "LMA, ${phrase}" aloud instead.` : '')
         );
     }
 
@@ -980,7 +1014,8 @@ export class MeetingConsentFlow {
 
     /** Asks for spoken replies to be listened for exactly while capture is withheld in the meeting. */
     private syncListening(): void {
-        const want = this.held && !!this.io && !this.stopped && !this.leaving && this.plan.mode !== 'off';
+        const want =
+            this.readsSpokenReplies && this.held && !!this.io && !this.stopped && !this.leaving && this.plan.mode !== 'off';
         if (want === this.listening) return;
         this.listening = want;
         try {

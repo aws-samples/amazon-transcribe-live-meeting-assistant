@@ -121,13 +121,18 @@ export function classifyChatReply(
 }
 
 /**
- * `consent`, `objection` or null for one final utterance heard in the meeting,
- * read exactly as a chat message is (classifyChatReply): the whole utterance
- * must be the reply.
+ * `consent`, `objection` or null for one final utterance heard in the meeting.
  *
- * The one difference is the addressee: speech recognition often writes "LMA"
- * as its letters ("L M A", "L.M.A."), so a run of those three single letters
- * is read as "LMA" before matching.
+ * Only an utterance addressed to LMA is a reply: people say "I agree" and
+ * "I don't agree" in conversation far more often than they type them as a
+ * whole message. Addressed, it is read as an addressed chat message is
+ * (classifyChatReply): "LMA consent", or LMA plus a consent phrase and nothing
+ * else ("LMA, I consent"), is consent; "LMA object", "LMA no consent", LMA plus
+ * an objection phrase, or an addressed sentence of up to 200 characters that
+ * contains an objection phrase, is an objection. A bare phrase is not.
+ *
+ * Speech recognition often writes "LMA" as its letters ("L M A", "L.M.A."),
+ * so a run of those three single letters is read as "LMA" before matching.
  */
 export function classifySpokenReply(
     utterance: string,
@@ -136,6 +141,7 @@ export function classifySpokenReply(
 ): ConsentDecision | null {
     if (!utterance) return null;
     const spelled = utterance.replace(/(^|[^\p{L}\p{N}])l[\s.]*m[\s.]*a(?=$|[^\p{L}\p{N}])/giu, '$1LMA');
+    if (!normalizeReplyText(spelled).split(' ').includes('lma')) return null;
     return classifyChatReply(spelled, consentPhrases, objectionPhrases);
 }
 

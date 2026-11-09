@@ -840,12 +840,15 @@ meeting shows what each platform actually gives. The VP never logs chat text.
 When the deployment's consent mode (the Meeting Consent section of the
 Configuration page), or the **Meeting consent** choice made on the Create Virtual
 Participant form, is Notify or Opt-in, the VP posts a notice in the meeting chat
-once it is admitted and reads the replies, typed in the chat or said aloud. In
+once it is admitted and reads the replies typed in the chat and, unless the
+Meeting Consent setting **Read spoken replies** is off, those said aloud and
+addressed to LMA (*"LMA, I consent"*, *"LMA, I object"*). In
 Notify it records and transcribes from the start, and stops at once when a
 participant objects. In Opt-in it joins with capture withheld (no transcript,
 audio or screen recording, voice assistant or chat added to the transcript);
-the meeting audio still goes to the meeting's transcription engine, only so that
-a reply said aloud can be heard, and nothing else heard is kept (see
+with spoken replies read, the meeting audio still goes to the meeting's
+transcription engine, only so that a reply said aloud can be heard, and nothing
+else heard is kept (see
 [Spoken replies](meeting-consent.md#spoken-replies)). It starts only when every
 participant present has consented, in the chat or aloud, or when the meeting's
 owner has confirmed in LMA that everyone agreed;
@@ -856,10 +859,12 @@ meeting after an objection. With mode Off it behaves as before, apart from a
 short read of its own row before joining, where a per-meeting choice is stored;
 see [Choosing the mode for one meeting](meeting-consent.md#choosing-the-mode-for-one-meeting).
 
-A reply is the whole chat message, or the whole utterance, as for the commands above: the configured
+A reply is the whole chat message, as for the commands above: the configured
 consent and objection phrases (by default *"I consent"*, *"I agree"*, *"I
 accept"*, and *"I object"*, *"I do not consent"*, *"stop recording"* and
-others), or `LMA consent`, `LMA no consent` and `LMA object`. Which platforms
+others), or `LMA consent`, `LMA no consent` and `LMA object`. Said aloud, a
+reply counts only when it is addressed to LMA: *"LMA, I consent"* or *"LMA
+consent"*, and *"LMA, I object"* or *"LMA, please stop recording"*. Which platforms
 support which rule, how the participants present are counted, and what is
 stored are in [Meeting Consent › Virtual Participant](meeting-consent.md#virtual-participant).
 While the meeting runs a consent flow, `LMA help` adds a line naming

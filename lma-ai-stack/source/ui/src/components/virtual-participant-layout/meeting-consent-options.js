@@ -42,7 +42,8 @@ export const meetingConsentOptionsFor = (platform) =>
       return {
         ...option,
         description:
-          'On the Teams browser join, which does not show who sent a chat message, participants consent aloud.',
+          'On the Teams browser join, which does not show who sent a chat message, ' +
+          'participants consent aloud ("LMA, I consent"); needs Read spoken replies on.',
       };
     }
     return option;

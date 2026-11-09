@@ -28,11 +28,22 @@ const OBJECTION = DEFAULT_CONSENT_SETTINGS.objectionPhrases;
 const classify = (message: string) => classifyChatReply(message, CONSENT, OBJECTION);
 const classifySpoken = (utterance: string) => classifySpokenReply(utterance, CONSENT, OBJECTION);
 
-test('a spoken reply is read as a chat message is: the whole utterance must be the reply', () => {
-    assert.equal(classifySpoken('I consent.'), 'consent');
-    assert.equal(classifySpoken('Stop recording!'), 'objection');
-    assert.equal(classifySpoken('I do not consent.'), 'objection', 'objections first');
-    assert.equal(classifySpoken('I agree with what Bo said about the roadmap.'), null);
+test('a spoken reply counts only when addressed to LMA', () => {
+    assert.equal(classifySpoken('LMA, I consent.'), 'consent');
+    assert.equal(classifySpoken('I agree, LMA'), 'consent');
+    assert.equal(classifySpoken('LMA consent'), 'consent');
+    assert.equal(classifySpoken('LMA, stop recording!'), 'objection');
+    assert.equal(classifySpoken('LMA object'), 'objection');
+    assert.equal(classifySpoken('LMA, I do not consent.'), 'objection', 'objections first');
+    for (const bare of ['I consent.', 'I agree', 'Stop recording!', 'I object', "I don't agree.", 'I do not consent.']) {
+        assert.equal(classifySpoken(bare), null, bare);
+    }
+});
+
+test('an addressed spoken consent must be the whole utterance; an addressed objection may be a sentence', () => {
+    assert.equal(classifySpoken('LMA, I agree with what Bo said about the roadmap.'), null);
+    assert.equal(classifySpoken('LMA, can you please stop recording now?'), 'objection');
+    assert.equal(classifySpoken(`LMA ${'and then we talked about the plan '.repeat(8)}stop recording`), null, 'over 200 characters');
     assert.equal(classifySpoken('Can we record the demo again later?'), null);
 });
 

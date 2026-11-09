@@ -43,7 +43,7 @@ transcriber treats a client that shows no consent step is a setting. See
 |---|---|---|
 | **Off** | Nothing | Always. This is how LMA behaves when consent has never been set up, and the shipped default. |
 | **Notify** | A notice that the meeting is recorded and transcribed, and how to object | From the start, until a participant objects. An objection stops recording and transcription, and is recorded. |
-| **Opt-in** | A request to agree, with the phrase to reply | Not until the consent rule below is met. An objection from anybody stops it again. A Virtual Participant still sends the meeting audio to the transcription engine while it waits, only to hear replies said aloud; see [Spoken replies](#spoken-replies). |
+| **Opt-in** | A request to agree, with the phrase to reply | Not until the consent rule below is met. An objection from anybody stops it again. Nothing is recorded or kept before then. A Virtual Participant still sends the meeting audio to the transcription engine while it waits, only to hear replies said aloud, unless **Read spoken replies** is off; see [Spoken replies](#spoken-replies). |
 
 An opt-in meeting is granted by one of two **consent rules**:
 
@@ -121,7 +121,12 @@ and a Virtual Participant on the
 Webex join never meets the each-participant rule and cannot move to
 owner-attests, so its meeting is not transcribed (see
 [What each platform supports](#what-each-platform-supports)). On the Teams
-browser join the rule is met only by consent said aloud.
+browser join the rule is met only by consent said aloud. Nothing is recorded or
+kept before consent under Regulated; while it waits a Virtual Participant
+listens for spoken replies, so the meeting audio is processed by the
+transcription engine and only the reply events are kept, unless **Read spoken
+replies** is off. No preset sets **Read spoken replies**, so applying one leaves
+it as it is.
 **Regulated – notify with opt-out, transcript not retained** sets the same as
 Regulated except the mode, which is Notify: capture runs from the start and
 stops when a participant objects, and a meeting may use Notify or the stricter
@@ -147,6 +152,7 @@ the `ConfigurationPreset` stack parameter; see
 | Evidence check model | The Amazon Bedrock vision model that checks evidence images; see [Checking evidence with a vision model](#checking-evidence-with-a-vision-model) | Amazon Nova Lite |
 | Streaming clients without a consent step | What the WebSocket transcriber does, in Notify or Opt-in, with a meeting from a client that shows no consent step: **Accept with a warning** (captured as before, with no consent record, and a warning logged) or **Refuse** (not recorded or transcribed, and the client is told why). See [Clients without a consent step](#clients-without-a-consent-step) | Accept with a warning |
 | Virtual Participant leaves after an objection | Whether a Virtual Participant leaves the meeting after a participant objects, in the chat or aloud, rather than staying in it without recording | Off |
+| Read spoken replies | Whether a Virtual Participant also reads consent replies and objections said aloud and addressed to LMA, sending the meeting audio to the transcription engine while consent is awaited, or reads the chat only; see [Spoken replies](#spoken-replies) | On |
 
 In the two texts, `{LMA_USER}` is the person using LMA in the meeting,
 `{meeting}` the meeting's name, and `{consent_phrase}` and `{objection_phrase}`
@@ -340,7 +346,7 @@ When somebody joins later, the notice is posted again, at most once a minute.
 An opt-in meeting starts with capture withheld: the VP joins, but writes no
 transcript and no recording, does not start the voice assistant or the screen
 recording, and adds no chat messages to the transcript; messages sent while
-capture is withheld are not added later either. It does send the meeting audio
+capture is withheld are not added later either. Unless **Read spoken replies** is off, it does send the meeting audio
 to the meeting's transcription engine, on a session of its own, but only to
 hear consent replies and objections said aloud: everything else it hears is
 discarded inside the VP (see [Spoken replies](#spoken-replies)). Because nothing
@@ -435,7 +441,7 @@ A consent reply needs a sender. One whose sender the platform does not show is
 not recorded, and under the each-participant rule it is answered with *"Live
 Meeting Assistant could not tell who sent that reply, so it was not recorded as
 consent."*, followed on the Teams browser join, which shows no chat senders, by
-*"Say "I consent" aloud instead."* (with the deployment's first consent phrase).
+*"Say "LMA, I consent" aloud instead."* (with the deployment's first consent phrase), where spoken replies are read.
 An objection without a sender still stops capture, and is recorded
 for *Unidentified participant*. A sender whose display name reads as one of the
 list's placeholders (*Unidentified participant 1*) is not counted as present
@@ -445,22 +451,39 @@ reads its own messages as replies.
 
 ### Spoken replies
 
-The VP also reads replies said aloud, on every join and with either
-transcription engine, and every notice it posts is followed by *"Replies may be
-typed in this chat or said aloud."*
+With **Read spoken replies** on (the shipped default), the VP also reads
+replies said aloud, on every join and with either transcription engine, and
+every notice it posts is followed by *"Replies may be typed in this chat, or
+said aloud starting with "LMA": say "LMA, I consent" or "LMA, I object"."*
+(with the deployment's first consent and objection phrases). With it off, the
+VP reads the chat only, as it did before spoken replies, sends no meeting audio
+anywhere while consent is awaited, does not read spoken objections from the
+transcription while capture runs, and follows every notice instead with *"Live
+Meeting Assistant reads replies in this chat; an objection made out loud takes
+effect when <LMA user> records it in LMA."*, which **Record an objection** in
+the Consent section does. The VP reads the setting before it joins; if it
+cannot read the Meeting Consent section, it reads the chat only.
 
-**What counts as a spoken reply.** A spoken reply is read exactly as a chat
-message is (see [Replies in the chat](#replies-in-the-chat)), with the
-deployment's phrases: the whole utterance, as the speech engine finalises it,
-must be the reply. *"I consent."*, *"Stop recording!"*, *"LMA consent"* and
-*"LMA, please stop recording now"* are replies; *"I agree with what Bo said"* is
-not. Objections are looked for first. Speech engines often write `LMA` as its
-letters, so *"L M A"* and *"L.M.A."* are read as `LMA`. Only final results are
-read, never the engine's partial results. Because people say short sentences
-far more often than they type them, a bare utterance that is exactly an
-objection phrase, such as *"I don't agree."* in a discussion, is read as an
-objection; a deployment where that is a problem can remove such phrases from
-**Objection phrases** and rely on `LMA object` and the other phrases.
+**What counts as a spoken reply.** Only an utterance addressed to LMA is a
+reply, because people say *"I agree"* and *"I don't agree"* in conversation far
+more often than they type them as a whole message. Addressed, it is read as an
+addressed chat message is (see [Replies in the chat](#replies-in-the-chat)),
+with the deployment's phrases, the whole utterance as the speech engine
+finalises it being the reply:
+
+- **Consent** is `LMA consent`, or `LMA` with one of the consent phrases and
+  nothing else (*"LMA, I consent."*, *"I agree, LMA"*).
+- **An objection** is `LMA object` or `LMA no consent`, `LMA` with one of the
+  objection phrases, or an utterance of up to 200 characters addressed to `LMA`
+  that contains an objection phrase anywhere (*"LMA, please stop recording
+  now"*). Objections are looked for first.
+- A bare phrase is not a reply when said aloud: *"I consent."* and *"Stop
+  recording!"* are ordinary speech, although the same words typed in the chat
+  are replies.
+
+Speech engines often write `LMA` as its letters, so *"L M A"* and *"L.M.A."*
+are read as `LMA`. Only final results are read, never the engine's partial
+results.
 
 **Who said it.** A spoken reply is attributed to the participant the VP shows
 as speaking during it, the same name the transcript gives that audio: on Amazon
@@ -514,7 +537,7 @@ transcription would be, and it is billed and appears in the meeting's
 [cost estimate](meeting-cost-estimate.md) as Amazon Transcribe streaming. With
 the MicroVM engine it stays on the MicroVM, which runs, and is billed, from the
 time the VP is admitted rather than from when consent is given. Choose the
-mode with this in mind; there is no setting yet that turns the listening off.
+mode with this in mind, and turn **Read spoken replies** off where no meeting audio may leave the Virtual Participant before consent.
 
 ### Who is present
 
@@ -542,11 +565,13 @@ rule, so it is never allowed to be shorter than the meeting:
   and the each-participant rule is never met, whether replies are typed or
   said. The detail line says so. Use the owner-attests rule on Webex.
 - **Where the platform shows no chat sender** (the Teams browser join), a
-  consent typed in the chat cannot be attributed, but one said aloud can, under
-  the name the platform shows speaking. So the each-participant rule is met
-  when every participant present has said their consent while the VP could see
-  who was speaking, and the detail line adds that on this platform consent is
-  given aloud.
+  consent typed in the chat cannot be attributed, but one said aloud
+  (*"LMA, I consent"*) can, under the name the platform shows speaking. So the
+  each-participant rule is met when every participant present has said their
+  consent while the VP could see who was speaking, and the detail line adds that
+  on this platform consent is given aloud. With **Read spoken replies** off it
+  is never met there, and the detail line says to choose the owner-attests rule
+  or turn the setting on.
 
 The count is the one each platform handler already reads to leave a meeting it
 is alone in: whenever the count on the page changes on the Chime and Zoom
@@ -567,7 +592,7 @@ identities are never listed.
 | Chime | Shown | Read, under the active speaker | Count | Yes | The chat and the attendee list are on screen together, so one screenshot has both |
 | Zoom (browser) | Shown | Read, under the active speaker | Count | Yes | The participants pane is opened, shot and closed again |
 | Zoom (Meeting SDK) | Shown | Read, under the active speaker | Count | Yes | One screenshot of LMA's SDK page |
-| Teams (browser) | **Not shown** | Read, under the active speaker | Count | Yes, **aloud only**: a typed consent cannot be attributed | The People pane is opened and shot, then the chat reopened |
+| Teams (browser) | **Not shown** | Read, under the active speaker | Count | Yes, **aloud only** ("LMA, I consent"): a typed consent cannot be attributed, so not with **Read spoken replies** off | The People pane is opened and shot, then the chat reopened |
 | Teams (Azure Communication Services) | Shown | Read, under the active speaker | Names | Yes | One screenshot of LMA's SDK page |
 | Webex (browser) | Shown | Read, under the active speaker | **None** | **No**: see [Who is present](#who-is-present) | The participants panel is opened, shot and closed again |
 | Google Meet (browser) | Shown (read from the message group's header) | Read, under the speaking tile | Count | Yes | The People panel is opened and shot, then the chat reopened |
@@ -610,9 +635,6 @@ that objection's screenshots.
   on any join or with either engine yet. How reliably a short reply is heard,
   and how often it is attributed to the right speaker, depends on each
   platform's speaker indicator and has not been measured.
-- There is no setting that turns off listening for spoken replies while
-  consent is awaited: a Virtual Participant in an opt-in meeting always sends
-  the meeting audio to the transcription engine while it waits.
 - Spoken replies are not read while the transcript is paused with `LMA pause`
   (nothing is sent to the engine then); replies in the chat still are.
 - The screen recording does not resume once capture has been withheld after it
