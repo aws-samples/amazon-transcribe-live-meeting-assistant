@@ -352,13 +352,19 @@ def test_a_summary_write_is_published_to_the_meeting_subscription() -> None:
     assert '"updateCallSummaryText"' in subscribe
 
 
-def test_the_pipelines_own_call_mutations_do_not_select_the_new_field() -> None:
+def test_the_pipelines_own_call_mutations_select_the_state_only_when_the_schema_has_it() -> None:
     """The shared selector is built against the schema the API is *running*, so a
-    field it names has to exist in the deployed schema before the layer carrying
-    it ships. Leaving the new field out keeps the layer and the schema
-    independently deployable, exactly as SpeakerIdentities does; the browser
-    carries the value over instead, which is what setCallsDeduped is for."""
-    assert "schema.Call.CallSummaryState" not in CALL_FIELDS.read_text(encoding="utf-8")
+    field it names unconditionally has to exist in the deployed schema before
+    the layer carrying it ships. The summary state is selected -- the ENDED
+    status and the end-of-meeting summary carry it to open meeting pages -- but
+    only when that schema declares it, which keeps the layer and the schema
+    independently deployable; without it the browser carries the value over,
+    which is what the merge below is for."""
+    source = CALL_FIELDS.read_text(encoding="utf-8")
+    guarded = source[source.index("def _summary_state(") : source.index("def call_fields(")]
+    assert '"CallSummaryState" in schema.Call._type.fields' in guarded
+    assert source.count("schema.Call.CallSummaryState") == 1
+    assert "schema.Call.CallSummaryState" in guarded
 
 
 def test_the_browser_carries_the_summary_state_over_a_pipeline_update() -> None:

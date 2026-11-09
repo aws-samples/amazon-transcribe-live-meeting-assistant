@@ -51,11 +51,14 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	Metadatajson: String
 	CallSummaryText: String
 	# Small JSON object describing where the summary text came from and whether a
-	# regeneration is in flight: {"source","status","startedAt","updatedAt",
+	# run is in flight: {"source","status","trigger","startedAt","updatedAt",
 	# "message"}. `source` is "generated" or "manual"; `status` is "running",
-	# "failed" or absent. Absent altogether on a meeting summarised before this
-	# field existed, which readers treat as a generated summary with nothing
-	# running. See ui/src/components/common/summary-state.js for the shape.
+	# "failed", "idle" or absent; `trigger` is "meeting-end" for the summary the
+	# pipeline produces when a meeting ends, and absent for a regeneration.
+	# Absent altogether on a meeting summarised before this field existed, and
+	# on a meeting in a deployment with summaries switched off, which readers
+	# treat as a summary with nothing running. See
+	# ui/src/components/common/summary-state.js for the shape.
 	CallSummaryState: String
 	# JSON map from a transcript segment's STORED speaker (its channel plus the
 	# voice id the engine assigned, e.g. 'Other Participant (spk_0)') to a real
@@ -894,6 +897,9 @@ type VideoKeyframe implements DynamoDbBase @aws_cognito_user_pools
 	ContentKind: String
 	# A few words naming the frame's shared content, when the model gave them.
 	Title: String
+	# The FrameId of an earlier frame showing the same screen, set when the
+	# text is read; the meeting page hides such frames unless asked to show all.
+	DuplicateOf: ID
 	Owner: String
 	SharedWith: String
 	# Signed links to the two images, valid for an hour, filled in only by
@@ -935,10 +941,16 @@ input UpdateAgentInput {
 
 input AddCallSummaryTextInput {
 	CallId: ID!
+	# A blank value is not written (updateCall.request.vtl skips blank values),
+	# which is how a failed end-of-meeting run records its state without
+	# replacing whatever text the meeting already has.
 	CallSummaryText: String!
 	UpdatedAt: AWSDateTime
 	Owner: String
 	SharedWith: String
+	# The end-of-meeting run's outcome, written with its text. Same shape as
+	# Call.CallSummaryState.
+	CallSummaryState: String
 }
 
 input UpdateCallAggregationInput {
@@ -956,6 +968,10 @@ input UpdateCallStatusInput {
 	UpdatedAt: AWSDateTime
 	Owner: String
 	SharedWith: String
+	# Written with the ENDED status when an end-of-meeting summary has been
+	# queued, so the meeting reads as "summary in progress" from the same write
+	# that ends it. Same shape as Call.CallSummaryState.
+	CallSummaryState: String
 }
 
 input UpdateRecordingUrlInput {

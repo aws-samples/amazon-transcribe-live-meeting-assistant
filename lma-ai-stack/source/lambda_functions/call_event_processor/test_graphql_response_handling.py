@@ -1718,3 +1718,129 @@ def test_a_page_without_the_list_is_returned_as_no_answer(schema):
         )
     )
     assert result == {"getTranscriptSegmentsWithSentiment": None}
+
+
+# ── the summary's progress is recorded on the meeting ───────────────────────
+
+SUMMARY_ORCHESTRATOR_ARN = "arn:summary-orchestrator"
+
+
+def end_meeting(session: Any, monkeypatch, summaries: bool) -> RecordingLambda:
+    """An END through the real dispatch, with summaries switched on or off."""
+    return run_with(
+        session,
+        {"EventType": "END", "CallId": "call-1"},
+        monkeypatch,
+        IS_TRANSCRIPT_SUMMARY_ENABLED=summaries,
+        ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN=SUMMARY_ORCHESTRATOR_ARN,
+        TRANSCRIPT_DELETION_FUNCTION_ARN="",
+    )
+
+
+def end_responses(stored_status: str) -> List[Any]:
+    """getCall answering with the stored status, then the status write."""
+    return [
+        {"getCall": {"CallId": "call-1", "Status": stored_status}},
+        {"updateCallStatus": {"CallId": "call-1", "Status": "ENDED"}},
+    ]
+
+
+def store_summary(session: Any, message: Dict[str, Any], monkeypatch) -> Dict[str, Any]:
+    """An ADD_SUMMARY through the real dispatch; the addCallSummaryText input sent."""
+    run_with(
+        session,
+        message,
+        monkeypatch,
+        TRANSCRIPT_DELETION_FUNCTION_ARN="",
+        POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN="",
+    )
+    (written,) = mutation_inputs(session, "addCallSummaryText")
+    return written
+
+
+def test_ending_a_meeting_with_summaries_on_marks_its_summary_in_progress(
+    schema, emitted, monkeypatch
+):
+    session = QueuedSession(schema, end_responses("STARTED"))
+    hook = end_meeting(session, monkeypatch, summaries=True)
+
+    assert [i["FunctionName"] for i in hook.invocations] == [SUMMARY_ORCHESTRATOR_ARN]
+    (written,) = mutation_inputs(session, "updateCallStatus")
+    assert written["Status"] == "ENDED"
+    state = json.loads(written["CallSummaryState"])
+    assert state["status"] == "running"
+    assert state["trigger"] == "meeting-end"
+    assert state["source"] == "generated"
+    assert state["startedAt"]
+
+
+def test_the_in_progress_state_is_published_with_the_ended_status(schema, emitted, monkeypatch):
+    """onUpdateCall is filled from the mutation's own selection, so the state
+    reaches open meeting pages only if the status write selects it."""
+    session = QueuedSession(schema, end_responses("STARTED"))
+    end_meeting(session, monkeypatch, summaries=True)
+    (status_write,) = [q for q in session.queries if "updateCallStatus(" in print_ast(q)]
+    document = print_ast(status_write)
+    selection = document[document.index(") {", document.index("updateCallStatus(")) :]
+    assert "CallSummaryState" in selection
+
+
+def test_ending_a_meeting_with_summaries_off_never_marks_a_summary_in_progress(
+    schema, emitted, monkeypatch
+):
+    session = QueuedSession(schema, end_responses("STARTED"))
+    hook = end_meeting(session, monkeypatch, summaries=False)
+    assert hook.invocations == []
+    (written,) = mutation_inputs(session, "updateCallStatus")
+    assert "CallSummaryState" not in written
+
+
+def test_a_redelivered_end_leaves_the_summary_state_alone(schema, emitted, monkeypatch):
+    """The summary may already have landed; marking it in progress again would
+    hide it behind a spinner that nothing is coming to clear."""
+    session = QueuedSession(schema, end_responses("ENDED"))
+    hook = end_meeting(session, monkeypatch, summaries=True)
+    assert hook.invocations == []
+    (written,) = mutation_inputs(session, "updateCallStatus")
+    assert "CallSummaryState" not in written
+
+
+def test_a_stored_summary_marks_the_summary_complete(schema, emitted, monkeypatch):
+    text = json.dumps({"SUMMARY": "Sarah Lee walked through the migration plan."})
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    written = store_summary(
+        session,
+        {"EventType": "ADD_SUMMARY", "CallId": "call-1", "CallSummaryText": text},
+        monkeypatch,
+    )
+    assert written["CallSummaryText"] == text
+    state = json.loads(written["CallSummaryState"])
+    assert state["status"] == "idle"
+    assert state["trigger"] == "meeting-end"
+    assert state["source"] == "generated"
+    assert state["updatedAt"]
+
+
+@pytest.mark.parametrize("text", ["An error occurred.", "No summary available", "  ", None])
+def test_a_failed_summary_marks_the_summary_failed_and_stores_no_text(
+    schema, emitted, monkeypatch, text
+):
+    """The text is sent blank, which updateCall.request.vtl does not write, so
+    whatever the meeting held survives and the page offers Regenerate."""
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    message = {"EventType": "ADD_SUMMARY", "CallId": "call-1"}
+    if text is not None:
+        message["CallSummaryText"] = text
+    written = store_summary(session, message, monkeypatch)
+    assert written["CallSummaryText"] == ""
+    state = json.loads(written["CallSummaryState"])
+    assert state["status"] == "failed"
+    assert state["trigger"] == "meeting-end"
+    assert state["message"]
+    assert state["updatedAt"]
+
+
+def test_the_shared_update_template_writes_no_blank_value():
+    """What a failed summary's write relies on to leave the stored text alone."""
+    template = (SOURCE / "appsync" / "updateCall.request.vtl").read_text(encoding="utf-8")
+    assert "!$util.isNullOrBlank($entry.value)" in template

@@ -221,6 +221,15 @@ def test_what_a_frame_shows_and_its_title_are_returned_and_camera_frames_are_kep
     assert [f.get("Title") for f in frames] == [None, "Q3 roadmap", None]
 
 
+def test_a_repeated_frame_is_returned_naming_the_frame_it_repeats(fakes):
+    # The page hides repeats by default but can show every frame, so they are
+    # returned like any other.
+    repeat = {**item(2000), "DuplicateOf": {"S": "0000001000-ab12cd"}}
+    fakes([item(1000), repeat])
+    frames = call(OWNER)["VideoKeyframes"]
+    assert [f.get("DuplicateOf") for f in frames] == [None, "0000001000-ab12cd"]
+
+
 @pytest.mark.parametrize(
     "image",
     [

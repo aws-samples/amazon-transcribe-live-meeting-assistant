@@ -7,7 +7,7 @@
 import asyncio
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from os import getenv
 from statistics import fmean
@@ -427,6 +427,58 @@ FAILED_SUMMARY_TEXTS = frozenset(
 def summary_was_produced(text: Any) -> bool:
     """Whether a stored summary is one, rather than a failed run's placeholder."""
     return isinstance(text, str) and text.strip().lower() not in FAILED_SUMMARY_TEXTS
+
+
+# The summary state (Call.CallSummaryState) the end-of-meeting run writes: one
+# JSON object, the same shape summary_regenerator writes for a regeneration and
+# ui/src/components/common/summary-state.js reads. `trigger` tells the two runs
+# apart, because the meeting page words them differently and gives up waiting
+# for this one sooner.
+SUMMARY_TRIGGER_MEETING_END = "meeting-end"
+SUMMARY_FAILED_MESSAGE = "the summary could not be generated"
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def summary_queued_state() -> str:
+    """The state a meeting carries from the moment its summary is queued.
+
+    Written with the ENDED status, in the same mutation, so there is no moment
+    at which the meeting page sees an ended meeting with no summary and nothing
+    to say why.
+    """
+    return json.dumps(
+        {
+            "source": "generated",
+            "status": "running",
+            "trigger": SUMMARY_TRIGGER_MEETING_END,
+            "startedAt": _now_iso(),
+        }
+    )
+
+
+def summary_outcome_state(text: Any) -> str:
+    """The state written beside the end-of-meeting summary: done, or failed."""
+    if summary_was_produced(text):
+        return json.dumps(
+            {
+                "source": "generated",
+                "status": "idle",
+                "trigger": SUMMARY_TRIGGER_MEETING_END,
+                "updatedAt": _now_iso(),
+            }
+        )
+    return json.dumps(
+        {
+            "source": "generated",
+            "status": "failed",
+            "trigger": SUMMARY_TRIGGER_MEETING_END,
+            "message": SUMMARY_FAILED_MESSAGE,
+            "updatedAt": _now_iso(),
+        }
+    )
 
 
 def was_already_created(create_call_result: Any) -> bool:
@@ -1073,9 +1125,17 @@ async def execute_add_call_summary_text_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
 ) -> Dict:
+    """Store the end-of-meeting summary, and the outcome of the run beside it.
+
+    A run that produced nothing usable -- the summariser's placeholder text, or
+    none -- stores no text. The input field is required, so it is sent blank,
+    and updateCall.request.vtl writes no attribute for a blank value: whatever
+    the meeting already holds stays, and the state says the run failed, which
+    is what the meeting page shows alongside its Regenerate action.
+    """
     calltext = message.get("CallSummaryText", None)
     call_summary_text = ""
-    if calltext and len(calltext) > 0:
+    if summary_was_produced(calltext):
         call_summary_text = calltext
 
     if not appsync_session.client.schema:
@@ -1085,7 +1145,11 @@ async def execute_add_call_summary_text_mutation(
     query = dsl_gql(
         DSLMutation(
             schema.Mutation.addCallSummaryText.args(
-                input={**message, "CallSummaryText": call_summary_text}
+                input={
+                    **message,
+                    "CallSummaryText": call_summary_text,
+                    "CallSummaryState": summary_outcome_state(calltext),
+                }
             ).select(*call_fields(schema))
         )
     )
@@ -1480,7 +1544,8 @@ async def execute_process_event_api_mutation(
         # would skip the summary on the retry and the meeting would end with no
         # summary at all. Ordering it ahead of the status mutation makes the worst
         # case a duplicate summary rather than a missing one.
-        if IS_TRANSCRIPT_SUMMARY_ENABLED and not was_already_ended:
+        summary_queued = IS_TRANSCRIPT_SUMMARY_ENABLED and not was_already_ended
+        if summary_queued:
             LAMBDA_HOOK_CLIENT.invoke(
                 FunctionName=ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN,
                 InvocationType="Event",
@@ -1494,8 +1559,16 @@ async def execute_process_event_api_mutation(
                 extra=dict(call_id=message.get("CallId")),
             )
 
+        # The status write carries the "summary in progress" state when a
+        # summary has just been queued, so the meeting page can tell a summary
+        # on its way from no summary at all. Only then: with summaries switched
+        # off nothing is coming, and a redelivered END must not reset the state
+        # of a summary that may already have landed.
+        status_message = (
+            {**message, "CallSummaryState": summary_queued_state()} if summary_queued else message
+        )
         response = await execute_update_call_status_mutation(
-            message=message, appsync_session=appsync_session
+            message=status_message, appsync_session=appsync_session
         )
         if isinstance(response, Exception):
             return_value["errors"].append(response)

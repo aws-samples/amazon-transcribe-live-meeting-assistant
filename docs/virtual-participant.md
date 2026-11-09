@@ -76,8 +76,9 @@ shown as **one person** — `Bob Strahan` for every line, however many voice ids
 separation gave him — unless it reads as a room (`Conference Room`, `ConfRm_1`,
 a room device) or two of its voices each spoke at length, in which case it is
 shown as **several people**: `Conference Room · Voice 1`, `Voice 2`. The
-**One person | Several people** toggle beside the name's chips on the
-**Transcript** tab corrects either guess in one click, and in **Several people**
+**One person | Several people** menu beside the name's chips on the
+**Transcript** tab (and beside the name in the Speakers panel) corrects either
+guess, and in **Several people**
 each voice can be named in place; see
 [One person or several people](transcription-and-translation.md#one-person-or-several-people).
 
@@ -717,6 +718,7 @@ Notes:
 - The default introduction message tells participants to type `LMA leave` to dismiss the bot and `LMA help` to see the other commands, and the name to add when there is more than one LMA in the meeting (see [More than one LMA in a meeting](#more-than-one-lma-in-a-meeting)). Customize via the `IntroMessage` CloudFormation parameter of the Virtual Participant stack or the `INTRO_MESSAGE` env var; a customized message is used as it is. In it, `{LMA_USER}` is replaced by the name of the user who started the VP, and `{LMA_HANDLE}` by the name to add after `LMA` to address this VP.
 - `LMA pause`, `LMA start` and `LMA help` must be the whole chat message: the `LMA` addressee (or `@LMA`, before or after the command) plus the command word, matched case-insensitively with punctuation ignored, so *"@LMA, pause!"* and *"start LMA"* count as the command. A bare `PAUSE` or `START` without the addressee is ordinary chat, as is a message that merely contains the command — *"LMA PAUSED"*, *"please LMA pause now"*, or an introduction message that explains the commands.
 - The help reply is posted as a few single-line chat messages, listing each command in one canonical form and how to address this VP by name. It is answered whether or not transcription is paused.
+- On the Zoom browser join the VP reads the chat from Zoom's chat panel, which Zoom closes by itself, for one when someone starts sharing their screen. The VP reopens the panel within a few seconds whenever Zoom's toolbar shows it closed, and then reads the messages sent while it was closed; a command typed while the panel was closed is therefore acted on a few seconds late rather than missed. It reads the messages already in the panel when it starts listening as sent before it joined and does not act on them, which matters on a meeting whose chat continues in a Team Chat group chat (*Meeting Group Chat*), where the panel can hold messages from earlier occurrences of the meeting.
 
 ### More than one LMA in a meeting
 
@@ -775,7 +777,8 @@ What is not added:
   introduction, status messages and help, and the answers as the chat panel
   shows them, which are added once as above);
 - private messages: on Zoom (the browser join and the Meeting SDK join), a
-  message sent to anyone but everyone, and a message whose recipient the VP
+  message sent to anyone but everyone (on a meeting whose chat continues in a
+  Team Chat group chat, a message to *Meeting Group Chat* is sent to everyone), and a message whose recipient the VP
   could not read (a chat label in a language other than English, or a Meeting
   SDK message that names no receiver). Only a message the VP read as sent to
   everyone is added. Teams and Google Meet meeting chats have no private

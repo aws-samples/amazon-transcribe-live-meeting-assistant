@@ -21,7 +21,9 @@ number of frames in its label: a strip of thumbnails in time order, each
 labelled with the time it went up. The tab appears once the first frames have
 loaded, including during a live meeting when the first frame is taken. Frames
 of the meeting's camera video rather than shared content are not shown or
-counted (see [Camera frames](#camera-frames)).
+counted (see [Camera frames](#camera-frames)), and frames that repeat the
+screen before them are hidden and not counted until asked for (see
+[Repeated frames](#repeated-frames)).
 
 - **Selecting a thumbnail** shows the picture large and moves the transcript to
   that time, highlighting the segment that was under way, for when the
@@ -49,8 +51,14 @@ counted (see [Camera frames](#camera-frames)).
 - **Labels**: a frame is labelled with its own title, a few words read with
   its [slide text](#slide-text); a frame without one that begins one of the
   meeting's [chapters](#chapters) is labelled with the chapter's title.
-- **Export slides (PDF)** opens every frame as a printable deck; see
-  [Exporting the slides](#exporting-the-slides).
+- **Repeated frames**: when some frames were found to show the same screen as
+  an earlier one, the strip says how many are hidden, and **Show all N
+  frames** shows them in place (**Hide repeated frames** hides them again). A
+  search looks through the frames the strip shows, so with repeats hidden it
+  finds the first frame of each screen. A repeated frame selected from the
+  summary is shown either way.
+- **Export slides (PDF)** opens every frame, without the repeated ones, as a
+  printable deck; see [Exporting the slides](#exporting-the-slides).
 
 The pictures are shown through links signed by the server for whoever opened
 the page, after the same access check as the transcript, and they last an
@@ -121,6 +129,36 @@ is stored with no text and no title, and is left out of the
 other frame's. Frames read before `ContentKind` was stored, or not yet read,
 have none and are treated as shared content. How well the model tells the kinds
 apart depends on the model.
+
+### Repeated frames
+
+A shared application whose content keeps updating, or a page scrolled a little,
+can give several frames of what a reader would call one screen: the pictures
+differ, but the text on them is nearly the same. Once a frame's text is read it
+is compared with the last frame before it that is neither a camera frame nor
+itself a repeat, and stored with `DuplicateOf` naming that frame when the two
+show the same screen:
+
+- their texts are at least 80% alike (the words, in order, compared as a
+  sequence), or
+- their titles are the same, ignoring case and punctuation, and their texts are
+  at least 50% alike. The title alone is not enough, because a model can name a
+  whole deck ("Q3 review") rather than each slide.
+
+A frame whose text holds every line of the earlier frame's and more is not a
+repeat, however alike the two are: it is a slide built up a point at a time,
+and the later frame is the fuller one. Two frames with no text are repeats
+only when their titles match. Nothing is marked when the earlier frame's text
+has not been read yet, or when the earlier frames cannot be read; such a frame
+is shown, as every frame was before frames were compared.
+
+Repeats are hidden on the **Screen share** strip unless **Show all N frames**
+is selected, and are left out of the exported deck. They are still stored, with
+their images, and are returned by `getVideoKeyframes` like any other frame; the
+summary, the chapters, the assistant and the meeting-history document read them
+as before. During a live meeting a frame is shown as soon as it is taken, before
+its text has been read; the strip reads the newest frames again with each new
+one, and a frame found to be a repeat is hidden then.
 
 ## Screen share summary
 
@@ -269,7 +307,9 @@ to be less reliable on real meetings.
 **Export slides (PDF)**, on the **Screen share** tab, opens the meeting's
 key frames in a new tab as a deck, one landscape page per frame in time order,
 each with its picture at full size (1568 pixels wide), its time, its label (as
-on the strip), and its [slide text](#slide-text); camera frames are left out. It then opens the browser's print
+on the strip), and its [slide text](#slide-text); camera frames and
+[repeated frames](#repeated-frames) are left out, whether or not the strip is
+showing all frames. It then opens the browser's print
 dialog, where **Save as PDF** saves it. All of the meeting's frames are read
 again for the export, so their links are fresh, and the dialog opens once
 the pictures have loaded. The tab opens as soon as the button is selected, and
@@ -345,10 +385,13 @@ Once a second the VP takes a small grayscale copy of its display — a grid of
 64 × 36 cells, each the average brightness of a block of the screen — and
 compares it with two earlier pictures:
 
-- **The previous second's**, to tell whether the picture is still moving. A
-  slide transition, scrolling, a video or a camera is not captured while it
-  moves; a frame is kept only once the picture has held still for two seconds
-  (three without a screen-share signal, below).
+- **The previous second's**, and the first picture of the still spell, to tell
+  whether the picture is still moving. A slide transition, scrolling, a video or
+  a camera is not captured while it moves; a frame is kept only once the
+  picture has held still for two seconds (three without a screen-share signal,
+  below). Comparing with the start of the spell as well means a picture that
+  creeps a little every second, as a live web page can, does not count as
+  holding still.
 - **The last key frame's**, to tell whether the settled picture is new. Going
   back to the slide that was just captured, or a share that stops and starts
   again on the same slide, does not produce another frame.
@@ -362,8 +405,38 @@ signal).
 
 Each key frame is stamped with the moment its picture **first appeared**, not
 the moment it was confirmed, so a slide that went up at 12:30 is listed at
-12:30. Frames are at least four seconds apart, and a meeting keeps at most
-1,000.
+12:30, and never earlier than the frame before it was taken. No two frames are
+stamped less than a second apart, on the detector's clock or on the
+transcript's, and a meeting keeps at most 1,000.
+
+### How often frames are kept
+
+A shared application whose content keeps updating, such as a live web page, a
+dashboard or a scrolling transcript, changes by about as much each time as one
+template slide differs from the next. On a measured 58-minute meeting with a
+browser showing such a page, the frames differed from the one before by 3–9%,
+and the four-second spacing alone let through 146 frames in 42 minutes, a
+median of 10 seconds apart. Raising the change threshold to separate the two
+would also drop slides (template slides differ by 4–7%, below), so the spacing
+adapts instead:
+
+- While the screen keeps changing, the second frame can follow the first after
+  four seconds, the third waits 30 seconds after the second, and every later
+  one 60 seconds after the one before.
+- Each 10 seconds that the screen is quiet — holding still, and no different
+  from the last key frame — steps the wait back down one: from 60 to 30 seconds,
+  then to four. A deck whose slides each stay up for longer than about 12
+  seconds (10 seconds quiet, plus the two seconds to settle) is therefore kept
+  slide by slide; slides changed faster than that, on a screen that has been
+  changing, can be skipped until the wait runs out.
+- A picture that differs by at least 10% from the one that had settled before
+  it is a different screen rather than an update of the same one (a new
+  application, a slide with another layout), and waits only the four seconds.
+  It is judged against the picture just before it, not against the last key
+  frame, because the small updates of a busy screen add up against an old frame.
+
+Frames that still show the same screen after this are collapsed once their text
+is read; see [Repeated frames](#repeated-frames).
 
 ### Screen-share signal per platform
 
@@ -387,6 +460,9 @@ thresholds.
 | Part that may still be changing for the picture to count as still | 2% | 1% |
 | Seconds the picture must hold still | 2 | 3 |
 | Largest part of the picture that may be moving | 50% | 25% |
+| Change from the picture settled before it that is a different screen (no wait beyond four seconds) | 10% | 10% |
+| Wait before the second, third and later frames while the screen keeps changing | 4 s, 30 s, 60 s | the same |
+| Quiet time that steps the wait back down one | 10 s | the same |
 
 Without a share signal, a gallery of moving cameras still produces no frames,
 because the cameras are moving. A layout change that then holds still — someone
@@ -413,6 +489,14 @@ slide built up one bullet at a time.
 | Document: when shown, and after the scroll stopped | 2 of 2 / 2 of 2 |
 | Bullet added to a slide already captured (3% of the grid, at the threshold) | missed in both modes; a replay of the same samples caught it with a share signal |
 
+These measurements were made before the spacing adapted (above) and have not
+been repeated since. The adaptive spacing and the stillness check against the
+start of a still spell are covered by unit tests on synthetic samples only: a
+page updating 5% of the grid every three seconds gives 44 frames in 42 minutes
+(420 with the four-second spacing alone), and a deck of template slides changed
+every 12 seconds keeps every slide. They have not yet been measured on a
+recorded or live meeting.
+
 The alternative considered, FFmpeg's own scene-change filter on the five-frames-
 a-second recording picture, used 1.8% of a core; it compares each frame only
 with the one before, which is what makes a camera strip or a slow transition
@@ -427,7 +511,9 @@ each one exactly as the Virtual Participant judges its samples. The app gives no
 screen-share signal — what it captures is whatever the user chose to share with
 LMA — so every picture is judged against the stricter thresholds, except that
 two still pictures in a row (about four seconds) are enough to settle, close to
-the Virtual Participant's three seconds.
+the Virtual Participant's three seconds. The spacing adapts in the same way
+(four seconds, then 30 and 60 while the picture keeps changing, stepping back
+down one for every 10 seconds it is quiet).
 
 Each key frame's time is placed on the transcript's clock from the offset the
 app reports between the start of its audio and the start of its video, which is
@@ -450,10 +536,14 @@ kbps) and streamed in real time:
 
 The thresholds and limits are read from environment variables of the Virtual
 Participant process — for example `KEYFRAME_CHANGE_FRACTION`,
-`KEYFRAME_STRICT_CHANGE_FRACTION`, `KEYFRAME_MIN_INTERVAL_MS` and
-`KEYFRAME_MAX_PER_MEETING`; see `keyframe-sampler.ts` — and, for desktop
-video, of the transcriber (`KEYFRAME_DESKTOP_CHANGE_FRACTION` and the others in
-`videokeyframes.ts`). They are not stack parameters: they are meant for local
+`KEYFRAME_STRICT_CHANGE_FRACTION`, `KEYFRAME_MIN_INTERVAL_MS`,
+`KEYFRAME_BACKOFF_STEPS_MS` (the longer waits, comma-separated milliseconds,
+`30000,60000`), `KEYFRAME_QUIET_STEP_MS` (`10000`),
+`KEYFRAME_MAJOR_CHANGE_FRACTION` and `KEYFRAME_STRICT_MAJOR_CHANGE_FRACTION`
+(`0.1`), and `KEYFRAME_MAX_PER_MEETING`; see `keyframe-sampler.ts` — and, for
+desktop video, of the transcriber (`KEYFRAME_DESKTOP_CHANGE_FRACTION`,
+`KEYFRAME_DESKTOP_MAJOR_CHANGE_FRACTION`, the same `KEYFRAME_BACKOFF_STEPS_MS`
+and `KEYFRAME_QUIET_STEP_MS`, and the others in `videokeyframes.ts`). They are not stack parameters: they are meant for local
 runs and calibration, and a value added to a task definition by hand is replaced
 at the next stack update.
 
@@ -479,6 +569,7 @@ finds the images. The item has:
 | `SlideText` | The text on the frame, read once after it is stored (see [Slide text](#slide-text)); empty when it holds none. |
 | `ContentKind` | What the frame shows, read with its text: `SCREEN`, `CAMERA` or `MIXED` (see [Camera frames](#camera-frames)). Absent until read, and on frames read before it was stored. |
 | `Title` | A few words naming the frame's shared content, when the model gave them. |
+| `DuplicateOf` | The `FrameId` of an earlier frame showing the same screen, set with the text when the frame is a repeat (see [Repeated frames](#repeated-frames)); absent otherwise. |
 
 ### Retention, access and deletion
 
@@ -508,7 +599,7 @@ The AppSync API has a query and a subscription:
 ```graphql
 query {
   getVideoKeyframes(callId: "<CallId>", limit: 100, nextToken: null, afterFrameId: null, frameId: null, frameIds: null) {
-    VideoKeyframes { FrameId Timestamp VideoOffset ShareDetected ThumbnailSignedUrl ImageSignedUrl }
+    VideoKeyframes { FrameId Timestamp VideoOffset ShareDetected DuplicateOf ThumbnailSignedUrl ImageSignedUrl }
     nextToken
   }
 }

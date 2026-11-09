@@ -1152,6 +1152,17 @@ describe('naming a speaker from the Transcript tab', () => {
     );
     const groupOf = (base) => screen.getByRole('group', { name: `Voices under ${base}` });
     const transcriptText = () => screen.getByTestId('transcript-scroll').textContent;
+    const modeMenu = (base) => within(groupOf(base)).getByRole('button', { name: /^How the voices under / });
+    const chooseMode = (base, text) => {
+      fireEvent.click(modeMenu(base));
+      fireEvent.click(screen.getByRole('menuitemcheckbox', { name: text }));
+    };
+    // The speakers named in the page header, each a button opening the Speakers panel.
+    const headerChips = () =>
+      screen
+        .getAllByRole('button', { name: /: show in the Speakers panel$/ })
+        .map((chip) => chip.getAttribute('aria-label').replace(/: show in the Speakers panel$/, ''));
+    const withMap = (map) => ({ ...ITEM, speakerIdentities: JSON.stringify(map) });
 
     it("shows an individual's voices under the name and a room's voices apart", () => {
       callsContext.value = { calls: [], sendUpdateSpeakerIdentities: vi.fn() };
@@ -1166,7 +1177,10 @@ describe('naming a speaker from the Transcript tab', () => {
       const sendUpdateSpeakerIdentities = vi.fn().mockResolvedValue(true);
       callsContext.value = { calls: [], sendUpdateSpeakerIdentities };
       const { rerender } = render(page());
-      fireEvent.click(within(groupOf('Bob Strahan')).getByRole('button', { name: 'Several people' }));
+      expect(modeMenu('Bob Strahan').getAttribute('aria-label')).toBe(
+        'How the voices under Bob Strahan are shown: One person',
+      );
+      chooseMode('Bob Strahan', 'Several people');
       await waitFor(() => expect(sendUpdateSpeakerIdentities).toHaveBeenCalledTimes(1));
       const [, serialized] = sendUpdateSpeakerIdentities.mock.calls[0];
       expect(JSON.parse(serialized).speakerModes['REMOTE#Bob Strahan']).toMatchObject({
@@ -1201,8 +1215,101 @@ describe('naming a speaker from the Transcript tab', () => {
     it('offers the toggle and the renames only to those who may name speakers', () => {
       callsContext.value = { calls: [], sendUpdateSpeakerIdentities: vi.fn() };
       render(page({ ...ITEM, owner: 'someone-else' }));
-      expect(within(groupOf('Bob Strahan')).getByRole('button', { name: 'Several people' }).disabled).toBe(true);
+      expect(modeMenu('Bob Strahan').disabled).toBe(true);
       expect(screen.queryByRole('button', { name: /^Rename / })).toBeNull();
+    });
+
+    it('switching a participant to one person updates the speaker chips', () => {
+      callsContext.value = { calls: [], sendUpdateSpeakerIdentities: vi.fn() };
+      const several = withMap({ speakerModes: { 'REMOTE#Bob Strahan': { mode: 'several', source: 'manual' } } });
+      const { rerender } = render(page(several));
+      expect(headerChips()).toEqual([
+        'Bob Strahan · Voice 1',
+        'Bob Strahan · Voice 2',
+        'ConfRm_1 · Voice 1',
+        'ConfRm_1 · Voice 2',
+      ]);
+      // The map comes back through the meeting's subscription with the new mode.
+      rerender(page(withMap({ speakerModes: { 'REMOTE#Bob Strahan': { mode: 'one', source: 'manual' } } })));
+      expect(headerChips()).toEqual(['Bob Strahan', 'ConfRm_1 · Voice 1', 'ConfRm_1 · Voice 2']);
+      expect(within(groupOf('Bob Strahan')).queryByText('Bob Strahan · Voice 1')).toBeNull();
+      expect(within(groupOf('Bob Strahan')).getByText('Bob Strahan')).toBeTruthy();
+    });
+
+    it('the speaker chips follow a speaker identity map that arrives live', () => {
+      callsContext.value = { calls: [], sendUpdateSpeakerIdentities: vi.fn() };
+      const { rerender } = render(page());
+      expect(headerChips()).toEqual(['Bob Strahan', 'ConfRm_1 · Voice 1', 'ConfRm_1 · Voice 2']);
+      // Another viewer shows Bob's voices apart and names one of the room's.
+      rerender(
+        page(
+          withMap({
+            identities: { 'REMOTE#ConfRm_1 (spk_0)': { name: 'Dana', status: 'confirmed', source: 'manual' } },
+            speakerModes: { 'REMOTE#Bob Strahan': { mode: 'several', source: 'manual' } },
+          }),
+        ),
+      );
+      expect(headerChips()).toEqual(['Bob Strahan · Voice 1', 'Bob Strahan · Voice 2', 'Dana', 'ConfRm_1 · Voice 2']);
+    });
+
+    it('a renamed voice shows its new name in the chips and the transcript', () => {
+      callsContext.value = { calls: [], sendUpdateSpeakerIdentities: vi.fn() };
+      render(page(withMap({ identities: { 'REMOTE#ConfRm_1 (spk_1)': { name: 'Priya', status: 'confirmed' } } })));
+      expect(headerChips()).toContain('Priya');
+      expect(headerChips()).not.toContain('ConfRm_1 · Voice 2');
+      expect(within(groupOf('ConfRm_1')).getByText('Priya')).toBeTruthy();
+      expect(transcriptText()).toContain('Priya');
+      expect(transcriptText()).not.toContain('ConfRm_1 · Voice 2');
+    });
+
+    it('clicking a speaker chip opens that speaker in the Speakers panel', () => {
+      callsContext.value = { calls: [], sendUpdateSpeakerIdentities: vi.fn() };
+      render(page());
+      fireEvent.click(screen.getByRole('button', { name: 'ConfRm_1 · Voice 2: show in the Speakers panel' }));
+      expect(selectedTab().textContent).toBe('Details');
+      const row = document.querySelector('[data-speaker-key="REMOTE#ConfRm_1 (spk_1)"]');
+      expect(row.className).toBe('speaker-row-focused');
+      expect(row.contains(document.activeElement)).toBe(true);
+      expect(document.activeElement.getAttribute('placeholder')).toBe('ConfRm_1 · Voice 2');
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    });
+
+    it("opens a voice's name field empty, with its Voice N placeholder", () => {
+      callsContext.value = { calls: [], sendUpdateSpeakerIdentities: vi.fn() };
+      render(page());
+      fireEvent.click(within(groupOf('ConfRm_1')).getByRole('button', { name: 'Rename ConfRm_1 · Voice 1' }));
+      const field = within(groupOf('ConfRm_1')).getByRole('textbox', { name: 'Name for ConfRm_1 · Voice 1' });
+      expect(field.value).toBe('');
+      expect(field.getAttribute('placeholder')).toBe('ConfRm_1 · Voice 1');
+    });
+
+    it("saves a voice's name once when Enter is followed by the field closing", async () => {
+      const sendUpdateSpeakerIdentities = vi.fn().mockResolvedValue(true);
+      callsContext.value = { calls: [], sendUpdateSpeakerIdentities };
+      render(page());
+      fireEvent.click(within(groupOf('ConfRm_1')).getByRole('button', { name: 'Rename ConfRm_1 · Voice 1' }));
+      const field = within(groupOf('ConfRm_1')).getByRole('textbox', { name: 'Name for ConfRm_1 · Voice 1' });
+      fireEvent.change(field, { target: { value: 'Dana' } });
+      fireEvent.keyDown(field, { key: 'Enter', keyCode: 13 });
+      fireEvent.blur(field);
+      await waitFor(() => expect(sendUpdateSpeakerIdentities).toHaveBeenCalledTimes(1));
+      expect(JSON.parse(sendUpdateSpeakerIdentities.mock.calls[0][1]).identities['REMOTE#ConfRm_1 (spk_0)'].name).toBe(
+        'Dana',
+      );
+    });
+
+    it("keeps a voice's More options reachable while its name is being typed", () => {
+      const sendUpdateSpeakerIdentities = vi.fn().mockResolvedValue(true);
+      callsContext.value = { calls: [], sendUpdateSpeakerIdentities };
+      render(page());
+      fireEvent.click(within(groupOf('ConfRm_1')).getByRole('button', { name: 'Rename ConfRm_1 · Voice 1' }));
+      const field = within(groupOf('ConfRm_1')).getByRole('textbox', { name: 'Name for ConfRm_1 · Voice 1' });
+      const more = within(groupOf('ConfRm_1')).getByRole('button', { name: 'More options' });
+      // Pressing the link moves focus from the field to it before the click lands.
+      fireEvent.blur(field, { relatedTarget: more });
+      fireEvent.click(more);
+      expect(screen.getByRole('dialog', { name: 'Speaker: ConfRm_1 · Voice 1' })).toBeTruthy();
+      expect(sendUpdateSpeakerIdentities).not.toHaveBeenCalled();
     });
   });
 });
