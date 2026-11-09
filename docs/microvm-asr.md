@@ -366,6 +366,12 @@ test meeting at a real-time factor of 0.14 on a 4-core host with punctuated, cas
 See *Not included: Whisper* below for why Parakeet TDT rather than Whisper is the
 offline model offered.
 
+The voice activity detector counts a 32 ms frame as speech at a Silero probability of
+0.35 and opens an utterance after 100 ms of speech, so a short reply such as "okay" or
+"not sure" reaches the model. With the stricter 0.5 and 250 ms it used before, those
+replies were discarded as noise: on clean AMI headset audio about 2% of the microphone
+channel's words were lost that way.
+
 **Two-pass bundles.** `parakeet-tdt-v3-live-titanet-small` and
 `parakeet-tdt-v3-live-nemotron35-titanet-small` pair Parakeet with a streaming model that
 previews the open utterance: the live row shows the streaming text as it is spoken, and
