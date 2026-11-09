@@ -10,6 +10,13 @@ import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { noteSentChat } from './meeting-chat.js';
 import { meetingChat } from './meeting-chat-runtime.js';
 import { chatAddressing } from './chat-addressing.js';
+import {
+    readZoomChatInPage,
+    ZOOM_CHAT_SELECTORS,
+    ZoomChatPanelKeeper,
+    zoomChatPanelStateInPage,
+    type ZoomChatPanelState,
+} from './zoom-chat-page.js';
 import { simliAvatar } from './simli-avatar.js';
 import {
     findElementWithFallback,
@@ -29,6 +36,11 @@ import {
 import { createLogger } from './logger.js';
 
 const log = createLogger('zoom');
+
+/** How often the chat list is read. */
+const ZOOM_CHAT_POLL_MS = 1500;
+/** Rows on screen this long after the chat list is first found were there before the VP listened. */
+const ZOOM_CHAT_BASELINE_SETTLE_MS = 2000;
 
 // Zoom's audio/video toggles use SVG icons inside a clickable <button>.
 // SVGs aren't reliable click targets, so we walk up to the nearest
@@ -112,16 +124,18 @@ export function parseZoomChatLabel(label: string): ZoomChatLabel {
 
 /**
  * Who a Zoom chat message went to: everyone when the recipient reads as
- * "Everyone" (in any of the forms Zoom shows it), privately otherwise ("to
- * You", "to <name>", a "(Direct Message)" or "(Privately)" mark), and unknown
- * when the label showed no recipient. English labels only: in another language
- * the label is in neither shape and the recipient is unknown, and the meeting
- * chat capture does not add a message whose recipient is unknown.
+ * "Everyone" (in any of the forms Zoom shows it), or as "Meeting Group Chat",
+ * the everyone-recipient of a meeting whose chat continues in a Team Chat group
+ * chat; privately otherwise ("to You", "to <name>", a "(Direct Message)" or
+ * "(Privately)" mark); and unknown when the label showed no recipient. English
+ * labels only: in another language the label is in neither shape and the
+ * recipient is unknown, and the meeting chat capture does not add a message
+ * whose recipient is unknown.
  */
 export function zoomChatAudience(recipient: string | null): 'everyone' | 'direct' | undefined {
     if (!recipient) return undefined;
     if (/privately|direct message/i.test(recipient)) return 'direct';
-    return /^everyone\b/i.test(recipient) ? 'everyone' : 'direct';
+    return /^(everyone|meeting group chat)\b/i.test(recipient) ? 'everyone' : 'direct';
 }
 
 export default class Zoom {
@@ -490,6 +504,8 @@ export default class Zoom {
      * only ever click a button whose label is specifically "open the chat
      * panel" — never a "close" button. One click is enough on cloakbrowser's
      * Chromium; no verify-retry loop (that loop caused an open/close war).
+     * The label is matched as a prefix: with unread messages Zoom appends
+     * " 2 unread messages" to it.
      */
     private async openChatPanel(page: Page): Promise<boolean> {
         // Idempotent: if the chat input is already visible the panel is open —
@@ -504,7 +520,7 @@ export default class Zoom {
         // button on an already-open panel. The pre-check above prevents that.
         const chatButtonResult = await findElementWithFallback(
             page,
-            ['button[aria-label="open the chat panel"]'],
+            [ZOOM_CHAT_SELECTORS.openButton],
             {
                 intent: 'Zoom toolbar button that OPENS the in-meeting chat panel (label "open the chat panel"). Not the close button.',
                 platform: 'ZOOM',
@@ -1755,7 +1771,7 @@ export default class Zoom {
         }
 
         // Set up message monitoring with LMA features
-        await page.exposeFunction('messageChange', async (message: string, messageId?: string | null, links?: string[]) => {
+        const onChatRow = async (message: string, messageId?: string | null, links?: string[]): Promise<void> => {
             // `message` is the row's aria-label, sender and recipient included.
             // Every command below is matched against the body alone.
             const { sender, recipient, body: rawBody, time } = parseZoomChatLabel(message);
@@ -1842,11 +1858,26 @@ export default class Zoom {
                     links,
                 });
             }
-        });
+        };
 
-        // Resolve chat-list selector node-side first.
-        let chatListSelector: string | null = 'div[aria-label="Chat Message List"]';
-        if (!(await page.$(chatListSelector))) {
+        // The chat reader (zoom-chat-page.ts). Zoom draws the chat rows only
+        // while its panel is open and closes the panel by itself, for one when
+        // someone starts sharing their screen, so the rows are read by polling
+        // whatever list is on the page, and the panel is reopened when the
+        // toolbar shows it closed. A list Zoom does not mark the way the
+        // selectors expect is looked for once by the AI resolver, and its
+        // selector (cached as zoom.monitor.chatList) is read after the built-in ones.
+        const chatSelectors = {
+            lists: [...ZOOM_CHAT_SELECTORS.lists] as string[],
+            rows: [...ZOOM_CHAT_SELECTORS.rows],
+            container: ZOOM_CHAT_SELECTORS.container,
+            settleMs: ZOOM_CHAT_BASELINE_SETTLE_MS,
+        };
+        const listOnPage = async (): Promise<boolean> =>
+            page
+                .evaluate((lists: string[]) => lists.some((s) => !!document.querySelector(s)), chatSelectors.lists)
+                .catch(() => false);
+        if (!(await listOnPage()) && (await this.chatInputVisible(page))) {
             const found = await findElementWithFallback(
                 page,
                 [],
@@ -1857,70 +1888,98 @@ export default class Zoom {
                 },
                 { maxRetries: 1, delayMs: 100 },
             );
-            chatListSelector = found ? found.selector : null;
+            if (found) chatSelectors.lists.push(found.selector);
         }
-        if (chatListSelector) {
-            log.info(`Listening for message changes via selector: ${chatListSelector}`);
-            await page.evaluate((selector: string) => {
-                const targetNode = document.querySelector(selector);
-                const config = { childList: true, subtree: true };
-                const CONTENT = 'div[id^="chat-message-content"]';
-                // Keyed on the message element's id, which carries Zoom's
-                // message id, so a row Zoom re-renders is not read twice and
-                // the same command typed twice is read twice.
-                const seen = new Set<string>();
-                // The rows already in the list when the observer attaches were
-                // there before the VP was listening: if Zoom re-renders them
-                // they are not read as new messages.
-                targetNode?.querySelectorAll(CONTENT).forEach((content) => {
-                    seen.add(content.id || `label:${content.getAttribute('aria-label') ?? ''}`);
-                });
-                const deliver = (content: Element) => {
-                    const label = content.getAttribute('aria-label');
-                    // No label yet: the row is filled in by a later mutation,
-                    // so it is not marked seen.
-                    if (!label) return;
-                    const key = content.id || `label:${label}`;
-                    if (seen.has(key)) return;
-                    seen.add(key);
-                    if (label.startsWith('You to ')) return;
-                    const id = content.id ? content.id.replace(/^chat-message-content-?/, '') || content.id : null;
-                    const scope = content.parentElement ?? content;
-                    const links = Array.from(scope.querySelectorAll('a[href]'))
-                        .map((a) => (a as HTMLAnchorElement).href)
-                        .filter(Boolean);
-                    (window as any).messageChange(label, id, links);
-                };
-                const callback = (mutationList: MutationRecord[]) => {
-                    // Every added node of every mutation: a burst of messages
-                    // arrives as several, and Zoom can add a wrapper holding
-                    // more than one row.
-                    for (const mutation of mutationList) {
-                        for (const node of Array.from(mutation.addedNodes)) {
-                            if (!(node instanceof Element)) continue;
-                            if (node.matches(CONTENT)) deliver(node);
-                            node.querySelectorAll(CONTENT).forEach(deliver);
+        const panelKeeper = new ZoomChatPanelKeeper();
+        let chatPollInFlight = false;
+        let listMissingLogged = false;
+        let readerLogged = false;
+        // Set while the consent flow shows the participants pane (below).
+        let chatKeeperPaused = false;
+        log.info('Listening for message changes (polling the chat list).');
+        const chatPoll = setInterval(async () => {
+            if (page.isClosed()) {
+                clearInterval(chatPoll);
+                return;
+            }
+            if (chatPollInFlight) return;
+            chatPollInFlight = true;
+            try {
+                const panel = await page
+                    .evaluate(zoomChatPanelStateInPage, {
+                        openButton: ZOOM_CHAT_SELECTORS.openButton,
+                        closeButton: ZOOM_CHAT_SELECTORS.closeButton,
+                    })
+                    .catch((): ZoomChatPanelState => 'unknown');
+                if (!chatKeeperPaused && panelKeeper.shouldReopen(panel, Date.now())) {
+                    log.info('[zoom-chat] the chat panel is closed; reopening it to keep reading the chat');
+                    let opened = false;
+                    try {
+                        const button = await page.$(ZOOM_CHAT_SELECTORS.openButton);
+                        if (button) {
+                            await humanClick(page, button);
+                            const until = Date.now() + 3000;
+                            while (!opened && Date.now() < until) {
+                                await new Promise((r) => setTimeout(r, 300));
+                                opened = await listOnPage();
+                            }
                         }
+                    } catch (err: any) {
+                        log.warn(`[zoom-chat] reopening the chat panel failed: ${err?.message ?? err}`);
                     }
-                };
-                const observer = new MutationObserver(callback);
-                if (targetNode) observer.observe(targetNode, config);
-            }, chatListSelector);
-        } else {
-            log.info('No chat list selector available — skipping chat monitoring');
-        }
+                    panelKeeper.attempted(Date.now(), opened);
+                    if (!opened) {
+                        log.warn(`[zoom-chat] the chat panel is still closed; next attempt in ${Math.round(panelKeeper.currentGapMs / 1000)}s`);
+                    }
+                }
+                const reading = await page.evaluate(readZoomChatInPage, chatSelectors);
+                if (!reading.listFound) {
+                    if (!listMissingLogged && panel === 'open') {
+                        listMissingLogged = true;
+                        log.warn('[zoom-chat] the chat panel is open but no message list was found on the page');
+                    }
+                } else if (!readerLogged && !reading.baseline) {
+                    readerLogged = true;
+                    log.info('[zoom-chat] reading the meeting chat');
+                }
+                for (const row of reading.rows) {
+                    await onChatRow(row.label, row.id, row.links);
+                }
+            } catch {
+                /* the page is navigating or closing; read again next tick */
+            } finally {
+                chatPollInFlight = false;
+            }
+        }, ZOOM_CHAT_POLL_MS);
 
         // The meeting consent flow, when the meeting runs one (meeting-consent.ts).
         // The participants pane opens beside the chat; it is closed again
         // after the screenshot, and the chat reopened if Zoom closed it.
+        // The chat panel keeper above stands aside while the participants pane
+        // is shown for the consent evidence, so it does not swap the pane out
+        // before its screenshot; restore() reopens the chat itself.
+        const participantPanels = toolbarPanels(page, {
+            listVisible: ['.participants-section-container', '.participants-ul'],
+            open: ['button[aria-label^="open the participants list pane" i]', 'button[aria-label*="participants" i][aria-label^="open" i]'],
+            close: ['button[aria-label^="close the participants list pane" i]', 'button[aria-label*="participants" i][aria-label^="close" i]'],
+            reopenChat: () => this.openChatPanel(page),
+        });
         attachMeetingConsent(page, {
             send: (messages) => this.sendMessages(page, messages),
-            panels: toolbarPanels(page, {
-                listVisible: ['.participants-section-container', '.participants-ul'],
-                open: ['button[aria-label^="open the participants list pane" i]', 'button[aria-label*="participants" i][aria-label^="open" i]'],
-                close: ['button[aria-label^="close the participants list pane" i]', 'button[aria-label*="participants" i][aria-label^="close" i]'],
-                reopenChat: () => this.openChatPanel(page),
-            }),
+            panels: {
+                ...participantPanels,
+                showParticipants: async () => {
+                    chatKeeperPaused = true;
+                    return (await participantPanels.showParticipants?.()) ?? false;
+                },
+                restore: async () => {
+                    try {
+                        await participantPanels.restore?.();
+                    } finally {
+                        chatKeeperPaused = false;
+                    }
+                },
+            },
             leave: (objector) => {
                 details.start = false;
                 this.requestEnd({ reason: 'consent-objection', trigger: 'consent-objection', requestedBy: objector });
@@ -1989,6 +2048,7 @@ export default class Zoom {
             exitInfo = { reason: 'meeting-timeout', trigger: 'meetingTimeout' };
         } finally {
             details.start = false;
+            clearInterval(chatPoll);
         }
         log.info(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
         return exitInfo;
