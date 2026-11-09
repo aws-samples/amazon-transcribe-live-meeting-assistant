@@ -26,7 +26,7 @@ import { configuredWakePhrases } from './stop-request.js';
 import { ASSISTANT_CHAT_COMMANDS } from './assistant-toggles.js';
 import type { VoiceAssistantProvider } from './voice-assistant-interface.js';
 import { chatAskAvailable } from './chat-ask.js';
-import { CONSENT_HELP_LINE, consentHelpActive } from './consent-help.js';
+import { consentHelpActive, consentHelpLine } from './consent-help.js';
 import { addressingVpHandle, preferredVpHandle } from './vp-handle.js';
 import { normalizeChatText } from './chat-text.js';
 
@@ -104,7 +104,7 @@ export function chatHelpMessages(
 
     // The consent replies, while the meeting runs a consent flow
     // (meeting-consent.ts); a meeting without one has nothing to reply to.
-    if (consent) messages.push(CONSENT_HELP_LINE);
+    if (consent) messages.push(consentHelpLine());
 
     return messages;
 }

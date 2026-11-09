@@ -150,6 +150,45 @@ def test_an_image_outside_the_meetings_folder_is_not_read(fakes) -> None:
     assert bedrock.calls == []
 
 
+# A meeting name with a run of dots: its folder name keeps them.
+DOTTED_CALL = (
+    "Review all the LMA new features and UI changes.. prep to release-2026-11-09-15-58-36-076"
+)
+DOTTED_FOLDER = (
+    "lma-consent-evidence/"
+    "Review_all_the_LMA_new_features_and_UI_changes.._prep_to_release_2026_11_09_15_58_36_076/"
+)
+
+
+def test_a_meeting_name_with_dots_has_its_own_evidence_read(fakes) -> None:
+    _s3, bedrock, _metering = fakes
+    result = index.handler(event(CallId=DOTTED_CALL, S3Key=f"{DOTTED_FOLDER}chat.png"), None)
+    assert result["Ok"] is True
+    assert len(bedrock.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        f"{DOTTED_FOLDER}../Another_meeting/chat.png",
+        f"{DOTTED_FOLDER}a/../../lma-audio-recordings/x.wav",
+        f"{DOTTED_FOLDER}./chat.png",
+        f"{DOTTED_FOLDER}a//chat.png",
+        DOTTED_FOLDER,
+        "lma-consent-evidence/Another_meeting/chat.png",
+        DOTTED_FOLDER.rstrip("/") + ".png",
+    ],
+)
+def test_a_meeting_name_with_dots_still_has_only_keys_inside_its_folder_read(fakes, key) -> None:
+    _s3, bedrock, _metering = fakes
+    result = index.handler(event(CallId=DOTTED_CALL, S3Key=key), None)
+    assert result == {
+        "Ok": False,
+        "Message": "the evidence is not in this meeting's evidence folder",
+    }
+    assert bedrock.calls == []
+
+
 def test_a_large_or_missing_or_unknown_image_is_refused(monkeypatch, fakes) -> None:
     monkeypatch.setattr(index, "S3", FakeS3(size=index.MAX_IMAGE_BYTES + 1))
     assert "larger" in index.handler(event(), None)["Message"]
