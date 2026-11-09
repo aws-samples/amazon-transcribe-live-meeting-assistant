@@ -182,6 +182,48 @@ def test_only_the_meetings_own_images_are_read(fakes, change):
     assert s3.keys == [] and bedrock.calls == []
 
 
+# A meeting name with a run of dots: its folder name keeps them.
+DOTTED_CALL = (
+    "Review all the LMA new features and UI changes.. prep to release-2026-11-09-15-58-36-076"
+)
+DOTTED_FOLDER = (
+    "lma-video-keyframes/"
+    "Review_all_the_LMA_new_features_and_UI_changes.._prep_to_release_2026_11_09_15_58_36_076/"
+)
+
+
+def dotted_event(key: str) -> Dict[str, str]:
+    from urllib.parse import quote
+
+    url = f"https://rec-bucket.s3.us-east-1.amazonaws.com/{quote(key, safe='')}"
+    return {"CallId": DOTTED_CALL, "FrameId": FRAME, "ImageUrl": url}
+
+
+def test_a_meeting_name_with_dots_has_its_own_frame_read(fakes):
+    key = f"{DOTTED_FOLDER}{FRAME}.jpg"
+    _, s3, bedrock, _ = fakes(item={"PK": {"S": f"kf#{DOTTED_CALL}"}})
+    assert index.handler(dotted_event(key), None)["status"] == "read"
+    assert s3.keys == [key] and len(bedrock.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        f"{DOTTED_FOLDER}../Another_meeting/f.jpg",
+        f"{DOTTED_FOLDER}a/../../lma-audio-recordings/x.wav",
+        f"{DOTTED_FOLDER}./f.jpg",
+        f"{DOTTED_FOLDER}a//f.jpg",
+        DOTTED_FOLDER,
+        "lma-video-keyframes/Another_meeting/f.jpg",
+        DOTTED_FOLDER.rstrip("/") + ".jpg",
+    ],
+)
+def test_a_meeting_name_with_dots_still_has_only_keys_inside_its_folder_read(fakes, key):
+    _, s3, bedrock, _ = fakes(item={"PK": {"S": f"kf#{DOTTED_CALL}"}})
+    assert index.handler(dotted_event(key), None)["status"] == "skipped"
+    assert s3.keys == [] and bedrock.calls == []
+
+
 def test_a_picture_with_no_text_is_stored_as_empty(fakes):
     dynamo, *_ = fakes(bedrock=FakeBedrock(answer="NO TEXT."))
     index.handler(dict(EVENT), None)

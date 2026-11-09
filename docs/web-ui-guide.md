@@ -135,8 +135,14 @@ assistant is a panel beside the tabs, on every tab; see
   for 30 seconds (the time a notice normally takes to be posted and answered);
   **Show the consent record** opens the record.
 - **Owner** and **Speakers** — the people heard in the meeting, by the names
-  given to their voices. **Name speakers** opens the Speakers panel on the
-  **Details** tab.
+  the transcript shows for them: a name shown as
+  [one person](transcription-and-translation.md#one-person-or-several-people)
+  is listed once however many voices it has, and a name shown as several
+  people is listed once per voice (`ConfRm_1 · Voice 1`, or the name given to
+  that voice). The list follows a renamed voice or a changed choice at once.
+  Selecting a speaker opens that speaker's voice in the Speakers panel on the
+  **Details** tab, with its name field ready for typing; **Name speakers** opens
+  the panel itself.
 - **Est. cost** — the meeting's estimated cost. Select it to see the itemised
   estimate; see [Meeting Cost Estimate](meeting-cost-estimate.md).
 - **Assistant** — opens and closes the [meeting assistant panel](#meeting-assistant-panel),
@@ -354,14 +360,19 @@ pass over chat messages, since they were typed rather than heard.
   works within the speakers chosen.
 - **One person | Several people** — the chips are grouped by the name the
   meeting platform showed, and a name that speaker separation heard several
-  voices under has this toggle beside it. **One person** shows every line under
+  voices under has a small menu beside it, shown as a person icon (one person)
+  or a group icon (several people); its tooltip says why the name is shown that
+  way. **One person** shows every line under
   the name alone (`Bob Strahan`, not `Bob Strahan (spk_0)` and `(spk_1)`);
   **Several people** gives each voice a chip of its own — `ConfRm_1 · Voice 1`,
   `Voice 2` — with a pencil to name that voice in place, which renames every line
-  it spoke (clear the name to go back to *Voice N*; **More options** opens the
-  speaker's dialog). LMA picks a default for each name — several people for a
+  it spoke. The field opens empty, with *ConfRm_1 · Voice 1* as its placeholder;
+  **Enter** or moving away saves the name, **Escape** cancels, and clearing a
+  name goes back to *Voice N*; **More options** opens the speaker's dialog. The
+  same menu is beside the name in the Speakers panel. LMA picks a default for
+  each name — several people for a
   room or a room device, or when two voices each spoke at length, one person
-  otherwise — so the toggle is only needed where that guess is wrong; see
+  otherwise — so the menu is only needed where that guess is wrong; see
   [One person or several people](transcription-and-translation.md#one-person-or-several-people).
   The choice is saved with the meeting and applies to the downloads, the summary
   and the Meeting Assistant too. It can be changed by the same people who can
