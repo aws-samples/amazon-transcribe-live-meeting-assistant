@@ -4,6 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import { describe, it, expect } from 'vitest';
+import { render, screen, cleanup } from '@testing-library/react';
 
 import { NAV_PATHS } from './navigation';
 import { generateNavigationItems } from '../common/navigation-items';
@@ -73,5 +74,15 @@ describe('side navigation visibility', () => {
     // Enrolling your own voice is self-service, not an admin task: only the
     // person whose voice it is can consent to it being stored.
     expect(hrefs({ VoiceEnrollmentAvailable: 'true' }, false)).toContain(VOICE_ENROLLMENT_PATH);
+  });
+
+  it('marks the Enroll My Voice entry Beta', () => {
+    const entry = generateNavigationItems({ VoiceEnrollmentAvailable: 'true' }, false).find(
+      (item) => item.text === 'Enroll My Voice',
+    );
+    expect(entry).toBeTruthy();
+    render(entry.info);
+    expect(screen.getByText('Beta')).toBeTruthy();
+    cleanup();
   });
 });

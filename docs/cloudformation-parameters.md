@@ -452,7 +452,7 @@ Console label: *Deploy the on-demand speech engine (EXPERIMENTAL)*
 
 Deploys the EXPERIMENTAL on-demand speech engine (open-source models on AWS Lambda MicroVMs in this account) alongside Amazon Transcribe. Nothing changes until an admin moves Stream Audio, Chrome extension and Desktop Capture meetings, or Virtual Participants, onto it in the Transcription Engine section of the Configuration page. English only; requires a region with AWS Lambda MicroVMs. See docs/microvm-asr.md.
 
-## Voice enrollment (biometric; off by default)
+## Voice enrollment (Beta; biometric; off by default)
 
 | Parameter | Default | Kind |
 |---|---|---|
@@ -999,7 +999,7 @@ meetings use the engine is chosen in the Transcription Engine section of the
 Configuration page, with no stack update. The bundles, their licences and how one
 is selected are described in [On-demand ASR & Speaker Diarization](microvm-asr.md).
 
-### Voice enrollment
+### Voice enrollment (Beta)
 
 > [!IMPORTANT]
 > Off by default, and turning it on means storing biometric data about people.
