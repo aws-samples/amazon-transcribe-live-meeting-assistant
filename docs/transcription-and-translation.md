@@ -113,6 +113,16 @@ voice, not per segment**, so one name relabels every segment that voice has
 already produced as well as every segment it produces afterwards. The turn count
 on the row is how many segments a rename will move.
 
+The voices of a name that can be shown as
+[one person or several people](#one-person-or-several-people) are listed
+together under that name, as **Voice 1**, **Voice 2** in the order they were
+first heard, with the name's **One person | Several people** menu beside it.
+Each unnamed voice's field shows what its lines read as (`ConfRm_1 · Voice 2`).
+Under a name shown as one person, naming any of its voices names all of them
+(except a locked one), because the transcript shows one name for every line
+under it. Selecting a speaker in the meeting page header opens the panel at
+that speaker's voice.
+
 Names are stored as a map on the meeting and applied wherever the transcript is
 read, so a rename is immediate and reversible, and it reaches the meeting
 summary, the Meeting Assistant and the transcript download as well as the screen.
@@ -166,10 +176,12 @@ Names that stand for nobody in particular — `Unknown`, `none`, the default
 grouped: their voice labels are kept, because they are the only way to tell the
 people behind them apart, and those voices are named as described above.
 
-Correcting the default is one click: on the **Transcript** tab, the speaker chips
+Correcting the default takes two clicks: on the **Transcript** tab, the speaker chips
 are grouped by name, and each name with two or more voices (or shown as several
-people) has a **One person | Several people** toggle; in **Several people** each
-voice's chip has a pencil to name it in place. See
+people) has a small **One person | Several people** menu (a person or a group
+icon); in **Several people** each voice's chip has a pencil to name it in place.
+The same menu is beside the name in the Speakers panel, and the speakers named in
+the page header follow the choice. See
 [Transcript tab](web-ui-guide.md#transcript-tab). The choice is stored with the
 meeting's speaker names, so like them it reaches the transcript download, the
 summary (after **Regenerate**), the agenda, and the Meeting Assistant. Changing it
@@ -196,7 +208,7 @@ The automatic passes stop as soon as there is nothing for them to do. When every
 voice already has a name — on a Virtual Participant meeting every voice carries
 the name the meeting platform showed — the panel says *Every voice already has a
 name from the meeting platform* and stops; what is left to tidy there is how a
-name's voices are grouped, which is the **One person | Several people** toggle
+name's voices are grouped, which is the **One person | Several people** menu
 above. They also stop once the meeting has ended (the end-of-meeting pass covers
 it), and after a pass that found nothing they wait until somebody speaks again.
 **Identify speakers** always answers when pressed. *Nothing in the transcript
