@@ -14,6 +14,7 @@ import { test } from 'node:test';
 import {
     atLeastAsStrict,
     classifyChatReply,
+    classifySpokenReply,
     noticeChatMessages,
     normalizeReplyText,
     renderNotice,
@@ -25,6 +26,34 @@ import { DEFAULT_CONSENT_SETTINGS } from './meeting-consent.js';
 const CONSENT = DEFAULT_CONSENT_SETTINGS.consentPhrases;
 const OBJECTION = DEFAULT_CONSENT_SETTINGS.objectionPhrases;
 const classify = (message: string) => classifyChatReply(message, CONSENT, OBJECTION);
+const classifySpoken = (utterance: string) => classifySpokenReply(utterance, CONSENT, OBJECTION);
+
+test('a spoken reply counts only when addressed to LMA', () => {
+    assert.equal(classifySpoken('LMA, I consent.'), 'consent');
+    assert.equal(classifySpoken('I agree, LMA'), 'consent');
+    assert.equal(classifySpoken('LMA consent'), 'consent');
+    assert.equal(classifySpoken('LMA, stop recording!'), 'objection');
+    assert.equal(classifySpoken('LMA object'), 'objection');
+    assert.equal(classifySpoken('LMA, I do not consent.'), 'objection', 'objections first');
+    for (const bare of ['I consent.', 'I agree', 'Stop recording!', 'I object', "I don't agree.", 'I do not consent.']) {
+        assert.equal(classifySpoken(bare), null, bare);
+    }
+});
+
+test('an addressed spoken consent must be the whole utterance; an addressed objection may be a sentence', () => {
+    assert.equal(classifySpoken('LMA, I agree with what Bo said about the roadmap.'), null);
+    assert.equal(classifySpoken('LMA, can you please stop recording now?'), 'objection');
+    assert.equal(classifySpoken(`LMA ${'and then we talked about the plan '.repeat(8)}stop recording`), null, 'over 200 characters');
+    assert.equal(classifySpoken('Can we record the demo again later?'), null);
+});
+
+test('LMA spelled out by speech recognition is read as the LMA addressee', () => {
+    assert.equal(classifySpoken('L M A consent.'), 'consent');
+    assert.equal(classifySpoken('L.M.A. no consent'), 'objection');
+    assert.equal(classifySpoken('LMA, please stop recording now.'), 'objection');
+    assert.equal(classifySpoken('Elma consent'), null, 'only the three letters');
+    assert.equal(classifySpoken('Film a consent'), null);
+});
 
 test('a configured consent phrase is consent as the whole message, in any case and punctuation', () => {
     for (const message of ['I consent', 'i consent!', '  I CONSENT. ', 'I agree', 'I accept', 'LMA, I consent', '@LMA I agree', 'I consent LMA']) {
