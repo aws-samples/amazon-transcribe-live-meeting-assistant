@@ -14,6 +14,8 @@ installed release still offers one of them.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import os
 import sys
 import types
@@ -37,27 +39,58 @@ def _install_fake(monkeypatch, **attrs):
     monkeypatch.setitem(sys.modules, MODULE, fake)
 
 
-def test_current_api_passes_headers_through_the_http_client(monkeypatch):
-    calls = []
+class _FakeHttpClient:
+    def __init__(self, headers, events):
+        self.headers = headers
+        self.events = events
 
+    async def __aenter__(self):
+        self.events.append("client-open")
+        return self
+
+    async def __aexit__(self, *exc):
+        self.events.append("client-closed")
+
+
+def _current_api(events):
     def create_mcp_http_client(headers=None):
-        return ("http-client", headers)
+        return _FakeHttpClient(headers, events)
 
-    def streamable_http_client(url, *, http_client=None):
-        calls.append((url, http_client))
-        return "transport"
+    @contextlib.asynccontextmanager
+    async def streamable_http_client(url, *, http_client=None):
+        events.append(("transport-open", url, http_client.headers))
+        yield "streams"
+        events.append("transport-closed")
 
-    _install_fake(
-        monkeypatch,
-        create_mcp_http_client=create_mcp_http_client,
-        streamable_http_client=streamable_http_client,
-    )
+    return {"create_mcp_http_client": create_mcp_http_client, "streamable_http_client": streamable_http_client}
+
+
+async def _open(factory):
+    async with factory() as streams:
+        return streams
+
+
+def test_current_api_passes_headers_through_the_http_client(monkeypatch):
+    events = []
+    _install_fake(monkeypatch, **_current_api(events))
     factory = mcp_server_loader.streamable_http_transport(
         "https://example.test/mcp", {"Authorization": "Bearer t"}
     )
-    assert calls == []  # nothing is opened until the client starts
-    assert factory() == "transport"
-    assert calls == [("https://example.test/mcp", ("http-client", {"Authorization": "Bearer t"}))]
+    assert events == []  # nothing is opened until the client starts
+    assert asyncio.run(_open(factory)) == "streams"
+    assert events[1] == ("transport-open", "https://example.test/mcp", {"Authorization": "Bearer t"})
+
+
+def test_the_http_client_is_closed_with_the_transport(monkeypatch):
+    events = []
+    _install_fake(monkeypatch, **_current_api(events))
+    factory = mcp_server_loader.streamable_http_transport("https://example.test/mcp", None)
+    asyncio.run(_open(factory))
+    asyncio.run(_open(factory))
+    assert [e for e in events if isinstance(e, str)] == [
+        "client-open", "transport-closed", "client-closed",
+        "client-open", "transport-closed", "client-closed",
+    ]
 
 
 def test_earlier_api_is_used_when_the_current_one_is_absent(monkeypatch):
@@ -74,11 +107,8 @@ def test_earlier_api_is_used_when_the_current_one_is_absent(monkeypatch):
 
 
 def test_load_http_mcp_server_builds_a_client(monkeypatch):
-    _install_fake(
-        monkeypatch,
-        create_mcp_http_client=lambda headers=None: headers,
-        streamable_http_client=lambda url, *, http_client=None: (url, http_client),
-    )
+    events = []
+    _install_fake(monkeypatch, **_current_api(events))
     created = {}
 
     class FakeMCPClient:
@@ -97,9 +127,13 @@ def test_load_http_mcp_server_builds_a_client(monkeypatch):
     )
     assert isinstance(client, FakeMCPClient)
     assert created["prefix"] == "custom_deepwiki"
-    assert created["transport"]() == ("https://mcp.deepwiki.com/mcp", {"X-Key": "k"})
+    assert asyncio.run(_open(created["transport"])) == "streams"
+    assert events[1] == ("transport-open", "https://mcp.deepwiki.com/mcp", {"X-Key": "k"})
 
 
-def test_installed_mcp_offers_a_streamable_http_client():
+def test_installed_mcp_offers_the_api_the_factory_uses():
     module = pytest.importorskip(MODULE)
-    assert hasattr(module, "streamable_http_client") or hasattr(module, "streamablehttp_client")
+    if hasattr(module, "streamable_http_client"):
+        assert hasattr(module, "create_mcp_http_client")
+    else:
+        assert hasattr(module, "streamablehttp_client")

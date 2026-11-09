@@ -18,6 +18,7 @@ Caching Strategy:
 - MCPClient health is checked before reuse; unhealthy clients are recreated
 """
 
+import contextlib
 import os
 import boto3
 import hashlib
@@ -409,9 +410,15 @@ def streamable_http_transport(server_url: str, headers: Optional[Dict[str, str]]
 
         return lambda: streamablehttp_client(url=server_url, headers=headers)
 
-    return lambda: streamable_http_client(
-        server_url, http_client=create_mcp_http_client(headers=headers)
-    )
+    @contextlib.asynccontextmanager
+    async def transport():
+        # The transport leaves a client it is given open, so the client is
+        # opened and closed here, with the transport's lifetime.
+        async with create_mcp_http_client(headers=headers) as http_client:
+            async with streamable_http_client(server_url, http_client=http_client) as streams:
+                yield streams
+
+    return transport
 
 
 def load_http_mcp_server(server_id: str, server_url: str, auth_config: dict = None):
