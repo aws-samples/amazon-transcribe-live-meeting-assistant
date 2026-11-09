@@ -538,14 +538,62 @@ def split_for_polly(text: str, limit: int = POLLY_TEXT_LIMIT) -> list[str]:
     return chunks
 
 
-def to_ssml(text: str, rate: str = "95%", break_ms: int = 350) -> str:
-    sentences = [xml_escape(s) for s in split_sentences(text)]
+#: Optional per-session file of pronunciation hints: a JSON list of
+#: ``{"phrase": "Live Meeting Assistant", "word": "Live", "ipa": "la\u026av"}``.
+#: Wherever ``phrase`` appears in a narration line, ``word`` inside it is spoken
+#: with the IPA pronunciation; the captions keep the line as written.
+PRONUNCIATIONS_FILE = "pronunciations.json"
+
+
+def load_pronunciations(session_dir: Path) -> list[dict[str, str]]:
+    path = session_dir / PRONUNCIATIONS_FILE
+    if not path.exists():
+        return []
+    valid = []
+    for entry in json.loads(path.read_text(encoding="utf-8")):
+        phrase, word, ipa = entry.get("phrase"), entry.get("word"), entry.get("ipa")
+        if not (phrase and word and ipa and word in phrase):
+            raise ValueError(
+                f"{PRONUNCIATIONS_FILE}: each entry needs phrase, word (inside phrase) and ipa: {entry!r}"
+            )
+        valid.append({"phrase": phrase, "word": word, "ipa": ipa})
+    return valid
+
+
+def apply_pronunciations(escaped: str, pronunciations: list[dict[str, str]]) -> str:
+    """Wrap each hinted word in an SSML ``<phoneme>`` inside an XML-escaped sentence."""
+    for entry in pronunciations:
+        phrase = xml_escape(entry["phrase"])
+        word = xml_escape(entry["word"])
+        ipa = xml_escape(entry["ipa"], {'"': "&quot;"})
+        tagged = phrase.replace(word, f'<phoneme alphabet="ipa" ph="{ipa}">{word}</phoneme>', 1)
+        escaped = re.sub(rf"(?<![\w>]){re.escape(phrase)}(?!\w)", lambda _m: tagged, escaped)
+    return escaped
+
+
+def to_ssml(
+    text: str,
+    rate: str = "95%",
+    break_ms: int = 350,
+    pronunciations: list[dict[str, str]] | None = None,
+) -> str:
+    sentences = [
+        apply_pronunciations(xml_escape(s), pronunciations or []) for s in split_sentences(text)
+    ]
     body = f'<break time="{break_ms}ms"/>'.join(sentences)
     return f'<speak><prosody rate="{rate}">{body}</prosody></speak>'
 
 
-def narration_cache_key(engine: str, voice: str, text: str, text_type: str = "ssml") -> str:
-    digest = hashlib.sha256(f"{engine}|{voice}|{text_type}|{text}".encode("utf-8"))
+def narration_cache_key(
+    engine: str,
+    voice: str,
+    text: str,
+    text_type: str = "ssml",
+    pronunciations: list[dict[str, str]] | None = None,
+) -> str:
+    applicable = [h for h in pronunciations or [] if h["phrase"] in text]
+    hints = json.dumps(applicable, sort_keys=True) if applicable else ""
+    digest = hashlib.sha256(f"{engine}|{voice}|{text_type}|{text}|{hints}".encode("utf-8"))
     return digest.hexdigest()[:20]
 
 
@@ -974,11 +1022,13 @@ def synthesize(
     plain_text: bool = False,
     client: Any = None,
     log: Callable[[str], None] = print,
+    pronunciations: list[dict[str, str]] | None = None,
 ) -> Path:
     """Narration mp3 for ``text``, from cache when the same line was spoken before."""
     out_dir.mkdir(parents=True, exist_ok=True)
     text_type = "text" if plain_text else "ssml"
-    key = narration_cache_key(engine, voice, text, text_type)
+    hints = None if plain_text else pronunciations
+    key = narration_cache_key(engine, voice, text, text_type, hints)
     out = out_dir / f"{key}.mp3"
     if out.exists() and out.stat().st_size > 0:
         return out
@@ -986,7 +1036,7 @@ def synthesize(
     chunks = split_for_polly(text)
     parts: list[Path] = []
     for i, chunk in enumerate(chunks):
-        body = chunk if plain_text else to_ssml(chunk)
+        body = chunk if plain_text else to_ssml(chunk, pronunciations=hints)
         log(f"  polly {voice}/{engine}: {len(chunk)} chars")
         response = client.synthesize_speech(
             Engine=engine,
@@ -1193,10 +1243,13 @@ def render_session(
     audio_files: dict[int, Path] = {}
     if lines:
         client = None if opts.dry_run else client_factory(opts.region)
+        hints = [] if opts.plain_text else load_pronunciations(session_dir)
+        if hints:
+            log(f"pronunciation hints: {', '.join(h['phrase'] for h in hints)}")
         for seq, text in lines.items():
             if opts.dry_run:
                 key = narration_cache_key(
-                    opts.engine, opts.voice, text, "text" if opts.plain_text else "ssml"
+                    opts.engine, opts.voice, text, "text" if opts.plain_text else "ssml", hints
                 )
                 cached = session_dir / "narration" / f"{key}.mp3"
                 duration = probe_duration(cached) if cached.exists() else estimate_duration(text)
@@ -1210,6 +1263,7 @@ def render_session(
                     opts.plain_text,
                     client=client,
                     log=log,
+                    pronunciations=hints,
                 )
                 audio_files[seq] = mp3
                 duration = probe_duration(mp3)
