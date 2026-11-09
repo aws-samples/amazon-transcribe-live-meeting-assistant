@@ -1158,3 +1158,29 @@ def test_the_language_list_is_not_baked_into_the_image() -> None:
     """The list is reported to the stack; the image does not read it."""
     rendered = index.render_model_env(index.resolve({}, _shipped_catalog()))
     assert "LANGUAGES" not in rendered
+
+
+def test_a_file_pinned_transducer_may_carry_an_encoder_weights_file() -> None:
+    catalog = _catalog_with_files_model()
+    main = next(m for m in catalog["models"] if m["id"] == "offline-model")
+    main["files"]["encoder_data"] = _files_pinned("encoder.weights", "8")
+    values = _env_values(index.resolve({"BundleId": "bundle-offline"}, catalog))
+
+    assert values["ASR_MODEL_ENCODER_DATA_FILE"] == "encoder.weights"
+    assert values["ASR_MODEL_ENCODER_DATA_URL"] == "https://x.invalid/rev/encoder.weights"
+    assert values["ASR_MODEL_ENCODER_DATA_SHA256"] == "8" * 64
+
+
+def test_a_file_pinned_transducer_encoder_weights_file_requires_a_checksum() -> None:
+    catalog = _catalog_with_files_model()
+    main = next(m for m in catalog["models"] if m["id"] == "offline-model")
+    main["files"]["encoder_data"] = {"path": "encoder.weights", "url": "https://x.invalid/w"}
+    with pytest.raises(index.ResolutionError, match="encoder_data file is missing"):
+        index.resolve({"BundleId": "bundle-offline"}, catalog)
+
+
+def test_the_parakeet_v3_bundles_use_the_full_precision_export() -> None:
+    catalog = json.loads((Path(__file__).parents[2] / "source" / "catalog.json").read_text())
+    v3 = [b for b in catalog["bundles"] if b["id"].startswith("parakeet-tdt-v3")]
+    assert v3
+    assert {b["modelId"] for b in v3} == {"parakeet-tdt-0.6b-v3"}

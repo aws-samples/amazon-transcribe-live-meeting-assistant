@@ -71,6 +71,7 @@ MODEL_KIND_FILE_KEYS = {
     "qwen3_asr": ("conv_frontend", "encoder", "decoder", "tokenizer"),
     "cohere_transcribe": ("encoder", "encoder_data", "decoder", "tokens"),
 }
+OPTIONAL_FILE_KEYS = {"transducer": ("encoder_data",)}
 OFFLINE_ONLY_KINDS = ("qwen3_asr", "cohere_transcribe")
 # A model whose "archive" is "files" is pinned file by file: each entry of its
 # "files" mapping is {"path", "url", "sha256"}, as a diarizer's files are, instead of
@@ -236,7 +237,8 @@ def resolve(properties: dict, catalog: dict) -> dict:
     missing = [key for key in MODEL_KIND_FILE_KEYS[kind] if not files.get(key)]
     if missing:
         raise ResolutionError(f"model {model.get('id')!r} is missing file names: {missing}")
-    _check_sources(model, MODEL_KIND_FILE_KEYS[kind], "model")
+    present_optional = tuple(key for key in OPTIONAL_FILE_KEYS.get(kind, ()) if files.get(key))
+    _check_sources(model, MODEL_KIND_FILE_KEYS[kind] + present_optional, "model")
     if not model.get("sherpaOnnx") or not model.get("onnxruntime"):
         raise ResolutionError(
             f"model {model.get('id')!r} must pin sherpaOnnx and onnxruntime versions"

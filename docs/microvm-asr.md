@@ -232,7 +232,7 @@ deployment created with `EnableMicrovmAsr=false` stays on Amazon Transcribe unti
 you set it to `true`. See [Choosing the engine](#choosing-the-engine) for what
 happens to the engine switches on upgrade.
 
-**First deployment builds the image**, which downloads the models (~1.1 GB for the
+**First deployment builds the image**, which downloads the models (~3.1 GB for the
 default bundle) and warms them. Expect several extra minutes on the first create and
 on any later change of bundle. Build logs, and the logs of every ASR session's
 MicroVM, land in `/aws/lambda-microvms/<stack-name>-asr-logs`, which the stack
@@ -355,6 +355,17 @@ checksum cannot change. Both forms produce the same files under the same names i
 image, so the runtime does not know which was used. The Parakeet TDT v3 and v2 entries use
 the per-file form, pinned to the sherpa-onnx maintainer's Hugging Face repositories. A
 Qwen3-ASR model needs its tokenizer directory and so must come from an archive.
+
+A transducer may also give an `encoder_data` file, for an encoder whose weights are
+stored outside its ONNX graph; that file keeps its own name in the image, because the
+graph records it. Every Parakeet v3 bundle uses the full-precision export of Parakeet TDT
+0.6B v3 this way (about 2.5 GB, exported by the sherpa-onnx maintainer), not the int8
+export (0.5 GB). On AMI meeting audio the int8 export left out the rest of some
+utterances after their first sentences; the full-precision export transcribed the same
+audio in full, with word error rates matching NVIDIA's published AMI figure, for about 10%
+more decode time and about 2.8 GB resident instead of 1.2 GB. The offline engine also
+keeps 300 ms of audio either side of each utterance the voice activity detector finds, so
+the first and last words of an utterance are not clipped.
 
 The runtime also carries an offline (`accurate`) engine — VAD-segmented, one decode
 per closed utterance, for transducer models that cannot stream — which the
