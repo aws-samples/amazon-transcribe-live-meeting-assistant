@@ -121,7 +121,13 @@
       "order": 10,
       "type": "boolean",
       "title": "Virtual Participant leaves after an objection",
-      "description": "On: when a participant objects in the meeting chat, the Virtual Participant stops recording and transcribing, says so, and leaves the meeting. Off: it stops and stays, so recording can resume if the participant later consents. Either way the objection is recorded."
+      "description": "On: when a participant objects, in the meeting chat or aloud, the Virtual Participant stops recording and transcribing, says so, and leaves the meeting. Off: it stops and stays, so recording can resume if the participant later consents. Either way the objection is recorded."
+    },
+    "readSpokenReplies": {
+      "order": 11,
+      "type": "boolean",
+      "title": "Read spoken replies",
+      "description": "On: the Virtual Participant also reads consent replies and objections said aloud and addressed to LMA (\"LMA, I consent\", \"LMA, I object\"). While consent is awaited it sends the meeting audio to the meeting's transcription engine to hear them; nothing it hears is recorded or kept except the replies. Off: it reads replies in the meeting chat only, and sends no meeting audio anywhere until consent is given."
     }
   },
   "additionalProperties": false

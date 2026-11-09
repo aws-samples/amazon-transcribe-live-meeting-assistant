@@ -20,6 +20,13 @@
  * Merging is here because splitting one person across two voice ids is the
  * common separation failure, and naming both rows 'Bob' without merging leaves
  * two Bobs that then confuse every summary.
+ *
+ * The voices of a platform name that can be shown as one person or several
+ * (speaker-modes.js) are listed together under that name, with its One person /
+ * Several people menu, and each row reads as its lines do: 'Voice 2' and the
+ * placeholder 'ConfRm_1 · Voice 2' while unnamed. Under a name shown as one
+ * person, naming one of its voices names them all, because the transcript shows
+ * that one name for every line under it.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -49,11 +56,16 @@ import {
   parseAttendeeList,
   parseSpeakerIdentities,
   serializeSpeakerIdentities,
+  speakerDisplayRows,
+  speakerGroups,
   speakerRowLabel,
   withMerge,
   withoutMerges,
   withSpeakerName,
 } from '../common/speaker-identities';
+import { offersModeChoice, ONE_PERSON, withSpeakerMode } from '../common/speaker-modes';
+import { own } from '../common/speaker-keys';
+import SpeakerModeMenu from './SpeakerModeMenu';
 
 const MERGE_PLACEHOLDER = { label: 'Same person as…', value: '' };
 
@@ -81,7 +93,17 @@ const STOP_REASONS = ['ALREADY_NAMED', 'MEETING_ENDED'];
 const PAUSE_REASONS = ['NO_EVIDENCE', 'NO_GROWTH', 'COOLDOWN'];
 
 const PLATFORM_NAMED = 'Every voice already has a name from the meeting platform.';
-const TIDY_HINT = 'Use One person / Several people on the Transcript tab to tidy voice labels.';
+const TIDY_HINT = "Choose One person / Several people beside a name's voices to tidy voice labels.";
+
+/** How long a row opened from the meeting header stays outlined. */
+const FOCUS_OUTLINE_MS = 3000;
+
+/** A voice's number within its platform name ('Voice 2'), or null outside a name offered the choice. */
+const voiceOrdinal = (row, group) => {
+  if (!group || !row.voiceId) return null;
+  const id = row.voiceId.replace(/[()]/g, '');
+  return group.voices.find((voice) => voice.id === id)?.ordinal ?? null;
+};
 
 /** What the header says after a pass, by the resolver's reason. */
 export const identifyOutcome = (result, roster) => {
@@ -111,6 +133,7 @@ export const identifyOutcome = (result, roster) => {
 
 const SpeakerRow = ({
   row,
+  ordinal = null,
   candidates,
   rosterRows,
   onRename,
@@ -152,7 +175,7 @@ const SpeakerRow = ({
       onSelect={({ detail }) => onRename(row, (detail.value || '').trim())}
       options={candidates.map((name) => ({ value: name }))}
       enteredTextLabel={(value) => `Use "${value}"`}
-      placeholder={row.defaultName}
+      placeholder={row.group ? row.shownAs : row.defaultName}
       disabled={disabled || row.locked}
       ariaLabel={`Name for voice ${row.voiceId || row.channel}`}
       empty="No matching attendee"
@@ -167,7 +190,7 @@ const SpeakerRow = ({
           commit();
         }
       }}
-      placeholder={row.defaultName}
+      placeholder={row.group ? row.shownAs : row.defaultName}
       disabled={disabled || row.locked}
       ariaLabel={`Name for voice ${row.voiceId || row.channel}`}
     />
@@ -177,7 +200,17 @@ const SpeakerRow = ({
     <SpaceBetween direction="vertical" size="xxs">
       <SpaceBetween direction="horizontal" size="xs" alignItems="center">
         <Box variant="small">
-          {row.voiceId ? <Badge>{row.voiceId.replace(/[()]/g, '')}</Badge> : <Badge>{channelLabel(row.channel)}</Badge>}
+          {ordinal !== null && (
+            <span title={row.voiceId.replace(/[()]/g, '')}>
+              <Badge>{`Voice ${ordinal}`}</Badge>
+            </span>
+          )}
+          {ordinal === null &&
+            (row.voiceId ? (
+              <Badge>{row.voiceId.replace(/[()]/g, '')}</Badge>
+            ) : (
+              <Badge>{channelLabel(row.channel)}</Badge>
+            ))}
         </Box>
         <Box>{nameField}</Box>
         <Box variant="small" color="text-body-secondary">
@@ -236,12 +269,41 @@ const SpeakerIdentitiesPanel = ({
   readOnly,
   isLive,
   onMeetingEnded = undefined,
+  focusRequest = null,
+  active = true,
 }) => {
   const identities = useMemo(() => parseSpeakerIdentities(item.speakerIdentities), [item.speakerIdentities]);
   const roster = useMemo(
     () => buildSpeakerRoster(segments, identities, item.remoteParticipantName),
     [segments, identities, item.remoteParticipantName],
   );
+  // Each platform name's voices shown as one person or several, over the whole
+  // transcript, and each row as the transcript shows it.
+  const groups = useMemo(() => speakerGroups(segments, identities), [segments, identities]);
+  const displayRows = useMemo(
+    () => speakerDisplayRows(roster, identities, groups, item.remoteParticipantName),
+    [roster, identities, groups, item.remoteParticipantName],
+  );
+  // The rows in the order first heard, the voices of a name offered the One
+  // person / Several people choice gathered under it where its first voice is.
+  const sections = useMemo(() => {
+    const out = [];
+    const byGroup = new Map();
+    displayRows.forEach((row) => {
+      const group = row.group ? own(groups, row.group) : undefined;
+      if (!offersModeChoice(group)) {
+        out.push({ row });
+        return;
+      }
+      if (!byGroup.has(group.key)) {
+        const section = { group, rows: [] };
+        byGroup.set(group.key, section);
+        out.push(section);
+      }
+      byGroup.get(group.key).rows.push(row);
+    });
+    return out;
+  }, [displayRows, groups]);
 
   const [saving, setSaving] = useState(false);
   const [pasted, setPasted] = useState('');
@@ -362,6 +424,34 @@ const SpeakerIdentitiesPanel = ({
   const [expandedOverride, setExpandedOverride] = useState(undefined);
   const expanded = expandedOverride ?? hasMultipleVoicesOnAChannel(roster);
 
+  // A speaker chosen in the meeting header: the panel opens, and that voice's
+  // row is scrolled to, outlined for a moment and its name field focused.
+  // Carried out once the Details tab is shown, since a hidden tab has no
+  // layout to scroll; the request's time stamp tells one choice from the next.
+  const rowsRef = useRef(null);
+  const appliedFocusRef = useRef(null);
+  const [focusedKey, setFocusedKey] = useState(null);
+  const focusTimerRef = useRef(undefined);
+  useEffect(() => () => clearTimeout(focusTimerRef.current), []);
+  useEffect(() => {
+    if (!focusRequest || appliedFocusRef.current === focusRequest.at) return;
+    if (!expanded) {
+      setExpandedOverride(true);
+      return;
+    }
+    if (!active) return;
+    appliedFocusRef.current = focusRequest.at;
+    const rowElement = [...(rowsRef.current?.querySelectorAll('[data-speaker-key]') ?? [])].find(
+      (element) => element.dataset.speakerKey === focusRequest.key,
+    );
+    if (!rowElement) return;
+    rowElement.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    rowElement.querySelector('input:not([disabled])')?.focus({ preventScroll: true });
+    setFocusedKey(focusRequest.key);
+    clearTimeout(focusTimerRef.current);
+    focusTimerRef.current = setTimeout(() => setFocusedKey(null), FOCUS_OUTLINE_MS);
+  }, [focusRequest, expanded, active]);
+
   const write = async (next) => {
     setSaving(true);
     try {
@@ -372,8 +462,20 @@ const SpeakerIdentitiesPanel = ({
   };
 
   // Clearing the field removes the mapping, so the transcript falls back to
-  // the voice id rather than showing an empty speaker.
-  const handleRename = (row, name) => write(withSpeakerName(identities, row.key, name));
+  // the voice id rather than showing an empty speaker. Under a name shown as
+  // one person the transcript shows one name for all its voices, so naming one
+  // names every voice under it that is not locked; otherwise two voices given
+  // different names would leave the lines showing neither.
+  const handleRename = (row, name) => {
+    const group = row.group ? own(groups, row.group) : undefined;
+    const keys =
+      offersModeChoice(group) && group.mode === ONE_PERSON
+        ? displayRows.filter((r) => r.key === row.key || (r.group === group.key && !r.locked)).map((r) => r.key)
+        : [row.key];
+    return write(keys.reduce((map, key) => withSpeakerName(map, key, name), identities));
+  };
+
+  const handleSetMode = (key, mode) => write(withSpeakerMode(identities, key, mode));
 
   const handleMerge = (row, targetKey) => write(withMerge(identities, row.key, targetKey));
 
@@ -443,6 +545,36 @@ const SpeakerIdentitiesPanel = ({
   const handleRemoveCandidate = (name) =>
     write({ ...identities, candidates: identities.candidates.filter((c) => c !== name) });
 
+  const renderRow = (row, ordinal) => (
+    <div
+      key={row.key}
+      data-speaker-key={row.key}
+      className={focusedKey === row.key ? 'speaker-row-focused' : undefined}
+    >
+      <SpaceBetween direction="vertical" size="xxs">
+        <SpeakerRow
+          row={row}
+          ordinal={ordinal}
+          candidates={identities.candidates}
+          rosterRows={roster}
+          onRename={handleRename}
+          onMerge={handleMerge}
+          onToggleLock={handleToggleLock}
+          onConfirm={handleConfirm}
+          onReject={handleReject}
+          disabled={readOnly || saving}
+        />
+        {row.mergedKeys.length > 0 && !readOnly && (
+          <Box padding={{ left: 'xl' }}>
+            <Button variant="inline-link" onClick={() => handleUnmergeAll(row)} disabled={saving}>
+              Separate merged voices
+            </Button>
+          </Box>
+        )}
+      </SpaceBetween>
+    </div>
+  );
+
   const handleClearAll = () => write({ ...identities, identities: {}, merges: {}, segmentOverrides: {} });
 
   return (
@@ -507,28 +639,40 @@ const SpeakerIdentitiesPanel = ({
             No speakers yet. Voices appear here as soon as the transcript has final segments.
           </Box>
         ) : (
-          roster.map((row) => (
-            <SpaceBetween key={row.key} direction="vertical" size="xxs">
-              <SpeakerRow
-                row={row}
-                candidates={identities.candidates}
-                rosterRows={roster}
-                onRename={handleRename}
-                onMerge={handleMerge}
-                onToggleLock={handleToggleLock}
-                onConfirm={handleConfirm}
-                onReject={handleReject}
-                disabled={readOnly || saving}
-              />
-              {row.mergedKeys.length > 0 && !readOnly && (
-                <Box padding={{ left: 'xl' }}>
-                  <Button variant="inline-link" onClick={() => handleUnmergeAll(row)} disabled={saving}>
-                    Separate merged voices
-                  </Button>
-                </Box>
+          <div ref={rowsRef}>
+            <SpaceBetween direction="vertical" size="s">
+              {sections.map((section) =>
+                section.group ? (
+                  <div
+                    key={`group:${section.group.key}`}
+                    role="group"
+                    aria-label={`Voices of ${section.group.base}`}
+                    data-testid="speaker-group"
+                  >
+                    <SpaceBetween direction="vertical" size="xxs">
+                      <SpaceBetween direction="horizontal" size="xs" alignItems="center">
+                        <Box fontWeight="bold">{section.group.base}</Box>
+                        <Box variant="small" color="text-body-secondary">
+                          {`${section.group.voices.length} ${section.group.voices.length === 1 ? 'voice' : 'voices'}`}
+                        </Box>
+                        <SpeakerModeMenu
+                          group={section.group}
+                          onSetMode={readOnly || saving ? undefined : handleSetMode}
+                        />
+                      </SpaceBetween>
+                      <div className="speaker-group-rows">
+                        <SpaceBetween direction="vertical" size="xs">
+                          {section.rows.map((row) => renderRow(row, voiceOrdinal(row, section.group)))}
+                        </SpaceBetween>
+                      </div>
+                    </SpaceBetween>
+                  </div>
+                ) : (
+                  renderRow(section.row, null)
+                ),
               )}
             </SpaceBetween>
-          ))
+          </div>
         )}
 
         <ExpandableSection

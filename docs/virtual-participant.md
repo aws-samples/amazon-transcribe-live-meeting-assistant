@@ -76,8 +76,9 @@ shown as **one person** — `Bob Strahan` for every line, however many voice ids
 separation gave him — unless it reads as a room (`Conference Room`, `ConfRm_1`,
 a room device) or two of its voices each spoke at length, in which case it is
 shown as **several people**: `Conference Room · Voice 1`, `Voice 2`. The
-**One person | Several people** toggle beside the name's chips on the
-**Transcript** tab corrects either guess in one click, and in **Several people**
+**One person | Several people** menu beside the name's chips on the
+**Transcript** tab (and beside the name in the Speakers panel) corrects either
+guess, and in **Several people**
 each voice can be named in place; see
 [One person or several people](transcription-and-translation.md#one-person-or-several-people).
 
@@ -231,7 +232,7 @@ What has been observed in live attempts, from a browser on an Amazon EC2 host an
 
 - **Confirmed in a live meeting:** joining, the introduction and the chat (including `LMA ask` and the assistant and translator switches), the voice assistant, and leaving when the host ends the meeting for everyone. The VP opens Meet in English (`hl=en`) whatever the browser's language, and falls back to the [AI resolver](#ai-driven-self-healing) for the join controls and the chat button.
 - **Speaker names are not confirmed yet.** The VP reads the audio-level indicator on each participant tile to tell who is speaking. That reading is built from one live meeting and has not yet been confirmed while people speak, so transcript lines may still carry the voice-separation label (`spk_0`, `spk_1`) rather than participants' names; name the voices in the Speakers panel. When no tile reads as speaking and exactly one other named participant is in the meeting, the VP names that participant as the speaker, so a two-person meeting is attributed either way. The VP logs each change in a tile's speaking state (`[meet] tile … speaking=…`, the first 50 per meeting), the structure of the first tiles and, at debug level, which tile elements change while people speak (`[meet] tile … activity`) over the first 45 seconds of the meeting, or until it ends if that is sooner.
-- **Meeting consent:** Notify, Opt-in with the owner-attests rule, and objections work. The each-participant rule is not offered for Meet meetings, because LMA does not yet use the chat sender it reads on Meet to record a person's consent; see [Meeting Consent](meeting-consent.md#what-each-platform-supports).
+- **Meeting consent:** Notify, both Opt-in rules and objections are offered. A consent typed in the chat is recorded under the sender the VP reads from the chat, as on Zoom and Chime, and one said aloud under the participant the VP shows speaking. Neither reading has been confirmed in a live Meet meeting yet (see the speaker names above); see [Meeting Consent](meeting-consent.md#what-each-platform-supports).
 - **Screen-share key frames:** Meet gives the VP no share signal it reads, so key frames are sampled all the time with the stricter thresholds, as on Webex and Chime.
 - The Simli avatar has not been tested on Meet. Joining with a Google account signed in to the VP's browser profile is not supported; the VP joins as a guest.
 
@@ -717,6 +718,7 @@ Notes:
 - The default introduction message tells participants to type `LMA leave` to dismiss the bot and `LMA help` to see the other commands, and the name to add when there is more than one LMA in the meeting (see [More than one LMA in a meeting](#more-than-one-lma-in-a-meeting)). Customize via the `IntroMessage` CloudFormation parameter of the Virtual Participant stack or the `INTRO_MESSAGE` env var; a customized message is used as it is. In it, `{LMA_USER}` is replaced by the name of the user who started the VP, and `{LMA_HANDLE}` by the name to add after `LMA` to address this VP.
 - `LMA pause`, `LMA start` and `LMA help` must be the whole chat message: the `LMA` addressee (or `@LMA`, before or after the command) plus the command word, matched case-insensitively with punctuation ignored, so *"@LMA, pause!"* and *"start LMA"* count as the command. A bare `PAUSE` or `START` without the addressee is ordinary chat, as is a message that merely contains the command — *"LMA PAUSED"*, *"please LMA pause now"*, or an introduction message that explains the commands.
 - The help reply is posted as a few single-line chat messages, listing each command in one canonical form and how to address this VP by name. It is answered whether or not transcription is paused.
+- On the Zoom browser join the VP reads the chat from Zoom's chat panel, which Zoom closes by itself, for one when someone starts sharing their screen. The VP reopens the panel within a few seconds whenever Zoom's toolbar shows it closed, and then reads the messages sent while it was closed; a command typed while the panel was closed is therefore acted on a few seconds late rather than missed. It reads the messages already in the panel when it starts listening as sent before it joined and does not act on them, which matters on a meeting whose chat continues in a Team Chat group chat (*Meeting Group Chat*), where the panel can hold messages from earlier occurrences of the meeting.
 
 ### More than one LMA in a meeting
 
@@ -775,7 +777,8 @@ What is not added:
   introduction, status messages and help, and the answers as the chat panel
   shows them, which are added once as above);
 - private messages: on Zoom (the browser join and the Meeting SDK join), a
-  message sent to anyone but everyone, and a message whose recipient the VP
+  message sent to anyone but everyone (on a meeting whose chat continues in a
+  Team Chat group chat, a message to *Meeting Group Chat* is sent to everyone), and a message whose recipient the VP
   could not read (a chat label in a language other than English, or a Meeting
   SDK message that names no receiver). Only a message the VP read as sent to
   everyone is added. Teams and Google Meet meeting chats have no private
@@ -840,11 +843,18 @@ meeting shows what each platform actually gives. The VP never logs chat text.
 When the deployment's consent mode (the Meeting Consent section of the
 Configuration page), or the **Meeting consent** choice made on the Create Virtual
 Participant form, is Notify or Opt-in, the VP posts a notice in the meeting chat
-once it is admitted and reads the replies. In Notify it records and transcribes
-from the start, and stops at once when a participant objects. In Opt-in it joins
-with capture withheld (no transcript, audio or screen recording, voice assistant
-or chat added to the transcript) and starts only when every participant present has consented in
-the chat, or when the meeting's owner has confirmed in LMA that everyone agreed;
+once it is admitted and reads the replies typed in the chat and, unless the
+Meeting Consent setting **Read spoken replies** is off, those said aloud and
+addressed to LMA (*"LMA, I consent"*, *"LMA, I object"*). In
+Notify it records and transcribes from the start, and stops at once when a
+participant objects. In Opt-in it joins with capture withheld (no transcript,
+audio or screen recording, voice assistant or chat added to the transcript);
+with spoken replies read, the meeting audio still goes to the meeting's
+transcription engine, only so that a reply said aloud can be heard, and nothing
+else heard is kept (see
+[Spoken replies](meeting-consent.md#spoken-replies)). It starts only when every
+participant present has consented, in the chat or aloud, or when the meeting's
+owner has confirmed in LMA that everyone agreed;
 until then its detail line reads **Waiting for consent: …** and `LMA start` is
 refused. It keeps screenshots of the chat and the participant list as evidence
 when consent is granted and on every objection, and can be set to leave the
@@ -855,7 +865,9 @@ see [Choosing the mode for one meeting](meeting-consent.md#choosing-the-mode-for
 A reply is the whole chat message, as for the commands above: the configured
 consent and objection phrases (by default *"I consent"*, *"I agree"*, *"I
 accept"*, and *"I object"*, *"I do not consent"*, *"stop recording"* and
-others), or `LMA consent`, `LMA no consent` and `LMA object`. Which platforms
+others), or `LMA consent`, `LMA no consent` and `LMA object`. Said aloud, a
+reply counts only when it is addressed to LMA: *"LMA, I consent"* or *"LMA
+consent"*, and *"LMA, I object"* or *"LMA, please stop recording"*. Which platforms
 support which rule, how the participants present are counted, and what is
 stored are in [Meeting Consent › Virtual Participant](meeting-consent.md#virtual-participant).
 While the meeting runs a consent flow, `LMA help` adds a line naming
