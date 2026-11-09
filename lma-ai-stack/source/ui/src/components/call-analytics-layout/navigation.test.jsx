@@ -30,7 +30,8 @@ describe('side navigation visibility', () => {
     const links = generateNavigationItems({ AsrEngineAvailable: 'true', VoiceEnrollmentAvailable: 'true' }, true)
       .flatMap((entry) => (entry.type === 'section' ? entry.items : [entry]))
       .filter((item) => item.type === 'link' && item.href.startsWith('#/') && !item.external)
-      .map((item) => item.href.slice(1));
+      // A link may carry a query (a Configuration section); the navigation renders by path.
+      .map((item) => item.href.slice(1).split('?')[0]);
 
     const missing = links.filter((path) => !NO_SIDE_NAV.has(path) && !NAV_PATHS.includes(path));
     expect(missing).toEqual([]);
