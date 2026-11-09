@@ -41,6 +41,7 @@ export default defineConfig({
             },
             { label: "Quick Start Guide", slug: "quick-start-guide" },
             { label: "Demo Videos", slug: "demo-videos" },
+            { label: "LMA in Action", slug: "lma-in-action" },
           ],
         },
         {
