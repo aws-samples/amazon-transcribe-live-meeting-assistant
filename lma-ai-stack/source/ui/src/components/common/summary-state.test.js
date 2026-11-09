@@ -22,11 +22,20 @@ import {
   STATUS_FAILED,
   STATUS_IDLE,
   STATUS_RUNNING,
+  MEETING_END_PATIENCE_MS,
+  SUMMARY_FAILED_TEXT,
+  SUMMARY_IN_PROGRESS_TEXT,
+  SUMMARY_OVERDUE_TEXT,
+  TRIGGER_MEETING_END,
   isHandEdited,
   isRegenerating,
+  isSummaryInProgress,
+  isSummaryOverdue,
+  msUntilSummaryOverdue,
   parseSummaryState,
   regenerationFailure,
   serializeSummaryState,
+  summaryStatusText,
 } from './summary-state';
 
 const NOW = Date.parse('2026-03-04T12:00:00.000Z');
@@ -143,5 +152,54 @@ describe('regenerationFailure', () => {
         NOW,
       ),
     ).toBeNull();
+  });
+});
+
+describe('the end-of-meeting summary', () => {
+  const queued = (offsetMs) => ({ status: STATUS_RUNNING, trigger: TRIGGER_MEETING_END, startedAt: iso(offsetMs) });
+
+  it('is in progress from the moment it is queued until the patience runs out', () => {
+    expect(isSummaryInProgress(queued(0), NOW)).toBe(true);
+    expect(isSummaryInProgress(queued(-MEETING_END_PATIENCE_MS + 1000), NOW)).toBe(true);
+    expect(isSummaryInProgress(queued(-MEETING_END_PATIENCE_MS - 1000), NOW)).toBe(false);
+    expect(isSummaryOverdue(queued(-MEETING_END_PATIENCE_MS - 1000), NOW)).toBe(true);
+    expect(isSummaryOverdue(queued(0), NOW)).toBe(false);
+  });
+
+  it('is not a regeneration', () => {
+    expect(isRegenerating(queued(0), NOW)).toBe(false);
+  });
+
+  it('is never in progress without the mark the pipeline writes', () => {
+    // A deployment with summaries switched off writes no state at all.
+    expect(isSummaryInProgress({}, NOW)).toBe(false);
+    expect(isSummaryOverdue({}, NOW)).toBe(false);
+    expect(summaryStatusText({}, NOW)).toBeNull();
+    // A regeneration's mark is not this run's either.
+    expect(isSummaryInProgress({ status: STATUS_RUNNING, startedAt: iso(0) }, NOW)).toBe(false);
+  });
+
+  it('is not believed with a stamp it cannot read or one dated in the future', () => {
+    expect(isSummaryInProgress({ status: STATUS_RUNNING, trigger: TRIGGER_MEETING_END }, NOW)).toBe(false);
+    expect(isSummaryOverdue({ status: STATUS_RUNNING, trigger: TRIGGER_MEETING_END }, NOW)).toBe(false);
+    expect(isSummaryInProgress(queued(CLOCK_SKEW_ALLOWANCE_MS + 60000), NOW)).toBe(false);
+  });
+
+  it('says when it will become overdue, so the page can wake up then', () => {
+    expect(msUntilSummaryOverdue(queued(-1000), NOW)).toBe(MEETING_END_PATIENCE_MS - 1000);
+    expect(msUntilSummaryOverdue({}, NOW)).toBeNull();
+  });
+
+  it('keeps showing its failure however long ago it was recorded', () => {
+    const failed = { status: STATUS_FAILED, trigger: TRIGGER_MEETING_END, message: 'nope', updatedAt: iso(-86400000) };
+    expect(regenerationFailure(failed, NOW)).toBe('nope');
+    expect(regenerationFailure({ ...failed, message: undefined }, NOW)).toBeTruthy();
+  });
+
+  it('is described the same way to every reader', () => {
+    expect(summaryStatusText(queued(0), NOW)).toBe(SUMMARY_IN_PROGRESS_TEXT);
+    expect(summaryStatusText(queued(-MEETING_END_PATIENCE_MS - 1000), NOW)).toBe(SUMMARY_OVERDUE_TEXT);
+    expect(summaryStatusText({ status: STATUS_FAILED, trigger: TRIGGER_MEETING_END }, NOW)).toBe(SUMMARY_FAILED_TEXT);
+    expect(summaryStatusText({ status: STATUS_IDLE, trigger: TRIGGER_MEETING_END }, NOW)).toBeNull();
   });
 });

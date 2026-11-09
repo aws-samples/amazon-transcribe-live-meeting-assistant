@@ -116,6 +116,17 @@ STATUS_RUNNING = "running"
 STATUS_FAILED = "failed"
 STATUS_IDLE = "idle"
 
+# The `trigger` the call event processor writes into the state when a meeting
+# ends and its summary is queued; a regeneration writes none.
+TRIGGER_MEETING_END = "meeting-end"
+
+# How long the end-of-meeting summary is waited for before Regenerate is
+# accepted in its place. Shorter than STALE_RUN_SECONDS because nobody pressed
+# anything to start that run: the meeting page offers Regenerate once it has
+# waited this long, and this must accept what the page offers. Must match
+# MEETING_END_PATIENCE_MS in ui/src/components/common/summary-state.js.
+MEETING_END_PATIENCE_SECONDS = 600
+
 DESERIALIZER = TypeDeserializer()
 
 dynamodb = boto3.client("dynamodb")
@@ -289,7 +300,23 @@ def is_running(state, now):
         # clock disagreeing, and beyond it is a value nothing here wrote, which
         # would otherwise hold the meeting until that time arrived.
         return False
-    return started > now - timedelta(seconds=STALE_RUN_SECONDS)
+    window = (
+        MEETING_END_PATIENCE_SECONDS
+        if state.get("trigger") == TRIGGER_MEETING_END
+        else STALE_RUN_SECONDS
+    )
+    return started > now - timedelta(seconds=window)
+
+
+def end_of_meeting_run_owns_state(meeting):
+    """True when the state on the meeting belongs to its end-of-meeting summary.
+
+    A regeneration that the meeting outlived must then write nothing at all:
+    the meeting is showing that summary's progress, and an "idle" or "failed"
+    written over it would hide a summary that is still on its way.
+    """
+    state = parse_state((meeting or {}).get("CallSummaryState"))
+    return state.get("trigger") == TRIGGER_MEETING_END
 
 
 def summary_is_usable(summary):
@@ -450,6 +477,8 @@ def start(call_id, identity, self_arn):
     now = datetime.now(timezone.utc)
     state = parse_state(meeting.get("CallSummaryState"))
     if is_running(state, now):
+        if state.get("trigger") == TRIGGER_MEETING_END:
+            return {"Success": False, "Message": "the meeting's summary is still being generated"}
         return {"Success": False, "Message": "a summary is already being regenerated"}
 
     # Queue the work BEFORE marking the meeting as regenerating. Marking first
@@ -513,6 +542,12 @@ def run(call_id):
 
     if not summary_is_usable(summary):
         LOGGER.warning("Keeping the stored summary for %s: the run produced nothing", call_id)
+        if was_live:
+            current = read_meeting(call_id) or {}
+            if current.get("Status") == STATUS_MEETING_ENDED and end_of_meeting_run_owns_state(
+                current
+            ):
+                return {"ok": False, "reason": "superseded"}
         # No CallSummaryText in this write. That is the whole point: the stored
         # summary survives a failed run.
         write_summary(
@@ -538,16 +573,20 @@ def run(call_id):
     # the snapshot already holds what this run saw. Pressing Regenerate once the
     # meeting has ended writes it again from the whole transcript, which is what
     # the docs tell the user to do.
-    if was_live and (read_meeting(call_id) or {}).get("Status") == STATUS_MEETING_ENDED:
+    current = (read_meeting(call_id) or {}) if was_live else {}
+    if was_live and current.get("Status") == STATUS_MEETING_ENDED:
         LOGGER.info(
             "Discarding the regenerated summary for %s: the meeting ended while it ran, "
             "so the end-of-meeting summary covers more of the transcript",
             call_id,
         )
-        write_summary(
-            call_id,
-            state={"source": previous_source, "status": STATUS_IDLE, "updatedAt": now},
-        )
+        # The end-of-meeting run has marked the meeting as summarising, or has
+        # already recorded how it went; either way the state is its to clear.
+        if not end_of_meeting_run_owns_state(current):
+            write_summary(
+                call_id,
+                state={"source": previous_source, "status": STATUS_IDLE, "updatedAt": now},
+            )
         return {"ok": False, "reason": "superseded"}
 
     write_summary(

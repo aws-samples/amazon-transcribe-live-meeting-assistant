@@ -136,6 +136,20 @@ test('a frame whose event could not be written is captured again', async () => {
     assert.equal(h.sampler.framesEmitted, 1, 'only the frame that was announced is counted');
 });
 
+test('no two frames are announced within one second on the transcript clock, even while it stands still', async () => {
+    let clock: number | null = 30;
+    const h = harness({ timelineSeconds: () => clock ?? 0 });
+    await h.feed(flat(200), 5);
+    assert.equal(h.frames.length, 1);
+    // Transcription reconnecting: the transcript clock does not run.
+    await h.feed(flat(60), 6);
+    assert.equal(h.frames.length, 1, 'a frame stamped at the same transcript time as the last is not announced');
+    clock = 60;
+    await h.feed(flat(120), 6);
+    assert.equal(h.frames.length, 2);
+    assert.ok(h.frames[1].Timestamp - h.frames[0].Timestamp >= 1);
+});
+
 test('ids sort in time order and keys follow the deletion prefix rule', () => {
     assert.ok(frameIdFor(9.5, 'a') < frameIdFor(10, 'a'));
     assert.ok(frameIdFor(10, 'a') < frameIdFor(100, 'a'));

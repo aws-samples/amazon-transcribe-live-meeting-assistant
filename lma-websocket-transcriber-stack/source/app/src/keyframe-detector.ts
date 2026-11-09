@@ -18,11 +18,14 @@
  * the incoming H.264 stream, one about every two seconds (a 64x36 grid, each
  * cell the average of a block of the picture). Two comparisons are made:
  *
- *   - against the previous sample, to tell whether the picture is still
- *     moving. Content that is moving (a slide transition, scrolling, a video
- *     or a talking head) is not captured until it holds still for
- *     `settleSamples` consecutive samples, so a frame is never taken
- *     mid-transition.
+ *   - against the previous sample and against the first sample of the
+ *     current still run, to tell whether the picture is still moving. Content
+ *     that is moving (a slide transition, scrolling, a video or a talking
+ *     head) is not captured until it holds still for `settleSamples`
+ *     consecutive samples, so a frame is never taken mid-transition. The
+ *     second comparison stops a screen that drifts a little every second (a
+ *     live web page) from counting as one long still run, whose frames would
+ *     all be stamped with the run's start.
  *   - against the last frame that was kept, to tell whether the settled
  *     picture is new. Returning to a slide already captured, or the same slide
  *     after a share is stopped and started again, is not a new frame.
@@ -41,6 +44,22 @@
  * still taken over the whole grid, so the thresholds keep their meaning when
  * part of the picture is masked.
  *
+ * How often frames are kept adapts to the screen. A frame must differ from
+ * the last kept one by `changeFraction` and be at least an interval after it.
+ * The interval starts at `minIntervalMs`; from the third frame kept while the
+ * screen keeps changing it steps up through `backoffStepsMs`, and each
+ * `quietStepMs` the screen is quiet (holding still, and no different from the
+ * last kept frame) steps it back down one. A slide deck is quiet between
+ * slides, so every slide on screen for longer than `quietStepMs` and the
+ * settle is kept promptly; an application whose content keeps updating is
+ * kept at most once per step. A picture that
+ * differs by at least `majorChangeFraction` from the one that had settled
+ * before it (a different screen in one step, rather than an update of the
+ * same one) waits only `minIntervalMs`. That is judged against the settled
+ * picture before it rather than the last kept frame, because the small updates
+ * of a busy screen add up against an old frame. Two frames are never stamped
+ * less than MIN_STAMP_GAP_MS apart.
+ *
  * Kept free of I/O so it can be tested on synthetic frames; see
  * videokeyframes.ts for the FFmpeg side.
  */
@@ -58,6 +77,13 @@ export interface KeyframeThresholds {
      * its borders are.
      */
     maxMovingFraction: number;
+    /**
+     * A picture that differs this much from the picture that had settled
+     * before it is a different screen: it is kept after `minIntervalMs`
+     * however far the interval has backed off. Absent: nothing skips the
+     * backoff.
+     */
+    majorChangeFraction?: number;
 }
 
 export interface KeyframeDetectorConfig {
@@ -65,8 +91,16 @@ export interface KeyframeDetectorConfig {
     sampleBytes: number;
     /** Brightness difference (0-255) above which a cell counts as changed. */
     pixelDelta: number;
-    /** Minimum time between two kept frames. */
+    /** Minimum time between two kept frames, and the interval while the screen is quiet. */
     minIntervalMs: number;
+    /**
+     * The longer intervals the minimum steps up through, one step per frame
+     * kept while the screen keeps changing (for example [30000, 60000]).
+     * Absent or empty: always `minIntervalMs`.
+     */
+    backoffStepsMs?: number[];
+    /** Each time the screen stays quiet this long, the interval steps back down one. */
+    quietStepMs?: number;
     /** Samples of history kept per cell for the motion mask (at most 8). */
     motionWindow?: number;
     /** Changes within the window at which a cell counts as moving. */
@@ -77,7 +111,18 @@ export interface KeyframeDetectorConfig {
 export interface KeptFrame {
     readonly frame: Uint8Array;
     readonly atMs: number;
+    /** The time the frame is stamped with (KeyframeDecision.firstSeenMs). */
+    readonly firstSeenMs: number;
+    /** Frames kept since the screen was last quiet, before this one; restored if it is forgotten. */
+    readonly burstBefore: number;
 }
+
+/**
+ * Two kept frames are never stamped closer together than this. With a
+ * minimum interval of seconds it only matters for a picture that is kept
+ * twice within one still run; see firstSeenMs.
+ */
+export const MIN_STAMP_GAP_MS = 1000;
 
 /** Kept frames remembered, so undoing one restores the one before it. */
 const KEPT_HISTORY = 8;
@@ -133,6 +178,22 @@ export class KeyframeDetector {
     private kept: KeptFrame[] = [];
     private stillSamples = 0;
     private stillSinceMs = 0;
+    /** The first sample of the current still run. */
+    private runStart: Uint8Array | null = null;
+    /** The latest sample that had held still for the settle count. */
+    private settledPicture: Uint8Array | null = null;
+    /** The settled picture from before the current still run began. */
+    private runBaseline: Uint8Array | null = null;
+    /** The intervals, shortest first: minIntervalMs, then the backoff steps. */
+    private readonly intervalsMs: number[];
+    private readonly quietStepMs: number;
+    /**
+     * Frames kept while the screen kept changing, less one for each quiet
+     * spell of quietStepMs; at most one more than the number of steps.
+     */
+    private burst = 0;
+    /** The last sample at which the screen moved or differed from the last kept frame. */
+    private lastActivityMs: number | null = null;
     /** Per cell, one bit per recent sample: whether the cell changed from the sample before. */
     private readonly history: Uint8Array;
     private readonly moving: Uint8Array;
@@ -146,6 +207,23 @@ export class KeyframeDetector {
         this.motionCount = Math.max(1, config.motionCount ?? 2);
         this.history = new Uint8Array(config.sampleBytes);
         this.moving = new Uint8Array(config.sampleBytes);
+        const steps = (config.backoffStepsMs ?? []).filter((ms) => Number.isFinite(ms) && ms > config.minIntervalMs);
+        this.intervalsMs = [config.minIntervalMs, ...steps.sort((a, b) => a - b)];
+        this.quietStepMs = config.quietStepMs ?? Infinity;
+    }
+
+    /** The interval a frame now has to wait after the last kept one (for diagnostics). */
+    get currentIntervalMs(): number {
+        return this.intervalsMs[this.stepFor(this.burst)];
+    }
+
+    /**
+     * The interval after the n-th frame kept while the screen kept changing:
+     * the first and second are the minimum apart, the third the first step,
+     * and so on, so a single quick change after a slide is still kept promptly.
+     */
+    private stepFor(burst: number): number {
+        return Math.min(Math.max(burst - 1, 0), this.intervalsMs.length - 1);
     }
 
     /** Fraction of the grid currently treated as moving (for diagnostics). */
@@ -172,11 +250,17 @@ export class KeyframeDetector {
         // The mask is the cells that were moving before this sample, so a
         // cell's first change -- a slide flipping -- still counts.
         const motion = this.previous ? changedFraction(current, this.previous, pixelDelta, this.moving) : 1;
-        if (this.previous && motion <= thresholds.stableFraction) {
+        // Still against the run's first sample too, so a picture that creeps
+        // a little every second does not settle as one run.
+        const drift = this.runStart ? changedFraction(current, this.runStart, pixelDelta, this.moving) : 1;
+        const still = this.previous !== null && motion <= thresholds.stableFraction && drift <= thresholds.stableFraction;
+        if (still) {
             this.stillSamples++;
         } else {
             this.stillSamples = 0;
             this.stillSinceMs = nowMs;
+            this.runStart = current;
+            this.runBaseline = this.settledPicture;
         }
         // With nothing kept yet, everything that holds still is new. Counting
         // the moving cells as well would keep a wall of moving cameras as the
@@ -194,19 +278,47 @@ export class KeyframeDetector {
         }
         this.previous = current;
 
-        const settled = this.stillSamples >= thresholds.settleSamples;
-        const spaced = reference === null || nowMs - reference.atMs >= this.config.minIntervalMs;
-        const quiet = this.movingFraction <= thresholds.maxMovingFraction;
-        const keep = settled && spaced && quiet && change >= thresholds.changeFraction;
-        if (!keep) {
-            return { keep, changeFraction: change, firstSeenMs: this.stillSinceMs };
+        // The backoff: each quiet spell of quietStepMs steps the interval back
+        // down one. Judged before this sample counts, so the first sample after
+        // a long quiet spell (or a pause) is judged at the shorter interval.
+        const changed = change >= thresholds.changeFraction;
+        if (this.lastActivityMs !== null && nowMs - this.lastActivityMs >= this.quietStepMs) {
+            const spells = Math.floor((nowMs - this.lastActivityMs) / this.quietStepMs);
+            this.burst = Math.max(0, this.burst - spells);
+            this.lastActivityMs += spells * this.quietStepMs;
         }
-        const kept: KeptFrame = { frame: current, atMs: nowMs };
+        if (!still || changed || this.lastActivityMs === null) {
+            this.lastActivityMs = nowMs;
+        }
+
+        // Stamped with when the picture first appeared, but never before the
+        // last kept frame was taken: a picture kept again within the same
+        // still run appeared after that frame, not with it.
+        const firstSeenMs = reference ? Math.max(this.stillSinceMs, reference.atMs) : this.stillSinceMs;
+        const settled = this.stillSamples >= thresholds.settleSamples;
+        if (settled) {
+            this.settledPicture = current;
+        }
+        const major =
+            this.runBaseline !== null &&
+            changedFraction(current, this.runBaseline, pixelDelta, this.moving) >= (thresholds.majorChangeFraction ?? Infinity);
+        const intervalMs = major ? this.intervalsMs[0] : this.intervalsMs[this.stepFor(this.burst)];
+        const spaced =
+            reference === null ||
+            (nowMs - reference.atMs >= intervalMs && firstSeenMs - reference.firstSeenMs >= MIN_STAMP_GAP_MS);
+        const calm = this.movingFraction <= thresholds.maxMovingFraction;
+        const keep = settled && spaced && calm && changed;
+        if (!keep) {
+            return { keep, changeFraction: change, firstSeenMs };
+        }
+        const kept: KeptFrame = { frame: current, atMs: nowMs, firstSeenMs, burstBefore: this.burst };
         this.kept.push(kept);
         if (this.kept.length > KEPT_HISTORY) {
             this.kept.shift();
         }
-        return { keep, kept, changeFraction: change, firstSeenMs: this.stillSinceMs };
+        // The next frames wait longer unless the screen goes quiet first.
+        this.burst = Math.min(this.burst + 1, this.intervalsMs.length);
+        return { keep, kept, changeFraction: change, firstSeenMs };
     }
 
     /**
@@ -221,6 +333,10 @@ export class KeyframeDetector {
         const index = this.kept.indexOf(kept);
         if (index === -1) {
             return;
+        }
+        // The newest keep moved the backoff on a step; undoing it moves it back.
+        if (index === this.kept.length - 1) {
+            this.burst = kept.burstBefore;
         }
         this.kept.splice(index, 1);
         this.stillSamples = 0;
@@ -237,6 +353,7 @@ export class KeyframeDetector {
      */
     pause(): void {
         this.previous = null;
+        this.runStart = null;
         this.stillSamples = 0;
     }
 }
