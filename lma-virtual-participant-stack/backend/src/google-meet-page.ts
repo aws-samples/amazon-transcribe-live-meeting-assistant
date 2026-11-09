@@ -393,14 +393,6 @@ export function cleanMeetParticipantName(raw: string | null | undefined): string
     return name;
 }
 
-/**
- * The sender named by a chat group's header, or null.
- *
- * The header reads "<name> <time>" ("Alice Smith 10:32 AM"); the VP's own read
- * "You". The text passed in is the group's text with its message bodies removed.
- * It must hold exactly one time: a text with two is more than one group, and
- * taking the first name from it would credit one person's message to another.
- */
 /** How far above a chat message its group's header is looked for (it was two levels up, live). */
 export const MEET_CHAT_HEADER_MAX_LEVELS = 4;
 
@@ -419,9 +411,10 @@ export interface MeetChatRaw {
  * Each message's header is the text of its group outside every message: the
  * group is the element `sels.group` matches when the page marks it, and
  * otherwise the nearest ancestor, at most `maxLevels` up, that has any such
- * text. A walk that climbs past one group reaches text with more than one time
- * in it, which senderFromMeetGroupHeader refuses, so a message is never
- * credited to a neighbouring group's sender.
+ * text. A walk that climbs past one group usually reaches text with more than
+ * one time in it, which senderFromMeetGroupHeader refuses. That guard holds only
+ * when the walk reaches two or more times: a header the walk reaches with a
+ * single time is taken as this message's own.
  */
 export function readMeetChatInPage(sels: { message: string; group: string; maxLevels: number }): MeetChatRaw[] {
     const w = window as any;
@@ -470,6 +463,15 @@ export function readMeetChatInPage(sels: { message: string; group: string; maxLe
     return out;
 }
 
+/**
+ * The sender named by a chat group's header, or null.
+ *
+ * The header reads "<name> <time>" ("Alice Smith 10:32 AM"). The reader's own
+ * messages carry a header with only the time, which gives null. The text passed
+ * in is the group's text with its message bodies removed. It must hold at most
+ * one time: a text with two is more than one group, and taking the first name
+ * from it would credit one person's message to another.
+ */
 export function senderFromMeetGroupHeader(header: string | null | undefined): string | null {
     const text = (header || '').replace(/\s+/g, ' ').trim();
     if (!text) return null;
@@ -493,8 +495,8 @@ export function timeFromMeetGroupHeader(header: string | null | undefined): stri
 /**
  * Is this name the VP's own?
  *
- * Meet labels the VP's own chat messages "You" and its own tile with its display
- * name. Matched whole, case-insensitively, so a participant whose name merely
+ * Meet labels the VP's own tile with its display name, and may label it "You".
+ * Its own chat messages carry a time-only header, so they have no sender at all. Matched whole, case-insensitively, so a participant whose name merely
  * contains "LMA" or starts with "You" is not mistaken for the VP.
  */
 export function isOwnMeetName(name: string | null | undefined, identities: readonly string[]): boolean {
