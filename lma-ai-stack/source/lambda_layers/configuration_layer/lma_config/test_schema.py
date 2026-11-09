@@ -191,6 +191,45 @@ def test_a_price_override_for_one_unit_is_valid():
     )
 
 
+def test_a_price_source_naming_its_offer_and_date_is_valid():
+    schema.validate_section(
+        "call_pricing",
+        {
+            "sources": {
+                "eu-west-1": {
+                    "transcribe/streaming": {
+                        "basis": "price-list-api",
+                        "offer": "transcribe",
+                        "offerVersion": "20260911124646",
+                        "usageType": "EU-StreamingAudio",
+                        "retrieved": "2026-11-09",
+                        "url": "https://aws.amazon.com/transcribe/pricing/",
+                        "detail": "Flat.",
+                    }
+                }
+            }
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        {"basis": "a hunch"},
+        {"retrieved": "last week"},
+        {"url": "http://example.com/"},
+        {"price": 1},
+        "the price list",
+    ],
+    ids=["basis", "date", "url", "unknown-key", "not-an-object"],
+)
+def test_a_price_source_the_estimate_could_not_name_is_refused(source):
+    with pytest.raises(errors.InvalidConfiguration):
+        schema.validate_section(
+            "call_pricing", {"sources": {"default": {"transcribe/streaming": source}}}
+        )
+
+
 def test_a_summary_prompt_turned_off_is_valid():
     schema.validate_section(
         "summary_prompt_templates", {"2#DETAILS": "NONE", "9#MINE": "Prompt {transcript}"}

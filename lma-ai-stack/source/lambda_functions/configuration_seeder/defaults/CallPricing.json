@@ -1,14 +1,23 @@
 {
   "currency": "USD",
-  "pricesAsOf": "2026-10-28",
-  "source": "AWS public on-demand list prices, read from the AWS Price List API (AmazonBedrock, AmazonBedrockFoundationModels, transcribe, AWSLambda, AmazonECS, comprehend) on 2026-10-28. Tiered prices use the first tier.",
+  "pricesAsOf": "2026-11-09",
+  "source": "AWS public on-demand list prices, read from the AWS Price List API on 2026-11-09. Each price's own source names the offer, its version and the usage types it was read from.",
   "baseRegion": "us-east-1",
   "pricedRegions": [
     "us-east-1",
-    "us-west-2"
+    "us-west-2",
+    "eu-west-1",
+    "ap-northeast-1",
+    "us-gov-west-1"
   ],
   "regions": {
     "default": {
+      "bedrock/amazon.nova-2-sonic-v1:0": {
+        "speechInputTokens": 3e-06,
+        "speechOutputTokens": 1.2e-05,
+        "textInputTokens": 3.3e-07,
+        "textOutputTokens": 2.75e-06
+      },
       "bedrock/amazon.nova-lite-v1:0": {
         "inputTokens": 6e-08,
         "outputTokens": 2.4e-07,
@@ -26,6 +35,12 @@
         "outputTokens": 3.2e-06,
         "cacheReadInputTokens": 2e-07,
         "cacheWriteInputTokens": 0.0
+      },
+      "bedrock/amazon.nova-sonic-v1:0": {
+        "speechInputTokens": 3.4e-06,
+        "speechOutputTokens": 1.36e-05,
+        "textInputTokens": 6e-08,
+        "textOutputTokens": 2.4e-07
       },
       "bedrock/global.amazon.nova-2-lite-v1:0": {
         "inputTokens": 3e-07,
@@ -81,10 +96,34 @@
         "cacheReadInputTokens": 8.25e-08,
         "cacheWriteInputTokens": 0.0
       },
+      "bedrock/us.amazon.nova-lite-v1:0": {
+        "inputTokens": 6e-08,
+        "outputTokens": 2.4e-07,
+        "cacheReadInputTokens": 1.5e-08,
+        "cacheWriteInputTokens": 0.0
+      },
+      "bedrock/us.amazon.nova-micro-v1:0": {
+        "inputTokens": 3.5e-08,
+        "outputTokens": 1.4e-07,
+        "cacheReadInputTokens": 8.75e-09,
+        "cacheWriteInputTokens": 0.0
+      },
       "bedrock/us.amazon.nova-premier-v1:0": {
         "inputTokens": 2.5e-06,
         "outputTokens": 1.25e-05,
         "cacheReadInputTokens": 6.25e-07
+      },
+      "bedrock/us.amazon.nova-pro-v1:0": {
+        "inputTokens": 8e-07,
+        "outputTokens": 3.2e-06,
+        "cacheReadInputTokens": 2e-07,
+        "cacheWriteInputTokens": 0.0
+      },
+      "bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "inputTokens": 1.1e-06,
+        "outputTokens": 5.5e-06,
+        "cacheReadInputTokens": 1.1e-07,
+        "cacheWriteInputTokens": 1.375e-06
       },
       "bedrock/us.anthropic.claude-haiku-5-5": {
         "inputTokens": 1.1e-07,
@@ -134,29 +173,16 @@
         "cacheReadInputTokens": 1.1e-07,
         "cacheWriteInputTokens": 2.75e-06
       },
-      "bedrock/amazon.nova-2-sonic-v1:0": {
-        "speechInputTokens": 3e-06,
-        "speechOutputTokens": 1.2e-05,
-        "textInputTokens": 3.3e-07,
-        "textOutputTokens": 2.75e-06
+      "comprehend/detect-sentiment": {
+        "units": 0.0001
       },
-      "bedrock/amazon.nova-sonic-v1:0": {
-        "speechInputTokens": 3.4e-06,
-        "speechOutputTokens": 1.36e-05,
-        "textInputTokens": 6e-08,
-        "textOutputTokens": 2.4e-07
+      "fargate/arm64": {
+        "vcpuSeconds": 8.994444e-06,
+        "gbSeconds": 9.88889e-07
       },
-      "transcribe/streaming": {
-        "seconds": 0.0001667
-      },
-      "transcribe/streaming-pii-redaction": {
-        "seconds": 4e-05
-      },
-      "transcribe/streaming-custom-language-model": {
-        "seconds": 0.0001
-      },
-      "transcribe/batch": {
-        "seconds": 0.0001
+      "fargate/x86_64": {
+        "vcpuSeconds": 1.1244444e-05,
+        "gbSeconds": 1.234722e-06
       },
       "lambda-microvm/arm64": {
         "vcpuSeconds": 2.76944e-05,
@@ -166,22 +192,1516 @@
         "vcpuSeconds": 3.26557e-05,
         "gbSeconds": 4.3235e-06
       },
-      "fargate/x86_64": {
-        "vcpuSeconds": 1.1244444e-05,
-        "gbSeconds": 1.234722e-06
+      "transcribe/batch": {
+        "seconds": 0.0001
       },
-      "fargate/arm64": {
-        "vcpuSeconds": 8.994444e-06,
-        "gbSeconds": 9.88889e-07
+      "transcribe/streaming": {
+        "seconds": 0.0001667
       },
-      "comprehend/detect-sentiment": {
-        "units": 0.0001
+      "transcribe/streaming-custom-language-model": {
+        "seconds": 0.0001
+      },
+      "transcribe/streaming-pii-redaction": {
+        "seconds": 4e-05
       }
     },
     "us-west-2": {
       "bedrock/amazon.nova-2-sonic-v1:0": {
         "textInputTokens": 3.19e-07,
         "textOutputTokens": 2.651e-06
+      }
+    },
+    "eu-west-1": {
+      "bedrock/eu.amazon.nova-2-lite-v1:0": {
+        "inputTokens": 3.74e-07,
+        "outputTokens": 3.157e-06,
+        "cacheReadInputTokens": 9.35e-08,
+        "cacheWriteInputTokens": 0.0
+      },
+      "bedrock/eu.amazon.nova-lite-v1:0": {
+        "inputTokens": 6.9e-08,
+        "outputTokens": 2.76e-07,
+        "cacheReadInputTokens": 1.725e-08,
+        "cacheWriteInputTokens": 0.0
+      },
+      "bedrock/eu.amazon.nova-micro-v1:0": {
+        "inputTokens": 4e-08,
+        "outputTokens": 1.6e-07,
+        "cacheReadInputTokens": 1e-08,
+        "cacheWriteInputTokens": 0.0
+      },
+      "bedrock/eu.amazon.nova-pro-v1:0": {
+        "inputTokens": 9.2e-07,
+        "outputTokens": 3.68e-06,
+        "cacheReadInputTokens": 2.3e-07,
+        "cacheWriteInputTokens": 0.0
+      },
+      "bedrock/eu.anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "inputTokens": 1.1e-06,
+        "outputTokens": 5.5e-06,
+        "cacheReadInputTokens": 1.1e-07,
+        "cacheWriteInputTokens": 1.375e-06
+      },
+      "bedrock/eu.anthropic.claude-haiku-5-5": {
+        "inputTokens": 1.1e-07,
+        "outputTokens": 5.5e-07,
+        "cacheReadInputTokens": 1.1e-08,
+        "cacheWriteInputTokens": 1.375e-07
+      },
+      "bedrock/eu.anthropic.claude-opus-4-6-v1": {
+        "inputTokens": 5.5e-06,
+        "outputTokens": 2.75e-05,
+        "cacheReadInputTokens": 5.5e-07,
+        "cacheWriteInputTokens": 6.875e-06
+      },
+      "bedrock/eu.anthropic.claude-opus-5-5": {
+        "inputTokens": 4.4e-06,
+        "outputTokens": 2.2e-05,
+        "cacheReadInputTokens": 2.2e-07,
+        "cacheWriteInputTokens": 5.5e-06
+      },
+      "bedrock/eu.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+        "inputTokens": 3.3e-06,
+        "outputTokens": 1.65e-05,
+        "cacheReadInputTokens": 3.3e-07,
+        "cacheWriteInputTokens": 4.125e-06
+      },
+      "bedrock/eu.anthropic.claude-sonnet-4-6": {
+        "inputTokens": 3.3e-06,
+        "outputTokens": 1.65e-05,
+        "cacheReadInputTokens": 3.3e-07,
+        "cacheWriteInputTokens": 4.125e-06
+      },
+      "bedrock/eu.anthropic.claude-sonnet-5-5": {
+        "inputTokens": 2.2e-06,
+        "outputTokens": 1.1e-05,
+        "cacheReadInputTokens": 1.1e-07,
+        "cacheWriteInputTokens": 2.75e-06
+      },
+      "bedrock/global.amazon.nova-2-lite-v1:0": {
+        "inputTokens": 3.4e-07,
+        "outputTokens": 2.87e-06,
+        "cacheReadInputTokens": 8.5e-08
+      },
+      "lambda-microvm/arm64": {
+        "vcpuSeconds": 2.91572e-05,
+        "gbSeconds": 3.8603e-06
+      },
+      "lambda-microvm/x86_64": {
+        "vcpuSeconds": 3.40538e-05,
+        "gbSeconds": 4.5086e-06
+      }
+    },
+    "ap-northeast-1": {
+      "bedrock/amazon.nova-2-sonic-v1:0": {
+        "speechInputTokens": 3.63e-06,
+        "speechOutputTokens": 1.452e-05,
+        "textInputTokens": 3.96e-07,
+        "textOutputTokens": 3.311e-06
+      },
+      "bedrock/amazon.nova-lite-v1:0": {
+        "inputTokens": 7.2e-08,
+        "outputTokens": 2.88e-07,
+        "cacheReadInputTokens": 1.8e-08
+      },
+      "bedrock/amazon.nova-sonic-v1:0": {
+        "speechInputTokens": 3.7e-06,
+        "speechOutputTokens": 1.47e-05,
+        "textInputTokens": 7.2e-08,
+        "textOutputTokens": 2.88e-07
+      },
+      "bedrock/apac.amazon.nova-lite-v1:0": {
+        "inputTokens": 7.2e-08,
+        "outputTokens": 2.88e-07,
+        "cacheReadInputTokens": 1.8e-08,
+        "cacheWriteInputTokens": 0.0
+      },
+      "bedrock/apac.amazon.nova-micro-v1:0": {
+        "inputTokens": 4.2e-08,
+        "outputTokens": 1.68e-07,
+        "cacheReadInputTokens": 1.05e-08,
+        "cacheWriteInputTokens": 0.0
+      },
+      "bedrock/apac.amazon.nova-pro-v1:0": {
+        "inputTokens": 9.6e-07,
+        "outputTokens": 3.84e-06,
+        "cacheReadInputTokens": 2.4e-07,
+        "cacheWriteInputTokens": 0.0
+      },
+      "bedrock/global.amazon.nova-2-lite-v1:0": {
+        "inputTokens": 3.6e-07,
+        "outputTokens": 3.01e-06,
+        "cacheReadInputTokens": 9e-08
+      },
+      "bedrock/jp.amazon.nova-2-lite-v1:0": {
+        "inputTokens": 3.96e-07,
+        "outputTokens": 3.311e-06,
+        "cacheReadInputTokens": 9.9e-08,
+        "cacheWriteInputTokens": 0.0
+      },
+      "bedrock/jp.anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "inputTokens": 1.1e-06,
+        "outputTokens": 5.5e-06,
+        "cacheReadInputTokens": 1.1e-07,
+        "cacheWriteInputTokens": 1.375e-06
+      },
+      "bedrock/jp.anthropic.claude-haiku-5-5": {
+        "inputTokens": 1.1e-07,
+        "outputTokens": 5.5e-07,
+        "cacheReadInputTokens": 1.1e-08,
+        "cacheWriteInputTokens": 1.375e-07
+      },
+      "bedrock/jp.anthropic.claude-opus-5-5": {
+        "inputTokens": 4.4e-06,
+        "outputTokens": 2.2e-05,
+        "cacheReadInputTokens": 2.2e-07,
+        "cacheWriteInputTokens": 5.5e-06
+      },
+      "bedrock/jp.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+        "inputTokens": 3.3e-06,
+        "outputTokens": 1.65e-05,
+        "cacheReadInputTokens": 3.3e-07,
+        "cacheWriteInputTokens": 4.125e-06
+      },
+      "bedrock/jp.anthropic.claude-sonnet-4-6": {
+        "inputTokens": 3.3e-06,
+        "outputTokens": 1.65e-05,
+        "cacheReadInputTokens": 3.3e-07,
+        "cacheWriteInputTokens": 4.125e-06
+      },
+      "fargate/arm64": {
+        "vcpuSeconds": 1.123611111e-05,
+        "gbSeconds": 1.227777778e-06
+      },
+      "fargate/x86_64": {
+        "vcpuSeconds": 1.404444444e-05,
+        "gbSeconds": 1.536111111e-06
+      },
+      "lambda-microvm/arm64": {
+        "vcpuSeconds": 3.22421e-05,
+        "gbSeconds": 4.2688e-06
+      },
+      "lambda-microvm/x86_64": {
+        "vcpuSeconds": 3.71569e-05,
+        "gbSeconds": 4.9195e-06
+      }
+    },
+    "us-gov-west-1": {
+      "bedrock/amazon.nova-lite-v1:0": {
+        "inputTokens": 7.2e-08,
+        "outputTokens": 2.88e-07,
+        "cacheReadInputTokens": 1.8e-08
+      },
+      "bedrock/amazon.nova-micro-v1:0": {
+        "inputTokens": 4.2e-08,
+        "outputTokens": 1.68e-07,
+        "cacheReadInputTokens": 1.05e-08
+      },
+      "bedrock/amazon.nova-pro-v1:0": {
+        "inputTokens": 9.6e-07,
+        "outputTokens": 3.84e-06,
+        "cacheReadInputTokens": 2.4e-07
+      },
+      "bedrock/us-gov.anthropic.claude-haiku-5-5": {
+        "inputTokens": 1.2e-07,
+        "outputTokens": 6e-07,
+        "cacheReadInputTokens": 1.2e-08,
+        "cacheWriteInputTokens": 1.5e-07
+      },
+      "bedrock/us-gov.anthropic.claude-opus-5-5": {
+        "inputTokens": 4.8e-06,
+        "outputTokens": 2.4e-05,
+        "cacheReadInputTokens": 2.4e-07,
+        "cacheWriteInputTokens": 6e-06
+      },
+      "bedrock/us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+        "inputTokens": 3.6e-06,
+        "outputTokens": 1.8e-05,
+        "cacheReadInputTokens": 3.6e-07,
+        "cacheWriteInputTokens": 4.5e-06
+      },
+      "bedrock/us-gov.anthropic.claude-sonnet-5-5": {
+        "inputTokens": 2.4e-06,
+        "outputTokens": 1.2e-05,
+        "cacheReadInputTokens": 1.2e-07,
+        "cacheWriteInputTokens": 3e-06
+      },
+      "fargate/arm64": {
+        "vcpuSeconds": 1.039733333e-05,
+        "gbSeconds": 1.135166667e-06
+      },
+      "fargate/x86_64": {
+        "vcpuSeconds": 1.35e-05,
+        "gbSeconds": 1.472222222e-06
+      }
+    }
+  },
+  "sources": {
+    "default": {
+      "bedrock/amazon.nova-2-sonic-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USE1-NovaSonic2.0-speech-input-tokens, USE1-NovaSonic2.0-speech-output-tokens, USE1-NovaSonic2.0-text-input-tokens, USE1-NovaSonic2.0-text-output-tokens",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/amazon.nova-lite-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USE1-NovaLite-input-tokens, USE1-NovaLite-output-tokens, USE1-NovaLite-cache-read-input-token-count, USE1-NovaLite-cache-write-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/amazon.nova-micro-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USE1-NovaMicro-input-tokens, USE1-NovaMicro-output-tokens, USE1-NovaMicro-cache-read-input-token-count, USE1-NovaMicro-cache-write-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/amazon.nova-pro-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USE1-NovaPro-input-tokens, USE1-NovaPro-output-tokens, USE1-NovaPro-cache-read-input-token-count, USE1-NovaPro-cache-write-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/amazon.nova-sonic-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USE1-NovaSonic-speech-input-tokens, USE1-NovaSonic-speech-output-tokens, USE1-NovaSonic-text-input-tokens, USE1-NovaSonic-text-output-tokens",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/global.amazon.nova-2-lite-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USE1-Nova2.0Lite-input-tokens-cross-region-global, USE1-Nova2.0Lite-output-tokens-cross-region-global, USE1-Nova2.0Lite-cache-read-input-token-count-cross-region-global, USE1-Nova2.0Lite-cache-write-input-token-count-cross-region-global",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USE1-MP:USE1_InputTokenCount_Global-Units, USE1-MP:USE1_OutputTokenCount_Global-Units, USE1-MP:USE1_CacheReadInputTokenCount_Global-Units, USE1-MP:USE1_CacheWriteInputTokenCount_Global-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-haiku-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USE1-MP:USE1_input_tokens_global_standard-Units, USE1-MP:USE1_output_tokens_global_standard-Units, USE1-MP:USE1_cache_read_tokens_global_standard-Units, USE1-MP:USE1_cache_write_tokens_global_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-opus-4-6-v1": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USE1-MP:USE1_InputTokenCount_Global-Units, USE1-MP:USE1_OutputTokenCount_Global-Units, USE1-MP:USE1_CacheReadInputTokenCount_Global-Units, USE1-MP:USE1_CacheWriteInputTokenCount_Global-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-opus-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USE1-MP:USE1_input_tokens_global_standard-Units, USE1-MP:USE1_output_tokens_global_standard-Units, USE1-MP:USE1_cache_read_tokens_global_standard-Units, USE1-MP:USE1_cache_write_tokens_global_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USE1-MP:USE1_InputTokenCount_Global-Units, USE1-MP:USE1_OutputTokenCount_Global-Units, USE1-MP:USE1_CacheReadInputTokenCount_Global-Units, USE1-MP:USE1_CacheWriteInputTokenCount_Global-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-sonnet-4-6": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USE1-MP:USE1_InputTokenCount_Global-Units, USE1-MP:USE1_OutputTokenCount_Global-Units, USE1-MP:USE1_CacheReadInputTokenCount_Global-Units, USE1-MP:USE1_CacheWriteInputTokenCount_Global-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-sonnet-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USE1-MP:USE1_input_tokens_global_standard-Units, USE1-MP:USE1_output_tokens_global_standard-Units, USE1-MP:USE1_cache_read_tokens_global_standard-Units, USE1-MP:USE1_cache_write_tokens_global_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.amazon.nova-2-lite-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USE1-Nova2.0Lite-input-tokens, USE1-Nova2.0Lite-output-tokens, USE1-Nova2.0Lite-cache-read-input-token-count, USE1-Nova2.0Lite-cache-write-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/us.amazon.nova-lite-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USE1-NovaLite-input-tokens, USE1-NovaLite-output-tokens, USE1-NovaLite-cache-read-input-token-count, USE1-NovaLite-cache-write-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Amazon Nova lists one price per token type in this region, which is used for this cross-Region inference profile too. Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/us.amazon.nova-micro-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USE1-NovaMicro-input-tokens, USE1-NovaMicro-output-tokens, USE1-NovaMicro-cache-read-input-token-count, USE1-NovaMicro-cache-write-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Amazon Nova lists one price per token type in this region, which is used for this cross-Region inference profile too. Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/us.amazon.nova-premier-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USE1-NovaPremier-input-tokens, USE1-NovaPremier-output-tokens, USE1-NovaPremier-cache-read-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/us.amazon.nova-pro-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USE1-NovaPro-input-tokens, USE1-NovaPro-output-tokens, USE1-NovaPro-cache-read-input-token-count, USE1-NovaPro-cache-write-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Amazon Nova lists one price per token type in this region, which is used for this cross-Region inference profile too. Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USE1-MP:USE1_InputTokenCount-Units, USE1-MP:USE1_OutputTokenCount-Units, USE1-MP:USE1_CacheReadInputTokenCount-Units, USE1-MP:USE1_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.anthropic.claude-haiku-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USE1-MP:USE1_input_tokens_standard-Units, USE1-MP:USE1_output_tokens_standard-Units, USE1-MP:USE1_cache_read_tokens_standard-Units, USE1-MP:USE1_cache_write_tokens_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.anthropic.claude-opus-4-1-20250805-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USE1-MP:USE1_InputTokenCount-Units, USE1-MP:USE1_OutputTokenCount-Units, USE1-MP:USE1_CacheReadInputTokenCount-Units, USE1-MP:USE1_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.anthropic.claude-opus-4-20250514-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USE1-MP:USE1_InputTokenCount-Units, USE1-MP:USE1_OutputTokenCount-Units, USE1-MP:USE1_CacheReadInputTokenCount-Units, USE1-MP:USE1_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.anthropic.claude-opus-4-6-v1": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USE1-MP:USE1_InputTokenCount-Units, USE1-MP:USE1_OutputTokenCount-Units, USE1-MP:USE1_CacheReadInputTokenCount-Units, USE1-MP:USE1_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.anthropic.claude-opus-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USE1-MP:USE1_input_tokens_standard-Units, USE1-MP:USE1_output_tokens_standard-Units, USE1-MP:USE1_cache_read_tokens_standard-Units, USE1-MP:USE1_cache_write_tokens_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USE1-MP:USE1_InputTokenCount-Units, USE1-MP:USE1_OutputTokenCount-Units, USE1-MP:USE1_CacheReadInputTokenCount-Units, USE1-MP:USE1_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.anthropic.claude-sonnet-4-6": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USE1-MP:USE1_InputTokenCount-Units, USE1-MP:USE1_OutputTokenCount-Units, USE1-MP:USE1_CacheReadInputTokenCount-Units, USE1-MP:USE1_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.anthropic.claude-sonnet-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USE1-MP:USE1_input_tokens_standard-Units, USE1-MP:USE1_output_tokens_standard-Units, USE1-MP:USE1_cache_read_tokens_standard-Units, USE1-MP:USE1_cache_write_tokens_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "comprehend/detect-sentiment": {
+        "basis": "price-list-api",
+        "offer": "comprehend",
+        "offerVersion": "20260911124625",
+        "usageType": "USE1-DetectSentiment",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/comprehend/pricing/",
+        "detail": "Tiered by monthly volume; this is the first tier 0-10000000 Unit of 3 tiers, the highest price."
+      },
+      "fargate/arm64": {
+        "basis": "price-list-api",
+        "offer": "AmazonECS",
+        "offerVersion": "20261019224317",
+        "usageType": "USE1-Fargate-ARM-vCPU-Hours:perCPU, USE1-Fargate-ARM-GB-Hours",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/fargate/pricing/",
+        "detail": "Listed per hour; divided by 3,600."
+      },
+      "fargate/x86_64": {
+        "basis": "price-list-api",
+        "offer": "AmazonECS",
+        "offerVersion": "20261019224317",
+        "usageType": "USE1-Fargate-vCPU-Hours:perCPU, USE1-Fargate-GB-Hours",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/fargate/pricing/",
+        "detail": "Listed per hour; divided by 3,600."
+      },
+      "lambda-microvm/arm64": {
+        "basis": "price-list-api",
+        "offer": "AWSLambda",
+        "offerVersion": "20261030234255",
+        "usageType": "Lambda-MicroVM-vCPU-Second-ARM, Lambda-MicroVM-Memory-GB-Second-ARM",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/lambda/pricing/"
+      },
+      "lambda-microvm/x86_64": {
+        "basis": "price-list-api",
+        "offer": "AWSLambda",
+        "offerVersion": "20261030234255",
+        "usageType": "Lambda-MicroVM-vCPU-Second, Lambda-MicroVM-Memory-GB-Second",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/lambda/pricing/"
+      },
+      "transcribe/batch": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "USE1-TranscribeAudio",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/"
+      },
+      "transcribe/streaming": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "USE1-StreamingAudio",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/"
+      },
+      "transcribe/streaming-custom-language-model": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "USE1-TranscribeStreamingClm",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/",
+        "detail": "Tiered by monthly volume; this is the first tier 0-15000000 seconds (0-250K min) of 4 tiers, the highest price."
+      },
+      "transcribe/streaming-pii-redaction": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "USE1-RedactionTranscribeStreaming",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/",
+        "detail": "Tiered by monthly volume; this is the first tier 0-15000000 seconds (0-250K min) of 4 tiers, the highest price."
+      }
+    },
+    "us-west-2": {
+      "bedrock/amazon.nova-2-sonic-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USW2-NovaSonic2.0-speech-input-tokens, USW2-NovaSonic2.0-speech-output-tokens, USW2-NovaSonic2.0-text-input-tokens, USW2-NovaSonic2.0-text-output-tokens",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/amazon.nova-lite-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USW2-NovaLite-input-tokens, USW2-NovaLite-output-tokens, USW2-NovaLite-cache-read-input-token-count, USW2-NovaLite-cache-write-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/amazon.nova-micro-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USW2-NovaMicro-input-tokens, USW2-NovaMicro-output-tokens, USW2-NovaMicro-cache-read-input-token-count, USW2-NovaMicro-cache-write-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/amazon.nova-pro-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USW2-NovaPro-input-tokens, USW2-NovaPro-output-tokens, USW2-NovaPro-cache-read-input-token-count, USW2-NovaPro-cache-write-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/global.amazon.nova-2-lite-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USW2-Nova2.0Lite-input-tokens-cross-region-global, USW2-Nova2.0Lite-output-tokens-cross-region-global, USW2-Nova2.0Lite-cache-read-input-token-count-cross-region-global, USW2-Nova2.0Lite-cache-write-input-token-count-cross-region-global",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USW2-MP:USW2_InputTokenCount_Global-Units, USW2-MP:USW2_OutputTokenCount_Global-Units, USW2-MP:USW2_CacheReadInputTokenCount_Global-Units, USW2-MP:USW2_CacheWriteInputTokenCount_Global-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-haiku-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USW2-MP:USW2_input_tokens_global_standard-Units, USW2-MP:USW2_output_tokens_global_standard-Units, USW2-MP:USW2_cache_read_tokens_global_standard-Units, USW2-MP:USW2_cache_write_tokens_global_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-opus-4-6-v1": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USW2-MP:USW2_InputTokenCount_Global-Units, USW2-MP:USW2_OutputTokenCount_Global-Units, USW2-MP:USW2_CacheReadInputTokenCount_Global-Units, USW2-MP:USW2_CacheWriteInputTokenCount_Global-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-opus-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USW2-MP:USW2_input_tokens_global_standard-Units, USW2-MP:USW2_output_tokens_global_standard-Units, USW2-MP:USW2_cache_read_tokens_global_standard-Units, USW2-MP:USW2_cache_write_tokens_global_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USW2-MP:USW2_InputTokenCount_Global-Units, USW2-MP:USW2_OutputTokenCount_Global-Units, USW2-MP:USW2_CacheReadInputTokenCount_Global-Units, USW2-MP:USW2_CacheWriteInputTokenCount_Global-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-sonnet-4-6": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USW2-MP:USW2_InputTokenCount_Global-Units, USW2-MP:USW2_OutputTokenCount_Global-Units, USW2-MP:USW2_CacheReadInputTokenCount_Global-Units, USW2-MP:USW2_CacheWriteInputTokenCount_Global-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-sonnet-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USW2-MP:USW2_input_tokens_global_standard-Units, USW2-MP:USW2_output_tokens_global_standard-Units, USW2-MP:USW2_cache_read_tokens_global_standard-Units, USW2-MP:USW2_cache_write_tokens_global_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.amazon.nova-2-lite-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USW2-Nova2.0Lite-input-tokens, USW2-Nova2.0Lite-output-tokens, USW2-Nova2.0Lite-cache-read-input-token-count, USW2-Nova2.0Lite-cache-write-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/us.amazon.nova-lite-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USW2-NovaLite-input-tokens, USW2-NovaLite-output-tokens, USW2-NovaLite-cache-read-input-token-count, USW2-NovaLite-cache-write-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Amazon Nova lists one price per token type in this region, which is used for this cross-Region inference profile too. Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/us.amazon.nova-micro-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USW2-NovaMicro-input-tokens, USW2-NovaMicro-output-tokens, USW2-NovaMicro-cache-read-input-token-count, USW2-NovaMicro-cache-write-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Amazon Nova lists one price per token type in this region, which is used for this cross-Region inference profile too. Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/us.amazon.nova-premier-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USW2-NovaPremier-input-tokens, USW2-NovaPremier-output-tokens, USW2-NovaPremier-cache-read-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/us.amazon.nova-pro-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "USW2-NovaPro-input-tokens, USW2-NovaPro-output-tokens, USW2-NovaPro-cache-read-input-token-count, USW2-NovaPro-cache-write-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Amazon Nova lists one price per token type in this region, which is used for this cross-Region inference profile too. Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USW2-MP:USW2_InputTokenCount-Units, USW2-MP:USW2_OutputTokenCount-Units, USW2-MP:USW2_CacheReadInputTokenCount-Units, USW2-MP:USW2_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.anthropic.claude-haiku-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USW2-MP:USW2_input_tokens_standard-Units, USW2-MP:USW2_output_tokens_standard-Units, USW2-MP:USW2_cache_read_tokens_standard-Units, USW2-MP:USW2_cache_write_tokens_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.anthropic.claude-opus-4-1-20250805-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USW2-MP:USW2_InputTokenCount-Units, USW2-MP:USW2_OutputTokenCount-Units, USW2-MP:USW2_CacheReadInputTokenCount-Units, USW2-MP:USW2_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.anthropic.claude-opus-4-20250514-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USW2-MP:USW2_InputTokenCount-Units, USW2-MP:USW2_OutputTokenCount-Units, USW2-MP:USW2_CacheReadInputTokenCount-Units, USW2-MP:USW2_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.anthropic.claude-opus-4-6-v1": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USW2-MP:USW2_InputTokenCount-Units, USW2-MP:USW2_OutputTokenCount-Units, USW2-MP:USW2_CacheReadInputTokenCount-Units, USW2-MP:USW2_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.anthropic.claude-opus-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USW2-MP:USW2_input_tokens_standard-Units, USW2-MP:USW2_output_tokens_standard-Units, USW2-MP:USW2_cache_read_tokens_standard-Units, USW2-MP:USW2_cache_write_tokens_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USW2-MP:USW2_InputTokenCount-Units, USW2-MP:USW2_OutputTokenCount-Units, USW2-MP:USW2_CacheReadInputTokenCount-Units, USW2-MP:USW2_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.anthropic.claude-sonnet-4-6": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USW2-MP:USW2_InputTokenCount-Units, USW2-MP:USW2_OutputTokenCount-Units, USW2-MP:USW2_CacheReadInputTokenCount-Units, USW2-MP:USW2_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us.anthropic.claude-sonnet-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "USW2-MP:USW2_input_tokens_standard-Units, USW2-MP:USW2_output_tokens_standard-Units, USW2-MP:USW2_cache_read_tokens_standard-Units, USW2-MP:USW2_cache_write_tokens_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "comprehend/detect-sentiment": {
+        "basis": "price-list-api",
+        "offer": "comprehend",
+        "offerVersion": "20260911124625",
+        "usageType": "USW2-DetectSentiment",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/comprehend/pricing/",
+        "detail": "Tiered by monthly volume; this is the first tier 0-10000000 Unit of 3 tiers, the highest price."
+      },
+      "fargate/arm64": {
+        "basis": "price-list-api",
+        "offer": "AmazonECS",
+        "offerVersion": "20261019224317",
+        "usageType": "USW2-Fargate-ARM-vCPU-Hours:perCPU, USW2-Fargate-ARM-GB-Hours",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/fargate/pricing/",
+        "detail": "Listed per hour; divided by 3,600."
+      },
+      "fargate/x86_64": {
+        "basis": "price-list-api",
+        "offer": "AmazonECS",
+        "offerVersion": "20261019224317",
+        "usageType": "USW2-Fargate-vCPU-Hours:perCPU, USW2-Fargate-GB-Hours",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/fargate/pricing/",
+        "detail": "Listed per hour; divided by 3,600."
+      },
+      "lambda-microvm/arm64": {
+        "basis": "price-list-api",
+        "offer": "AWSLambda",
+        "offerVersion": "20261030234255",
+        "usageType": "USW2-Lambda-MicroVM-vCPU-Second-ARM, USW2-Lambda-MicroVM-Memory-GB-Second-ARM",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/lambda/pricing/"
+      },
+      "lambda-microvm/x86_64": {
+        "basis": "price-list-api",
+        "offer": "AWSLambda",
+        "offerVersion": "20261030234255",
+        "usageType": "USW2-Lambda-MicroVM-vCPU-Second, USW2-Lambda-MicroVM-Memory-GB-Second",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/lambda/pricing/"
+      },
+      "transcribe/batch": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "USW2-TranscribeAudio",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/"
+      },
+      "transcribe/streaming": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "USW2-StreamingAudio",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/"
+      },
+      "transcribe/streaming-custom-language-model": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "USW2-TranscribeStreamingClm",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/",
+        "detail": "Tiered by monthly volume; this is the first tier 0-15000000 seconds (0-250K min) of 4 tiers, the highest price."
+      },
+      "transcribe/streaming-pii-redaction": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "USW2-RedactionTranscribeStreaming",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/",
+        "detail": "Tiered by monthly volume; this is the first tier 0-15000000 seconds (0-250K min) of 4 tiers, the highest price."
+      }
+    },
+    "eu-west-1": {
+      "bedrock/eu.amazon.nova-2-lite-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "EU-Nova2.0Lite-input-tokens, EU-Nova2.0Lite-output-tokens, EU-Nova2.0Lite-cache-read-input-token-count, EU-Nova2.0Lite-cache-write-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/eu.amazon.nova-lite-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "EU-NovaLite-input-tokens, EU-NovaLite-output-tokens, EU-NovaLite-cache-read-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Amazon Nova lists one price per token type in this region, which is used for this cross-Region inference profile too. Listed per 1,000 tokens; divided by 1,000. No cache-write price is listed for this model in this region; cache writes are priced at $0, which is what Amazon Nova lists for them where it lists one."
+      },
+      "bedrock/eu.amazon.nova-micro-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "EU-NovaMicro-input-tokens, EU-NovaMicro-output-tokens, EU-NovaMicro-cache-read-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Amazon Nova lists one price per token type in this region, which is used for this cross-Region inference profile too. Listed per 1,000 tokens; divided by 1,000. No cache-write price is listed for this model in this region; cache writes are priced at $0, which is what Amazon Nova lists for them where it lists one."
+      },
+      "bedrock/eu.amazon.nova-pro-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "EU-NovaPro-input-tokens, EU-NovaPro-output-tokens, EU-NovaPro-cache-read-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Amazon Nova lists one price per token type in this region, which is used for this cross-Region inference profile too. Listed per 1,000 tokens; divided by 1,000. No cache-write price is listed for this model in this region; cache writes are priced at $0, which is what Amazon Nova lists for them where it lists one."
+      },
+      "bedrock/eu.anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "EU-MP:EU_InputTokenCount-Units, EU-MP:EU_OutputTokenCount-Units, EU-MP:EU_CacheReadInputTokenCount-Units, EU-MP:EU_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/eu.anthropic.claude-haiku-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "EU-MP:EU_input_tokens_standard-Units, EU-MP:EU_output_tokens_standard-Units, EU-MP:EU_cache_read_tokens_standard-Units, EU-MP:EU_cache_write_tokens_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/eu.anthropic.claude-opus-4-6-v1": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "EU-MP:EU_InputTokenCount-Units, EU-MP:EU_OutputTokenCount-Units, EU-MP:EU_CacheReadInputTokenCount-Units, EU-MP:EU_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/eu.anthropic.claude-opus-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "EU-MP:EU_input_tokens_standard-Units, EU-MP:EU_output_tokens_standard-Units, EU-MP:EU_cache_read_tokens_standard-Units, EU-MP:EU_cache_write_tokens_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/eu.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "EU-MP:EU_InputTokenCount-Units, EU-MP:EU_OutputTokenCount-Units, EU-MP:EU_CacheReadInputTokenCount-Units, EU-MP:EU_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/eu.anthropic.claude-sonnet-4-6": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "EU-MP:EU_InputTokenCount-Units, EU-MP:EU_OutputTokenCount-Units, EU-MP:EU_CacheReadInputTokenCount-Units, EU-MP:EU_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/eu.anthropic.claude-sonnet-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "EU-MP:EU_input_tokens_standard-Units, EU-MP:EU_output_tokens_standard-Units, EU-MP:EU_cache_read_tokens_standard-Units, EU-MP:EU_cache_write_tokens_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.amazon.nova-2-lite-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "EU-Nova2.0Lite-input-tokens-cross-region-global, EU-Nova2.0Lite-output-tokens-cross-region-global, EU-Nova2.0Lite-cache-read-input-token-count-cross-region-global, EU-Nova2.0Lite-cache-write-input-token-count-cross-region-global",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "EU-MP:EU_InputTokenCount_Global-Units, EU-MP:EU_OutputTokenCount_Global-Units, EU-MP:EU_CacheReadInputTokenCount_Global-Units, EU-MP:EU_CacheWriteInputTokenCount_Global-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-haiku-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "EU-MP:EU_input_tokens_global_standard-Units, EU-MP:EU_output_tokens_global_standard-Units, EU-MP:EU_cache_read_tokens_global_standard-Units, EU-MP:EU_cache_write_tokens_global_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-opus-4-6-v1": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "EU-MP:EU_InputTokenCount_Global-Units, EU-MP:EU_OutputTokenCount_Global-Units, EU-MP:EU_CacheReadInputTokenCount_Global-Units, EU-MP:EU_CacheWriteInputTokenCount_Global-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-opus-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "EU-MP:EU_input_tokens_global_standard-Units, EU-MP:EU_output_tokens_global_standard-Units, EU-MP:EU_cache_read_tokens_global_standard-Units, EU-MP:EU_cache_write_tokens_global_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "EU-MP:EU_InputTokenCount_Global-Units, EU-MP:EU_OutputTokenCount_Global-Units, EU-MP:EU_CacheReadInputTokenCount_Global-Units, EU-MP:EU_CacheWriteInputTokenCount_Global-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-sonnet-4-6": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "EU-MP:EU_InputTokenCount_Global-Units, EU-MP:EU_OutputTokenCount_Global-Units, EU-MP:EU_CacheReadInputTokenCount_Global-Units, EU-MP:EU_CacheWriteInputTokenCount_Global-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-sonnet-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "EU-MP:EU_input_tokens_global_standard-Units, EU-MP:EU_output_tokens_global_standard-Units, EU-MP:EU_cache_read_tokens_global_standard-Units, EU-MP:EU_cache_write_tokens_global_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "comprehend/detect-sentiment": {
+        "basis": "price-list-api",
+        "offer": "comprehend",
+        "offerVersion": "20260911124625",
+        "usageType": "EU-DetectSentiment",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/comprehend/pricing/",
+        "detail": "Tiered by monthly volume; this is the first tier 0-10000000 Unit of 3 tiers, the highest price."
+      },
+      "fargate/arm64": {
+        "basis": "price-list-api",
+        "offer": "AmazonECS",
+        "offerVersion": "20261019224317",
+        "usageType": "EU-Fargate-ARM-vCPU-Hours:perCPU, EU-Fargate-ARM-GB-Hours",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/fargate/pricing/",
+        "detail": "Listed per hour; divided by 3,600."
+      },
+      "fargate/x86_64": {
+        "basis": "price-list-api",
+        "offer": "AmazonECS",
+        "offerVersion": "20261019224317",
+        "usageType": "EU-Fargate-vCPU-Hours:perCPU, EU-Fargate-GB-Hours",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/fargate/pricing/",
+        "detail": "Listed per hour; divided by 3,600."
+      },
+      "lambda-microvm/arm64": {
+        "basis": "price-list-api",
+        "offer": "AWSLambda",
+        "offerVersion": "20261030234255",
+        "usageType": "EU-Lambda-MicroVM-vCPU-Second-ARM, EU-Lambda-MicroVM-Memory-GB-Second-ARM",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/lambda/pricing/"
+      },
+      "lambda-microvm/x86_64": {
+        "basis": "price-list-api",
+        "offer": "AWSLambda",
+        "offerVersion": "20261030234255",
+        "usageType": "EU-Lambda-MicroVM-vCPU-Second, EU-Lambda-MicroVM-Memory-GB-Second",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/lambda/pricing/"
+      },
+      "transcribe/batch": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "EU-TranscribeAudio",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/"
+      },
+      "transcribe/streaming": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "EU-StreamingAudio",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/"
+      },
+      "transcribe/streaming-custom-language-model": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "EU-TranscribeStreamingClm",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/",
+        "detail": "Tiered by monthly volume; this is the first tier 0-15000000 seconds (0-250K min) of 4 tiers, the highest price."
+      },
+      "transcribe/streaming-pii-redaction": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "EU-RedactionTranscribeStreaming",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/",
+        "detail": "Tiered by monthly volume; this is the first tier 0-15000000 seconds (0-250K min) of 4 tiers, the highest price."
+      }
+    },
+    "ap-northeast-1": {
+      "bedrock/amazon.nova-2-sonic-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "APN1-NovaSonic2.0-speech-input-tokens, APN1-NovaSonic2.0-speech-output-tokens, APN1-NovaSonic2.0-text-input-tokens, APN1-NovaSonic2.0-text-output-tokens",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/amazon.nova-lite-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "APN1-NovaLite-input-tokens, APN1-NovaLite-output-tokens, APN1-NovaLite-cache-read-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000. No cache-write price is listed for this model in this region; cache writes are priced at $0, which is what Amazon Nova lists for them where it lists one."
+      },
+      "bedrock/amazon.nova-sonic-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "APN1-NovaSonic-speech-input-tokens, APN1-NovaSonic-speech-output-tokens, APN1-NovaSonic-text-input-tokens, APN1-NovaSonic-text-output-tokens",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/apac.amazon.nova-lite-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "APN1-NovaLite-input-tokens, APN1-NovaLite-output-tokens, APN1-NovaLite-cache-read-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Amazon Nova lists one price per token type in this region, which is used for this cross-Region inference profile too. Listed per 1,000 tokens; divided by 1,000. No cache-write price is listed for this model in this region; cache writes are priced at $0, which is what Amazon Nova lists for them where it lists one."
+      },
+      "bedrock/apac.amazon.nova-micro-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "APN1-NovaMicro-input-tokens, APN1-NovaMicro-output-tokens, APN1-NovaMicro-cache-read-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Amazon Nova lists one price per token type in this region, which is used for this cross-Region inference profile too. Listed per 1,000 tokens; divided by 1,000. No cache-write price is listed for this model in this region; cache writes are priced at $0, which is what Amazon Nova lists for them where it lists one."
+      },
+      "bedrock/apac.amazon.nova-pro-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "APN1-NovaPro-input-tokens, APN1-NovaPro-output-tokens, APN1-NovaPro-cache-read-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Amazon Nova lists one price per token type in this region, which is used for this cross-Region inference profile too. Listed per 1,000 tokens; divided by 1,000. No cache-write price is listed for this model in this region; cache writes are priced at $0, which is what Amazon Nova lists for them where it lists one."
+      },
+      "bedrock/global.amazon.nova-2-lite-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "APN1-Nova2.0Lite-input-tokens-cross-region-global, APN1-Nova2.0Lite-output-tokens-cross-region-global, APN1-Nova2.0Lite-cache-read-input-token-count-cross-region-global, APN1-Nova2.0Lite-cache-write-input-token-count-cross-region-global",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "APN1-MP:APN1_InputTokenCount_Global-Units, APN1-MP:APN1_OutputTokenCount_Global-Units, APN1-MP:APN1_CacheReadInputTokenCount_Global-Units, APN1-MP:APN1_CacheWriteInputTokenCount_Global-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-haiku-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "APN1-MP:APN1_input_tokens_global_standard-Units, APN1-MP:APN1_output_tokens_global_standard-Units, APN1-MP:APN1_cache_read_tokens_global_standard-Units, APN1-MP:APN1_cache_write_tokens_global_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-opus-4-6-v1": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "APN1-MP:APN1_InputTokenCount_Global-Units, APN1-MP:APN1_OutputTokenCount_Global-Units, APN1-MP:APN1_CacheReadInputTokenCount_Global-Units, APN1-MP:APN1_CacheWriteInputTokenCount_Global-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-opus-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "APN1-MP:APN1_input_tokens_global_standard-Units, APN1-MP:APN1_output_tokens_global_standard-Units, APN1-MP:APN1_cache_read_tokens_global_standard-Units, APN1-MP:APN1_cache_write_tokens_global_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "APN1-MP:APN1_InputTokenCount_Global-Units, APN1-MP:APN1_OutputTokenCount_Global-Units, APN1-MP:APN1_CacheReadInputTokenCount_Global-Units, APN1-MP:APN1_CacheWriteInputTokenCount_Global-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/global.anthropic.claude-sonnet-4-6": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "APN1-MP:APN1_InputTokenCount_Global-Units, APN1-MP:APN1_OutputTokenCount_Global-Units, APN1-MP:APN1_CacheReadInputTokenCount_Global-Units, APN1-MP:APN1_CacheWriteInputTokenCount_Global-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Global cross-Region inference price. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/jp.amazon.nova-2-lite-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "APN1-Nova2.0Lite-input-tokens, APN1-Nova2.0Lite-output-tokens, APN1-Nova2.0Lite-cache-read-input-token-count, APN1-Nova2.0Lite-cache-write-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000."
+      },
+      "bedrock/jp.anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "APN1-MP:APN1_InputTokenCount-Units, APN1-MP:APN1_OutputTokenCount-Units, APN1-MP:APN1_CacheReadInputTokenCount-Units, APN1-MP:APN1_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/jp.anthropic.claude-haiku-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "APN1-MP:APN1_input_tokens_standard-Units, APN1-MP:APN1_output_tokens_standard-Units, APN1-MP:APN1_cache_read_tokens_standard-Units, APN1-MP:APN1_cache_write_tokens_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/jp.anthropic.claude-opus-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "APN1-MP:APN1_input_tokens_standard-Units, APN1-MP:APN1_output_tokens_standard-Units, APN1-MP:APN1_cache_read_tokens_standard-Units, APN1-MP:APN1_cache_write_tokens_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/jp.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "APN1-MP:APN1_InputTokenCount-Units, APN1-MP:APN1_OutputTokenCount-Units, APN1-MP:APN1_CacheReadInputTokenCount-Units, APN1-MP:APN1_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/jp.anthropic.claude-sonnet-4-6": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "APN1-MP:APN1_InputTokenCount-Units, APN1-MP:APN1_OutputTokenCount-Units, APN1-MP:APN1_CacheReadInputTokenCount-Units, APN1-MP:APN1_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "comprehend/detect-sentiment": {
+        "basis": "price-list-api",
+        "offer": "comprehend",
+        "offerVersion": "20260911124625",
+        "usageType": "APN1-DetectSentiment",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/comprehend/pricing/",
+        "detail": "Tiered by monthly volume; this is the first tier 0-10000000 Unit of 3 tiers, the highest price."
+      },
+      "fargate/arm64": {
+        "basis": "price-list-api",
+        "offer": "AmazonECS",
+        "offerVersion": "20261019224317",
+        "usageType": "APN1-Fargate-ARM-vCPU-Hours:perCPU, APN1-Fargate-ARM-GB-Hours",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/fargate/pricing/",
+        "detail": "Listed per hour; divided by 3,600."
+      },
+      "fargate/x86_64": {
+        "basis": "price-list-api",
+        "offer": "AmazonECS",
+        "offerVersion": "20261019224317",
+        "usageType": "APN1-Fargate-vCPU-Hours:perCPU, APN1-Fargate-GB-Hours",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/fargate/pricing/",
+        "detail": "Listed per hour; divided by 3,600."
+      },
+      "lambda-microvm/arm64": {
+        "basis": "price-list-api",
+        "offer": "AWSLambda",
+        "offerVersion": "20261030234255",
+        "usageType": "APN1-Lambda-MicroVM-vCPU-Second-ARM, APN1-Lambda-MicroVM-Memory-GB-Second-ARM",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/lambda/pricing/"
+      },
+      "lambda-microvm/x86_64": {
+        "basis": "price-list-api",
+        "offer": "AWSLambda",
+        "offerVersion": "20261030234255",
+        "usageType": "APN1-Lambda-MicroVM-vCPU-Second, APN1-Lambda-MicroVM-Memory-GB-Second",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/lambda/pricing/"
+      },
+      "transcribe/batch": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "APN1-TranscribeAudio",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/"
+      },
+      "transcribe/streaming": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "APN1-StreamingAudio",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/"
+      },
+      "transcribe/streaming-custom-language-model": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "APN1-TranscribeStreamingClm",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/",
+        "detail": "Tiered by monthly volume; this is the first tier 0-15000000 seconds (0-250K min) of 3 tiers, the highest price."
+      },
+      "transcribe/streaming-pii-redaction": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "APN1-RedactionTranscribeStreaming",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/",
+        "detail": "Tiered by monthly volume; this is the first tier 0-15000000 seconds (0-250K min) of 3 tiers, the highest price."
+      },
+      "bedrock/global.anthropic.claude-sonnet-5-5": {
+        "basis": "estimate",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The Price List API lists no Claude Sonnet 5.5 product for ap-northeast-1. The Global price read for us-east-1 is used: every Global Claude price read was the same in each region that lists the model."
+      }
+    },
+    "us-gov-west-1": {
+      "bedrock/amazon.nova-lite-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "UGW1-NovaLite-input-tokens, UGW1-NovaLite-output-tokens, UGW1-NovaLite-cache-read-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000. No cache-write price is listed for this model in this region; cache writes are priced at $0, which is what Amazon Nova lists for them where it lists one."
+      },
+      "bedrock/amazon.nova-micro-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "UGW1-NovaMicro-input-tokens, UGW1-NovaMicro-output-tokens, UGW1-NovaMicro-cache-read-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000. No cache-write price is listed for this model in this region; cache writes are priced at $0, which is what Amazon Nova lists for them where it lists one."
+      },
+      "bedrock/amazon.nova-pro-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrock",
+        "offerVersion": "20261106184538",
+        "usageType": "UGW1-NovaPro-input-tokens, UGW1-NovaPro-output-tokens, UGW1-NovaPro-cache-read-input-token-count",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "Listed per 1,000 tokens; divided by 1,000. No cache-write price is listed for this model in this region; cache writes are priced at $0, which is what Amazon Nova lists for them where it lists one."
+      },
+      "bedrock/us-gov.anthropic.claude-haiku-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "UGW1-MP:UGW1_input_tokens_standard-Units, UGW1-MP:UGW1_output_tokens_standard-Units, UGW1-MP:UGW1_cache_read_tokens_standard-Units, UGW1-MP:UGW1_cache_write_tokens_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us-gov.anthropic.claude-opus-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "UGW1-MP:UGW1_input_tokens_standard-Units, UGW1-MP:UGW1_output_tokens_standard-Units, UGW1-MP:UGW1_cache_read_tokens_standard-Units, UGW1-MP:UGW1_cache_write_tokens_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "UGW1-MP:UGW1_InputTokenCount-Units, UGW1-MP:UGW1_OutputTokenCount-Units, UGW1-MP:UGW1_CacheReadInputTokenCount-Units, UGW1-MP:UGW1_CacheWriteInputTokenCount-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "bedrock/us-gov.anthropic.claude-sonnet-5-5": {
+        "basis": "price-list-api",
+        "offer": "AmazonBedrockFoundationModels",
+        "offerVersion": "20261109180952",
+        "usageType": "UGW1-MP:UGW1_input_tokens_standard-Units, UGW1-MP:UGW1_output_tokens_standard-Units, UGW1-MP:UGW1_cache_read_tokens_standard-Units, UGW1-MP:UGW1_cache_write_tokens_standard-Units",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/bedrock/pricing/",
+        "detail": "The model's Regional price, which is the one listed for its geographic cross-Region inference profile. Listed per million tokens; divided by 1,000,000."
+      },
+      "comprehend/detect-sentiment": {
+        "basis": "price-list-api",
+        "offer": "comprehend",
+        "offerVersion": "20260911124625",
+        "usageType": "UGW1-DetectSentiment",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/comprehend/pricing/",
+        "detail": "Tiered by monthly volume; this is the first tier 0-10000000 Unit of 3 tiers, the highest price."
+      },
+      "fargate/arm64": {
+        "basis": "price-list-api",
+        "offer": "AmazonECS",
+        "offerVersion": "20261019224317",
+        "usageType": "UGW1-Fargate-ARM-vCPU-Hours:perCPU, UGW1-Fargate-ARM-GB-Hours",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/fargate/pricing/",
+        "detail": "Listed per hour; divided by 3,600."
+      },
+      "fargate/x86_64": {
+        "basis": "price-list-api",
+        "offer": "AmazonECS",
+        "offerVersion": "20261019224317",
+        "usageType": "UGW1-Fargate-vCPU-Hours:perCPU, UGW1-Fargate-GB-Hours",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/fargate/pricing/",
+        "detail": "Listed per hour; divided by 3,600."
+      },
+      "transcribe/batch": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "UGW1-TranscribeAudio",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/"
+      },
+      "transcribe/streaming": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "UGW1-StreamingAudio",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/"
+      },
+      "transcribe/streaming-custom-language-model": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "UGW1-TranscribeStreamingClm",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/",
+        "detail": "Tiered by monthly volume; this is the first tier 0-15000000 seconds (0-250K min) of 4 tiers, the highest price."
+      },
+      "transcribe/streaming-pii-redaction": {
+        "basis": "price-list-api",
+        "offer": "transcribe",
+        "offerVersion": "20260911124646",
+        "usageType": "UGW1-RedactionTranscribeStreaming",
+        "retrieved": "2026-11-09",
+        "url": "https://aws.amazon.com/transcribe/pricing/",
+        "detail": "Tiered by monthly volume; this is the first tier 0-15000000 seconds (0-250K min) of 4 tiers, the highest price."
       }
     }
   },
@@ -206,6 +1726,6 @@
     "Amazon Bedrock Knowledge Base queries (RetrieveAndGenerate does not report token usage) and the vector store behind them.",
     "Amazon Bedrock Guardrails and Amazon Translate (live translation in the browser).",
     "Third-party services: ElevenLabs, Simli and Tavily web search.",
-    "Free tier, Savings Plans, volume tiers beyond the first, and any private pricing agreement."
+    "Free tier, Savings Plans and volume tiers beyond the first. A private pricing agreement is applied only where an administrator sets its prices in Meeting Cost Prices."
   ]
 }

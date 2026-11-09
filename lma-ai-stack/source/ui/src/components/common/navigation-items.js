@@ -107,6 +107,13 @@ export const generateNavigationItems = (settings, isAdmin) => {
           text: 'View / Edit Configuration',
           href: `#${CONFIGURATION_PATH}`,
         },
+        // The Meeting Cost Prices section of the same page, as the IDP
+        // Accelerator lists its Pricing page.
+        {
+          type: 'link',
+          text: 'Meeting Cost Prices',
+          href: `#${CONFIGURATION_PATH}?section=call_pricing`,
+        },
         {
           type: 'link',
           text: 'MCP Servers',

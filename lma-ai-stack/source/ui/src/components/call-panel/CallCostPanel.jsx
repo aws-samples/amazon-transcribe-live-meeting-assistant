@@ -21,10 +21,12 @@ import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import {
   Alert,
+  Badge,
   Box,
   Button,
   ColumnLayout,
   ExpandableSection,
+  Link,
   Popover,
   SpaceBetween,
   StatusIndicator,
@@ -37,6 +39,8 @@ import {
   formatCost,
   formatQuantity,
   formatUnitPrice,
+  lineCalculation,
+  priceSourceLabel,
   serviceLabel,
   tableRows,
   unitLabel,
@@ -57,7 +61,8 @@ const renderCost = (row, currency) => {
   if (!row.Priced) {
     return <StatusIndicator type="warning">No price</StatusIndicator>;
   }
-  return formatCost(row.Cost, currency);
+  // The whole calculation as the cell's title, so it can be read as one statement.
+  return <span title={lineCalculation(row, currency)}>{formatCost(row.Cost, currency)}</span>;
 };
 
 const renderService = (row) => {
@@ -91,16 +96,63 @@ const renderService = (row) => {
   );
 };
 
+// Where the line's price came from -- the shipped table's source, or a price
+// set in the active configuration profile -- with the full sentence on selection.
+const renderPriceSource = (row, currency) => {
+  if (row.kind !== 'line' || !row.Chargeable) return '';
+  const label = priceSourceLabel(row);
+  const shipped = row.ShippedUnitPrice;
+  const trigger =
+    row.PriceOrigin === 'custom' ? (
+      <SpaceBetween direction="horizontal" size="xxs">
+        <Badge color="blue">{label}</Badge>
+        {shipped !== null && shipped !== undefined && (
+          <Box variant="small">{`shipped ${formatUnitPrice(shipped, currency)}`}</Box>
+        )}
+      </SpaceBetween>
+    ) : (
+      label
+    );
+  if (!row.PriceSource) return trigger;
+  return (
+    <Popover
+      dismissButton={false}
+      position="top"
+      size="large"
+      triggerType="text"
+      header="Where this price comes from"
+      content={
+        <SpaceBetween size="xs">
+          <Box>{row.PriceSource}</Box>
+          {row.PriceSourceUrl && (
+            <Link external href={row.PriceSourceUrl}>
+              Pricing page
+            </Link>
+          )}
+        </SpaceBetween>
+      }
+    >
+      {trigger}
+    </Popover>
+  );
+};
+
+// The columns read as the calculation they show: usage, times the unit price,
+// equals the cost.
 const buildColumns = (currency) => [
   { id: 'service', header: 'Service', cell: renderService },
-  { id: 'unit', header: 'Unit', cell: (row) => (row.kind === 'line' ? unitLabel(row.Unit) : '') },
-  { id: 'quantity', header: 'Quantity', cell: (row) => (row.kind === 'line' ? formatQuantity(row.Quantity) : '') },
+  {
+    id: 'usage',
+    header: 'Usage',
+    cell: (row) => (row.kind === 'line' ? `${formatQuantity(row.Quantity)} ${unitLabel(row.Unit)}` : ''),
+  },
   {
     id: 'unitPrice',
-    header: 'Unit price',
+    header: '× Unit price',
     cell: (row) => (row.kind === 'line' && row.Chargeable ? formatUnitPrice(row.UnitPrice, currency) : ''),
   },
-  { id: 'cost', header: 'Estimated cost', cell: (row) => renderCost(row, currency) },
+  { id: 'cost', header: '= Estimated cost', cell: (row) => renderCost(row, currency) },
+  { id: 'source', header: 'Price source', cell: (row) => renderPriceSource(row, currency) },
 ];
 
 /**
@@ -131,10 +183,12 @@ export const CallCostBreakdown = ({ estimate = null, error = null }) => {
       {estimate && !unmetered && (
         <>
           <Alert type="info" header="This is an estimate">
-            {`Computed from usage recorded for this meeting, at public on-demand list prices as of ` +
-              `${estimate.PricesAsOf || 'an unrecorded date'}, first volume tier. Your bill can differ: free ` +
-              'tier, Savings Plans, volume discounts and private pricing are not applied, and resources that ' +
-              'run whether or not a meeting is in progress are not included.'}
+            {`Each line is the usage recorded for this meeting times a unit price: a public on-demand list ` +
+              `price as of ${estimate.PricesAsOf || 'an unrecorded date'} (first volume tier), unless an ` +
+              'administrator set a price of their own in the Meeting Cost Prices configuration. Your bill can ' +
+              'differ: free tier, Savings Plans and volume discounts are not applied, and resources that run ' +
+              'whether or not a meeting is in progress are not included. Select a price source to see where ' +
+              'it comes from.'}
           </Alert>
           {estimateCaveats(estimate).map((text) => (
             <Alert key={text} type="warning">

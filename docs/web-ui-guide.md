@@ -609,7 +609,10 @@ with the form for each generated from that section's schema:
 - A save refused because someone else saved first can be reloaded with your
   changes kept over theirs
 - `?section=<name>` opens one section directly, for example
-  `/#/configuration/settings?section=call_pricing`
+  `/#/configuration/settings?section=call_pricing`, which **Configuration ▸
+  Meeting Cost Prices** in the navigation opens: the table of unit prices each
+  meeting's estimated cost uses, with the source of each (see
+  [Meeting Cost Estimate](meeting-cost-estimate.md#changing-prices))
 
 See the [Configuration Guide](configuration-guide.md) for full documentation.
 
