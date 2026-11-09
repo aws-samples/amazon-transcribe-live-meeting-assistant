@@ -16,6 +16,12 @@ searches it, and the meeting's document in the meeting-history knowledge base
 includes it. A CAMERA frame is stored with no text and no title, and the
 readers leave it out (docs/meeting-video.md, "Camera frames").
 
+Once read, a frame is compared with the last frame before it that is neither a
+camera frame nor itself a repeat; when the two show the same screen (the same
+text, near enough, or the same title and much the same text) it is stored with
+``DuplicateOf`` naming that frame, and the meeting page hides it by default
+(docs/meeting-video.md, "Repeated frames").
+
 A vision model rather than Amazon Textract: on the measured frames both read
 every word, and the model also says what a chart shows, for a tenth of the
 price per frame (docs/meeting-video.md, "Slide text").
@@ -32,7 +38,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import boto3
 import pure
@@ -84,6 +90,54 @@ METERING = MeteringWriter(source="keyframe-text-extractor")
 
 def frame_key(call_id: str, frame_id: str) -> Dict[str, Any]:
     return {"PK": {"S": f"kf#{call_id}"}, "SK": {"S": f"f#{frame_id}"}}
+
+
+#: Frames before this one looked at to find the one it may repeat. Past a run
+#: of camera frames and repeats this long, the frame is taken as new.
+EARLIER_FRAMES = 20
+
+
+def duplicate_of(call_id: str, frame_id: str, title: str, text: str) -> Optional[str]:
+    """The FrameId of the earlier frame this one repeats, or None.
+
+    None as well when the earlier frames cannot be read: a frame not marked is
+    shown, which is how every frame was shown before frames were compared.
+    """
+    try:
+        items = DYNAMODB.query(
+            TableName=EVENT_SOURCING_TABLE,
+            KeyConditionExpression="PK = :pk AND SK < :sk",
+            ExpressionAttributeValues={
+                ":pk": {"S": f"kf#{call_id}"},
+                ":sk": {"S": f"f#{frame_id}"},
+            },
+            ProjectionExpression="#f, #t, #k, #n, #d",
+            ExpressionAttributeNames={
+                "#f": "FrameId",
+                "#t": "SlideText",
+                "#k": "ContentKind",
+                "#n": "Title",
+                "#d": "DuplicateOf",
+            },
+            ScanIndexForward=False,
+            Limit=EARLIER_FRAMES,
+        ).get("Items", [])
+    except ClientError as error:
+        LOGGER.warning(
+            "Could not read the frames before key frame %s: %s",
+            frame_id,
+            error.response["Error"]["Code"],
+        )
+        return None
+    earlier = pure.earlier_original(items)
+    if earlier is None:
+        return None
+    earlier_id = (earlier.get("FrameId") or {}).get("S")
+    if not earlier_id:
+        return None
+    earlier_title = (earlier.get("Title") or {}).get("S")
+    earlier_text = (earlier.get("SlideText") or {}).get("S")
+    return earlier_id if pure.is_duplicate(title, text, earlier_title, earlier_text) else None
 
 
 def model_id() -> str:
@@ -200,6 +254,10 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     if title:
         update += ", Title = :n"
         values[":n"] = {"S": title}
+    original = duplicate_of(call_id, frame_id, title, text) if kind != pure.CAMERA else None
+    if original:
+        update += ", DuplicateOf = :d"
+        values[":d"] = {"S": original}
     try:
         DYNAMODB.update_item(
             TableName=EVENT_SOURCING_TABLE,
@@ -218,5 +276,15 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             error.response["Error"]["Code"],
         )
         return {"status": "failed", "reason": "not stored"}
-    LOGGER.info("Read key frame %s of %s: %s, %d characters", frame_id, call_id, kind, len(text))
-    return {"status": "read", "characters": len(text), "contentKind": kind}
+    LOGGER.info(
+        "Read key frame %s of %s: %s, %d characters%s",
+        frame_id,
+        call_id,
+        kind,
+        len(text),
+        f", repeating {original}" if original else "",
+    )
+    result = {"status": "read", "characters": len(text), "contentKind": kind}
+    if original:
+        result["duplicateOf"] = original
+    return result
