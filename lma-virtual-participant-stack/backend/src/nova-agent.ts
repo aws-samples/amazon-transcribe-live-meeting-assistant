@@ -66,6 +66,7 @@ import {
   requiresAlwaysListening,
 } from './assistant-toggles.js';
 import { createLogger } from './logger.js';
+import { inMeetingRequestPayload } from './meeting-assist-request.js';
 
 const log = createLogger('nova-agent');
 
@@ -2600,19 +2601,13 @@ export class NovaAgent implements VoiceAssistantProvider {
     log.info(`Query for Strands agent: ${String(query ?? '').length} characters`);
     log.debug(`Query for Strands agent: ${query}`);
 
-    // Build payload for direct Strands agent invocation
-    // The Strands agent Lambda expects: text, call_id, conversation_history, etc.
-    const callId = process.env.VP_CALL_ID || process.env.MEETING_NAME || 'nova-voice-agent';
-    const username = process.env.LMA_USER || 'NovaAgent';
-    
-    const payload = {
-      text: query,  // Strands agent expects 'text' field
-      call_id: callId,
-      conversation_history: [],
-      userEmail: username,
-      dynamodb_table_name: process.env.DYNAMODB_TABLE_NAME || '',  // Use main CallEventTable, not VPTaskRegistry
-      dynamodb_pk: `c#${callId}`,  // Use callId for dynamodb_pk (matches database schema)
-    };
+    // A request spoken to the voice assistant in the meeting: answered as the
+    // Meeting Assistant section's In-meeting requests setting allows
+    // (meeting-assist-request.ts).
+    const payload = inMeetingRequestPayload(query, 'voice_assistant', {
+      fallbackCallId: 'nova-voice-agent',
+      fallbackUser: 'NovaAgent',
+    });
 
     log.debug('Strands agent payload:', JSON.stringify(payload));
 

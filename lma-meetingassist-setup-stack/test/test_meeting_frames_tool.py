@@ -238,7 +238,7 @@ def tool(monkeypatch):
     monkeypatch.setattr(handler_module, "APPSYNC_GRAPHQL_URL", "")  # no thinking steps
     monkeypatch.setattr(handler_module.meeting_frames, "load_keyframes", lambda _run, _cid: list(FRAMES))
     monkeypatch.setattr(handler_module.meeting_frames, "download_image", lambda url: b"jpeg-bytes")
-    monkeypatch.setattr(handler_module, "query_transcript_items", lambda *_a: list(SEGMENTS))
+    monkeypatch.setattr(handler_module, "query_transcript_items", lambda *_a, **_kw: list(SEGMENTS))
     # The meeting record the speaker names are read from: a meeting with none.
     monkeypatch.setattr(handler_module, "dynamodb", FakeDynamo({}))
     metered: List[Any] = []

@@ -20,13 +20,11 @@ import {
     CHAT_MESSAGE_LIMITS,
     MAX_ANSWER_MESSAGES,
     chatQuestionPayload,
-    chatSenderIsMeetingOwner,
     createChatAnswerer,
     isOwnChatSender,
     parseChatQuestion,
     splitForChat,
     startChatAnswer,
-    type ChatAsker,
     type ChatPlatform,
 } from './chat-ask.js';
 import { details } from './details.js';
@@ -338,42 +336,11 @@ test("respond says which replies are the assistant's answer and which are the VP
 
 const ENV = { VP_CALL_ID: 'call-1', LMA_USER: 'owner@example.com', DYNAMODB_TABLE_NAME: 'EventSourcingTable' };
 
-test('a chat question is sent in the meeting chat tool scope, for this meeting', () => {
-    const payload = chatQuestionPayload('what was decided?', { sender: 'Alice', platform: 'zoom' }, ENV);
+test('a chat question is sent as an in-meeting request from the meeting chat, for this meeting', () => {
+    const payload = chatQuestionPayload('what was decided?', ENV);
     assert.equal(payload.toolScope, 'meeting_chat');
     assert.equal(payload.text, 'what was decided?');
     assert.equal(payload.call_id, 'call-1');
     assert.equal(payload.dynamodb_pk, 'c#call-1');
     assert.equal(payload.dynamodb_table_name, 'EventSourcingTable');
-});
-
-test("a chat question is never sent as the meeting owner's, whatever display name it carries", () => {
-    // The owner's user name, the VP's own name for them, a real name and no
-    // sender at all: a display name is chosen by whoever types it, so none of
-    // them is taken as the owner asking.
-    const platforms: ChatPlatform[] = ['zoom', 'zoom-sdk', 'teams', 'teams-sdk', 'webex', 'chime', 'google-meet'];
-    for (const platform of platforms) {
-        for (const sender of ['owner@example.com', details.lmaUser, 'Bob Strahan', null, undefined]) {
-            assert.equal(chatSenderIsMeetingOwner({ sender, platform }), false);
-            assert.equal(chatQuestionPayload('q', { sender, platform }, ENV).askedByMeetingOwner, false);
-        }
-    }
-});
-
-test("a chat question carries the LMA user, for the setting's all-tools choices to act for", () => {
-    assert.equal(chatQuestionPayload('q', { sender: 'Alice', platform: 'teams' }, ENV).userEmail, 'owner@example.com');
-    assert.equal(chatQuestionPayload('q', { sender: 'Alice', platform: 'teams' }, {}).userEmail, '');
-});
-
-test('the agent is told who asked and on which platform', async () => {
-    const seen: ChatAsker[] = [];
-    const a = createChatAnswerer(
-        async (_question, asker) => {
-            seen.push(asker);
-            return 'An answer.';
-        },
-        { available: () => true, paused: () => false },
-    );
-    await a.answer(Q('anything'), 'Alice', 'google-meet');
-    assert.deepEqual(seen, [{ sender: 'Alice', platform: 'google-meet' }]);
 });

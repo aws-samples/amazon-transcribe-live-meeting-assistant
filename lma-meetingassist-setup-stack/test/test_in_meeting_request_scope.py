@@ -3,14 +3,17 @@
 # This file is licensed under the MIT License.
 # See the LICENSE file in the project root for full license information.
 
-"""The meeting-chat tool scope of the Strands meeting-assist function.
+"""The in-meeting tool scope of the Strands meeting-assist function.
 
-A question typed in the meeting chat (the Virtual Participant's ``LMA ask``)
-arrives with ``toolScope: 'meeting_chat'``. The Meeting Assistant section's
-``chatQuestionTools`` setting decides what it is answered with: by default the
-current meeting only (transcript, agenda, shared-screen pictures), with no
-user email whatever the event carries; the setting's other choices offer every
-tool to the owner's questions or to everyone's.
+A request made in the meeting by whoever is in it arrives with a toolScope
+naming its caller: ``meeting_chat`` (the Virtual Participant's ``LMA ask``),
+``voice_assistant`` (a voice assistant lookup) or ``wake_phrase`` (the wake
+phrase, from the agent assist orchestrator). The Meeting Assistant section's
+``inMeetingRequestTools`` setting decides what it is answered with: by default
+the current meeting only (its transcript with its chat, agenda and shared
+screen), with no user email whatever the event carries; ``unrestricted``
+offers every tool. The meeting page's own chat sends no scope and is offered
+every tool whatever the setting.
 
 The handler is driven end to end with every tool group's precondition met --
 an MCP server installed, both knowledge bases, web search, AppSync and the
@@ -57,6 +60,13 @@ ALL_TOOLS = {
 CURRENT_MEETING_TOOLS = {"current_meeting_transcript", "get_meeting_agenda", "get_meeting_frames"}
 
 CHAT = {"toolScope": "meeting_chat", "userEmail": "owner@example.com"}
+VOICE = {"toolScope": "voice_assistant", "userEmail": "owner@example.com"}
+WAKE = {
+    "toolScope": "wake_phrase",
+    "userEmail": "owner@example.com",
+    "transcript_segment_args": {"SegmentId": "seg-1"},
+}
+IN_MEETING = [CHAT, VOICE, WAKE]
 
 SCHEMA = (
     Path(__file__).resolve().parents[2]
@@ -173,83 +183,72 @@ def built(monkeypatch, configured):  # pylint: disable=unused-argument,redefined
 # ── the default: the current meeting only ──────────────────────────────────
 
 
-def test_a_chat_question_is_answered_with_current_meeting_tools_only_by_default(built):
-    agent = built(CHAT)
-    assert agent["tools"] == CURRENT_MEETING_TOOLS
+@pytest.mark.parametrize("event", IN_MEETING, ids=["chat", "voice", "wake-phrase"])
+def test_an_in_meeting_request_uses_current_meeting_content_only_by_default(built, event):
+    assert built(event)["tools"] == CURRENT_MEETING_TOOLS
 
 
-def test_a_chat_question_from_the_owner_is_answered_with_current_meeting_tools_by_default(built):
-    # Even an event that says the owner asked is answered from the current
-    # meeting only unless the setting allows more.
-    agent = built({**CHAT, "askedByMeetingOwner": True})
-    assert agent["tools"] == CURRENT_MEETING_TOOLS
-
-
-def test_the_shipped_chat_question_tools_are_the_current_meeting_only(configured):
-    configured({})
-    shipped = parameters.shipped_setting_defaults()["meeting_assist"]["chatQuestionTools"]
-    assert shipped == handler_module.DEFAULT_CHAT_QUESTION_TOOLS == "current_meeting_only"
-    assert handler_module.configured_chat_question_tools() == "current_meeting_only"
-
-
-@pytest.mark.parametrize("value", ["", "everything", None, True])
-def test_an_unrecognised_setting_is_answered_from_the_current_meeting_only(built, configured, value):
-    configured({"chatQuestionTools": value})
-    assert handler_module.configured_chat_question_tools() == "current_meeting_only"
+def test_a_chat_question_from_a_participant_is_answered_with_current_meeting_tools_only_by_default(built):
     assert built(CHAT)["tools"] == CURRENT_MEETING_TOOLS
 
 
-def test_a_current_meeting_chat_question_is_told_which_tools_it_has(built):
-    agent = built(CHAT)
-    assert agent["system_prompt"].endswith(
-        handler_module.MEETING_CHAT_NOTE + handler_module.MEETING_CHAT_SCOPE_NOTE
-    )
-    assert "its transcript, its agenda and the pictures of its shared screen" in (
-        handler_module.MEETING_CHAT_SCOPE_NOTE
-    )
-    assert "do not search the web" in handler_module.MEETING_CHAT_SCOPE_NOTE
+def test_a_spoken_request_to_the_voice_assistant_uses_current_meeting_content_only_by_default(built):
+    assert built(VOICE)["tools"] == CURRENT_MEETING_TOOLS
 
 
-def test_a_current_meeting_chat_question_has_no_user_email():
-    scope = handler_module.chat_question_scope(CHAT)
-    assert scope == (True, True, "")
+def test_the_shipped_in_meeting_request_tools_are_the_current_meeting_only(configured):
+    configured({})
+    shipped = parameters.shipped_setting_defaults()["meeting_assist"]["inMeetingRequestTools"]
+    assert shipped == handler_module.DEFAULT_IN_MEETING_TOOLS == "current_meeting_only"
+    assert handler_module.configured_in_meeting_request_tools() == "current_meeting_only"
 
 
-# ── owner_only_all_tools ───────────────────────────────────────────────────
+@pytest.mark.parametrize("value", ["", "everything", "owner_only_all_tools", None, True])
+def test_an_unrecognised_setting_is_answered_from_the_current_meeting_only(built, configured, value):
+    configured({"inMeetingRequestTools": value})
+    assert handler_module.configured_in_meeting_request_tools() == "current_meeting_only"
+    assert built(VOICE)["tools"] == CURRENT_MEETING_TOOLS
 
 
-def test_the_owners_chat_question_may_use_all_tools_when_the_setting_allows(built, configured):
-    configured({"chatQuestionTools": "owner_only_all_tools"})
-    agent = built({**CHAT, "askedByMeetingOwner": True})
+@pytest.mark.parametrize("event", IN_MEETING, ids=["chat", "voice", "wake-phrase"])
+def test_a_current_meeting_request_is_told_what_the_current_meeting_holds(built, event):
+    prompt = built(event)["system_prompt"]
+    assert prompt.endswith(handler_module.CURRENT_MEETING_SCOPE_NOTE)
+    note = handler_module.CURRENT_MEETING_SCOPE_NOTE
+    for available in ("transcript", "meeting chat", "[chat]", "agenda", "shared screen", "title", "text"):
+        assert available in note
+    assert "do not search the web" in note
+
+
+def test_only_a_chat_question_is_told_its_answer_is_posted_in_the_chat(built):
+    assert handler_module.MEETING_CHAT_NOTE in built(CHAT)["system_prompt"]
+    assert handler_module.MEETING_CHAT_NOTE not in built(VOICE)["system_prompt"]
+    assert handler_module.MEETING_CHAT_NOTE not in built(WAKE)["system_prompt"]
+
+
+@pytest.mark.parametrize("event", IN_MEETING, ids=["chat", "voice", "wake-phrase"])
+def test_a_current_meeting_request_has_no_user_email(event):
+    scope = handler_module.in_meeting_scope(event)
+    assert scope.current_meeting_only is True
+    assert scope.user_email == ""
+
+
+# ── unrestricted ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("event", IN_MEETING, ids=["chat", "voice", "wake-phrase"])
+def test_unrestricted_lets_in_meeting_requests_use_all_tools(built, configured, event):
+    configured({"inMeetingRequestTools": "unrestricted"})
+    agent = built(event)
     assert agent["tools"] == ALL_TOOLS
-    assert handler_module.MEETING_CHAT_SCOPE_NOTE not in agent["system_prompt"]
-    assert agent["system_prompt"].endswith(handler_module.MEETING_CHAT_NOTE)
+    assert handler_module.CURRENT_MEETING_SCOPE_NOTE not in agent["system_prompt"]
 
 
-@pytest.mark.parametrize("flag", [False, None, "true", 1])
-def test_a_participants_chat_question_is_answered_from_the_current_meeting_when_only_the_owner_may_use_all_tools(
-    built, configured, flag
+@pytest.mark.parametrize("event", IN_MEETING, ids=["chat", "voice", "wake-phrase"])
+def test_an_unrestricted_in_meeting_request_acts_for_the_user_it_names(
+    built, configured, monkeypatch, event
 ):
-    # Only an explicit True says the owner asked; a missing, false or
-    # merely truthy value does not.
-    configured({"chatQuestionTools": "owner_only_all_tools"})
-    event = {**CHAT} if flag is None else {**CHAT, "askedByMeetingOwner": flag}
-    assert built(event)["tools"] == CURRENT_MEETING_TOOLS
-    assert handler_module.chat_question_scope(event).user_email == ""
-
-
-# ── all_participants_all_tools ─────────────────────────────────────────────
-
-
-def test_every_chat_question_may_use_all_tools_when_the_setting_allows(built, configured):
-    configured({"chatQuestionTools": "all_participants_all_tools"})
-    agent = built({**CHAT, "askedByMeetingOwner": False})
-    assert agent["tools"] == ALL_TOOLS
-    assert agent["system_prompt"].endswith(handler_module.MEETING_CHAT_NOTE)
-
-
-def test_an_all_tools_chat_question_acts_for_the_meetings_user(built, configured, monkeypatch):
-    configured({"chatQuestionTools": "all_participants_all_tools"})
+    configured({"inMeetingRequestTools": "unrestricted"})
     seen = []
 
     def factory(*_args, **kwargs):
@@ -257,44 +256,52 @@ def test_an_all_tools_chat_question_acts_for_the_meetings_user(built, configured
         return _named("meeting_history")
 
     monkeypatch.setattr(handler_module, "create_meeting_history_tool", factory)
-    built(CHAT)
+    built(event)
     assert seen == ["owner@example.com"]
 
 
-# ── every other request ────────────────────────────────────────────────────
+def test_an_unrestricted_chat_question_is_still_told_its_answer_is_posted_in_the_chat(
+    built, configured
+):
+    configured({"inMeetingRequestTools": "unrestricted"})
+    assert built(CHAT)["system_prompt"].endswith(handler_module.MEETING_CHAT_NOTE)
 
 
-@pytest.mark.parametrize(
-    "value", ["current_meeting_only", "owner_only_all_tools", "all_participants_all_tools"]
-)
-def test_other_requests_are_given_every_configured_tool_whatever_the_setting(built, configured, value):
-    # The control case: the same configuration, without the scope, offers
-    # every tool -- so the tests above are measuring the scope and not a
-    # stand-in that builds nothing. The meeting page's assistant, the wake
-    # phrase and the voice assistant are not affected by the setting.
-    configured({"chatQuestionTools": value})
+# ── the meeting page's own chat ────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("value", ["current_meeting_only", "unrestricted"])
+def test_the_meeting_pages_assistant_is_given_every_configured_tool_whatever_the_setting(
+    built, configured, value
+):
+    # The control case: the same configuration, without an in-meeting scope,
+    # offers every tool -- so the tests above are measuring the scope and not
+    # a stand-in that builds nothing.
+    configured({"inMeetingRequestTools": value})
     agent = built({"userEmail": "owner@example.com"})
     assert agent["tools"] == ALL_TOOLS
     assert handler_module.MEETING_CHAT_NOTE not in agent["system_prompt"]
-    assert handler_module.MEETING_CHAT_SCOPE_NOTE not in agent["system_prompt"]
+    assert handler_module.CURRENT_MEETING_SCOPE_NOTE not in agent["system_prompt"]
 
 
-def test_other_requests_keep_their_user_email():
-    assert handler_module.chat_question_scope({"userEmail": "owner@example.com"}) == (
-        False,
+def test_an_unknown_tool_scope_is_answered_as_the_meeting_page_is():
+    # Only the named in-meeting callers are restricted; the in-app chat sends
+    # no scope at all.
+    assert handler_module.in_meeting_scope({"userEmail": "owner@example.com"}) == (
+        "",
         False,
         "owner@example.com",
     )
-    assert handler_module.chat_question_scope({"user_email": "owner@example.com"}) == (
-        False,
+    assert handler_module.in_meeting_scope({"user_email": "owner@example.com"}) == (
+        "",
         False,
         "owner@example.com",
     )
 
 
 def test_every_offered_choice_is_one_the_assistant_recognises():
-    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))["properties"]["chatQuestionTools"]
-    assert tuple(schema["enum"]) == handler_module.CHAT_QUESTION_TOOLS_VALUES
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))["properties"]["inMeetingRequestTools"]
+    assert tuple(schema["enum"]) == handler_module.IN_MEETING_TOOLS_VALUES
     assert set(schema["enumLabels"]) == set(schema["enum"])
 
 

@@ -86,7 +86,7 @@
       "type": "string",
       "default": "low"
     },
-    "chatQuestionTools": {
+    "inMeetingRequestTools": {
       "type": "string",
       "default": "current_meeting_only"
     }

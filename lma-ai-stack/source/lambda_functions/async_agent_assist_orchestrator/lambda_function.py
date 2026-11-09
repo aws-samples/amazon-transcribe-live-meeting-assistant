@@ -58,6 +58,10 @@ CHAT_ASSISTANT_CHANNEL = "CHAT_ASSISTANT"
 #: meeting page gives the assistant.
 ASSISTANT_SPEAKER = "Meeting Assistant"
 
+#: The meeting assistant's tool scope for a request spoken with the wake phrase
+#: (strands_meeting_assist_function.IN_MEETING_TOOL_SCOPES).
+WAKE_PHRASE_TOOL_SCOPE = "wake_phrase"
+
 
 def meeting_time_seconds(call_id: str) -> float:
     """How far the meeting's transcript has reached, in seconds from its start.
@@ -206,6 +210,12 @@ def get_lambda_agent_assist_transcript(
         "dynamodb_pk": f"c#{call_id}",
         "userEmail": owner,  # Add userEmail for tools that require UBAC
     }
+    # A wake phrase is spoken in the meeting by whoever is in it, so it is an
+    # in-meeting request: the meeting assistant answers it as the Meeting
+    # Assistant section's In-meeting requests setting allows. A question from
+    # the meeting page's chat is the signed-in user's, and carries no scope.
+    if transcript_segment_args.get("Channel") != CHAT_ASSISTANT_CHANNEL:
+        payload["toolScope"] = WAKE_PHRASE_TOOL_SCOPE
 
     LOGGER.debug("Agent Assist Lambda Request: %s", content)
 

@@ -65,6 +65,9 @@ with mock.patch.dict(sys.modules, _STUBS):
 # A wall-clock time, as the meeting page's chat stamps its questions.
 WALL_CLOCK = 1_794_240_852.0
 
+# The requests the orchestrator sent the meeting-assist Lambda, in the last run.
+REQUESTS: List[Dict[str, Any]] = []
+
 
 class _Table:
     """A stand-in DynamoDB client holding meeting records by key."""
@@ -94,7 +97,8 @@ def written(monkeypatch):
 
     class _Lambda:
         @staticmethod
-        def invoke(**_kwargs):
+        def invoke(**kwargs):
+            REQUESTS.append(json.loads(kwargs["Payload"]))
             return {
                 "Payload": io.BytesIO(json.dumps({"message": "The launch is on Friday."}).encode())
             }
@@ -108,6 +112,7 @@ def written(monkeypatch):
     def run(message: Dict[str, Any], table: _Table) -> List[Dict[str, Any]]:
         monkeypatch.setattr(orchestrator, "DYNAMODB_CLIENT", table)
         segments.clear()
+        REQUESTS.clear()
         orchestrator.publish_lambda_agent_assist_transcript_segment(
             {
                 "CallId": "call-1",
@@ -190,3 +195,17 @@ def test_a_wake_phrase_answer_keeps_the_time_of_the_segment_that_asked(written):
         assert segment["StartTime"] == 12.0
         assert segment["EndTime"] == pytest.approx(14.001)
     assert table.requests == [], "the meeting record is read only for a question from the chat"
+
+
+def test_a_wake_phrase_request_is_sent_as_an_in_meeting_request(written):
+    # Spoken in the meeting by whoever is in it, so the meeting assistant
+    # answers it as the In-meeting requests setting allows.
+    written({"Channel": "AGENT_ASSISTANT", "StartTime": 12.0, "EndTime": 14.0}, _meeting(0))
+    assert [request.get("toolScope") for request in REQUESTS] == ["wake_phrase"]
+
+
+def test_a_question_from_the_meeting_pages_chat_carries_no_in_meeting_scope(written):
+    # The signed-in user's own question: answered with every tool, as before.
+    written(CHAT_QUESTION, _meeting(0))
+    assert len(REQUESTS) == 1
+    assert "toolScope" not in REQUESTS[0]
