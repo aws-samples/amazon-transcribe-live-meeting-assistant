@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Meeting Assistant in action</title>
+<meta name="description" content="Live Meeting Assistant (LMA): an open-source AI teammate that joins your meetings, answers questions while you talk, connects to your own systems, and keeps consent and retention under your control. Runs in your AWS account.">
+<style>
+  :root {
+    --ink: #16191f; --muted: #4b5563; --navy: #0f1b2d; --blue: #0972d3; --blue-2: #5ab0ff;
+    --soft: #f2f8fd; --line: #e2e8f0; --card: #ffffff; --bg: #ffffff; --band: #f7f9fc;
+    --shadow: 0 18px 50px rgba(15, 27, 45, .14), 0 2px 8px rgba(15, 27, 45, .06);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; font-family: "Amazon Ember", "Helvetica Neue", Arial, sans-serif; color: var(--ink); background: var(--bg); line-height: 1.6; }
+  a { color: var(--blue); }
+  img { max-width: 100%; display: block; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 28px; }
+
+  /* top bar */
+  .top { position: sticky; top: 0; z-index: 10; background: rgba(255,255,255,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  .top .wrap { display: flex; align-items: center; justify-content: space-between; height: 58px; }
+  .brand { font-weight: 800; color: var(--navy); text-decoration: none; letter-spacing: .01em; }
+  .top nav a { margin-left: 22px; font-size: 15px; color: var(--muted); text-decoration: none; }
+  .top nav a:hover { color: var(--blue); }
+
+  /* hero */
+  .hero { background: radial-gradient(1200px 500px at 50% -120px, #e3f1fd 0%, rgba(255,255,255,0) 70%); padding: 72px 0 40px; text-align: center; }
+  .pill { display: inline-block; font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--blue); background: #fff; border: 1px solid #b6d8f5; border-radius: 999px; padding: 6px 16px; }
+  .hero h1 { font-size: clamp(38px, 5.4vw, 64px); line-height: 1.08; margin: 22px auto 18px; max-width: 900px; color: var(--navy); letter-spacing: -.02em; }
+  .accent { background: linear-gradient(90deg, var(--blue), #7b5cff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero p.lead { font-size: 20px; color: var(--muted); max-width: 760px; margin: 0 auto 30px; }
+  .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-bottom: 46px; }
+  .btn { display: inline-block; padding: 13px 24px; border-radius: 10px; font-weight: 700; text-decoration: none; font-size: 16px; }
+  .btn.primary { background: var(--blue); color: #fff; }
+  .btn.ghost { border: 1px solid #b6d8f5; color: var(--navy); background: #fff; }
+  .shot { border-radius: 16px; overflow: hidden; box-shadow: var(--shadow); border: 1px solid var(--line); background: #fff; }
+  .hero .shot { max-width: 1100px; margin: 0 auto; }
+  .platforms { margin-top: 34px; color: var(--muted); font-size: 15px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 12px; }
+  .chip { border: 1px solid var(--line); background: #fff; color: var(--navy); border-radius: 999px; padding: 6px 14px; font-size: 14px; font-weight: 600; }
+
+  /* stats band */
+  .band { background: var(--navy); color: #fff; padding: 46px 0; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; text-align: center; }
+  .stats b { display: block; font-size: 30px; color: var(--blue-2); margin-bottom: 4px; }
+  .stats span { font-size: 15px; color: #cbd5e1; }
+
+  /* feature rows */
+  section.feature { padding: 86px 0; border-bottom: 1px solid var(--line); }
+  section.feature:nth-of-type(even) { background: var(--band); }
+  .row { display: grid; grid-template-columns: 1fr 1.15fr; gap: 64px; align-items: center; }
+  .row.flip .text { order: 2; }
+  .row.narrow-shot { grid-template-columns: 1fr 1fr; }
+  .row.narrow-shot.flip { grid-template-columns: 1fr 1fr; }
+  .kicker { color: var(--blue); font-weight: 800; letter-spacing: .12em; text-transform: uppercase; font-size: 13px; margin-bottom: 10px; }
+  h2 { font-size: clamp(28px, 3.3vw, 40px); line-height: 1.15; margin: 0 0 18px; color: var(--navy); letter-spacing: -.01em; }
+  .text p { font-size: 17.5px; color: #33404f; margin: 0 0 16px; }
+  .why { border-left: 3px solid var(--blue); padding: 4px 0 4px 16px; margin-top: 20px; }
+  .why b { display: block; font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--navy); margin-bottom: 2px; }
+  .why p { margin: 0; }
+  .text ul { margin: 0 0 16px; padding-left: 20px; color: #33404f; font-size: 17px; }
+  .text li { margin-bottom: 6px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+  .caption { font-size: 13.5px; color: var(--muted); text-align: center; margin-top: 10px; }
+  .more { font-weight: 700; text-decoration: none; }
+  .more::after { content: " \2192"; }
+
+  /* sub-hero */
+  .subhero { padding: 90px 0 30px; text-align: center; background: linear-gradient(180deg, #fff 0%, var(--soft) 100%); }
+  .subhero h2 { font-size: clamp(32px, 4.2vw, 50px); max-width: 860px; margin: 14px auto 16px; }
+  .subhero p { font-size: 19px; color: var(--muted); max-width: 720px; margin: 0 auto; }
+
+  /* grid of cards */
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; margin-top: 40px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 24px 24px 20px; }
+  .card h3 { margin: 0 0 8px; font-size: 19px; color: var(--navy); }
+  .card p { margin: 0; font-size: 15.5px; color: #33404f; }
+
+  /* videos */
+  section.videos { padding: 86px 0; border-bottom: 1px solid var(--line); text-align: center; }
+  .vgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px; margin-top: 40px; text-align: left; }
+  .vcard h3 { font-size: 17px; margin: 12px 0 2px; color: var(--navy); }
+  .vcard p { font-size: 14.5px; margin: 0; color: var(--muted); }
+  .vbox { position: relative; aspect-ratio: 16 / 9; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); box-shadow: var(--shadow); background: var(--navy); }
+  .vbox video, .vbox img { width: 100%; height: 100%; object-fit: cover; object-position: top center; }
+  .vbox .soon { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(15, 27, 45, .55); color: #fff; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: 13px; }
+  .vfeature { max-width: 980px; margin: 40px auto 0; text-align: left; }
+  .vfeature .vbox { border-radius: 16px; }
+  .vfeature h3 { font-size: 22px; }
+  @media (max-width: 900px) { .vgrid { grid-template-columns: 1fr; } }
+
+  /* closing */
+  .closing { background: var(--navy); color: #fff; text-align: center; padding: 90px 0; }
+  .closing h2 { color: #fff; }
+  .closing p { color: #cbd5e1; font-size: 19px; max-width: 700px; margin: 0 auto 30px; }
+  .closing .btn.ghost { background: transparent; color: #fff; border-color: #475569; }
+  footer { text-align: center; font-size: 13px; color: var(--muted); padding: 26px 0 40px; }
+
+  @media (max-width: 900px) {
+    .row, .row.narrow-shot, .row.narrow-shot.flip { grid-template-columns: 1fr; gap: 32px; }
+    .row.flip .text { order: 0; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .cards { grid-template-columns: 1fr; }
+    .top nav { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="./">Live Meeting Assistant</a>
+    <nav>
+      <a href="#watch">Watch</a>
+      <a href="#during">During the meeting</a>
+      <a href="#extend">Extend</a>
+      <a href="#after">After</a>
+      <a href="#trust">Trust</a>
+      <a href="quick-start-guide/">Get started</a>
+    </nav>
+  </div>
+</header>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="wrap">
+    <span class="pill">Open source &middot; runs in your AWS account</span>
+    <h1>An AI teammate <span class="accent">in</span> your meetings, not just a note taker</h1>
+    <p class="lead">Live Meeting Assistant joins the call, transcribes and translates as people speak, answers questions while the conversation is still going, and reaches into your own systems to do it. Then it hands you a summary, a searchable record and an audit trail you control.</p>
+    <div class="cta">
+      <a class="btn primary" href="quick-start-guide/">Deploy LMA</a>
+      <a class="btn ghost" href="#watch">Watch the demos</a>
+    </div>
+    <div class="shot"><img src="images/lma-in-action/hero.png" alt="An LMA meeting page during a live meeting: the transcript translated into Spanish, and the meeting assistant answering a question with web search results"></div>
+    <div class="platforms">
+      Works the same way in
+      <div class="chips"><span class="chip">Zoom</span><span class="chip">Microsoft Teams</span><span class="chip">Google Meet</span><span class="chip">Webex</span><span class="chip">Amazon Chime</span><span class="chip">In-person rooms</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- STATS BAND -->
+<section class="band">
+  <div class="wrap stats">
+    <div><b>Live</b><span>Answers during the meeting, not after it</span></div>
+    <div><b>Any MCP tool</b><span>Your CRM, tickets, wikis and APIs</span></div>
+    <div><b>Your account</b><span>Data, models and keys stay with you</span></div>
+    <div><b>MIT-0</b><span>Open source, change anything</span></div>
+  </div>
+</section>
+
+<!-- VIDEOS -->
+<section class="videos" id="watch">
+  <div class="wrap">
+    <span class="pill">Watch</span>
+    <h2 style="margin-top:14px">See it in action</h2>
+    <p style="font-size:18px;color:var(--muted);max-width:720px;margin:0 auto">Narrated, captioned demos recorded on a test deployment with synthetic meetings and voices. Google Meet is shown; Zoom, Teams, Webex and Chime work the same way.</p>
+    <div class="vfeature">
+      <div class="vcard">
+        <!-- Paste the video's https://github.com/user-attachments/assets/... URL into data-video. -->
+        <div class="vbox" data-video="https://github.com/user-attachments/assets/32ad7709-6866-4051-95b0-c5a35fb9fb87" data-poster="images/lma-in-action/hero.png" id="video-lma-overview"></div>
+        <h3>Live Meeting Assistant: an AI teammate in your meetings <span style="font-weight:400;color:var(--muted)">(5:25)</span></h3>
+        <p>For new viewers: LMA joins a meeting, names the voices in a conference room, translates live, answers questions and searches the web mid-meeting, introduces the voice assistant, then shows MCP connectors, consent, retention and agents.</p>
+      </div>
+    </div>
+    <div class="vgrid">
+      <div class="vcard">
+        <!-- Paste the video's https://github.com/user-attachments/assets/... URL into data-video. -->
+        <div class="vbox" data-video="https://github.com/user-attachments/assets/ab0245f3-b9e9-4cf3-859d-a80b1b95eafd" data-poster="images/lma-in-action/agenda-coverage.png" id="video-whats-new-0-4-0"></div>
+        <h3>What's new in LMA 0.4.0: a meeting's life <span style="font-weight:400;color:var(--muted)">(4:22)</span></h3>
+        <p>The release in one story, from a pasted invitation to the summary, agenda coverage, consent record, cost and retention.</p>
+      </div>
+      <div class="vcard">
+        <!-- Paste the video's https://github.com/user-attachments/assets/... URL into data-video. -->
+        <div class="vbox" data-video="https://github.com/user-attachments/assets/0b452f88-2cbf-4291-a121-ad303a754b37" data-poster="images/lma-in-action/vp-google-meet-chat.png" id="video-virtual-participant"></div>
+        <h3>The Virtual Participant in depth <span style="font-weight:400;color:var(--muted)">(2:05)</span></h3>
+        <p>Scheduling LMA for a later meeting, its live view, and chat commands, with two LMAs in one meeting.</p>
+      </div>
+      <div class="vcard">
+        <!-- Paste the video's https://github.com/user-attachments/assets/... URL into data-video. -->
+        <div class="vbox" data-video="https://github.com/user-attachments/assets/c907513e-7266-4528-9288-287779dd8b0e" data-poster="images/lma-in-action/live-translation.png" id="video-meeting-page"></div>
+        <h3>The meeting page in depth <span style="font-weight:400;color:var(--muted)">(3:12)</span></h3>
+        <p>The transcript and recording together, search, speaker filters, editing and regenerating the summary, and AGENDA CHECK.</p>
+      </div>
+      <div class="vcard">
+        <!-- Paste the video's https://github.com/user-attachments/assets/... URL into data-video. -->
+        <div class="vbox" data-video="https://github.com/user-attachments/assets/00ea3e11-3876-4e36-8061-5a8dcd948fb4" data-poster="images/lma-in-action/speakers-named.png" id="video-speakers-screen"></div>
+        <h3>Speakers and the shared screen <span style="font-weight:400;color:var(--muted)">(2:08)</span></h3>
+        <p>Voices in one room told apart and named, voice enrollment, and key frames of shared slides searched by their text.</p>
+      </div>
+      <div class="vcard">
+        <!-- Paste the video's https://github.com/user-attachments/assets/... URL into data-video. -->
+        <div class="vbox" data-video="https://github.com/user-attachments/assets/74899379-056e-4d7a-a7fc-4d23f9132033" data-poster="images/lma-in-action/consent-and-capture.png" id="video-assistant-consent"></div>
+        <h3>The assistant, consent and privacy <span style="font-weight:400;color:var(--muted)">(2:21)</span></h3>
+        <p>Quick actions, model choices, where models run, consent modes, deleting transcripts after the summary, and the consent record.</p>
+      </div>
+      <div class="vcard">
+        <!-- Paste the video's https://github.com/user-attachments/assets/... URL into data-video. -->
+        <div class="vbox" data-video="https://github.com/user-attachments/assets/3b3bfd8e-2c22-412b-8bf5-421221bb770c" data-poster="images/lma-in-action/troubleshooting-agent.png" id="video-configuration"></div>
+        <h3>Configuration and administration <span style="font-weight:400;color:var(--muted)">(2:06)</span></h3>
+        <p>Named profiles, managed presets, Form, JSON or YAML editing, revision history and comparing revisions.</p>
+      </div>
+    </div>
+    <p style="margin-top:34px"><a class="more" href="demo-videos/">All demo videos</a></p>
+  </div>
+</section>
+
+<!-- JOINS EVERY PLATFORM -->
+<section class="feature">
+  <div class="wrap row">
+    <div class="text">
+      <div class="kicker">Capture</div>
+      <h2>It joins the meeting for you, on any platform</h2>
+      <p>Paste the meeting link and a Virtual Participant joins as a guest, now or at a scheduled time. It introduces itself in the meeting chat, listens, watches the shared screen, and leaves when the meeting ends. Prefer not to add a participant? Capture from your own browser, the Chrome extension, the Desktop Capture App for macOS and Windows, or upload a recording.</p>
+      <p>Anyone in the meeting can talk to it in the chat: <code>LMA help</code>, <code>LMA pause</code>, <code>LMA ask &hellip;</code>. Two people can each bring their own LMA and address it by name.</p>
+      <div class="why"><b>Why it matters</b><p>One assistant for every customer's and every team's platform of choice, with nothing to install for the other participants.</p></div>
+      <p style="margin-top:18px"><a class="more" href="meeting-sources/">Meeting sources</a></p>
+    </div>
+    <div class="shot"><img src="images/lma-in-action/vp-google-meet-chat.png" alt="The Virtual Participant's live view of its Google Meet window with LMA's introduction in the meeting chat"></div>
+  </div>
+</section>
+
+<!-- HYBRID ROOMS -->
+<section class="feature">
+  <div class="wrap row flip">
+    <div class="text">
+      <div class="kicker">Hybrid meetings</div>
+      <h2>Everyone in the conference room gets their own name</h2>
+      <p>When several people share one room microphone, most transcripts collapse them into "Conference Room". LMA tells the voices apart and names each one from what they say, such as their own introductions, and shows the quote it used beside each name. Merge a stray voice in one click, or mark a seat as one person or several.</p>
+      <div class="why"><b>Why it matters</b><p>Action items and decisions are attributed to the right person, even when half the meeting is in the room.</p></div>
+      <p style="margin-top:18px"><a class="more" href="transcription-and-translation/">Speakers and diarization</a></p>
+    </div>
+    <div class="shot"><img src="images/lma-in-action/speakers-named.png" alt="Identify speakers naming two voices from one conference room seat, each with the quote it was named from"></div>
+  </div>
+</section>
+
+<!-- LIVE TRANSLATION -->
+<section class="feature">
+  <div class="wrap row">
+    <div class="text">
+      <div class="kicker">Live transcript</div>
+      <h2>A live transcript, in the language you read best</h2>
+      <p>Every line appears seconds after it is spoken, labelled with its speaker, and can be translated into your language as it arrives. Search it, filter it by speaker, and play the recording from any line. Choose Amazon Transcribe, or an on-demand open-model speech engine that runs in your account.</p>
+      <div class="why"><b>Why it matters</b><p>Multilingual teams follow the same conversation in real time, and nobody has to wait for the recording.</p></div>
+      <p style="margin-top:18px"><a class="more" href="transcription-and-translation/">Transcription and translation</a></p>
+    </div>
+    <div class="shot"><img src="images/lma-in-action/live-translation.png" alt="Transcript lines in English with their Spanish translation beneath, and speaker filter chips"></div>
+  </div>
+</section>
+
+<!-- SUB-HERO: ASK ANYTHING -->
+<section class="subhero" id="during">
+  <div class="wrap">
+    <span class="pill">During the meeting</span>
+    <h2>Ask anything, <span class="accent">while it still matters</span></h2>
+    <p>The meeting assistant is an agent with tools, not a chatbot over a transcript. It reads the meeting so far, then reaches for whatever it needs to answer: past meetings, your documents, the web, or your own systems.</p>
+  </div>
+</section>
+
+<!-- ASK DURING -->
+<section class="feature">
+  <div class="wrap row narrow-shot">
+    <div class="text">
+      <div class="kicker">Meeting assistant</div>
+      <h2>"What is still open, and who owns it?"</h2>
+      <p>Ask in plain language, or press a quick action: summarize so far, list actions, find topics, or flag action items with no owner or due date. Answers stream in a few seconds and cite what was said.</p>
+      <p>Then go further: "search the web for current best practices on what we just discussed". The assistant runs the search, reads the results and answers in the context of your meeting.</p>
+      <div class="why"><b>Why it matters</b><p>Gaps are caught while everyone is still in the room to close them, not in a follow-up email a day later.</p></div>
+      <p style="margin-top:18px"><a class="more" href="meeting-assistant/">Meeting assistant</a></p>
+    </div>
+    <div>
+      <div class="pair">
+        <div class="shot"><img src="images/lma-in-action/assistant-open-decisions.png" alt="The meeting assistant listing open decisions and owners"></div>
+        <div class="shot"><img src="images/lma-in-action/assistant-web-search.png" alt="The meeting assistant answering with web search results"></div>
+      </div>
+      <div class="caption">Open decisions and owners, then a web search, mid-meeting</div>
+    </div>
+  </div>
+</section>
+
+<!-- ASK IN CHAT -->
+<section class="feature">
+  <div class="wrap row flip">
+    <div class="text">
+      <div class="kicker">In the meeting chat</div>
+      <h2>Anyone in the meeting can ask, right from the chat</h2>
+      <p>Type <code>LMA what was just discussed?</code> in Zoom, Teams or Meet chat, and the answer is posted back to the meeting chat for everyone, and recorded in the transcript. Latecomers catch up without interrupting, and people without an LMA login still benefit.</p>
+      <p>With the voice assistant turned on, participants can say its wake phrase and hear the answer spoken, and an optional avatar gives LMA a face on camera.</p>
+      <div class="why"><b>Why it matters</b><p>The assistant serves the whole meeting, not only the person who invited it.</p></div>
+      <p style="margin-top:18px"><a class="more" href="voice-assistant/">Voice assistant</a></p>
+    </div>
+    <div class="shot"><img src="images/lma-in-action/ask-lma-in-chat.png" alt="A question typed in the meeting chat and LMA's answer posted back"></div>
+  </div>
+</section>
+
+<!-- EXTEND: MCP -->
+<section class="feature" id="extend">
+  <div class="wrap row">
+    <div class="text">
+      <div class="kicker">Extensible</div>
+      <h2>Connect it to your own systems with MCP</h2>
+      <p>Give the assistant new tools by adding Model Context Protocol servers: install one from the public MCP registry, such as Salesforce, or point it at your own endpoint, with OAuth or an API key. Built-in tools already search this meeting's transcript, agenda and slides, your past meetings, your documents in a knowledge base, and the web.</p>
+      <p>Ask "pull up this account's open opportunities" during a sales call, or "is there a ticket for this bug?" in a stand-up.</p>
+      <div class="why"><b>Why it matters</b><p>Answers come from your own data, in the moment, without anyone leaving the call to look it up.</p></div>
+      <p style="margin-top:18px"><a class="more" href="mcp-servers/">MCP servers</a></p>
+    </div>
+    <div class="shot"><img src="images/lma-in-action/mcp-connectors.png" alt="The MCP Servers configuration page with active servers and the public registry"></div>
+  </div>
+</section>
+
+<!-- INTEGRATE: HOSTED MCP -->
+<section class="feature">
+  <div class="wrap row flip">
+    <div class="text">
+      <div class="kicker">Integrate</div>
+      <h2>Bring your meetings into your AI agents</h2>
+      <p>LMA is also an MCP server. Connect Amazon Quick Suite, Claude Desktop or your own agents, and they can search your meetings, read transcripts and summaries, and even send a Virtual Participant to a meeting, now or on a schedule.</p>
+      <p>Interactive clients sign in with OAuth; scheduled and headless agents use a personal API key. Each user sees only their own and shared meetings.</p>
+      <div class="why"><b>Why it matters</b><p>Meeting knowledge flows into the tools people already use, instead of sitting in another silo.</p></div>
+      <p style="margin-top:18px"><a class="more" href="amazon-quick-mcp-setup/">Amazon Quick setup</a></p>
+    </div>
+    <div class="shot"><img src="images/lma-in-action/agents-mcp.png" alt="Hosted MCP Access settings with the MCP server URL and API key generation"></div>
+  </div>
+</section>
+
+<!-- AFTER -->
+<section class="subhero" id="after">
+  <div class="wrap">
+    <span class="pill">After the meeting</span>
+    <h2>A record you can <span class="accent">act on</span></h2>
+    <p>Summaries, actions, agenda coverage and the slides that were shown, ready as soon as the meeting ends, and searchable across every meeting you have had.</p>
+  </div>
+</section>
+
+<section class="feature">
+  <div class="wrap row">
+    <div class="text">
+      <div class="kicker">Summary and agenda</div>
+      <h2>Did we cover what we came for?</h2>
+      <p>Paste the invitation and LMA reads the agenda. Afterwards the summary shows which agenda items were covered, which were only touched on, and which were missed, alongside the key points, decisions and action items. Summaries are Markdown you can edit, regenerate safely, download or share.</p>
+      <div class="why"><b>Why it matters</b><p>Follow-ups start from what was actually agreed, and nothing on the agenda silently falls off.</p></div>
+      <p style="margin-top:18px"><a class="more" href="meeting-agenda/">Meeting agenda</a></p>
+    </div>
+    <div class="shot"><img src="images/lma-in-action/agenda-coverage.png" alt="Summary with agenda coverage showing covered and missed items"></div>
+  </div>
+</section>
+
+<section class="feature">
+  <div class="wrap row flip">
+    <div class="text">
+      <div class="kicker">The shared screen</div>
+      <h2>The slides are searchable too</h2>
+      <p>LMA keeps key frames of whatever was shared, reads the text on them, and adds a shared-screen section to the summary. Search for a figure that was on a slide and jump straight to it, and the moment in the meeting when it was shown.</p>
+      <div class="why"><b>Why it matters</b><p>What was shown is captured as faithfully as what was said.</p></div>
+      <p style="margin-top:18px"><a class="more" href="meeting-video/">Meeting video and key frames</a></p>
+    </div>
+    <div class="shot"><img src="images/lma-in-action/screen-share-search.png" alt="Key frames of shared slides, filtered by a search for text on them"></div>
+  </div>
+</section>
+
+<section class="feature">
+  <div class="wrap row">
+    <div class="text">
+      <div class="kicker">Across meetings</div>
+      <h2>Ask across all your meetings</h2>
+      <p>"Across our meetings, what has been decided about the launch, and what is still open?" The Meetings Query Tool answers from every meeting you can see, and lists the meetings it drew on.</p>
+      <div class="why"><b>Why it matters</b><p>A project's history is one question away, even when it was spread across a dozen calls.</p></div>
+      <p style="margin-top:18px"><a class="more" href="meetings-query-tool/">Meetings Query Tool</a></p>
+    </div>
+    <div class="shot"><img src="images/lma-in-action/meetings-query.png" alt="Meetings Query Tool answering a question across many meetings, with sources"></div>
+  </div>
+</section>
+
+<!-- TRUST -->
+<section class="subhero" id="trust">
+  <div class="wrap">
+    <span class="pill">Trust</span>
+    <h2>Consent and retention <span class="accent">you can prove</span></h2>
+    <p>Built for organisations that have to answer "who agreed to this, and where is the data now?"</p>
+  </div>
+</section>
+
+<section class="feature">
+  <div class="wrap row">
+    <div class="text">
+      <div class="kicker">Informed consent</div>
+      <h2>Everyone knows, and you can show it</h2>
+      <p>Choose Off, Notify or Opt-in for each meeting. LMA posts its notice in the meeting, and any objection stops it. Every meeting keeps a consent record, with the notice that was given, the responses, and screenshots as evidence.</p>
+      <div class="why"><b>Why it matters</b><p>Recording policy becomes something you can demonstrate meeting by meeting, not just a line in a handbook.</p></div>
+      <p style="margin-top:18px"><a class="more" href="meeting-consent/">Meeting consent</a></p>
+    </div>
+    <div class="shot"><img src="images/lma-in-action/consent-and-capture.png" alt="Capture and processing details with the meeting's consent record"></div>
+  </div>
+</section>
+
+<section class="feature">
+  <div class="wrap row flip">
+    <div class="text">
+      <div class="kicker">Retention</div>
+      <h2>Keep only what you need, for as long as you need it</h2>
+      <p>Set how many days to keep meeting records and transcripts, or delete each transcript as soon as its summary is written, so only the summary remains. Deleting a meeting deletes its recordings too.</p>
+      <div class="why"><b>Why it matters</b><p>You decide the balance between a useful record and the smallest possible footprint, and it applies automatically.</p></div>
+      <p style="margin-top:18px"><a class="more" href="transcript-deletion/">Transcript deletion after the summary</a></p>
+    </div>
+    <div class="shot"><img src="images/lma-in-action/retention.png" alt="Retention settings: days to keep meeting records and transcripts, and delete the transcript after the summary"></div>
+  </div>
+</section>
+
+<section class="feature">
+  <div class="wrap row narrow-shot">
+    <div class="text">
+      <div class="kicker">Transparent cost</div>
+      <h2>See what every meeting cost</h2>
+      <p>Each meeting shows how it was captured and an itemised estimate of what it cost: transcription, model tokens for each feature, the voice assistant and the Virtual Participant's compute, at dated list prices. Default models are chosen and tuned for quality at a low cost per meeting, and you can switch to any model you prefer.</p>
+      <div class="why"><b>Why it matters</b><p>No per-seat licence: you pay only for the AWS services each meeting uses, and you can see exactly where it goes.</p></div>
+      <p style="margin-top:18px"><a class="more" href="meeting-cost-estimate/">Meeting cost estimate</a></p>
+    </div>
+    <div class="shot"><img src="images/lma-in-action/estimated-cost.png" alt="Estimated cost of a meeting, itemised by service"></div>
+  </div>
+</section>
+
+<!-- WHY LMA -->
+<section class="subhero">
+  <div class="wrap">
+    <span class="pill">Why LMA</span>
+    <h2>Yours to run, <span class="accent">yours to shape</span></h2>
+    <div class="cards">
+      <div class="card"><h3>Runs in your AWS account</h3><p>Meetings, recordings and models stay in your account and Region, encrypted with your own key. Keep model inference global, in your geography, or in your Region.</p></div>
+      <div class="card"><h3>Open source</h3><p>MIT-0 licensed. Change the prompts, the quick actions, the summary sections, or the code itself.</p></div>
+      <div class="card"><h3>Your models</h3><p>Built on Amazon Bedrock and the Strands Agents SDK. Pick the models for the assistant and for summaries, and add guardrails.</p></div>
+      <div class="card"><h3>Configuration profiles</h3><p>Named profiles and managed presets, edited as a form, JSON or YAML, with revision history and side-by-side comparison.</p></div>
+      <div class="card"><h3>A troubleshooting agent</h3><p>Admins ask why a join failed or what went wrong in a deployment, and an agent reads the logs and explains what happened.</p></div>
+      <div class="card"><h3>Embed it anywhere</h3><p><a href="embeddable-components/">Embed</a> the transcript, assistant or Virtual Participant views into your own web applications as components.</p></div>
+    </div>
+    <div class="pair" style="margin-top:34px">
+      <div class="shot"><img src="images/lma-in-action/config-compare.png" alt="Comparing two configuration revisions side by side"></div>
+      <div class="shot"><img src="images/lma-in-action/troubleshooting-agent.png" alt="The troubleshooting agent explaining a failed meeting join"></div>
+    </div>
+  </div>
+</section>
+
+<!-- CLOSING -->
+<section class="closing">
+  <div class="wrap">
+    <h2>Bring LMA to your next meeting</h2>
+    <p>Deploy it in your own AWS account in under an hour, then invite it to a meeting on any platform.</p>
+    <div class="cta" style="margin-bottom:0">
+      <a class="btn primary" href="quick-start-guide/">Quick start guide</a>
+      <a class="btn ghost" href="demo-videos/">Demo videos</a>
+      <a class="btn ghost" href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant">GitHub</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Live Meeting Assistant is sample code, provided under the MIT-0 License. Screenshots show a test deployment with synthetic meetings and voices.
+</footer>
+
+
+<script>
+  // Each .vbox[data-video] becomes a player once a GitHub asset URL is pasted into data-video;
+  // until then it shows its poster with a "Video coming soon" label.
+  document.querySelectorAll('.vbox[data-video]').forEach((box) => {
+    const url = box.dataset.video.trim();
+    const poster = box.dataset.poster;
+    if (/^https:\/\/github\.com\/user-attachments\/assets\/[\w-]+$/.test(url)) {
+      const v = document.createElement('video');
+      v.controls = true; v.playsInline = true; v.preload = 'metadata'; v.poster = poster;
+      v.style.objectFit = 'contain'; v.style.background = '#000';
+      const src = document.createElement('source');
+      src.src = url; src.type = 'video/mp4';
+      v.appendChild(src);
+      box.appendChild(v);
+    } else {
+      const img = document.createElement('img');
+      img.src = poster; img.alt = '';
+      const soon = document.createElement('div');
+      soon.className = 'soon'; soon.textContent = 'Video coming soon';
+      box.append(img, soon);
+    }
+  });
+</script>
+</body>
+</html>
