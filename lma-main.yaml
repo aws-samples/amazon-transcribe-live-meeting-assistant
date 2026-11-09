@@ -927,7 +927,7 @@ Metadata:
         Parameters:
           - EnableMicrovmAsr
       - Label:
-          default: Voice enrollment (biometric; off by default)
+          default: Voice enrollment (Beta; biometric; off by default)
         Parameters:
           - EnableVoiceEnrollment
           - VoiceEnrollmentRetentionDays

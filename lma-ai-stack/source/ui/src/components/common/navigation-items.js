@@ -4,6 +4,9 @@
  * See the LICENSE file in the project root for full license information.
  */
 
+import React from 'react';
+import { Badge } from '@cloudscape-design/components';
+
 import {
   CALLS_PATH,
   MEETINGS_QUERY_PATH,
@@ -73,13 +76,14 @@ export const generateNavigationItems = (settings, isAdmin) => {
   // person can consent to it being stored. Offered only where the deployment
   // has enrollment switched on, since the portal has nothing to talk to
   // otherwise. External rather than nested, because the page is a standalone
-  // task with its own layout.
+  // task with its own layout. Marked Beta, as the portal page is too.
   if (`${settings?.VoiceEnrollmentAvailable}` === 'true') {
     navigationItems.push({
       type: 'link',
       text: 'Enroll My Voice',
       href: `#${VOICE_ENROLLMENT_PATH}`,
       external: true,
+      info: <Badge color="blue">Beta</Badge>,
     });
   }
 
