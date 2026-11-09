@@ -1,0 +1,662 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-g5ptsecz"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Monitoring & Alerting | LMA</title><link rel="canonical" href="https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/monitoring/"/><link rel="sitemap" href="/amazon-transcribe-live-meeting-assistant/sitemap-index.xml"/><link rel="shortcut icon" href="/amazon-transcribe-live-meeting-assistant/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v7.4.4"/><meta name="generator" content="Starlight v0.42.8"/><meta property="og:title" content="Monitoring &amp; Alerting"/><meta property="og:type" content="article"/><meta property="og:url" content="https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/monitoring/"/><meta property="og:locale" content="en"/><meta property="og:description" content="Live Meeting Assistant — Real-time meeting transcription, AI-powered meeting assistance, and virtual meeting participation on AWS"/><meta property="og:site_name" content="LMA"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="Live Meeting Assistant — Real-time meeting transcription, AI-powered meeting assistance, and virtual meeting participation on AWS"/><script>
+	window.StarlightThemeProvider = (() => {
+		const storedTheme =
+			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+		const theme =
+			storedTheme ||
+			(window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+		document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+		return {
+			updatePickers(theme = storedTheme || 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = theme;
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector(`#theme-icons`);
+					const newIcon = tmpl && tmpl.content.querySelector('.' + theme);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script><template id="theme-icons"><svg aria-hidden="true" class="light astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z"/></svg><svg aria-hidden="true" class="dark astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z"/></svg><svg aria-hidden="true" class="auto astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg></template><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/print.ehPL0gv-.css" media="print"><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/common.0xECwWjX.css"><style>@layer starlight.components{svg:where(.astro-hkc32dio){color:var(--sl-icon-color);font-size:var(--sl-icon-size,1em);width:1em;height:1em;overflow:visible}}
+</style><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/page.cNngjUgL.js"></script></head><body class="astro-g5ptsecz"><a class="sl-skip-link astro-qb7clj6f" href="#_top">Skip to content</a><div class="page sl-flex astro-yntsjkba"><header class="header astro-yntsjkba"><div class="header astro-by6fddyj"><div class="title-wrapper sl-flex astro-by6fddyj"><a href="/amazon-transcribe-live-meeting-assistant/" class="site-title sl-flex astro-6rvad3va"><img class="light:sl-hidden print:hidden astro-6rvad3va" alt src="/amazon-transcribe-live-meeting-assistant/_astro/logo-dark.DjwyAsdJ.svg" width="120" height="40"><img class="dark:sl-hidden print:block astro-6rvad3va" alt src="/amazon-transcribe-live-meeting-assistant/_astro/logo-light.Therjg_H.svg" width="120" height="40"><span class="astro-6rvad3va" translate="no">LMA</span></a></div><div class="sl-flex print:hidden astro-by6fddyj"><site-search class="astro-by6fddyj astro-b5kgnn7o" data-translations="{&quot;placeholder&quot;:&quot;Search&quot;}"><button data-open-modal disabled aria-label="Search" aria-keyshortcuts="Control+K" class="astro-b5kgnn7o"><svg aria-hidden="true" class="astro-b5kgnn7o astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.71 20.29 18 16.61A9 9 0 1 0 16.61 18l3.68 3.68a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.39ZM11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg><span class="sl-hidden md:sl-block astro-b5kgnn7o" aria-hidden="true">Search</span><kbd class="sl-hidden md:sl-flex astro-b5kgnn7o" style="display: none;"><kbd class="astro-b5kgnn7o">Ctrl</kbd><kbd class="astro-b5kgnn7o">K</kbd></kbd></button><dialog style="padding:0" aria-label="Search" class="astro-b5kgnn7o"><div class="dialog-frame sl-flex astro-b5kgnn7o"><button data-close-modal class="sl-flex md:sl-hidden astro-b5kgnn7o">Cancel</button><div class="search-container astro-b5kgnn7o"><div id="starlight__search" class="astro-b5kgnn7o"></div></div></div></dialog></site-search><script>
+	(() => {
+		const openBtn = document.querySelector('button[data-open-modal]');
+		const shortcut = openBtn?.querySelector('kbd');
+		if (!openBtn || !(shortcut instanceof HTMLElement)) return;
+		const platformKey = shortcut.querySelector('kbd');
+		if (platformKey && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+			platformKey.textContent = '⌘';
+			openBtn.setAttribute('aria-keyshortcuts', 'Meta+K');
+		}
+		shortcut.style.display = '';
+	})();
+</script><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/Search.astro_astro_type_script_index_0_lang.DKiPuTrW.js"></script></div><div class="sl-hidden md:sl-flex print:hidden right-group astro-by6fddyj"><div class="sl-flex social-icons astro-by6fddyj"><a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" rel="me" class="sl-flex astro-n2mnl6yq"><span class="sr-only astro-n2mnl6yq">GitHub</span><svg aria-hidden="true" class="astro-n2mnl6yq astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-2z5xp7gb"><span class="sr-only astro-2z5xp7gb">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-2z5xp7gb"><option value="dark" class="astro-2z5xp7gb">Dark</option><option value="light" class="astro-2z5xp7gb">Light</option><option value="auto" selected class="astro-2z5xp7gb">Auto</option></select><svg aria-hidden="true" class="icon caret astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script><script type="module">var e=`starlight-theme`,t=e=>e===`auto`||e===`dark`||e===`light`?e:`auto`,n=()=>t(typeof localStorage<`u`&&localStorage.getItem(e));function r(t){typeof localStorage<`u`&&localStorage.setItem(e,t===`light`||t===`dark`?t:``)}var i=()=>matchMedia(`(prefers-color-scheme: light)`).matches?`light`:`dark`;function a(e){StarlightThemeProvider.updatePickers(e),document.documentElement.dataset.theme=e===`auto`?i():e,r(e)}matchMedia(`(prefers-color-scheme: light)`).addEventListener(`change`,()=>{n()===`auto`&&a(`auto`)});var o=class extends HTMLElement{constructor(){super(),a(n()),this.querySelector(`select`)?.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&a(t(e.currentTarget.value))})}};customElements.define(`starlight-theme-select`,o);</script><script type="module">var e=class extends HTMLElement{constructor(){super();let e=this.querySelector(`select`);e&&(e.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&(window.location.pathname=e.currentTarget.value)}),window.addEventListener(`pageshow`,t=>{if(!t.persisted)return;let n=e.querySelector(`option[selected]`)?.index;n!==e.selectedIndex&&(e.selectedIndex=n??0)}))}};customElements.define(`starlight-lang-select`,e);</script></div></div></header><nav class="sidebar print:hidden astro-yntsjkba" aria-label="Main"><button popovertarget="starlight__sidebar" class="sl-menu-button sl-flex md:sl-hidden print:hidden astro-r2osgdlg"><svg aria-hidden="true" class="open-menu astro-r2osgdlg astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M3 8h18a1 1 0 1 0 0-2H3a1 1 0 0 0 0 2Zm18 8H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Zm0-5H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Z"/></svg><svg aria-hidden="true" class="close-menu astro-r2osgdlg astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="m13.41 12 6.3-6.29a1.004 1.004 0 1 0-1.42-1.42L12 10.59l-6.29-6.3a1.004 1.004 0 0 0-1.42 1.42l6.3 6.29-6.3 6.29a1 1 0 0 0 0 1.42.998.998 0 0 0 1.42 0l6.29-6.3 6.29 6.3a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.42L13.41 12Z"/></svg><span class="sr-only astro-r2osgdlg">Menu</span></button><script type="module">var e=class extends HTMLElement{constructor(){super();let e=matchMedia(`(min-width: 50em)`),t=()=>{this.popover=e.matches?null:`auto`};t(),e.addEventListener(`change`,()=>t()),this.addEventListener(`toggle`,({newState:e})=>this.trapFocus(e===`open`))}trapFocus(e){document.querySelectorAll(`.main-frame, .sl-skip-link`).forEach(t=>{t.toggleAttribute(`inert`,e)})}};customElements.define(`sl-sidebar-pane`,e);</script><sl-sidebar-pane popover id="starlight__sidebar" class="sidebar-pane astro-yntsjkba"><div class="sidebar-content sl-flex astro-yntsjkba"><sl-sidebar-state-persist data-hash="0k58gzh" class="astro-ipdry5cl"><script aria-hidden="true">
+		(() => {
+			try {
+				if (!matchMedia('(min-width: 50em)').matches) return;
+				/** @type {HTMLElement | null} */
+				const target = document.querySelector('sl-sidebar-state-persist');
+				const state = JSON.parse(sessionStorage.getItem('sl-sidebar-state') || '0');
+				if (!target || !state || target.dataset.hash !== state.hash) return;
+				window._starlightScrollRestore = state.scroll;
+				customElements.define(
+					'sl-sidebar-restore',
+					class SidebarRestore extends HTMLElement {
+						connectedCallback() {
+							try {
+								const idx = parseInt(this.dataset.index || '');
+								const details = this.closest('details');
+								if (details && typeof state.open[idx] === 'boolean') details.open = state.open[idx];
+							} catch {}
+						}
+					}
+				);
+			} catch {}
+		})();
+	</script><ul class="top-level astro-rmhv4bp6"><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Overview</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="0"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Welcome</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Getting Started</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="1"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/prerequisites-and-deployment/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Prerequisites &amp; Deployment</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/quick-start-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Quick Start Guide</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/demo-videos/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Demo Videos</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lma-in-action/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">LMA in Action</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Core Features</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="2"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/transcription-and-translation/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Transcription &amp; Translation</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/microvm-asr/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">On-demand ASR &amp; Diarization (MicroVM)</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-assistant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Assistant</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/transcript-summarization/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Transcript Summarization</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-agenda/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Agenda</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-consent/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Consent</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/transcript-deletion/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Transcript Deletion After the Summary</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-video/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Video and Key Frames</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meetings-query-tool/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meetings Query Tool</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Meeting Sources</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="3"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-sources/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Sources Overview</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/stream-audio/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Stream Audio</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/browser-extension/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Browser Extension</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/desktop-capture-app/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Desktop Capture App</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/virtual-participant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Virtual Participant</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Voice Assistant &amp; Avatar</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="4"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/voice-assistant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Voice Assistant</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/nova-sonic-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Nova Sonic Setup</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/elevenlabs-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">ElevenLabs Setup</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/simli-avatar-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Simli Avatar Setup</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">MCP Server Integration</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="5"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/mcp-servers/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">MCP Servers Overview</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/mcp-api-key-auth/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">MCP API Key Auth</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/salesforce-mcp-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Salesforce MCP</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/amazon-quick-mcp-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Amazon QuickSuite MCP</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/deepwiki-mcp-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">DeepWiki MCP</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Web UI</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="6"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/web-ui-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Web UI Guide</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Access Control &amp; Security</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="7"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/user-management/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">User Management</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/user-based-access-control/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">User-Based Access Control</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/infrastructure-and-security/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Infrastructure &amp; Security</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/security-scanning/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Security Scanning (SRT)</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Integration &amp; API</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="8"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/websocket-streaming-api/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">WebSocket Streaming API</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/embeddable-components/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Embeddable Components</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lambda-hook-functions/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Lambda Hook Functions</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Administration</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="9"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/cloudformation-parameters/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">CloudFormation Parameters</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/configuration-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Configuration Guide</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/configuration-store/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Unified Configuration Store</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/stack-updates-and-upgrades/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Stack Updates &amp; Upgrades</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/well-architected/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Well-Architected Assessment</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-cost-estimate/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Cost Estimate</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/monitoring/" aria-current="page" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Monitoring &amp; Alerting</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/troubleshooting/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Troubleshooting</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/cleanup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Cleanup</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Development</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="10"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/developer-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Developer Guide</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lma-cli/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">LMA CLI Reference</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lma-sdk/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">LMA SDK Reference</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">New &amp; Uncategorized</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="11"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/amazon-quick-desktop-integration/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Amazon Quick Desktop Integration</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/blog-update-proposal/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Blog Update Proposal</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/cloudformation-service-role/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Cloudformation Service Role</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/dependency-upgrade-validation-runbook/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Dependency Upgrade Validation Runbook</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/scheduled-integration-tests/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Scheduled Integration Tests</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/teams-acs-sdk/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Teams Acs Sdk</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/test-coverage/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Test Coverage</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/troubleshooting-agent/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Troubleshooting Agent</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/upload-audio/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Upload Audio</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/virtual-participant-local-dev/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Virtual Participant Local Dev</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/voice-enrollment/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Voice Enrollment</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/zoom-credentials-and-join-reliability/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Zoom Credentials And Join Reliability</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/zoom-meeting-sdk/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Zoom Meeting Sdk</span></a></li></ul></details></li></ul><script aria-hidden="true">
+		(() => {
+			const scroller = document.getElementById('starlight__sidebar');
+			if (!window._starlightScrollRestore || !scroller) return;
+			scroller.scrollTop = window._starlightScrollRestore;
+			delete window._starlightScrollRestore;
+		})();
+	</script></sl-sidebar-state-persist><div class="md:sl-hidden"><div class="mobile-preferences sl-flex astro-p4azlveh"><div class="social-icons astro-p4azlveh"><a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" rel="me" class="sl-flex astro-n2mnl6yq"><span class="sr-only astro-n2mnl6yq">GitHub</span><svg aria-hidden="true" class="astro-n2mnl6yq astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-2z5xp7gb"><span class="sr-only astro-2z5xp7gb">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-2z5xp7gb"><option value="dark" class="astro-2z5xp7gb">Dark</option><option value="light" class="astro-2z5xp7gb">Light</option><option value="auto" selected class="astro-2z5xp7gb">Auto</option></select><svg aria-hidden="true" class="icon caret astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script></div></div></div></sl-sidebar-pane></nav><div class="main-frame astro-yntsjkba"><script type="module">var e=document.getElementById(`starlight__sidebar`),t=e?.querySelector(`sl-sidebar-state-persist`),n=`sl-sidebar-state`,r=()=>{let r=[],i=t?.dataset.hash||``;try{let e=sessionStorage.getItem(n),t=JSON.parse(e||`{}`);Array.isArray(t.open)&&t.hash===i&&(r=t.open)}catch{}return{hash:i,open:r,scroll:e?.scrollTop||0}},i=e=>{try{sessionStorage.setItem(n,JSON.stringify(e))}catch{}},a=()=>i(r()),o=(e,t)=>{let n=r();n.open[t]=e,i(n)};t?.addEventListener(`click`,e=>{if(!(e.target instanceof Element))return;let t=e.target.closest(`summary`)?.closest(`details`);if(!t)return;let n=t.querySelector(`sl-sidebar-restore`),r=parseInt(n?.dataset.index||``);isNaN(r)||o(!t.open,r)}),addEventListener(`visibilitychange`,()=>{document.visibilityState===`hidden`&&a()});</script><div class="lg:sl-flex astro-lrzkfocr"><aside class="right-sidebar-container print:hidden astro-lrzkfocr"><div class="right-sidebar astro-lrzkfocr"><div class="lg:sl-hidden astro-qok35upx"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-66cqc7ze"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-66cqc7ze"><details id="starlight__mobile-toc" class="astro-66cqc7ze"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-66cqc7ze"><span class="toggle sl-flex astro-66cqc7ze">On this page<svg aria-hidden="true" class="caret astro-66cqc7ze astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></span><span class="display-current astro-66cqc7ze"></span></summary><div class="dropdown astro-66cqc7ze"><ul class="isMobile astro-jugkfwgx" style="--depth: 0;"><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#_top" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Overview</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#what-is-watched" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">What is watched</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#the-alarm-table" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">The alarm table</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#notes-on-individual-alarms" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Notes on individual alarms</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#metrics-lma-publishes" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Metrics LMA publishes</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#how-they-are-published-and-what-that-implies" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">How they are published, and what that implies</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#what-is-not-published-yet" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">What is not published yet</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#subscribing-to-the-alerts-topic" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Subscribing to the alerts topic</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#alerting-a-team-rather-than-one-person" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Alerting a team rather than one person</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#turning-the-alarms-off" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Turning the alarms off</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#what-it-costs" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">What it costs</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#the-dashboard" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">The dashboard</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#related-documentation" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Related documentation</span></a></li></ul></div></details></nav></mobile-starlight-toc><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/MobileTableOfContents.astro_astro_type_script_index_0_lang.C3fM4Kra.js"></script></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-qok35upx"><div class="sl-container astro-qok35upx"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-jugkfwgx" style="--depth: 0;"><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#_top" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Overview</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#what-is-watched" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">What is watched</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#the-alarm-table" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">The alarm table</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#notes-on-individual-alarms" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Notes on individual alarms</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#metrics-lma-publishes" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Metrics LMA publishes</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#how-they-are-published-and-what-that-implies" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">How they are published, and what that implies</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#what-is-not-published-yet" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">What is not published yet</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#subscribing-to-the-alerts-topic" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Subscribing to the alerts topic</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#alerting-a-team-rather-than-one-person" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Alerting a team rather than one person</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#turning-the-alarms-off" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Turning the alarms off</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#what-it-costs" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">What it costs</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#the-dashboard" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">The dashboard</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#related-documentation" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Related documentation</span></a></li></ul></nav></starlight-toc><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/TableOfContents.astro_astro_type_script_index_0_lang.BpJaGz7G.js"></script></div></div></div></aside><div class="main-pane astro-lrzkfocr"><main data-pagefind-body class="astro-g5ptsecz" lang="en" dir="ltr"><div class="content-panel astro-a7po4psb"><div class="sl-container astro-a7po4psb"><h1 id="_top" class="astro-bebwqqxs">Monitoring &amp; Alerting</h1></div></div><div class="content-panel astro-a7po4psb"><div class="sl-container astro-a7po4psb"><div class="sl-markdown-content"><p>Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+SPDX-License-Identifier: MIT-0</p>
+<div class="sl-heading-wrapper level-h1"><h1 id="monitoring--alerting">Monitoring &#x26; Alerting</h1><a class="sl-anchor-link" href="#monitoring--alerting"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Monitoring &#x26; Alerting”</span></a></div>
+<p>LMA deploys an SNS topic for operational alerts, 15 alarms that notify it, and
+one CloudWatch dashboard per deployment. Everything described here is created by
+<code dir="auto">lma-main.yaml</code> as part of the normal stack deployment — there is nothing extra
+to install — but <strong>one manual step is required before any alert is delivered</strong>:
+the email subscription SNS creates for your <code dir="auto">AdminEmail</code> address starts in
+<code dir="auto">PendingConfirmation</code> and stays there until somebody clicks the link in the
+confirmation message. See <a href="#subscribing-to-the-alerts-topic">Subscribing to the alerts topic</a>.</p>
+<p>For log groups, console navigation and the symptom-by-symptom guide to specific
+failures, see <a href="../troubleshooting/">Troubleshooting</a>. This page covers what is
+watched automatically and who hears about it.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="what-is-watched">What is watched</h2><a class="sl-anchor-link" href="#what-is-watched"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “What is watched”</span></a></div>
+<p>The alarms fall into two groups, and the difference matters when you are reading
+one.</p>
+<p>All but two read a metric that an AWS service publishes on its own. None of
+those depend on LMA emitting anything, which means they work on a deployment
+that has never been touched and they keep working if application code changes.
+They cover infrastructure health well and application behaviour only indirectly:
+they can tell you the Call Event Processor is failing, but not that a particular
+meeting produced no transcript.</p>
+<p>The remaining two read metrics LMA publishes itself — see
+<a href="#metrics-lma-publishes">Metrics LMA publishes</a> below. Both watch a condition the
+code otherwise swallows: a failure that is caught, recorded and not raised, so
+no AWS-published metric moves and nothing else would ever mention it. That is
+exactly why each is an alarm rather than only a graph. The cost of reading an
+application metric is that it depends on application code: if a component stops
+publishing, its alarm reads <code dir="auto">OK</code>. Both treat missing data as not breaching, so
+an alarm with no data at all looks exactly like one that is simply quiet and
+will not be the thing that tells you. A build-time gate checks the wiring that
+would cause that, and the dashboard band note says how to tell the two apart by
+eye.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="the-alarm-table">The alarm table</h3><a class="sl-anchor-link" href="#the-alarm-table"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “The alarm table”</span></a></div>
+<p>Thresholds are given as the metric, the statistic and the window. “Tuned by”
+names the CloudFormation parameter that changes the alarm’s behaviour, with its
+default in brackets; where the only parameter is <code dir="auto">EnableOperationalAlarms</code>, the
+threshold is fixed in the template because any non-zero value is already a
+problem.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Alarm</th><th>Fires when</th><th>Topic</th><th>Tuned by</th></tr></thead><tbody><tr><td><code dir="auto">discarded-records-queue-depth</code></td><td>The queue holding Kinesis records the Call Event Processor could not process has one or more messages visible (<code dir="auto">Maximum</code> over 5 min, <code dir="auto">> 0</code>). Also notifies on recovery.</td><td><code dir="auto">AlertsTopic</code></td><td><code dir="auto">EnableOperationalAlarms</code> (<code dir="auto">true</code>)</td></tr><tr><td><code dir="auto">transcript-deletion-dead-letter-queue-depth</code></td><td>A transcript deletion did not complete after its retries, so a meeting’s transcript is still stored although the Retention settings say it should have been deleted (<code dir="auto">Maximum</code> of visible messages over 5 min, <code dir="auto">> 0</code>). Also notifies on recovery. See <a href="../transcript-deletion/">Transcript Deletion After the Summary</a>.</td><td><code dir="auto">AlertsTopic</code></td><td><code dir="auto">EnableOperationalAlarms</code> (<code dir="auto">true</code>)</td></tr><tr><td><code dir="auto">call-event-processor-errors</code></td><td>The Call Event Processor failed one or more invocations (<code dir="auto">Sum</code> over 5 min, <code dir="auto">>= 1</code>).</td><td><code dir="auto">AlertsTopic</code></td><td><code dir="auto">EnableOperationalAlarms</code> (<code dir="auto">true</code>)</td></tr><tr><td><code dir="auto">call-event-processor-throttles</code></td><td>Lambda refused to start an invocation for want of account concurrency (<code dir="auto">Sum</code> over 5 min, <code dir="auto">> 0</code>).</td><td><code dir="auto">AlertsTopic</code></td><td><code dir="auto">EnableOperationalAlarms</code> (<code dir="auto">true</code>)</td></tr><tr><td><code dir="auto">kinesis-consumer-iterator-age</code></td><td>The consumer is more than 5 minutes behind the stream in two of the last three 5-minute windows (<code dir="auto">Maximum</code>, <code dir="auto">> 300000</code> ms).</td><td><code dir="auto">AlertsTopic</code></td><td><code dir="auto">EnableOperationalAlarms</code> (<code dir="auto">true</code>)</td></tr><tr><td><code dir="auto">kinesis-write-throughput-exceeded</code></td><td>A write to the call data stream was rejected for exceeding shard throughput (<code dir="auto">Sum</code> over 5 min, <code dir="auto">> 0</code>).</td><td><code dir="auto">AlertsTopic</code></td><td><code dir="auto">EnableOperationalAlarms</code> (<code dir="auto">true</code>)</td></tr><tr><td><code dir="auto">transcriber-no-healthy-targets</code></td><td>The transcriber load balancer has no target passing its health check, for two consecutive 1-minute windows (<code dir="auto">Minimum</code>, <code dir="auto">&#x3C; 1</code>). Also notifies on recovery.</td><td><code dir="auto">AlertsTopic</code></td><td><code dir="auto">EnableOperationalAlarms</code> (<code dir="auto">true</code>)</td></tr><tr><td><code dir="auto">transcriber-service-no-tasks</code></td><td>The transcriber ECS service is running no tasks, for two consecutive 5-minute windows (<code dir="auto">Minimum</code>, <code dir="auto">&#x3C; 1</code>). Also notifies on recovery.</td><td><code dir="auto">AlertsTopic</code></td><td><code dir="auto">EnableOperationalAlarms</code> (<code dir="auto">true</code>)</td></tr><tr><td><code dir="auto">appsync-5xx-errors</code></td><td>The GraphQL API returned five or more server errors (<code dir="auto">Sum</code> over 5 min, <code dir="auto">>= 5</code>).</td><td><code dir="auto">AlertsTopic</code></td><td><code dir="auto">EnableOperationalAlarms</code> (<code dir="auto">true</code>)</td></tr><tr><td><code dir="auto">transcribe-concurrent-streams-near-quota</code></td><td>Concurrent Amazon Transcribe <code dir="auto">StartStreamTranscription</code> sessions in this region reach the configured level (<code dir="auto">Maximum</code> over 5 min, <code dir="auto">>= threshold</code>).</td><td><code dir="auto">AlertsTopic</code></td><td><code dir="auto">TranscribeConcurrentStreamAlarmThreshold</code> (<code dir="auto">20</code>)</td></tr><tr><td><code dir="auto">stale-meeting-reaper-not-invoked</code></td><td>The stale-meeting reaper recorded no invocations in each of two consecutive hours (<code dir="auto">Sum</code>, <code dir="auto">&#x3C;= 0</code>). Also notifies on recovery.</td><td><code dir="auto">AlertsTopic</code></td><td><code dir="auto">EnableOperationalAlarms</code> (<code dir="auto">true</code>)</td></tr><tr><td><code dir="auto">bedrock-throttling</code></td><td>Amazon Bedrock throttled five or more invocations (<code dir="auto">Sum</code> over 5 min, <code dir="auto">>= 5</code>).</td><td><code dir="auto">AlertsTopic</code></td><td><code dir="auto">EnableOperationalAlarms</code> (<code dir="auto">true</code>)</td></tr><tr><td><code dir="auto">vp-launch-failures</code></td><td>The Virtual Participant launch state machine failed or timed out an execution in any of the last three 5-minute windows (<code dir="auto">Sum</code>, <code dir="auto">>= 1</code>).</td><td><code dir="auto">AlertsTopic</code></td><td><code dir="auto">EnableOperationalAlarms</code> (<code dir="auto">true</code>)</td></tr><tr><td><code dir="auto">transcript-segment-write-failures</code></td><td>One or more transcript segments failed to be written in any of the last three 5-minute windows (<code dir="auto">Sum</code> of <code dir="auto">TranscriptSegmentWriteFailed</code>, <code dir="auto">>= 1</code>). Reads a metric LMA publishes.</td><td><code dir="auto">AlertsTopic</code></td><td><code dir="auto">EnableOperationalAlarms</code> (<code dir="auto">true</code>)</td></tr><tr><td><code dir="auto">meetings-without-transcript</code></td><td>Three or more audio sessions streamed for at least thirty seconds and produced no transcript at all, in any of the last three 5-minute windows (<code dir="auto">Sum</code> of <code dir="auto">StreamingSessionsWithoutTranscript</code>, <code dir="auto">>= 3</code>). Reads a metric LMA publishes.</td><td><code dir="auto">AlertsTopic</code></td><td><code dir="auto">EnableOperationalAlarms</code> (<code dir="auto">true</code>)</td></tr></tbody></table>
+<p>Each alarm carries an <code dir="auto">AlarmDescription</code> written as the first few steps of a
+runbook, because the description is the only context that travels with the
+notification email. If you receive an alert and want to know what to check,
+read the body of the message before opening the console.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="notes-on-individual-alarms">Notes on individual alarms</h3><a class="sl-anchor-link" href="#notes-on-individual-alarms"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Notes on individual alarms”</span></a></div>
+<p><strong>Queue depth is not a rate.</strong> Nothing drains the discarded-records queue
+automatically; messages sit there for their 14-day retention. So
+<code dir="auto">discarded-records-queue-depth</code> does not clear on its own — the depth stays
+where it is until somebody purges the queue. That is why it also notifies on
+recovery: the queue returning to empty means a person acted, which is itself
+worth knowing. The message bodies carry the shard and sequence-number range of
+the failed batch rather than the records themselves, so finding out what was
+lost means reading the Call Event Processor’s log group for the same period.</p>
+<p><strong>The concurrent-streams threshold cannot read your quota.</strong> Amazon Transcribe’s
+default account quota is 25 concurrent streaming sessions, and
+<code dir="auto">TranscribeConcurrentStreamAlarmThreshold</code> defaults to 20 — eighty per cent of
+it, which leaves time to request an increase before meetings start being
+refused. If you raise the quota, raise this parameter with it. There is no API
+the alarm can consult, so left at 20 against a quota of 200 it notifies at a
+level that is no longer close to anything. LMA opens one streaming session per
+audio channel, which means a stereo meeting counts as two.</p>
+<p><strong>What that alarm counts, exactly.</strong> Amazon Transcribe publishes
+<code dir="auto">ConcurrentStreamsCount</code> under a single dimension set — <code dir="auto">Domain</code>, <code dir="auto">ServiceType</code>
+and <code dir="auto">Operation</code> together — so the alarm is scoped to one operation,
+<code dir="auto">StartStreamTranscription</code>, which is the one LMA calls. The count is still
+account-wide and region-wide: another workload in the same account calling
+<code dir="auto">StartStreamTranscription</code> is included. A workload calling
+<code dir="auto">StartCallAnalyticsStreamTranscription</code> or <code dir="auto">StartMedicalStreamTranscription</code>
+consumes the same quota but publishes a separate series, so it is <em>not</em>
+included — if you share the account with such a workload, the alarm will
+under-report how close you are. Covering every operation at once would need a
+<code dir="auto">SEARCH</code> expression, and CloudWatch does not accept <code dir="auto">SEARCH</code> in an alarm, so
+enumerating one operation is the only option. The dashboard’s widget has the
+same scope.</p>
+<p><strong>A fresh install produces one <code dir="auto">stale-meeting-reaper-not-invoked</code> alert.</strong> That
+alarm watches for the <em>absence</em> of invocations, so it treats missing data as
+breaching. CloudWatch treats an evaluation range with no data at all as
+breaching regardless of how many evaluation periods are configured, so a stack
+that has just been created notifies once and then clears as soon as the reaper’s
+first scheduled run lands. This is expected and needs no action. The reaper is
+always scheduled, so the alarm is created whenever operational alarms are on.
+Setting <strong>Meeting Processing › Minutes without speech before a meeting is
+ended</strong> to <code dir="auto">0</code> on the <a href="../configuration-guide/">Configuration page</a> makes each
+run end nothing, but the reaper still runs on schedule, so the alarm does not
+stay red.</p>
+<p><strong>Healthy-target count and task count are a pair.</strong> An ALB target group
+publishes <code dir="auto">HealthyHostCount</code> only while it has registered targets, so when the
+transcriber service has no tasks at all the target group publishes nothing and
+<code dir="auto">transcriber-no-healthy-targets</code> reads as healthy. <code dir="auto">transcriber-service-no-tasks</code>
+is what covers that case. Treat the two as one signal: either firing means new
+meetings are being refused.</p>
+<p><strong><code dir="auto">vp-launch-failures</code> watches the launch, not the meeting.</strong> It reads the Step
+Functions state machine that starts a Virtual Participant, so it tells you a bot
+was asked for and did not start. It cannot tell you that a bot started, joined,
+and then left early — ECS publishes no metric for a task that stopped
+unexpectedly, and the launch-and-admission detail lives in the Virtual
+Participant’s own log group and meeting record.</p>
+<p><strong><code dir="auto">transcript-segment-write-failures</code> is the only notice that a transcript has a
+gap.</strong> The Call Event Processor issues the writes for a batch of segments
+together and collects the results, including the failures, rather than raising
+on them. That is deliberate — one rejected segment should not replay the whole
+Kinesis batch — but the consequence is that the record is <strong>not redelivered</strong>,
+which is what sets these failures apart from every other failure in the
+pipeline. A raised failure is attributed to its record, retried, and finally
+described to the event source’s on-failure destination, where the
+discarded-records-queue-depth alarm picks it up. This one reaches neither on its
+own account, so that queue stays empty. It is redelivered only if some other
+record in the same batch raises, which redelivers everything after it.</p>
+<p><code dir="auto">AWS/Lambda Errors</code> does not move for either, so it cannot be used to tell
+them apart: a raised failure that the batch processor can attribute to a record
+still leaves the invocation returning a partial-batch response normally. It
+moves only where a failure carries no sequence number at all, which is the one
+case the handler fails the whole invocation for. The transcript simply has a line
+missing, on a meeting page with no error on it.</p>
+<p>If this alarm fires, read the Call Event Processor’s log group for <code dir="auto">max retries on query</code> over the same window; each of those lines carries the exception type
+and the GraphQL <code dir="auto">errorType</code>. Search for that string rather than the handler’s
+<code dir="auto">event processor error</code>, which reports only failures that were raised — and the
+point of this metric is that these were not, so grepping for it finds nothing
+in the window that fired. Segments already lost cannot be replayed once their
+Kinesis records pass the stream’s 24-hour retention, so a sustained rate
+is urgent in a way a single occurrence is not.</p>
+<p><strong><code dir="auto">meetings-without-transcript</code> deliberately ignores short sessions.</strong> The
+transcriber counts a session only if it ran for at least thirty seconds and
+produced nothing, because below that the overwhelmingly common case is somebody
+who started streaming and changed their mind. The alarm then needs three in a
+five-minute window, so one genuinely odd meeting does not page anybody while a
+pattern does. The usual causes, in the order worth checking: the Amazon
+Transcribe concurrent-stream quota being exhausted, which
+<code dir="auto">transcribe-concurrent-streams-near-quota</code> should have notified first; a
+language code or custom vocabulary the account does not have; and, where the
+MicroVM ASR engine is selected in the Transcription Engine section of the Configuration page, an engine that
+could not start with fallback to Amazon Transcribe switched off.</p>
+<p>What it cannot see: meetings that do not go through the transcriber. A Virtual
+Participant runs Amazon Transcribe, or the MicroVM ASR engine, inside its own
+container and writes transcript segments straight to Kinesis, so a Virtual
+Participant that joins a meeting and transcribes nothing is not counted here
+and this alarm will not fire for it. The same goes for an uploaded recording.
+For a deployment whose meetings are mostly Virtual Participant ones, this alarm
+covers very little — the Virtual Participant publishes no transcript metrics of
+its own yet, which is the first gap named under
+<a href="#what-is-not-published-yet">What is not published yet</a>.</p>
+<p>One case to expect noise from: a transcriber task replaced mid-meeting, by a
+deployment or by scale-in. Its shutdown closes the server, which closes each
+connected socket, which runs the same per-meeting teardown a client
+disconnecting would — so a meeting it had carried for more than thirty seconds
+without a transcript yet is counted, even though what ended it was the
+infrastructure and not a transcription fault. Whether the count lands is
+a race: the process exits as soon as the server has closed, and the teardown
+runs from an asynchronous close handler. So treat a small number of these
+concurrent with a deployment or a scale-in event as explained by it, and read
+<code dir="auto">transcriber-service-no-tasks</code> and the ECS task-count widget alongside. The
+alarm needs three in a five-minute window partly for this reason.</p>
+<p><strong>Why there is no alarm on how long a transcript takes to appear.</strong>
+<code dir="auto">TimeToFirstTranscriptSegmentMs</code> is the obvious thing to alarm on and the wrong
+thing. It measures from a meeting’s audio session opening to its first
+transcript segment, and what dominates that interval is when somebody first
+speaks — so a meeting that starts five minutes before anybody talks produces a
+five-minute value, and a threshold low enough to catch a real problem would fire
+on every quiet meeting. The failure worth alarming on is “no transcript at all”,
+which <code dir="auto">meetings-without-transcript</code> counts directly. The latency is graphed
+instead, where its distribution is informative and a single value is not.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="metrics-lma-publishes">Metrics LMA publishes</h2><a class="sl-anchor-link" href="#metrics-lma-publishes"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Metrics LMA publishes”</span></a></div>
+<p>Two of the alarms above, and one band of the dashboard, read metrics the
+application emits rather than metrics an AWS service emits. There are eight of
+them. Seven answer one question end to end: a meeting was asked for — did a
+transcript come out of it, how long did that take, and was anything dropped on
+the way? The eighth, from the Virtual Participant, counts the Nova Sonic voice
+assistant streams Amazon Bedrock refused for the account’s concurrency quota.</p>
+<p>They are published in the CloudWatch namespace <strong><code dir="auto">&#x3C;stack-name></code></strong> — the name of
+the top-level LMA stack, so two deployments in one account never mix. Each
+emitting component is told that namespace by a <code dir="auto">METRIC_NAMESPACE</code> environment
+variable, which is what makes the dashboard and the alarms work on any stack
+name without being edited.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Metric</th><th>Unit</th><th>Published by</th><th>What it means</th></tr></thead><tbody><tr><td><code dir="auto">MeetingsStarted</code></td><td>Count</td><td>Call Event Processor</td><td>A meeting record was created. Counted once per meeting: the Kinesis stream redelivers routinely, and a redelivered start event finds the record already there and is not counted again.</td></tr><tr><td><code dir="auto">MeetingsEnded</code></td><td>Count</td><td>Call Event Processor</td><td>A meeting was marked ended, counted on the write that closed it. Read against <code dir="auto">MeetingsStarted</code> over a long window rather than a short one — a live meeting is legitimately started and not yet ended.</td></tr><tr><td><code dir="auto">TranscriptSegmentsWritten</code></td><td>Count</td><td>Call Event Processor</td><td>Transcript segment writes that AppSync accepted. Counts partial segments as well as final ones, so it tracks pipeline throughput rather than the number of things said.</td></tr><tr><td><code dir="auto">TranscriptSegmentWriteFailed</code></td><td>Count</td><td>Call Event Processor</td><td>Transcript segment writes that failed. Alarmed; see the note above for why nothing else reports these.</td></tr><tr><td><code dir="auto">StreamingSessionsStarted</code></td><td>Count</td><td>WebSocket transcriber</td><td>A live audio session opened for a meeting, and the denominator for the metric below. One per audio session, not per meeting: a client that drops its socket and reconnects for the same meeting opens a second session and is counted again, where <code dir="auto">MeetingsStarted</code> is not. Video sockets are separate and are not counted. <strong>Counts only meetings streamed through the transcriber</strong> — Stream Audio, the browser extension and the desktop app. A Virtual Participant transcribes in its own container and writes to Kinesis itself, and an uploaded recording never opens a live session, so neither appears here even though both are counted by <code dir="auto">MeetingsStarted</code>.</td></tr><tr><td><code dir="auto">TimeToFirstTranscriptSegmentMs</code></td><td>Milliseconds</td><td>WebSocket transcriber</td><td>Milliseconds from a meeting’s audio session opening to its first transcript segment reaching Kinesis, emitted once per audio session, so a client that reconnects produces a second value measured from the reconnect. Graphed, not alarmed; see the note above.</td></tr><tr><td><code dir="auto">StreamingSessionsWithoutTranscript</code></td><td>Count</td><td>WebSocket transcriber</td><td>A session closed having produced no transcript segment at all, after running long enough that silence is a fault. Alarmed.</td></tr><tr><td><code dir="auto">NovaSonicStreamsThrottled</code></td><td>Count</td><td>Virtual Participant</td><td>Amazon Bedrock refused to open a Nova Sonic stream because the account’s concurrent-stream quota for the model (20 per region, not adjustable) was reached. One per refused attempt, so a wake phrase retried four times counts four. Each refusal is handled — a translator keeps the session it has, an assistant retries and then stays silent, the lookup acknowledgement is rendered later or skipped — so this is graphed rather than given an alarm of its own; a sustained non-zero value means voice assistants in this stack are degrading. Amazon Bedrock also counts these refusals in its own <code dir="auto">InvocationThrottles</code> metric (measured: four refused streams appeared there as four), which the <code dir="auto">bedrock-throttling</code> alarm reads account-wide, so five or more in five minutes already notify; this metric is what tells you they came from this stack’s voice assistants. See <a href="../voice-assistant/#nova-sonic-concurrency-quota">Nova Sonic Concurrency Quota</a>.</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h3"><h3 id="how-they-are-published-and-what-that-implies">How they are published, and what that implies</h3><a class="sl-anchor-link" href="#how-they-are-published-and-what-that-implies"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “How they are published, and what that implies”</span></a></div>
+<p>The records are written in <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Embedded_Metric_Format.html">CloudWatch’s embedded metric
+format</a>:
+a line of JSON in the emitting component’s own log group, which CloudWatch Logs
+turns into a metric at ingestion. Nothing calls <code dir="auto">PutMetricData</code>, and no IAM role
+gained <code dir="auto">cloudwatch:PutMetricData</code> — AWS documents the embedded format as needing
+only the log-writing permission these components already have. Three
+consequences are worth knowing before you read a graph:</p>
+<ul>
+<li><strong>The log group is the audit trail.</strong> Every datapoint is still a log event, so
+a number you do not believe can be traced to the record that produced it with
+a Logs Insights query over the Call Event Processor’s or the transcriber’s log
+group, filtering on the metric’s name.</li>
+<li><strong>A count can be slightly out, in either direction.</strong> AWS documents the
+format as guaranteeing at-least-once delivery with occasional duplicates, so
+any of these can read high. Two have their own reasons to drift.
+<code dir="auto">MeetingsStarted</code> can read low: it skips a start event that finds the meeting
+already stored, and a first delivery whose own earlier attempt stored the
+meeting and then failed in transit is indistinguishable from a redelivery.
+<code dir="auto">TranscriptSegmentsWritten</code> can read high: when one record in a Kinesis batch
+raises, every record after it is redelivered, and segments already written by
+those later records are written and counted again. None of these is a billing
+input, so the trade is the right one — but do not read either as an exact
+census.</li>
+<li><strong>Datapoints can arrive a little late</strong>, because the log has to be flushed and
+ingested first, and neither Lambda nor the ECS <code dir="auto">awslogs</code> driver lets the
+application control when. Both alarms on these metrics therefore need only one
+breaching period out of the last three, which is what AWS recommends for this
+case: it absorbs a datapoint landing in the period after the one it belongs to
+without missing the event.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="what-is-not-published-yet">What is not published yet</h3><a class="sl-anchor-link" href="#what-is-not-published-yet"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “What is not published yet”</span></a></div>
+<p>The MicroVM ASR engine and the Meeting Assistant publish nothing, and the
+Virtual Participant publishes only <code dir="auto">NovaSonicStreamsThrottled</code>. That means
+there is still no metric for the fraction of
+Virtual Participant joins that fail and on which trigger, for how often ASR
+falls back to Amazon Transcribe, or for assistant and Bedrock latency and
+failure rates. The Virtual Participant is the significant one: it transcribes
+in its own container rather than through the transcriber, so none of the three
+session metrics above covers a Virtual Participant meeting, and the equivalent
+of <code dir="auto">StreamingSessionsWithoutTranscript</code> for it does not exist.</p>
+<p>All of it remains diagnosable only from the log groups
+<a href="../troubleshooting/">Troubleshooting</a> names. It is a separate piece of work,
+deliberately: the Virtual Participant’s exit-reason taxonomy wants to be a
+metric dimension, and whether its value space is closed enough to be one needs
+checking before it becomes a billed dimension on a custom metric.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="subscribing-to-the-alerts-topic">Subscribing to the alerts topic</h2><a class="sl-anchor-link" href="#subscribing-to-the-alerts-topic"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Subscribing to the alerts topic”</span></a></div>
+<p>The stack creates one SNS topic, encrypted with the deployment’s
+customer-managed KMS key. Its ARN and a console link are stack outputs:</p>
+<ul>
+<li><code dir="auto">SNSAlertsTopicARN</code></li>
+<li><code dir="auto">SNSAlertsTopicConsoleUrl</code></li>
+</ul>
+<p>An email subscription for the <code dir="auto">AdminEmail</code> address is created with the stack.
+<strong>SNS email subscriptions start in <code dir="auto">PendingConfirmation</code> and deliver nothing
+until confirmed.</strong> SNS sends a message titled “AWS Notification - Subscription
+Confirmation” to that address, with a link that must be clicked; until somebody
+does, every alarm can fire and nobody will hear about it. Check the
+subscription’s status on the topic’s <strong>Subscriptions</strong> tab in the console — if it
+reads <code dir="auto">PendingConfirmation</code>, look for that email, including in a spam folder, and
+use <strong>Request confirmation</strong> on the subscription to send it again if it has been
+lost. The confirmation link expires after three days.</p>
+<p>A <strong>headless or CI deployment therefore starts with no working subscriber</strong>, even
+though the subscription resource exists: nobody is reading the mailbox that was
+asked to confirm. If you deploy from a pipeline and want alerts, add a
+subscription after deployment that needs no human confirmation — an HTTPS
+endpoint, a Lambda function, or an SQS queue are all confirmed automatically —
+rather than relying on the email one.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="alerting-a-team-rather-than-one-person">Alerting a team rather than one person</h3><a class="sl-anchor-link" href="#alerting-a-team-rather-than-one-person"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Alerting a team rather than one person”</span></a></div>
+<p>The <code dir="auto">AdminEmail</code> subscription is a starting point, not a design. One person’s
+mailbox is a single point of failure for every alert this stack raises, and it is
+also an address that eventually belongs to somebody who has left. Point the topic
+at something the team owns:</p>
+<ul>
+<li><strong>A distribution list or shared mailbox.</strong> Add a second email subscription for
+the alias and confirm it from the shared mailbox. Both subscriptions can
+coexist; remove the individual one once the alias is confirmed.</li>
+<li><strong>A chat channel.</strong> AWS Chatbot subscribes to an SNS topic and posts to Slack
+or Microsoft Teams, which also gives you a visible history of what fired and
+when. Configure it against the <code dir="auto">SNSAlertsTopicARN</code> output.</li>
+<li><strong>An on-call system.</strong> PagerDuty, Opsgenie and similar accept an SNS
+subscription over HTTPS. Those subscriptions confirm themselves, so they work
+for a pipeline-deployed stack.</li>
+<li><strong>A queue, for anything that should be processed rather than read.</strong> An SQS
+subscription lets you fan out to your own tooling without giving that tooling
+permission to the topic.</li>
+</ul>
+<p>Because the topic is encrypted with the customer-managed key, anything you give
+permission to publish to it also needs <code dir="auto">kms:GenerateDataKey*</code> and <code dir="auto">kms:Decrypt</code>
+on that key. Subscribers do not: decryption happens before delivery. The stack’s
+key policy already grants CloudWatch those two actions, which is what lets an
+alarm action reach an encrypted topic. The grant is not narrowed by a condition
+key, because AWS does not document CloudWatch populating <code dir="auto">aws:SourceAccount</code> or
+<code dir="auto">aws:SourceArn</code> when it calls KMS on an alarm action’s behalf, and a condition
+that did not match would drop every notification silently. If you deploy inside
+an AWS Organization and want that statement narrowed, <code dir="auto">aws:SourceOrgID</code> is the
+condition key AWS documents for it.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="turning-the-alarms-off">Turning the alarms off</h3><a class="sl-anchor-link" href="#turning-the-alarms-off"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Turning the alarms off”</span></a></div>
+<p><code dir="auto">EnableOperationalAlarms</code> defaults to <code dir="auto">true</code>. Setting it to <code dir="auto">false</code> removes all
+of the alarms on a stack update and leaves the topic and the dashboard in place,
+which is the right choice if your organisation manages alarms centrally and
+would otherwise have two systems notifying for the same event. It removes the
+notifications rather than the visibility — the dashboard still works, because it
+reads the same service-published metrics directly.</p>
+<p>One consequence worth expecting: because the topic and its subscription are
+created either way, a deployment with <code dir="auto">EnableOperationalAlarms=false</code> still
+sends the <code dir="auto">AdminEmail</code> address a subscription-confirmation message, for a topic
+that nothing will publish to. Confirming it anyway is the better choice — it
+means switching the alarms back on starts delivering immediately, rather than
+needing a second round trip through somebody’s inbox.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="what-it-costs">What it costs</h3><a class="sl-anchor-link" href="#what-it-costs"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “What it costs”</span></a></div>
+<p>In us-east-1, a standard-resolution CloudWatch alarm costs $0.10 per alarm
+metric per month, with the first ten alarm metrics included at no charge. <strong>An
+alarm built on a metric-math expression bills per metric referenced in the
+expression, not per alarm</strong>, so the 15 alarms here are 17 billable alarm metrics
+— thirteen reading a single metric each, plus two metric-math alarms reading two
+metrics each. That is $0.70 per month for an account with the free allowance
+still available, and $1.70 per month for one that has already used it elsewhere.</p>
+<p>The seven metrics LMA publishes are <strong>custom metrics</strong>, which are billed
+separately from the alarms that read them: $0.30 per metric per month in
+us-east-1 for the first 10,000, so $2.10 per month per stack, with the first ten
+custom metrics in an account included at no charge. None of them carries a
+dimension, which is the thing to keep an eye on if you add more: a custom metric
+is billed per unique combination of name and dimension values, so a dimension
+with a hundred values is a hundred metrics. Their records are also log events,
+so they add log ingestion and storage — a few hundred bytes per meeting and per
+batch of transcript segments, which is immaterial next to the transcript log
+volume itself.</p>
+<p>The dashboard references 38 metrics, comfortably inside the metric allowance for
+a free dashboard, and CloudWatch includes three dashboards per account at no
+charge. An account that already has three custom dashboards pays $3.00 per month
+for this one, which is the realistic case for anyone running several LMA stacks
+in one account. Logs Insights queries in the four error-log widgets are billed
+per query when the widget runs, not continuously. See
+<a href="https://aws.amazon.com/cloudwatch/pricing/">Amazon CloudWatch pricing</a> for
+other regions and for current rates.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="the-dashboard">The dashboard</h2><a class="sl-anchor-link" href="#the-dashboard"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “The dashboard”</span></a></div>
+<p>One dashboard is created per deployment, named <code dir="auto">&#x3C;stack-name>-&#x3C;region></code>. Its name
+and a console link are stack outputs:</p>
+<ul>
+<li><code dir="auto">OperationalDashboardName</code></li>
+<li><code dir="auto">OperationalDashboardConsoleUrl</code></li>
+</ul>
+<p>Widget titles are written to say what the number means where a bare number would
+mislead. Reading top to bottom:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Widget</th><th>What it shows</th><th>Read it for</th></tr></thead><tbody><tr><td>Transcribe concurrent streaming sessions</td><td><code dir="auto">ConcurrentStreamsCount</code> for <code dir="auto">StartStreamTranscription</code>, with a horizontal annotation at the alarm threshold</td><td>How close the account is to the streaming quota. Account-wide, so a spike you cannot explain may belong to another workload — but only one that calls the same operation; see the note above on what this series excludes.</td></tr><tr><td>Kinesis call data stream</td><td><code dir="auto">IncomingRecords</code> and <code dir="auto">WriteProvisionedThroughputExceeded</code></td><td>Whether the pipeline is accepting writes. Record volume alone tells you how busy the deployment is, not whether it is healthy; rejected writes are the signal.</td></tr><tr><td>Consumer lag</td><td><code dir="auto">SubscribeToShardEvent.MillisBehindLatest</code> for the stream’s enhanced fan-out consumer, and the Call Event Processor’s event-source <code dir="auto">IteratorAge</code>, annotated at the alarm threshold</td><td>How far behind the live meeting the transcript is. Two series reporting the same lag by different routes, so either alone is enough. Note the <em>stream-level</em> <code dir="auto">GetRecords.IteratorAgeMilliseconds</code> is deliberately not shown: LMA reads the stream through an enhanced fan-out consumer, which uses <code dir="auto">SubscribeToShard</code>, so that metric reflects whatever else happens to poll the stream rather than this consumer’s lag.</td></tr><tr><td>Discarded records queue</td><td><code dir="auto">ApproximateNumberOfMessagesVisible</code>, annotated at zero</td><td>Open work. Depth never falls on its own, so any value above zero is a batch that needs investigating, not a backlog that will clear.</td></tr><tr><td>Call Event Processor</td><td><code dir="auto">Invocations</code>, <code dir="auto">Errors</code>, <code dir="auto">Throttles</code>, <code dir="auto">ConcurrentExecutions</code> and <code dir="auto">Duration</code> p99</td><td>The health of the one consumer between Kinesis and the web UI. Rising duration with flat invocations usually precedes rising lag.</td></tr><tr><td>Amazon Bedrock</td><td><code dir="auto">Invocations</code>, <code dir="auto">InvocationThrottles</code>, <code dir="auto">InvocationClientErrors</code> and <code dir="auto">InvocationLatency</code> p99</td><td>Whether summaries and the Meeting Assistant are getting through. Read without a model dimension on purpose: Bedrock publishes these both ways, and a request throttled before the model is resolved carries no model id, so filtering by model undercounts.</td></tr><tr><td>ECS tasks</td><td><code dir="auto">RunningTaskCount</code> for the transcriber <em>service</em>, and cluster-wide <code dir="auto">TaskCount</code> for the Virtual Participant cluster</td><td>Capacity. Two different metrics because <code dir="auto">RunningTaskCount</code> is only published per service: the Virtual Participant cluster starts a task per meeting with <code dir="auto">RunTask</code> rather than through a service, so it has no <code dir="auto">RunningTaskCount</code> series under any <code dir="auto">VPLaunchType</code> — including <code dir="auto">FARGATE</code> and <code dir="auto">EC2</code>, where the service that does exist holds <code dir="auto">DesiredCount: 0</code> and only keeps a load-balancer target-group association. <code dir="auto">TaskCount</code> is the cluster-wide metric and does count those per-meeting tasks. It is legitimately zero whenever no Virtual Participant is in a meeting, and permanently zero under the default <code dir="auto">VPLaunchType=MICROVM</code>, where participants run on Lambda MicroVMs and are not ECS tasks at all.</td></tr><tr><td>Virtual Participant memory used</td><td><code dir="auto">MemoryUtilized</code> for the VP task definition family, peak and average</td><td>Whether a participant stuck in <code dir="auto">INITIALIZING</code> is on a starved host. <a href="../troubleshooting/">Troubleshooting</a> describes this check; the widget is the same query without the console navigation.</td></tr><tr><td>Transcriber target health</td><td><code dir="auto">HealthyHostCount</code> and <code dir="auto">UnHealthyHostCount</code></td><td>Whether new meetings can connect at all. Zero healthy targets refuses every new connection.</td></tr><tr><td>Transcriber load balancer</td><td><code dir="auto">TargetResponseTime</code> p99 and <code dir="auto">HTTPCode_Target_5XX_Count</code></td><td>Errors at the edge. Response time is of limited use here: a meeting is one long-lived WebSocket, so what is being timed is the upgrade handshake, not the meeting.</td></tr><tr><td>GraphQL API</td><td><code dir="auto">4XXError</code>, <code dir="auto">5XXError</code> and <code dir="auto">Latency</code> p99</td><td>What the web UI is experiencing. 4XX is usually an expired client token and is not alarmed; 5XX is a failing resolver and is.</td></tr><tr><td>Application metrics (band header)</td><td>A note naming the namespace these widgets read</td><td>The five widgets in this band come from LMA rather than from an AWS service; the error tables further down are Logs Insights queries, not metrics. If a series in the band is empty while meetings are running, the component is not publishing rather than nothing having happened — check that <code dir="auto">METRIC_NAMESPACE</code> is set on it.</td></tr><tr><td>Meetings</td><td><code dir="auto">MeetingsStarted</code>, <code dir="auto">MeetingsEnded</code> and <code dir="auto">StreamingSessionsStarted</code></td><td>Whether meetings are happening, and whether they are finishing. Started and ended will not match over a short window, because a live meeting has started and not ended; a persistent gap over hours is meetings that never closed, which is what the stale-meeting reaper exists for. Live audio sessions count only the meetings streamed through the transcriber, so they are lower than meetings started by however many Virtual Participant and uploaded-recording meetings the deployment has — not a fault.</td></tr><tr><td>Time to first transcript segment</td><td><code dir="auto">TimeToFirstTranscriptSegmentMs</code> at minimum, average, p90 and p99</td><td>How long a meeting waits for its transcript to begin. Read the shape, not a value: the interval is dominated by when somebody first speaks, so the minimum is the closest thing here to a measure of the pipeline itself, and a rising p90 with a flat minimum usually means meetings are starting earlier rather than the pipeline slowing.</td></tr><tr><td>Transcript segment writes</td><td><code dir="auto">TranscriptSegmentsWritten</code> and <code dir="auto">TranscriptSegmentWriteFailed</code>, annotated at the alarm threshold</td><td>Whether the transcript is reaching the meeting page. Any value on the failure series is a line that is simply missing, with no error on the meeting page and nothing on the discarded-records queue.</td></tr><tr><td>Audio sessions that produced no transcript</td><td><code dir="auto">StreamingSessionsWithoutTranscript</code> against <code dir="auto">StreamingSessionsStarted</code>, annotated at the alarm threshold</td><td>Sessions that streamed audio and got nothing back. Sessions under thirty seconds are not counted, so a value here is a session that ran long enough for silence to be a fault rather than a user who changed their mind — though a muted room or a meeting abandoned at minute two still lands here, which is why the alarm needs three in a window. Read against sessions opened: one in fifty is a different problem from one in two.</td></tr><tr><td>Nova Sonic streams refused</td><td><code dir="auto">NovaSonicStreamsThrottled</code></td><td>Whether this stack’s voice assistants are being refused Nova Sonic streams for the account’s concurrency quota of 20 per region. Each refusal degrades an assistant rather than failing it — see <a href="../voice-assistant/#nova-sonic-concurrency-quota">Nova Sonic Concurrency Quota</a> for what each one does — so a value here is a capacity signal: fewer concurrent voice-assistant meetings in the account and region, or another region, is the remedy, since the quota cannot be raised.</td></tr><tr><td>Four error-log tables</td><td>The most recent 50 lines matching <code dir="auto">/ERROR/</code> in the Call Event Processor, the Virtual Participant launch state machine, the Virtual Participant container and the WebSocket transcriber container log groups</td><td>A first look without leaving the dashboard. These are CloudWatch Logs Insights queries, so they run on demand and are billed per query, not continuously.</td></tr></tbody></table>
+<p>The dashboard is created whether or not <code dir="auto">EnableOperationalAlarms</code> is <code dir="auto">true</code>.
+See <a href="#what-it-costs">What it costs</a> above for the dashboard and alarm charges.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="related-documentation">Related documentation</h2><a class="sl-anchor-link" href="#related-documentation"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Related documentation”</span></a></div>
+<ul>
+<li><a href="../troubleshooting/">Troubleshooting</a> — log group names, console navigation, and the symptom-by-symptom guide</li>
+<li><a href="../cloudformation-parameters/">CloudFormation Parameters Reference</a> — every stack parameter, including the two added for alarms</li>
+<li><a href="../well-architected/">Well-Architected Framework Assessment</a> — where this fits in the Operational Excellence pillar</li>
+<li><a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/blob/main/utilities/load-simulator/README.md">LMA Load Simulator</a> — generating load to see these metrics move</li>
+</ul></div><footer class="sl-flex astro-ddtxxk7k"><div class="meta sl-flex astro-ddtxxk7k"></div><div class="pagination-links print:hidden astro-b5raizh3" dir="ltr"><a href="/amazon-transcribe-live-meeting-assistant/meeting-cost-estimate/" rel="prev" class="astro-b5raizh3"><svg aria-hidden="true" class="astro-b5raizh3 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg><span class="astro-b5raizh3">Previous<br class="astro-b5raizh3"><span class="link-title astro-b5raizh3">Meeting Cost Estimate</span></span></a><a href="/amazon-transcribe-live-meeting-assistant/troubleshooting/" rel="next" class="astro-b5raizh3"><svg aria-hidden="true" class="astro-b5raizh3 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg><span class="astro-b5raizh3">Next<br class="astro-b5raizh3"><span class="link-title astro-b5raizh3">Troubleshooting</span></span></a></div></footer></div></div></main></div></div></div></div></body></html>

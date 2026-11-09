@@ -1,0 +1,791 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-g5ptsecz"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Configuration Guide | LMA</title><link rel="canonical" href="https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/configuration-guide/"/><link rel="sitemap" href="/amazon-transcribe-live-meeting-assistant/sitemap-index.xml"/><link rel="shortcut icon" href="/amazon-transcribe-live-meeting-assistant/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v7.4.4"/><meta name="generator" content="Starlight v0.42.8"/><meta property="og:title" content="Configuration Guide"/><meta property="og:type" content="article"/><meta property="og:url" content="https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/configuration-guide/"/><meta property="og:locale" content="en"/><meta property="og:description" content="Live Meeting Assistant — Real-time meeting transcription, AI-powered meeting assistance, and virtual meeting participation on AWS"/><meta property="og:site_name" content="LMA"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="Live Meeting Assistant — Real-time meeting transcription, AI-powered meeting assistance, and virtual meeting participation on AWS"/><script>
+	window.StarlightThemeProvider = (() => {
+		const storedTheme =
+			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+		const theme =
+			storedTheme ||
+			(window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+		document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+		return {
+			updatePickers(theme = storedTheme || 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = theme;
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector(`#theme-icons`);
+					const newIcon = tmpl && tmpl.content.querySelector('.' + theme);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script><template id="theme-icons"><svg aria-hidden="true" class="light astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z"/></svg><svg aria-hidden="true" class="dark astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z"/></svg><svg aria-hidden="true" class="auto astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg></template><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/print.ehPL0gv-.css" media="print"><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/common.0xECwWjX.css"><style>@layer starlight.components{svg:where(.astro-hkc32dio){color:var(--sl-icon-color);font-size:var(--sl-icon-size,1em);width:1em;height:1em;overflow:visible}}
+</style><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/page.cNngjUgL.js"></script></head><body class="astro-g5ptsecz"><a class="sl-skip-link astro-qb7clj6f" href="#_top">Skip to content</a><div class="page sl-flex astro-yntsjkba"><header class="header astro-yntsjkba"><div class="header astro-by6fddyj"><div class="title-wrapper sl-flex astro-by6fddyj"><a href="/amazon-transcribe-live-meeting-assistant/" class="site-title sl-flex astro-6rvad3va"><img class="light:sl-hidden print:hidden astro-6rvad3va" alt src="/amazon-transcribe-live-meeting-assistant/_astro/logo-dark.DjwyAsdJ.svg" width="120" height="40"><img class="dark:sl-hidden print:block astro-6rvad3va" alt src="/amazon-transcribe-live-meeting-assistant/_astro/logo-light.Therjg_H.svg" width="120" height="40"><span class="astro-6rvad3va" translate="no">LMA</span></a></div><div class="sl-flex print:hidden astro-by6fddyj"><site-search class="astro-by6fddyj astro-b5kgnn7o" data-translations="{&quot;placeholder&quot;:&quot;Search&quot;}"><button data-open-modal disabled aria-label="Search" aria-keyshortcuts="Control+K" class="astro-b5kgnn7o"><svg aria-hidden="true" class="astro-b5kgnn7o astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.71 20.29 18 16.61A9 9 0 1 0 16.61 18l3.68 3.68a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.39ZM11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg><span class="sl-hidden md:sl-block astro-b5kgnn7o" aria-hidden="true">Search</span><kbd class="sl-hidden md:sl-flex astro-b5kgnn7o" style="display: none;"><kbd class="astro-b5kgnn7o">Ctrl</kbd><kbd class="astro-b5kgnn7o">K</kbd></kbd></button><dialog style="padding:0" aria-label="Search" class="astro-b5kgnn7o"><div class="dialog-frame sl-flex astro-b5kgnn7o"><button data-close-modal class="sl-flex md:sl-hidden astro-b5kgnn7o">Cancel</button><div class="search-container astro-b5kgnn7o"><div id="starlight__search" class="astro-b5kgnn7o"></div></div></div></dialog></site-search><script>
+	(() => {
+		const openBtn = document.querySelector('button[data-open-modal]');
+		const shortcut = openBtn?.querySelector('kbd');
+		if (!openBtn || !(shortcut instanceof HTMLElement)) return;
+		const platformKey = shortcut.querySelector('kbd');
+		if (platformKey && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+			platformKey.textContent = '⌘';
+			openBtn.setAttribute('aria-keyshortcuts', 'Meta+K');
+		}
+		shortcut.style.display = '';
+	})();
+</script><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/Search.astro_astro_type_script_index_0_lang.DKiPuTrW.js"></script></div><div class="sl-hidden md:sl-flex print:hidden right-group astro-by6fddyj"><div class="sl-flex social-icons astro-by6fddyj"><a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" rel="me" class="sl-flex astro-n2mnl6yq"><span class="sr-only astro-n2mnl6yq">GitHub</span><svg aria-hidden="true" class="astro-n2mnl6yq astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-2z5xp7gb"><span class="sr-only astro-2z5xp7gb">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-2z5xp7gb"><option value="dark" class="astro-2z5xp7gb">Dark</option><option value="light" class="astro-2z5xp7gb">Light</option><option value="auto" selected class="astro-2z5xp7gb">Auto</option></select><svg aria-hidden="true" class="icon caret astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script><script type="module">var e=`starlight-theme`,t=e=>e===`auto`||e===`dark`||e===`light`?e:`auto`,n=()=>t(typeof localStorage<`u`&&localStorage.getItem(e));function r(t){typeof localStorage<`u`&&localStorage.setItem(e,t===`light`||t===`dark`?t:``)}var i=()=>matchMedia(`(prefers-color-scheme: light)`).matches?`light`:`dark`;function a(e){StarlightThemeProvider.updatePickers(e),document.documentElement.dataset.theme=e===`auto`?i():e,r(e)}matchMedia(`(prefers-color-scheme: light)`).addEventListener(`change`,()=>{n()===`auto`&&a(`auto`)});var o=class extends HTMLElement{constructor(){super(),a(n()),this.querySelector(`select`)?.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&a(t(e.currentTarget.value))})}};customElements.define(`starlight-theme-select`,o);</script><script type="module">var e=class extends HTMLElement{constructor(){super();let e=this.querySelector(`select`);e&&(e.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&(window.location.pathname=e.currentTarget.value)}),window.addEventListener(`pageshow`,t=>{if(!t.persisted)return;let n=e.querySelector(`option[selected]`)?.index;n!==e.selectedIndex&&(e.selectedIndex=n??0)}))}};customElements.define(`starlight-lang-select`,e);</script></div></div></header><nav class="sidebar print:hidden astro-yntsjkba" aria-label="Main"><button popovertarget="starlight__sidebar" class="sl-menu-button sl-flex md:sl-hidden print:hidden astro-r2osgdlg"><svg aria-hidden="true" class="open-menu astro-r2osgdlg astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M3 8h18a1 1 0 1 0 0-2H3a1 1 0 0 0 0 2Zm18 8H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Zm0-5H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Z"/></svg><svg aria-hidden="true" class="close-menu astro-r2osgdlg astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="m13.41 12 6.3-6.29a1.004 1.004 0 1 0-1.42-1.42L12 10.59l-6.29-6.3a1.004 1.004 0 0 0-1.42 1.42l6.3 6.29-6.3 6.29a1 1 0 0 0 0 1.42.998.998 0 0 0 1.42 0l6.29-6.3 6.29 6.3a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.42L13.41 12Z"/></svg><span class="sr-only astro-r2osgdlg">Menu</span></button><script type="module">var e=class extends HTMLElement{constructor(){super();let e=matchMedia(`(min-width: 50em)`),t=()=>{this.popover=e.matches?null:`auto`};t(),e.addEventListener(`change`,()=>t()),this.addEventListener(`toggle`,({newState:e})=>this.trapFocus(e===`open`))}trapFocus(e){document.querySelectorAll(`.main-frame, .sl-skip-link`).forEach(t=>{t.toggleAttribute(`inert`,e)})}};customElements.define(`sl-sidebar-pane`,e);</script><sl-sidebar-pane popover id="starlight__sidebar" class="sidebar-pane astro-yntsjkba"><div class="sidebar-content sl-flex astro-yntsjkba"><sl-sidebar-state-persist data-hash="0k58gzh" class="astro-ipdry5cl"><script aria-hidden="true">
+		(() => {
+			try {
+				if (!matchMedia('(min-width: 50em)').matches) return;
+				/** @type {HTMLElement | null} */
+				const target = document.querySelector('sl-sidebar-state-persist');
+				const state = JSON.parse(sessionStorage.getItem('sl-sidebar-state') || '0');
+				if (!target || !state || target.dataset.hash !== state.hash) return;
+				window._starlightScrollRestore = state.scroll;
+				customElements.define(
+					'sl-sidebar-restore',
+					class SidebarRestore extends HTMLElement {
+						connectedCallback() {
+							try {
+								const idx = parseInt(this.dataset.index || '');
+								const details = this.closest('details');
+								if (details && typeof state.open[idx] === 'boolean') details.open = state.open[idx];
+							} catch {}
+						}
+					}
+				);
+			} catch {}
+		})();
+	</script><ul class="top-level astro-rmhv4bp6"><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Overview</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="0"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Welcome</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Getting Started</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="1"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/prerequisites-and-deployment/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Prerequisites &amp; Deployment</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/quick-start-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Quick Start Guide</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/demo-videos/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Demo Videos</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lma-in-action/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">LMA in Action</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Core Features</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="2"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/transcription-and-translation/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Transcription &amp; Translation</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/microvm-asr/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">On-demand ASR &amp; Diarization (MicroVM)</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-assistant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Assistant</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/transcript-summarization/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Transcript Summarization</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-agenda/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Agenda</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-consent/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Consent</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/transcript-deletion/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Transcript Deletion After the Summary</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-video/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Video and Key Frames</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meetings-query-tool/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meetings Query Tool</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Meeting Sources</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="3"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-sources/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Sources Overview</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/stream-audio/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Stream Audio</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/browser-extension/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Browser Extension</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/desktop-capture-app/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Desktop Capture App</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/virtual-participant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Virtual Participant</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Voice Assistant &amp; Avatar</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="4"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/voice-assistant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Voice Assistant</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/nova-sonic-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Nova Sonic Setup</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/elevenlabs-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">ElevenLabs Setup</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/simli-avatar-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Simli Avatar Setup</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">MCP Server Integration</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="5"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/mcp-servers/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">MCP Servers Overview</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/mcp-api-key-auth/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">MCP API Key Auth</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/salesforce-mcp-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Salesforce MCP</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/amazon-quick-mcp-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Amazon QuickSuite MCP</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/deepwiki-mcp-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">DeepWiki MCP</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Web UI</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="6"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/web-ui-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Web UI Guide</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Access Control &amp; Security</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="7"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/user-management/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">User Management</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/user-based-access-control/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">User-Based Access Control</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/infrastructure-and-security/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Infrastructure &amp; Security</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/security-scanning/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Security Scanning (SRT)</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Integration &amp; API</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="8"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/websocket-streaming-api/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">WebSocket Streaming API</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/embeddable-components/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Embeddable Components</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lambda-hook-functions/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Lambda Hook Functions</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Administration</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="9"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/cloudformation-parameters/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">CloudFormation Parameters</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/configuration-guide/" aria-current="page" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Configuration Guide</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/configuration-store/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Unified Configuration Store</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/stack-updates-and-upgrades/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Stack Updates &amp; Upgrades</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/well-architected/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Well-Architected Assessment</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-cost-estimate/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Cost Estimate</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/monitoring/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Monitoring &amp; Alerting</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/troubleshooting/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Troubleshooting</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/cleanup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Cleanup</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Development</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="10"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/developer-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Developer Guide</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lma-cli/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">LMA CLI Reference</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lma-sdk/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">LMA SDK Reference</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">New &amp; Uncategorized</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="11"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/amazon-quick-desktop-integration/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Amazon Quick Desktop Integration</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/blog-update-proposal/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Blog Update Proposal</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/cloudformation-service-role/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Cloudformation Service Role</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/dependency-upgrade-validation-runbook/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Dependency Upgrade Validation Runbook</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/scheduled-integration-tests/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Scheduled Integration Tests</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/teams-acs-sdk/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Teams Acs Sdk</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/test-coverage/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Test Coverage</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/troubleshooting-agent/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Troubleshooting Agent</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/upload-audio/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Upload Audio</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/virtual-participant-local-dev/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Virtual Participant Local Dev</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/voice-enrollment/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Voice Enrollment</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/zoom-credentials-and-join-reliability/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Zoom Credentials And Join Reliability</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/zoom-meeting-sdk/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Zoom Meeting Sdk</span></a></li></ul></details></li></ul><script aria-hidden="true">
+		(() => {
+			const scroller = document.getElementById('starlight__sidebar');
+			if (!window._starlightScrollRestore || !scroller) return;
+			scroller.scrollTop = window._starlightScrollRestore;
+			delete window._starlightScrollRestore;
+		})();
+	</script></sl-sidebar-state-persist><div class="md:sl-hidden"><div class="mobile-preferences sl-flex astro-p4azlveh"><div class="social-icons astro-p4azlveh"><a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" rel="me" class="sl-flex astro-n2mnl6yq"><span class="sr-only astro-n2mnl6yq">GitHub</span><svg aria-hidden="true" class="astro-n2mnl6yq astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-2z5xp7gb"><span class="sr-only astro-2z5xp7gb">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-2z5xp7gb"><option value="dark" class="astro-2z5xp7gb">Dark</option><option value="light" class="astro-2z5xp7gb">Light</option><option value="auto" selected class="astro-2z5xp7gb">Auto</option></select><svg aria-hidden="true" class="icon caret astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script></div></div></div></sl-sidebar-pane></nav><div class="main-frame astro-yntsjkba"><script type="module">var e=document.getElementById(`starlight__sidebar`),t=e?.querySelector(`sl-sidebar-state-persist`),n=`sl-sidebar-state`,r=()=>{let r=[],i=t?.dataset.hash||``;try{let e=sessionStorage.getItem(n),t=JSON.parse(e||`{}`);Array.isArray(t.open)&&t.hash===i&&(r=t.open)}catch{}return{hash:i,open:r,scroll:e?.scrollTop||0}},i=e=>{try{sessionStorage.setItem(n,JSON.stringify(e))}catch{}},a=()=>i(r()),o=(e,t)=>{let n=r();n.open[t]=e,i(n)};t?.addEventListener(`click`,e=>{if(!(e.target instanceof Element))return;let t=e.target.closest(`summary`)?.closest(`details`);if(!t)return;let n=t.querySelector(`sl-sidebar-restore`),r=parseInt(n?.dataset.index||``);isNaN(r)||o(!t.open,r)}),addEventListener(`visibilitychange`,()=>{document.visibilityState===`hidden`&&a()});</script><div class="lg:sl-flex astro-lrzkfocr"><aside class="right-sidebar-container print:hidden astro-lrzkfocr"><div class="right-sidebar astro-lrzkfocr"><div class="lg:sl-hidden astro-qok35upx"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-66cqc7ze"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-66cqc7ze"><details id="starlight__mobile-toc" class="astro-66cqc7ze"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-66cqc7ze"><span class="toggle sl-flex astro-66cqc7ze">On this page<svg aria-hidden="true" class="caret astro-66cqc7ze astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></span><span class="display-current astro-66cqc7ze"></span></summary><div class="dropdown astro-66cqc7ze"><ul class="isMobile astro-jugkfwgx" style="--depth: 0;"><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#_top" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Overview</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#what-you-can-change-without-redeploying" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">What you can change without redeploying</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#settings-that-were-stack-parameters-before-040" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Settings that were stack parameters before 0.4.0</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#retention-settings-the-stack-limits" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Retention: settings the stack limits</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#configuration-profiles" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Configuration profiles</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#using-the-configuration-page" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Using the Configuration page</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#what-happens-when-you-save" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">What happens when you save</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#copying-configuration-between-deployments-and-presets" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Copying configuration between deployments, and presets</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#configuration-presets" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Configuration presets</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#changing-a-setting-outside-the-web-ui" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Changing a setting outside the web UI</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#notes-on-specific-settings" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Notes on specific settings</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#choosing-amazon-bedrock-models" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Choosing Amazon Bedrock models</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#teams-meeting-end-detection" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Teams meeting-end detection</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#closing-meetings-that-were-never-ended" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Closing meetings that were never ended</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#related" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Related</span></a></li></ul></div></details></nav></mobile-starlight-toc><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/MobileTableOfContents.astro_astro_type_script_index_0_lang.C3fM4Kra.js"></script></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-qok35upx"><div class="sl-container astro-qok35upx"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-jugkfwgx" style="--depth: 0;"><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#_top" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Overview</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#what-you-can-change-without-redeploying" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">What you can change without redeploying</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#settings-that-were-stack-parameters-before-040" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Settings that were stack parameters before 0.4.0</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#retention-settings-the-stack-limits" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Retention: settings the stack limits</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#configuration-profiles" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Configuration profiles</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#using-the-configuration-page" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Using the Configuration page</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#what-happens-when-you-save" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">What happens when you save</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#copying-configuration-between-deployments-and-presets" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Copying configuration between deployments, and presets</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#configuration-presets" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Configuration presets</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#changing-a-setting-outside-the-web-ui" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Changing a setting outside the web UI</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#notes-on-specific-settings" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Notes on specific settings</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#choosing-amazon-bedrock-models" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Choosing Amazon Bedrock models</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#teams-meeting-end-detection" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Teams meeting-end detection</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#closing-meetings-that-were-never-ended" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Closing meetings that were never ended</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#related" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Related</span></a></li></ul></nav></starlight-toc><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/TableOfContents.astro_astro_type_script_index_0_lang.BpJaGz7G.js"></script></div></div></div></aside><div class="main-pane astro-lrzkfocr"><main data-pagefind-body class="astro-g5ptsecz" lang="en" dir="ltr"><div class="content-panel astro-a7po4psb"><div class="sl-container astro-a7po4psb"><h1 id="_top" class="astro-bebwqqxs">Configuration Guide</h1></div></div><div class="content-panel astro-a7po4psb"><div class="sl-container astro-a7po4psb"><div class="sl-markdown-content"><!-- Copyright (c) 2025 Amazon.com. This file is licensed under the MIT License. -->
+<!-- See the LICENSE file in the project root for full license information. -->
+<div class="sl-heading-wrapper level-h1"><h1 id="configuration-guide">Configuration Guide</h1><a class="sl-anchor-link" href="#configuration-guide"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Configuration Guide”</span></a></div>
+<p>This page is for administrators. It explains which of LMA’s settings you can
+change from the web UI while the stack is running, how to change them on the
+<strong>View / Edit Configuration</strong> page (the Configuration page), what happens when you save, and what to do when a save is
+refused. How the settings are stored, cached and versioned underneath is
+described in the <a href="../configuration-store/">Unified Configuration Store</a> reference.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="what-you-can-change-without-redeploying">What you can change without redeploying</h2><a class="sl-anchor-link" href="#what-you-can-change-without-redeploying"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “What you can change without redeploying”</span></a></div>
+<p>Two kinds of setting control LMA. <strong>Stack parameters</strong> are chosen when the
+CloudFormation stack is deployed or updated; they decide which resources exist,
+such as whether the Virtual Participant or the on-demand speech engine is
+deployed at all, and changing one means a stack update. They are listed in
+<a href="../cloudformation-parameters/">CloudFormation Parameters</a>. <strong>Runtime settings</strong>
+are what this page is about: they are stored in the stack’s configuration table,
+an Admin changes them from the web UI, and the change takes effect without a
+deployment.</p>
+<p>The runtime settings are grouped into sections, and held in configuration
+profiles (see <a href="#configuration-profiles">Configuration profiles</a>). The deployment
+default profile holds every setting’s default, which ships with LMA and is
+updated by later releases; a Custom profile holds a full copy you change. Settings
+that were stack parameters before 0.4.0 are listed in
+<a href="#settings-that-were-stack-parameters-before-040">Settings that were stack parameters before 0.4.0</a>.
+For the retention settings, a stack parameter is still the default and a limit;
+see <a href="#retention-settings-the-stack-limits">Retention: settings the stack limits</a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Section</th><th>What it controls</th><th>A saved change applies</th></tr></thead><tbody><tr><td>Transcript Summary</td><td>The sections of the end-of-meeting summary and the prompt behind each</td><td>To summaries generated within about five minutes of the save. <strong>Regenerate</strong> on a meeting page uses it at once</td></tr><tr><td>Meeting Assist Chat Buttons</td><td>The quick-action buttons in the chat panel. A saved list replaces the shipped buttons as a whole</td><td>At once, to chat panels opened after the save</td></tr><tr><td>Nova Sonic Voice Assistant</td><td>The voice assistant’s system prompt and prompt mode, model, voice, turn-taking sensitivity, meeting mode and translator settings</td><td>To the next meeting the voice assistant joins</td></tr><tr><td>Transcription Engine</td><td>Virtual Participant voice separation, which works on Amazon Transcribe, and, where the experimental on-demand speech engine is deployed, which engine transcribes streaming meetings and which transcribes Virtual Participants. Without that engine only the voice separation switch is shown</td><td>To meetings that start within 30 seconds of the save or later</td></tr><tr><td>Meeting Cost Prices</td><td>The unit prices the per-meeting <a href="../meeting-cost-estimate/">cost estimate</a> is computed with</td><td>To estimates drawn within about five minutes of the save</td></tr><tr><td>Amazon Bedrock Models</td><td>The Amazon Bedrock model used for summaries and meeting insights, for the meeting assistant and the troubleshooting agent, for the meeting assistant’s knowledge bases, and for reading the text of key frames, and the <strong>Model inference geography</strong>: whether those models, the consent evidence check model and the Virtual Participant’s page-automation model may run in any commercial AWS Region, only within this deployment’s geography, or only in its Region (see <a href="../infrastructure-and-security/#where-meeting-content-is-processed">Where meeting content is processed</a>)</td><td>To each summary, answer or key frame started about five minutes after the save or later</td></tr><tr><td>Amazon Transcribe</td><td>The Amazon Transcribe options of meetings streamed from the Stream Audio page, the browser extension and the desktop app, and of Virtual Participants: language or language identification, redaction, custom vocabulary and language model, and the default for identifying speakers within a channel</td><td>To streaming meetings that start after the save, and to the next Virtual Participant to start</td></tr><tr><td>Meeting Recording</td><td>Whether those meetings’ audio is recorded when the client does not say</td><td>To streaming meetings that start after the save, and to the next Virtual Participant to start</td></tr><tr><td>Meeting Assistant</td><td>The regular expression that wakes the meeting assistant in a transcript, and whether its answers use Amazon Bedrock <a href="../meeting-assistant/#prompt-caching">prompt caching</a></td><td>To transcript segments processed, and answers started, about five minutes after the save or later</td></tr><tr><td>Meeting Processing</td><td>Whether a transcript Lambda hook is sent partial segments, how long a meeting may go without speech before the inactive-meeting reaper ends it, and how far back the reaper looks</td><td>Within about five minutes of the save</td></tr><tr><td>Virtual Participant</td><td>The Virtual Participant’s voice assistant provider, activation mode, wake phrases and activation duration, the ElevenLabs agent and Simli face, how a Teams Virtual Participant decides its meeting has ended, and whether the meeting chat is added to the transcript (see <a href="../virtual-participant/#meeting-chat-in-the-transcript">Meeting Chat in the Transcript</a>)</td><td>To the next Virtual Participant to start</td></tr><tr><td>Retention</td><td>How many days meeting records and transcript segments are kept, up to the limit the stack sets</td><td>To records written about five minutes after the save or later; a record already written keeps its expiry</td></tr><tr><td>Meeting Consent</td><td>Whether participants are told a meeting is recorded and transcribed and whether their consent is needed first (off, notify or opt-in, and the opt-in rule), the notice texts, the phrases a reply is read by, whether a meeting may be started with another choice, whether evidence screenshots are kept, the model that checks them, what the WebSocket transcriber does with a streaming client that shows no consent step, whether a Virtual Participant leaves after an objection, and whether it reads replies said aloud. See <a href="../meeting-consent/">Meeting Consent</a></td><td>To meetings whose consent starts after the save</td></tr><tr><td>Meeting Agenda</td><td>How far into a meeting with no agenda its transcript is read for one somebody stated, or whether it is read at all</td><td>To meetings that reach the threshold about five minutes after the save or later</td></tr></tbody></table>
+<p>Every section is on <strong>Configuration ▸ Configuration</strong>. The pages that each edited
+one section — Transcript Summary, Nova Sonic Config and Transcription Engine — are
+now sections of it, and a bookmark to one of them opens its section. The <strong>Edit
+Chat Buttons</strong> dialog in a meeting’s chat panel stays where it is and saves into
+the same configuration.</p>
+<p>Only members of the <strong>Admin</strong> Cognito group can change any of these. Add someone
+to the group on <a href="../user-management/">User Management</a> if they need to.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="settings-that-were-stack-parameters-before-040">Settings that were stack parameters before 0.4.0</h2><a class="sl-anchor-link" href="#settings-that-were-stack-parameters-before-040"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Settings that were stack parameters before 0.4.0”</span></a></div>
+<p>Until 0.4.0 these settings were also stack parameters, and the parameter was the
+setting’s default. From 0.4.0 they are only settings: the parameters are gone, and
+each setting ships with a default in the deployment’s default profile.</p>
+<p>The table lists the parameters a released version had; three settings new in
+0.4.0 (the knowledge-base model, the key frame text model and the agenda timing)
+were never released as parameters.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Section › setting</th><th>Stack parameter before 0.4.0</th></tr></thead><tbody><tr><td>Amazon Bedrock Models › Summaries and meeting insights</td><td><code dir="auto">BedrockModelId</code></td></tr><tr><td>Amazon Bedrock Models › Meeting assistant</td><td><code dir="auto">MeetingAssistServiceBedrockModelID</code></td></tr><tr><td>Amazon Transcribe › Language</td><td><code dir="auto">TranscribeLanguageCode</code></td></tr><tr><td>Amazon Transcribe › Language options</td><td><code dir="auto">TranscribeLanguageOptions</code></td></tr><tr><td>Amazon Transcribe › Preferred language</td><td><code dir="auto">TranscribePreferredLanguage</code></td></tr><tr><td>Amazon Transcribe › Redact personal information</td><td><code dir="auto">IsContentRedactionEnabled</code></td></tr><tr><td>Amazon Transcribe › Entity types to redact</td><td><code dir="auto">TranscribePiiEntityTypes</code></td></tr><tr><td>Amazon Transcribe › Custom vocabulary</td><td><code dir="auto">CustomVocabularyName</code></td></tr><tr><td>Amazon Transcribe › Custom language model</td><td><code dir="auto">CustomLanguageModelName</code></td></tr><tr><td>Amazon Transcribe › Identify speakers within a channel by default</td><td><code dir="auto">ShowSpeakerLabel</code></td></tr><tr><td>Meeting Recording › Record meeting audio</td><td><code dir="auto">EnableAudioRecording</code></td></tr><tr><td>Meeting Assistant › Wake phrase (regular expression)</td><td><code dir="auto">AssistantWakePhraseRegEx</code></td></tr><tr><td>Meeting Processing › Send only finished segments to the transcript Lambda hook</td><td><code dir="auto">TranscriptLambdaHookFunctionNonPartialOnly</code></td></tr><tr><td>Meeting Processing › Days to look back for meetings that were never ended</td><td><code dir="auto">MeetingInactivityLookbackInDays</code></td></tr><tr><td>Meeting Processing › Minutes without speech before a meeting is ended</td><td><code dir="auto">MeetingInactivityTimeoutInMinutes</code></td></tr><tr><td>Virtual Participant › Voice assistant</td><td><code dir="auto">VoiceAssistantProvider</code></td></tr><tr><td>Virtual Participant › Voice assistant activation mode</td><td><code dir="auto">VoiceAssistantActivationMode</code></td></tr><tr><td>Virtual Participant › Wake phrases</td><td><code dir="auto">VoiceAssistantWakePhrases</code></td></tr><tr><td>Virtual Participant › Seconds the voice assistant stays active</td><td><code dir="auto">VoiceAssistantActivationDuration</code></td></tr><tr><td>Virtual Participant › ElevenLabs agent ID</td><td><code dir="auto">ElevenLabsAgentId</code></td></tr><tr><td>Virtual Participant › Simli face ID</td><td><code dir="auto">SimliFaceId</code></td></tr><tr><td>Virtual Participant › Teams: milliseconds between meeting checks</td><td><code dir="auto">VPAttendeePollMs</code></td></tr><tr><td>Virtual Participant › Teams: checks alone before leaving</td><td><code dir="auto">VPPollsBeforeEnd</code></td></tr><tr><td>Virtual Participant › Teams: checks without a meeting before leaving</td><td><code dir="auto">VPPollsBeforeEndMissing</code></td></tr></tbody></table>
+<p><strong>Upgrading a deployment that set any of these parameters.</strong> The values the
+parameters held are not carried across. After the update, a deployment upgraded
+from v0.3.10 uses the shipped default for every one of these settings. To keep a value you had set with a parameter:</p>
+<ul>
+<li>create a Custom profile (<strong>Create profile</strong> in the profile list), set the
+values there, save and <strong>Activate</strong> it; or</li>
+<li>write the values into a configuration file and deploy with the
+<code dir="auto">CustomConfigPath</code> stack parameter, which makes them the deployment default; see
+<a href="../configuration-store/#choosing-the-default-configuration-at-deploy-time">Choosing the default configuration at deploy time</a>.</li>
+</ul>
+<p>Remove the parameters from deploy commands and pipelines: CloudFormation refuses
+an update that names a parameter the template does not declare. <code dir="auto">lma deploy</code>
+leaves them out on its own.</p>
+<p>The integration API keys stay stack parameters, and a provider or avatar chosen on
+the page without its key on the stack does not start. The Nova Sonic Voice
+Assistant section says whether its Group meeting and Translator meeting modes
+apply, from the activation mode as saved in the Virtual Participant section: they
+need <strong>Always listening</strong>.</p>
+<p>A few things to know about these settings:</p>
+<ul>
+<li>A model chosen on the page is not checked before it is used, so enable access to
+it in the Amazon Bedrock console first.</li>
+<li>The WebSocket transcriber checks, as each meeting starts, that the Amazon
+Transcribe options fit together: language identification needs language
+options, at most one dialect per language, a preferred language among them, and
+no custom vocabulary or language model. Options that do not fit together are
+logged, and the meeting is transcribed with the shipped defaults for those
+options until they are corrected. A Virtual Participant makes the same check as
+it starts.</li>
+<li>If the WebSocket transcriber cannot read the configuration when a meeting
+starts, that meeting uses the shipped defaults, and the next meeting reads the
+configuration again.</li>
+<li>Nothing checks that a custom vocabulary or language model exists. Amazon
+Transcribe checks when a meeting starts, and a meeting whose vocabulary or
+model it does not recognise is not transcribed.</li>
+<li>The page offers only the choices the schema lists. A model a later release stops
+offering stays in force where it was saved, and the next save of the section
+asks for another.</li>
+<li><strong>Meeting Processing › Minutes without speech before a meeting is ended</strong> set to
+0 makes the inactive-meeting reaper end nothing; the reaper is always deployed.</li>
+</ul>
+<div class="sl-heading-wrapper level-h2"><h2 id="retention-settings-the-stack-limits">Retention: settings the stack limits</h2><a class="sl-anchor-link" href="#retention-settings-the-stack-limits"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Retention: settings the stack limits”</span></a></div>
+<p>The <strong>Retention</strong> section sets how many days a meeting’s records are kept:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Section › setting</th><th>Default and upper limit from</th><th>What it covers</th></tr></thead><tbody><tr><td>Retention › Days to keep meeting records</td><td><code dir="auto">MeetingRecordExpirationInDays</code></td><td>The meeting, its summary and its usage records</td></tr><tr><td>Retention › Days to keep transcript segments</td><td><code dir="auto">TranscriptionExpirationInDays</code></td><td>Each turn of the transcript, and each meeting assistant answer in it</td></tr></tbody></table>
+<p>For these two, the stack parameter is the <strong>upper limit</strong> as well as the
+default. You can keep records for less time than the deployment allows, but not
+for more:</p>
+<ul>
+<li>The page shows the parameter’s value as the default, says it is the limit, and
+marks a longer value as an error before you save. The server checks again, and
+refuses the save if a value exceeds the limit.</li>
+<li>Each function and task that writes these records applies the limit itself,
+from the parameter. So a value above it is never used, even one that reached
+the configuration another way, such as a restore of an older revision, or one
+saved before a stack update lowered the parameter. A stack update that lowers
+the parameter applies at once; one that raises it changes the default, and a
+shorter value saved on the page stays in force until you reset it.</li>
+<li>A change applies to records written after it, within about five minutes. A
+record already written keeps the expiry it was given, so shortening retention
+does not delete anything early, and lengthening it does not keep anything
+longer.</li>
+<li>Fractions of a day are allowed, as for the parameters, down to 0.1 day.</li>
+<li><strong>Delete the transcript after the summary</strong>, in the same section, has no
+stack parameter: it ships set to Off, and any of its choices can be saved. It
+deletes each meeting’s transcript
+permanently once the meeting is summarized, transcript files included; see
+<a href="../transcript-deletion/">Transcript Deletion After the Summary</a>.</li>
+<li>The recordings bucket’s lifecycle rules, which delete transcript files and
+key-frame images after <code dir="auto">TranscriptionExpirationInDays</code> days and recordings
+after <code dir="auto">AudioRecordingExpirationInDays</code> days, follow the stack parameters only.
+Shortening transcript retention on the page does not delete those files
+sooner.</li>
+</ul>
+<div class="sl-heading-wrapper level-h2"><h2 id="configuration-profiles">Configuration profiles</h2><a class="sl-anchor-link" href="#configuration-profiles"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Configuration profiles”</span></a></div>
+<p>A deployment holds several <strong>profiles</strong>, each a complete configuration, and one
+of them is <strong>active</strong>: the one every meeting uses. They work as IDP’s do.</p>
+<ul>
+<li><strong>default</strong> is the deployment default: the release’s shipped settings, the
+preset and file the <code dir="auto">ConfigurationPreset</code> and <code dir="auto">CustomConfigPath</code>
+stack parameters name, and the stack parameters that are defaults of settings.
+Every stack update rewrites it, so it is read-only. A new deployment runs on it.</li>
+<li><strong>Managed</strong> profiles are the shipped presets (<code dir="auto">standard</code>,
+<code dir="auto">internal-meetings-notify</code>, <code dir="auto">regulated-consent-required</code> and
+<code dir="auto">regulated-notify</code>; see
+<a href="#configuration-presets">Configuration presets</a>), each
+the default with the preset applied. They are read-only and rewritten by every
+stack update too. Activate one to use it as it is.</li>
+<li><strong>Custom</strong> profiles are yours. Choose <strong>Create profile</strong> in the profile list
+to copy any profile, change its settings and save them, then <strong>Activate</strong> it. A Custom
+profile is a full copy: a later release’s new defaults do not change a setting
+it holds, and a setting the release adds comes from the default.</li>
+</ul>
+<p>The <strong>Configuration Profiles</strong> list at the top of the page shows every profile
+with its type (Managed or Custom), description and when it was last saved. It
+marks the active one, and the one open in the editor below it; the page opens the
+active profile by default, and the address names the profile open
+(<code dir="auto">#/configuration/settings?profile=trial</code>), so a link can open another. Choose a
+profile’s name to open it in the editor; if the editor holds unsaved changes, the
+page asks first. The list can be collapsed to give the editor more room.</p>
+<p>Select profiles in the list to act on them:</p>
+<ul>
+<li><strong>Compare profiles</strong> (two or more selected) lists every setting the selected
+profiles do not all hold alike, with a column for each profile’s value; a
+setting a profile does not hold reads <code dir="auto">(not set)</code>. Profiles are compared as
+saved, so edits you have not saved are not included. <strong>Export</strong> downloads the
+comparison as CSV or JSON.</li>
+<li><strong>Activate</strong> (one selected) makes it the active profile.</li>
+<li><strong>Delete</strong> removes the selected Custom profiles; the active profile and the
+Managed ones cannot be deleted. A deleted profile’s revisions stay in the
+history.</li>
+<li><strong>Create profile</strong> copies a profile, as it is saved, to a new Custom one: the
+one selected, or else the one open.</li>
+<li><strong>Import</strong> makes a new Custom profile of a file exported from LMA (see
+<a href="#copying-configuration-between-deployments-and-presets">Copying configuration between deployments</a>).</li>
+</ul>
+<p>The editor’s <strong>Actions</strong> menu works on the profile open. Besides export, import
+and presets, <strong>Save current edits as new profile</strong> makes a new Custom profile of
+what the editor holds, unsaved edits included, and leaves the open profile as it
+is saved; <strong>Reset all sections to defaults</strong> does what each section’s <strong>Reset
+section to defaults</strong> does, for every section, as unsaved changes. The
+configuration history is kept per profile, and <strong>Revisions…</strong> opens the history
+of the profile open.</p>
+<p>The pages that edit one setting outside the Configuration page, such as the
+meeting page’s chat buttons, save into the active profile, and refuse while the
+default or a Managed profile is active: create and activate a Custom profile
+first.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="using-the-configuration-page">Using the Configuration page</h2><a class="sl-anchor-link" href="#using-the-configuration-page"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Using the Configuration page”</span></a></div>
+<p>Open <strong>Configuration ▸ View / Edit Configuration</strong> in the navigation, and open a
+profile from the list at the top; the editor below the list shows it. Each section is a panel
+that says what it controls and when a saved change applies; open one to edit it.
+A link to <code dir="auto">#/configuration/settings?section=call_pricing</code> (or any other section’s
+name) opens that section directly.</p>
+<p><strong>Seeing what you changed.</strong> A value that differs from the release default is
+marked <strong>Changed</strong>, or <strong>Added</strong> for an entry the release does not ship, with a
+coloured rule beside it, and a section’s heading counts how many of its settings
+differ. A section with edits you have not saved yet is marked <strong>Unsaved
+changes</strong>.</p>
+<p><strong>Putting a default back.</strong> <strong>Reset to default</strong>, beside a changed value, puts
+back the shipped value of that one setting. <strong>Reset section to defaults</strong> does it
+for a whole section, and <strong>Undo changes</strong> discards what you have edited in a
+section since the page loaded. <strong>Discard changes</strong>, at the top, does that for every
+section.</p>
+<p><strong>Lists of entries.</strong> The summary sections and the chat buttons are lists you can
+add to. A summary section the release ships cannot be deleted, because the next
+release would bring it back; <strong>Turn off</strong> it instead, and the summary skips it.
+<strong>Turn on</strong> brings back that one section with the shipped prompt. Renaming a
+shipped section turns off the old title and adds the new one in the same place.
+A chat button list is saved whole: you can remove any button and reorder the list,
+and while you have saved no list of your own, the shipped buttons apply.</p>
+<p><strong>Prices.</strong> Prices are listed by region — <code dir="auto">default</code> applies everywhere — then by
+service, then by unit. You can change a shipped price, or add a region, service
+or unit the table does not list. A shipped entry can be reset but not removed.</p>
+<p><strong>Editing as JSON or YAML.</strong> The <strong>Form / JSON / YAML</strong> switch above the
+sections shows the whole profile as one JSON or YAML document, keyed by section
+name, each section holding every one of its settings. Edit it there to change
+several settings at once or to paste a section from another deployment: what you
+type is checked as you type against the same schemas as the form, the problems
+are listed under the text, and <strong>Save changes</strong> saves it as one revision as it
+would a form edit. A section you leave out of the text keeps its values. In
+most sections a setting you remove returns to its default, as <strong>Reset to
+default</strong> would; to turn a shipped summary section off, set its prompt to
+<code dir="auto">NONE</code>. The chat buttons are the exception: that section is saved as a whole
+list, so the buttons the text holds are the list, and removing them all brings
+back the shipped buttons. Settings this deployment does not offer are left out
+of the text, as the form leaves them out, and are not taken from it if you add
+them. While the text does not parse, the page neither saves nor switches view; correct it,
+or choose <strong>Discard changes</strong>. The text of the default and Managed profiles is
+read-only, as their form is.</p>
+<p><strong>Mistakes are caught as you type.</strong> A value a save would refuse — a negative
+price, an empty voice id, a region name that is not a region code — is marked
+in red with what is wrong, and the page does not offer to save until it is
+corrected.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="what-happens-when-you-save">What happens when you save</h2><a class="sl-anchor-link" href="#what-happens-when-you-save"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “What happens when you save”</span></a></div>
+<p>Select <strong>Save changes</strong>. The dialog lists the sections you changed and asks for
+two optional things:</p>
+<ul>
+<li>a <strong>comment</strong>, recorded with the save, so the history says why it was made;</li>
+<li>a <strong>label</strong>, which keeps this revision in the history however many saves
+follow it.</li>
+</ul>
+<p><strong>The save is checked before anything is stored.</strong> Every section has a schema
+that says which settings it has and what values each accepts. The page checks
+your changes against it as you edit, and the server checks again: a save that
+breaks a rule is refused as a whole, nothing is stored, and the error names each
+setting that was wrong. For example:</p>
+<div class="expressive-code"><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/ec.w36nc.css"><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/ec.0vx5m.js"></script><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="plaintext"><code><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">call_pricing › regions › default › transcribe/streaming › seconds: must be at least 0; got -1</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="call_pricing › regions › default › transcribe/streaming › seconds: must be at least 0; got -1"><div></div></button></div></figure></div>
+<p>Read the path from left to right: the section, then each key down to the setting.
+A refusal can name a setting you did not touch: what an upgrade carried across
+from an earlier release, and what a restore put back, are stored without this
+check, and a later save of that section checks them. Correct the setting it
+names, then save again.</p>
+<p><strong>The save is checked against the version you loaded.</strong> All the sections are
+stored together, and a save is refused if anyone saved any of them after your
+page loaded — on this page, in the Edit Chat Buttons dialog, by a restore from the history, or through the API — rather than silently
+replacing their change. The page then offers two ways on:</p>
+<ul>
+<li><strong>Reload and keep my changes</strong> loads what they saved and applies your changes
+over it. Settings you both changed now hold your value, and the page lists
+them so you can check them. The chat buttons count as one setting: if the
+other save changed them, your whole list is kept. Nothing is saved until you select <strong>Save changes</strong>
+again.</li>
+<li><strong>Discard my changes and reload</strong> shows the configuration as it is now saved.</li>
+</ul>
+<p><strong>Every save is recorded.</strong> A save that changes something becomes a numbered
+revision recording who saved it, when, which sections it changed, and your comment
+and label. <strong>Revisions…</strong> opens the revision history of the profile open, where
+you can see the revisions, compare any two of them setting by setting,
+label or relabel one, or restore an earlier one. A restore puts back every section
+as it was in that revision and is itself recorded as a new revision, so it can be
+undone the same way. See
+<a href="../configuration-store/#revisions-and-audit">Revisions and audit</a>.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="copying-configuration-between-deployments-and-presets">Copying configuration between deployments, and presets</h2><a class="sl-anchor-link" href="#copying-configuration-between-deployments-and-presets"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Copying configuration between deployments, and presets”</span></a></div>
+<p>The editor’s <strong>Actions</strong> menu offers three things for the profile open. None of
+them saves anything: what they change appears on the
+page as unsaved changes, marked like your own edits, and is stored only when you
+select <strong>Save changes</strong>.</p>
+<ul>
+<li><strong>Export to a file</strong> downloads the configuration as saved — your changes over
+the release defaults, not the defaults themselves — as a JSON file. Unsaved
+edits on the page are not in it.</li>
+<li><strong>Import from a file</strong> loads such a file, for example one exported from a
+staging deployment, onto the page. Because the file holds changes rather than
+whole settings, importing it into a deployment of a later release keeps that
+release’s defaults for everything the file does not change. A section the file
+holds that this deployment does not have is listed and left out, and so is a
+setting the page does not show here, such as the engine choices on a deployment
+without the on-demand speech engine, which keeps its current value. The save
+comment is filled in with the file’s name; change it if you like. To make a
+new profile of the file instead, leaving every existing profile as it is, use
+<strong>Import</strong> in the Configuration Profiles list: it reads the file the same way,
+asks for the new profile’s name, and creates it with the file’s changes over
+the deployment defaults.</li>
+<li><strong>Apply a preset…</strong> opens a dialog listing the presets LMA ships, each with
+its description (see <a href="#configuration-presets">Configuration presets</a>). A
+preset is offered only where the deployment has every setting it changes.
+Once you choose one, the dialog lists the settings it changes in each
+section.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="configuration-presets">Configuration presets</h3><a class="sl-anchor-link" href="#configuration-presets"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Configuration presets”</span></a></div>
+<p>A <strong>preset</strong> is a complete organizational default for consent, retention and
+privacy. All four set the same settings, listed below, and change only those,
+so applying one sets every one of them whichever preset was applied before, and every other setting stays as it is. They are the choices
+of the <code dir="auto">ConfigurationPreset</code> stack parameter, and each is also stored as a
+read-only <strong>Managed</strong> profile of the same name, which the deployment rewrites on
+every stack update; activate it as it is, or copy it to a Custom profile to
+change it.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Setting</th><th>Standard (<code dir="auto">standard</code>, the default)</th><th>Internal meetings – notify participants (<code dir="auto">internal-meetings-notify</code>)</th><th>Regulated – consent required, transcript not retained (<code dir="auto">regulated-consent-required</code>)</th><th>Regulated – notify with opt-out, transcript not retained (<code dir="auto">regulated-notify</code>)</th></tr></thead><tbody><tr><td>Meeting Consent › Consent mode</td><td>Off</td><td>Notify</td><td>Opt-in</td><td>Notify</td></tr><tr><td>Meeting Consent › Consent rule (opt-in)</td><td>Each participant consents</td><td>Each participant consents</td><td>Each participant consents</td><td>Each participant consents</td></tr><tr><td>Meeting Consent › Allow a different choice per meeting</td><td>On</td><td>On</td><td>Off (a meeting may only use this mode or a stricter one)</td><td>Off (a meeting may only use this mode or a stricter one)</td></tr><tr><td>Meeting Consent › Keep evidence screenshots</td><td>On</td><td>On</td><td>On</td><td>On</td></tr><tr><td>Meeting Consent › Streaming clients without a consent step</td><td>Accept with a warning</td><td>Accept with a warning</td><td>Refuse the meeting</td><td>Refuse the meeting</td></tr><tr><td>Meeting Consent › Virtual Participant leaves after an objection</td><td>Off</td><td>Off</td><td>On</td><td>On</td></tr><tr><td>Retention › Delete the transcript after the summary</td><td>Off</td><td>Off</td><td>15 minutes after the summary</td><td>15 minutes after the summary</td></tr><tr><td>Meeting Recording › Record meeting audio</td><td>On</td><td>On</td><td>Off</td><td>Off</td></tr><tr><td>Virtual Participant › Add the meeting chat to the transcript</td><td>On</td><td>On</td><td>Off</td><td>Off</td></tr><tr><td>Amazon Transcribe › Redact personal information</td><td>Off</td><td>Off</td><td>On</td><td>On</td></tr><tr><td>Amazon Bedrock Models › Model inference geography</td><td>Global</td><td>Global</td><td>Same geography as this deployment</td><td>Same geography as this deployment</td></tr></tbody></table>
+<p>Under the Regulated preset nothing is recorded or kept until each participant
+consents. While it waits, a Virtual Participant listens for consent said aloud:
+the meeting audio is processed by the meeting’s transcription engine, and only
+the reply events are kept on the consent record. Turn <strong>Meeting Consent › Read
+spoken replies</strong> off to have it read the chat only and send no meeting audio
+anywhere before consent; the presets leave that setting as it is (see
+<a href="../meeting-consent/#spoken-replies">Spoken replies</a>). Stream Audio and the Desktop Capture App cannot collect
+each participant’s consent, so Start is refused from them; use a Virtual
+Participant on a join that supports each-participant consent. A Virtual
+Participant on the Webex join cannot tell who is present, so it never meets the
+each-participant rule, and with a different choice per meeting turned off the
+meeting cannot move to the less strict owner-attests rule, so such a meeting is
+not transcribed. On the Teams browser join, which shows no chat sender, the rule
+is met only by consent said aloud. See
+<a href="../meeting-consent/#what-each-platform-supports">What each platform supports</a>.</p>
+<p>The Regulated notify preset keeps the Regulated preset’s retention and privacy
+settings but uses Notify: recording and transcription run from the start, the
+participants are told with the notice, and an objection stops them. A meeting
+may use Notify or the stricter Opt-in, not Off. A Virtual Participant posts the
+notice in the meeting chat and reads objections there, and those said aloud and
+addressed to LMA (read from the meeting’s own transcription, unless <strong>Read
+spoken replies</strong> is off), on every join, and it leaves the meeting after an
+objection, so nothing is recorded or kept after it. Stream Audio and the Desktop Capture App
+show the notice for the LMA user to share in the meeting and capture from
+Start; an objection takes effect when the user records it with <strong>Participant
+objected</strong>. Clients that show no consent step (the browser extension, the
+Stream Audio embed and Desktop Capture App builds from before the consent step)
+are refused, as under Regulated. See
+<a href="../meeting-consent/#stream-audio-and-the-desktop-capture-app">Stream Audio and the Desktop Capture App</a>.</p>
+<p>Standard holds the shipped defaults, so applying it in the editor puts these
+settings back after another preset changed them. The layer’s tests
+hold each preset to exactly the values in this table.</p>
+<p>Some controls are stack parameters rather than settings. They are not part of
+any profile, so no preset can set them, and a deployment that needs the
+posture of either Regulated preset also sets them when the stack is deployed or updated:</p>
+<ul>
+<li><code dir="auto">LogLevel</code> — <code dir="auto">INFO</code> (the default) or <code dir="auto">WARN</code>. <code dir="auto">DEBUG</code> logs meeting content.</li>
+<li><code dir="auto">MeetingRecordExpirationInDays</code> and <code dir="auto">TranscriptionExpirationInDays</code> — the
+longest meeting records and transcript segments are kept, which the Retention
+section can shorten but not lengthen (see
+<a href="#retention-settings-the-stack-limits">Retention: settings the stack limits</a>).</li>
+<li><code dir="auto">AudioRecordingExpirationInDays</code> and <code dir="auto">CloudWatchLogsExpirationInDays</code> — how
+long recordings and logs are kept.</li>
+<li><code dir="auto">EnableVideoRecording</code> — meeting video from the Virtual Participant and the
+Desktop Capture App. A Virtual Participant’s video is also chosen per meeting.</li>
+</ul>
+<p>Where each service that receives meeting content runs is listed in
+<a href="../infrastructure-and-security/#where-meeting-content-is-processed">Where meeting content is processed</a>.
+The consent settings are described in <a href="../meeting-consent/">Meeting Consent</a>, and
+the deletion in <a href="../transcript-deletion/">Transcript Deletion After the Summary</a>.</p>
+<p>To start a new deployment from a preset, or from a configuration
+file of your own, set the <code dir="auto">ConfigurationPreset</code> and <code dir="auto">CustomConfigPath</code> stack
+parameters; see
+<a href="../configuration-store/#choosing-the-default-configuration-at-deploy-time">Choosing the default configuration at deploy time</a>.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="changing-a-setting-outside-the-web-ui">Changing a setting outside the web UI</h2><a class="sl-anchor-link" href="#changing-a-setting-outside-the-web-ui"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Changing a setting outside the web UI”</span></a></div>
+<p>The page saves through the <code dir="auto">updateConfiguration</code> GraphQL operation, which an
+Admin can also call directly, with the same checks. It and the older per-section
+operations are described in the
+<a href="../configuration-store/">Unified Configuration Store</a> reference. Editing the
+configuration table in the DynamoDB console does not work: the records are
+stored compressed, and an attribute added beside a compressed record is ignored.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="notes-on-specific-settings">Notes on specific settings</h2><a class="sl-anchor-link" href="#notes-on-specific-settings"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Notes on specific settings”</span></a></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="choosing-amazon-bedrock-models">Choosing Amazon Bedrock models</h3><a class="sl-anchor-link" href="#choosing-amazon-bedrock-models"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Choosing Amazon Bedrock models”</span></a></div>
+<p><strong>Summaries and meeting insights</strong> (summaries, pasted meeting invitations, the speaker-naming pass,
+agenda derivation and the transcript knowledge-base query) and
+<strong>Meeting assistant</strong> (the meeting assistant and the
+troubleshooting agent) offer the same list but have different defaults, because
+they are chosen for different jobs. The first defaults to
+<code dir="auto">global.anthropic.claude-sonnet-5-5</code>: summarisation is batch work where the
+quality of the answer is what matters. The second
+defaults to <code dir="auto">global.anthropic.claude-haiku-5-5</code>, run at a low reasoning effort
+(<strong>Meeting Assistant › Reasoning effort</strong>). The assistant answers mid-meeting and
+is sometimes spoken aloud, so its default is chosen on answer quality, time to the
+first word and cost together. Over thirteen meeting-assistant requests against
+real meeting transcripts, Claude Haiku 5.5 at low effort gave the answer judged
+better than Claude Haiku 4.5’s on ten, at about a tenth of the cost, because its
+per-token prices are a tenth of Haiku 4.5’s. The trade-off is latency: its median
+time to the first word of an answer was 3.3 s, against 2.1 s for Haiku 4.5, since
+the Claude 5 generation reasons before it answers. A deployment where the fastest
+reply matters more than answer quality can choose
+<code dir="auto">global.anthropic.claude-haiku-4-5-20251001-v1:0</code> instead.</p>
+<p>Summaries cost more on Sonnet 5.5 than on Haiku 4.5 — roughly 27% more input
+tokens, and two to three times the output tokens, for a noticeably longer
+summary. The Claude 5 generation reasons before it answers and the reasoning is
+billed as output, so one summary of the same meeting consumes roughly three to
+four times the output tokens it does on Claude 4.5 at the same size, and its
+tokenizer counts a given transcript as roughly a quarter more input tokens. If
+cost matters more than the last increment of quality, use
+<code dir="auto">global.anthropic.claude-haiku-4-5-20251001-v1:0</code>.</p>
+<p><strong>Meeting assistant knowledge bases</strong> offers a shorter list. It names the model the
+meeting assistant’s knowledge bases generate an answer with, and a Bedrock
+Knowledge Base can be driven with fewer models than the agent itself runs on —
+per individual model, not by family or version — so the list is a record of what
+has been verified rather than a rule. See
+<a href="../meeting-assistant/#the-knowledge-base-model">The knowledge-base model</a>.</p>
+<p><strong>Key frame text</strong> offers only image-capable models, because the model reads a
+picture of the shared screen. See <a href="../meeting-video/">Meeting Video and Key Frames</a>.</p>
+<p>A <code dir="auto">global.</code> profile routes to whichever region has capacity; a <code dir="auto">us.</code> profile keeps
+inference within the United States. Pick the one your data-residency position
+allows. Whichever you choose, enable access to that model in the Amazon Bedrock
+console for the region you deploy into first — see
+<a href="../prerequisites-and-deployment/#amazon-bedrock-model-access">Amazon Bedrock Model Access</a>.
+The Configuration page offers only the models listed here.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="teams-meeting-end-detection">Teams meeting-end detection</h3><a class="sl-anchor-link" href="#teams-meeting-end-detection"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Teams meeting-end detection”</span></a></div>
+<p>The Virtual Participant section’s three <strong>Teams</strong> settings (milliseconds between meeting checks, and the two counts of checks before leaving) apply to the
+Teams browser join path only, and no deployment should normally need to change
+them — see
+<a href="../virtual-participant/#how-the-vp-decides-a-meeting-has-ended">How the VP decides a meeting has ended</a>
+for what each signal measures and why the two thresholds differ so much.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="closing-meetings-that-were-never-ended">Closing meetings that were never ended</h3><a class="sl-anchor-link" href="#closing-meetings-that-were-never-ended"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Closing meetings that were never ended”</span></a></div>
+<p><strong>Meeting Processing › Minutes without speech before a meeting is ended</strong> backs the scheduled reaper that ends meetings
+whose client disconnected without sending its end-of-meeting event; otherwise
+those meetings show as “In Progress” for as long as their record is retained. The
+reaper runs every 15 minutes, so a meeting can remain in progress for the timeout
+plus one interval. Its liveness signal is the meeting record’s last update, which
+a transcript segment refreshes, so a meeting that is still connected but has
+produced no finalized speech for longer than the timeout is also ended; keep the
+value comfortably longer than the longest quiet stretch your meetings have.
+Meetings still being processed by the upload pipeline are left to the upload
+finalizer. The reaper is always deployed; a timeout of 0 makes it end nothing.</p>
+<p><strong>Days to look back for meetings that were never ended</strong> bounds how much history each run examines. A
+meeting that started before the window is never closed automatically, so if you
+are updating a deployment that has accumulated older meetings stuck in progress,
+raise it once on the Configuration page, let a run
+complete, and put it back; no stack update is needed. Each run also stops after
+reading 500 candidate meetings, newest first. See
+<a href="../troubleshooting/#meeting-stuck-in-progress">Troubleshooting → Meeting Stuck In Progress</a>.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="related">Related</h2><a class="sl-anchor-link" href="#related"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Related”</span></a></div>
+<ul>
+<li><a href="../configuration-store/">Unified Configuration Store</a> — the storage, caching,
+validation and revision history behind these settings</li>
+<li><a href="../transcript-summarization/">Transcript Summarization</a>,
+<a href="../nova-sonic-setup/">Nova Sonic 2 Setup</a>, <a href="../microvm-asr/">MicroVM ASR</a> and
+<a href="../meeting-cost-estimate/">Meeting Cost Estimate</a> — what each section’s
+settings do</li>
+</ul></div><footer class="sl-flex astro-ddtxxk7k"><div class="meta sl-flex astro-ddtxxk7k"></div><div class="pagination-links print:hidden astro-b5raizh3" dir="ltr"><a href="/amazon-transcribe-live-meeting-assistant/cloudformation-parameters/" rel="prev" class="astro-b5raizh3"><svg aria-hidden="true" class="astro-b5raizh3 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg><span class="astro-b5raizh3">Previous<br class="astro-b5raizh3"><span class="link-title astro-b5raizh3">CloudFormation Parameters</span></span></a><a href="/amazon-transcribe-live-meeting-assistant/configuration-store/" rel="next" class="astro-b5raizh3"><svg aria-hidden="true" class="astro-b5raizh3 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg><span class="astro-b5raizh3">Next<br class="astro-b5raizh3"><span class="link-title astro-b5raizh3">Unified Configuration Store</span></span></a></div></footer></div></div></main></div></div></div></div></body></html>

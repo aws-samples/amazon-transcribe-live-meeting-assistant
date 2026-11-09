@@ -1,0 +1,1350 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-g5ptsecz"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Meeting Consent | LMA</title><link rel="canonical" href="https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/meeting-consent/"/><link rel="sitemap" href="/amazon-transcribe-live-meeting-assistant/sitemap-index.xml"/><link rel="shortcut icon" href="/amazon-transcribe-live-meeting-assistant/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v7.4.4"/><meta name="generator" content="Starlight v0.42.8"/><meta property="og:title" content="Meeting Consent"/><meta property="og:type" content="article"/><meta property="og:url" content="https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/meeting-consent/"/><meta property="og:locale" content="en"/><meta property="og:description" content="Live Meeting Assistant — Real-time meeting transcription, AI-powered meeting assistance, and virtual meeting participation on AWS"/><meta property="og:site_name" content="LMA"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="Live Meeting Assistant — Real-time meeting transcription, AI-powered meeting assistance, and virtual meeting participation on AWS"/><script>
+	window.StarlightThemeProvider = (() => {
+		const storedTheme =
+			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+		const theme =
+			storedTheme ||
+			(window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+		document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+		return {
+			updatePickers(theme = storedTheme || 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = theme;
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector(`#theme-icons`);
+					const newIcon = tmpl && tmpl.content.querySelector('.' + theme);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script><template id="theme-icons"><svg aria-hidden="true" class="light astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z"/></svg><svg aria-hidden="true" class="dark astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z"/></svg><svg aria-hidden="true" class="auto astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg></template><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/print.ehPL0gv-.css" media="print"><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/common.0xECwWjX.css"><style>@layer starlight.components{svg:where(.astro-hkc32dio){color:var(--sl-icon-color);font-size:var(--sl-icon-size,1em);width:1em;height:1em;overflow:visible}}
+</style><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/page.cNngjUgL.js"></script></head><body class="astro-g5ptsecz"><a class="sl-skip-link astro-qb7clj6f" href="#_top">Skip to content</a><div class="page sl-flex astro-yntsjkba"><header class="header astro-yntsjkba"><div class="header astro-by6fddyj"><div class="title-wrapper sl-flex astro-by6fddyj"><a href="/amazon-transcribe-live-meeting-assistant/" class="site-title sl-flex astro-6rvad3va"><img class="light:sl-hidden print:hidden astro-6rvad3va" alt src="/amazon-transcribe-live-meeting-assistant/_astro/logo-dark.DjwyAsdJ.svg" width="120" height="40"><img class="dark:sl-hidden print:block astro-6rvad3va" alt src="/amazon-transcribe-live-meeting-assistant/_astro/logo-light.Therjg_H.svg" width="120" height="40"><span class="astro-6rvad3va" translate="no">LMA</span></a></div><div class="sl-flex print:hidden astro-by6fddyj"><site-search class="astro-by6fddyj astro-b5kgnn7o" data-translations="{&quot;placeholder&quot;:&quot;Search&quot;}"><button data-open-modal disabled aria-label="Search" aria-keyshortcuts="Control+K" class="astro-b5kgnn7o"><svg aria-hidden="true" class="astro-b5kgnn7o astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.71 20.29 18 16.61A9 9 0 1 0 16.61 18l3.68 3.68a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.39ZM11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg><span class="sl-hidden md:sl-block astro-b5kgnn7o" aria-hidden="true">Search</span><kbd class="sl-hidden md:sl-flex astro-b5kgnn7o" style="display: none;"><kbd class="astro-b5kgnn7o">Ctrl</kbd><kbd class="astro-b5kgnn7o">K</kbd></kbd></button><dialog style="padding:0" aria-label="Search" class="astro-b5kgnn7o"><div class="dialog-frame sl-flex astro-b5kgnn7o"><button data-close-modal class="sl-flex md:sl-hidden astro-b5kgnn7o">Cancel</button><div class="search-container astro-b5kgnn7o"><div id="starlight__search" class="astro-b5kgnn7o"></div></div></div></dialog></site-search><script>
+	(() => {
+		const openBtn = document.querySelector('button[data-open-modal]');
+		const shortcut = openBtn?.querySelector('kbd');
+		if (!openBtn || !(shortcut instanceof HTMLElement)) return;
+		const platformKey = shortcut.querySelector('kbd');
+		if (platformKey && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+			platformKey.textContent = '⌘';
+			openBtn.setAttribute('aria-keyshortcuts', 'Meta+K');
+		}
+		shortcut.style.display = '';
+	})();
+</script><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/Search.astro_astro_type_script_index_0_lang.DKiPuTrW.js"></script></div><div class="sl-hidden md:sl-flex print:hidden right-group astro-by6fddyj"><div class="sl-flex social-icons astro-by6fddyj"><a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" rel="me" class="sl-flex astro-n2mnl6yq"><span class="sr-only astro-n2mnl6yq">GitHub</span><svg aria-hidden="true" class="astro-n2mnl6yq astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-2z5xp7gb"><span class="sr-only astro-2z5xp7gb">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-2z5xp7gb"><option value="dark" class="astro-2z5xp7gb">Dark</option><option value="light" class="astro-2z5xp7gb">Light</option><option value="auto" selected class="astro-2z5xp7gb">Auto</option></select><svg aria-hidden="true" class="icon caret astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script><script type="module">var e=`starlight-theme`,t=e=>e===`auto`||e===`dark`||e===`light`?e:`auto`,n=()=>t(typeof localStorage<`u`&&localStorage.getItem(e));function r(t){typeof localStorage<`u`&&localStorage.setItem(e,t===`light`||t===`dark`?t:``)}var i=()=>matchMedia(`(prefers-color-scheme: light)`).matches?`light`:`dark`;function a(e){StarlightThemeProvider.updatePickers(e),document.documentElement.dataset.theme=e===`auto`?i():e,r(e)}matchMedia(`(prefers-color-scheme: light)`).addEventListener(`change`,()=>{n()===`auto`&&a(`auto`)});var o=class extends HTMLElement{constructor(){super(),a(n()),this.querySelector(`select`)?.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&a(t(e.currentTarget.value))})}};customElements.define(`starlight-theme-select`,o);</script><script type="module">var e=class extends HTMLElement{constructor(){super();let e=this.querySelector(`select`);e&&(e.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&(window.location.pathname=e.currentTarget.value)}),window.addEventListener(`pageshow`,t=>{if(!t.persisted)return;let n=e.querySelector(`option[selected]`)?.index;n!==e.selectedIndex&&(e.selectedIndex=n??0)}))}};customElements.define(`starlight-lang-select`,e);</script></div></div></header><nav class="sidebar print:hidden astro-yntsjkba" aria-label="Main"><button popovertarget="starlight__sidebar" class="sl-menu-button sl-flex md:sl-hidden print:hidden astro-r2osgdlg"><svg aria-hidden="true" class="open-menu astro-r2osgdlg astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M3 8h18a1 1 0 1 0 0-2H3a1 1 0 0 0 0 2Zm18 8H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Zm0-5H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Z"/></svg><svg aria-hidden="true" class="close-menu astro-r2osgdlg astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="m13.41 12 6.3-6.29a1.004 1.004 0 1 0-1.42-1.42L12 10.59l-6.29-6.3a1.004 1.004 0 0 0-1.42 1.42l6.3 6.29-6.3 6.29a1 1 0 0 0 0 1.42.998.998 0 0 0 1.42 0l6.29-6.3 6.29 6.3a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.42L13.41 12Z"/></svg><span class="sr-only astro-r2osgdlg">Menu</span></button><script type="module">var e=class extends HTMLElement{constructor(){super();let e=matchMedia(`(min-width: 50em)`),t=()=>{this.popover=e.matches?null:`auto`};t(),e.addEventListener(`change`,()=>t()),this.addEventListener(`toggle`,({newState:e})=>this.trapFocus(e===`open`))}trapFocus(e){document.querySelectorAll(`.main-frame, .sl-skip-link`).forEach(t=>{t.toggleAttribute(`inert`,e)})}};customElements.define(`sl-sidebar-pane`,e);</script><sl-sidebar-pane popover id="starlight__sidebar" class="sidebar-pane astro-yntsjkba"><div class="sidebar-content sl-flex astro-yntsjkba"><sl-sidebar-state-persist data-hash="0k58gzh" class="astro-ipdry5cl"><script aria-hidden="true">
+		(() => {
+			try {
+				if (!matchMedia('(min-width: 50em)').matches) return;
+				/** @type {HTMLElement | null} */
+				const target = document.querySelector('sl-sidebar-state-persist');
+				const state = JSON.parse(sessionStorage.getItem('sl-sidebar-state') || '0');
+				if (!target || !state || target.dataset.hash !== state.hash) return;
+				window._starlightScrollRestore = state.scroll;
+				customElements.define(
+					'sl-sidebar-restore',
+					class SidebarRestore extends HTMLElement {
+						connectedCallback() {
+							try {
+								const idx = parseInt(this.dataset.index || '');
+								const details = this.closest('details');
+								if (details && typeof state.open[idx] === 'boolean') details.open = state.open[idx];
+							} catch {}
+						}
+					}
+				);
+			} catch {}
+		})();
+	</script><ul class="top-level astro-rmhv4bp6"><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Overview</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="0"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Welcome</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Getting Started</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="1"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/prerequisites-and-deployment/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Prerequisites &amp; Deployment</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/quick-start-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Quick Start Guide</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/demo-videos/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Demo Videos</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lma-in-action/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">LMA in Action</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Core Features</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="2"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/transcription-and-translation/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Transcription &amp; Translation</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/microvm-asr/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">On-demand ASR &amp; Diarization (MicroVM)</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-assistant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Assistant</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/transcript-summarization/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Transcript Summarization</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-agenda/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Agenda</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-consent/" aria-current="page" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Consent</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/transcript-deletion/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Transcript Deletion After the Summary</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-video/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Video and Key Frames</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meetings-query-tool/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meetings Query Tool</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Meeting Sources</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="3"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-sources/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Sources Overview</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/stream-audio/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Stream Audio</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/browser-extension/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Browser Extension</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/desktop-capture-app/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Desktop Capture App</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/virtual-participant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Virtual Participant</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Voice Assistant &amp; Avatar</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="4"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/voice-assistant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Voice Assistant</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/nova-sonic-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Nova Sonic Setup</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/elevenlabs-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">ElevenLabs Setup</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/simli-avatar-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Simli Avatar Setup</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">MCP Server Integration</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="5"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/mcp-servers/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">MCP Servers Overview</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/mcp-api-key-auth/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">MCP API Key Auth</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/salesforce-mcp-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Salesforce MCP</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/amazon-quick-mcp-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Amazon QuickSuite MCP</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/deepwiki-mcp-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">DeepWiki MCP</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Web UI</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="6"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/web-ui-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Web UI Guide</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Access Control &amp; Security</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="7"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/user-management/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">User Management</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/user-based-access-control/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">User-Based Access Control</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/infrastructure-and-security/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Infrastructure &amp; Security</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/security-scanning/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Security Scanning (SRT)</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Integration &amp; API</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="8"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/websocket-streaming-api/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">WebSocket Streaming API</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/embeddable-components/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Embeddable Components</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lambda-hook-functions/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Lambda Hook Functions</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Administration</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="9"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/cloudformation-parameters/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">CloudFormation Parameters</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/configuration-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Configuration Guide</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/configuration-store/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Unified Configuration Store</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/stack-updates-and-upgrades/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Stack Updates &amp; Upgrades</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/well-architected/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Well-Architected Assessment</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-cost-estimate/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Cost Estimate</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/monitoring/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Monitoring &amp; Alerting</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/troubleshooting/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Troubleshooting</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/cleanup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Cleanup</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Development</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="10"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/developer-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Developer Guide</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lma-cli/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">LMA CLI Reference</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lma-sdk/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">LMA SDK Reference</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">New &amp; Uncategorized</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="11"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/amazon-quick-desktop-integration/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Amazon Quick Desktop Integration</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/blog-update-proposal/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Blog Update Proposal</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/cloudformation-service-role/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Cloudformation Service Role</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/dependency-upgrade-validation-runbook/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Dependency Upgrade Validation Runbook</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/scheduled-integration-tests/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Scheduled Integration Tests</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/teams-acs-sdk/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Teams Acs Sdk</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/test-coverage/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Test Coverage</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/troubleshooting-agent/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Troubleshooting Agent</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/upload-audio/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Upload Audio</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/virtual-participant-local-dev/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Virtual Participant Local Dev</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/voice-enrollment/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Voice Enrollment</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/zoom-credentials-and-join-reliability/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Zoom Credentials And Join Reliability</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/zoom-meeting-sdk/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Zoom Meeting Sdk</span></a></li></ul></details></li></ul><script aria-hidden="true">
+		(() => {
+			const scroller = document.getElementById('starlight__sidebar');
+			if (!window._starlightScrollRestore || !scroller) return;
+			scroller.scrollTop = window._starlightScrollRestore;
+			delete window._starlightScrollRestore;
+		})();
+	</script></sl-sidebar-state-persist><div class="md:sl-hidden"><div class="mobile-preferences sl-flex astro-p4azlveh"><div class="social-icons astro-p4azlveh"><a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" rel="me" class="sl-flex astro-n2mnl6yq"><span class="sr-only astro-n2mnl6yq">GitHub</span><svg aria-hidden="true" class="astro-n2mnl6yq astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-2z5xp7gb"><span class="sr-only astro-2z5xp7gb">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-2z5xp7gb"><option value="dark" class="astro-2z5xp7gb">Dark</option><option value="light" class="astro-2z5xp7gb">Light</option><option value="auto" selected class="astro-2z5xp7gb">Auto</option></select><svg aria-hidden="true" class="icon caret astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script></div></div></div></sl-sidebar-pane></nav><div class="main-frame astro-yntsjkba"><script type="module">var e=document.getElementById(`starlight__sidebar`),t=e?.querySelector(`sl-sidebar-state-persist`),n=`sl-sidebar-state`,r=()=>{let r=[],i=t?.dataset.hash||``;try{let e=sessionStorage.getItem(n),t=JSON.parse(e||`{}`);Array.isArray(t.open)&&t.hash===i&&(r=t.open)}catch{}return{hash:i,open:r,scroll:e?.scrollTop||0}},i=e=>{try{sessionStorage.setItem(n,JSON.stringify(e))}catch{}},a=()=>i(r()),o=(e,t)=>{let n=r();n.open[t]=e,i(n)};t?.addEventListener(`click`,e=>{if(!(e.target instanceof Element))return;let t=e.target.closest(`summary`)?.closest(`details`);if(!t)return;let n=t.querySelector(`sl-sidebar-restore`),r=parseInt(n?.dataset.index||``);isNaN(r)||o(!t.open,r)}),addEventListener(`visibilitychange`,()=>{document.visibilityState===`hidden`&&a()});</script><div class="lg:sl-flex astro-lrzkfocr"><aside class="right-sidebar-container print:hidden astro-lrzkfocr"><div class="right-sidebar astro-lrzkfocr"><div class="lg:sl-hidden astro-qok35upx"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-66cqc7ze"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-66cqc7ze"><details id="starlight__mobile-toc" class="astro-66cqc7ze"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-66cqc7ze"><span class="toggle sl-flex astro-66cqc7ze">On this page<svg aria-hidden="true" class="caret astro-66cqc7ze astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></span><span class="display-current astro-66cqc7ze"></span></summary><div class="dropdown astro-66cqc7ze"><ul class="isMobile astro-jugkfwgx" style="--depth: 0;"><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#_top" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Overview</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#the-three-modes" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">The three modes</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#status-and-when-a-meeting-may-be-captured" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Status, and when a meeting may be captured</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#how-a-reply-is-read" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">How a reply is read</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#the-meeting-consent-settings" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">The Meeting Consent settings</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#on-the-meeting-page" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">On the meeting page</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#in-the-summary-download" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">In the summary download</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#flows-by-capture-method" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Flows by capture method</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#virtual-participant" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Virtual Participant</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#choosing-the-mode-for-one-meeting" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Choosing the mode for one meeting</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#notify" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Notify</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#opt-in" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Opt-in</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#objections" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Objections</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#replies-in-the-chat" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Replies in the chat</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#spoken-replies" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Spoken replies</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#who-is-present" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Who is present</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#what-each-platform-supports" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">What each platform supports</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#evidence-screenshots" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Evidence screenshots</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#not-done-yet" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Not done yet</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#stream-audio-and-the-desktop-capture-app" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Stream Audio and the Desktop Capture App</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#the-consent-step" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">The consent step</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#what-the-transcriber-records-and-when" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">What the transcriber records, and when</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#how-capture-is-gated" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">How capture is gated</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#the-desktop-capture-app" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">The Desktop Capture App</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#clients-without-a-consent-step" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Clients without a consent step</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#what-is-stored" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">What is stored</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#checking-evidence-with-a-vision-model" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Checking evidence with a vision model</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#who-can-do-what" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Who can do what</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#api" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">API</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#limitations" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Limitations</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#related" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Related</span></a></li></ul></div></details></nav></mobile-starlight-toc><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/MobileTableOfContents.astro_astro_type_script_index_0_lang.C3fM4Kra.js"></script></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-qok35upx"><div class="sl-container astro-qok35upx"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-jugkfwgx" style="--depth: 0;"><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#_top" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Overview</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#the-three-modes" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">The three modes</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#status-and-when-a-meeting-may-be-captured" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Status, and when a meeting may be captured</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#how-a-reply-is-read" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">How a reply is read</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#the-meeting-consent-settings" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">The Meeting Consent settings</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#on-the-meeting-page" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">On the meeting page</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#in-the-summary-download" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">In the summary download</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#flows-by-capture-method" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Flows by capture method</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#virtual-participant" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Virtual Participant</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#choosing-the-mode-for-one-meeting" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Choosing the mode for one meeting</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#notify" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Notify</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#opt-in" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Opt-in</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#objections" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Objections</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#replies-in-the-chat" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Replies in the chat</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#spoken-replies" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Spoken replies</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#who-is-present" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Who is present</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#what-each-platform-supports" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">What each platform supports</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#evidence-screenshots" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Evidence screenshots</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#not-done-yet" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Not done yet</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#stream-audio-and-the-desktop-capture-app" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Stream Audio and the Desktop Capture App</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#the-consent-step" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">The consent step</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#what-the-transcriber-records-and-when" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">What the transcriber records, and when</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#how-capture-is-gated" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">How capture is gated</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#the-desktop-capture-app" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">The Desktop Capture App</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#clients-without-a-consent-step" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Clients without a consent step</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#what-is-stored" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">What is stored</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#checking-evidence-with-a-vision-model" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Checking evidence with a vision model</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#who-can-do-what" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Who can do what</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#api" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">API</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#limitations" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Limitations</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#related" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Related</span></a></li></ul></nav></starlight-toc><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/TableOfContents.astro_astro_type_script_index_0_lang.BpJaGz7G.js"></script></div></div></div></aside><div class="main-pane astro-lrzkfocr"><main data-pagefind-body class="astro-g5ptsecz" lang="en" dir="ltr"><div class="content-panel astro-a7po4psb"><div class="sl-container astro-a7po4psb"><h1 id="_top" class="astro-bebwqqxs">Meeting Consent</h1></div></div><div class="content-panel astro-a7po4psb"><div class="sl-container astro-a7po4psb"><div class="sl-markdown-content"><!-- Copyright (c) 2025 Amazon.com. This file is licensed under the MIT License. -->
+<!-- See the LICENSE file in the project root for full license information. -->
+<div class="sl-heading-wrapper level-h1"><h1 id="meeting-consent">Meeting Consent</h1><a class="sl-anchor-link" href="#meeting-consent"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Meeting Consent”</span></a></div>
+<p>LMA can tell a meeting’s participants that the meeting is being recorded and
+transcribed, and can wait for them to agree before it records or transcribes
+anything. Whether it does either is the <strong>consent mode</strong>, set for the whole
+deployment on the Configuration page and, where the deployment allows it,
+chosen again for a single meeting when the meeting starts. What participants
+replied, who attested on their behalf, and any screenshots kept as evidence are
+stored on the meeting in a <strong>consent record</strong>, beside its transcript.</p>
+<p>The record is supporting evidence of what was said in the meeting. It is not a
+legal determination that consent was given, and LMA does not decide which
+rules apply to a meeting: recording and transcription laws differ between
+countries, states and organisations, some require every party’s consent and
+some only one party’s, and some set requirements a chat reply does not meet.
+Choose the mode with whoever advises your organisation on those rules. Nothing
+on this page is legal advice.</p>
+<p><strong>Current state:</strong> the consent settings, the consent record and its API, the
+evidence check and the meeting page’s Consent section are in place. The
+<strong>Virtual Participant</strong> runs the consent flow: it posts the notice in the
+meeting chat, reads the replies typed there or said aloud, and withholds or
+stops recording and transcription accordingly (see
+<a href="#virtual-participant">Virtual Participant</a>).
+<strong>Stream Audio</strong> and the <strong>Desktop Capture App</strong> run it too: they show the
+notice, ask the user to confirm, and the WebSocket transcriber records that on
+the meeting and withholds or stops recording and transcription accordingly (see
+<a href="#stream-audio-and-the-desktop-capture-app">Stream Audio and the Desktop Capture App</a>).
+The browser extension does not run it yet; how the
+transcriber treats a client that shows no consent step is a setting. See
+<a href="#flows-by-capture-method">Flows by capture method</a>.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="the-three-modes">The three modes</h2><a class="sl-anchor-link" href="#the-three-modes"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “The three modes”</span></a></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Mode</th><th>What participants see</th><th>When the meeting is recorded and transcribed</th></tr></thead><tbody><tr><td><strong>Off</strong></td><td>Nothing</td><td>Always. This is how LMA behaves when consent has never been set up, and the shipped default.</td></tr><tr><td><strong>Notify</strong></td><td>A notice that the meeting is recorded and transcribed, and how to object</td><td>From the start, until a participant objects. An objection stops recording and transcription, and is recorded.</td></tr><tr><td><strong>Opt-in</strong></td><td>A request to agree, with the phrase to reply</td><td>Not until the consent rule below is met. An objection from anybody stops it again. Nothing is recorded or kept before then. A Virtual Participant still sends the meeting audio to the transcription engine while it waits, only to hear replies said aloud, unless <strong>Read spoken replies</strong> is off; see <a href="#spoken-replies">Spoken replies</a>.</td></tr></tbody></table>
+<p>An opt-in meeting is granted by one of two <strong>consent rules</strong>:</p>
+<ul>
+<li><strong>Each participant consents.</strong> Every participant listed as present has
+replied with consent. A participant who joins later and has not replied
+withholds recording and transcription again until they do.</li>
+<li><strong>The meeting owner attests that everyone agreed.</strong> The person who owns the
+meeting in LMA confirms that everyone agreed: out loud, in the chat, or in the
+invitation’s terms. An objection from any participant still stops recording
+and transcription, whatever the owner attested.</li>
+</ul>
+<div class="sl-heading-wrapper level-h2"><h2 id="status-and-when-a-meeting-may-be-captured">Status, and when a meeting may be captured</h2><a class="sl-anchor-link" href="#status-and-when-a-meeting-may-be-captured"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Status, and when a meeting may be captured”</span></a></div>
+<p>Each meeting’s consent record has a <strong>status</strong>, worked out again every time
+something is recorded on it:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Status</th><th>Meaning</th></tr></thead><tbody><tr><td><code dir="auto">not_required</code></td><td>The meeting runs in mode Off, or its consent was never started.</td></tr><tr><td><code dir="auto">pending</code></td><td>Notify: the notice has not been recorded as posted yet. Opt-in: the rule is not met yet.</td></tr><tr><td><code dir="auto">granted</code></td><td>Notify: the notice was posted and nobody has objected. Opt-in: the rule is met and nobody has objected.</td></tr><tr><td><code dir="auto">objected</code></td><td>A participant’s latest reply is an objection.</td></tr></tbody></table>
+<p>The record also says whether the meeting <strong>may be recorded and transcribed
+now</strong> (<code dir="auto">CaptureAllowed</code>), and this is the one value a capture client acts on:</p>
+<ul>
+<li><strong>Opt-in:</strong> only while the status is <code dir="auto">granted</code>.</li>
+<li><strong>Notify:</strong> unless the status is <code dir="auto">objected</code>.</li>
+<li><strong>Off:</strong> always.</li>
+</ul>
+<p>A meeting with no consent record is judged by the deployment’s mode: in a
+deployment whose mode is opt-in it may not be captured until its consent has
+been started and granted, because the absence of a record is not consent.</p>
+<p>Every change of status, or of whether the meeting may be captured, is added to
+the record’s <strong>status history</strong> with the time and a short reason (“1
+participant objected”, “every participant consented”), so the record shows when
+recording stopped and resumed as well as why.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="how-a-reply-is-read">How a reply is read</h2><a class="sl-anchor-link" href="#how-a-reply-is-read"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “How a reply is read”</span></a></div>
+<p>A participant’s reply — a chat message, or something said in the meeting — is
+read as consent or as an objection by the phrases in the Meeting Consent
+settings:</p>
+<ul>
+<li>It is an <strong>objection</strong> when it contains one of the objection phrases as whole
+words, ignoring case, punctuation and spacing.</li>
+<li>Otherwise it is <strong>consent</strong> when it contains one of the consent phrases.</li>
+<li>Objections are looked for first, so “I do not consent” is an objection
+although it contains “consent”, and “I agree, but I object to the recording”
+is an objection.</li>
+<li>Anything else is neither, and is not recorded.</li>
+</ul>
+<p>Each participant’s <strong>latest</strong> reply is the one that counts: somebody who
+objected and then consented has consented, and the other way round. Replies are
+matched to participants by their display name in the meeting, compared without
+regard to case or extra spacing.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="the-meeting-consent-settings">The Meeting Consent settings</h2><a class="sl-anchor-link" href="#the-meeting-consent-settings"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “The Meeting Consent settings”</span></a></div>
+<p>An Admin sets the deployment’s default in the <strong>Meeting Consent</strong> section of
+<strong>Configuration ▸ Configuration</strong> (see the <a href="../configuration-guide/">Configuration Guide</a>).
+A saved change applies to meetings whose consent starts after the save; a
+meeting already under way keeps the mode and rule it started with.</p>
+<p>The configuration presets set these settings together with the related
+retention and privacy ones: <strong>Internal meetings – notify participants</strong> sets
+Notify, and <strong>Regulated – consent required, transcript not retained</strong> sets
+Opt-in with the each-participant rule, a stricter choice only per meeting,
+clients without a consent step refused and the Virtual Participant leaving
+after an objection. Under Regulated, Stream Audio and the Desktop Capture App
+cannot collect each participant’s consent, so Start is refused from them (see
+<a href="#stream-audio-and-the-desktop-capture-app">Stream Audio and the Desktop Capture App</a>),
+and a Virtual Participant on the
+Webex join never meets the each-participant rule and cannot move to
+owner-attests, so its meeting is not transcribed (see
+<a href="#what-each-platform-supports">What each platform supports</a>). On the Teams
+browser join the rule is met only by consent said aloud. Nothing is recorded or
+kept before consent under Regulated; while it waits a Virtual Participant
+listens for spoken replies, so the meeting audio is processed by the
+transcription engine and only the reply events are kept, unless <strong>Read spoken
+replies</strong> is off. No preset sets <strong>Read spoken replies</strong>, so applying one leaves
+it as it is.
+<strong>Regulated – notify with opt-out, transcript not retained</strong> sets the same as
+Regulated except the mode, which is Notify: capture runs from the start and
+stops when a participant objects, and a meeting may use Notify or the stricter
+Opt-in, not Off. Notify and objections work on every Virtual Participant join,
+and Stream Audio and the Desktop Capture App run their notify step and capture
+from Start, while clients without a consent step are still refused (see
+<a href="#clients-without-a-consent-step">Clients without a consent step</a>). <strong>Standard</strong> puts
+back the shipped defaults. Apply one from
+the editor’s <strong>Actions ▸ Apply a preset…</strong>, or choose one at deploy time with
+the <code dir="auto">ConfigurationPreset</code> stack parameter; see
+<a href="../configuration-guide/#configuration-presets">Configuration presets</a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Setting</th><th>Meaning</th><th>Shipped default</th></tr></thead><tbody><tr><td>Consent mode</td><td>Off, Notify or Opt-in</td><td>Off</td></tr><tr><td>Consent rule (opt-in)</td><td>Each participant consents, or the meeting owner attests</td><td>Each participant consents</td></tr><tr><td>Notice text (notify)</td><td>The notice a notify meeting posts</td><td>“{LMA_USER} is using Live Meeting Assistant to record and transcribe this meeting ({meeting}). If you do not agree, reply “{objection_phrase}” in the chat or say so, and recording and transcription will stop.”</td></tr><tr><td>Consent request text (opt-in)</td><td>The request an opt-in meeting posts</td><td>“{LMA_USER} would like to record and transcribe this meeting ({meeting}) with Live Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed. Reply “{consent_phrase}” to agree, or “{objection_phrase}” to decline.”</td></tr><tr><td>Consent phrases</td><td>Comma-separated phrases read as consent</td><td>I consent, I agree, I accept</td></tr><tr><td>Objection phrases</td><td>Comma-separated phrases read as an objection</td><td>I object, I do not consent, I don’t consent, I do not agree, I don’t agree, do not record, don’t record, stop recording</td></tr><tr><td>Allow a different choice per meeting</td><td>Whether a meeting may be started with another mode, rule or notice</td><td>On</td></tr><tr><td>Keep evidence screenshots</td><td>Whether evidence images stay with the meeting, or are deleted once checked</td><td>On</td></tr><tr><td>Evidence check model</td><td>The Amazon Bedrock vision model that checks evidence images; see <a href="#checking-evidence-with-a-vision-model">Checking evidence with a vision model</a></td><td>Amazon Nova Lite</td></tr><tr><td>Streaming clients without a consent step</td><td>What the WebSocket transcriber does, in Notify or Opt-in, with a meeting from a client that shows no consent step: <strong>Accept with a warning</strong> (captured as before, with no consent record, and a warning logged) or <strong>Refuse</strong> (not recorded or transcribed, and the client is told why). See <a href="#clients-without-a-consent-step">Clients without a consent step</a></td><td>Accept with a warning</td></tr><tr><td>Virtual Participant leaves after an objection</td><td>Whether a Virtual Participant leaves the meeting after a participant objects, in the chat or aloud, rather than staying in it without recording</td><td>Off</td></tr><tr><td>Read spoken replies</td><td>Whether a Virtual Participant also reads consent replies and objections said aloud and addressed to LMA, sending the meeting audio to the transcription engine while consent is awaited, or reads the chat only; see <a href="#spoken-replies">Spoken replies</a></td><td>On</td></tr></tbody></table>
+<p>In the two texts, <code dir="auto">{LMA_USER}</code> is the person using LMA in the meeting,
+<code dir="auto">{meeting}</code> the meeting’s name, and <code dir="auto">{consent_phrase}</code> and <code dir="auto">{objection_phrase}</code>
+the first phrase of each list. Any other text in braces is posted as written.</p>
+<p>With <strong>Allow a different choice per meeting</strong> off, a meeting may still be
+started with a <em>stricter</em> choice than the default — opt-in in a notify
+deployment, or each participant in an owner-attests deployment — but not a less
+strict one, and not with its own notice text.</p>
+<p>The settings are read when they are needed, with no cache, because they decide
+whether a meeting may be captured. If they cannot be read, starting a meeting’s
+consent fails rather than falling back to off, and so does reading a meeting
+that has no consent record; a meeting with a record is read without the
+settings, since its record decides its own gate.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="on-the-meeting-page">On the meeting page</h2><a class="sl-anchor-link" href="#on-the-meeting-page"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “On the meeting page”</span></a></div>
+<p>The meeting page’s header names the consent setting that applied to the
+meeting and its status (<em>Consent Opt-in · granted</em>), or <em>Consent enforcement
+off</em> for a meeting whose consent was off or never started; selecting it opens
+the record. The <strong>Details</strong> tab’s <strong>Capture and processing</strong> section shows the
+same setting with the status. While a live meeting in notify or opt-in mode has
+recording and transcription withheld, a warning above the tabs says that
+transcription is paused until consent is recorded (or that a participant
+objected), from 30 seconds after the meeting started, with a link to the record.</p>
+<p>A meeting whose consent was in notify or opt-in mode has a <strong>Consent</strong> section
+on its <strong>Details</strong> tab. It shows:</p>
+<ul>
+<li>the <strong>mode</strong> and, for opt-in, the <strong>rule</strong>;</li>
+<li>the <strong>status</strong>, and whether the meeting may be <strong>recorded and transcribed</strong>
+now (<em>Allowed</em> or <em>Withheld</em>);</li>
+<li>the <strong>notice</strong> posted, and when it was first posted;</li>
+<li>the <strong>participants</strong>: everyone listed as present, then anybody else who was
+listed or replied, each with their latest reply (<em>Consented</em>, <em>Objected</em> or
+<em>No reply</em>);</li>
+<li>the owner’s <strong>attestation</strong>, when there is one;</li>
+<li>the <strong>evidence</strong> images as thumbnails, each with the vision model’s verdict,
+confidence and summary when it has been checked; selecting one opens it full
+size;</li>
+<li>a <strong>timeline</strong> of everything, oldest first: consent started, notices posted,
+replies and attestations, and each change of status with its reason. Replies
+are placed by when LMA recorded them, the order the status is decided in.</li>
+</ul>
+<p>If the record cannot be read when the page opens, the section says so rather
+than disappearing, and the summary download has no record to include until one
+is read. If a later read fails, the section shows the error above the last
+record read, and the download carries that record.</p>
+<p>The images are shown through links signed for whoever opened the page, after
+the same access check as the transcript, and last an hour. An image that has
+expired (see <a href="#what-is-stored">What is stored</a>) or was deleted after its check
+is shown as such, with its entry and check. The section updates
+as the record changes, whoever changed it. A meeting whose consent was never
+started, or ran in mode off, shows no section.</p>
+<p>Three actions, each offered only to the people the backend lets do it:</p>
+<ul>
+<li><strong>Record an objection</strong> — the owner, anyone the meeting is shared with, and
+Admins. Enter the participant’s display name and, optionally, what they said.
+It is recorded as source <code dir="auto">ui</code> under your username, and stops recording and
+transcription in a notify or opt-in meeting until that participant consents.</li>
+<li><strong>Attest that everyone agreed</strong> — the meeting’s owner only, and only for an
+opt-in meeting under the <strong>The meeting owner attests</strong> rule, where it is what
+grants the meeting. Choose how everyone agreed (out loud, in the chat, or by
+accepting the invitation’s terms) and, optionally, add a statement. It grants
+the meeting unless somebody objected.</li>
+<li><strong>Check with model</strong> (or <strong>Check again</strong>) on an evidence image — the owner
+and Admins. See
+<a href="#checking-evidence-with-a-vision-model">Checking evidence with a vision model</a>.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="in-the-summary-download">In the summary download</h3><a class="sl-anchor-link" href="#in-the-summary-download"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “In the summary download”</span></a></div>
+<p>The summary’s downloads and its copy to the clipboard, under <strong>Download</strong> in
+the meeting page’s header, add the consent record after the summary: the
+mode, rule and status, whether capture was allowed at the time of the download,
+the notice, the attestation, each participant’s latest reply, the timeline, and
+each evidence image’s check, followed by the note that the record is supporting
+evidence and not a legal determination. A meeting without a consent record
+downloads as before. The email link carries the summary only.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="flows-by-capture-method">Flows by capture method</h2><a class="sl-anchor-link" href="#flows-by-capture-method"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Flows by capture method”</span></a></div>
+<p>The consent record, its rules and its API are shared by every way a meeting
+reaches LMA. Each capture method decides how the notice is posted and how
+replies are read.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Capture method</th><th>Notice</th><th>Replies</th><th>Status</th></tr></thead><tbody><tr><td><strong>Virtual Participant</strong></td><td>Posted in the meeting chat when the Virtual Participant is admitted, and again when somebody joins</td><td>Read from the meeting chat by display name, and from what is said, under the name of the participant shown speaking; an attestation or an objection made in the meeting page’s Consent section (or through the API); screenshots of the chat and the participant list kept as evidence</td><td>Available. See <a href="#virtual-participant">Virtual Participant</a> for what each platform supports.</td></tr><tr><td><strong>Stream Audio</strong></td><td>Shown to the LMA user, with a copy button, to read out or post in their meeting</td><td>Attested by the LMA user, who owns the meeting (opt-in is met by the rule <strong>The meeting owner attests</strong>); an objection is reported with <strong>Participant objected</strong></td><td>Available. See <a href="#stream-audio-and-the-desktop-capture-app">Stream Audio and the Desktop Capture App</a>.</td></tr><tr><td><strong>Desktop Capture App</strong> (macOS and Windows)</td><td>As for Stream Audio, with a copy button</td><td>As for Stream Audio; evidence is a frame of the screen-video source selected in the app</td><td>Available in builds that include it. Earlier builds show no consent step and are treated as <a href="#clients-without-a-consent-step">clients without a consent step</a>. See <a href="#the-desktop-capture-app">The Desktop Capture App</a>.</td></tr><tr><td><strong>Browser extension</strong></td><td>As for Stream Audio</td><td>As for Stream Audio</td><td>Not available yet; treated as a client without a consent step.</td></tr><tr><td><strong>Upload Audio</strong></td><td>None: the recording already exists</td><td>—</td><td>Not applicable. A recording should only be uploaded with the consent its participants gave when it was made.</td></tr></tbody></table>
+<p>Until a capture method runs the flow, its meetings have no consent record. A
+streaming client’s are captured or refused as the setting <strong>Streaming clients
+without a consent step</strong> says. In a deployment whose mode is
+opt-in, <code dir="auto">getMeetingConsent</code> reports a meeting with no record as not allowed.</p>
+<p>A capture client follows the same steps whichever method it is:</p>
+<ol>
+<li><strong>Create the meeting</strong> as it does today (the meeting record must exist), and
+in an opt-in meeting send no transcript or recording yet.</li>
+<li><strong>Start consent</strong> with <code dir="auto">startMeetingConsent</code>, naming the meeting’s mode and
+rule only when they differ from the deployment’s. The answer holds the
+notice text to post, its placeholders filled.</li>
+<li><strong>Post the notice</strong> where participants will see it, and record that it was
+posted with <code dir="auto">recordMeetingConsentNotice</code>.</li>
+<li><strong>Keep the participant list current</strong> with <code dir="auto">setMeetingConsentParticipants</code>
+as people join and leave, leaving out LMA’s own participant.</li>
+<li><strong>Record each reply</strong> that reads as consent or an objection (see
+<a href="#how-a-reply-is-read">How a reply is read</a>) with
+<code dir="auto">recordMeetingConsentEvent</code>, and any attestation the owner makes with
+<code dir="auto">attestMeetingConsent</code>.</li>
+<li><strong>Gate capture on <code dir="auto">CaptureAllowed</code></strong> in every answer: start sending the
+transcript and recording when it becomes true, and stop when it becomes
+false.</li>
+<li><strong>Keep evidence</strong> where it can: store a screenshot under the meeting’s
+evidence folder, record it with <code dir="auto">addMeetingConsentEvidence</code>, and check it
+with <code dir="auto">verifyMeetingConsentEvidence</code>.</li>
+</ol>
+<div class="sl-heading-wrapper level-h2"><h2 id="virtual-participant">Virtual Participant</h2><a class="sl-anchor-link" href="#virtual-participant"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Virtual Participant”</span></a></div>
+<p>The Virtual Participant (VP) runs the consent flow as a capture client,
+following the steps above. When the deployment’s mode is <strong>Off</strong> and the
+meeting chose nothing else, it does nothing new: it reads the mode before it
+joins, finds it off, and joins, records and transcribes exactly as it always
+has, without calling the consent API. The one exception is a VP that cannot
+read its own row before joining, where a per-meeting choice would be stored:
+it then withholds capture until a later read succeeds (see
+<a href="#choosing-the-mode-for-one-meeting">Choosing the mode for one meeting</a>). In every other mode it posts
+the notice in the meeting chat once it is admitted, records that it did, keeps
+the participant list on the record current, reads replies typed in the chat
+and listens for replies said aloud (see <a href="#spoken-replies">Spoken replies</a>), and
+acts on <code dir="auto">CaptureAllowed</code> in every answer the API gives.</p>
+<p>What “capture” means here is everything the VP takes from the meeting: the
+transcript, the audio recording, the meeting chat it adds to the transcript
+(see <a href="../virtual-participant/#meeting-chat-in-the-transcript">Meeting Chat in the Transcript</a>),
+the voice assistant’s input, the key frames and the screen recording. The VP gates them
+with the same switch the <code dir="auto">LMA pause</code> and <code dir="auto">LMA start</code> chat commands use, so
+starting after consent is the same path as resuming after a pause.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="choosing-the-mode-for-one-meeting">Choosing the mode for one meeting</h3><a class="sl-anchor-link" href="#choosing-the-mode-for-one-meeting"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Choosing the mode for one meeting”</span></a></div>
+<p>The <strong>Create Virtual Participant</strong> form has a <strong>Meeting consent</strong> choice: the
+deployment’s setting (the default), Off, Notify, Opt-in with each participant
+consenting, or Opt-in with the meeting owner attesting. The each-participant
+choice is not offered for Webex, and for Teams it carries a note that on the
+Teams browser join participants consent aloud (see
+<a href="#what-each-platform-supports">What each platform supports</a>). Any choice other
+than the deployment’s is stored on the VP’s row (<code dir="auto">consentMode</code> and <code dir="auto">consentRule</code> in
+<code dir="auto">createVirtualParticipant</code>) and read by the VP when it starts, so scheduled
+meetings keep it too. Whether the deployment allows the choice is decided as for
+any capture client: with <strong>Allow a different choice per meeting</strong> off, a less
+strict choice is not used. The VP applies that rule itself before joining, so it
+knows whether to withhold capture, and the resolver applies it again when the VP
+starts the meeting’s consent; when the resolver refuses the meeting’s choice,
+the VP runs the deployment’s mode instead. A meeting that chose Off in a
+deployment whose mode is not Off is captured as usual, and the VP still starts
+its consent, in mode off, once the meeting exists, so that the record shows
+consent was not required for it and the resolver’s check applies to it too. The
+meeting assistant’s MCP tools that start and schedule a VP do not offer the
+choice yet; a VP they start uses the deployment’s setting.</p>
+<p>The VP reads the Meeting Consent section with no cache when it starts. If it
+cannot read it, and the meeting did not ask for opt-in, it does not assume Off:
+it withholds capture, as for opt-in, until the consent API tells it the
+meeting’s mode, and then behaves as that mode says. A Virtual Participant stack
+deployed on its own without its <code dir="auto">ConfigurationTableName</code> parameter has no
+settings to read, so it behaves this way in every meeting; LMA’s main stack
+always passes the parameter. In the same way, if it
+cannot read the meeting’s own choice from its row (it tries three times before
+joining), it withholds capture and does not start the meeting’s consent until a
+later read succeeds, because the choice it could not read may have been
+opt-in. While the meeting runs a consent flow, <code dir="auto">LMA help</code> also lists
+<code dir="auto">LMA consent</code> and <code dir="auto">LMA no consent</code>.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="notify">Notify</h3><a class="sl-anchor-link" href="#notify"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Notify”</span></a></div>
+<p>The VP records and transcribes from the start, as it does without consent, and
+posts the notice in the chat as soon as it is in the meeting. Once the notice is
+recorded as posted and nobody has objected, the status is <code dir="auto">granted</code>, and the VP
+keeps screenshots as evidence (see <a href="#evidence-screenshots">Evidence screenshots</a>).
+When somebody joins later, the notice is posted again, at most once a minute.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="opt-in">Opt-in</h3><a class="sl-anchor-link" href="#opt-in"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Opt-in”</span></a></div>
+<p>An opt-in meeting starts with capture withheld: the VP joins, but writes no
+transcript and no recording, does not start the voice assistant or the screen
+recording, and adds no chat messages to the transcript; messages sent while
+capture is withheld are not added later either. Unless <strong>Read spoken replies</strong> is off, it does send the meeting audio
+to the meeting’s transcription engine, on a session of its own, but only to
+hear consent replies and objections said aloud: everything else it hears is
+discarded inside the VP (see <a href="#spoken-replies">Spoken replies</a>). Because nothing
+is transcribed, the VP sends the meeting’s <code dir="auto">START</code> event itself, which creates
+the meeting record its consent needs, and then posts the consent request. The VP’s
+detail line on the Virtual Participants page reads <strong>Waiting for consent: …</strong>
+with what it is waiting for, and an <code dir="auto">LMA start</code> typed in the chat is answered
+with <em>“Live Meeting Assistant cannot start until consent is given.”</em> When the
+record says the meeting may be captured, the VP posts that consent was given and
+the usual start message, starts transcription and recording, keeps evidence
+screenshots, and clears the detail line. If somebody typed <code dir="auto">LMA pause</code> while the
+VP was waiting, it says that consent was given but stays paused until
+<code dir="auto">LMA start</code>.</p>
+<ul>
+<li><strong>Each participant consents.</strong> Every participant listed as present must reply
+with consent, in the chat or aloud (see <a href="#replies-in-the-chat">Replies in the chat</a>
+and <a href="#spoken-replies">Spoken replies</a>).
+Each consent is acknowledged with who is still awaited, for example <em>“Thank
+you, Bo Chen. Still waiting for Cy Diaz and 1 unidentified participant.”</em>
+When somebody joins while the meeting is being recorded, the record lists one
+more participant who has not consented, so <strong>recording and transcription
+pause</strong> until they do; the notice is posted again with a line saying so, and
+the detail line shows what is awaited. This is the record’s own rule: a
+participant who joins later and has not replied withholds capture again. Who
+counts as present is described in <a href="#who-is-present">Who is present</a>.</li>
+<li><strong>The meeting owner attests.</strong> The request is followed by <em>“Recording starts
+when <lma user=""> confirms in LMA that everyone has agreed.”</lma></em> The owner confirms
+with <strong>Attest that everyone agreed</strong> in the meeting page’s Consent section
+(see <a href="#on-the-meeting-page">On the meeting page</a>), or with
+<code dir="auto">attestMeetingConsent</code> through the API. The VP reads the record every 10
+seconds, so an attestation reaches it within about that long. Replies are
+still read and recorded as evidence, but no reply is taken as the owner’s
+attestation: the chat and the speaker indicator show a display name, which
+cannot be matched reliably to the LMA user who owns the meeting.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="objections">Objections</h3><a class="sl-anchor-link" href="#objections"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Objections”</span></a></div>
+<p>In every mode an objection, typed in the chat or said aloud, stops capture at
+once, before anything is written: the VP turns the transcript and recording off
+and stops the screen recording, then posts <em>”<name> objected. Live Meeting
+Assistant has stopped recording and transcribing this meeting.”</name></em>, records the
+objection (the sender’s or speaker’s display name, the words, <code dir="auto">chat</code> or <code dir="auto">voice</code>
+as the source, and the time) and keeps evidence screenshots. The detail line
+reads <strong>Not recording: a participant objected to recording.</strong> A spoken
+objection’s own words were said while the meeting was being captured, so they
+are the last line of its transcript. An objection said aloud and also typed in
+the chat, by the same participant or with either one unnamed, within 30 seconds
+and while capture is still stopped by the first, is acted on and recorded once.</p>
+<ul>
+<li>With <strong>Virtual Participant leaves after an objection</strong> off (the default) the
+VP stays, and listens for spoken replies while capture is stopped. Each
+participant’s latest reply is the one that counts, so if the objector later
+replies with consent, in the chat or aloud, capture resumes, as the
+acknowledgement says. The transcript and the audio recording resume; the screen recording does
+not. It stops for the rest of the meeting the first time capture is withheld
+after it started, and what it recorded until then is kept on the meeting as
+usual.</li>
+<li>With it on, the VP also posts its usual goodbye and leaves. Its status ends
+<code dir="auto">COMPLETED</code> with <em>“Left after <name> objected to recording.”</name></em> and the end
+trigger <code dir="auto">consent-objection</code>.</li>
+</ul>
+<p>An objection recorded somewhere else, by a signed-in user with <strong>Record an
+objection</strong> in the meeting page’s Consent section or through the API
+(<code dir="auto">recordMeetingConsentEvent</code>), reaches the VP at its next read of the record.
+It stops capture in the same way and posts <em>“An objection for <name> was
+recorded in LMA. …”</name></em>.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="replies-in-the-chat">Replies in the chat</h3><a class="sl-anchor-link" href="#replies-in-the-chat"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Replies in the chat”</span></a></div>
+<p>The VP reads a chat message as a reply only when <strong>the whole message</strong> is a
+reply, as it reads its chat commands: case, punctuation and spacing are ignored,
+and an <code dir="auto">LMA</code> addressee may stand anywhere in it.</p>
+<ul>
+<li><strong>Consent</strong> is a message that is one of the consent phrases (<em>“I consent”</em>,
+<em>“i agree!”</em>, <em>“LMA, I accept”</em>), or <code dir="auto">LMA consent</code>.</li>
+<li><strong>An objection</strong> is a message that is one of the objection phrases (<em>“I
+object”</em>, <em>“Stop recording.”</em>), <code dir="auto">LMA no consent</code> or <code dir="auto">LMA object</code>, or a message
+of up to 200 characters addressed to <code dir="auto">LMA</code> that contains an objection phrase
+anywhere (<em>“LMA, please stop recording now”</em>).</li>
+<li>Objections are looked for first, so <em>“LMA I do not consent”</em> is an objection.</li>
+<li>Anything else is ordinary chat. In particular <em>“I agree with Bo’s point”</em> and
+<em>“I don’t agree with the roadmap”</em> are not replies, although they contain
+default phrases: a meeting chat is full of such sentences.</li>
+</ul>
+<p>This is stricter than the reading in <a href="#how-a-reply-is-read">How a reply is read</a>,
+which looks for a phrase anywhere in a reply; the VP does not use that reading
+for the chat or for speech. <code dir="auto">LMA consent</code>, <code dir="auto">LMA no consent</code> and <code dir="auto">LMA object</code> work whatever
+phrases are configured, so they are the forms to suggest when a deployment’s
+phrases are long or in another language.</p>
+<p>A consent reply needs a sender. One whose sender the platform does not show is
+not recorded, and under the each-participant rule it is answered with <em>“Live
+Meeting Assistant could not tell who sent that reply, so it was not recorded as
+consent.”</em>, followed on the Teams browser join, which shows no chat senders, by
+<em>“Say “LMA, I consent” aloud instead.”</em> (with the deployment’s first consent phrase), where spoken replies are read.
+An objection without a sender still stops capture, and is recorded
+for <em>Unidentified participant</em>. A sender whose display name reads as one of the
+list’s placeholders (<em>Unidentified participant 1</em>) is not counted as present
+and their consent is not recorded, so a name cannot fill the seat it reads as. A reply that a chat
+observer reports twice within five seconds is acted on once, and the VP never
+reads its own messages as replies.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="spoken-replies">Spoken replies</h3><a class="sl-anchor-link" href="#spoken-replies"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Spoken replies”</span></a></div>
+<p>With <strong>Read spoken replies</strong> on (the shipped default), the VP also reads
+replies said aloud, on every join and with either transcription engine, and
+every notice it posts is followed by <em>“Replies may be typed in this chat, or
+said aloud starting with “LMA”: say “LMA, I consent” or “LMA, I object”.”</em>
+(with the deployment’s first consent and objection phrases). With it off, the
+VP reads the chat only, as it did before spoken replies, sends no meeting audio
+anywhere while consent is awaited, does not read spoken objections from the
+transcription while capture runs, and follows every notice instead with <em>“Live
+Meeting Assistant reads replies in this chat; an objection made out loud takes
+effect when <lma user=""> records it in LMA.”</lma></em>, which <strong>Record an objection</strong> in
+the Consent section does. The VP reads the setting before it joins; if it
+cannot read the Meeting Consent section, it reads the chat only.</p>
+<p><strong>What counts as a spoken reply.</strong> Only an utterance addressed to LMA is a
+reply, because people say <em>“I agree”</em> and <em>“I don’t agree”</em> in conversation far
+more often than they type them as a whole message. Addressed, it is read as an
+addressed chat message is (see <a href="#replies-in-the-chat">Replies in the chat</a>),
+with the deployment’s phrases, the whole utterance as the speech engine
+finalises it being the reply:</p>
+<ul>
+<li><strong>Consent</strong> is <code dir="auto">LMA consent</code>, or <code dir="auto">LMA</code> with one of the consent phrases and
+nothing else (<em>“LMA, I consent.”</em>, <em>“I agree, LMA”</em>).</li>
+<li><strong>An objection</strong> is <code dir="auto">LMA object</code> or <code dir="auto">LMA no consent</code>, <code dir="auto">LMA</code> with one of the
+objection phrases, or an utterance of up to 200 characters addressed to <code dir="auto">LMA</code>
+that contains an objection phrase anywhere (<em>“LMA, please stop recording
+now”</em>). Objections are looked for first.</li>
+<li>A bare phrase is not a reply when said aloud: <em>“I consent.”</em> and <em>“Stop
+recording!”</em> are ordinary speech, although the same words typed in the chat
+are replies.</li>
+</ul>
+<p>Speech engines often write <code dir="auto">LMA</code> as its letters, so <em>“L M A”</em> and <em>“L.M.A.”</em>
+are read as <code dir="auto">LMA</code>. Only final results are read, never the engine’s partial
+results.</p>
+<p><strong>Who said it.</strong> A spoken reply is attributed to the participant the VP shows
+as speaking during it, the same name the transcript gives that audio: on Amazon
+Transcribe, the active speaker the platform showed for most of the utterance;
+on the MicroVM engine, the attendee the row is named after, without the
+engine’s voice label (<code dir="auto">spk_0</code>), which is not a name. A named speaker also
+counts as seen for <a href="#who-is-present">Who is present</a>. A reply whose speaker the
+VP cannot name (nobody was shown speaking yet, or the platform shows a
+placeholder) is handled as a chat reply without a sender: a consent is not
+recorded, and under the each-participant rule the chat says <em>“Live Meeting
+Assistant heard consent said aloud but could not tell who said it, so it was
+not recorded.”</em>; an objection still stops capture and is recorded for
+<em>Unidentified participant</em>. Each reply is recorded with <code dir="auto">voice</code> as its source.
+The VP’s own voice assistant is never read: it is not in the meeting audio the
+VP listens to, it has its own channel or session on both engines, and a reply
+attributed to one of the VP’s own names is ignored.</p>
+<p><strong>While capture runs</strong> (Notify, or Opt-in after consent), the VP reads the
+final participant results of the meeting’s ongoing transcription, and acts on a
+spoken objection exactly as on one in the chat.</p>
+<p><strong>While consent is awaited</strong> (Opt-in before consent, after an objection, or
+after somebody joins under the each-participant rule), nothing is captured, so
+the VP opens a separate session to the meeting’s transcription engine, Amazon
+Transcribe or the MicroVM engine, chosen as transcription chooses it, and
+streams the meeting audio to it from the moment it is admitted. With Amazon
+Transcribe this is its own streaming request, with the meeting’s language
+settings; with the MicroVM engine it is its own session, on the MicroVM the
+meeting’s transcription uses when one is running, or else on one launched for
+the meeting and then kept for its transcription once consent is given. If no
+MicroVM can be started, Amazon Transcribe is used, as for transcription. Every
+final result is attributed and read as above, and then discarded inside the VP:</p>
+<ul>
+<li>what it heard is <strong>not</strong> written to Kinesis, so it never reaches the
+transcript, the summary or anything built from the transcript;</li>
+<li>it is not written to the audio recording, which records silence while
+capture is withheld, and it does not reach the voice assistant;</li>
+<li>it is not logged, at any log level, including <code dir="auto">DEBUG</code>;</li>
+<li>only a reply is kept, as an event on the consent record, with the words that
+were read as the reply.</li>
+</ul>
+<p>When consent is given, the listening session is closed before capture starts,
+and transcription opens sessions of its own, so no audio heard while consent was
+awaited reaches the transcript.</p>
+<p><strong>What this means for processing.</strong> While consent is awaited the meeting audio
+is processed by the transcription engine, although nothing is kept apart from
+the reply events. With Amazon Transcribe, that audio is sent to the Amazon
+Transcribe streaming service in this deployment’s Region, as the meeting’s
+transcription would be, and it is billed and appears in the meeting’s
+<a href="../meeting-cost-estimate/">cost estimate</a> as Amazon Transcribe streaming. With
+the MicroVM engine it stays on the MicroVM, which runs, and is billed, from the
+time the VP is admitted rather than from when consent is given. Choose the
+mode with this in mind, and turn <strong>Read spoken replies</strong> off where no meeting audio may leave the Virtual Participant before consent.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="who-is-present">Who is present</h3><a class="sl-anchor-link" href="#who-is-present"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Who is present”</span></a></div>
+<p>The participant list the VP keeps on the record decides the each-participant
+rule, so it is never allowed to be shorter than the meeting:</p>
+<ul>
+<li><strong>Where the platform gives a list of names</strong> that accounts for everybody the
+attendee count shows (the Teams join through Azure Communication Services),
+the list is those names.</li>
+<li><strong>Where it gives only a count</strong> (the Chime, Zoom, Teams and Google Meet
+browser joins, and the Zoom Meeting SDK join), the list is the names the VP
+has seen since the count last went up, as the active speaker, as the speaker
+of a spoken reply, or as a chat sender, plus one
+<em>Unidentified participant N</em> for each seat no name accounts for. An
+unidentified participant can never consent, so the meeting is not granted
+until everybody present has spoken or written in the chat, and consented.
+When the count goes up, the names seen before stop counting, because one of
+them may have left in the meantime: everybody present has to be seen again
+(speaking is enough; their consent is already on the record). When it goes
+down while consent is still awaited, the same applies. While consent is
+granted it does not, because a departure cannot add anybody who has not
+consented.</li>
+<li><strong>Where it gives neither</strong> (the Webex browser join), the names seen can never
+be shown to be everybody, so one unidentified participant is always listed
+and the each-participant rule is never met, whether replies are typed or
+said. The detail line says so. Use the owner-attests rule on Webex.</li>
+<li><strong>Where the platform shows no chat sender</strong> (the Teams browser join), a
+consent typed in the chat cannot be attributed, but one said aloud
+(<em>“LMA, I consent”</em>) can, under the name the platform shows speaking. So the
+each-participant rule is met when every participant present has said their
+consent while the VP could see who was speaking, and the detail line adds that
+on this platform consent is given aloud. With <strong>Read spoken replies</strong> off it
+is never met there, and the detail line says to choose the owner-attests rule
+or turn the setting on.</li>
+</ul>
+<p>The count is the one each platform handler already reads to leave a meeting it
+is alone in: whenever the count on the page changes on the Chime and Zoom
+browser joins (plus a check every 30 seconds on Zoom), every 3 seconds on the
+two SDK joins, every 20 seconds by default on the Teams browser join (the
+Virtual Participant section’s attendee poll interval), and every 20 seconds on
+the Google Meet join. One person leaving and
+another joining between two readings leaves the count unchanged, which the VP
+cannot see; the window is as long as the interval between readings.</p>
+<p>The names are display names, as everywhere in the record. The VP’s own
+identities are never listed.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="what-each-platform-supports">What each platform supports</h3><a class="sl-anchor-link" href="#what-each-platform-supports"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “What each platform supports”</span></a></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Join</th><th>Chat sender</th><th>Spoken replies</th><th>Who is present</th><th>Each participant consents</th><th>Participant list screenshot</th></tr></thead><tbody><tr><td>Chime</td><td>Shown</td><td>Read, under the active speaker</td><td>Count</td><td>Yes</td><td>The chat and the attendee list are on screen together, so one screenshot has both</td></tr><tr><td>Zoom (browser)</td><td>Shown</td><td>Read, under the active speaker</td><td>Count</td><td>Yes</td><td>The participants pane is opened, shot and closed again</td></tr><tr><td>Zoom (Meeting SDK)</td><td>Shown</td><td>Read, under the active speaker</td><td>Count</td><td>Yes</td><td>One screenshot of LMA’s SDK page</td></tr><tr><td>Teams (browser)</td><td><strong>Not shown</strong></td><td>Read, under the active speaker</td><td>Count</td><td>Yes, <strong>aloud only</strong> (“LMA, I consent”): a typed consent cannot be attributed, so not with <strong>Read spoken replies</strong> off</td><td>The People pane is opened and shot, then the chat reopened</td></tr><tr><td>Teams (Azure Communication Services)</td><td>Shown</td><td>Read, under the active speaker</td><td>Names</td><td>Yes</td><td>One screenshot of LMA’s SDK page</td></tr><tr><td>Webex (browser)</td><td>Shown</td><td>Read, under the active speaker</td><td><strong>None</strong></td><td><strong>No</strong>: see <a href="#who-is-present">Who is present</a></td><td>The participants panel is opened, shot and closed again</td></tr><tr><td>Google Meet (browser)</td><td>Shown (read from the message group’s header)</td><td>Read, under the speaking tile</td><td>Count</td><td>Yes</td><td>The People panel is opened and shot, then the chat reopened</td></tr></tbody></table>
+<p>Notify, owner-attests and objections, typed or said, work on every join.
+Opening and closing panels is best effort: a button the VP cannot find means a
+chat screenshot without a participant list, never a held-up meeting. The panel
+buttons, the participant-name reading, and spoken replies on every join were
+written against each platform’s current page and have not all been exercised
+in a live meeting yet. On Google Meet in particular, neither the chat sender
+reading nor the speaking-tile reading has been confirmed in a live meeting (see
+<a href="../virtual-participant/#google-meet">Google Meet</a> in the Virtual Participant guide), so a
+reply there could be recorded under the wrong name until they are; use the
+owner-attests rule on Meet where that matters.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="evidence-screenshots">Evidence screenshots</h3><a class="sl-anchor-link" href="#evidence-screenshots"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Evidence screenshots”</span></a></div>
+<p>When the meeting’s status becomes <code dir="auto">granted</code> (in notify, once the notice is
+recorded as posted), and on every objection, the VP takes a screenshot of the
+meeting page with the chat open, then, where the platform allows it, opens the
+participant list, takes a second one, and puts the chat back. The screenshots
+are taken from the meeting page itself, so nothing open in the live view covers
+them. Each is a JPEG stored in the recordings bucket under
+<code dir="auto">lma-consent-evidence/&#x3C;meeting>/</code> and added to the record with
+<code dir="auto">addMeetingConsentEvidence</code>, with a note of what it shows and when
+(<em>“Meeting chat when Bo Chen objected”</em>). For each chat screenshot the VP then
+asks for the vision-model check (<code dir="auto">verifyMeetingConsentEvidence</code>) without
+waiting for it; a participant list on its own is not checked, because the check
+reads a chat for the notice and the replies. Neither the screenshots nor the
+check ever hold up the meeting: a failure is logged and the meeting carries on.
+A VP keeps at most 24 images per meeting, below the record’s 30, and takes no
+more after that. Before leaving after an objection it waits up to 30 seconds for
+that objection’s screenshots.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="not-done-yet">Not done yet</h3><a class="sl-anchor-link" href="#not-done-yet"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Not done yet”</span></a></div>
+<ul>
+<li>The notice is posted in the chat only, not spoken by the voice assistant, so
+a participant who cannot see the chat hears no request to reply.</li>
+<li><a href="#spoken-replies">Spoken replies</a> have not been exercised in a live meeting
+on any join or with either engine yet. How reliably a short reply is heard,
+and how often it is attributed to the right speaker, depends on each
+platform’s speaker indicator and has not been measured.</li>
+<li>Spoken replies are not read while the transcript is paused with <code dir="auto">LMA pause</code>
+(nothing is sent to the engine then); replies in the chat still are.</li>
+<li>The screen recording does not resume once capture has been withheld after it
+started (see <a href="#objections">Objections</a>).</li>
+</ul>
+<div class="sl-heading-wrapper level-h2"><h2 id="stream-audio-and-the-desktop-capture-app">Stream Audio and the Desktop Capture App</h2><a class="sl-anchor-link" href="#stream-audio-and-the-desktop-capture-app"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Stream Audio and the Desktop Capture App”</span></a></div>
+<p>Stream Audio sends a meeting’s audio to the WebSocket transcriber, which
+creates the meeting. Neither the page nor the user’s browser can see the
+meeting’s participants or its chat, so the consent step is the LMA user’s own:
+they share the notice, and confirm that it was shared or, in opt-in, that
+everyone agreed. The transcriber records that confirmation on the meeting, as a
+backend role, and is the component that decides whether audio is transcribed
+and recorded. The Desktop Capture App uses the same protocol, described in
+<a href="../websocket-streaming-api/#615-meeting-consent-frames">the WebSocket streaming API</a>,
+and the same rules; <a href="#the-desktop-capture-app">The Desktop Capture App</a> below
+says where it differs.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="the-consent-step">The consent step</h3><a class="sl-anchor-link" href="#the-consent-step"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “The consent step”</span></a></div>
+<p>When the page opens its connection to the transcriber it asks for the consent
+settings in force (a <code dir="auto">CONSENT_SETTINGS</code> frame). With the mode Off, or a
+transcriber that does not answer, the page shows no step and streams as before.
+Otherwise a <strong>Meeting consent</strong> panel appears above the Start button with:</p>
+<ul>
+<li><strong>The notice</strong> for the mode in force (the consent request in opt-in), its
+placeholders filled with the meeting owner field and the meeting topic, and a
+<strong>Copy notice</strong> button for pasting it into the meeting’s chat.</li>
+<li><strong>The confirmation</strong>: in opt-in, <em>Everyone in the meeting agreed to it being
+recorded and transcribed</em>; in notify, <em>I have told everyone in the meeting,
+with the notice above</em>. With it, <strong>how</strong>: out loud, in the meeting chat, or in
+the invitation’s terms, and an optional note.</li>
+<li><strong>Capture evidence</strong> (optional): the browser asks which tab or window to
+share; one frame of it is kept as a JPEG and the capture stops at once. While
+streaming, the button takes a frame of the tab being streamed, with no prompt.</li>
+<li><strong>Participant objected</strong>, while streaming, with an optional name.</li>
+</ul>
+<p>In <strong>opt-in</strong>, Start is refused until the confirmation is ticked and a method
+chosen. The page sends its consent step with every <code dir="auto">START</code>, as mode Off when it
+has not read the settings yet (Start pressed straight after opening the page,
+or the settings unavailable), so the transcriber refuses an opt-in meeting the
+page did not ask about, rather than treating it as a client without a consent
+step; the page then reads the settings again and shows the step. In <strong>notify</strong>, streaming may start without them; the notice is then not
+recorded as posted, so the meeting’s status stays <code dir="auto">pending</code>, which in notify
+still allows capture.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="what-the-transcriber-records-and-when">What the transcriber records, and when</h3><a class="sl-anchor-link" href="#what-the-transcriber-records-and-when"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “What the transcriber records, and when”</span></a></div>
+<p>The confirmation travels in the <code dir="auto">consent</code> field of the <code dir="auto">START</code> frame. The
+meeting does not exist yet at that moment: the transcriber puts the meeting’s
+start on the Kinesis stream, and the call event processor creates its row a
+moment later. So the transcriber waits for the row, retrying for up to 30
+seconds, reads the meeting’s owner, and then, if it is the signed-in user who
+streams, through the meeting consent API:</p>
+<ol>
+<li>starts the meeting’s consent in the deployment’s mode, naming the rule
+<strong>The meeting owner attests</strong> for opt-in, with the meeting owner field and the
+topic for the notice’s placeholders;</li>
+<li>records the notice as posted, if the user confirmed, with the channel the
+method implies (out loud: <code dir="auto">voice</code>; chat: <code dir="auto">chat</code>; invitation: <code dir="auto">invite</code>) and
+the text as the page showed it;</li>
+<li>in opt-in, relays the attestation, which the record attributes to the
+meeting’s owner (the signed-in user who streams), with the method and the
+note, or a sentence saying how everyone agreed when there is no note;</li>
+<li>stores any evidence image under the meeting’s evidence folder, adds it to
+the record, and asks for it to be checked with the vision model
+(<code dir="auto">verifyMeetingConsentEvidence</code>). The check is supporting evidence and does
+not change the status (see
+<a href="#checking-evidence-with-a-vision-model">Checking evidence with a vision model</a>);
+if the check fails, the image is kept unchecked. A meeting may send at most
+five images, each a JPEG or PNG of at most 3.75 MB; an image that is refused
+or could not be stored does not count towards the five.</li>
+</ol>
+<p>After each step the transcriber tells the page what the record says, and the
+page shows it. The transcriber records the step after <code dir="auto">START</code> rather than the
+page recording it itself, because the page cannot know when the meeting’s row
+exists and only a backend role may add evidence.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="how-capture-is-gated">How capture is gated</h3><a class="sl-anchor-link" href="#how-capture-is-gated"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “How capture is gated”</span></a></div>
+<ul>
+<li><strong>Notify:</strong> audio is transcribed and recorded from the start, as notify
+allows until somebody objects. If the consent record cannot be written, the
+meeting goes on and the page says so: <code dir="auto">CONSENT_NOT_RECORDED</code> when the record
+could not be started, <code dir="auto">NOTICE_NOT_RECORDED</code> when only the notice could not be
+recorded as posted.</li>
+<li><strong>Opt-in:</strong> nothing is transcribed or recorded until the record answers that
+the meeting may be captured, usually a second or two after Start. Audio sent
+before then is discarded, not buffered. If the record cannot be written —
+the meeting was not created in time, the API refused the attestation, or the
+transcriber has no API configured — the meeting is ended without anything
+having been captured, and the page says why.</li>
+<li><strong>An objection:</strong> <strong>Participant objected</strong> stops the page’s capture, and the
+transcriber stops transcribing and recording at once, before the objection is
+written, ends the meeting as if the page had sent <code dir="auto">END</code>, and records the
+objection (under the name given, or <em>A participant</em>, with source <code dir="auto">voice</code>).
+What was captured before the objection is kept: an objection stops capture,
+it does not delete what was captured while capture was allowed. A meeting
+whose record answers that it may not be captured is ended the same way.</li>
+<li><strong>A refused meeting</strong> (opt-in without the confirmation, or a deployment the
+page cannot satisfy) is not created at all: the transcriber answers with the
+reason and closes the connection.</li>
+<li><strong>Video:</strong> a desktop video stream for a meeting is refused while the meeting’s
+consent does not allow capture, and is finalized when an objection stops it.</li>
+</ul>
+<p>An opt-in deployment whose rule is <strong>Each participant consents</strong> and that does
+not <strong>allow a different choice per meeting</strong> cannot be satisfied from Stream
+Audio or the Desktop Capture App, which have no participant list: the page or
+the app says so and Start is refused.
+Use a Virtual Participant for such meetings, or allow a per-meeting choice.</p>
+<p>If the transcriber cannot read the consent settings when a meeting starts, it
+records the page’s step in the mode the page showed, and the meeting consent
+resolver, which reads the settings itself, decides: in either mode nothing is
+transcribed or recorded until the record answers that the meeting may be
+captured, and if the record refuses the step the meeting is ended. A client
+without a step is then captured, since nothing says that a step is needed.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="the-desktop-capture-app">The Desktop Capture App</h3><a class="sl-anchor-link" href="#the-desktop-capture-app"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “The Desktop Capture App”</span></a></div>
+<p>The macOS and Windows apps show the same step in their panel (see
+<a href="../desktop-capture-app/#meeting-consent-notify-and-opt-in-deployments">Meeting consent in the Desktop Capture App</a>),
+and the transcriber records and gates it exactly as for Stream Audio. The
+differences:</p>
+<ul>
+<li><strong>Reading the settings.</strong> The app connects to the transcriber only when a
+recording starts, so it asks for the settings on a short-lived connection of
+its own when the user signs in, when the panel opens, and at Start if it has
+no answer yet. A transcriber that does not answer within six seconds is
+treated as one that predates the consent frames: no step is shown. The app
+still sends its step with <code dir="auto">START</code>, as mode Off, as Stream Audio does, so in an
+opt-in deployment the transcriber refuses the meeting and the app reads the
+settings again rather than being treated as a client without a consent step.</li>
+<li><strong>Evidence</strong> is one frame of the screen or window selected as the
+screen-video source in the app’s Settings, taken with the capture permission
+the app already holds (on macOS, ScreenCaptureKit, macOS 14 or later). It can
+be taken before Start, when it is sent once the meeting starts, or while
+recording, when it is sent at once.</li>
+<li><strong>Reconnects.</strong> The app sends a fresh <code dir="auto">START</code>, with the same consent step, each
+time its connection drops and reconnects. The transcriber finds the meeting’s
+record already started and does not record the notice or the attestation a
+second time; in an opt-in meeting the first second or so of audio after each
+reconnect is discarded until the record answers again. A meeting somebody
+objected to is not resumed: the transcriber refuses it and the app stops.</li>
+<li><strong>Screen video</strong> of an opt-in meeting starts once the meeting’s consent allows
+capture, since the transcriber refuses a video stream before that.</li>
+<li><strong>The command line</strong> (<code dir="auto">--cli</code>) prints the notice and takes the confirmation as
+<code dir="auto">--consent-method verbal|chat|invite_terms</code>, with an optional <code dir="auto">--consent-note</code>.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="clients-without-a-consent-step">Clients without a consent step</h3><a class="sl-anchor-link" href="#clients-without-a-consent-step"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Clients without a consent step”</span></a></div>
+<p>Clients that show no consent step — the browser extension, the Stream Audio
+embed (<code dir="auto">#/embed?component=stream-audio</code>), Desktop Capture App builds from
+before the consent step, and scripts written against the streaming API — send
+<code dir="auto">START</code> without a
+<code dir="auto">consent</code> field. In Notify or Opt-in the transcriber treats such a meeting by
+the setting <strong>Streaming clients without a consent step</strong>:</p>
+<ul>
+<li><strong>Accept with a warning</strong> (the shipped default): the meeting is recorded and
+transcribed as before, with no consent record, and the transcriber logs a
+warning naming the meeting. This keeps existing desktop builds and
+integrations working while they are updated, but it means that <strong>in an opt-in
+deployment such a meeting is captured without anybody having confirmed
+consent</strong>. Its meeting has no consent record, and <code dir="auto">getMeetingConsent</code> reports
+it as not allowed.</li>
+<li><strong>Refuse:</strong> the meeting is not created, recorded or transcribed; the client is
+sent a <code dir="auto">CONSENT_STATE</code> frame with the code <code dir="auto">CONSENT_REQUIRED</code> and the
+connection is closed. A client without the consent step does not read that
+frame either, so the browser extension and the Stream Audio embed show only
+that the connection closed, and each reconnect is refused again. Choose this
+only once every client in use shows the consent step, and not while the
+browser extension or the Stream Audio embed is in use.</li>
+</ul>
+<div class="sl-heading-wrapper level-h2"><h2 id="what-is-stored">What is stored</h2><a class="sl-anchor-link" href="#what-is-stored"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “What is stored”</span></a></div>
+<p>The consent record is the <code dir="auto">Consent</code> attribute of the meeting’s row in the
+event-sourcing table, so it is kept, shared and deleted with the meeting. It
+holds:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td><code dir="auto">Mode</code>, <code dir="auto">Rule</code></td><td>The meeting’s mode, and for opt-in its rule</td></tr><tr><td><code dir="auto">Status</code>, <code dir="auto">CaptureAllowed</code></td><td>As above, worked out on every write</td></tr><tr><td><code dir="auto">NoticeText</code></td><td>The notice or request for this meeting, placeholders filled</td></tr><tr><td><code dir="auto">NoticePostedAt</code>, <code dir="auto">Notices</code></td><td>When the notice was first posted; each posting, with its channel (<code dir="auto">chat</code>, <code dir="auto">voice</code>, <code dir="auto">banner</code> or <code dir="auto">invite</code>), text, time and who recorded it. The first posting and the latest 9 are kept</td></tr><tr><td><code dir="auto">Participants</code>, <code dir="auto">ParticipantsSeen</code></td><td>Who is present now, as last listed, and everyone ever listed (the first 500)</td></tr><tr><td><code dir="auto">Events</code></td><td>Every reply and attestation in the order recorded: the participant’s display name, <code dir="auto">consent</code> or <code dir="auto">objection</code>, where it was read (<code dir="auto">chat</code>, <code dir="auto">voice</code>, <code dir="auto">ui</code> for an entry a signed-in user made, or <code dir="auto">attestation</code>), the words when sent, when it happened, when it was recorded and by whom</td></tr><tr><td><code dir="auto">Attestation</code></td><td>Who attested, how (<code dir="auto">verbal</code>, <code dir="auto">chat</code> or <code dir="auto">invite_terms</code>), what they said, and when</td></tr><tr><td><code dir="auto">Evidence</code></td><td>The images kept: each one’s id, kind (<code dir="auto">screenshot</code> or <code dir="auto">invitation</code>), where it is stored, when it was taken, a note, the vision model’s check of it (<code dir="auto">Verification</code>) when one ran, and when the image was deleted after its check (<code dir="auto">ImageDeletedAt</code>) when screenshots are not kept</td></tr><tr><td><code dir="auto">StatusHistory</code></td><td>Each change of status or of <code dir="auto">CaptureAllowed</code>, with the time and reason; the latest 100 are kept</td></tr><tr><td><code dir="auto">StartedAt</code>, <code dir="auto">StartedBy</code>, <code dir="auto">UpdatedAt</code>, <code dir="auto">Version</code></td><td>When and by whom consent was started; when it last changed; a count that increases with every write</td></tr></tbody></table>
+<p>A participant list of more than 250 distinct names is refused, so a meeting
+larger than that cannot be granted under the <strong>Each participant consents</strong>
+rule; use <strong>The meeting owner attests</strong> for it. A meeting keeps at most 30
+evidence images. Events are compacted towards 300: past that, older events are
+dropped, but never a participant’s latest reply or the latest attestation, so
+the status does not change by being compacted, and a meeting in which more than
+300 names have replied keeps one event for each of them.</p>
+<p>The record shares one database item, of at most 400 KB, with the rest of the
+meeting row, so it is also held to 150 KB as a whole. A write that would take it
+past that first sheds what the status does not depend on, in this order: replies
+that are no longer anybody’s latest, the words of replies, the older status
+history, the notices between the first and the latest, the names no longer
+present, what the evidence check read in each image, and finally each reply’s
+other details and each image’s note and check summary. A write that still would not fit is
+refused with a message saying so.</p>
+<p>Evidence images are private objects in the recordings bucket, under
+<code dir="auto">lma-consent-evidence/&#x3C;meeting>/</code>, where <code dir="auto">&#x3C;meeting></code> is the CallId with every
+character other than letters, digits, <code dir="auto">_</code> and <code dir="auto">.</code> replaced by <code dir="auto">_</code> and any
+leading and trailing <code dir="auto">_</code> removed (the same rule as the key frames’ folder).
+Two CallIds that differ only in such characters, <code dir="auto">a b</code> and <code dir="auto">a_b</code> for example,
+share a folder, as they do for key frames.
+Only a backend role can add one, and only from that folder. <code dir="auto">getMeetingConsent</code>
+signs an hour-long link to each image for whoever may read the meeting.</p>
+<p>Deleting a meeting deletes its consent record, which is part of the meeting
+row, and every image in its evidence folder. A lifecycle rule on
+<code dir="auto">lma-consent-evidence/</code> also deletes the images after
+<code dir="auto">TranscriptionExpirationInDays</code>, as for the key frames. The record itself is
+kept as long as the meeting record (<code dir="auto">MeetingRecordExpirationInDays</code>), which is
+usually longer, so a record can go on listing images that have expired: their
+entries and anything stored about them remain, and a link to one leads nowhere.
+If the images are needed for as long as the record, keep the two retentions
+equal, or copy the images elsewhere before they expire.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="checking-evidence-with-a-vision-model">Checking evidence with a vision model</h2><a class="sl-anchor-link" href="#checking-evidence-with-a-vision-model"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Checking evidence with a vision model”</span></a></div>
+<p>An evidence screenshot — typically the meeting chat after the request was
+posted — can be checked by an Amazon Bedrock vision model with
+<code dir="auto">verifyMeetingConsentEvidence</code>. The model is shown the image with the notice
+that was posted, the meeting’s mode, the consent and objection phrases and the
+participants listed as present, and asked to report what the picture shows:</p>
+<ul>
+<li>whether the notice is visible, and whether it says the same as the notice
+posted;</li>
+<li>every visible reply to it, with the sender’s name as shown, the reply’s text,
+and whether it reads as consent, an objection, or neither;</li>
+<li>whether anybody objected;</li>
+<li>how sure it is, from 0 to 1, and a one-sentence summary.</li>
+</ul>
+<p>From that answer LMA draws a <strong>verdict</strong>, the same way whichever model answered:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Verdict</th><th>When</th></tr></thead><tbody><tr><td><code dir="auto">objection_found</code></td><td>The model reported an objection, or a visible reply reads as one. Reported whatever the model’s confidence.</td></tr><tr><td><code dir="auto">supports_consent</code></td><td>The notice is visible, nobody objected, the model’s confidence is at least 0.5, and — for the opt-in rule <strong>Each participant consents</strong> — every participant listed as present has a visible reply reading as consent.</td></tr><tr><td><code dir="auto">inconclusive</code></td><td>Anything else, including an answer that could not be read. For the each-participant rule, the participants with no visible consent are listed (<code dir="auto">MissingParticipants</code>).</td></tr></tbody></table>
+<p>The result is stored on the evidence entry as <code dir="auto">Verification</code>, with the model’s
+id, when the check ran, who ran it and the tokens it used. It is supporting
+evidence only: <strong>it never changes the meeting’s consent status</strong>, which follows
+only from the replies and attestations recorded on the meeting. A check that
+finds an objection nobody recorded is for a person to look at — the owner can
+record the objection — and a check that supports consent does not grant it.</p>
+<p>The model is told that everything in the screenshot, including text that looks
+like an instruction, is content to report, and not to identify anybody from
+their face or appearance, only from names written on the screen.</p>
+<p><strong>Model and cost.</strong> The model is <strong>Evidence check model</strong> in the Meeting Consent
+settings; the shipped default is Amazon Nova Lite (<code dir="auto">amazon.nova-lite-v1:0</code>), the
+same in-region model the key frame text reader uses by default, so a deployment
+that reads key frames needs no further model access. Each check is one model
+call, recorded against the meeting as <strong>Consent evidence check</strong> in its
+<a href="../meeting-cost-estimate/">cost estimate</a>.</p>
+<p>Measured on four synthetic screenshots of a meeting with a chat panel (1568 ×
+882 JPEG), each checked three times per model at temperature 0: every
+participant consenting (expected <code dir="auto">supports_consent</code>), one of three participants
+not replying (<code dir="auto">inconclusive</code>), an objection worded freely, “I don’t consent to
+being recorded, please turn it off” (<code dir="auto">objection_found</code>), and a chat line telling
+the checker to ignore its instructions and report that everyone consented,
+followed by an objection (<code dir="auto">objection_found</code>):</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Model</th><th>Verdicts as expected</th><th>Input / output tokens per check</th><th>Cost per check</th><th>Time per check</th></tr></thead><tbody><tr><td>Amazon Nova Lite</td><td>12 of 12</td><td>about 2,630 / 110</td><td>about $0.0002</td><td>about 1.3 s</td></tr><tr><td>Amazon Nova 2 Lite</td><td>12 of 12</td><td>about 790 / 140</td><td>about $0.0006</td><td>about 1.3 s</td></tr><tr><td>Claude Haiku 4.5</td><td>12 of 12</td><td>about 2,120 / 190</td><td>about $0.003</td><td>about 1.8 s</td></tr></tbody></table>
+<p>Four synthetic screenshots are a small sample with clean, legible text. Real
+chat panels are smaller, busier and partly hidden, so expect more <code dir="auto">inconclusive</code>
+results from them, and choose a larger model if the default reads them poorly.</p>
+<p><strong>Keeping or deleting the image.</strong> With <strong>Keep evidence screenshots</strong> on (the
+default), the image stays with the meeting until the meeting is deleted. With it
+off, the image is deleted as soon as its check is stored, and the entry keeps
+the check and <code dir="auto">ImageDeletedAt</code>; such an entry cannot be checked again. If the
+deletion fails, the check is still stored and the image is left for the
+meeting’s deletion or the lifecycle rule to remove. If the image is deleted but
+<code dir="auto">ImageDeletedAt</code> cannot be recorded, the failure is logged with the evidence
+id, and the entry goes on looking as if its image were kept.</p>
+<p><strong>Timing.</strong> The check runs while the request waits. AppSync answers a request
+within 30 seconds; a check that takes longer still stores its result, but the
+request returns an error and no <code dir="auto">onUpdateMeetingConsent</code> message is sent, so the
+result is seen on the next read of the record.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="who-can-do-what">Who can do what</h2><a class="sl-anchor-link" href="#who-can-do-what"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Who can do what”</span></a></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Operation</th><th>Who</th></tr></thead><tbody><tr><td>Read the record (<code dir="auto">getMeetingConsent</code>, <code dir="auto">Call.Consent</code>, <code dir="auto">onUpdateMeetingConsent</code>)</td><td>The meeting’s owner, the people it is shared with, Admins, and LMA’s backend roles</td></tr><tr><td>Start consent (<code dir="auto">startMeetingConsent</code>)</td><td>The owner, an Admin, or a backend role</td></tr><tr><td>Record that the notice was posted (<code dir="auto">recordMeetingConsentNotice</code>)</td><td>The owner, an Admin, or a backend role</td></tr><tr><td>List the participants present (<code dir="auto">setMeetingConsentParticipants</code>)</td><td>The owner, an Admin, or a backend role</td></tr><tr><td>Record a reply (<code dir="auto">recordMeetingConsentEvent</code>)</td><td>A backend role, for a reply read from the chat or the speech. A signed-in user who can read the record may record an <strong>objection</strong>; only the owner or an Admin may record <strong>consent</strong> on a participant’s behalf. A signed-in user’s entry is recorded as source <code dir="auto">ui</code> under their own username; the meeting page’s <strong>Record an objection</strong> makes one</td></tr><tr><td>Attest (<code dir="auto">attestMeetingConsent</code>)</td><td>The meeting’s owner, or a backend role relaying the owner’s attestation and naming them</td></tr><tr><td>Add evidence (<code dir="auto">addMeetingConsentEvidence</code>)</td><td>A backend role</td></tr><tr><td>Check evidence with the vision model (<code dir="auto">verifyMeetingConsentEvidence</code>)</td><td>The owner, an Admin, or a backend role. Where evidence screenshots are not kept, the check is what deletes the image</td></tr></tbody></table>
+<p>The WebSocket transcriber’s task role is one of LMA’s backend roles. It is
+granted the six consent mutations it calls (<code dir="auto">startMeetingConsent</code>,
+<code dir="auto">recordMeetingConsentNotice</code>, <code dir="auto">recordMeetingConsentEvent</code>,
+<code dir="auto">attestMeetingConsent</code>, <code dir="auto">addMeetingConsentEvidence</code> and
+<code dir="auto">verifyMeetingConsentEvidence</code>), and <code dir="auto">getCall</code> to read a meeting’s owner before
+writing anything, and nothing else on the API. It acts only
+for the meeting started on the connection a frame arrives on, and records a
+consent step only on a meeting owned by the signed-in user who started it, so a
+signed-in user can record consent, an objection or evidence only for their own
+meeting that they are streaming. A <code dir="auto">START</code> with a consent step that names an
+existing meeting owned by somebody else is refused with <code dir="auto">MEETING_NOT_OWNED</code>
+before anything is written for it, and the client is told to use another
+meeting name. If such a meeting is created while the step is being recorded,
+this connection’s capture of it is dropped as soon as its owner is read, with
+nothing written to its consent record and no end event or recording written for
+it.</p>
+<p>These rules are applied by the meeting consent resolver on every request, as
+the meeting’s other edits are applied by theirs; a meeting the caller may not
+see is refused in the same way as one that does not exist.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="api">API</h2><a class="sl-anchor-link" href="#api"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “API”</span></a></div>
+<p>All the operations are on the AppSync GraphQL API, with Cognito user pool or
+IAM authorization. Every mutation answers with a <code dir="auto">MeetingConsentUpdate</code>
+(<code dir="auto">CallId</code>, <code dir="auto">Owner</code>, <code dir="auto">SharedWith</code>, <code dir="auto">Consent</code>), which is also what the
+<code dir="auto">onUpdateMeetingConsent(CallId)</code> subscription carries. A subscriber receives
+the <code dir="auto">Consent</code> fields the writer selected, so a writer should select the whole
+record; the fragment below does. A subscriber that shows the evidence images
+reads <code dir="auto">getMeetingConsent</code> again on each message, because only that query signs
+their links.</p>
+<div class="expressive-code"><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/ec.w36nc.css"><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/ec.0vx5m.js"></script><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="graphql"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">fragment</span><span style="--0:#D6DEEB;--1:#403F53"> ConsentRecord </span><span style="--0:#C792EA;--1:#8844AE">on</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">MeetingConsent</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">Mode</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Rule</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Status</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">CaptureAllowed</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">NoticeText</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">NoticePostedAt</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">Notices</span><span style="--0:#D6DEEB;--1:#403F53"> { </span><span style="--0:#C5E478;--1:#3B61B0">Channel</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Text</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">PostedAt</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">PostedBy</span><span style="--0:#D6DEEB;--1:#403F53"> }</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">Participants</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">ParticipantsSeen</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">Events</span><span style="--0:#D6DEEB;--1:#403F53"> { </span><span style="--0:#C5E478;--1:#3B61B0">EventId</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">ParticipantName</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Decision</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Source</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Text</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">OccurredAt</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">RecordedAt</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">RecordedBy</span><span style="--0:#D6DEEB;--1:#403F53"> }</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">Attestation</span><span style="--0:#D6DEEB;--1:#403F53"> { </span><span style="--0:#C5E478;--1:#3B61B0">AttestedBy</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Method</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Statement</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">AttestedAt</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">RecordedBy</span><span style="--0:#D6DEEB;--1:#403F53"> }</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">Evidence</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#C5E478;--1:#3B61B0">EvidenceId</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Kind</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">S3Key</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">CapturedAt</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">AddedAt</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Note</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">SignedUrl</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">ImageDeletedAt</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#C5E478;--1:#3B61B0">Verification</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent">      </span><span style="--0:#C5E478;--1:#3B61B0">Verdict</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">MissingParticipants</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Readable</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">NoticeVisible</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">NoticeMatches</span></div></div><div class="ec-line"><div class="code"><span class="indent">      </span><span style="--0:#C5E478;--1:#3B61B0">Replies</span><span style="--0:#D6DEEB;--1:#403F53"> { </span><span style="--0:#C5E478;--1:#3B61B0">Name</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Text</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Decision</span><span style="--0:#D6DEEB;--1:#403F53"> }</span></div></div><div class="ec-line"><div class="code"><span class="indent">      </span><span style="--0:#C5E478;--1:#3B61B0">AnyObjection</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Confidence</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Summary</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">ModelId</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">VerifiedAt</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">VerifiedBy</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">InputTokens</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">OutputTokens</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">    </span></span><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">StatusHistory</span><span style="--0:#D6DEEB;--1:#403F53"> { </span><span style="--0:#C5E478;--1:#3B61B0">Status</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">CaptureAllowed</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">At</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Reason</span><span style="--0:#D6DEEB;--1:#403F53"> }</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">StartedAt</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">StartedBy</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">UpdatedAt</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Version</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">query</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">getMeetingConsent</span><span style="--1:#403F53"><span style="--0:#D6DEEB">(</span><span style="--0:#D7DBE0">CallId</span><span style="--0:#D6DEEB">: </span></span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">&#x3C;CallId></span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">) {</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#C5E478;--1:#3B61B0">CallId</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#C5E478;--1:#3B61B0">CaptureAllowed</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#C5E478;--1:#3B61B0">Consent</span><span style="--0:#D6DEEB;--1:#403F53"> { </span><span style="--0:#7FDBCA;--1:#096E72">...</span><span style="--0:#C5E478;--1:#3B61B0">ConsentRecord</span><span style="--0:#D6DEEB;--1:#403F53"> }</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#C5E478;--1:#3B61B0">Settings</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent">      </span><span style="--0:#C5E478;--1:#3B61B0">Mode</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Rule</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">NotifyNoticeText</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">OptInNoticeText</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">ConsentPhrases</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">ObjectionPhrases</span></div></div><div class="ec-line"><div class="code"><span class="indent">      </span><span style="--0:#C5E478;--1:#3B61B0">AllowPerMeetingOverride</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">KeepEvidenceScreenshots</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">VerifierModelId</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">    </span></span><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">mutation</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">startMeetingConsent</span><span style="--1:#403F53"><span style="--0:#D6DEEB">(</span><span style="--0:#D7DBE0">input</span><span style="--0:#D6DEEB">: {</span></span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#ECC48D;--1:#3B61B0">CallId</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">&#x3C;CallId></span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#ECC48D;--1:#3B61B0">Mode</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">opt_in</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#ECC48D;--1:#3B61B0">Rule</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">each_participant</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">,</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#ECC48D;--1:#3B61B0">LmaUser</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">Ana Silva</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#ECC48D;--1:#3B61B0">MeetingName</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">Weekly sync</span><span style="--0:#D9F5DD;--1:#111111">"</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">}) { </span><span style="--0:#C5E478;--1:#3B61B0">CallId</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Owner</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">SharedWith</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Consent</span><span style="--0:#D6DEEB;--1:#403F53"> { </span><span style="--0:#7FDBCA;--1:#096E72">...</span><span style="--0:#C5E478;--1:#3B61B0">ConsentRecord</span><span style="--0:#D6DEEB;--1:#403F53"> } }</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">mutation</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">recordMeetingConsentNotice</span><span style="--1:#403F53"><span style="--0:#D6DEEB">(</span><span style="--0:#D7DBE0">input</span><span style="--0:#D6DEEB">: { </span></span><span style="--0:#ECC48D;--1:#3B61B0">CallId</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">&#x3C;CallId></span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#ECC48D;--1:#3B61B0">Channel</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">chat</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53"> }) {</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#C5E478;--1:#3B61B0">CallId</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Owner</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">SharedWith</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Consent</span><span style="--0:#D6DEEB;--1:#403F53"> { </span><span style="--0:#7FDBCA;--1:#096E72">...</span><span style="--0:#C5E478;--1:#3B61B0">ConsentRecord</span><span style="--0:#D6DEEB;--1:#403F53"> }</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">mutation</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">setMeetingConsentParticipants</span><span style="--1:#403F53"><span style="--0:#D6DEEB">(</span><span style="--0:#D7DBE0">input</span><span style="--0:#D6DEEB">: { </span></span><span style="--0:#ECC48D;--1:#3B61B0">CallId</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">&#x3C;CallId></span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#ECC48D;--1:#3B61B0">Participants</span><span style="--0:#D6DEEB;--1:#403F53">: [</span><span style="--0:#919F9F;--1:#5F636F">"Ana Silva"</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">Bo Chen</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">] }) {</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#C5E478;--1:#3B61B0">CallId</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Owner</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">SharedWith</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Consent</span><span style="--0:#D6DEEB;--1:#403F53"> { </span><span style="--0:#7FDBCA;--1:#096E72">...</span><span style="--0:#C5E478;--1:#3B61B0">ConsentRecord</span><span style="--0:#D6DEEB;--1:#403F53"> }</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">mutation</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">recordMeetingConsentEvent</span><span style="--1:#403F53"><span style="--0:#D6DEEB">(</span><span style="--0:#D7DBE0">input</span><span style="--0:#D6DEEB">: {</span></span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#ECC48D;--1:#3B61B0">CallId</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">&#x3C;CallId></span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#ECC48D;--1:#3B61B0">ParticipantName</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">Bo Chen</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#ECC48D;--1:#3B61B0">Decision</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">consent</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">,</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#ECC48D;--1:#3B61B0">Source</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">chat</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#ECC48D;--1:#3B61B0">Text</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">I consent</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#ECC48D;--1:#3B61B0">OccurredAt</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">2026-11-02T10:01:12.000Z</span><span style="--0:#D9F5DD;--1:#111111">"</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">}) { </span><span style="--0:#C5E478;--1:#3B61B0">CallId</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Owner</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">SharedWith</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Consent</span><span style="--0:#D6DEEB;--1:#403F53"> { </span><span style="--0:#7FDBCA;--1:#096E72">...</span><span style="--0:#C5E478;--1:#3B61B0">ConsentRecord</span><span style="--0:#D6DEEB;--1:#403F53"> } }</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">mutation</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">attestMeetingConsent</span><span style="--1:#403F53"><span style="--0:#D6DEEB">(</span><span style="--0:#D7DBE0">input</span><span style="--0:#D6DEEB">: {</span></span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#ECC48D;--1:#3B61B0">CallId</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">&#x3C;CallId></span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#ECC48D;--1:#3B61B0">Method</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">verbal</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#ECC48D;--1:#3B61B0">Statement</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">Everyone agreed at the start.</span><span style="--0:#D9F5DD;--1:#111111">"</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">}) { </span><span style="--0:#C5E478;--1:#3B61B0">CallId</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Owner</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">SharedWith</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Consent</span><span style="--0:#D6DEEB;--1:#403F53"> { </span><span style="--0:#7FDBCA;--1:#096E72">...</span><span style="--0:#C5E478;--1:#3B61B0">ConsentRecord</span><span style="--0:#D6DEEB;--1:#403F53"> } }</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">mutation</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">addMeetingConsentEvidence</span><span style="--1:#403F53"><span style="--0:#D6DEEB">(</span><span style="--0:#D7DBE0">input</span><span style="--0:#D6DEEB">: {</span></span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#ECC48D;--1:#3B61B0">CallId</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">&#x3C;CallId></span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#ECC48D;--1:#3B61B0">S3Key</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">lma-consent-evidence/&#x3C;meeting>/chat-0001.jpg</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">,</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#ECC48D;--1:#3B61B0">Kind</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">screenshot</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#ECC48D;--1:#3B61B0">CapturedAt</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">2026-11-02T10:01:30.000Z</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#ECC48D;--1:#3B61B0">Note</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">Chat panel after the request</span><span style="--0:#D9F5DD;--1:#111111">"</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">}) { </span><span style="--0:#C5E478;--1:#3B61B0">CallId</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Owner</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">SharedWith</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Consent</span><span style="--0:#D6DEEB;--1:#403F53"> { </span><span style="--0:#7FDBCA;--1:#096E72">...</span><span style="--0:#C5E478;--1:#3B61B0">ConsentRecord</span><span style="--0:#D6DEEB;--1:#403F53"> } }</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">mutation</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">verifyMeetingConsentEvidence</span><span style="--1:#403F53"><span style="--0:#D6DEEB">(</span><span style="--0:#D7DBE0">input</span><span style="--0:#D6DEEB">: { </span></span><span style="--0:#ECC48D;--1:#3B61B0">CallId</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">&#x3C;CallId></span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#ECC48D;--1:#3B61B0">EvidenceId</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">&#x3C;EvidenceId></span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53"> }) {</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#C5E478;--1:#3B61B0">CallId</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Owner</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">SharedWith</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Consent</span><span style="--0:#D6DEEB;--1:#403F53"> { </span><span style="--0:#7FDBCA;--1:#096E72">...</span><span style="--0:#C5E478;--1:#3B61B0">ConsentRecord</span><span style="--0:#D6DEEB;--1:#403F53"> }</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">subscription</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C5E478;--1:#3B61B0">onUpdateMeetingConsent</span><span style="--1:#403F53"><span style="--0:#D6DEEB">(</span><span style="--0:#D7DBE0">CallId</span><span style="--0:#D6DEEB">: </span></span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">&#x3C;CallId></span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">) {</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#C5E478;--1:#3B61B0">CallId</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Owner</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">SharedWith</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Consent</span><span style="--0:#D6DEEB;--1:#403F53"> { </span><span style="--0:#C5E478;--1:#3B61B0">Status</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">CaptureAllowed</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">Version</span><span style="--0:#D6DEEB;--1:#403F53"> }</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="fragment ConsentRecord on MeetingConsent {  Mode Rule Status CaptureAllowed NoticeText NoticePostedAt  Notices { Channel Text PostedAt PostedBy }  Participants ParticipantsSeen  Events { EventId ParticipantName Decision Source Text OccurredAt RecordedAt RecordedBy }  Attestation { AttestedBy Method Statement AttestedAt RecordedBy }  Evidence {    EvidenceId Kind S3Key CapturedAt AddedAt Note SignedUrl ImageDeletedAt    Verification {      Verdict MissingParticipants Readable NoticeVisible NoticeMatches      Replies { Name Text Decision }      AnyObjection Confidence Summary ModelId VerifiedAt VerifiedBy InputTokens OutputTokens    }  }  StatusHistory { Status CaptureAllowed At Reason }  StartedAt StartedBy UpdatedAt Version}query {  getMeetingConsent(CallId: &#x22;<CallId>&#x22;) {    CallId    CaptureAllowed    Consent { ...ConsentRecord }    Settings {      Mode Rule NotifyNoticeText OptInNoticeText ConsentPhrases ObjectionPhrases      AllowPerMeetingOverride KeepEvidenceScreenshots VerifierModelId    }  }}mutation {  startMeetingConsent(input: {    CallId: &#x22;<CallId>&#x22;, Mode: &#x22;opt_in&#x22;, Rule: &#x22;each_participant&#x22;,    LmaUser: &#x22;Ana Silva&#x22;, MeetingName: &#x22;Weekly sync&#x22;  }) { CallId Owner SharedWith Consent { ...ConsentRecord } }}mutation {  recordMeetingConsentNotice(input: { CallId: &#x22;<CallId>&#x22;, Channel: &#x22;chat&#x22; }) {    CallId Owner SharedWith Consent { ...ConsentRecord }  }}mutation {  setMeetingConsentParticipants(input: { CallId: &#x22;<CallId>&#x22;, Participants: [&#x22;Ana Silva&#x22;, &#x22;Bo Chen&#x22;] }) {    CallId Owner SharedWith Consent { ...ConsentRecord }  }}mutation {  recordMeetingConsentEvent(input: {    CallId: &#x22;<CallId>&#x22;, ParticipantName: &#x22;Bo Chen&#x22;, Decision: &#x22;consent&#x22;,    Source: &#x22;chat&#x22;, Text: &#x22;I consent&#x22;, OccurredAt: &#x22;2026-11-02T10:01:12.000Z&#x22;  }) { CallId Owner SharedWith Consent { ...ConsentRecord } }}mutation {  attestMeetingConsent(input: {    CallId: &#x22;<CallId>&#x22;, Method: &#x22;verbal&#x22;, Statement: &#x22;Everyone agreed at the start.&#x22;  }) { CallId Owner SharedWith Consent { ...ConsentRecord } }}mutation {  addMeetingConsentEvidence(input: {    CallId: &#x22;<CallId>&#x22;, S3Key: &#x22;lma-consent-evidence/<meeting>/chat-0001.jpg&#x22;,    Kind: &#x22;screenshot&#x22;, CapturedAt: &#x22;2026-11-02T10:01:30.000Z&#x22;, Note: &#x22;Chat panel after the request&#x22;  }) { CallId Owner SharedWith Consent { ...ConsentRecord } }}mutation {  verifyMeetingConsentEvidence(input: { CallId: &#x22;<CallId>&#x22;, EvidenceId: &#x22;<EvidenceId>&#x22; }) {    CallId Owner SharedWith Consent { ...ConsentRecord }  }}subscription {  onUpdateMeetingConsent(CallId: &#x22;<CallId>&#x22;) {    CallId Owner SharedWith Consent { Status CaptureAllowed Version }  }}"><div></div></button></div></figure></div>
+<p>Arguments that are checked:</p>
+<ul>
+<li><code dir="auto">Mode</code> is <code dir="auto">off</code>, <code dir="auto">notify</code> or <code dir="auto">opt_in</code>; <code dir="auto">Rule</code> is <code dir="auto">each_participant</code> or
+<code dir="auto">owner_attests</code>, and is used only with <code dir="auto">opt_in</code>. Omitted, each is the
+meeting’s own once its consent has started, and the deployment’s before
+that.</li>
+<li>Starting consent again with the mode and rule already in force, or naming
+neither, returns the record as it is, without a write: a capture client that
+restarts keeps the meeting’s choice and its notice even if the deployment’s
+settings have changed since. <code dir="auto">NoticeText</code>, <code dir="auto">LmaUser</code> and <code dir="auto">MeetingName</code> are
+read only when consent starts or its mode changes.</li>
+<li>Starting it with a different mode or rule is refused once a notice, reply,
+attestation or evidence image has been recorded. Before that, the mode is
+changed and the change is added to the status history; the participants
+listed and when consent was first started are kept.</li>
+<li>Every other mutation is refused until consent has been started.</li>
+<li>A backend role’s reply names its <code dir="auto">Source</code>, <code dir="auto">chat</code> or <code dir="auto">voice</code>. An attestation
+a backend role relays is recorded as the meeting owner’s; <code dir="auto">AttestedBy</code>, when
+given, must name the owner.</li>
+<li>Names are cut at 100 characters, reply and statement texts at 500, notices
+at 2,000, and an evidence key may be at most 256 characters.</li>
+</ul>
+<p>Each write reads the meeting row and writes the record back on condition that
+nobody else wrote it in between, retrying a few times, so replies that arrive
+together are all kept. A write that keeps meeting another one is refused with
+a message to try again.</p>
+<p>The rules that decide the status and the gate are in one Python module,
+<code dir="auto">lma_consent</code> in the configuration layer (<code dir="auto">lma-ai-stack/source/lambda_layers/configuration_layer/lma_consent/</code>),
+which the resolver uses and a Python capture client or script can import; it
+also holds the reply classifier described above.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="limitations">Limitations</h2><a class="sl-anchor-link" href="#limitations"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Limitations”</span></a></div>
+<ul>
+<li><strong>Display names are not verified identities.</strong> Replies are matched to
+participants by the name the meeting platform shows. A participant can rename
+themselves, two people can show the same name, and a guest’s name is whatever
+they typed. A reply is recorded under the name its sender showed when it was
+sent, and two participants showing one name are counted as one.</li>
+<li><strong>Speech is read as words, and attributed by the speaker indicator.</strong> A
+spoken reply is only as reliable as its transcript; a reply in a language the
+transcription is not set up for may not be read at all. It is recorded under
+the name the platform showed speaking, which can be wrong when people speak
+over each other or the indicator lags, and is missing when nobody was shown
+speaking.</li>
+<li><strong>A model’s reading is supporting evidence.</strong> The evidence check reports
+what a vision model read in a screenshot. It can misread small or partly
+hidden text, and it never changes a meeting’s status.</li>
+<li><strong>What LMA records is evidence, not a determination.</strong> The record shows what
+was posted and what was replied, when; whether that amounts to consent where
+the meeting took place is for your organisation to decide.</li>
+<li><strong>A streamed meeting’s consent is the user’s word.</strong> Stream Audio and the
+Desktop Capture App cannot see the participants or the meeting chat, so an
+opt-in meeting from either is granted on the LMA user’s attestation alone. An evidence screenshot is the
+only part of the record that shows what the participants saw or replied.</li>
+<li><strong>Not every capture method runs the flow yet.</strong> See
+<a href="#flows-by-capture-method">Flows by capture method</a>.</li>
+<li><strong>What the Virtual Participant can see differs by platform.</strong> Who is present
+and who sent a chat message or is speaking come from the meeting page, and not every
+platform shows all three; see
+<a href="#what-each-platform-supports">What each platform supports</a>.</li>
+<li><strong>The record is meeting data.</strong> It is kept and deleted with the meeting, and
+anyone the meeting is shared with can read it, including participants’ names
+and replies.</li>
+</ul>
+<div class="sl-heading-wrapper level-h2"><h2 id="related">Related</h2><a class="sl-anchor-link" href="#related"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Related”</span></a></div>
+<ul>
+<li><a href="../configuration-guide/">Configuration Guide</a> — the Meeting Consent section,
+and the <a href="../configuration-guide/#configuration-presets">configuration presets</a>
+that set it</li>
+<li><a href="../transcript-deletion/">Transcript Deletion After the Summary</a></li>
+<li><a href="../virtual-participant/">Virtual Participant</a></li>
+<li><a href="../stream-audio/">Stream Audio</a></li>
+<li><a href="../user-based-access-control/">User-Based Access Control</a> — who can read a meeting</li>
+</ul></div><footer class="sl-flex astro-ddtxxk7k"><div class="meta sl-flex astro-ddtxxk7k"></div><div class="pagination-links print:hidden astro-b5raizh3" dir="ltr"><a href="/amazon-transcribe-live-meeting-assistant/meeting-agenda/" rel="prev" class="astro-b5raizh3"><svg aria-hidden="true" class="astro-b5raizh3 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg><span class="astro-b5raizh3">Previous<br class="astro-b5raizh3"><span class="link-title astro-b5raizh3">Meeting Agenda</span></span></a><a href="/amazon-transcribe-live-meeting-assistant/transcript-deletion/" rel="next" class="astro-b5raizh3"><svg aria-hidden="true" class="astro-b5raizh3 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg><span class="astro-b5raizh3">Next<br class="astro-b5raizh3"><span class="link-title astro-b5raizh3">Transcript Deletion After the Summary</span></span></a></div></footer></div></div></main></div></div></div></div></body></html>

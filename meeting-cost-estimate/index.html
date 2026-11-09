@@ -1,0 +1,593 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-g5ptsecz"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Meeting Cost Estimate | LMA</title><link rel="canonical" href="https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/meeting-cost-estimate/"/><link rel="sitemap" href="/amazon-transcribe-live-meeting-assistant/sitemap-index.xml"/><link rel="shortcut icon" href="/amazon-transcribe-live-meeting-assistant/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v7.4.4"/><meta name="generator" content="Starlight v0.42.8"/><meta property="og:title" content="Meeting Cost Estimate"/><meta property="og:type" content="article"/><meta property="og:url" content="https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/meeting-cost-estimate/"/><meta property="og:locale" content="en"/><meta property="og:description" content="Live Meeting Assistant — Real-time meeting transcription, AI-powered meeting assistance, and virtual meeting participation on AWS"/><meta property="og:site_name" content="LMA"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="Live Meeting Assistant — Real-time meeting transcription, AI-powered meeting assistance, and virtual meeting participation on AWS"/><script>
+	window.StarlightThemeProvider = (() => {
+		const storedTheme =
+			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+		const theme =
+			storedTheme ||
+			(window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+		document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+		return {
+			updatePickers(theme = storedTheme || 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = theme;
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector(`#theme-icons`);
+					const newIcon = tmpl && tmpl.content.querySelector('.' + theme);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script><template id="theme-icons"><svg aria-hidden="true" class="light astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z"/></svg><svg aria-hidden="true" class="dark astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z"/></svg><svg aria-hidden="true" class="auto astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg></template><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/print.ehPL0gv-.css" media="print"><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/common.0xECwWjX.css"><style>@layer starlight.components{svg:where(.astro-hkc32dio){color:var(--sl-icon-color);font-size:var(--sl-icon-size,1em);width:1em;height:1em;overflow:visible}}
+</style><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/page.cNngjUgL.js"></script></head><body class="astro-g5ptsecz"><a class="sl-skip-link astro-qb7clj6f" href="#_top">Skip to content</a><div class="page sl-flex astro-yntsjkba"><header class="header astro-yntsjkba"><div class="header astro-by6fddyj"><div class="title-wrapper sl-flex astro-by6fddyj"><a href="/amazon-transcribe-live-meeting-assistant/" class="site-title sl-flex astro-6rvad3va"><img class="light:sl-hidden print:hidden astro-6rvad3va" alt src="/amazon-transcribe-live-meeting-assistant/_astro/logo-dark.DjwyAsdJ.svg" width="120" height="40"><img class="dark:sl-hidden print:block astro-6rvad3va" alt src="/amazon-transcribe-live-meeting-assistant/_astro/logo-light.Therjg_H.svg" width="120" height="40"><span class="astro-6rvad3va" translate="no">LMA</span></a></div><div class="sl-flex print:hidden astro-by6fddyj"><site-search class="astro-by6fddyj astro-b5kgnn7o" data-translations="{&quot;placeholder&quot;:&quot;Search&quot;}"><button data-open-modal disabled aria-label="Search" aria-keyshortcuts="Control+K" class="astro-b5kgnn7o"><svg aria-hidden="true" class="astro-b5kgnn7o astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.71 20.29 18 16.61A9 9 0 1 0 16.61 18l3.68 3.68a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.39ZM11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg><span class="sl-hidden md:sl-block astro-b5kgnn7o" aria-hidden="true">Search</span><kbd class="sl-hidden md:sl-flex astro-b5kgnn7o" style="display: none;"><kbd class="astro-b5kgnn7o">Ctrl</kbd><kbd class="astro-b5kgnn7o">K</kbd></kbd></button><dialog style="padding:0" aria-label="Search" class="astro-b5kgnn7o"><div class="dialog-frame sl-flex astro-b5kgnn7o"><button data-close-modal class="sl-flex md:sl-hidden astro-b5kgnn7o">Cancel</button><div class="search-container astro-b5kgnn7o"><div id="starlight__search" class="astro-b5kgnn7o"></div></div></div></dialog></site-search><script>
+	(() => {
+		const openBtn = document.querySelector('button[data-open-modal]');
+		const shortcut = openBtn?.querySelector('kbd');
+		if (!openBtn || !(shortcut instanceof HTMLElement)) return;
+		const platformKey = shortcut.querySelector('kbd');
+		if (platformKey && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+			platformKey.textContent = '⌘';
+			openBtn.setAttribute('aria-keyshortcuts', 'Meta+K');
+		}
+		shortcut.style.display = '';
+	})();
+</script><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/Search.astro_astro_type_script_index_0_lang.DKiPuTrW.js"></script></div><div class="sl-hidden md:sl-flex print:hidden right-group astro-by6fddyj"><div class="sl-flex social-icons astro-by6fddyj"><a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" rel="me" class="sl-flex astro-n2mnl6yq"><span class="sr-only astro-n2mnl6yq">GitHub</span><svg aria-hidden="true" class="astro-n2mnl6yq astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-2z5xp7gb"><span class="sr-only astro-2z5xp7gb">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-2z5xp7gb"><option value="dark" class="astro-2z5xp7gb">Dark</option><option value="light" class="astro-2z5xp7gb">Light</option><option value="auto" selected class="astro-2z5xp7gb">Auto</option></select><svg aria-hidden="true" class="icon caret astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script><script type="module">var e=`starlight-theme`,t=e=>e===`auto`||e===`dark`||e===`light`?e:`auto`,n=()=>t(typeof localStorage<`u`&&localStorage.getItem(e));function r(t){typeof localStorage<`u`&&localStorage.setItem(e,t===`light`||t===`dark`?t:``)}var i=()=>matchMedia(`(prefers-color-scheme: light)`).matches?`light`:`dark`;function a(e){StarlightThemeProvider.updatePickers(e),document.documentElement.dataset.theme=e===`auto`?i():e,r(e)}matchMedia(`(prefers-color-scheme: light)`).addEventListener(`change`,()=>{n()===`auto`&&a(`auto`)});var o=class extends HTMLElement{constructor(){super(),a(n()),this.querySelector(`select`)?.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&a(t(e.currentTarget.value))})}};customElements.define(`starlight-theme-select`,o);</script><script type="module">var e=class extends HTMLElement{constructor(){super();let e=this.querySelector(`select`);e&&(e.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&(window.location.pathname=e.currentTarget.value)}),window.addEventListener(`pageshow`,t=>{if(!t.persisted)return;let n=e.querySelector(`option[selected]`)?.index;n!==e.selectedIndex&&(e.selectedIndex=n??0)}))}};customElements.define(`starlight-lang-select`,e);</script></div></div></header><nav class="sidebar print:hidden astro-yntsjkba" aria-label="Main"><button popovertarget="starlight__sidebar" class="sl-menu-button sl-flex md:sl-hidden print:hidden astro-r2osgdlg"><svg aria-hidden="true" class="open-menu astro-r2osgdlg astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M3 8h18a1 1 0 1 0 0-2H3a1 1 0 0 0 0 2Zm18 8H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Zm0-5H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Z"/></svg><svg aria-hidden="true" class="close-menu astro-r2osgdlg astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="m13.41 12 6.3-6.29a1.004 1.004 0 1 0-1.42-1.42L12 10.59l-6.29-6.3a1.004 1.004 0 0 0-1.42 1.42l6.3 6.29-6.3 6.29a1 1 0 0 0 0 1.42.998.998 0 0 0 1.42 0l6.29-6.3 6.29 6.3a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.42L13.41 12Z"/></svg><span class="sr-only astro-r2osgdlg">Menu</span></button><script type="module">var e=class extends HTMLElement{constructor(){super();let e=matchMedia(`(min-width: 50em)`),t=()=>{this.popover=e.matches?null:`auto`};t(),e.addEventListener(`change`,()=>t()),this.addEventListener(`toggle`,({newState:e})=>this.trapFocus(e===`open`))}trapFocus(e){document.querySelectorAll(`.main-frame, .sl-skip-link`).forEach(t=>{t.toggleAttribute(`inert`,e)})}};customElements.define(`sl-sidebar-pane`,e);</script><sl-sidebar-pane popover id="starlight__sidebar" class="sidebar-pane astro-yntsjkba"><div class="sidebar-content sl-flex astro-yntsjkba"><sl-sidebar-state-persist data-hash="0k58gzh" class="astro-ipdry5cl"><script aria-hidden="true">
+		(() => {
+			try {
+				if (!matchMedia('(min-width: 50em)').matches) return;
+				/** @type {HTMLElement | null} */
+				const target = document.querySelector('sl-sidebar-state-persist');
+				const state = JSON.parse(sessionStorage.getItem('sl-sidebar-state') || '0');
+				if (!target || !state || target.dataset.hash !== state.hash) return;
+				window._starlightScrollRestore = state.scroll;
+				customElements.define(
+					'sl-sidebar-restore',
+					class SidebarRestore extends HTMLElement {
+						connectedCallback() {
+							try {
+								const idx = parseInt(this.dataset.index || '');
+								const details = this.closest('details');
+								if (details && typeof state.open[idx] === 'boolean') details.open = state.open[idx];
+							} catch {}
+						}
+					}
+				);
+			} catch {}
+		})();
+	</script><ul class="top-level astro-rmhv4bp6"><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Overview</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="0"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Welcome</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Getting Started</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="1"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/prerequisites-and-deployment/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Prerequisites &amp; Deployment</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/quick-start-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Quick Start Guide</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/demo-videos/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Demo Videos</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lma-in-action/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">LMA in Action</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Core Features</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="2"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/transcription-and-translation/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Transcription &amp; Translation</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/microvm-asr/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">On-demand ASR &amp; Diarization (MicroVM)</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-assistant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Assistant</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/transcript-summarization/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Transcript Summarization</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-agenda/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Agenda</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-consent/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Consent</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/transcript-deletion/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Transcript Deletion After the Summary</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-video/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Video and Key Frames</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meetings-query-tool/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meetings Query Tool</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Meeting Sources</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="3"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-sources/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Sources Overview</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/stream-audio/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Stream Audio</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/browser-extension/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Browser Extension</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/desktop-capture-app/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Desktop Capture App</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/virtual-participant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Virtual Participant</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Voice Assistant &amp; Avatar</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="4"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/voice-assistant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Voice Assistant</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/nova-sonic-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Nova Sonic Setup</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/elevenlabs-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">ElevenLabs Setup</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/simli-avatar-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Simli Avatar Setup</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">MCP Server Integration</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="5"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/mcp-servers/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">MCP Servers Overview</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/mcp-api-key-auth/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">MCP API Key Auth</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/salesforce-mcp-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Salesforce MCP</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/amazon-quick-mcp-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Amazon QuickSuite MCP</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/deepwiki-mcp-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">DeepWiki MCP</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Web UI</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="6"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/web-ui-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Web UI Guide</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Access Control &amp; Security</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="7"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/user-management/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">User Management</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/user-based-access-control/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">User-Based Access Control</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/infrastructure-and-security/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Infrastructure &amp; Security</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/security-scanning/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Security Scanning (SRT)</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Integration &amp; API</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="8"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/websocket-streaming-api/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">WebSocket Streaming API</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/embeddable-components/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Embeddable Components</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lambda-hook-functions/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Lambda Hook Functions</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Administration</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="9"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/cloudformation-parameters/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">CloudFormation Parameters</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/configuration-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Configuration Guide</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/configuration-store/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Unified Configuration Store</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/stack-updates-and-upgrades/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Stack Updates &amp; Upgrades</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/well-architected/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Well-Architected Assessment</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-cost-estimate/" aria-current="page" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Cost Estimate</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/monitoring/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Monitoring &amp; Alerting</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/troubleshooting/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Troubleshooting</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/cleanup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Cleanup</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Development</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="10"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/developer-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Developer Guide</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lma-cli/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">LMA CLI Reference</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lma-sdk/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">LMA SDK Reference</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">New &amp; Uncategorized</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="11"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/amazon-quick-desktop-integration/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Amazon Quick Desktop Integration</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/blog-update-proposal/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Blog Update Proposal</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/cloudformation-service-role/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Cloudformation Service Role</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/dependency-upgrade-validation-runbook/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Dependency Upgrade Validation Runbook</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/scheduled-integration-tests/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Scheduled Integration Tests</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/teams-acs-sdk/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Teams Acs Sdk</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/test-coverage/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Test Coverage</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/troubleshooting-agent/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Troubleshooting Agent</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/upload-audio/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Upload Audio</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/virtual-participant-local-dev/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Virtual Participant Local Dev</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/voice-enrollment/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Voice Enrollment</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/zoom-credentials-and-join-reliability/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Zoom Credentials And Join Reliability</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/zoom-meeting-sdk/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Zoom Meeting Sdk</span></a></li></ul></details></li></ul><script aria-hidden="true">
+		(() => {
+			const scroller = document.getElementById('starlight__sidebar');
+			if (!window._starlightScrollRestore || !scroller) return;
+			scroller.scrollTop = window._starlightScrollRestore;
+			delete window._starlightScrollRestore;
+		})();
+	</script></sl-sidebar-state-persist><div class="md:sl-hidden"><div class="mobile-preferences sl-flex astro-p4azlveh"><div class="social-icons astro-p4azlveh"><a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" rel="me" class="sl-flex astro-n2mnl6yq"><span class="sr-only astro-n2mnl6yq">GitHub</span><svg aria-hidden="true" class="astro-n2mnl6yq astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-2z5xp7gb"><span class="sr-only astro-2z5xp7gb">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-2z5xp7gb"><option value="dark" class="astro-2z5xp7gb">Dark</option><option value="light" class="astro-2z5xp7gb">Light</option><option value="auto" selected class="astro-2z5xp7gb">Auto</option></select><svg aria-hidden="true" class="icon caret astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script></div></div></div></sl-sidebar-pane></nav><div class="main-frame astro-yntsjkba"><script type="module">var e=document.getElementById(`starlight__sidebar`),t=e?.querySelector(`sl-sidebar-state-persist`),n=`sl-sidebar-state`,r=()=>{let r=[],i=t?.dataset.hash||``;try{let e=sessionStorage.getItem(n),t=JSON.parse(e||`{}`);Array.isArray(t.open)&&t.hash===i&&(r=t.open)}catch{}return{hash:i,open:r,scroll:e?.scrollTop||0}},i=e=>{try{sessionStorage.setItem(n,JSON.stringify(e))}catch{}},a=()=>i(r()),o=(e,t)=>{let n=r();n.open[t]=e,i(n)};t?.addEventListener(`click`,e=>{if(!(e.target instanceof Element))return;let t=e.target.closest(`summary`)?.closest(`details`);if(!t)return;let n=t.querySelector(`sl-sidebar-restore`),r=parseInt(n?.dataset.index||``);isNaN(r)||o(!t.open,r)}),addEventListener(`visibilitychange`,()=>{document.visibilityState===`hidden`&&a()});</script><div class="lg:sl-flex astro-lrzkfocr"><aside class="right-sidebar-container print:hidden astro-lrzkfocr"><div class="right-sidebar astro-lrzkfocr"><div class="lg:sl-hidden astro-qok35upx"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-66cqc7ze"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-66cqc7ze"><details id="starlight__mobile-toc" class="astro-66cqc7ze"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-66cqc7ze"><span class="toggle sl-flex astro-66cqc7ze">On this page<svg aria-hidden="true" class="caret astro-66cqc7ze astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></span><span class="display-current astro-66cqc7ze"></span></summary><div class="dropdown astro-66cqc7ze"><ul class="isMobile astro-jugkfwgx" style="--depth: 0;"><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#_top" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Overview</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#where-to-read-it" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Where to read it</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#on-the-meeting-page" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">On the meeting page</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#through-the-api" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Through the API</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#what-is-metered-and-how" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">What is metered, and how</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#prices" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Prices</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#regions" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Regions</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#how-a-line-is-priced" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">How a line is priced</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#changing-a-price" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Changing a price</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#what-is-not-included" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">What is not included</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#known-ways-the-figure-can-be-off" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Known ways the figure can be off</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#how-the-records-are-stored" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">How the records are stored</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#upgrading" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Upgrading</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#reference" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Reference</span></a></li></ul></div></details></nav></mobile-starlight-toc><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/MobileTableOfContents.astro_astro_type_script_index_0_lang.C3fM4Kra.js"></script></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-qok35upx"><div class="sl-container astro-qok35upx"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-jugkfwgx" style="--depth: 0;"><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#_top" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Overview</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#where-to-read-it" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Where to read it</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#on-the-meeting-page" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">On the meeting page</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#through-the-api" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Through the API</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#what-is-metered-and-how" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">What is metered, and how</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#prices" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Prices</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#regions" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Regions</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#how-a-line-is-priced" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">How a line is priced</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#changing-a-price" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Changing a price</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#what-is-not-included" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">What is not included</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#known-ways-the-figure-can-be-off" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Known ways the figure can be off</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#how-the-records-are-stored" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">How the records are stored</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#upgrading" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Upgrading</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#reference" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Reference</span></a></li></ul></nav></starlight-toc><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/TableOfContents.astro_astro_type_script_index_0_lang.BpJaGz7G.js"></script></div></div></div></aside><div class="main-pane astro-lrzkfocr"><main data-pagefind-body class="astro-g5ptsecz" lang="en" dir="ltr"><div class="content-panel astro-a7po4psb"><div class="sl-container astro-a7po4psb"><h1 id="_top" class="astro-bebwqqxs">Meeting Cost Estimate</h1></div></div><div class="content-panel astro-a7po4psb"><div class="sl-container astro-a7po4psb"><div class="sl-markdown-content"><!-- Copyright (c) 2025 Amazon.com. This file is licensed under the MIT License. -->
+<!-- See the LICENSE file in the project root for full license information. -->
+<div class="sl-heading-wrapper level-h1"><h1 id="meeting-cost-estimate">Meeting Cost Estimate</h1><a class="sl-anchor-link" href="#meeting-cost-estimate"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Meeting Cost Estimate”</span></a></div>
+<p>LMA estimates what each meeting cost to run, line by line: the seconds of Amazon
+Transcribe it used, the tokens every Amazon Bedrock call spent on it, and the
+compute of the Virtual Participant that joined it. The approach follows the GenAI
+IDP Accelerator’s estimated cost per document: usage is recorded where it happens
+as <strong>metering records</strong> against the meeting, and a configurable <strong>price table</strong>
+turns those records into dollars whenever the estimate is read.</p>
+<p>It is an <strong>estimate</strong>, and it is labelled as one wherever it appears. It uses public
+on-demand list prices dated in the price table, the first volume tier of any tiered
+price, and only the usage LMA meters. <a href="#what-is-not-included">What is not included</a>
+lists what is left out, and the estimate itself carries the same list.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="where-to-read-it">Where to read it</h2><a class="sl-anchor-link" href="#where-to-read-it"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Where to read it”</span></a></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="on-the-meeting-page">On the meeting page</h3><a class="sl-anchor-link" href="#on-the-meeting-page"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “On the meeting page”</span></a></div>
+<p>The meeting page’s header shows the total as <strong>Est. cost</strong> (“$0.1234”, with
+“(incomplete)” when some line has no price); selecting it opens the itemised
+estimate. The same estimate is the <strong>Estimated cost</strong> section of the <strong>Details</strong>
+tab — collapsed by default, below the Speakers and Consent panels — which shows
+the total in its header (“$0.1234 estimated”) and, opened, the itemised table:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Column</th><th>Shows</th></tr></thead><tbody><tr><td>Service</td><td>The service and model or API, grouped by what the usage was for, with a subtotal row per group. Select a service to see how its usage was measured (launch type, sizes, why a figure is approximate).</td></tr><tr><td>Unit, Quantity</td><td>What was counted and how much.</td></tr><tr><td>Unit price</td><td>US dollars per unit from the price table, or <strong>No price</strong> when the table has none.</td></tr><tr><td>Estimated cost</td><td>Quantity times unit price. Below $0.0001 is written ”&#x3C; $0.0001”, never rounded to zero. Units that are shown for reference only read “not billed separately”.</td></tr></tbody></table>
+<p>Above the table the panel says that this is an estimate, the date of its prices, and
+any line it could not price or region it priced at another region’s rates. Below it
+are what the estimate does not include, the region, and when the figure was
+computed. The estimate is re-read when the meeting’s status changes and when its
+summary arrives, because most of a meeting’s usage is recorded as it ends. A Virtual
+Participant writes its runtime as it leaves, which can be later still; the refresh
+button picks that up. A meeting with no metering records shows <strong>No metering data</strong>
+rather than a cost of zero.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="through-the-api">Through the API</h3><a class="sl-anchor-link" href="#through-the-api"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Through the API”</span></a></div>
+<p><code dir="auto">Query.getCallCost(CallId)</code> on the AppSync API returns the itemised estimate for one
+meeting. It answers the same callers <code dir="auto">getCall</code> answers: an Admin, the meeting’s
+owner, anyone the meeting is shared with, and a backend role signing with IAM.</p>
+<p>The result has:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td><code dir="auto">TotalCost</code></td><td>The sum of every priced line, in <code dir="auto">Currency</code> (USD).</td></tr><tr><td><code dir="auto">ContextTotals</code></td><td>The same total split by what the usage was for (see the contexts below).</td></tr><tr><td><code dir="auto">Items</code></td><td>One line per context, service and unit: quantity, unit price and cost.</td></tr><tr><td><code dir="auto">UnpricedCount</code></td><td>Lines with no price in the table. They are left out of every total, so a non-zero count means the total is incomplete.</td></tr><tr><td><code dir="auto">RecordCount</code></td><td>How many metering records were read. Zero for a meeting held before this feature was deployed.</td></tr><tr><td><code dir="auto">PricesAsOf</code>, <code dir="auto">PriceSource</code></td><td>When the default prices were taken, and from where.</td></tr><tr><td><code dir="auto">Region</code>, <code dir="auto">BaseRegion</code>, <code dir="auto">RegionsWithoutListedPrices</code></td><td>The deployment’s region, and any region whose usage was priced at the base region’s prices because the table lists none of its own.</td></tr><tr><td><code dir="auto">NotIncluded</code></td><td>What the estimate leaves out.</td></tr><tr><td><code dir="auto">ComputedAt</code></td><td>When this estimate was computed.</td></tr></tbody></table>
+<p>The estimate is computed <strong>on every read</strong>, not frozen when the meeting ends. Usage
+keeps arriving after the END event: the summary is generated after it, the Virtual
+Participant writes its runtime as it leaves, and a summary can be regenerated days
+later. A meeting’s records are one DynamoDB query on one partition, so reading them
+each time is cheap, and the figure is always the current one.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="what-is-metered-and-how">What is metered, and how</h2><a class="sl-anchor-link" href="#what-is-metered-and-how"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “What is metered, and how”</span></a></div>
+<p>Each line belongs to a <strong>context</strong> — what the usage was for — and a <strong>service</strong>, the
+key the price table is looked up by.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Context</th><th>Service</th><th>Unit(s)</th><th>Written by</th><th>How it is measured</th></tr></thead><tbody><tr><td>Transcription</td><td><code dir="auto">transcribe/streaming</code></td><td><code dir="auto">seconds</code></td><td>WebSocket transcriber, Virtual Participant</td><td>Seconds of audio sent in each <code dir="auto">StartStreamTranscription</code> request, rounded up, with Transcribe’s 15-second minimum per request. A two-channel stream with channel identification is billed at the stream’s duration, not twice it, so it is measured once. Written per request, so reconnects during a long meeting each appear.</td></tr><tr><td>Transcription</td><td><code dir="auto">transcribe/streaming-pii-redaction</code></td><td><code dir="auto">seconds</code></td><td>WebSocket transcriber, Virtual Participant</td><td>The same seconds again when content redaction was applied to the request, because redaction is billed per second on top.</td></tr><tr><td>Transcription</td><td><code dir="auto">transcribe/streaming-custom-language-model</code></td><td><code dir="auto">seconds</code></td><td>WebSocket transcriber</td><td>The same seconds again when a custom language model was used.</td></tr><tr><td>Transcription</td><td><code dir="auto">transcribe/batch</code></td><td><code dir="auto">seconds</code></td><td>Upload Audio finalizer</td><td>The batch job’s duration, read as the end time of the last transcribed word, with the 15-second minimum. Trailing silence, which is billed, is not counted.</td></tr><tr><td>Transcription</td><td><code dir="auto">lambda-microvm/arm64</code></td><td><code dir="auto">vcpuSeconds</code>, <code dir="auto">gbSeconds</code></td><td>WebSocket transcriber, Virtual Participant</td><td>When the <a href="../microvm-asr/">MicroVM ASR engine</a> transcribed the meeting: the MicroVM’s configured memory (reported by the launcher; 8 GiB for every bundle today) and its vCPUs at 2 GiB per vCPU, multiplied by the time from the launch request to release.</td></tr><tr><td>Summary</td><td><code dir="auto">bedrock/&#x3C;model id></code></td><td><code dir="auto">inputTokens</code>, <code dir="auto">outputTokens</code>, cache units</td><td>Meeting summary Lambda</td><td>The <code dir="auto">usage</code> block of each Converse call — one per summary section. On a Claude model, when two or more sections share the transcript prefix and it reaches the model’s minimum cacheable length, the first section that quotes it records it as <code dir="auto">cacheWriteInputTokens</code> and the sections after it that quote it the same way as <code dir="auto">cacheReadInputTokens</code>; see <a href="../transcript-summarization/#prompt-caching">Prompt Caching</a>. A regeneration runs every section again and is recorded again.</td></tr><tr><td>SpeakerNaming</td><td><code dir="auto">bedrock/&#x3C;model id></code></td><td>as above</td><td>Speaker name resolver</td><td>Each naming pass’s model call.</td></tr><tr><td>AgendaDerivation</td><td><code dir="auto">bedrock/&#x3C;model id></code></td><td>as above</td><td>Agenda deriver</td><td>The model call of each pass that read the transcript for a stated agenda: the automatic one, at most once per meeting, and each press of <strong>Derive agenda</strong>. See <a href="../meeting-agenda/#deriving-an-agenda-from-the-transcript">Meeting Agenda</a>.</td></tr><tr><td>MeetingAssistant</td><td><code dir="auto">bedrock/&#x3C;model id></code></td><td>as above</td><td>Strands meeting assistant</td><td>The tokens the Strands SDK accumulated over every model call one answer took (an answer that uses tools is several calls), whether asked from the chat panel, by wake phrase or by the voice assistant. When the answer looked at the shared screen, a second record counts the <code dir="auto">images</code> sent; they are billed as the input tokens already counted, so the count is shown and not priced. See <a href="../meeting-video/#asking-the-assistant-about-the-shared-screen">Meeting Video and Key Frames</a>.</td></tr><tr><td>ConsentVerification</td><td><code dir="auto">bedrock/&#x3C;model id></code></td><td>as above</td><td>Consent evidence verifier</td><td>The model call of each check of a consent evidence screenshot. See <a href="../meeting-consent/#checking-evidence-with-a-vision-model">Meeting Consent</a>.</td></tr><tr><td>SlideText</td><td><code dir="auto">bedrock/&#x3C;model id></code></td><td>as above</td><td>Key frame text extractor</td><td>The tokens of reading the text of each key frame of the shared screen, once per frame. See <a href="../meeting-video/#slide-text">Meeting Video and Key Frames</a>.</td></tr><tr><td>VoiceAssistant</td><td><code dir="auto">bedrock/amazon.nova-2-sonic-v1:0</code></td><td><code dir="auto">speechInputTokens</code>, <code dir="auto">speechOutputTokens</code>, <code dir="auto">textInputTokens</code>, <code dir="auto">textOutputTokens</code></td><td>Virtual Participant</td><td>The deltas of Nova Sonic’s own <code dir="auto">usageEvent</code>s, written every five minutes and when the assistant stops. Recorded in the region Nova Sonic ran in, which <code dir="auto">AmazonNovaSonicRegion</code> can make different from the stack’s.</td></tr><tr><td>VirtualParticipant</td><td><code dir="auto">fargate/x86_64</code>, <code dir="auto">fargate/arm64</code></td><td><code dir="auto">vcpuSeconds</code>, <code dir="auto">gbSeconds</code></td><td>Virtual Participant</td><td>The task’s vCPU and memory (from the ECS task metadata endpoint) multiplied by how long the process ran, with Fargate’s one-minute minimum. Image pull and task start-up before the process starts are not included.</td></tr><tr><td>VirtualParticipant</td><td><code dir="auto">lambda-microvm/arm64</code></td><td><code dir="auto">vcpuSeconds</code>, <code dir="auto">gbSeconds</code></td><td>Virtual Participant</td><td>The MicroVM image’s 4 GiB (2 vCPUs) multiplied by how long the process ran.</td></tr><tr><td>VirtualParticipant</td><td><code dir="auto">ec2/virtual-participant-host</code></td><td><code dir="auto">runtimeSeconds</code></td><td>Virtual Participant</td><td>The EC2 launch type’s hosts are billed by the hour whether or not a meeting is running, so no share of a host is attributed to one meeting. The runtime is shown for reference with no cost.</td></tr><tr><td>PageAutomation</td><td><code dir="auto">bedrock/&#x3C;model id></code></td><td>as above</td><td>Virtual Participant</td><td>The Claude call the page-automation fallback makes when a meeting platform’s UI changed and a selector had to be found again. Cached for 30 days, so most meetings have none.</td></tr><tr><td>Sentiment</td><td><code dir="auto">comprehend/detect-sentiment</code></td><td><code dir="auto">units</code></td><td>Call event processor</td><td>One Amazon Comprehend <code dir="auto">DetectSentiment</code> request per final transcript segment, at 100 characters per unit with a three-unit minimum. Kept as a running counter per meeting rather than a record per segment.</td></tr></tbody></table>
+<p>Some units are shown for reference and never priced on their own: <code dir="auto">requests</code>,
+<code dir="auto">sessions</code>, <code dir="auto">audioSeconds</code> and <code dir="auto">runtimeSeconds</code>. They appear on the estimate with
+<code dir="auto">Chargeable: false</code>.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="prices">Prices</h2><a class="sl-anchor-link" href="#prices"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Prices”</span></a></div>
+<p>The default price table is
+<code dir="auto">lma-ai-stack/source/lambda_functions/configuration_seeder/defaults/CallPricing.json</code>.
+Every price in it is a public on-demand list price read from the AWS Price List API
+(<code dir="auto">AmazonBedrock</code>, <code dir="auto">AmazonBedrockFoundationModels</code>, <code dir="auto">transcribe</code>, <code dir="auto">AWSLambda</code>,
+<code dir="auto">AmazonECS</code>, <code dir="auto">comprehend</code>) on <strong>2026-10-28</strong>, in US dollars per single unit — per
+token, per second, per vCPU-second. Where a price is tiered by monthly volume, the
+first tier is listed, which is the highest price; a deployment that transcribes more
+than 250,000 minutes a month pays less than this shows for the Transcribe add-ons. Standard streaming transcription is a flat price.</p>
+<p>A few examples of what is in it, for <code dir="auto">us-east-1</code>:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Service</th><th>Unit</th><th>Price (USD)</th></tr></thead><tbody><tr><td>Amazon Transcribe streaming</td><td>second</td><td>0.0001667</td></tr><tr><td>Amazon Transcribe streaming PII redaction (add-on)</td><td>second</td><td>0.00004</td></tr><tr><td><code dir="auto">global.anthropic.claude-haiku-4-5-20251001-v1:0</code></td><td>input / output token</td><td>0.000001 / 0.000005</td></tr><tr><td><code dir="auto">global.anthropic.claude-sonnet-5-5</code></td><td>input / output token</td><td>0.000002 / 0.00001</td></tr><tr><td>Nova 2 Sonic</td><td>speech input / speech output token</td><td>0.000003 / 0.000012</td></tr><tr><td>AWS Fargate (x86_64)</td><td>vCPU-hour / GB-hour</td><td>0.04048 / 0.004445</td></tr><tr><td>AWS Lambda MicroVMs (arm64)</td><td>vCPU-second / GB-second</td><td>0.0000276944 / 0.0000036667</td></tr><tr><td>Amazon Comprehend DetectSentiment</td><td>100-character unit</td><td>0.0001</td></tr></tbody></table>
+<p>The table holds a price for every Bedrock model the stack parameters offer, under its
+exact model or inference-profile id. A <code dir="auto">global.</code> and a <code dir="auto">us.</code> profile of the same
+model have different prices (where both exist, the regional <code dir="auto">us.</code> profile is 10%
+higher), so each is listed separately.
+A test fails if an Amazon Nova or Anthropic model id is added to <code dir="auto">lma-main.yaml</code>
+without a price.</p>
+<p>Bedrock reports prompt-cache tokens separately from ordinary input, and they are
+billed at their own rates, so a Bedrock line can carry <code dir="auto">cacheReadInputTokens</code> and
+<code dir="auto">cacheWriteInputTokens</code> beside <code dir="auto">inputTokens</code>. The table prices both for every model
+the <a href="../meeting-assistant/#prompt-caching">meeting assistant caches on</a>, which includes every Claude model the <a href="../transcript-summarization/#prompt-caching">summarizer caches on</a>. Nova Micro,
+Nova Lite and Nova Pro list a cache write at zero and a cache read at a quarter of the
+input price; those three cache prices were read from the Price List API on
+2026-11-06, after the rest of the table.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="regions">Regions</h3><a class="sl-anchor-link" href="#regions"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Regions”</span></a></div>
+<p>Prices are listed for <strong>us-east-1</strong> and <strong>us-west-2</strong>. <code dir="auto">regions.default</code> holds the
+us-east-1 prices, and <code dir="auto">regions.us-west-2</code> lists only what differs there (Nova Sonic’s
+text tokens). A deployment in any other region is priced at the us-east-1 prices,
+and its estimate names the region in <code dir="auto">RegionsWithoutListedPrices</code>. To price another
+region, add a <code dir="auto">regions.&#x3C;region></code> entry holding its differences from the base; a region whose prices equal the base is recognised by
+listing it in <code dir="auto">pricedRegions</code>. Either one is enough for the region to count as
+priced.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="how-a-line-is-priced">How a line is priced</h3><a class="sl-anchor-link" href="#how-a-line-is-priced"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “How a line is priced”</span></a></div>
+<p>The lookup is deliberately strict, as it is in the IDP Accelerator: a line’s service
+must match a price entry exactly, and its unit must be named in that entry. Nothing
+is guessed from a similar-looking entry. A line with no price is reported as
+unpriced, shown without a cost, left out of every total and counted in
+<code dir="auto">UnpricedCount</code>. A plausible wrong number is worse than a visible gap.</p>
+<p>One exception, for Amazon Bedrock models, is always named on the line it applies
+to. The price table lists each model’s <code dir="auto">global.</code> and <code dir="auto">us.</code> profiles and its plain
+id where Amazon Bedrock sells one, while the <strong>Model inference geography</strong> setting
+(see <a href="../infrastructure-and-security/#where-meeting-content-is-processed">Where meeting content is processed</a>)
+can also run the same model through its <code dir="auto">eu.</code>, <code dir="auto">apac.</code>, <code dir="auto">jp.</code>, <code dir="auto">au.</code>, <code dir="auto">ca.</code> or
+<code dir="auto">in.</code> profile, or as its plain in-Region id. A line for such an id is priced at the
+same model’s <code dir="auto">global.</code> price, else its plain id’s, else its <code dir="auto">us.</code> profile’s, and its
+note says which. It is never priced as a different model. For the models in the
+shipped table the <code dir="auto">us.</code> profiles are listed at 10% above the <code dir="auto">global.</code> ones, so an
+estimate for a geography profile priced this way is likely low by about that much.</p>
+<p>A unit named in <code dir="auto">nonChargeableUnits</code> (the <code dir="auto">images</code> the meeting assistant sends,
+for example) is shown with no cost and is not counted as unpriced. Changes to the
+price table replace a list rather than merging into it, so a custom
+<code dir="auto">nonChargeableUnits</code> must list every such unit, <code dir="auto">images</code> included.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="changing-a-price">Changing a price</h3><a class="sl-anchor-link" href="#changing-a-price"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Changing a price”</span></a></div>
+<p>An Admin can change prices in the <strong>Meeting Cost Prices</strong> section of
+<strong>Configuration ▸ Configuration</strong> (<code dir="auto">/#/configuration/settings?section=call_pricing</code>),
+where each price that differs from the shipped one is marked and can be reset; see
+the <a href="../configuration-guide/">Configuration Guide</a>. The same changes can be made
+through the API, as described below.</p>
+<p>The price table is the <code dir="auto">call_pricing</code> section of the
+<a href="../configuration-store/">unified configuration store</a>. The shipped table is part of
+the baseline record, so a release that updates a price reaches every deployment on
+its next stack update. An Admin’s changes are stored as a delta in the <code dir="auto">custom</code>
+profile and keep winning over the baseline:</p>
+<ul>
+<li><code dir="auto">Query.getCallPricing</code> returns the shipped table (<code dir="auto">Default</code>), the Admin’s changes
+(<code dir="auto">Custom</code>), the merged table every estimate uses (<code dir="auto">Effective</code>) and the <code dir="auto">Version</code> to
+send back on save.</li>
+<li><code dir="auto">Mutation.updateCallPricing(input: {Pricing, ExpectedVersion})</code> stores the changes.
+<code dir="auto">Pricing</code> is a JSON object in the same shape as the shipped table, naming only what
+differs — for example
+<code dir="auto">{"regions": {"default": {"transcribe/streaming": {"seconds": 0.00012}}}}</code> for a
+negotiated Transcribe rate. <code dir="auto">"{}"</code> returns every price to the shipped value. The
+save replaces all of the Admin’s earlier price changes with this object, so
+include every change that should stay. The save is checked against the
+<code dir="auto">call_pricing</code> section’s <a href="../configuration-store/#section-schemas-and-validation">schema</a>
+and refused as a whole, naming each problem, if a price is not a finite,
+non-negative number, a region, service or unit name is not in the form the table
+uses (a region is <code dir="auto">default</code> or a code such as <code dir="auto">us-east-1</code>, a service is
+<code dir="auto">&#x3C;service>/&#x3C;api-or-model></code>, a unit is a word such as <code dir="auto">inputTokens</code>), <code dir="auto">currency</code>
+is anything but <code dir="auto">USD</code>, <code dir="auto">pricesAsOf</code> is not a <code dir="auto">YYYY-MM-DD</code> date, or a key is one
+the table does not have. <code dir="auto">ExpectedVersion</code> is required, and a
+save against a version another Admin has since saved is refused rather than
+overwriting their change.
+The version is that of the whole <code dir="auto">custom</code> profile, which the Transcript Summary
+page also writes, so a price save made after an unrelated prompt-template save
+is refused too; reload and save again.</li>
+</ul>
+<p>Both are Admin only. An estimate read within five minutes of a price change may
+still use the previous price: the section is on the store’s standard cache tier.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="what-is-not-included">What is not included</h2><a class="sl-anchor-link" href="#what-is-not-included"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “What is not included”</span></a></div>
+<p>The estimate covers the usage that can be attributed to one meeting. It does not
+include:</p>
+<ul>
+<li>Resources that run whether or not a meeting is in progress: the WebSocket
+transcriber’s Fargate service, NAT gateways, the Application Load Balancer,
+CloudFront, and Virtual Participant EC2 hosts.</li>
+<li>Per-request charges of the services LMA is built on: AppSync, DynamoDB, Kinesis
+Data Streams, LMA’s own Lambda functions, S3 storage of recordings, and CloudWatch
+Logs.</li>
+<li>Amazon Bedrock Knowledge Base queries made by the meeting assistant’s document and
+meeting-history tools (RetrieveAndGenerate does not report token usage), and the
+vector store behind them.</li>
+<li>Amazon Bedrock Guardrails and Amazon Translate (live translation in the browser).</li>
+<li>The short Nova Sonic clip the voice assistant renders once at start-up to
+acknowledge tool calls.</li>
+<li>Lambda MicroVM snapshot read and storage charges.</li>
+<li>Third-party services: ElevenLabs, Simli and Tavily web search.</li>
+<li>Free tier, Savings Plans, volume tiers beyond the first, and any private pricing
+agreement.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="known-ways-the-figure-can-be-off">Known ways the figure can be off</h3><a class="sl-anchor-link" href="#known-ways-the-figure-can-be-off"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Known ways the figure can be off”</span></a></div>
+<ul>
+<li><strong>Lost records read as lower cost.</strong> A metering write that fails is logged and
+dropped rather than allowed to interrupt transcription or a summary, and a process
+that is killed outright (out of memory, a host reboot) writes nothing for its open
+request or its runtime.</li>
+<li><strong>Redelivery can count Comprehend twice.</strong> The sentiment counter adds on each
+delivery of a transcript segment, so a Kinesis batch that is redelivered adds its
+segments’ units again. The amount is a fraction of a cent.</li>
+<li><strong>A re-run upload finalizer records its batch job again.</strong> The finalizer writes
+the job’s seconds each time it finalizes the meeting, so finalizing the same
+upload twice shows the batch transcription twice.</li>
+<li><strong>Compute is measured from inside the process.</strong> Fargate’s image pull and start-up,
+and the seconds between a MicroVM launch request and the Virtual Participant
+process starting, are billed but not counted.</li>
+</ul>
+<div class="sl-heading-wrapper level-h2"><h2 id="how-the-records-are-stored">How the records are stored</h2><a class="sl-anchor-link" href="#how-the-records-are-stored"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “How the records are stored”</span></a></div>
+<p>Metering records are items in the meeting table (<code dir="auto">EventSourcingTable</code>) under
+<code dir="auto">PK = mtr#&#x3C;CallId></code>, one item per metered event:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Attribute</th><th>Meaning</th></tr></thead><tbody><tr><td><code dir="auto">SK</code></td><td><code dir="auto">&#x3C;Context>#&#x3C;RecordedAt>#&#x3C;RecordId></code>, unique per record. The Comprehend counter uses the fixed <code dir="auto">Sentiment#counter#comprehend/detect-sentiment</code>.</td></tr><tr><td><code dir="auto">CallId</code>, <code dir="auto">Context</code>, <code dir="auto">Service</code></td><td>The meeting, what the usage was for, and the price-table key.</td></tr><tr><td><code dir="auto">Usage</code></td><td>Map of unit to quantity. The counter item keeps each unit as a top-level <code dir="auto">u_&#x3C;unit></code> number instead, because DynamoDB’s <code dir="auto">ADD</code> cannot create a member of a map that does not exist yet.</td></tr><tr><td><code dir="auto">Details</code></td><td>Strings for the reader: launch type, sizes, how a duration was measured. Never priced.</td></tr><tr><td><code dir="auto">Region</code></td><td>The region the usage was billed in, when not the deployment’s.</td></tr><tr><td><code dir="auto">Source</code>, <code dir="auto">RecordedAt</code></td><td>The component that wrote it, and when.</td></tr><tr><td><code dir="auto">ExpiresAfter</code></td><td>The same retention as the meeting record (<code dir="auto">MeetingRecordExpirationInDays</code>, or the shorter period set in the Retention section of the Configuration page), so a meeting’s cost expires with it.</td></tr></tbody></table>
+<p>The grant each component gains for metering is <code dir="auto">dynamodb:PutItem</code> on the meeting
+table, conditioned on <code dir="auto">dynamodb:LeadingKeys</code> matching <code dir="auto">mtr#*</code>, in addition to
+whatever access that component already had, so the only write it adds is of
+metering records. (The call event
+processor, which already has full access to the table, uses <code dir="auto">UpdateItem</code> for its
+counter.) Deleting a meeting from the UI deletes its metering records with it; a
+record a Virtual Participant writes while it is being stopped by that same deletion
+can land after the delete, and expires with its TTL.</p>
+<p>The writers are <code dir="auto">lma_metering</code> in the AI stack’s configuration layer (the Lambda
+functions), a copy of its writer in the meeting-assist stack, and <code dir="auto">metering.ts</code> in
+the WebSocket transcriber and the Virtual Participant.
+<code dir="auto">lma-ai-stack/test/test_metering_record_contract.py</code> asserts they all produce the
+same item, and that every service the TypeScript writers name has a price.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="upgrading">Upgrading</h2><a class="sl-anchor-link" href="#upgrading"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Upgrading”</span></a></div>
+<p>Nothing to do. Meetings held before the upgrade have no metering records, so their
+estimate reads zero with <code dir="auto">RecordCount: 0</code> — which means “not metered”, not “free” — and the meeting page shows <strong>No metering data</strong> for them.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="reference">Reference</h2><a class="sl-anchor-link" href="#reference"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Reference”</span></a></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>What</th><th>Where</th></tr></thead><tbody><tr><td>Record writer and the estimator</td><td><code dir="auto">lma-ai-stack/source/lambda_layers/configuration_layer/lma_metering/</code></td></tr><tr><td>Default price table</td><td><code dir="auto">lma-ai-stack/source/lambda_functions/configuration_seeder/defaults/CallPricing.json</code></td></tr><tr><td><code dir="auto">getCallCost</code>, <code dir="auto">getCallPricing</code>, <code dir="auto">updateCallPricing</code></td><td><code dir="auto">lma-ai-stack/source/lambda_functions/call_cost_resolver/</code></td></tr><tr><td>Transcriber writer</td><td><code dir="auto">lma-websocket-transcriber-stack/source/app/src/metering.ts</code></td></tr><tr><td>Virtual Participant writer</td><td><code dir="auto">lma-virtual-participant-stack/backend/src/metering.ts</code></td></tr><tr><td>Meeting assistant writer</td><td><code dir="auto">lma-meetingassist-setup-stack/src/call_metering.py</code></td></tr><tr><td>Cross-writer contract test</td><td><code dir="auto">lma-ai-stack/test/test_metering_record_contract.py</code></td></tr></tbody></table></div><footer class="sl-flex astro-ddtxxk7k"><div class="meta sl-flex astro-ddtxxk7k"></div><div class="pagination-links print:hidden astro-b5raizh3" dir="ltr"><a href="/amazon-transcribe-live-meeting-assistant/well-architected/" rel="prev" class="astro-b5raizh3"><svg aria-hidden="true" class="astro-b5raizh3 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg><span class="astro-b5raizh3">Previous<br class="astro-b5raizh3"><span class="link-title astro-b5raizh3">Well-Architected Assessment</span></span></a><a href="/amazon-transcribe-live-meeting-assistant/monitoring/" rel="next" class="astro-b5raizh3"><svg aria-hidden="true" class="astro-b5raizh3 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg><span class="astro-b5raizh3">Next<br class="astro-b5raizh3"><span class="link-title astro-b5raizh3">Monitoring &amp; Alerting</span></span></a></div></footer></div></div></main></div></div></div></div></body></html>
