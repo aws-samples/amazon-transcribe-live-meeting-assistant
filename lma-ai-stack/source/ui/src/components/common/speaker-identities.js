@@ -462,6 +462,48 @@ export const hasMultipleVoicesOnAChannel = (roster) => {
 export const speakerRowLabel = (row) => row.name || `${row.defaultName} ${row.voiceId || ''}`.trim();
 
 /**
+ * The roster's rows as the transcript shows them.
+ *
+ * Each row gains `shownAs` (the name its lines carry, through the meeting's
+ * speaker modes -- 'Bob Strahan' for every voice of a name shown as one person,
+ * 'ConfRm_1 · Voice 2' for an unnamed voice of a name shown as several),
+ * `shownUnnamed` (that name is a placeholder nobody gave), and `group` (the
+ * key of the platform name it was resolved under, if any). `groups` is
+ * speakerGroups over the same segments the roster was built from.
+ */
+export const speakerDisplayRows = (roster, identities, groups, fallbackName) =>
+  (roster ?? []).map((row) => {
+    const resolved = resolveSpeaker(
+      { channel: row.channel, speaker: row.storedSpeaker },
+      identities,
+      canonicalChannel(row.channel) === REMOTE_CHANNEL ? fallbackName : undefined,
+      groups,
+    );
+    return { ...row, shownAs: resolved.name, shownUnnamed: resolved.status === 'unnamed', group: resolved.group };
+  });
+
+/**
+ * The speakers named in the meeting page's header: one per name the transcript
+ * shows, in the order first heard, so the header lists exactly the speakers the
+ * transcript's lines carry. Takes speakerDisplayRows' rows; each entry is
+ * `{ key, label, keys }`, `key` being the first voice under the name (the row
+ * the Speakers panel opens at) and `keys` every voice under it.
+ */
+export const headerSpeakers = (displayRows) => {
+  const byLabel = new Map();
+  (displayRows ?? []).forEach((row) => {
+    const label = `${row.shownAs ?? ''}`.trim() || speakerRowLabel(row);
+    const entry = byLabel.get(label);
+    if (entry) {
+      entry.keys.push(row.key);
+      return;
+    }
+    byLabel.set(label, { key: row.key, label, keys: [row.key] });
+  });
+  return [...byLabel.values()];
+};
+
+/**
  * The map with the voice `key` given `name` by a person: confirmed, and
  * recorded as manual so no automatic pass revisits it. An empty name removes
  * the voice's entry, so the transcript falls back to the voice id rather than

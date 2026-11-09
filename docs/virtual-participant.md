@@ -76,8 +76,9 @@ shown as **one person** — `Bob Strahan` for every line, however many voice ids
 separation gave him — unless it reads as a room (`Conference Room`, `ConfRm_1`,
 a room device) or two of its voices each spoke at length, in which case it is
 shown as **several people**: `Conference Room · Voice 1`, `Voice 2`. The
-**One person | Several people** toggle beside the name's chips on the
-**Transcript** tab corrects either guess in one click, and in **Several people**
+**One person | Several people** menu beside the name's chips on the
+**Transcript** tab (and beside the name in the Speakers panel) corrects either
+guess, and in **Several people**
 each voice can be named in place; see
 [One person or several people](transcription-and-translation.md#one-person-or-several-people).
 

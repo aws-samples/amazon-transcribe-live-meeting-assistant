@@ -10,6 +10,7 @@ import {
   emptyIdentities,
   formatTalkTime,
   hasMultipleVoicesOnAChannel,
+  headerSpeakers,
   identityKeyFor,
   parseAttendeeList,
   parseSpeakerIdentities,
@@ -17,6 +18,8 @@ import {
   resolveSpeaker,
   resolveSpeakerName,
   serializeSpeakerIdentities,
+  speakerDisplayRows,
+  speakerGroups,
   speakerKey,
   speakerRowLabel,
   withMerge,
@@ -541,5 +544,63 @@ describe('the edits the Speakers panel and the speaker modal make', () => {
     expect(speakerRowLabel({ name: 'Bob', defaultName: 'Room 3', voiceId: '(spk_0)' })).toBe('Bob');
     expect(speakerRowLabel({ name: '', defaultName: 'Room 3', voiceId: '(spk_0)' })).toBe('Room 3 (spk_0)');
     expect(speakerRowLabel({ name: '', defaultName: 'Me', voiceId: '' })).toBe('Me');
+  });
+});
+
+describe('headerSpeakers', () => {
+  const line = (speaker, startTime, endTime, channel = 'REMOTE') => ({
+    channel,
+    speaker,
+    startTime,
+    endTime,
+    isPartial: false,
+    transcript: 'Words.',
+  });
+  const SEGMENTS = [
+    line('Bob Strahan (spk_0)', 0, 100),
+    line('Bob Strahan (spk_1)', 100, 101),
+    line('ConfRm_1 (spk_0)', 101, 110),
+    line('ConfRm_1 (spk_1)', 110, 120),
+    line('Other Participant (spk_0)', 120, 125),
+  ];
+  const header = (map, fallbackName = undefined) => {
+    const identities = parseSpeakerIdentities(map);
+    const roster = buildSpeakerRoster(SEGMENTS, identities, fallbackName);
+    return headerSpeakers(speakerDisplayRows(roster, identities, speakerGroups(SEGMENTS, identities), fallbackName));
+  };
+
+  it('names each speaker the transcript shows once, in the order first heard', () => {
+    expect(header(undefined).map((s) => s.label)).toEqual([
+      'Bob Strahan',
+      'ConfRm_1 · Voice 1',
+      'ConfRm_1 · Voice 2',
+      'Other Participant (spk_0)',
+    ]);
+  });
+
+  it("keeps every voice of a name shown as one person under the name's one entry", () => {
+    const [bob] = header(undefined);
+    expect(bob).toEqual({
+      key: 'REMOTE#Bob Strahan (spk_0)',
+      label: 'Bob Strahan',
+      keys: ['REMOTE#Bob Strahan (spk_0)', 'REMOTE#Bob Strahan (spk_1)'],
+    });
+  });
+
+  it('follows a chosen mode and the names given to voices', () => {
+    const map = {
+      identities: { 'REMOTE#ConfRm_1 (spk_1)': { name: 'Priya', status: 'confirmed' } },
+      speakerModes: { 'REMOTE#Bob Strahan': { mode: 'several' }, 'REMOTE#ConfRm_1': { mode: 'one' } },
+    };
+    expect(header(map).map((s) => s.label)).toEqual([
+      'Bob Strahan · Voice 1',
+      'Bob Strahan · Voice 2',
+      'Priya',
+      'Other Participant (spk_0)',
+    ]);
+  });
+
+  it('substitutes the Stream Audio participant name for the remote placeholder, as the transcript does', () => {
+    expect(header(undefined, 'Sam Ortiz').map((s) => s.label)).toContain('Sam Ortiz (spk_0)');
   });
 });
