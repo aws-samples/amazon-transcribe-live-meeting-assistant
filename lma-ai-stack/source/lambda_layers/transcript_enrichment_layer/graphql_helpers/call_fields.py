@@ -15,6 +15,25 @@ from gql.dsl import DSLField, DSLSchema
 CHANNELS = ("REMOTE", "LOCAL", "AGENT", "CALLER")
 
 
+def _summary_state(schema: DSLSchema) -> Tuple[DSLField, ...]:
+    """Call.CallSummaryState, when the schema the API is running declares it.
+
+    Selected so that the two writes which carry it -- the ENDED status and the
+    end-of-meeting summary -- publish it to onUpdateCall, and every other write
+    publishes the stored value rather than a null the browser has to paper over.
+
+    Conditional because the schema a selector is built against is the one the
+    API is running, which during a stack update can be older than this layer:
+    naming a field it does not declare would fail every write the pipeline
+    makes. Without the field the browser carries the stored value over, as it
+    did before this was selected.
+    """
+    # pylint: disable-next=protected-access
+    if "CallSummaryState" in schema.Call._type.fields:
+        return (schema.Call.CallSummaryState,)
+    return ()
+
+
 def call_fields(schema: DSLSchema) -> Tuple[DSLField, ...]:
     """Call type field selector"""
     overall_sentiment_select = schema.SentimentAggregation.OverallSentiment.select(
@@ -44,6 +63,7 @@ def call_fields(schema: DSLSchema) -> Tuple[DSLField, ...]:
         schema.Call.UpdatedAt,
         schema.Call.AgentId,
         schema.Call.CallSummaryText,
+        *_summary_state(schema),
         schema.Call.CustomerPhoneNumber,
         schema.Call.SystemPhoneNumber,
         schema.Call.RecordingUrl,

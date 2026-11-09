@@ -30,15 +30,19 @@ import {
   ToggleButton,
 } from '@cloudscape-design/components';
 import ReactMarkdown from 'react-markdown';
-import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate';
-import { StandardRetryStrategy } from '@aws-sdk/middleware-retry';
+import { TranslateClient } from '@aws-sdk/client-translate';
 import markdownRehypePlugins from '../common/markdown-plugins';
 import { getMarkdownSummary, getSummarySection, summarySections } from '../common/summary';
 import {
   SOURCE_MANUAL,
   STATUS_IDLE,
+  SUMMARY_IN_PROGRESS_TEXT,
+  SUMMARY_OVERDUE_TEXT,
   isHandEdited,
   isRegenerating,
+  isSummaryInProgress,
+  isSummaryOverdue,
+  msUntilSummaryOverdue,
   parseSummaryState,
   regenerationFailure,
 } from '../common/summary-state';
@@ -73,6 +77,7 @@ import { NodeSlot, useDetachedNode } from './NodeSlot';
 import { TAB_DETAILS, TAB_SCREEN_SHARE, TAB_SUMMARY, TAB_TRANSCRIPT } from './meeting-tabs';
 import SummarySections from './SummarySections';
 import useMeetingTab from '../../hooks/use-meeting-tab';
+import useTranscriptTranslation from '../../hooks/use-transcript-translation';
 import useCallCost from '../../hooks/use-call-cost';
 
 import VideoTimeline from '../video-timeline';
@@ -130,9 +135,6 @@ const logger = new ConsoleLogger('CallPanel');
 // comprehend PII types
 const piiTypesSplitRegEx = new RegExp(`\\[(${COMPREHEND_PII_TYPES.join('|')})\\]`);
 
-const MAXIMUM_ATTEMPTS = 100;
-const MAXIMUM_RETRY_DELAY = 1000;
-
 const PAUSE_TO_MERGE_IN_SECONDS = 1;
 
 /**
@@ -170,6 +172,37 @@ const CONSENT_RECORD_ID = 'meeting-consent-record';
 const EDIT_AFTER_MEETING_REASON =
   'Available once the meeting has ended, so the end-of-meeting summary cannot replace your text.';
 
+const GENERATING_REASON = 'Available once the summary being generated for this meeting has arrived.';
+
+/**
+ * The summary's text, or -- when it has none to show yet -- what is happening
+ * instead: the end-of-meeting summary on its way, a run that failed or is
+ * overdue (with the way out, when the viewer can take it), or "Not available".
+ */
+const SummaryBody = ({ callId, sections, keyframes, onKeyframeSelect, generating, overdue, failed, canRegenerate }) => {
+  if (!sections.length && generating) {
+    return (
+      <Box nativeAttributes={{ role: 'status', 'aria-live': 'polite' }}>
+        <StatusIndicator type="loading">{SUMMARY_IN_PROGRESS_TEXT}</StatusIndicator>
+        <Box color="text-body-secondary" padding={{ top: 'xs' }}>
+          The meeting has ended and its summary is being written. It appears here when it is ready.
+        </Box>
+      </Box>
+    );
+  }
+  if (!sections.length && (failed || overdue)) {
+    return (
+      <Box color="text-body-secondary">
+        {failed ? 'No summary is available for this meeting.' : SUMMARY_OVERDUE_TEXT}
+        {canRegenerate && ' Use Regenerate to try again.'}
+      </Box>
+    );
+  }
+  return (
+    <SummarySections callId={callId} sections={sections} keyframes={keyframes} onKeyframeSelect={onKeyframeSelect} />
+  );
+};
+
 // Exported for its own tests: regenerating is an asynchronous run whose
 // progress and failure are read back from the meeting rather than from the
 // mutation's answer, and that handover is worth driving directly.
@@ -193,24 +226,32 @@ export const CallSummary = ({
   const [saving, setSaving] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
 
+  // Re-rendered once when an end-of-meeting summary in progress becomes
+  // overdue, so the fallback below appears without anything else having to
+  // change on the meeting.
+  const [, setOverdueTick] = useState(0);
+  useEffect(() => {
+    const wait = msUntilSummaryOverdue(summaryState);
+    if (wait === null) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setOverdueTick((n) => n + 1), wait + 100);
+    return () => clearTimeout(timer);
+  }, [summaryState]);
+
   const regenerating = starting || isRegenerating(summaryState);
+  // The end-of-meeting summary, queued when the meeting ended and not yet
+  // written. A press of Regenerate in this tab takes over from it.
+  const generating = !starting && isSummaryInProgress(summaryState);
+  const overdue = !starting && isSummaryOverdue(summaryState);
   const failure = startError || regenerationFailure(summaryState);
   const handEdited = isHandEdited(summaryState);
-  // Editing waits until the meeting has ended. A meeting still running gets an
-  // end-of-meeting summary from the Kinesis pipeline when it does end, and that
-  // write replaces the text without asking -- so an edit made during the
-  // meeting would be discarded with none of the confirmation an edit is
-  // promised, and the panel would go on showing the Edited badge over generated
-  // text, because addCallSummaryText does not write CallSummaryState.
-  //
-  // This narrows that window rather than closing it. `ENDED` is set on the END
-  // event, and the orchestrator then runs the speaker-naming pass and a model
-  // call per template before its summary lands, which takes minutes. An edit
-  // saved in between is still replaced, and the stale Edited label still
-  // follows. Closing it properly means having the pipeline's write reset the
-  // state, which is a change to that mutation's input and to how the browser
-  // carries the field over -- out of scope here, and recorded in the docs as
-  // the behaviour it is.
+  // Editing waits until the meeting has ended, and then until its
+  // end-of-meeting summary has been written. That write replaces the text
+  // without asking -- so an edit made before it lands would be discarded with
+  // none of the confirmation an edit is promised. The pipeline marks the
+  // summary as in progress in the same write that sets `ENDED`, and marks it
+  // generated when the summary lands, so both waits are read from the state.
   //
   // Regenerate stays available during a meeting, which is one of the documented
   // reasons to press it: a meeting summarised while it was still going has
@@ -307,6 +348,14 @@ export const CallSummary = ({
           actions={
             <SpaceBetween size="xxs" direction="horizontal" alignItems="center">
               {regenerating && <StatusIndicator type="loading">Regenerating</StatusIndicator>}
+              {/* In the header only beside text already shown (a summary made
+                  while the meeting ran); otherwise the body says it. */}
+              {generating && sections.length > 0 && (
+                <StatusIndicator type="loading">{SUMMARY_IN_PROGRESS_TEXT}</StatusIndicator>
+              )}
+              {!regenerating && overdue && !failure && (
+                <StatusIndicator type="warning">{SUMMARY_OVERDUE_TEXT}</StatusIndicator>
+              )}
               {!regenerating && failure && (
                 // Announced, because the outcome of pressing Regenerate -- and
                 // especially a refusal -- is the whole feedback for that action.
@@ -339,7 +388,8 @@ export const CallSummary = ({
                     <Button
                       iconName="refresh"
                       loading={regenerating}
-                      disabled={readOnly || saving}
+                      disabled={readOnly || saving || generating}
+                      disabledReason={generating && !readOnly ? GENERATING_REASON : undefined}
                       onClick={handleRegenerateClick}
                     >
                       Regenerate
@@ -348,7 +398,7 @@ export const CallSummary = ({
                   {onSave && (
                     <Button
                       iconName="edit"
-                      disabled={readOnly || regenerating || meetingInProgress || !item.callSummaryText}
+                      disabled={readOnly || regenerating || generating || meetingInProgress || !item.callSummaryText}
                       disabledReason={meetingInProgress && !readOnly ? EDIT_AFTER_MEETING_REASON : undefined}
                       onClick={beginEditing}
                     >
@@ -402,11 +452,15 @@ export const CallSummary = ({
           />
         </FormField>
       ) : (
-        <SummarySections
+        <SummaryBody
           callId={item.callId}
           sections={sections}
           keyframes={keyframes}
           onKeyframeSelect={onKeyframeSelect}
+          generating={generating}
+          overdue={overdue && !regenerating}
+          failed={Boolean(failure) && !regenerating}
+          canRegenerate={Boolean(onRegenerate) && !readOnly}
         />
       )}
     </Container>
@@ -478,7 +532,7 @@ const translationOf = ({ segmentId, targetLanguage, translateOn }, translateCach
   return translateCache?.[segmentId.concat('-', targetLanguage)]?.translated ?? '';
 };
 
-const TranscriptContent = ({ segment, translateCache, query = '' }) => {
+const TranscriptContent = ({ segment, translation = '', query = '' }) => {
   const { transcript, segmentId, channel } = segment;
   // The search's words marked in the segment's own text (not its translation).
   const transcriptPlugins = useMemo(
@@ -486,7 +540,7 @@ const TranscriptContent = ({ segment, translateCache, query = '' }) => {
     [query],
   );
 
-  const result = translationOf(segment, translateCache);
+  const result = translation;
 
   const transcriptPiiSplit = transcript.split(piiTypesSplitRegEx);
 
@@ -626,7 +680,7 @@ const SpeakerRenamePopover = ({ segment, onRenameSpeaker, locked }) => {
 
 const TranscriptSegment = ({
   segment,
-  translateCache,
+  translation = '',
   enableSentimentAnalysis,
   onRenameSpeaker,
   readOnly,
@@ -645,7 +699,7 @@ const TranscriptSegment = ({
           time={getTimestampFromSeconds(segment.startTime)}
           onSeek={onSeek}
           query={query}
-          translation={translationOf(segment, translateCache)}
+          translation={translation}
         />
       </Grid>
     );
@@ -697,7 +751,7 @@ const TranscriptSegment = ({
             <TextContent>{times}</TextContent>
           )}
         </SpaceBetween>
-        <TranscriptContent segment={segment} translateCache={translateCache} query={query} />
+        <TranscriptContent segment={segment} translation={translation} query={query} />
       </SpaceBetween>
     </Grid>
   );
@@ -756,6 +810,43 @@ const isDisplayedSegment = (s) =>
 
 const rowIdFor = (s) => `${s.segmentId}-${s.createdAt}`;
 
+// How often, at most, the lines on screen are read while the reader scrolls,
+// for the translation to do those first.
+const VISIBLE_ROWS_THROTTLE_MS = 200;
+
+/**
+ * How far translating the transcript has got, and what to do about the lines
+ * that could not be translated. Says nothing once every line is done; during a
+ * live meeting, says nothing about the line or two that are always just
+ * arriving. Exported for its own tests.
+ */
+export const TranslationProgress = ({ status, live, onRetry }) => {
+  const { total, done, failed, reason, translating } = status;
+  const remaining = total - done - failed;
+  if (translating && (!live || remaining > 2)) {
+    return (
+      <Box padding={{ horizontal: 's', bottom: 'xxs' }}>
+        <StatusIndicator type="loading">{`Translating ${done} of ${total} lines`}</StatusIndicator>
+      </Box>
+    );
+  }
+  if (!translating && failed > 0) {
+    return (
+      <Box padding={{ horizontal: 's', bottom: 'xxs' }} nativeAttributes={{ role: 'status', 'aria-live': 'polite' }}>
+        <SpaceBetween direction="horizontal" size="xs" alignItems="center">
+          <StatusIndicator type="error">
+            {`Could not translate ${failed} of ${total} lines${reason ? `: ${reason}` : ''}`}
+          </StatusIndicator>
+          <Button variant="inline-link" onClick={onRetry}>
+            Try again
+          </Button>
+        </SpaceBetween>
+      </Box>
+    );
+  }
+  return null;
+};
+
 // How long after the page scrolls the transcript itself a scroll event is
 // taken to be that scroll rather than the reader's. A smooth scroll over a long
 // transcript takes most of a second.
@@ -772,7 +863,7 @@ const TranscriptRow = React.memo(
     current,
     match,
     query,
-    translateCache,
+    translation,
     enableSentimentAnalysis,
     participantName,
     onRenameSpeaker,
@@ -788,11 +879,12 @@ const TranscriptRow = React.memo(
         className={classes.join(' ')}
         data-start-time={segment.startTime}
         data-row-id={rowIdFor(segment)}
+        data-segment-id={segment.segmentId}
         aria-current={current ? 'true' : undefined}
       >
         <TranscriptSegment
           segment={segment}
-          translateCache={translateCache}
+          translation={translation}
           enableSentimentAnalysis={enableSentimentAnalysis}
           participantName={participantName}
           onRenameSpeaker={onRenameSpeaker}
@@ -959,10 +1051,6 @@ const CallInProgressTranscript = ({
   // The speaker whose chip opened the speaker modal, or null.
   const [editingSpeaker, setEditingSpeaker] = useState(null);
   const [turnByTurnSegments, setTurnByTurnSegments] = useState([]);
-  const [translateCache, setTranslateCache] = useState({});
-  const [cacheSeen, setCacheSeen] = useState({});
-  const [lastUpdated, setLastUpdated] = useState(Date.now());
-  const [updateFlag, setUpdateFlag] = useState(false);
   const [userHasScrolled, setUserHasScrolled] = useState(false);
   const [query, setQuery] = useState('');
   const [activeMatch, setActiveMatch] = useState(-1);
@@ -997,119 +1085,6 @@ const CallInProgressTranscript = ({
 
     return currentTurnByTurnSegments;
   };
-
-  const updateTranslateCache = (seg) => {
-    const promises = [];
-    // prettier-ignore
-    for (let i = 0; i < seg.length; i += 1) {
-      const k = seg[i].segmentId.concat('-', targetLanguage);
-
-      // prettier-ignore
-      if (translateCache[k] === undefined) {
-        // Now call translate API
-        const params = {
-          Text: seg[i].transcript,
-          SourceLanguageCode: 'auto',
-          TargetLanguageCode: targetLanguage,
-        };
-        const command = new TranslateTextCommand(params);
-
-        logger.debug('Translate API being invoked for:', seg[i].transcript, targetLanguage);
-
-        promises.push(
-          translateClient.send(command).then(
-            (data) => {
-              const n = {};
-              logger.debug('Translate API response:', seg[i].transcript, targetLanguage, data.TranslatedText);
-              n[k] = { cacheId: k, transcript: seg[i].transcript, translated: data.TranslatedText };
-              return n;
-            },
-            (error) => {
-              logger.debug('Error from translate:', error);
-            },
-          ),
-        );
-      }
-    }
-    return promises;
-  };
-
-  // Translate all segments when the call is completed.
-  useEffect(() => {
-    if (translateOn && targetLanguage !== '' && item.recordingStatusLabel !== IN_PROGRESS_STATUS) {
-      const promises = updateTranslateCache(getSegments());
-      Promise.all(promises).then((results) => {
-        // prettier-ignore
-        if (results.length > 0) {
-          setTranslateCache((state) => ({
-            ...state,
-            ...results.reduce((a, b) => ({ ...a, ...b })),
-          }));
-          setUpdateFlag((state) => !state);
-        }
-      });
-    }
-  }, [targetLanguage, agentTranscript, translateOn, item.recordingStatusLabel]);
-
-  // Translate real-time segments when the call is in progress.
-  useEffect(() => {
-    const runTranslation = async () => {
-      const c = getSegments();
-      // prettier-ignore
-      if (
-        translateOn
-        && targetLanguage !== ''
-        && c.length > 0
-        && item.recordingStatusLabel === IN_PROGRESS_STATUS
-      ) {
-        const k = c[c.length - 1].segmentId.concat('-', targetLanguage);
-        const n = {};
-        if (c[c.length - 1].isPartial === false && cacheSeen[k] === undefined) {
-          n[k] = { seen: true };
-          setCacheSeen((state) => ({
-            ...state,
-            ...n,
-          }));
-
-          // prettier-ignore
-          if (translateCache[k] === undefined) {
-            // Now call translate API
-            const params = {
-              Text: c[c.length - 1].transcript,
-              SourceLanguageCode: 'auto',
-              TargetLanguageCode: targetLanguage,
-            };
-            const command = new TranslateTextCommand(params);
-
-            logger.debug('Translate API being invoked for:', c[c.length - 1].transcript, targetLanguage);
-
-            try {
-              const data = await translateClient.send(command);
-              const o = {};
-              logger.debug('Translate API response:', c[c.length - 1].transcript, data.TranslatedText);
-              o[k] = {
-                cacheId: k,
-                transcript: c[c.length - 1].transcript,
-                translated: data.TranslatedText,
-              };
-              setTranslateCache((state) => ({
-                ...state,
-                ...o,
-              }));
-            } catch (error) {
-              logger.debug('Error from translate:', error);
-            }
-          }
-        }
-        if (Date.now() - lastUpdated > 500) {
-          setUpdateFlag((state) => !state);
-          logger.debug('Updating turn by turn with latest cache');
-        }
-      }
-      setLastUpdated(Date.now());
-    };
-    runTranslation();
-  }, [callTranscriptPerCallId, translateOn, targetLanguage]);
 
   // Whether each platform name's voices are one person or several, decided over
   // the whole transcript (speaker-modes.js). Recomputed as segments arrive, so
@@ -1246,6 +1221,21 @@ const CallInProgressTranscript = ({
       ),
     [turnByTurnSegments, activeSpeakers, showChat],
   );
+  // Translated a bounded number of lines at a time, newest first while the
+  // meeting runs and the lines on screen first after it (see
+  // use-transcript-translation.js), each line shown as soon as it arrives.
+  const {
+    translateCache,
+    status: translation,
+    prioritize: prioritizeTranslation,
+    retry: retryTranslation,
+  } = useTranscriptTranslation({
+    segments: visibleSegments,
+    enabled: translateOn,
+    targetLanguage,
+    translateClient,
+    newestFirst: isLive,
+  });
   const matchIds = useMemo(
     () => (query.trim() ? visibleSegments.filter((s) => textMatches(s.transcript, query)).map(rowIdFor) : []),
     [visibleSegments, query],
@@ -1284,9 +1274,34 @@ const CallInProgressTranscript = ({
     if (container.scrollTo) container.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
   }, []);
 
+  // The lines on screen, for the translation to do first. Read at most every
+  // VISIBLE_ROWS_THROTTLE_MS while the reader scrolls.
+  const visibleRowsTimer = useRef(null);
+  const reportVisibleRows = useCallback(() => {
+    const container = containerRef.current;
+    if (!container || !translateOn || !targetLanguage) return;
+    const { top, bottom } = visibleBounds(container);
+    const ids = [];
+    container.querySelectorAll('[data-segment-id]').forEach((row) => {
+      const r = row.getBoundingClientRect();
+      if (r.bottom >= top && r.top <= bottom) ids.push(row.getAttribute('data-segment-id'));
+    });
+    prioritizeTranslation(ids);
+  }, [translateOn, targetLanguage, prioritizeTranslation]);
+  useEffect(() => {
+    reportVisibleRows();
+  }, [reportVisibleRows, visibleSegments.length, active]);
+  useEffect(() => () => clearTimeout(visibleRowsTimer.current), []);
+
   // Detect when user manually scrolls
   const handleScroll = (e) => {
     const container = e.target;
+    if (translateOn && visibleRowsTimer.current === null) {
+      visibleRowsTimer.current = setTimeout(() => {
+        visibleRowsTimer.current = null;
+        reportVisibleRows();
+      }, VISIBLE_ROWS_THROTTLE_MS);
+    }
     if (isLive) {
       const threshold = 50; // pixels from bottom
       const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
@@ -1323,7 +1338,6 @@ const CallInProgressTranscript = ({
     targetLanguage,
     agentTranscript,
     translateOn,
-    updateFlag,
     speakerIdentities,
   ]);
 
@@ -1444,6 +1458,9 @@ const CallInProgressTranscript = ({
           hidden among them, it would move them, and the browser's scroll
           anchoring would then scroll the box -- which reads as the reader
           scrolling, and shows the notice again. */}
+      {translateOn && targetLanguage && (
+        <TranslationProgress status={translation} live={isLive} onRetry={retryTranslation} />
+      )}
       <div className="transcript-scroll-frame">
         {pausedNotice && (
           <div className="transcript-follow-paused" role="status">
@@ -1490,7 +1507,9 @@ const CallInProgressTranscript = ({
                   current={rowId === currentRowId}
                   match={match}
                   query={query}
-                  translateCache={translateCache}
+                  // The row's own translation rather than the whole cache, so
+                  // a translation arriving re-renders its row and no other.
+                  translation={translationOf(s, translateCache)}
                   enableSentimentAnalysis={enableSentimentAnalysis}
                   participantName={item.remoteParticipantName}
                   onRenameSpeaker={onRenameSpeaker}
@@ -1824,36 +1843,21 @@ export const CallPanel = ({
     (channel) => channel.segments || [],
   );
 
-  // prettier-ignore
-  const customRetryStrategy = new StandardRetryStrategy(
-    async () => MAXIMUM_ATTEMPTS,
-    {
-      delayDecider:
-        (_, attempts) => Math.floor(
-          Math.min(MAXIMUM_RETRY_DELAY, 2 ** attempts * 10),
-        ),
-    },
+  // One client per set of credentials, which go stale and are refreshed when
+  // a user stays signed in for a long time. One attempt per request: the
+  // transcript's translation queue does its own retrying, with backoff, so
+  // that a throttled request is visible to it and counted against a bounded
+  // number of requests in flight -- an SDK retrying each of hundreds of lines
+  // on its own is what kept a long meeting from showing any translation.
+  const translateClient = useMemo(
+    () =>
+      new TranslateClient({
+        region: awsExports.aws_project_region,
+        credentials: currentCredentials,
+        maxAttempts: 1,
+      }),
+    [currentCredentials],
   );
-
-  let translateClient = new TranslateClient({
-    region: awsExports.aws_project_region,
-    credentials: currentCredentials,
-    maxAttempts: MAXIMUM_ATTEMPTS,
-    retryStrategy: customRetryStrategy,
-  });
-
-  /* Get a client with refreshed credentials. Credentials can go stale when user is logged in
-     for an extended period.
-   */
-  useEffect(() => {
-    logger.debug('Translate client with refreshed credentials');
-    translateClient = new TranslateClient({
-      region: awsExports.aws_project_region,
-      credentials: currentCredentials,
-      maxAttempts: MAXIMUM_ATTEMPTS,
-      retryStrategy: customRetryStrategy,
-    });
-  }, [currentCredentials]);
 
   const isLive = item.recordingStatusLabel === IN_PROGRESS_STATUS;
 

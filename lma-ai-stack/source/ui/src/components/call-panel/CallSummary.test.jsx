@@ -20,11 +20,19 @@
  * download, the email, the embedded panel -- will show.
  */
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 
 import { CallSummary } from './CallPanel';
-import { SOURCE_MANUAL, STATUS_FAILED, STATUS_RUNNING } from '../common/summary-state';
+import {
+  MEETING_END_PATIENCE_MS,
+  SOURCE_MANUAL,
+  STATUS_FAILED,
+  STATUS_IDLE,
+  STATUS_RUNNING,
+  SUMMARY_IN_PROGRESS_TEXT,
+  TRIGGER_MEETING_END,
+} from '../common/summary-state';
 import { DONE_STATUS, IN_PROGRESS_STATUS } from '../common/get-recording-status';
 
 /* eslint-disable react/prop-types */
@@ -283,5 +291,104 @@ describe('CallSummary — editing by hand', () => {
     expect(screen.getByRole('button', { name: /save summary/i })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: /save summary/i }));
     expect(onSave).not.toHaveBeenCalled();
+  });
+});
+
+describe('CallSummary — the end-of-meeting summary on its way', () => {
+  // What the pipeline writes: running when the meeting ends, then idle with the
+  // text or failed without it. The shape summary-state.js documents.
+  const endOfMeeting = (state) => ({ source: 'generated', trigger: TRIGGER_MEETING_END, ...state });
+  const queuedAgo = (ms) =>
+    endOfMeeting({ status: STATUS_RUNNING, startedAt: new Date(Date.now() - ms).toISOString() });
+  const ended = (state, text) => ({
+    ...withState(state, text),
+    recordingStatusLabel: DONE_STATUS,
+  });
+  const rerenderWith = (rerender, item) =>
+    rerender(<CallSummary item={item} onSave={onSave} onRegenerate={onRegenerate} readOnly={false} />);
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('shows the summary in progress, then the summary once it is written', () => {
+    const { rerender } = renderPanel({ item: ended(queuedAgo(5000), null) });
+    expect(screen.getByText(SUMMARY_IN_PROGRESS_TEXT)).toBeInTheDocument();
+    expect(screen.queryByText('Not available')).not.toBeInTheDocument();
+    // A second run would be refused while this one is going, and an edit would
+    // be replaced when it lands.
+    // `aria-disabled`: the button carries a disabledReason, so Cloudscape keeps
+    // it focusable rather than setting `disabled`.
+    expect(screen.getByRole('button', { name: /regenerate/i })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('button', { name: /^edit$/i })).toBeDisabled();
+
+    rerenderWith(
+      rerender,
+      ended(endOfMeeting({ status: STATUS_IDLE, updatedAt: new Date().toISOString() }), GENERATED),
+    );
+    expect(screen.queryByText(SUMMARY_IN_PROGRESS_TEXT)).not.toBeInTheDocument();
+    expect(screen.getByText(/migration plan/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /regenerate/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /^edit$/i })).toBeEnabled();
+  });
+
+  it('offers Regenerate with a short message when the summary failed', async () => {
+    renderPanel({
+      item: ended(
+        endOfMeeting({
+          status: STATUS_FAILED,
+          message: 'the summary could not be generated',
+          // Long ago on purpose: unlike a regeneration's failure, this one is
+          // why the meeting has no summary, and does not age out.
+          updatedAt: new Date(Date.now() - 86400000).toISOString(),
+        }),
+        null,
+      ),
+    });
+    expect(screen.getByText('the summary could not be generated')).toBeInTheDocument();
+    expect(screen.getByText(/use regenerate to try again/i)).toBeInTheDocument();
+    expect(screen.queryByText(SUMMARY_IN_PROGRESS_TEXT)).not.toBeInTheDocument();
+    const regenerate = screen.getByRole('button', { name: /regenerate/i });
+    expect(regenerate).toBeEnabled();
+    fireEvent.click(regenerate);
+    await waitFor(() => expect(onRegenerate).toHaveBeenCalledTimes(1));
+  });
+
+  it('offers Regenerate once the summary has been waited for too long', () => {
+    renderPanel({ item: ended(queuedAgo(MEETING_END_PATIENCE_MS + 1000), null) });
+    expect(screen.queryByText(SUMMARY_IN_PROGRESS_TEXT)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/taking longer than expected/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /regenerate/i })).toBeEnabled();
+  });
+
+  it('falls back to Regenerate on its own when no outcome ever arrives', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    renderPanel({ item: ended(queuedAgo(0), null) });
+    expect(screen.getByText(SUMMARY_IN_PROGRESS_TEXT)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /regenerate/i })).toHaveAttribute('aria-disabled', 'true');
+    act(() => {
+      vi.advanceTimersByTime(MEETING_END_PATIENCE_MS + 1000);
+    });
+    expect(screen.queryByText(SUMMARY_IN_PROGRESS_TEXT)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /regenerate/i })).toBeEnabled();
+  });
+
+  it('never shows a summary in progress for a meeting with summaries switched off', () => {
+    // Nothing marks such a meeting: it ends with no summary state at all.
+    renderPanel({ item: { ...ITEM, callSummaryText: undefined, recordingStatusLabel: DONE_STATUS } });
+    expect(screen.queryByText(SUMMARY_IN_PROGRESS_TEXT)).not.toBeInTheDocument();
+    expect(screen.queryByText(/taking longer than expected/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Not available')).toBeInTheDocument();
+  });
+
+  it('shows a summary in progress beside the text written while the meeting ran', () => {
+    renderPanel({ item: ended(queuedAgo(5000), GENERATED) });
+    expect(screen.getByText(SUMMARY_IN_PROGRESS_TEXT)).toBeInTheDocument();
+    expect(screen.getByText(/migration plan/)).toBeInTheDocument();
+  });
+
+  it('is not shown as a regeneration', () => {
+    renderPanel({ item: ended(queuedAgo(5000), null) });
+    expect(screen.queryByText(/^Regenerating$/)).not.toBeInTheDocument();
   });
 });

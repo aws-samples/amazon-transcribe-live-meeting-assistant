@@ -2780,16 +2780,21 @@ Resources:
               !Ref EndOfCallLambdaHookFunctionArn,
             ]
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
-          BOTO_READ_TIMEOUT: 60
           SPEAKER_NAME_RESOLVER_ARN: !GetAtt SpeakerNameResolverFunction.Arn
           # Must exceed the resolver's own 60s timeout, so a pass that is still
           # running is never abandoned and retried from here.
           SPEAKER_NAME_READ_TIMEOUT: 75
+          # How long the summary function is waited for. With the speaker-naming
+          # wait above it must leave this function's own Timeout time to record
+          # the outcome, so a summary that runs too long is reported as failed
+          # rather than leaving the meeting marked as in progress.
+          SUMMARY_READ_TIMEOUT: 780
           # The expiry of the summary it writes when the request names none:
           # the Retention section's value, at most this parameter's.
           MEETING_RECORD_EXPIRATION_IN_DAYS: !Ref MeetingRecordExpirationInDays
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-      Timeout: 240
+      # The Lambda maximum: the summary it waits for can run for most of it.
+      Timeout: 900
       MemorySize: 128
       Handler: lambda_function.handler
       Layers:
