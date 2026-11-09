@@ -342,6 +342,8 @@ Configure the language mode using the **Language for Transcription** CloudFormat
 
 LMA supports live translation of transcripts into 75+ languages via Amazon Translate. Users select their preferred target language directly in the LMA web UI. Translation is performed client-side, translating the transcribed text as it appears in the interface. This allows each user to independently choose their own target language without affecting other participants.
 
+Amazon Translate takes one line per request, so a long meeting is translated a line at a time, a few lines at once. During a live meeting the newest lines are translated first; after it, the lines on screen are translated first and the rest follow. Each line shows its translation as soon as it arrives, and the transcript shows **Translating N of M lines** while it works through a long meeting. A request the service refuses because too many were sent is retried after a short wait. If some lines still cannot be translated -- for example because the language pair is not supported, or the signed-in user has no permission to use Amazon Translate -- the transcript says how many and why, with **Try again**. Translations are kept while the page is open, so turning **Translate** off and on, or going back to a language already used, does not translate the same lines again.
+
 ## Content Redaction (PII)
 
 LMA can automatically redact personally identifiable information (PII) from transcripts using Amazon Transcribe's built-in content redaction.

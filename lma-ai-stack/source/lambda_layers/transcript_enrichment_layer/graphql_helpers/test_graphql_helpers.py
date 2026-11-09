@@ -129,6 +129,9 @@ def test_call_selector_covers_the_fields_the_ui_reads(dsl_schema: DSLSchema):
         "Owner",
         "SharedWith",
         "CallSummaryText",
+        # The summary's progress: the ENDED status write and the end-of-meeting
+        # summary write carry it, and the meeting page reads it from them.
+        "CallSummaryState",
         "TotalConversationDurationMillis",
     ):
         assert expected in selected, f"call_fields no longer selects {expected}"
@@ -183,3 +186,14 @@ def test_every_selected_call_field_is_declared_on_the_call_type(dsl_schema: DSLS
     declared = set(dsl_schema.Call._type.fields)  # pylint: disable=protected-access
     selected = {str(field.name) for field in call_fields(dsl_schema)}
     assert selected <= declared, f"selected but not on Call: {sorted(selected - declared)}"
+
+
+def test_call_selector_works_against_a_schema_without_the_summary_state(dsl_schema: DSLSchema):
+    """The running API's schema can be older than this layer during a stack
+    update; a selector naming a field it lacks would fail every pipeline write."""
+    without = SCHEMA.read_text().replace("\tCallSummaryState: String\n", "", 1)
+    assert without != SCHEMA.read_text()
+    older = DSLSchema(build_ast_schema(parse(APPSYNC_PRELUDE + without), assume_valid_sdl=True))
+    selected = {str(field.name) for field in call_fields(older)}
+    assert "CallSummaryState" not in selected
+    assert "CallSummaryText" in selected

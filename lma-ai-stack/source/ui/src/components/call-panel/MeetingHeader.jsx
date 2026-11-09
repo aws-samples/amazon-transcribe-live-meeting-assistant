@@ -49,6 +49,7 @@ import { DONE_STATUS } from '../common/get-recording-status';
 import DiagnoseButton from '../troubleshooting/DiagnoseButton';
 import { formatDuration, formatMeetingStart, meetingTitle } from '../common/meeting-header';
 import { consentSummary } from '../common/meeting-context';
+import { parseSummaryState, summaryStatusText } from '../common/summary-state';
 import { CallCostBreakdown, costSummaryText } from './CallCostPanel';
 import { ASSISTANT_PANEL_ID } from './MeetingAssistantPanel';
 import {
@@ -146,6 +147,8 @@ const MeetingHeader = ({
   const title = meetingTitle(item.callId);
   const started = formatMeetingStart(item.initiationTimeStamp);
   const hasSummary = Boolean(item.callSummaryText);
+  const summaryUnavailableReason =
+    summaryStatusText(parseSummaryState(item.callSummaryState)) || 'This meeting has no summary yet.';
   // As before the move: a transcript is offered for download once the meeting
   // has ended, and not after the Retention section has deleted it.
   const canDownloadTranscript = item.recordingStatusLabel === DONE_STATUS && !item.transcriptDeletedAt;
@@ -161,7 +164,7 @@ const MeetingHeader = ({
         id: `summary:${entry.id}`,
         ariaLabel: `Summary: ${entry.text}`,
         disabled: !hasSummary,
-        disabledReason: hasSummary ? undefined : 'This meeting has no summary yet.',
+        disabledReason: hasSummary ? undefined : summaryUnavailableReason,
       })),
     },
     {

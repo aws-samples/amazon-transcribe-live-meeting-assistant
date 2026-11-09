@@ -565,7 +565,7 @@ Translate meeting transcripts in real-time:
 - Choose from **75+ languages** powered by Amazon Translate
 - Translation is performed client-side for low latency
 
-Live translation applies to the transcript panel and updates as new segments arrive.
+Live translation applies to the transcript panel and updates as new segments arrive. On a long meeting the lines fill in a few at a time, with a progress line above the transcript; see [Live Translation](transcription-and-translation.md#live-translation).
 
 ## Admin Configuration Pages
 
