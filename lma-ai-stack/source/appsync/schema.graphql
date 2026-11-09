@@ -1862,6 +1862,10 @@ type CallCost @aws_cognito_user_pools @aws_iam {
 	ContextTotals: [CallCostContextTotal]
 	Items: [CallCostLineItem]
 	UnpricedCount: Int
+	# Lines priced at a price the active configuration profile sets, and the
+	# name of that profile.
+	CustomPriceCount: Int
+	PriceProfile: String
 	# Metering records read for this meeting.
 	RecordCount: Int
 	# The date the default prices were taken, and from where.
@@ -1902,6 +1906,14 @@ type CallCostLineItem @aws_cognito_user_pools @aws_iam {
 	Note: String
 	# How the usage was measured: launch type, sizes, session counts.
 	Details: String
+	# Where UnitPrice came from: "shipped" (the price table LMA ships), "custom"
+	# (set in the active configuration profile), or "none" (no price).
+	PriceOrigin: String
+	# One sentence naming that source, and a pricing page for a shipped price.
+	PriceSource: String
+	PriceSourceUrl: String
+	# The shipped price of the same unit, shown beside a custom one.
+	ShippedUnitPrice: Float
 }
 
 # A JSON string: {"Default", "Custom", "Effective", "Version", "UpdatedBy",

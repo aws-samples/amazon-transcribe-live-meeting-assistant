@@ -142,20 +142,78 @@ export const tableRows = (estimate) =>
     },
   ]);
 
+/** The AWS service each price-table prefix names, in the order the price table lists them. */
+export const SERVICE_NAMES = {
+  transcribe: 'Amazon Transcribe',
+  bedrock: 'Amazon Bedrock',
+  'lambda-microvm': 'AWS Lambda MicroVM',
+  fargate: 'AWS Fargate',
+  comprehend: 'Amazon Comprehend',
+  ec2: 'Amazon EC2',
+};
+
 /** What the Service column shows: the model or API, without the service prefix. */
 export const serviceLabel = (service) => {
   if (!service) return '';
   const [prefix, ...rest] = service.split('/');
   const name = rest.join('/');
-  const prefixes = {
-    bedrock: 'Amazon Bedrock',
-    transcribe: 'Amazon Transcribe',
-    'lambda-microvm': 'AWS Lambda MicroVM',
-    fargate: 'AWS Fargate',
-    ec2: 'Amazon EC2',
-    comprehend: 'Amazon Comprehend',
-  };
-  return prefixes[prefix] ? `${prefixes[prefix]} — ${name}` : service;
+  return SERVICE_NAMES[prefix] ? `${SERVICE_NAMES[prefix]} — ${name}` : service;
+};
+
+// How many of a unit a readable price is quoted for, and what that many is called.
+const READABLE_SCALES = {
+  inputTokens: [1e6, 'per million input tokens'],
+  outputTokens: [1e6, 'per million output tokens'],
+  cacheReadInputTokens: [1e6, 'per million cache read tokens'],
+  cacheWriteInputTokens: [1e6, 'per million cache write tokens'],
+  speechInputTokens: [1e6, 'per million speech input tokens'],
+  speechOutputTokens: [1e6, 'per million speech output tokens'],
+  textInputTokens: [1e6, 'per million text input tokens'],
+  textOutputTokens: [1e6, 'per million text output tokens'],
+  seconds: [60, 'per minute'],
+  vcpuSeconds: [3600, 'per vCPU-hour'],
+  gbSeconds: [3600, 'per GB-hour'],
+  units: [1, 'per 100-character unit'],
+};
+
+/**
+ * A unit price as the AWS pricing pages quote it -- "$3.00 per million input
+ * tokens", "$0.010002 per minute" -- so a reader can compare it with them.
+ * Empty for a unit with no usual scale.
+ */
+export const readablePrice = (unit, price, currency = 'USD') => {
+  const scale = READABLE_SCALES[unit];
+  if (!scale || price === null || price === undefined || Number.isNaN(Number(price))) return '';
+  const symbol = currency === 'USD' ? '$' : `${currency} `;
+  const amount = Number(price) * scale[0];
+  // As a pricing page writes it: "$3.00", "$0.10", "$0.04048". Six places at
+  // most, which also drops the binary noise of 1e-7 × 1e6.
+  const text = amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+  return `${symbol}${text} ${scale[1]}`;
+};
+
+/** The calculation a priced line shows: "1,480 seconds × $0.0001667 = $0.2467". */
+export const lineCalculation = (line, currency = 'USD') => {
+  if (!line || !line.Chargeable || !line.Priced || line.UnitPrice === null || line.UnitPrice === undefined) {
+    return '';
+  }
+  return (
+    `${formatQuantity(line.Quantity)} ${unitLabel(line.Unit)} × ${formatUnitPrice(line.UnitPrice, currency)}` +
+    ` = ${formatCost(line.Cost, currency)}`
+  );
+};
+
+/**
+ * A few words naming where a line's price came from, for the table cell; the
+ * full sentence is the line's PriceSource.
+ */
+export const priceSourceLabel = (line) => {
+  if (!line || !line.Chargeable) return '';
+  if (line.PriceOrigin === 'custom') return 'Your price';
+  if (line.PriceOrigin === 'none' || !line.Priced) return 'No price';
+  if (!line.PriceSource) return 'Shipped price';
+  // "AWS Price List API (offer ..., read ...)" is shown as "AWS Price List API".
+  return line.PriceSource.split(/[(.]/)[0].trim() || 'Shipped price';
 };
 
 /** Short, factual statements about what limits this estimate, for the panel's notes. */
@@ -167,6 +225,13 @@ export const estimateCaveats = (estimate) => {
       `${estimate.UnpricedCount} line${estimate.UnpricedCount === 1 ? ' has' : 's have'} no price in the ` +
         'price table and ' +
         `${estimate.UnpricedCount === 1 ? 'is' : 'are'} not included in the total.`,
+    );
+  }
+  if (estimate.CustomPriceCount > 0) {
+    const profile = estimate.PriceProfile ? `the ${estimate.PriceProfile} configuration profile` : 'this deployment';
+    caveats.push(
+      `${estimate.CustomPriceCount} line${estimate.CustomPriceCount === 1 ? ' is' : 's are'} priced at a price ` +
+        `set in ${profile} rather than the shipped list price; each shows the shipped price beside it.`,
     );
   }
   (estimate.RegionsWithoutListedPrices || []).forEach((region) => {

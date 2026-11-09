@@ -225,3 +225,165 @@ def test_the_shipped_table_prices_every_service_a_writer_meters() -> None:
     for service in fixed_services:
         assert service in base, service
     assert "ec2/virtual-participant-host" in shipped["notes"]
+
+
+# ── where each line's price came from ───────────────────────────────────────
+
+SOURCED: Dict[str, Any] = {
+    **TABLE,
+    "sources": {
+        "default": {
+            "transcribe/streaming": {
+                "basis": "price-list-api",
+                "offer": "transcribe",
+                "offerVersion": "20260911124646",
+                "usageType": "USE1-StreamingAudio",
+                "retrieved": "2026-11-09",
+                "url": "https://aws.amazon.com/transcribe/pricing/",
+            },
+            "bedrock/m": {"basis": "estimate", "detail": "not listed", "retrieved": "2026-11-09"},
+        },
+        "us-west-2": {
+            "bedrock/m": {
+                "basis": "price-list-api",
+                "offer": "AmazonBedrock",
+                "usageType": "USW2-m",
+                "retrieved": "2026-11-09",
+            }
+        },
+    },
+}
+
+
+def _with_default_price(table: Dict[str, Any], service: str, units: Dict[str, float]) -> Dict:
+    """``table`` with ``service``'s base-region prices changed, as a profile changes them."""
+    default = table["regions"]["default"]
+    return {
+        **table,
+        "regions": {
+            **table["regions"],
+            "default": {**default, service: {**default.get(service, {}), **units}},
+        },
+    }
+
+
+def test_the_meeting_cost_shows_units_unit_price_and_cost_per_line_with_its_source() -> None:
+    result = pricing.estimate_call_cost(
+        "c",
+        [record("Transcription", "transcribe/streaming", {"seconds": 600})],
+        SOURCED,
+        "us-east-1",
+        now=NOW,
+    )
+    (line,) = result["Items"]
+    assert line["Quantity"] == 600
+    assert line["UnitPrice"] == 0.0001667
+    assert line["Cost"] == pytest.approx(600 * 0.0001667)
+    assert line["PriceOrigin"] == pricing.ORIGIN_SHIPPED
+    assert line["ShippedUnitPrice"] == 0.0001667
+    assert line["PriceSource"] == (
+        "AWS Price List API (offer transcribe version 20260911124646, "
+        "usage type USE1-StreamingAudio, read 2026-11-09)"
+    )
+    assert line["PriceSourceUrl"] == "https://aws.amazon.com/transcribe/pricing/"
+    assert result["CustomPriceCount"] == 0
+
+
+def test_an_override_price_replaces_the_shipped_price_in_the_estimate() -> None:
+    overridden = _with_default_price(SOURCED, "transcribe/streaming", {"seconds": 0.0001})
+    result = pricing.estimate_call_cost(
+        "c",
+        [record("Transcription", "transcribe/streaming", {"seconds": 600})],
+        overridden,
+        "us-east-1",
+        shipped=SOURCED,
+        profile="negotiated",
+        now=NOW,
+    )
+    (line,) = result["Items"]
+    assert line["UnitPrice"] == 0.0001
+    assert result["TotalCost"] == pytest.approx(0.06)
+    assert line["PriceOrigin"] == pricing.ORIGIN_CUSTOM
+    assert line["ShippedUnitPrice"] == 0.0001667
+    assert line["PriceSource"].startswith("Set in the negotiated configuration profile.")
+    assert "$0.0001667" in line["PriceSource"]
+    assert "AWS Price List API" in line["PriceSource"]
+    assert line["PriceSourceUrl"] is None
+    assert result["CustomPriceCount"] == 1
+    assert result["PriceProfile"] == "negotiated"
+
+
+def test_a_price_for_a_unit_the_release_does_not_price_is_reported_as_the_profiles() -> None:
+    added = _with_default_price(SOURCED, "bedrock/m", {"imagesIn": 0.01})
+    result = pricing.estimate_call_cost(
+        "c",
+        [record("Summary", "bedrock/m", {"imagesIn": 2})],
+        added,
+        "us-east-1",
+        shipped=SOURCED,
+        profile="custom",
+    )
+    (line,) = result["Items"]
+    assert line["PriceOrigin"] == pricing.ORIGIN_CUSTOM
+    assert line["ShippedUnitPrice"] is None
+    assert "LMA ships no price for this unit" in line["PriceSource"]
+
+
+def test_a_region_names_the_source_of_its_own_prices() -> None:
+    result = pricing.estimate_call_cost(
+        "c",
+        [record("VoiceAssistant", "bedrock/m", {"outputTokens": 10}, Region="us-west-2")],
+        SOURCED,
+        "us-east-1",
+    )
+    (line,) = result["Items"]
+    assert line["UnitPrice"] == 0.000006
+    assert "usage type USW2-m" in line["PriceSource"]
+
+
+def test_an_estimated_shipped_price_says_it_is_an_estimate() -> None:
+    result = pricing.estimate_call_cost(
+        "c", [record("Summary", "bedrock/m", {"inputTokens": 10})], SOURCED, "us-east-1"
+    )
+    assert result["Items"][0]["PriceSource"] == "Estimate (read 2026-11-09). not listed"
+
+
+def test_an_unpriced_line_says_it_is_left_out_of_the_total() -> None:
+    result = pricing.estimate_call_cost(
+        "c", [record("Summary", "bedrock/other", {"inputTokens": 10})], SOURCED, "us-east-1"
+    )
+    (line,) = result["Items"]
+    assert line["PriceOrigin"] == pricing.ORIGIN_NONE
+    assert "left out of the total" in line["PriceSource"]
+
+
+def test_a_stand_in_price_is_sourced_from_the_entry_it_was_taken_from() -> None:
+    table = {
+        **GEO_TABLE,
+        "sources": {
+            "default": {
+                "bedrock/global.anthropic.claude-sonnet-5-5": {
+                    "basis": "price-list-api",
+                    "usageType": "global-sku",
+                }
+            }
+        },
+    }
+    result = pricing.estimate_call_cost(
+        "c",
+        [record("Summary", "bedrock/eu.anthropic.claude-sonnet-5-5", {"inputTokens": 1000})],
+        table,
+        "eu-west-1",
+    )
+    (line,) = result["Items"]
+    assert line["PriceOrigin"] == pricing.ORIGIN_SHIPPED
+    assert "global-sku" in line["PriceSource"]
+
+
+def test_an_unreadable_source_costs_the_line_its_source_and_nothing_else() -> None:
+    broken = {**SOURCED, "sources": {"default": "nonsense"}}
+    result = pricing.estimate_call_cost(
+        "c", [record("Transcription", "transcribe/streaming", {"seconds": 60})], broken, "us-east-1"
+    )
+    (line,) = result["Items"]
+    assert line["Priced"] and line["PriceSource"] == "The price table LMA ships"

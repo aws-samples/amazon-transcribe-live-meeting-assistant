@@ -17,10 +17,16 @@ that store.
 
 from .pricing import (
     DEFAULT_NON_CHARGEABLE_UNITS,
+    ORIGIN_CUSTOM,
+    ORIGIN_NONE,
+    ORIGIN_SHIPPED,
+    SOURCE_BASES,
     aggregate,
     estimate_call_cost,
     prices_for_region,
     read_records,
+    source_text,
+    sources_for_region,
 )
 from .records import (
     BEDROCK_TOKEN_UNITS,
@@ -47,6 +53,10 @@ __all__ = [
     "PK_PREFIX",
     "TABLE_ENV_VAR",
     "MeteringWriter",
+    "ORIGIN_CUSTOM",
+    "ORIGIN_NONE",
+    "ORIGIN_SHIPPED",
+    "SOURCE_BASES",
     "aggregate",
     "bedrock_service",
     "bedrock_usage",
@@ -57,4 +67,6 @@ __all__ = [
     "metering_pk",
     "prices_for_region",
     "read_records",
+    "source_text",
+    "sources_for_region",
 ]

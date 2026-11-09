@@ -886,6 +886,16 @@ def test_the_profile_write_is_conditional_as_well_as_guarded_by_a_read(seeder) -
     assert conditions == ["attribute_not_exists(#key)"]
 
 
+def test_the_deployment_loads_the_shipped_prices_with_their_sources_as_the_default(seeder) -> None:
+    """The baseline's price table is the shipped file, sources included, and nothing else."""
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default")
+    shipped = json.loads((seeder.DEFAULTS_DIR / seeder.CALL_PRICING_FILE).read_text("utf-8"))
+    pricing = dynamo.body("Config#default")["call_pricing"]
+    assert pricing == shipped
+    assert pricing["sources"]["default"]["transcribe/streaming"]["basis"] == "price-list-api"
+
+
 def test_a_second_deployment_does_update_the_baseline(seeder) -> None:
     """A new release's prompts have to reach the table."""
     store, dynamo = build_store()

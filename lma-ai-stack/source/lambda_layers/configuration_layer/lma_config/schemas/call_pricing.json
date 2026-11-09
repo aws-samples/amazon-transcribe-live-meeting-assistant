@@ -2,19 +2,20 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lma:configuration/call_pricing",
   "title": "Meeting cost prices",
-  "description": "The unit prices the per-meeting cost estimate is computed with, in US dollars per unit. A price you change is kept over the shipped one; every price you leave alone keeps coming from the release, so a later release's price updates still reach it.",
+  "description": "The unit prices each meeting's estimated cost is calculated with, in US dollars, and where each shipped price came from. Change a price to use your own rate, for example a private pricing agreement; the meeting's Details tab then shows that line at your price, with the shipped price beside it.",
   "sectionLabel": "Meeting Cost Prices",
   "order": 5,
   "collapsible": true,
   "defaultExpanded": false,
   "mergeStrategy": "merge",
+  "widget": "priceTable",
   "type": "object",
   "properties": {
     "regions": {
       "order": 0,
       "type": "object",
-      "title": "Prices by region",
-      "description": "Prices under 'default' apply in every region; a region listed here overrides the prices it names. Each service is keyed '<service>/<api-or-model>', and each of its units holds a price per unit.",
+      "title": "Prices",
+      "description": "Prices by region, then by service, then by unit. The prices under \"default\" are those of the base region and apply wherever a region lists no price of its own.",
       "keyLabel": "Region",
       "itemLabel": "Region",
       "propertyNames": { "pattern": "^(default|[a-z]{2}(-gov)?-[a-z]+-[0-9])$" },
@@ -38,66 +39,108 @@
         }
       }
     },
-    "baseRegion": {
+    "sources": {
       "order": 1,
+      "type": "object",
+      "title": "Price sources",
+      "description": "Where each shipped price came from, by region and service, laid out as the prices are.",
+      "keyLabel": "Region",
+      "itemLabel": "Region",
+      "propertyNames": { "pattern": "^(default|[a-z]{2}(-gov)?-[a-z]+-[0-9])$" },
+      "additionalProperties": {
+        "type": "object",
+        "title": "Services",
+        "keyLabel": "Service",
+        "itemLabel": "Service",
+        "propertyNames": { "pattern": "^[a-z0-9-]+/.+$" },
+        "additionalProperties": {
+          "type": "object",
+          "title": "Source",
+          "properties": {
+            "basis": {
+              "type": "string",
+              "title": "Basis",
+              "enum": ["price-list-api", "pricing-page", "estimate"],
+              "enumLabels": {
+                "price-list-api": "AWS Price List API",
+                "pricing-page": "AWS pricing page",
+                "estimate": "Estimate"
+              }
+            },
+            "offer": { "type": "string", "title": "Price List offer", "maxLength": 128 },
+            "offerVersion": { "type": "string", "title": "Offer version", "maxLength": 64 },
+            "usageType": { "type": "string", "title": "Usage type", "maxLength": 256 },
+            "retrieved": {
+              "type": "string",
+              "title": "Read on",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            "url": { "type": "string", "title": "Pricing page", "pattern": "^https://", "maxLength": 512 },
+            "detail": { "type": "string", "title": "Detail", "format": "textarea", "rows": 2, "maxLength": 1000 }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "baseRegion": {
+      "order": 2,
       "type": "string",
       "title": "Base region",
-      "description": "The region whose prices stand in for a region the table does not list.",
+      "description": "The region whose prices are listed under \"default\".",
       "pattern": "^[a-z]{2}(-gov)?-[a-z]+-[0-9]$"
     },
     "pricedRegions": {
-      "order": 2,
+      "order": 3,
       "type": "array",
-      "title": "Regions with listed prices",
-      "description": "The regions the shipped prices were read for. An estimate in any other region says it used the base region's prices.",
+      "title": "Regions with their own prices",
+      "description": "An estimate for usage in a region not listed here says that it used the base region's prices.",
       "itemLabel": "Region",
       "items": { "type": "string", "pattern": "^[a-z]{2}(-gov)?-[a-z]+-[0-9]$" }
     },
     "nonChargeableUnits": {
-      "order": 3,
+      "order": 4,
       "type": "array",
-      "title": "Units shown for reference only",
-      "description": "Units an estimate lists but does not charge for on their own, such as requests and runtime seconds.",
+      "title": "Units shown without a price",
+      "description": "Counted on the estimate for reference, such as requests, and not billed on their own.",
       "itemLabel": "Unit",
       "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" }
     },
     "notes": {
-      "order": 4,
+      "order": 5,
       "type": "object",
-      "title": "Notes by service",
-      "description": "Explanations shown beside a service's line in an estimate.",
+      "title": "How usage is measured",
+      "description": "Shown on the estimate beside a service's lines.",
       "keyLabel": "Service",
       "itemLabel": "Note",
       "additionalProperties": { "type": "string", "format": "textarea", "rows": 2 }
     },
     "notIncluded": {
-      "order": 5,
+      "order": 6,
       "type": "array",
       "title": "Not included",
-      "description": "What every estimate says it leaves out.",
+      "description": "Shown on every estimate as what it leaves out.",
       "itemLabel": "Item",
       "items": { "type": "string", "format": "textarea", "rows": 2 }
     },
     "pricesAsOf": {
-      "order": 6,
+      "order": 7,
       "type": "string",
       "title": "Prices as of",
-      "description": "The date the prices were read, as YYYY-MM-DD.",
+      "description": "The date the shipped prices were read, as YYYY-MM-DD.",
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
     },
     "source": {
-      "order": 7,
+      "order": 8,
       "type": "string",
-      "title": "Source",
-      "description": "Where the prices came from.",
+      "title": "Source of the shipped prices",
       "format": "textarea",
       "rows": 2
     },
     "currency": {
-      "order": 8,
+      "order": 9,
       "type": "string",
       "title": "Currency",
-      "description": "The estimate is in US dollars; this names it, and does not convert anything.",
+      "description": "Every price is in US dollars.",
       "enum": ["USD"]
     }
   },
