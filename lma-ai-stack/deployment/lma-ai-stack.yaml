@@ -12413,6 +12413,9 @@ Resources:
 
   UploadQuickSightManifest:
     Type: Custom::UploadQuickSightManifest
+    # The function's role reaches the bucket's key through this separate
+    # policy, so the manifest is written only once the policy is attached.
+    DependsOn: RecordingsBucketEncryptionKeyPolicy
     Properties:
       ServiceToken: !GetAtt UploadManifestLambda.Arn
       BucketName: !Ref S3BucketName
