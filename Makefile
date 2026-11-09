@@ -127,6 +127,16 @@ NODE_PINNED_VERSION := $(strip $(shell cat .nvmrc 2>/dev/null))
 # quietly and its EBADENGINE warnings are therefore suppressed.
 NODE_MIN_VERSION := 22.22.2
 
+# When nvm has the pinned version installed, put it first on PATH for every
+# recipe, so `make` uses it even in a shell that was opened before
+# `make setup-node` changed the nvm default (astro in docs-site needs the
+# pinned version, newer than NODE_MIN_VERSION). CI installs Node without nvm,
+# so there this is empty and PATH is unchanged.
+NVM_PINNED_NODE_BIN := $(wildcard $(or $(NVM_DIR),$(HOME)/.nvm)/versions/node/v$(NODE_PINNED_VERSION)/bin)
+ifneq ($(NVM_PINNED_NODE_BIN),)
+export PATH := $(NVM_PINNED_NODE_BIN):$(PATH)
+endif
+
 # npm install invocation shared by every JS target. `--loglevel=error --no-fund`
 # drops npm's notice-level output (funding summaries, transitive `deprecated`
 # notices, and peer-dependency/engine warnings for packages we do not control)
