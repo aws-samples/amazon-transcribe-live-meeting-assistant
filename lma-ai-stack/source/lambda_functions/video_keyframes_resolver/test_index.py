@@ -243,6 +243,38 @@ def test_a_link_is_signed_only_inside_the_meetings_own_folder(fakes, image):
     assert s3.signed == [f"{FOLDER}0000001000-ab12cd_thumb.jpg"]
 
 
+# A meeting name with a run of dots: its folder name keeps them.
+DOTTED_CALL = (
+    "Review all the LMA new features and UI changes.. prep to release-2026-11-09-15-58-36-076"
+)
+DOTTED_FOLDER = (
+    "lma-video-keyframes/"
+    "Review_all_the_LMA_new_features_and_UI_changes.._prep_to_release_2026_11_09_15_58_36_076/"
+)
+
+
+def test_a_meeting_name_with_dots_has_its_own_images_accepted():
+    for name in ("0000001000-ab12cd.jpg", "0000001000-ab12cd_thumb.jpg"):
+        key = f"{DOTTED_FOLDER}{name}"
+        assert index.object_key(url(key), DOTTED_CALL) == key
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        f"{DOTTED_FOLDER}../Another_meeting/f.jpg",
+        f"{DOTTED_FOLDER}a/../../lma-audio-recordings/x.wav",
+        f"{DOTTED_FOLDER}./f.jpg",
+        f"{DOTTED_FOLDER}a//f.jpg",
+        DOTTED_FOLDER,
+        "lma-video-keyframes/Another_meeting/f.jpg",
+        DOTTED_FOLDER.rstrip("/") + ".jpg",
+    ],
+)
+def test_a_meeting_name_with_dots_still_has_only_keys_inside_its_folder_accepted(key):
+    assert index.object_key(url(key), DOTTED_CALL) is None
+
+
 def test_pages_follow_in_time_order_and_new_frames_come_after_a_given_one(fakes):
     fakes([item(ms) for ms in (1000, 2000, 3000, 4000, 5000)])
     first = call(OWNER, limit=2)
