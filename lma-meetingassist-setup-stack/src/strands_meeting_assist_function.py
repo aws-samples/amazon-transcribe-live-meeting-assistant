@@ -13,7 +13,7 @@ import json
 import os
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 import logging
 from datetime import datetime
 from bedrock_compat import (
@@ -2034,30 +2034,101 @@ def query_knowledge_base(user_input: str, call_id: str) -> str:
         return ""
 
 
-MEETING_CHAT_SCOPE_NOTE = (
+# What a question typed in the meeting chat (the Virtual Participant's
+# `LMA ask`) may be answered with: the Meeting Assistant section's
+# chatQuestionTools setting. The values, and the one used when the setting
+# cannot be read or holds anything else; the same value as the setting's
+# shipped default in setting_defaults.json.
+CHAT_QUESTION_TOOLS_CURRENT_MEETING_ONLY = 'current_meeting_only'
+CHAT_QUESTION_TOOLS_OWNER_ONLY_ALL_TOOLS = 'owner_only_all_tools'
+CHAT_QUESTION_TOOLS_ALL_PARTICIPANTS_ALL_TOOLS = 'all_participants_all_tools'
+CHAT_QUESTION_TOOLS_VALUES = (
+    CHAT_QUESTION_TOOLS_CURRENT_MEETING_ONLY,
+    CHAT_QUESTION_TOOLS_OWNER_ONLY_ALL_TOOLS,
+    CHAT_QUESTION_TOOLS_ALL_PARTICIPANTS_ALL_TOOLS,
+)
+DEFAULT_CHAT_QUESTION_TOOLS = CHAT_QUESTION_TOOLS_CURRENT_MEETING_ONLY
+
+
+def configured_chat_question_tools() -> str:
+    """What a question typed in the meeting chat may be answered with.
+
+    The Meeting Assistant section's Meeting chat questions setting on the
+    Configuration page, else the shipped default (the current meeting only).
+    Read per answer, like the model. A value that is not one of
+    CHAT_QUESTION_TOOLS_VALUES is treated as the default.
+    """
+    value = read_setting(
+        'meeting_assist', 'chatQuestionTools', default=DEFAULT_CHAT_QUESTION_TOOLS
+    )
+    if value in CHAT_QUESTION_TOOLS_VALUES:
+        return value
+    logger.warning("Unrecognised chatQuestionTools value; using the current meeting only")
+    return DEFAULT_CHAT_QUESTION_TOOLS
+
+
+# Appended to the system prompt of every question typed in the meeting chat.
+MEETING_CHAT_NOTE = (
     "\n\nThis question was typed in the meeting chat, and your answer is posted there for "
-    "everyone in the meeting to read. Only the current meeting's transcript, its agenda, "
-    "the pictures of its shared screen and web search are available for it: do not try any other "
-    "tool named above, and do not refer to past meetings or documents. Answer briefly in plain "
-    "sentences."
+    "everyone in the meeting to read. Answer briefly in plain sentences."
+)
+
+# Appended after MEETING_CHAT_NOTE when the question is answered from the
+# current meeting only.
+MEETING_CHAT_SCOPE_NOTE = (
+    " Only the current meeting is available for it: its transcript, its agenda and the "
+    "pictures of its shared screen. Do not try any other tool named above, do not search "
+    "the web, and do not refer to past meetings or documents."
 )
 
 
-def meeting_chat_tool_scope(event: Dict[str, Any]) -> Tuple[bool, str]:
-    """Whether the event is a meeting-chat question, and the user email to use.
+class ChatQuestionScope(NamedTuple):
+    """How one request is answered, as decided by ``chat_question_scope``.
+
+    ``from_meeting_chat``: the question was typed in the meeting chat, so the
+    answer is posted where everyone in the meeting reads it.
+    ``current_meeting_only``: only the current meeting's transcript, agenda and
+    shared-screen pictures are offered.
+    ``user_email``: the user the user-scoped tools (meeting history) act for,
+    or '' for none.
+    """
+
+    from_meeting_chat: bool
+    current_meeting_only: bool
+    user_email: str
+
+
+def chat_question_scope(event: Dict[str, Any]) -> ChatQuestionScope:
+    """Which tools a request is offered, and the user email to use.
 
     toolScope 'meeting_chat' is a question typed in the meeting chat (the
     Virtual Participant's `LMA ask`), whose answer everyone in the meeting
-    reads. It is answered from the current meeting's transcript, its agenda and
-    web search only: the document knowledge base, the MCP servers and the VNC and browser
-    controls are not offered, and the user email is cleared here, whatever the
-    event carries, so the meeting-history tools that are scoped to it are not
-    offered either.
+    reads. What it is answered with is the chatQuestionTools setting:
+
+    - current_meeting_only (the default): the current meeting's transcript,
+      agenda and shared-screen pictures only, and no user email, whatever the
+      event carries.
+    - owner_only_all_tools: every configured tool, as the meeting page offers
+      them, when the event says the meeting's owner asked
+      (``askedByMeetingOwner`` is exactly True); otherwise as
+      current_meeting_only. The Virtual Participant knows a chat sender only by
+      the display name the meeting shows, and does not set the flag from it.
+    - all_participants_all_tools: every configured tool, for any sender.
+
+    Every other request (the meeting page, the wake phrase, the voice
+    assistant) is offered every configured tool, as before.
     """
     user_email = event.get('userEmail', '') or event.get('user_email', '')
-    if event.get('toolScope') == 'meeting_chat':
-        return True, ''
-    return False, user_email
+    if event.get('toolScope') != 'meeting_chat':
+        return ChatQuestionScope(False, False, user_email)
+    policy = configured_chat_question_tools()
+    all_tools = policy == CHAT_QUESTION_TOOLS_ALL_PARTICIPANTS_ALL_TOOLS or (
+        policy == CHAT_QUESTION_TOOLS_OWNER_ONLY_ALL_TOOLS
+        and event.get('askedByMeetingOwner') is True
+    )
+    if all_tools:
+        return ChatQuestionScope(True, False, user_email)
+    return ChatQuestionScope(True, True, '')
 
 
 def handler(event, context):
@@ -2127,9 +2198,15 @@ def handler(event, context):
         call_id = event.get('callId', '') or event.get('call_id', '')
         conversation_history = event.get('conversation_history', [])
         dynamodb_table_name = event.get('dynamodb_table_name', '')
-        meeting_chat_scope, user_email = meeting_chat_tool_scope(event)
-        if meeting_chat_scope:
-            logger.info("Tool scope: meeting_chat")
+        chat_scope = chat_question_scope(event)
+        user_email = chat_scope.user_email
+        # Only the current meeting's tools: everything else below is left out.
+        current_meeting_only = chat_scope.current_meeting_only
+        if chat_scope.from_meeting_chat:
+            logger.info(
+                "Tool scope: meeting_chat (%s)",
+                'current meeting only' if current_meeting_only else 'all tools',
+            )
         
         if not user_input:
             return {
@@ -2171,7 +2248,7 @@ def handler(event, context):
         # Load installed MCP servers (account-level) - returns MCPClient objects
         # Uses module-level caching: on warm Lambda starts with unchanged config,
         # cached clients are returned almost instantly (no DynamoDB query, no subprocess spawn)
-        if MCP_LOADER_AVAILABLE and not meeting_chat_scope:
+        if MCP_LOADER_AVAILABLE and not current_meeting_only:
             try:
                 logger.info("Loading installed MCP servers...")
                 mcp_clients, from_cache = load_account_mcp_servers()
@@ -2206,8 +2283,9 @@ def handler(event, context):
                         'timestamp': datetime.utcnow().isoformat()
                     }, 0)
         
-        # Add web search tool if an API key is configured (auto-enable)
-        if web_search_configured:
+        # Add web search tool if an API key is configured (auto-enable). Not
+        # for a chat question answered from the current meeting only.
+        if web_search_configured and not current_meeting_only:
             try:
                 from tavily import TavilyClient
                 from strands import tool
@@ -2314,7 +2392,7 @@ def handler(event, context):
         # Add document retrieval tool if KB configured. The factory returns None
         # when the knowledge-base model cannot generate an answer, in which case
         # the agent is offered no such tool rather than one that cannot answer.
-        if kb_id and not meeting_chat_scope:
+        if kb_id and not current_meeting_only:
             document_search_tool = create_document_search_tool(
                 kb_id=kb_id,
                 kb_region=kb_region,
@@ -2328,7 +2406,7 @@ def handler(event, context):
                 logger.info(f"Document retrieval tool enabled (KB model: {kb_model_id})")
         
         # Add recent meetings list tool if DynamoDB table and transcript KB configured
-        if dynamodb_table_name and transcript_kb_id and user_email:
+        if dynamodb_table_name and transcript_kb_id and user_email and not current_meeting_only:
             tools.append(create_recent_meetings_tool(
                 dynamodb_table_name=dynamodb_table_name,
                 user_email=user_email,
@@ -2339,7 +2417,7 @@ def handler(event, context):
         
         # Add meeting history tool if transcript KB configured. As above, the
         # factory returns None when the knowledge-base model cannot generate.
-        if transcript_kb_id and user_email:
+        if transcript_kb_id and user_email and not current_meeting_only:
             meeting_history_tool = create_meeting_history_tool(
                 transcript_kb_id=transcript_kb_id,
                 kb_region=kb_region,
@@ -2383,13 +2461,13 @@ def handler(event, context):
                 call_id=call_id,
                 dynamodb_table_name=dynamodb_table_name,
                 model_id=model_id,
-                show_inline=bool(transcript_segment_args.get('MessageId')) and not meeting_chat_scope,
+                show_inline=bool(transcript_segment_args.get('MessageId')) and not chat_scope.from_meeting_chat,
                 message_id=message_id
             ))
             logger.info("Meeting frames tool enabled")
 
         # Add VNC preview control tool (available to all users)
-        if APPSYNC_GRAPHQL_URL and not meeting_chat_scope:
+        if APPSYNC_GRAPHQL_URL and not current_meeting_only:
             tools.append(create_vnc_preview_control_tool(
                 call_id=call_id,
                 appsync_url=APPSYNC_GRAPHQL_URL,
@@ -2398,7 +2476,7 @@ def handler(event, context):
             logger.info("VNC preview control tool enabled")
         
         # Add VP browser control tool (available to all users)
-        if EVENT_API_HTTP_URL and not meeting_chat_scope:
+        if EVENT_API_HTTP_URL and not current_meeting_only:
             tools.append(create_vp_browser_control_tool(
                 call_id=call_id,
                 event_api_http_url=EVENT_API_HTTP_URL,
@@ -2453,7 +2531,8 @@ def handler(event, context):
             cache_config_kwargs, system_prompt = prompt_cache_plan(
                 model_id,
                 (get_meeting_assistant_prompt_with_tools() if tools else get_meeting_assistant_prompt())
-                + (MEETING_CHAT_SCOPE_NOTE if meeting_chat_scope else ''),
+                + (MEETING_CHAT_NOTE if chat_scope.from_meeting_chat else '')
+                + (MEETING_CHAT_SCOPE_NOTE if current_meeting_only else ''),
                 enabled=prompt_caching_enabled(),
             )
             if cache_config_kwargs is not None:

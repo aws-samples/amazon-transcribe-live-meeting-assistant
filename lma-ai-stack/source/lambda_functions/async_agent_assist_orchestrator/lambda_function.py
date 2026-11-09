@@ -7,7 +7,7 @@ import json
 import uuid
 from datetime import datetime
 from os import getenv
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Tuple
 
 import boto3
 
@@ -39,6 +39,7 @@ LAMBDA_CLIENT: LambdaClient = BOTO3_SESSION.client(
     config=CLIENT_CONFIG,
 )
 KINESIS_CLIENT: KinesisClient = BOTO3_SESSION.client("kinesis")
+DYNAMODB_CLIENT = BOTO3_SESSION.client("dynamodb", config=CLIENT_CONFIG)
 
 CALL_DATA_STREAM_NAME = getenv("CALL_DATA_STREAM_NAME", "")
 
@@ -47,6 +48,56 @@ LAMBDA_AGENT_ASSIST_FUNCTION_ARN = getenv("LAMBDA_AGENT_ASSIST_FUNCTION_ARN", ""
 IS_LAMBDA_AGENT_ASSIST_ENABLED = getenv("IS_LAMBDA_AGENT_ASSIST_ENABLED", "false").lower() == "true"
 
 DYNAMODB_TABLE_NAME = getenv("DYNAMODB_TABLE_NAME", "")
+
+#: The channel of the meeting page's assistant chat (strands_chat_interface).
+#: Its questions arrive stamped with the wall-clock time they were asked, not a
+#: time on the meeting's transcript timeline.
+CHAT_ASSISTANT_CHANNEL = "CHAT_ASSISTANT"
+
+#: The speaker the meeting assistant's answers are stored under: the name the
+#: meeting page gives the assistant.
+ASSISTANT_SPEAKER = "Meeting Assistant"
+
+
+def meeting_time_seconds(call_id: str) -> float:
+    """How far the meeting's transcript has reached, in seconds from its start.
+
+    The call record's TotalConversationDurationMillis, which the call event
+    processor keeps at the latest end of the meeting's final speech segments:
+    the current point on the transcript timeline while the meeting runs, and
+    its end afterwards. 0 when the meeting has no speech yet or the record
+    cannot be read, so an answer is never placed beyond the meeting.
+    """
+    if not DYNAMODB_TABLE_NAME or not call_id:
+        return 0.0
+    key = f"c#{call_id}"
+    try:
+        item = (
+            DYNAMODB_CLIENT.get_item(
+                TableName=DYNAMODB_TABLE_NAME,
+                Key={"PK": {"S": key}, "SK": {"S": key}},
+                ProjectionExpression="TotalConversationDurationMillis",
+            ).get("Item")
+            or {}
+        )
+        raw = item.get("TotalConversationDurationMillis", {}).get("N")
+        return max(0.0, float(raw) / 1000) if raw is not None else 0.0
+    except Exception as error:  # pylint: disable=broad-except
+        LOGGER.warning("Could not read the meeting's transcript extent: %s", error)
+        return 0.0
+
+
+def answer_times(message: Dict[str, Any]) -> Tuple[Any, Any]:
+    """The start and end of the answer segment, on the meeting's transcript timeline.
+
+    A wake-phrase answer takes the times of the transcript segment that asked,
+    which are already on that timeline. A question from the meeting page's
+    chat is placed where the transcript has reached when it is answered.
+    """
+    if message.get("Channel") == CHAT_ASSISTANT_CHANNEL:
+        at = meeting_time_seconds(message.get("CallId", ""))
+        return at, at
+    return message["StartTime"], message["EndTime"]
 
 
 def write_agent_assist_to_kds(message: Dict[str, Any]):
@@ -77,8 +128,7 @@ def publish_lambda_agent_assist_transcript_segment(
     channel: str = message["Channel"]
     is_partial: bool = message["IsPartial"]
     message["SegmentId"]
-    start_time: float = message["StartTime"]
-    end_time: float = message["EndTime"]
+    start_time, end_time = answer_times(message)
     end_time = float(end_time) + 0.001  # UI sort order
     # Use "OriginalTranscript", if defined (optionally set by transcript lambda hook fn)"
     transcript: str = message.get("OriginalTranscript", message["Transcript"])
@@ -105,6 +155,8 @@ def publish_lambda_agent_assist_transcript_segment(
         IsPartial=is_partial,
         SegmentId=str(uuid.uuid4()),
         StartTime=start_time,
+        # Without one the event processor stores the placeholder participant name.
+        Speaker=ASSISTANT_SPEAKER,
         Status="TRANSCRIBING",
         Owner=owner,  # Pass Owner for userEmail extraction
         ConversationHistory=conversation_history,  # Pass conversation history

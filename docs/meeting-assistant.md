@@ -60,7 +60,7 @@ Pre-configured suggestion buttons appear in the chat panel, allowing users to tr
 
 ## Built-in Tools
 
-The Meeting Assistant has access to the following tools:
+The Meeting Assistant has access to the following tools. A question typed in the meeting chat (the Virtual Participant's `LMA ask`) is offered only `current_meeting_transcript`, `get_meeting_agenda` and `get_meeting_frames` unless **Meeting Assistant › Meeting chat questions** on the Configuration page offers more; see [Asking the Meeting Assistant from Chat](virtual-participant.md#asking-the-meeting-assistant-from-chat).
 
 | Tool | Description |
 |---|---|

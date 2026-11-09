@@ -6,8 +6,11 @@
 """The meeting-chat tool scope of the Strands meeting-assist function.
 
 A question typed in the meeting chat (the Virtual Participant's ``LMA ask``)
-arrives with ``toolScope: 'meeting_chat'``. The scope itself decides that the
-user-scoped tools are not offered, whatever user email the event carries.
+arrives with ``toolScope: 'meeting_chat'``. The Meeting Assistant section's
+``chatQuestionTools`` setting decides what it is answered with: by default the
+current meeting only (transcript, agenda, shared-screen pictures), with no
+user email whatever the event carries; the setting's other choices offer every
+tool to the owner's questions or to everyone's.
 
 The handler is driven end to end with every tool group's precondition met --
 an MCP server installed, both knowledge bases, web search, AppSync and the
@@ -21,9 +24,11 @@ offered.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -31,6 +36,7 @@ os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 import strands_meeting_assist_function as handler_module  # noqa: E402
 import strands_stand_in  # noqa: E402 -- scripts/testing, on the path via conftest.py
+from lma_config import parameters  # noqa: E402
 
 ALL_TOOLS = {
     "mcp_server",
@@ -45,10 +51,17 @@ ALL_TOOLS = {
     "control_vp_browser",
 }
 
-# The meeting's agenda and its shared screen are offered in the chat scope too:
-# guests in the meeting may read the agenda of the meeting they are in, and see
-# again what was shared with them, as they read its transcript.
-CHAT_TOOLS = {"web_search", "current_meeting_transcript", "get_meeting_agenda", "get_meeting_frames"}
+# The current meeting: its transcript, its agenda and its shared screen. Guests
+# in the meeting may read the agenda of the meeting they are in, and see again
+# what was shared with them, as they read its transcript.
+CURRENT_MEETING_TOOLS = {"current_meeting_transcript", "get_meeting_agenda", "get_meeting_frames"}
+
+CHAT = {"toolScope": "meeting_chat", "userEmail": "owner@example.com"}
+
+SCHEMA = (
+    Path(__file__).resolve().parents[2]
+    / "lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/schemas/meeting_assist.json"
+)
 
 
 def _named(name: str):
@@ -59,8 +72,27 @@ def _named(name: str):
     return tool
 
 
+class _Store:
+    def __init__(self, values):
+        self.values = values
+
+    def get_section(self, name):
+        return types.SimpleNamespace(values=self.values if name == "meeting_assist" else {})
+
+
 @pytest.fixture
-def built(monkeypatch):
+def configured(monkeypatch):
+    """Set the Meeting Assistant section's saved values."""
+
+    def install(values):
+        monkeypatch.setattr(parameters, "_SHARED_STORE", _Store(values))
+
+    install({})
+    return install
+
+
+@pytest.fixture
+def built(monkeypatch, configured):  # pylint: disable=unused-argument,redefined-outer-name
     """Run the handler for an event and return what its Agent was given."""
     constructed: list[dict] = []
 
@@ -137,46 +169,133 @@ def built(monkeypatch):
     return run
 
 
-def test_meeting_chat_question_is_given_only_the_transcript_agenda_frames_and_web_search(built):
-    agent = built({"toolScope": "meeting_chat", "userEmail": "owner@example.com"})
-    assert agent["tools"] == CHAT_TOOLS
+
+# ── the default: the current meeting only ──────────────────────────────────
 
 
-def test_meeting_chat_question_is_told_which_tools_it_has(built):
-    agent = built({"toolScope": "meeting_chat", "userEmail": "owner@example.com"})
-    assert agent["system_prompt"].endswith(handler_module.MEETING_CHAT_SCOPE_NOTE)
-    assert "transcript, its agenda, the pictures of its shared screen and web search" in (
+def test_a_chat_question_is_answered_with_current_meeting_tools_only_by_default(built):
+    agent = built(CHAT)
+    assert agent["tools"] == CURRENT_MEETING_TOOLS
+
+
+def test_a_chat_question_from_the_owner_is_answered_with_current_meeting_tools_by_default(built):
+    # Even an event that says the owner asked is answered from the current
+    # meeting only unless the setting allows more.
+    agent = built({**CHAT, "askedByMeetingOwner": True})
+    assert agent["tools"] == CURRENT_MEETING_TOOLS
+
+
+def test_the_shipped_chat_question_tools_are_the_current_meeting_only(configured):
+    configured({})
+    shipped = parameters.shipped_setting_defaults()["meeting_assist"]["chatQuestionTools"]
+    assert shipped == handler_module.DEFAULT_CHAT_QUESTION_TOOLS == "current_meeting_only"
+    assert handler_module.configured_chat_question_tools() == "current_meeting_only"
+
+
+@pytest.mark.parametrize("value", ["", "everything", None, True])
+def test_an_unrecognised_setting_is_answered_from_the_current_meeting_only(built, configured, value):
+    configured({"chatQuestionTools": value})
+    assert handler_module.configured_chat_question_tools() == "current_meeting_only"
+    assert built(CHAT)["tools"] == CURRENT_MEETING_TOOLS
+
+
+def test_a_current_meeting_chat_question_is_told_which_tools_it_has(built):
+    agent = built(CHAT)
+    assert agent["system_prompt"].endswith(
+        handler_module.MEETING_CHAT_NOTE + handler_module.MEETING_CHAT_SCOPE_NOTE
+    )
+    assert "its transcript, its agenda and the pictures of its shared screen" in (
         handler_module.MEETING_CHAT_SCOPE_NOTE
     )
+    assert "do not search the web" in handler_module.MEETING_CHAT_SCOPE_NOTE
 
 
-def test_other_requests_are_given_every_configured_tool(built):
+def test_a_current_meeting_chat_question_has_no_user_email():
+    scope = handler_module.chat_question_scope(CHAT)
+    assert scope == (True, True, "")
+
+
+# ── owner_only_all_tools ───────────────────────────────────────────────────
+
+
+def test_the_owners_chat_question_may_use_all_tools_when_the_setting_allows(built, configured):
+    configured({"chatQuestionTools": "owner_only_all_tools"})
+    agent = built({**CHAT, "askedByMeetingOwner": True})
+    assert agent["tools"] == ALL_TOOLS
+    assert handler_module.MEETING_CHAT_SCOPE_NOTE not in agent["system_prompt"]
+    assert agent["system_prompt"].endswith(handler_module.MEETING_CHAT_NOTE)
+
+
+@pytest.mark.parametrize("flag", [False, None, "true", 1])
+def test_a_participants_chat_question_is_answered_from_the_current_meeting_when_only_the_owner_may_use_all_tools(
+    built, configured, flag
+):
+    # Only an explicit True says the owner asked; a missing, false or
+    # merely truthy value does not.
+    configured({"chatQuestionTools": "owner_only_all_tools"})
+    event = {**CHAT} if flag is None else {**CHAT, "askedByMeetingOwner": flag}
+    assert built(event)["tools"] == CURRENT_MEETING_TOOLS
+    assert handler_module.chat_question_scope(event).user_email == ""
+
+
+# ── all_participants_all_tools ─────────────────────────────────────────────
+
+
+def test_every_chat_question_may_use_all_tools_when_the_setting_allows(built, configured):
+    configured({"chatQuestionTools": "all_participants_all_tools"})
+    agent = built({**CHAT, "askedByMeetingOwner": False})
+    assert agent["tools"] == ALL_TOOLS
+    assert agent["system_prompt"].endswith(handler_module.MEETING_CHAT_NOTE)
+
+
+def test_an_all_tools_chat_question_acts_for_the_meetings_user(built, configured, monkeypatch):
+    configured({"chatQuestionTools": "all_participants_all_tools"})
+    seen = []
+
+    def factory(*_args, **kwargs):
+        seen.append(kwargs["user_email"])
+        return _named("meeting_history")
+
+    monkeypatch.setattr(handler_module, "create_meeting_history_tool", factory)
+    built(CHAT)
+    assert seen == ["owner@example.com"]
+
+
+# ── every other request ────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "value", ["current_meeting_only", "owner_only_all_tools", "all_participants_all_tools"]
+)
+def test_other_requests_are_given_every_configured_tool_whatever_the_setting(built, configured, value):
     # The control case: the same configuration, without the scope, offers
-    # every tool -- so the test above is measuring the scope and not a
-    # stand-in that builds nothing.
+    # every tool -- so the tests above are measuring the scope and not a
+    # stand-in that builds nothing. The meeting page's assistant, the wake
+    # phrase and the voice assistant are not affected by the setting.
+    configured({"chatQuestionTools": value})
     agent = built({"userEmail": "owner@example.com"})
     assert agent["tools"] == ALL_TOOLS
+    assert handler_module.MEETING_CHAT_NOTE not in agent["system_prompt"]
     assert handler_module.MEETING_CHAT_SCOPE_NOTE not in agent["system_prompt"]
 
 
-def test_meeting_chat_scope_clears_the_user_email():
-    scope, user_email = handler_module.meeting_chat_tool_scope(
-        {"toolScope": "meeting_chat", "userEmail": "owner@example.com"}
-    )
-    assert scope is True
-    assert user_email == ""
-
-
 def test_other_requests_keep_their_user_email():
-    assert handler_module.meeting_chat_tool_scope({"userEmail": "owner@example.com"}) == (
+    assert handler_module.chat_question_scope({"userEmail": "owner@example.com"}) == (
+        False,
         False,
         "owner@example.com",
     )
-    assert handler_module.meeting_chat_tool_scope({"user_email": "owner@example.com"}) == (
+    assert handler_module.chat_question_scope({"user_email": "owner@example.com"}) == (
+        False,
         False,
         "owner@example.com",
     )
 
+
+def test_every_offered_choice_is_one_the_assistant_recognises():
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))["properties"]["chatQuestionTools"]
+    assert tuple(schema["enum"]) == handler_module.CHAT_QUESTION_TOOLS_VALUES
+    assert set(schema["enumLabels"]) == set(schema["enum"])
 
 
 @pytest.mark.parametrize(

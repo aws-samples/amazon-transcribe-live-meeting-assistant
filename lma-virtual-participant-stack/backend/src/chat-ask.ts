@@ -15,13 +15,20 @@
  * ARN and the permission to invoke it are set whenever the deployment's
  * meeting assistant is a Strands one, whatever the voice-assistant provider.
  *
- * Questions from the chat are asked with `toolScope: 'meeting_chat'` and no
- * user email, so the agent answers from the current meeting's transcript and
- * web search. It is not given the document knowledge base, the owner's meeting
- * history, MCP servers, or the browser and VNC controls: a chat sender is known
- * only by the display name the meeting shows, and the answer is read by
- * everyone in the meeting, so a question in the chat is answered as any
- * participant's question rather than as the LMA user's.
+ * Questions from the chat are asked with `toolScope: 'meeting_chat'`, and the
+ * meeting assistant decides from the Meeting Assistant section's
+ * `chatQuestionTools` setting what to answer with: by default only the
+ * current meeting (its transcript, agenda and shared-screen pictures), with
+ * no web search, document knowledge base, past meetings, MCP servers or
+ * browser and VNC controls. The LMA user is sent as `userEmail` for the
+ * setting's all-tools choices; the assistant does not use it otherwise.
+ *
+ * Every question is sent with `askedByMeetingOwner: false`
+ * (`chatSenderIsMeetingOwner`). A chat sender is known only by the display
+ * name the meeting shows, which any participant can choose, and no platform's
+ * chat ties a message to the LMA user's sign-in, so ownership is not
+ * established from the chat. The setting's "owner only" choice therefore
+ * answers every chat question from the current meeting only.
  *
  * The answer is posted as plain text (markdown reduced by `toSpokenText`, which
  * also makes it a single line — the one shape every platform's send path
@@ -249,29 +256,58 @@ function cutAtWord(text: string, max: number): string {
     return (space > max / 2 ? window.slice(0, space) : window).trimEnd();
 }
 
+/** Who asked a chat question, as the platform handler read it. */
+export interface ChatAsker {
+    sender: string | null | undefined;
+    platform: ChatPlatform;
+}
+
 /** Calls the meeting-assist agent with a question and returns its answer text. */
-export type AskMeetingAssistant = (question: string) => Promise<string>;
+export type AskMeetingAssistant = (question: string, asker: ChatAsker) => Promise<string>;
+
+/**
+ * Whether a chat question is the meeting owner's (the LMA user who started
+ * this Virtual Participant). Always false: the chat shows a sender only by the
+ * display name the meeting shows, which any participant can set to the
+ * owner's name, and no platform's chat ties a message to the LMA user's
+ * sign-in. The meeting assistant offers the owner-only tools only when this is
+ * true.
+ */
+export function chatSenderIsMeetingOwner(_asker: ChatAsker): boolean {
+    return false;
+}
+
+/** The meeting-assist Lambda's request for a question typed in the meeting chat. */
+export function chatQuestionPayload(
+    question: string,
+    asker: ChatAsker,
+    env: Record<string, string | undefined> = process.env,
+) {
+    const callId = env.VP_CALL_ID || env.MEETING_NAME || 'vp-chat';
+    return {
+        text: question,
+        call_id: callId,
+        conversation_history: [],
+        // Used only when the chatQuestionTools setting offers all tools.
+        userEmail: env.LMA_USER || '',
+        toolScope: 'meeting_chat',
+        askedByMeetingOwner: chatSenderIsMeetingOwner(asker),
+        dynamodb_table_name: env.DYNAMODB_TABLE_NAME || '',
+        dynamodb_pk: `c#${callId}`,
+    };
+}
 
 let lambdaClient: LambdaClient | null = null;
 
 /**
  * Ask the Strands meeting-assist Lambda, as the voice assistant's lookup does,
- * with the chat's narrower tool scope.
+ * in the meeting chat's tool scope.
  */
-export const askStrandsMeetingAssistant: AskMeetingAssistant = async (question) => {
+export const askStrandsMeetingAssistant: AskMeetingAssistant = async (question, asker) => {
     const arn = process.env.STRANDS_LAMBDA_ARN;
     if (!arn) throw new Error('STRANDS_LAMBDA_ARN is not set');
     lambdaClient ??= new LambdaClient({ region: process.env.AWS_REGION || process.env.VP_AWS_REGION || 'us-east-1' });
-    const callId = process.env.VP_CALL_ID || process.env.MEETING_NAME || 'vp-chat';
-    const payload = {
-        text: question,
-        call_id: callId,
-        conversation_history: [],
-        userEmail: '',
-        toolScope: 'meeting_chat',
-        dynamodb_table_name: process.env.DYNAMODB_TABLE_NAME || '',
-        dynamodb_pk: `c#${callId}`,
-    };
+    const payload = chatQuestionPayload(question, asker);
     const response = await lambdaClient.send(
         new InvokeCommand({ FunctionName: arn, InvocationType: 'RequestResponse', Payload: JSON.stringify(payload) }),
     );
@@ -390,7 +426,7 @@ export function createChatAnswerer(
         try {
             let timer: NodeJS.Timeout | undefined;
             const raw = await Promise.race([
-                ask(parsed.question),
+                ask(parsed.question, { sender, platform }),
                 new Promise<never>((_, reject) => {
                     timer = setTimeout(() => reject(new Error(`no answer within ${timeoutMs} ms`)), timeoutMs);
                 }),

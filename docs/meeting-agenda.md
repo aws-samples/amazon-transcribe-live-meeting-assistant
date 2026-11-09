@@ -166,7 +166,10 @@ The same question can be asked three ways:
   same meeting assistant, which uses the agenda tool.
 - **The meeting chat** — `LMA ask what's left on the agenda?` A question typed
   in the meeting chat is answered from the current meeting's transcript, its
-  agenda and web search only, and the answer is posted in the chat for
+  agenda and its shared screen only (unless **Meeting Assistant › Meeting chat
+  questions** on the Configuration page offers more; see
+  [Asking the Meeting Assistant from Chat](virtual-participant.md#asking-the-meeting-assistant-from-chat)),
+  and the answer is posted in the chat for
   everyone. **Guests may read the agenda of the meeting they are in** this way,
   just as they can ask about its transcript.
 
