@@ -49,12 +49,13 @@ import {
 import { COMPREHEND_PII_TYPES, LANGUAGE_CODES } from '../common/constants';
 import {
   buildSpeakerRoster,
+  headerSpeakers,
   identityKeyFor,
   parseSpeakerIdentities,
   resolveSpeaker,
   serializeSpeakerIdentities,
+  speakerDisplayRows,
   speakerGroups,
-  speakerRowLabel,
   withSpeakerName,
 } from '../common/speaker-identities';
 import { speakerChipLayout, withSpeakerMode } from '../common/speaker-modes';
@@ -1161,6 +1162,9 @@ const CallInProgressTranscript = ({
         // below, because showing a guess as indistinguishable from a name a
         // person typed is the one thing that would make this actively harmful.
         t.speakerProposed = resolved.status === 'proposed';
+        // A placeholder nobody gave ('ConfRm_1 · Voice 2'), which a voice's
+        // chip opens empty to rename rather than prefilled.
+        t.speakerUnnamed = resolved.status === 'unnamed';
 
         return t;
       })
@@ -1192,7 +1196,7 @@ const CallInProgressTranscript = ({
     [voiceKeysByName, onSaveSpeakerIdentities, readOnly],
   );
   // The chips, grouped by platform name, with each group's One person /
-  // Several people toggle.
+  // Several people menu.
   const chipEntries = useMemo(
     () => speakerChipLayout(turnByTurnSegments.filter(isSpeechSegment), groups),
     [turnByTurnSegments, groups],
@@ -2241,7 +2245,30 @@ export const CallPanel = ({
   );
   const platform = platformLabel(meetingVp?.meetingPlatform);
   const roster = buildSpeakerRoster(transcriptSegmentsForCall, speakerIdentities, item.remoteParticipantName);
-  const speakers = roster.map((row) => ({ key: row.key, label: speakerRowLabel(row) }));
+  // The header names the speakers the transcript's lines carry: through the
+  // meeting's speaker modes, so a name shown as one person is one speaker
+  // however many voices it has, and a name shown as several people is one per
+  // voice. Recomputed on every render, so a mode or a name arriving through
+  // the meeting's subscription reaches the header with the transcript.
+  const speakers = headerSpeakers(
+    speakerDisplayRows(
+      roster,
+      speakerIdentities,
+      speakerGroups(transcriptSegmentsForCall, speakerIdentities),
+      item.remoteParticipantName,
+    ),
+  );
+  // A speaker chosen in the header, opened in the Speakers panel on the
+  // Details tab. Kept as a request until the panel has carried it out, like
+  // the consent record's.
+  const [speakerFocusRequest, setSpeakerFocusRequest] = useState(null);
+  const showSpeaker = useCallback(
+    (key) => {
+      setActiveTab(TAB_DETAILS);
+      setSpeakerFocusRequest({ key, at: Date.now() });
+    },
+    [setActiveTab],
+  );
 
   // The consent record is shown on the Details tab when consent was enforced
   // for the meeting (or could not be read); the header's indicator and the
@@ -2410,6 +2437,8 @@ export const CallPanel = ({
         readOnly={speakerNamesReadOnly}
         isLive={isLive}
         onMeetingEnded={onRefreshMeeting}
+        focusRequest={speakerFocusRequest}
+        active={activeTab === TAB_DETAILS}
       />
       {showConsentRecordPanel && (
         <div id={CONSENT_RECORD_ID}>
@@ -2508,6 +2537,7 @@ export const CallPanel = ({
             getCallDetailsFromCallIds={getCallDetailsFromCallIds}
             setToolsOpen={setToolsOpen}
             onShowSpeakers={speakerNamesReadOnly ? undefined : () => setActiveTab(TAB_DETAILS)}
+            onSelectSpeaker={showSpeaker}
             assistant={
               assistantEnabled
                 ? {

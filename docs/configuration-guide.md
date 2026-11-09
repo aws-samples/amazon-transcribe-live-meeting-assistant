@@ -47,7 +47,7 @@ see [Retention: settings the stack limits](#retention-settings-the-stack-limits)
 | Meeting Processing | Whether a transcript Lambda hook is sent partial segments, how long a meeting may go without speech before the inactive-meeting reaper ends it, and how far back the reaper looks | Within about five minutes of the save |
 | Virtual Participant | The Virtual Participant's voice assistant provider, activation mode, wake phrases and activation duration, the ElevenLabs agent and Simli face, how a Teams Virtual Participant decides its meeting has ended, and whether the meeting chat is added to the transcript (see [Meeting Chat in the Transcript](virtual-participant.md#meeting-chat-in-the-transcript)) | To the next Virtual Participant to start |
 | Retention | How many days meeting records and transcript segments are kept, up to the limit the stack sets | To records written about five minutes after the save or later; a record already written keeps its expiry |
-| Meeting Consent | Whether participants are told a meeting is recorded and transcribed and whether their consent is needed first (off, notify or opt-in, and the opt-in rule), the notice texts, the phrases a reply is read by, whether a meeting may be started with another choice, whether evidence screenshots are kept, the model that checks them, what the WebSocket transcriber does with a streaming client that shows no consent step, and whether a Virtual Participant leaves after an objection. See [Meeting Consent](meeting-consent.md) | To meetings whose consent starts after the save |
+| Meeting Consent | Whether participants are told a meeting is recorded and transcribed and whether their consent is needed first (off, notify or opt-in, and the opt-in rule), the notice texts, the phrases a reply is read by, whether a meeting may be started with another choice, whether evidence screenshots are kept, the model that checks them, what the WebSocket transcriber does with a streaming client that shows no consent step, whether a Virtual Participant leaves after an objection, and whether it reads replies said aloud. See [Meeting Consent](meeting-consent.md) | To meetings whose consent starts after the save |
 | Meeting Agenda | How far into a meeting with no agenda its transcript is read for one somebody stated, or whether it is read at all | To meetings that reach the threshold about five minutes after the save or later |
 
 Every section is on **Configuration ▸ Configuration**. The pages that each edited
@@ -386,22 +386,30 @@ change it.
 | Amazon Transcribe › Redact personal information | Off | Off | On | On |
 | Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment | Same geography as this deployment |
 
-Under the Regulated preset nothing is recorded or transcribed until each
-participant consents. Stream Audio and the Desktop Capture App cannot collect
+Under the Regulated preset nothing is recorded or kept until each participant
+consents. While it waits, a Virtual Participant listens for consent said aloud:
+the meeting audio is processed by the meeting's transcription engine, and only
+the reply events are kept on the consent record. Turn **Meeting Consent › Read
+spoken replies** off to have it read the chat only and send no meeting audio
+anywhere before consent; the presets leave that setting as it is (see
+[Spoken replies](meeting-consent.md#spoken-replies)). Stream Audio and the Desktop Capture App cannot collect
 each participant's consent, so Start is refused from them; use a Virtual
-Participant on a join that supports each-participant consent. A Virtual Participant on a join that cannot
-match consent replies to participants (Teams in the browser, Webex and Google
-Meet) never meets the each-participant rule, and with a different choice per
-meeting turned off the meeting cannot move to the less strict owner-attests
-rule, so such a meeting is not transcribed. See
+Participant on a join that supports each-participant consent. A Virtual
+Participant on the Webex join cannot tell who is present, so it never meets the
+each-participant rule, and with a different choice per meeting turned off the
+meeting cannot move to the less strict owner-attests rule, so such a meeting is
+not transcribed. On the Teams browser join, which shows no chat sender, the rule
+is met only by consent said aloud. See
 [What each platform supports](meeting-consent.md#what-each-platform-supports).
 
 The Regulated notify preset keeps the Regulated preset's retention and privacy
 settings but uses Notify: recording and transcription run from the start, the
 participants are told with the notice, and an objection stops them. A meeting
 may use Notify or the stricter Opt-in, not Off. A Virtual Participant posts the
-notice in the meeting chat and reads objections there on every join, and it
-leaves the meeting after an objection. Stream Audio and the Desktop Capture App
+notice in the meeting chat and reads objections there, and those said aloud and
+addressed to LMA (read from the meeting's own transcription, unless **Read
+spoken replies** is off), on every join, and it leaves the meeting after an
+objection, so nothing is recorded or kept after it. Stream Audio and the Desktop Capture App
 show the notice for the LMA user to share in the meeting and capture from
 Start; an objection takes effect when the user records it with **Participant
 objected**. Clients that show no consent step (the browser extension, the

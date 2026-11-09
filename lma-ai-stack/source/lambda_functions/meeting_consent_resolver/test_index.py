@@ -694,3 +694,81 @@ def test_a_deleted_image_whose_mark_cannot_be_written_still_answers(dynamo, monk
     result = call("verifyMeetingConsentEvidence", BACKEND, EvidenceId=evidence_id)
     assert calls == ["store", "mark_deleted"] and s3.deleted
     assert result["Consent"]["Evidence"][0]["Verification"]["Verdict"] == "objection_found"
+
+
+# ── a meeting name with dots ────────────────────────────────────────────────
+
+# A meeting name with a run of dots: its folder name keeps them.
+DOTTED_CALL_ID = (
+    "Review all the LMA new features and UI changes.. prep to release-2026-11-09-15-58-36-076"
+)
+DOTTED_FOLDER = (
+    "lma-consent-evidence/"
+    "Review_all_the_LMA_new_features_and_UI_changes.._prep_to_release_2026_11_09_15_58_36_076/"
+)
+OUTSIDE_DOTTED_FOLDER = [
+    f"{DOTTED_FOLDER}../Another_meeting/chat.jpg",
+    f"{DOTTED_FOLDER}a/../../lma-audio-recordings/x.wav",
+    f"{DOTTED_FOLDER}./chat.jpg",
+    f"{DOTTED_FOLDER}a//chat.jpg",
+    DOTTED_FOLDER,
+    "lma-consent-evidence/Another_meeting/chat.jpg",
+    DOTTED_FOLDER.rstrip("/") + ".jpg",
+]
+
+
+@pytest.fixture
+def dotted(dynamo, monkeypatch):
+    """The dynamo fixture, with the meeting the calls name being DOTTED_CALL_ID."""
+    dynamo.put_meeting(DOTTED_CALL_ID, SharedWith=[SHARED])
+    monkeypatch.setattr(sys.modules[__name__], "CALL_ID", DOTTED_CALL_ID)
+    return dynamo
+
+
+def test_a_meeting_name_with_dots_has_its_evidence_added_and_signed(dotted) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    call("addMeetingConsentEvidence", BACKEND, S3Key=f"{DOTTED_FOLDER}chat.jpg")
+    evidence = call("getMeetingConsent", user(SHARED))["Consent"]["Evidence"]
+    assert evidence[0]["SignedUrl"] == f"https://signed/{DOTTED_FOLDER}chat.jpg?e=3600"
+    assert index.sign(f"{DOTTED_FOLDER}chat.jpg", DOTTED_CALL_ID) is not None
+
+
+@pytest.mark.parametrize("key", OUTSIDE_DOTTED_FOLDER)
+def test_a_meeting_name_with_dots_still_has_only_keys_inside_its_folder_added(dotted, key) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    with pytest.raises(index.BadRequestError):
+        call("addMeetingConsentEvidence", BACKEND, S3Key=key)
+    assert index.sign(key, DOTTED_CALL_ID) is None
+
+
+def test_a_meeting_name_with_dots_has_its_checked_image_deleted(dotted, monkeypatch) -> None:
+    s3 = DeletingS3()
+    monkeypatch.setattr(index, "S3", s3)
+    settings(monkeypatch, keepEvidenceScreenshots=False)
+    monkeypatch.setattr(index, "LAMBDA", FakeLambda(VERIFIED))
+    monkeypatch.setattr(index, "VERIFIER_FUNCTION", "verifier")
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    added = call("addMeetingConsentEvidence", BACKEND, S3Key=f"{DOTTED_FOLDER}chat.jpg")
+    evidence_id = added["Consent"]["Evidence"][0]["EvidenceId"]
+    call("verifyMeetingConsentEvidence", BACKEND, EvidenceId=evidence_id)
+    assert s3.deleted == [f"{DOTTED_FOLDER}chat.jpg"]
+
+
+@pytest.mark.parametrize("key", OUTSIDE_DOTTED_FOLDER)
+def test_a_meeting_name_with_dots_has_no_image_outside_its_folder_deleted(
+    dotted, monkeypatch, key
+) -> None:
+    s3 = DeletingS3()
+    monkeypatch.setattr(index, "S3", s3)
+    settings(monkeypatch, keepEvidenceScreenshots=False)
+    monkeypatch.setattr(index, "LAMBDA", FakeLambda(VERIFIED))
+    monkeypatch.setattr(index, "VERIFIER_FUNCTION", "verifier")
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    added = call("addMeetingConsentEvidence", BACKEND, S3Key=f"{DOTTED_FOLDER}chat.jpg")
+    evidence_id = added["Consent"]["Evidence"][0]["EvidenceId"]
+    # A stored entry whose key is not the one that was accepted when it was added.
+    consent = dotted.consent(DOTTED_CALL_ID)
+    consent["Evidence"][0]["S3Key"] = key
+    dotted.items[DOTTED_CALL_ID]["Consent"] = SER.serialize(index._dynamo(consent))
+    call("verifyMeetingConsentEvidence", BACKEND, EvidenceId=evidence_id)
+    assert s3.deleted == []

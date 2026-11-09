@@ -75,3 +75,22 @@ def test_the_model_is_read_for_each_request(store) -> None:
     first = index.model_arn()
     store({"summaryModelId": "us.anthropic.claude-sonnet-4-6"})
     assert first != index.model_arn()
+
+
+def test_the_query_sends_generation_and_orchestration_prompts(store, monkeypatch) -> None:
+    """Claude 5.5 models are refused by RetrieveAndGenerate without both prompts."""
+    store({"summaryModelId": "global.anthropic.claude-sonnet-5-5"})
+    sent = {}
+
+    class _KB:
+        def retrieve_and_generate(self, **kwargs):
+            sent.update(kwargs)
+            return {"output": {"text": "ok"}, "citations": []}
+
+    monkeypatch.setattr(index, "KB_CLIENT", _KB())
+    index.get_kb_response("what was decided?", "u1", True, None)
+    kb = sent["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]
+    assert (
+        "$search_results$" in kb["generationConfiguration"]["promptTemplate"]["textPromptTemplate"]
+    )
+    assert "$query$" in kb["orchestrationConfiguration"]["promptTemplate"]["textPromptTemplate"]

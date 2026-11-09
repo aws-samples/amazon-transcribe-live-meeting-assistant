@@ -5353,10 +5353,12 @@ Resources:
           PolicyDocument:
             Version: 2012-10-17
             Statement:
-              # The key frame items: read whether the text is there, and store it.
+              # The key frame items: read whether the text is there, read the
+              # frames before it to tell whether it repeats one, and store it.
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
+                  - dynamodb:Query
                   - dynamodb:UpdateItem
                 Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
                 Condition:

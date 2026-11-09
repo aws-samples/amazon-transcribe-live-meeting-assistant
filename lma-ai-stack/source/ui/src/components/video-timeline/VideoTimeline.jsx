@@ -26,8 +26,12 @@
  * **Export slides (PDF)** prints every frame as a deck (common/slide-deck.js).
  * Frames of the meeting's camera video rather than shared content
  * (ContentKind CAMERA) are loaded, for the clock anchors, but not shown,
- * counted, labelled or exported. A frame shown before its text was read is
- * classified when the frames are next read.
+ * counted, labelled or exported. Frames that repeat an earlier one
+ * (DuplicateOf: the same screen, by its text) are hidden and not counted until
+ * "Show all N frames" is selected, and are never exported. A frame shown
+ * before its text was read is classified when the frames are next read; while
+ * the meeting runs, the newest frames still without their text are read again
+ * with each new frame.
  *
  * On the meeting page the strip is the Screen share tab. `onFramesChange` tells
  * the page how many frames it has loaded (which is what decides whether the
@@ -50,7 +54,9 @@ import {
   frameLabel,
   frameMatches,
   matchSnippet,
+  isRepeatedFrame,
   mergeKeyframes,
+  newFramesCursor,
   showsSharedContent,
 } from '../common/video-keyframes';
 import { chapterTitlesByFrame } from '../common/chapters';
@@ -110,6 +116,8 @@ const VideoTimeline = ({
   const [search, setSearch] = useState('');
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
+  // Whether frames that repeat an earlier one are shown.
+  const [showRepeats, setShowRepeats] = useState(false);
   const stripRef = useRef(null);
   const sentinelRef = useRef(null);
   const framesRef = useRef(frames);
@@ -186,9 +194,8 @@ const VideoTimeline = ({
       });
       if (ran && pendingNewRef.current && !nextTokenRef.current) {
         pendingNewRef.current = false;
-        const last = framesRef.current[framesRef.current.length - 1];
         // eslint-disable-next-line no-use-before-define
-        loadPage({ after: last?.FrameId || '' });
+        loadPage({ after: newFramesCursor(framesRef.current) });
       }
     },
     [runLoad],
@@ -219,8 +226,7 @@ const VideoTimeline = ({
     // A frame announced during the renewal is fetched now, as after a page.
     if (ran && pendingNewRef.current && !nextTokenRef.current) {
       pendingNewRef.current = false;
-      const last = framesRef.current[framesRef.current.length - 1];
-      loadPage({ after: last?.FrameId || '' });
+      loadPage({ after: newFramesCursor(framesRef.current) });
     }
     return ran;
   }, [runLoad, loadPage]);
@@ -236,6 +242,7 @@ const VideoTimeline = ({
     setNextToken(null);
     setLoaded(false);
     setSelectedId(null);
+    setShowRepeats(false);
     loadPage();
   }, [callId]);
 
@@ -256,7 +263,9 @@ const VideoTimeline = ({
   }, [nextToken, loadPage]);
 
   // New frames while the meeting runs. Once every page is loaded, the frames
-  // after the last one are fetched (with their signed links); before that the
+  // after the last one are fetched (with their signed links), from before the
+  // newest frames whose text was not read yet when they were loaded, so they
+  // come back read (and marked when they repeat a frame); before that the
   // paging reaches them in order.
   useEffect(() => {
     if (!isLive || !callId) return undefined;
@@ -264,9 +273,8 @@ const VideoTimeline = ({
       callId,
       () => {
         if (nextTokenRef.current) return;
-        const last = framesRef.current[framesRef.current.length - 1];
         // '' rather than null with no frames yet: still a fetch of new frames.
-        loadPage({ after: last?.FrameId || '' });
+        loadPage({ after: newFramesCursor(framesRef.current) });
       },
       (e) => logger.error('key frame subscription failed', e),
     );
@@ -302,14 +310,17 @@ const VideoTimeline = ({
     if (onClockAnchors) onClockAnchors(clockAnchorsFromFrames(frames));
   }, [frames, onClockAnchors]);
 
-  // The frames of shared content: what the strip shows and counts.
+  // The frames of shared content, and of those the ones that do not repeat an
+  // earlier frame: what the strip shows and counts by default.
   const sharedFrames = useMemo(() => frames.filter(showsSharedContent), [frames]);
+  const distinctCount = useMemo(() => sharedFrames.filter((f) => !isRepeatedFrame(f)).length, [sharedFrames]);
+  const repeatCount = sharedFrames.length - distinctCount;
 
   // How many frames are shown, whether there are more, and whether the first
   // page has been read (`loaded`), for the page's tab label and its player.
   useEffect(() => {
-    if (onFramesChange) onFramesChange({ count: sharedFrames.length, more: Boolean(nextToken), loaded });
-  }, [sharedFrames.length, nextToken, loaded, onFramesChange]);
+    if (onFramesChange) onFramesChange({ count: distinctCount, more: Boolean(nextToken), loaded });
+  }, [distinctCount, nextToken, loaded, onFramesChange]);
 
   // A frame selected from elsewhere: shown large, and its thumbnail brought into
   // view. Read by id when it is on a page not loaded yet.
@@ -346,8 +357,6 @@ const VideoTimeline = ({
     const button = stripRef.current?.querySelector(`[data-frame-id="${selectedId}"]`);
     if (button?.scrollIntoView) button.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
   }, [selectedId, frames]);
-
-  const chapterTitles = useMemo(() => chapterTitlesByFrame(chapters, frames), [chapters, frames]);
 
   /**
    * Every frame, read fresh (for links that last the print), then the deck. The
@@ -392,10 +401,18 @@ const VideoTimeline = ({
 
   const selected = frames.find((f) => f.FrameId === selectedId);
   const searching = Boolean(search.trim());
-  const shown = useMemo(
-    () => (search.trim() ? sharedFrames.filter((f) => frameMatches(f, search)) : sharedFrames),
-    [sharedFrames, search],
+  // Repeats are hidden unless asked for; a repeat selected from elsewhere (a
+  // slide the summary names) is shown so its thumbnail can be found.
+  const visibleFrames = useMemo(
+    () => (showRepeats ? sharedFrames : sharedFrames.filter((f) => !isRepeatedFrame(f) || f.FrameId === selectedId)),
+    [sharedFrames, showRepeats, selectedId],
   );
+  const shown = useMemo(
+    () => (search.trim() ? visibleFrames.filter((f) => frameMatches(f, search)) : visibleFrames),
+    [visibleFrames, search],
+  );
+  // Labelled from the frames shown, so a chapter is not given to a hidden repeat.
+  const chapterTitles = useMemo(() => chapterTitlesByFrame(chapters, visibleFrames), [chapters, visibleFrames]);
 
   // A search covers the whole meeting: the pages not loaded yet are loaded,
   // one after another, while it is typed. So do pages that held only camera
@@ -432,7 +449,7 @@ const VideoTimeline = ({
       header={
         <Header
           variant="h4"
-          counter={`(${sharedFrames.length}${nextToken ? '+' : ''})`}
+          counter={`(${distinctCount}${nextToken ? '+' : ''})`}
           description="The shared screen each time it changed. Select one to see it full size."
           actions={
             <Button iconName="download" loading={exporting} onClick={exportDeck}>
@@ -458,6 +475,20 @@ const VideoTimeline = ({
           }
           onChange={({ detail }) => setSearch(detail.filteringText)}
         />
+        {repeatCount > 0 && (
+          <SpaceBetween size="xs" direction="horizontal">
+            {!showRepeats && (
+              <Box variant="small" color="text-body-secondary">
+                {`${repeatCount} ${repeatCount === 1 ? 'frame repeats' : 'frames repeat'} the screen before ${
+                  repeatCount === 1 ? 'it' : 'them'
+                } and ${repeatCount === 1 ? 'is' : 'are'} hidden.`}
+              </Box>
+            )}
+            <Button variant="inline-link" onClick={() => setShowRepeats((v) => !v)}>
+              {showRepeats ? 'Hide repeated frames' : `Show all ${sharedFrames.length} frames`}
+            </Button>
+          </SpaceBetween>
+        )}
         {searching && !shown.length && !loading && !nextToken && (
           <Box color="text-body-secondary">No frame shows that text.</Box>
         )}

@@ -9,7 +9,8 @@
  *
  * A chip limits the transcript to one speaker. Where a platform name carries
  * several voice labels -- 'Bob Strahan (spk_0)', 'Bob Strahan (spk_1)' -- its
- * chips sit together with a one-click toggle:
+ * chips sit together with a small One person / Several people menu
+ * (SpeakerModeMenu):
  *
  *  - One person: every line under the name shows the name alone, and the chip's
  *    edit button opens the speaker modal (rename, combine, separate).
@@ -21,16 +22,12 @@
  * the summary, the meeting assistant -- shows the same names. Who may change
  * them is decided by the caller, by the same rule as the Speakers panel.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
-import { Box, Button, Input, SegmentedControl, ToggleButton } from '@cloudscape-design/components';
+import { Box, Button, Input, ToggleButton } from '@cloudscape-design/components';
 
-import { describeSpeakerMode, ONE_PERSON, SEVERAL_PEOPLE } from '../common/speaker-modes';
-
-const MODE_OPTIONS = [
-  { id: ONE_PERSON, text: 'One person' },
-  { id: SEVERAL_PEOPLE, text: 'Several people' },
-];
+import { SEVERAL_PEOPLE } from '../common/speaker-modes';
+import SpeakerModeMenu from './SpeakerModeMenu';
 
 /** The chip itself: a filter toggle when there is more than one speaker, else the name. */
 const ChipLabel = ({ name, filterable, selected, onToggle }) =>
@@ -51,40 +48,67 @@ ChipLabel.propTypes = {
   onToggle: PropTypes.func.isRequired,
 };
 
-/** One voice of a name shown as several people, renamed in place. */
+/**
+ * One voice of a name shown as several people, renamed in place.
+ *
+ * The field starts empty, with the 'Voice N' placeholder showing, while the
+ * voice has no name, so typing a name does not mean first deleting the
+ * placeholder. The name is saved on Enter or when focus leaves the chip --
+ * but not when it moves to the chip's own More options link, which would
+ * otherwise vanish under the pointer as the save closed the field. Escape
+ * closes the field without saving.
+ */
 const VoiceChip = ({ chip, filterable, selected, onToggle, onRename = undefined, onMore = undefined }) => {
+  const current = chip.unnamed ? '' : chip.name;
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(chip.name);
+  const [draft, setDraft] = useState(current);
+  // Set while the field is open; cleared by whichever of Enter, Escape or
+  // leaving the chip comes first, so the field closing cannot save twice.
+  const openRef = useRef(false);
   useEffect(() => {
-    if (!editing) setDraft(chip.name);
-  }, [chip.name, editing]);
+    if (!editing) setDraft(current);
+  }, [current, editing]);
 
-  const commit = () => {
+  const open = () => {
+    openRef.current = true;
+    setDraft(current);
+    setEditing(true);
+  };
+  const close = (save) => {
+    if (!openRef.current) return;
+    openRef.current = false;
     setEditing(false);
     const trimmed = draft.trim();
-    if (trimmed !== chip.name) onRename(chip.keys, trimmed);
+    if (save && trimmed !== current) onRename(chip.keys, trimmed);
   };
 
   if (editing) {
     return (
-      <span className="transcript-speaker-chip transcript-speaker-chip-editing">
+      <span
+        className="transcript-speaker-chip transcript-speaker-chip-editing"
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) close(true);
+        }}
+      >
         <Input
           value={draft}
           autoFocus
           ariaLabel={`Name for ${chip.name}`}
-          placeholder="Name"
+          placeholder={chip.name}
           onChange={({ detail }) => setDraft(detail.value)}
-          onBlur={commit}
           onKeyDown={({ detail }) => {
-            if (detail.key === 'Enter') commit();
-            if (detail.key === 'Escape') {
-              setDraft(chip.name);
-              setEditing(false);
-            }
+            if (detail.key === 'Enter') close(true);
+            if (detail.key === 'Escape') close(false);
           }}
         />
         {onMore && (
-          <Button variant="inline-link" onClick={() => onMore(chip.name)}>
+          <Button
+            variant="inline-link"
+            onClick={() => {
+              close(false);
+              onMore(chip.name);
+            }}
+          >
             More options
           </Button>
         )}
@@ -94,14 +118,16 @@ const VoiceChip = ({ chip, filterable, selected, onToggle, onRename = undefined,
   return (
     <span className="transcript-speaker-chip">
       <ChipLabel name={chip.name} filterable={filterable} selected={selected} onToggle={onToggle} />
-      {onRename && (
-        <Button variant="icon" iconName="edit" ariaLabel={`Rename ${chip.name}`} onClick={() => setEditing(true)} />
-      )}
+      {onRename && <Button variant="icon" iconName="edit" ariaLabel={`Rename ${chip.name}`} onClick={open} />}
     </span>
   );
 };
 
-const CHIP_SHAPE = PropTypes.shape({ name: PropTypes.string, keys: PropTypes.arrayOf(PropTypes.string) });
+const CHIP_SHAPE = PropTypes.shape({
+  name: PropTypes.string,
+  keys: PropTypes.arrayOf(PropTypes.string),
+  unnamed: PropTypes.bool,
+});
 
 VoiceChip.propTypes = {
   chip: CHIP_SHAPE.isRequired,
@@ -183,14 +209,7 @@ const TranscriptSpeakerChips = ({
                 {editButton(chip.name)}
               </span>
             ))}
-        <span title={describeSpeakerMode(entry.group)} className="transcript-speaker-mode">
-          <SegmentedControl
-            label={`How the voices under ${entry.base} are shown`}
-            selectedId={entry.mode}
-            options={MODE_OPTIONS.map((option) => ({ ...option, disabled: !onSetMode }))}
-            onChange={({ detail }) => onSetMode?.(entry.key, detail.selectedId)}
-          />
-        </span>
+        <SpeakerModeMenu group={entry.group} onSetMode={onSetMode} compact />
       </span>
     );
   });
