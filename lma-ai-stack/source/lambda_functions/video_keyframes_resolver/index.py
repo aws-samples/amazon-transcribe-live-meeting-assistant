@@ -242,6 +242,7 @@ FIELDS = (
     "SlideText",
     "ContentKind",
     "Title",
+    "DuplicateOf",
     "Owner",
     "SharedWith",
 )
