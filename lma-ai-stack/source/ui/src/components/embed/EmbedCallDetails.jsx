@@ -29,6 +29,7 @@ import {
   Popover,
   SpaceBetween,
   Spinner,
+  StatusIndicator,
   Alert,
   TextContent,
   Toggle,
@@ -46,6 +47,7 @@ import mapCallsAttributes from '../common/map-call-attributes';
 import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 import { CallPanel } from '../call-panel/CallPanel';
 import { getMarkdownSummary } from '../common/summary';
+import { SUMMARY_IN_PROGRESS_TEXT, parseSummaryState, summaryStatusText } from '../common/summary-state';
 import { COMPREHEND_PII_TYPES, LANGUAGE_CODES } from '../common/constants';
 import { parseSpeakerIdentities, resolveSpeakerName, speakerGroups } from '../common/speaker-identities';
 import { SentimentIcon } from '../sentiment-icon/SentimentIcon';
@@ -64,13 +66,23 @@ const piiTypesSplitRegEx = new RegExp(`\\[(${COMPREHEND_PII_TYPES.join('|')})\\]
 /**
  * Standalone summary panel - renders just the meeting summary.
  */
-const EmbedSummaryPanel = ({ item }) => (
-  <Container header={<Header variant="h4">Meeting Summary</Header>}>
-    <TextContent color="gray">
-      <SummaryMarkdown callId={item.callId}>{getMarkdownSummary(item.callSummaryText)}</SummaryMarkdown>
-    </TextContent>
-  </Container>
-);
+const EmbedSummaryPanel = ({ item }) => {
+  // A meeting whose summary is on its way, or failed, says so rather than
+  // "Not available", in the meeting page's words. The panel updates from the
+  // same subscription the page does, so the summary replaces this when it lands.
+  const status = item.callSummaryText ? null : summaryStatusText(parseSummaryState(item.callSummaryState));
+  return (
+    <Container header={<Header variant="h4">Meeting Summary</Header>}>
+      {status === SUMMARY_IN_PROGRESS_TEXT && <StatusIndicator type="loading">{status}</StatusIndicator>}
+      {status && status !== SUMMARY_IN_PROGRESS_TEXT && <Box color="text-body-secondary">{status}</Box>}
+      {!status && (
+        <TextContent color="gray">
+          <SummaryMarkdown callId={item.callId}>{getMarkdownSummary(item.callSummaryText)}</SummaryMarkdown>
+        </TextContent>
+      )}
+    </Container>
+  );
+};
 
 EmbedSummaryPanel.propTypes = {
   // eslint-disable-next-line react/forbid-prop-types

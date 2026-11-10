@@ -295,6 +295,7 @@ Parameters:
       - standard
       - internal-meetings-notify
       - regulated-consent-required
+      - regulated-notify
       - none
     Description: >-
       The configuration preset the deployment's default configuration is built
@@ -2728,6 +2729,17 @@ Resources:
                 Action:
                   - dynamodb:GetItem
                 Resource: !GetAtt ConfigurationTable.Arn
+              # Read-only, and only the meeting records (c#): how far a
+              # meeting's transcript has reached, where an answer from the
+              # meeting page's chat is placed on the transcript timeline.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "c#*"
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -2779,16 +2791,21 @@ Resources:
               !Ref EndOfCallLambdaHookFunctionArn,
             ]
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
-          BOTO_READ_TIMEOUT: 60
           SPEAKER_NAME_RESOLVER_ARN: !GetAtt SpeakerNameResolverFunction.Arn
           # Must exceed the resolver's own 60s timeout, so a pass that is still
           # running is never abandoned and retried from here.
           SPEAKER_NAME_READ_TIMEOUT: 75
+          # How long the summary function is waited for. With the speaker-naming
+          # wait above it must leave this function's own Timeout time to record
+          # the outcome, so a summary that runs too long is reported as failed
+          # rather than leaving the meeting marked as in progress.
+          SUMMARY_READ_TIMEOUT: 780
           # The expiry of the summary it writes when the request names none:
           # the Retention section's value, at most this parameter's.
           MEETING_RECORD_EXPIRATION_IN_DAYS: !Ref MeetingRecordExpirationInDays
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-      Timeout: 240
+      # The Lambda maximum: the summary it waits for can run for most of it.
+      Timeout: 900
       MemorySize: 128
       Handler: lambda_function.handler
       Layers:
@@ -5347,10 +5364,12 @@ Resources:
           PolicyDocument:
             Version: 2012-10-17
             Statement:
-              # The key frame items: read whether the text is there, and store it.
+              # The key frame items: read whether the text is there, read the
+              # frames before it to tell whether it repeats one, and store it.
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
+                  - dynamodb:Query
                   - dynamodb:UpdateItem
                 Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
                 Condition:
@@ -12412,6 +12431,9 @@ Resources:
 
   UploadQuickSightManifest:
     Type: Custom::UploadQuickSightManifest
+    # The function's role reaches the bucket's key through this separate
+    # policy, so the manifest is written only once the policy is attached.
+    DependsOn: RecordingsBucketEncryptionKeyPolicy
     Properties:
       ServiceToken: !GetAtt UploadManifestLambda.Arn
       BucketName: !Ref S3BucketName

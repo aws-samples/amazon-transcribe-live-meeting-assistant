@@ -39,15 +39,15 @@ see [Retention: settings the stack limits](#retention-settings-the-stack-limits)
 | Meeting Assist Chat Buttons | The quick-action buttons in the chat panel. A saved list replaces the shipped buttons as a whole | At once, to chat panels opened after the save |
 | Nova Sonic Voice Assistant | The voice assistant's system prompt and prompt mode, model, voice, turn-taking sensitivity, meeting mode and translator settings | To the next meeting the voice assistant joins |
 | Transcription Engine | Virtual Participant voice separation, which works on Amazon Transcribe, and, where the experimental on-demand speech engine is deployed, which engine transcribes streaming meetings and which transcribes Virtual Participants. Without that engine only the voice separation switch is shown | To meetings that start within 30 seconds of the save or later |
-| Meeting Cost Prices | The unit prices the per-meeting [cost estimate](meeting-cost-estimate.md) is computed with | To estimates drawn within about five minutes of the save |
+| Meeting Cost Prices | The unit prices the per-meeting [cost estimate](meeting-cost-estimate.md) is computed with, by region, shown as a table with the source of every shipped price; change one to use your own rate, and export or import the whole table (see [Changing prices](meeting-cost-estimate.md#changing-prices)). Also opened from **Configuration ▸ Meeting Cost Prices** in the navigation | To estimates drawn within about five minutes of the save |
 | Amazon Bedrock Models | The Amazon Bedrock model used for summaries and meeting insights, for the meeting assistant and the troubleshooting agent, for the meeting assistant's knowledge bases, and for reading the text of key frames, and the **Model inference geography**: whether those models, the consent evidence check model and the Virtual Participant's page-automation model may run in any commercial AWS Region, only within this deployment's geography, or only in its Region (see [Where meeting content is processed](infrastructure-and-security.md#where-meeting-content-is-processed)) | To each summary, answer or key frame started about five minutes after the save or later |
 | Amazon Transcribe | The Amazon Transcribe options of meetings streamed from the Stream Audio page, the browser extension and the desktop app, and of Virtual Participants: language or language identification, redaction, custom vocabulary and language model, and the default for identifying speakers within a channel | To streaming meetings that start after the save, and to the next Virtual Participant to start |
 | Meeting Recording | Whether those meetings' audio is recorded when the client does not say | To streaming meetings that start after the save, and to the next Virtual Participant to start |
-| Meeting Assistant | The regular expression that wakes the meeting assistant in a transcript, and whether its answers use Amazon Bedrock [prompt caching](meeting-assistant.md#prompt-caching) | To transcript segments processed, and answers started, about five minutes after the save or later |
+| Meeting Assistant | The regular expression that wakes the meeting assistant in a transcript, whether its answers use Amazon Bedrock [prompt caching](meeting-assistant.md#prompt-caching), its reasoning effort, and what a request made in the meeting (the meeting chat, the voice assistant, the wake phrase) is answered from ([In-meeting requests](meeting-assistant.md#in-meeting-requests)) | To transcript segments processed, and answers started, about five minutes after the save or later |
 | Meeting Processing | Whether a transcript Lambda hook is sent partial segments, how long a meeting may go without speech before the inactive-meeting reaper ends it, and how far back the reaper looks | Within about five minutes of the save |
 | Virtual Participant | The Virtual Participant's voice assistant provider, activation mode, wake phrases and activation duration, the ElevenLabs agent and Simli face, how a Teams Virtual Participant decides its meeting has ended, and whether the meeting chat is added to the transcript (see [Meeting Chat in the Transcript](virtual-participant.md#meeting-chat-in-the-transcript)) | To the next Virtual Participant to start |
 | Retention | How many days meeting records and transcript segments are kept, up to the limit the stack sets | To records written about five minutes after the save or later; a record already written keeps its expiry |
-| Meeting Consent | Whether participants are told a meeting is recorded and transcribed and whether their consent is needed first (off, notify or opt-in, and the opt-in rule), the notice texts, the phrases a reply is read by, whether a meeting may be started with another choice, whether evidence screenshots are kept, the model that checks them, what the WebSocket transcriber does with a streaming client that shows no consent step, and whether a Virtual Participant leaves after an objection. See [Meeting Consent](meeting-consent.md) | To meetings whose consent starts after the save |
+| Meeting Consent | Whether participants are told a meeting is recorded and transcribed and whether their consent is needed first (off, notify or opt-in, and the opt-in rule), the notice texts, the phrases a reply is read by, whether a meeting may be started with another choice, whether evidence screenshots are kept, the model that checks them, what the WebSocket transcriber does with a streaming client that shows no consent step, whether a Virtual Participant leaves after an objection, and whether it reads replies said aloud. See [Meeting Consent](meeting-consent.md) | To meetings whose consent starts after the save |
 | Meeting Agenda | How far into a meeting with no agenda its transcript is read for one somebody stated, or whether it is read at all | To meetings that reach the threshold about five minutes after the save or later |
 
 Every section is on **Configuration ▸ Configuration**. The pages that each edited
@@ -187,7 +187,8 @@ of them is **active**: the one every meeting uses. They work as IDP's do.
   stack parameters name, and the stack parameters that are defaults of settings.
   Every stack update rewrites it, so it is read-only. A new deployment runs on it.
 - **Managed** profiles are the shipped presets (`standard`,
-  `internal-meetings-notify` and `regulated-consent-required`; see
+  `internal-meetings-notify`, `regulated-consent-required` and
+  `regulated-notify`; see
   [Configuration presets](#configuration-presets)), each
   the default with the preset applied. They are read-only and rewritten by every
   stack update too. Activate one to use it as it is.
@@ -364,36 +365,57 @@ select **Save changes**.
 ### Configuration presets
 
 A **preset** is a complete organizational default for consent, retention and
-privacy. All three set the same settings, listed below, and change only those,
+privacy. All four set the same settings, listed below, and change only those,
 so applying one sets every one of them whichever preset was applied before, and every other setting stays as it is. They are the choices
 of the `ConfigurationPreset` stack parameter, and each is also stored as a
 read-only **Managed** profile of the same name, which the deployment rewrites on
 every stack update; activate it as it is, or copy it to a Custom profile to
 change it.
 
-| Setting | Standard (`standard`, the default) | Internal meetings – notify participants (`internal-meetings-notify`) | Regulated – consent required, transcript not retained (`regulated-consent-required`) |
-|---|---|---|---|
-| Meeting Consent › Consent mode | Off | Notify | Opt-in |
-| Meeting Consent › Consent rule (opt-in) | Each participant consents | Each participant consents | Each participant consents |
-| Meeting Consent › Allow a different choice per meeting | On | On | Off (a meeting may only use this mode or a stricter one) |
-| Meeting Consent › Keep evidence screenshots | On | On | On |
-| Meeting Consent › Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse the meeting |
-| Meeting Consent › Virtual Participant leaves after an objection | Off | Off | On |
-| Retention › Delete the transcript after the summary | Off | Off | 15 minutes after the summary |
-| Meeting Recording › Record meeting audio | On | On | Off |
-| Virtual Participant › Add the meeting chat to the transcript | On | On | Off |
-| Amazon Transcribe › Redact personal information | Off | Off | On |
-| Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment |
+| Setting | Standard (`standard`, the default) | Internal meetings – notify participants (`internal-meetings-notify`) | Regulated – consent required, transcript not retained (`regulated-consent-required`) | Regulated – notify with opt-out, transcript not retained (`regulated-notify`) |
+|---|---|---|---|---|
+| Meeting Consent › Consent mode | Off | Notify | Opt-in | Notify |
+| Meeting Consent › Consent rule (opt-in) | Each participant consents | Each participant consents | Each participant consents | Each participant consents |
+| Meeting Consent › Allow a different choice per meeting | On | On | Off (a meeting may only use this mode or a stricter one) | Off (a meeting may only use this mode or a stricter one) |
+| Meeting Consent › Keep evidence screenshots | On | On | On | On |
+| Meeting Consent › Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse the meeting | Refuse the meeting |
+| Meeting Consent › Virtual Participant leaves after an objection | Off | Off | On | On |
+| Retention › Delete the transcript after the summary | Off | Off | 15 minutes after the summary | 15 minutes after the summary |
+| Meeting Recording › Record meeting audio | On | On | Off | Off |
+| Virtual Participant › Add the meeting chat to the transcript | On | On | Off | Off |
+| Amazon Transcribe › Redact personal information | Off | Off | On | On |
+| Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment | Same geography as this deployment |
 
-Under the Regulated preset nothing is recorded or transcribed until each
-participant consents. Stream Audio and the Desktop Capture App cannot collect
+Under the Regulated preset nothing is recorded or kept until each participant
+consents. While it waits, a Virtual Participant listens for consent said aloud:
+the meeting audio is processed by the meeting's transcription engine, and only
+the reply events are kept on the consent record. Turn **Meeting Consent › Read
+spoken replies** off to have it read the chat only and send no meeting audio
+anywhere before consent; the presets leave that setting as it is (see
+[Spoken replies](meeting-consent.md#spoken-replies)). Stream Audio and the Desktop Capture App cannot collect
 each participant's consent, so Start is refused from them; use a Virtual
-Participant on a join that supports each-participant consent. A Virtual Participant on a join that cannot
-match consent replies to participants (Teams in the browser, Webex and Google
-Meet) never meets the each-participant rule, and with a different choice per
-meeting turned off the meeting cannot move to the less strict owner-attests
-rule, so such a meeting is not transcribed. See
+Participant on a join that supports each-participant consent. A Virtual
+Participant on the Webex join cannot tell who is present, so it never meets the
+each-participant rule, and with a different choice per meeting turned off the
+meeting cannot move to the less strict owner-attests rule, so such a meeting is
+not transcribed. On the Teams browser join, which shows no chat sender, the rule
+is met only by consent said aloud. See
 [What each platform supports](meeting-consent.md#what-each-platform-supports).
+
+The Regulated notify preset keeps the Regulated preset's retention and privacy
+settings but uses Notify: recording and transcription run from the start, the
+participants are told with the notice, and an objection stops them. A meeting
+may use Notify or the stricter Opt-in, not Off. A Virtual Participant posts the
+notice in the meeting chat and reads objections there, and those said aloud and
+addressed to LMA (read from the meeting's own transcription, unless **Read
+spoken replies** is off), on every join, and it leaves the meeting after an
+objection, so nothing is recorded or kept after it. Stream Audio and the Desktop Capture App
+show the notice for the LMA user to share in the meeting and capture from
+Start; an objection takes effect when the user records it with **Participant
+objected**. Clients that show no consent step (the browser extension, the
+Stream Audio embed and Desktop Capture App builds from before the consent step)
+are refused, as under Regulated. See
+[Stream Audio and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
 
 Standard holds the shipped defaults, so applying it in the editor puts these
 settings back after another preset changed them. The layer's tests
@@ -401,7 +423,7 @@ hold each preset to exactly the values in this table.
 
 Some controls are stack parameters rather than settings. They are not part of
 any profile, so no preset can set them, and a deployment that needs the
-Regulated preset's posture also sets them when the stack is deployed or updated:
+posture of either Regulated preset also sets them when the stack is deployed or updated:
 
 - `LogLevel` — `INFO` (the default) or `WARN`. `DEBUG` logs meeting content.
 - `MeetingRecordExpirationInDays` and `TranscriptionExpirationInDays` — the

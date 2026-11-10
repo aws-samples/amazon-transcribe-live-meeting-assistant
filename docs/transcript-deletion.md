@@ -46,7 +46,8 @@ while the setting was off keeps its transcript for the days set above.
 
 The **Regulated – consent required, transcript not retained** configuration
 preset sets this to 15 minutes after the summary, together with opt-in consent,
-no audio recording and redaction; **Standard** and **Internal meetings – notify
+no audio recording and redaction, and **Regulated – notify with opt-out,
+transcript not retained** sets the same with notify consent; **Standard** and **Internal meetings – notify
 participants** set it to Off. See
 [Configuration presets](configuration-guide.md#configuration-presets),
 which also lists the retention stack parameters a preset cannot set, and

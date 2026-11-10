@@ -7,8 +7,8 @@
 
 What has to hold: the tool reads only the current meeting's record and says so
 plainly when there is no agenda (the agent must never invent one); it is offered
-in every tool scope, the meeting chat's included (asserted with the other scope
-tests, in test_meeting_chat_tool_scope.py); and the transcript can carry
+in every tool scope, the in-meeting scope included (asserted with the other scope
+tests, in test_in_meeting_request_scope.py); and the transcript can carry
 the times a progress check cites, without changing the transcript the agent is
 handed as context by default.
 """
@@ -123,8 +123,8 @@ def test_the_transcript_carries_times_only_when_asked(monkeypatch):
 # ── where the tool is offered, and what the agent is told ───────────────────
 
 
-def test_the_meeting_chat_is_told_the_agenda_is_available():
-    assert "its agenda" in handler_module.MEETING_CHAT_SCOPE_NOTE
+def test_an_in_meeting_request_is_told_the_agenda_is_available():
+    assert "its agenda" in handler_module.CURRENT_MEETING_SCOPE_NOTE
 
 
 def test_the_prompt_guides_a_progress_check_with_transcript_times():

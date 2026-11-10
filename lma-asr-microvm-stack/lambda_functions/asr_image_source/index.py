@@ -69,10 +69,82 @@ MODEL_KIND_FILE_KEYS = {
     "cohere_transcribe": ("encoder", "encoder_data", "decoder", "tokens"),
 }
 OFFLINE_ONLY_KINDS = ("qwen3_asr", "cohere_transcribe")
+# A model whose "archive" is "files" is pinned file by file: each entry of its
+# "files" mapping is {"path", "url", "sha256"}, as a diarizer's files are, instead of
+# one archive URL and checksum for the whole model. fetch_model.py lays both forms
+# out under the same names.
+FILES_ARCHIVE = "files"
+# A tokenizer is a directory, which cannot be fetched as one pinned file.
+DIRECTORY_FILE_KEYS = ("tokenizer",)
 
 
 class ResolutionError(Exception):
     """The model parameters could not be resolved to a complete selection."""
+
+
+def _is_files_model(model: dict) -> bool:
+    return model.get("archive") == FILES_ARCHIVE
+
+
+def _file_name(entry) -> str:
+    """The in-archive name of a model file, whichever form the catalog uses."""
+    if isinstance(entry, dict):
+        return str(entry.get("path", ""))
+    return "" if entry is None else str(entry)
+
+
+def _check_sources(model: dict, keys: tuple, label: str) -> None:
+    """Every model needs pinned bytes: one archive checksum, or one per file."""
+    files = model.get("files") or {}
+    if not _is_files_model(model):
+        if not model.get("url"):
+            raise ResolutionError(f"{label} {model.get('id')!r} has no download URL")
+        if not model.get("sha256"):
+            raise ResolutionError(
+                f"{label} {model.get('id')!r} has no pinned SHA256. Pin it in catalog.json; "
+                "unverified weights are never baked into an image."
+            )
+        return
+    for key in keys:
+        if key in DIRECTORY_FILE_KEYS:
+            raise ResolutionError(
+                f"{label} {model.get('id')!r} needs its {key} directory, which only an "
+                "archive can carry"
+            )
+        entry = files.get(key)
+        if not isinstance(entry, dict):
+            raise ResolutionError(
+                f"{label} {model.get('id')!r} is pinned file by file, so its {key} entry "
+                "must give path, url and sha256"
+            )
+        missing = [field for field in ("path", "url", "sha256") if not entry.get(field)]
+        if missing:
+            raise ResolutionError(f"{label} {model.get('id')!r} {key} file is missing {missing}")
+    warm = model.get("warmWav")
+    if warm is not None and not (isinstance(warm, dict) and warm.get("url") and warm.get("sha256")):
+        raise ResolutionError(f"{label} {model.get('id')!r} warmWav needs url and sha256")
+
+
+def _file_source_lines(prefix: str, model: dict) -> list[str]:
+    """Per-file URL and checksum lines for a model pinned file by file; none otherwise.
+
+    Archive models render exactly as before, so their image source fingerprint (and
+    therefore their image) is unchanged.
+    """
+    if not _is_files_model(model):
+        return []
+    lines: list[str] = []
+    for key, entry in (model.get("files") or {}).items():
+        if isinstance(entry, dict):
+            stem = f"{prefix}{key.upper()}"
+            lines += [f"{stem}_URL={entry.get('url', '')}", f"{stem}_SHA256={entry.get('sha256', '')}"]
+    warm = model.get("warmWav") or {}
+    if warm:
+        lines += [
+            f"{prefix}WARM_WAV_URL={warm.get('url', '')}",
+            f"{prefix}WARM_WAV_SHA256={warm.get('sha256', '')}",
+        ]
+    return lines
 
 
 def _prop(properties: dict, name: str, default: str = "") -> str:
@@ -142,13 +214,6 @@ def resolve(properties: dict, catalog: dict) -> dict:
             f"model {model.get('id')!r} uses the {engine!r} engine; this stack supports "
             "'streaming' (frame-synchronous) and 'accurate' (offline, VAD-segmented)"
         )
-    if not model.get("url"):
-        raise ResolutionError(f"model {model.get('id')!r} has no download URL")
-    if not model.get("sha256"):
-        raise ResolutionError(
-            f"model {model.get('id')!r} has no pinned SHA256. Pin it in catalog.json; "
-            "unverified weights are never baked into an image."
-        )
     kind = model.get("modelKind", "transducer")
     if kind not in MODEL_KIND_FILE_KEYS:
         raise ResolutionError(
@@ -162,6 +227,7 @@ def resolve(properties: dict, catalog: dict) -> dict:
     missing = [key for key in MODEL_KIND_FILE_KEYS[kind] if not files.get(key)]
     if missing:
         raise ResolutionError(f"model {model.get('id')!r} is missing file names: {missing}")
+    _check_sources(model, MODEL_KIND_FILE_KEYS[kind], "model")
     if not model.get("sherpaOnnx") or not model.get("onnxruntime"):
         raise ResolutionError(
             f"model {model.get('id')!r} must pin sherpaOnnx and onnxruntime versions"
@@ -205,10 +271,10 @@ def resolve(properties: dict, catalog: dict) -> dict:
             raise ResolutionError(
                 f"preview model {preview.get('id')!r} must be a streaming transducer"
             )
-        for key in ("url", "sha256", "sherpaOnnx", "onnxruntime"):
+        for key in ("sherpaOnnx", "onnxruntime"):
             if not preview.get(key):
                 raise ResolutionError(f"preview model {preview.get('id')!r} has no {key}")
-            if key in ("sherpaOnnx", "onnxruntime") and preview[key] != model.get(key):
+            if preview[key] != model.get(key):
                 raise ResolutionError(
                     f"preview model {preview.get('id')!r} pins {key} {preview[key]}, but the "
                     f"image runs {model.get(key)} for {model.get('id')!r}"
@@ -219,6 +285,7 @@ def resolve(properties: dict, catalog: dict) -> dict:
             raise ResolutionError(
                 f"preview model {preview.get('id')!r} is missing file names: {absent}"
             )
+        _check_sources(preview, FILE_KEYS, "preview model")
     diarizer_id = bundle.get("diarizerModelId", "none")
     diarizer: dict | None = None
     if diarizer_id not in ("none", ""):
@@ -303,18 +370,19 @@ def render_model_env(selection: dict) -> str:
         f"ASR_SPEAKER_THRESHOLD={bundle.get('speakerThreshold', '')}",
         f"ASR_MIN_SEGMENT_MS={bundle.get('minSegmentMs', '')}",
         f"ASR_MODEL_ID={model['id']}",
-        f"ASR_MODEL_URL={model['url']}",
-        f"ASR_MODEL_SHA256={model['sha256']}",
+        f"ASR_MODEL_URL={model.get('url', '')}",
+        f"ASR_MODEL_SHA256={model.get('sha256', '')}",
         f"ASR_MODEL_ARCHIVE={model.get('archive', 'tar.bz2')}",
         f"ASR_MODEL_STRIP_COMPONENTS={model.get('stripComponents', 1)}",
         f"ASR_MODEL_KIND={model.get('modelKind', 'transducer')}",
-        f"ASR_MODEL_ENCODER_FILE={files['encoder']}",
-        f"ASR_MODEL_DECODER_FILE={files['decoder']}",
-        f"ASR_MODEL_JOINER_FILE={files.get('joiner', '')}",
-        f"ASR_MODEL_TOKENS_FILE={files.get('tokens', '')}",
-        f"ASR_MODEL_CONV_FRONTEND_FILE={files.get('conv_frontend', '')}",
-        f"ASR_MODEL_TOKENIZER_FILE={files.get('tokenizer', '')}",
-        f"ASR_MODEL_ENCODER_DATA_FILE={files.get('encoder_data', '')}",
+        f"ASR_MODEL_ENCODER_FILE={_file_name(files['encoder'])}",
+        f"ASR_MODEL_DECODER_FILE={_file_name(files['decoder'])}",
+        f"ASR_MODEL_JOINER_FILE={_file_name(files.get('joiner'))}",
+        f"ASR_MODEL_TOKENS_FILE={_file_name(files.get('tokens'))}",
+        f"ASR_MODEL_CONV_FRONTEND_FILE={_file_name(files.get('conv_frontend'))}",
+        f"ASR_MODEL_TOKENIZER_FILE={_file_name(files.get('tokenizer'))}",
+        f"ASR_MODEL_ENCODER_DATA_FILE={_file_name(files.get('encoder_data'))}",
+        *_file_source_lines("ASR_MODEL_", model),
         f"ASR_MODEL_LANGUAGE={model.get('decodeLanguage', '')}",
         # BOTH names, deliberately. The runtime selects its engine from $ASR_ENGINE
         # (warmup.py, ws_server.py); ASR_MODEL_ENGINE is only descriptive. Writing the
@@ -330,10 +398,11 @@ def render_model_env(selection: dict) -> str:
         f"ASR_PREVIEW_MODEL_SHA256={preview.get('sha256', '')}",
         f"ASR_PREVIEW_MODEL_ARCHIVE={preview.get('archive', 'tar.bz2')}",
         f"ASR_PREVIEW_MODEL_STRIP_COMPONENTS={preview.get('stripComponents', 1)}",
-        f"ASR_PREVIEW_MODEL_ENCODER_FILE={preview_files.get('encoder', '')}",
-        f"ASR_PREVIEW_MODEL_DECODER_FILE={preview_files.get('decoder', '')}",
-        f"ASR_PREVIEW_MODEL_JOINER_FILE={preview_files.get('joiner', '')}",
-        f"ASR_PREVIEW_MODEL_TOKENS_FILE={preview_files.get('tokens', '')}",
+        f"ASR_PREVIEW_MODEL_ENCODER_FILE={_file_name(preview_files.get('encoder'))}",
+        f"ASR_PREVIEW_MODEL_DECODER_FILE={_file_name(preview_files.get('decoder'))}",
+        f"ASR_PREVIEW_MODEL_JOINER_FILE={_file_name(preview_files.get('joiner'))}",
+        f"ASR_PREVIEW_MODEL_TOKENS_FILE={_file_name(preview_files.get('tokens'))}",
+        *_file_source_lines("ASR_PREVIEW_MODEL_", preview),
         f"ASR_PREVIEW_MODEL_LICENSE={preview.get('license', '')}",
         f"ASR_DIARIZER_KIND={diarizer.get('kind', '')}",
         f"ASR_DIARIZER_MODEL_ID={diarizer.get('id', '')}",

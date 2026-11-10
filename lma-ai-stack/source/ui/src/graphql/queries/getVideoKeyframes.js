@@ -33,6 +33,7 @@ export default /* GraphQL */ `
         SlideText
         ContentKind
         Title
+        DuplicateOf
         ImageSignedUrl
         ThumbnailSignedUrl
       }

@@ -66,6 +66,9 @@ import {
     parseGoogleMeetMeeting,
     parseMeetParticipantCount,
     senderFromMeetGroupHeader,
+    readMeetChatInPage,
+    MeetChatRaw,
+    MEET_CHAT_HEADER_MAX_LEVELS,
     timeFromMeetGroupHeader,
 } from './google-meet-page.js';
 import { createLogger } from './logger.js';
@@ -481,47 +484,17 @@ export default class GoogleMeet {
      *
      * Keyed on Meet's message id, so a message is read once however often the
      * list re-renders, and the same command typed twice is read twice. The
-     * sender is taken from the header of the message's group; when no group
-     * matches, or its header does not read as one name and one time, the
-     * sender is null rather than borrowed from a neighbouring message.
+     * sender is taken from the header of the message's group
+     * (readMeetChatInPage); when no header is found, or it does not read as one
+     * name and one time, the sender is null rather than borrowed from a
+     * neighbouring message.
      */
     private async readNewChatMessages(page: Page): Promise<MeetChatReading[]> {
-        const raw: Array<{ header: string | null; text: string; id: string | null; links: string[] }> = await page.evaluate(
-            (sels: { message: string; group: string }) => {
-                const w = window as any;
-                const seen: Set<string> = (w.__lmaMeetSeen ||= new Set<string>());
-                const out: Array<{ header: string | null; text: string; id: string | null; links: string[] }> = [];
-                for (const node of Array.from(document.querySelectorAll(sels.message))) {
-                    // A message nested in another (a reply or quote) is read as part of it.
-                    if (node.parentElement?.closest(sels.message)) continue;
-                    const text = ((node as HTMLElement).innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
-                    // Not marked seen until it has text, so a row filled in by a
-                    // later render is read once it is complete.
-                    if (!text || text.length > 2000) continue;
-                    const key = node.getAttribute('data-message-id') || `text:${text}`;
-                    if (seen.has(key)) continue;
-                    seen.add(key);
-                    const group = node.closest(sels.group);
-                    let header: string | null = null;
-                    if (group) {
-                        const parts: string[] = [];
-                        const walker = document.createTreeWalker(group, NodeFilter.SHOW_TEXT);
-                        for (let t = walker.nextNode(); t; t = walker.nextNode()) {
-                            if (t.parentElement?.closest(sels.message)) continue;
-                            const piece = (t.textContent || '').trim();
-                            if (piece) parts.push(piece);
-                        }
-                        header = parts.join(' ');
-                    }
-                    const links = Array.from(node.querySelectorAll('a[href]'))
-                        .map((a) => (a as HTMLAnchorElement).href)
-                        .filter(Boolean);
-                    out.push({ header, text, id: node.getAttribute('data-message-id'), links });
-                }
-                return out;
-            },
-            { message: MEET_IN_PAGE_SELECTORS.chatMessage, group: MEET_IN_PAGE_SELECTORS.chatGroup },
-        );
+        const raw: MeetChatRaw[] = await page.evaluate(readMeetChatInPage, {
+            message: MEET_IN_PAGE_SELECTORS.chatMessage,
+            group: MEET_IN_PAGE_SELECTORS.chatGroup,
+            maxLevels: MEET_CHAT_HEADER_MAX_LEVELS,
+        });
         return raw.map(({ header, text, id, links }) => ({
             sender: senderFromMeetGroupHeader(header),
             text,
@@ -557,12 +530,11 @@ export default class GoogleMeet {
         }
         // Read with its address reduced to "LMA".
         const message = route.text;
-        // The consent flow gets no sender on Meet. The sender reading has not
-        // been confirmed against a live meeting, and a consent recorded for the
-        // wrong person is worse than one not recorded: so, as on the Teams
-        // browser join, a consent reply cannot be attributed (objections still
-        // stop capture), and `sendersHidden` below says so.
-        if (await meetingConsent.handleChat(null, message)) return;
+        // A consent reply, or "LMA start" while consent is withheld, under the
+        // sender read from the message's group header, as on Zoom and Chime. A
+        // header that spans two groups gives no sender, and a consent reply
+        // without one is not recorded (senderFromMeetGroupHeader).
+        if (await meetingConsent.handleChat(sender, message)) return;
         const assistantToggle = parseAssistantChatCommand(message);
         const chatQuestion = assistantToggle ? null : parseChatQuestion(message);
         // Not a branch of the chain below, so the question is still recorded as
@@ -1328,8 +1300,6 @@ export default class GoogleMeet {
         // is reopened after the screenshot of it.
         attachMeetingConsent(page, {
             send: (messages) => this.sendMessages(page, messages),
-            // See handleIncomingMessage: consent replies are read without a sender.
-            sendersHidden: true,
             panels: toolbarPanels(page, {
                 listVisible: [...MEET_SELECTORS.peopleList],
                 open: [...MEET_SELECTORS.peopleButton],

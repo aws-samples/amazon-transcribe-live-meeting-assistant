@@ -10,7 +10,8 @@ a frame's image is, what the model is asked, and what of its answer is kept.
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping, Optional, Tuple
+from difflib import SequenceMatcher
+from typing import Any, Iterable, Mapping, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
 FRAME_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -63,6 +64,21 @@ def posixify_filename(filename: str) -> str:
     return re.sub(r"_+$", "", name)
 
 
+def key_in_folder(key: Any, folder: str) -> bool:
+    """True when ``key`` names an object inside ``folder``, a prefix ending in "/".
+
+    The rule is applied to the key's "/"-separated segments: every segment must
+    be non-empty and neither "." nor "..". A meeting's folder name is its CallId
+    made safe as a file name, which keeps dots, so a run of dots inside a
+    segment is part of a name and is accepted. The same helper is copied into
+    each function that checks such a key; lma-ai-stack/test/
+    test_key_in_folder_copies_agree.py keeps the copies identical.
+    """
+    if not isinstance(key, str) or not folder.endswith("/") or not key.startswith(folder):
+        return False
+    return all(segment not in ("", ".", "..") for segment in key.split("/"))
+
+
 def object_key(url: Any, call_id: str, bucket: str, prefix: str) -> Optional[str]:
     """The key of a frame's image, when the URL is in the meeting's own key-frame folder.
 
@@ -77,7 +93,7 @@ def object_key(url: Any, call_id: str, bucket: str, prefix: str) -> Optional[str
     if not parsed.hostname.startswith(f"{bucket}.s3."):
         return None
     key = unquote(parsed.path.lstrip("/"))
-    if not key.startswith(f"{prefix}{posixify_filename(call_id)}/") or ".." in key:
+    if not key_in_folder(key, f"{prefix}{posixify_filename(call_id)}/"):
         return None
     return key
 
@@ -243,3 +259,95 @@ def read_answer(answer: Any, truncated: bool = False) -> Tuple[str, str, str]:
     if kind == CAMERA:
         return CAMERA, "", ""
     return kind, title, clean_text("\n".join(lines), truncated=truncated)
+
+
+# ── Repeated frames ────────────────────────────────────────────────────────
+#
+# A shared application whose content keeps updating, or a page scrolled a
+# little, gives frames that differ in pixels but show the same screen. Once a
+# frame's text is read it is compared with the last frame before it that was
+# not itself a repeat (and not a camera frame), and stored with ``DuplicateOf``
+# naming that frame when the two show the same thing. The meeting page hides
+# such frames by default and leaves them out of the exported deck.
+
+#: Word-sequence similarity at or above which two frames show the same screen.
+DUPLICATE_TEXT_SIMILARITY = 0.8
+#: The lower similarity enough when the two frames' titles are the same. Not
+#: the title alone: a model can name a whole deck rather than each slide.
+DUPLICATE_TITLE_TEXT_SIMILARITY = 0.5
+
+_WORDS = re.compile(r"\w+")
+
+
+def _words(text: Any) -> list:
+    return _WORDS.findall(text.casefold()) if isinstance(text, str) else []
+
+
+def _lines(text: Any) -> list:
+    if not isinstance(text, str):
+        return []
+    return [" ".join(_words(line)) for line in text.split("\n") if _words(line)]
+
+
+def text_similarity(a: Any, b: Any) -> float:
+    """How alike two frames' texts are, 0 to 1, by their words in order.
+
+    1.0 for two empty texts (nothing on either to tell them apart), 0.0 when
+    only one is empty.
+    """
+    wa, wb = _words(a), _words(b)
+    if not wa and not wb:
+        return 1.0
+    if not wa or not wb:
+        return 0.0
+    return SequenceMatcher(None, wa, wb, autojunk=False).ratio()
+
+
+def same_title(a: Any, b: Any) -> bool:
+    """Whether two titles are the same, ignoring case, punctuation and spacing; never for none."""
+    wa, wb = _words(a), _words(b)
+    return bool(wa) and wa == wb
+
+
+def extends(text: Any, earlier: Any) -> bool:
+    """Whether ``text`` holds every line of ``earlier`` and more: a slide built up a point at a time.
+
+    Such a frame is not a repeat however alike the two are: it is the fuller
+    version, and hiding it would leave the last points out of the deck.
+    """
+    lines, before = _lines(text), _lines(earlier)
+    return bool(before) and len(lines) > len(before) and set(before) <= set(lines)
+
+
+def is_duplicate(title: str, text: str, earlier_title: Any, earlier_text: Any) -> bool:
+    """Whether a frame shows the same screen as an earlier one, from what was read off both."""
+    if not isinstance(earlier_text, str):
+        return False  # the earlier frame is not read yet
+    if extends(text, earlier_text):
+        return False
+    similarity = text_similarity(text, earlier_text)
+    if text.strip() and earlier_text.strip() and similarity >= DUPLICATE_TEXT_SIMILARITY:
+        return True
+    return same_title(title, earlier_title) and similarity >= DUPLICATE_TITLE_TEXT_SIMILARITY
+
+
+def _attr(item: Mapping[str, Any], name: str) -> Any:
+    value = item.get(name)
+    return value.get("S") if isinstance(value, Mapping) else None
+
+
+def earlier_original(items: Iterable[Mapping[str, Any]]) -> Optional[Mapping[str, Any]]:
+    """Of the frames before one, newest first (DynamoDB items), the one to compare it with.
+
+    The newest that shows shared content and is not itself a repeat; camera
+    frames and repeats are passed over. None when there is none, or when a
+    frame on the way to it has not been read yet, so whether it is a repeat or
+    a camera frame is not known.
+    """
+    for item in items:
+        if _attr(item, "SlideText") is None:
+            return None
+        if _attr(item, "ContentKind") == CAMERA or _attr(item, "DuplicateOf"):
+            continue
+        return item
+    return None

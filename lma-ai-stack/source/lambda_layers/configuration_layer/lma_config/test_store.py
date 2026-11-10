@@ -203,6 +203,25 @@ def test_a_profile_is_a_delta_over_the_shipped_baseline() -> None:
     }
 
 
+def test_a_resolved_section_carries_the_shipped_values_it_was_merged_over() -> None:
+    """So a reader can say which of the values it uses the release supplied."""
+    store, _, _ = build()
+    seed(store)
+    store.write_profile(
+        "custom",
+        {"summary_prompt_templates": {"1#SUMMARY": "my own summary prompt"}},
+        updated_by="admin@example.com",
+        expected_version=1,
+    )
+
+    section = store.get_section("summary_prompt_templates")
+    assert section.values["1#SUMMARY"] == "my own summary prompt"
+    assert section.baseline_values == DEFAULT_BODY["summary_prompt_templates"]
+    # Served from the cache, the layers come with it.
+    again = store.get_section("summary_prompt_templates")
+    assert again.served_from_cache and again.baseline_values == section.baseline_values
+
+
 def test_the_baseline_alone_is_served_when_no_profile_has_been_written() -> None:
     store, _, _ = build()
     store.write_default(DEFAULT_BODY)

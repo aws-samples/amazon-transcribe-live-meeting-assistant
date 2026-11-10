@@ -63,7 +63,7 @@ def meeting(monkeypatch):
     def install(record=None, error=None):
         fake = FakeDynamo(record, error)
         monkeypatch.setattr(handler_module, "dynamodb", fake)
-        monkeypatch.setattr(handler_module, "query_transcript_items", lambda *_a: [dict(s) for s in SEGMENTS])
+        monkeypatch.setattr(handler_module, "query_transcript_items", lambda *_a, **_kw: [dict(s) for s in SEGMENTS])
         return fake
 
     return install

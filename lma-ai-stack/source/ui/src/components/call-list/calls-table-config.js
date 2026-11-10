@@ -5,6 +5,7 @@
  */
 import React, { useState } from 'react';
 import {
+  Box,
   Button,
   ButtonDropdown,
   CollectionPreferences,
@@ -21,6 +22,7 @@ import { CALLS_PATH } from '../../routes/constants';
 import { SentimentIndicator } from '../sentiment-icon/SentimentIcon';
 import { SentimentTrendIndicator } from '../sentiment-trend-icon/SentimentTrendIcon';
 import { getTextOnlySummary } from '../common/summary';
+import { parseSummaryState, summaryStatusText } from '../common/summary-state';
 import { shareModal, deleteModal } from '../common/meeting-controls';
 import { sharedWithEntries } from '../common/shared-with';
 import CustomDateRangeModal from './CustomDateRangeModal';
@@ -67,6 +69,10 @@ export const COLUMN_DEFINITIONS_MAIN = [
     id: 'summary',
     header: 'Summary',
     cell: (item) => {
+      // A meeting whose summary is on its way, or failed, says so rather than
+      // "Not available" -- the same words the meeting page uses.
+      const status = item.callSummaryText ? null : summaryStatusText(parseSummaryState(item.callSummaryState));
+      if (status) return <Box color="text-body-secondary">{status}</Box>;
       const summary = getTextOnlySummary(item.callSummaryText);
       return (
         <Popover
