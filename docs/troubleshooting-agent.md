@@ -334,13 +334,23 @@ forced one, so read it as "this diagnosis did not get to search as widely as it
 wanted" rather than "the agent was cut off mid-sentence". `usage.endedBecause`
 is set only on the forced path, and names the limit that ended the run.
 
+The per-turn output limit works differently, because it is reached inside a
+model turn rather than between tool calls. Claude 5 generation models reason
+before they answer, and that reasoning counts against the limit, so the answer
+turn after a long investigation is the one most likely to reach it. When a
+turn does, the run is not resumed (that would re-send the whole conversation):
+if the model had begun its answer, you get the answer as far as it got, ending
+with a note that it stopped at the output limit; if it had not, you get the
+three-section "Not determined" answer naming that limit. The model's reasoning
+is never part of either. Both set `truncated` and `usage.endedBecause`.
+
 | Environment variable | Default | Maximum | Bounds |
 |---|---|---|---|
 | `TROUBLESHOOTING_MAX_ITERATIONS` | 8 | 20 | Tool calls per diagnosis |
 | `TROUBLESHOOTING_TOKEN_BUDGET` | 250,000 | 1,000,000 | Input + output tokens per diagnosis. Checked between tool calls, so a run can overshoot it by roughly one model turn before it stops |
 | `TROUBLESHOOTING_WALL_CLOCK_SECONDS` | 240 | 870 | Seconds per diagnosis — **requested**; see below |
 | `TROUBLESHOOTING_ANSWER_RESERVE_SECONDS` | 30 | 120 | Time held back for the model to write its answer |
-| `TROUBLESHOOTING_MAX_OUTPUT_TOKENS` | 4,096 | 16,384 | Output tokens per model turn |
+| `TROUBLESHOOTING_MAX_OUTPUT_TOKENS` | 16,384 | 32,768 | Output tokens per model turn, reasoning included. Applies to Claude models; the Amazon Nova models are held to at most 4,096 |
 | `TROUBLESHOOTING_MAX_LOG_GROUPS` | 120 | 400 | Log groups returned by discovery |
 | `TROUBLESHOOTING_MAX_LOG_EVENTS` | 100 | 1,000 | Rows per log query |
 | `TROUBLESHOOTING_MAX_LOG_MESSAGE_LENGTH` | 2,000 | 20,000 | Characters per log line |

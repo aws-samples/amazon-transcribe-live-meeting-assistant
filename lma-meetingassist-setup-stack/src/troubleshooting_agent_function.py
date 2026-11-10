@@ -77,7 +77,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import boto3
 import troubleshooting_prompt
-from bedrock_compat import accepts_temperature
+from bedrock_compat import accepts_temperature, claude_major_version
 from botocore.config import Config as BotoCoreConfig
 
 from configuration_settings import read_setting, resolve_model_id
@@ -107,6 +107,14 @@ BEDROCK_GUARDRAIL_VERSION = os.environ.get("BEDROCK_GUARDRAIL_VERSION", "").stri
 # Diagnosis is extractive, not conversational: the same evidence should produce
 # the same cause. Zero on the models that accept a temperature at all.
 AGENT_TEMPERATURE = 0.0
+
+#: The per-turn output ceiling for a model that is not Claude (the Amazon Nova
+#: models). It is the value the agent has always run them with, and it stays
+#: there rather than following TROUBLESHOOTING_MAX_OUTPUT_TOKENS up, because
+#: their own output limits are below the Claude default and Bedrock rejects a
+#: request whose ceiling is above the model's limit. They do not reason before
+#: answering, so they do not need the larger figure.
+NON_CLAUDE_MAX_OUTPUT_TOKENS = 4096
 
 CLIENT_CONFIG = BotoCoreConfig(retries={"mode": "adaptive", "max_attempts": 3})
 # Bedrock gets the project's aggressive profile: cross-region inference
@@ -1066,6 +1074,62 @@ def configured_model_id() -> str:
     )
 
 
+def output_token_ceiling(model_id: str, limits: AgentLimits) -> int:
+    """The ``max_tokens`` the agent's model is given for one turn.
+
+    The configured limit for Claude, whose output limits are all above its
+    maximum, and at most NON_CLAUDE_MAX_OUTPUT_TOKENS for anything else. A
+    lowered value is logged, for the same reason ``_read`` logs a clamp: a limit
+    that quietly became a different one is an hour of somebody's debugging.
+    """
+    configured = limits.max_output_tokens
+    if claude_major_version(model_id) is not None or configured <= NON_CLAUDE_MAX_OUTPUT_TOKENS:
+        return configured
+    logger.info(
+        "using an output limit of %d per turn for %s rather than the configured %d",
+        NON_CLAUDE_MAX_OUTPUT_TOKENS,
+        model_id,
+        configured,
+    )
+    return NON_CLAUDE_MAX_OUTPUT_TOKENS
+
+
+#: Appended to an answer that stopped at the output ceiling, so a reader does
+#: not take a missing section for one the model chose to leave out.
+_CUT_OFF_NOTE = (
+    "\n\n---\n*This answer stopped at the {limit}-token output limit for one model "
+    "turn, so it may be incomplete. Ask again with a narrower question, or raise "
+    "`TROUBLESHOOTING_MAX_OUTPUT_TOKENS` on the troubleshooting function.*"
+)
+
+
+def answer_at_output_limit(messages: Any, max_tokens: int, budget: RunBudget) -> str:
+    """What the caller gets when the model's turn stopped at ``max_tokens``.
+
+    Strands appends that turn to the conversation before it raises
+    ``MaxTokensReachedException``. When the turn had begun the answer — its
+    text has a section heading — that answer is returned as far as it got,
+    marked as incomplete. Otherwise (the turn stopped while reasoning, or while
+    asking for a tool, which Strands rewrites as a sentence saying so) the
+    caller gets the same three-section "Not determined" answer as a run ended
+    at any other limit. Only ``text`` blocks are read, so the model's reasoning
+    is never returned. The run is not resumed: see the module docstring.
+    """
+    text = ""
+    last = messages[-1] if messages else None
+    if isinstance(last, Mapping) and last.get("role") == "assistant":
+        text = "".join(
+            str(block.get("text") or "")
+            for block in last.get("content") or []
+            if isinstance(block, Mapping) and "text" in block
+        )
+    if _ANY_SECTION_HEADING.search(text):
+        return strip_preamble(text) + _CUT_OFF_NOTE.format(limit=max_tokens)
+    return _TRUNCATED_ANSWER.format(
+        reason=budget.ended_because, usage=json.dumps(budget.as_dict(), indent=2)
+    )
+
+
 def run_diagnosis(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
     """Diagnose one question and return the answer with its run metadata."""
     model_id = configured_model_id()
@@ -1094,10 +1158,12 @@ def run_diagnosis(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
 
     from strands import Agent
     from strands.models import BedrockModel
+    from strands.types.exceptions import MaxTokensReachedException
 
+    max_tokens = output_token_ceiling(model_id, limits)
     model_kwargs: Dict[str, Any] = {
         "model_id": model_id,
-        "max_tokens": limits.max_output_tokens,
+        "max_tokens": max_tokens,
         # The project's aggressive Bedrock retry profile, passed explicitly:
         # BedrockModel builds its own client, so a config left on the module
         # would simply not be used and the model would run on the SDK's
@@ -1124,8 +1190,22 @@ def run_diagnosis(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
     )
 
     try:
-        result = agent(build_question(event))
-        if budget.ended_because is not None:
+        try:
+            result: Any = agent(build_question(event))
+        except MaxTokensReachedException:
+            # Not an error either: the model's turn stopped at its output
+            # ceiling. The evidence behind it has already been paid for, so the
+            # caller gets what the model wrote, or the three sections saying
+            # which limit was reached, rather than a failed run.
+            result = None
+            budget.ended_because = (
+                f"the {max_tokens}-token output limit for one model turn was reached"
+            )
+            budget.stopped_because = budget.stopped_because or budget.ended_because
+            logger.warning("troubleshooting run stopped: %s", budget.ended_because)
+        if result is None:
+            answer = answer_at_output_limit(agent.messages, max_tokens, budget)
+        elif budget.ended_because is not None:
             # Not an error: the run reached a limit, the model kept calling
             # tools, and the loop was ended rather than paying for another
             # turn. The agent's final message is then the turn that asked for

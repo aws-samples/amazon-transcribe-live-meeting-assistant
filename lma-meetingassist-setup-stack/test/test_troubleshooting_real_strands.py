@@ -78,10 +78,18 @@ def _check_every_tool_use_is_answered(messages: List[Dict[str, Any]]) -> None:
             )
 
 
+class CutOff:
+    """A turn that stops at the output ceiling after ``text`` (may be empty)."""
+
+    def __init__(self, text: str = ""):
+        self.text = text
+
+
 class ScriptedModel(Model):
     """A model that plays back one response per turn.
 
-    Each turn is either a string (a final text answer) or a list of
+    Each turn is either a string (a final text answer), a ``CutOff`` (a turn
+    that reasons, writes ``text`` and stops with ``max_tokens``), or a list of
     ``(tool_name, input)`` pairs, which are emitted as parallel ``toolUse``
     blocks in a single response — the shape Haiku produced on a live stack.
     """
@@ -121,6 +129,17 @@ class ScriptedModel(Model):
             yield {"contentBlockDelta": {"delta": {"text": turn}}}
             yield {"contentBlockStop": {}}
             stop_reason = "end_turn"
+        elif isinstance(turn, CutOff):
+            # Reasoning first, as Claude 5 produces it, then the text so far.
+            yield {"contentBlockStart": {"start": {}}}
+            reasoning = {"reasoningContent": {"text": "private reasoning"}}
+            yield {"contentBlockDelta": {"delta": reasoning}}
+            yield {"contentBlockStop": {}}
+            if turn.text:
+                yield {"contentBlockStart": {"start": {}}}
+                yield {"contentBlockDelta": {"delta": {"text": turn.text}}}
+                yield {"contentBlockStop": {}}
+            stop_reason = "max_tokens"
         else:
             for name, tool_input in turn:
                 tool_use = {"toolUseId": f"tooluse_{uuid.uuid4().hex}", "name": name}
@@ -332,6 +351,39 @@ def test_a_wall_clock_overrun_ends_the_run_the_same_way() -> None:
     assert model.calls == 3
     assert "90-second time budget" in outcome["result"]["usage"]["endedBecause"]
     assert "Not determined" in outcome["result"]["answer"]
+
+
+def test_an_answer_that_reaches_the_output_ceiling_is_returned_as_far_as_it_got() -> None:
+    """The live shape: eight tool calls, then an answer turn that reasons and
+    stops at the output ceiling partway through its answer."""
+    turns: List[Any] = [[PARAMS], [DISCOVER]] + [[SEARCH]] * 6
+    turns.append(CutOff("I have enough evidence.\n\n" + ANSWER + "\n\n## Recommend"))
+    model = ScriptedModel(turns)
+
+    outcome = run(model, FakeTools(), max_output_tokens="5000")
+
+    answer = outcome["result"]["answer"]
+    assert answer.startswith(ANSWER)
+    assert "5000-token output limit" in answer
+    assert "private reasoning" not in answer
+    assert "I have enough evidence" not in answer
+    assert outcome["result"]["truncated"] is True
+    assert model.calls == 9
+
+
+def test_a_turn_that_reaches_the_output_ceiling_while_reasoning_gets_the_three_sections() -> (
+    None
+):
+    model = ScriptedModel([[PARAMS], CutOff()])
+
+    outcome = run(model, FakeTools())
+
+    answer = outcome["result"]["answer"]
+    assert answer.startswith("## Root Cause")
+    assert "Not determined" in answer
+    assert "token output limit for one model turn" in answer
+    assert "private reasoning" not in answer
+    assert model.calls == 2
 
 
 def test_a_run_within_its_limits_returns_the_model_s_answer() -> None:

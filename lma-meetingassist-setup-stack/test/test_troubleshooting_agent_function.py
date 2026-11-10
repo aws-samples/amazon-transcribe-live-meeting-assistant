@@ -1423,24 +1423,145 @@ def test_a_run_whose_loop_was_ended_answers_with_the_truncated_sections() -> Non
         budgets[0].ended_because = budgets[0].stopped_because
         return "Let me search one more log group."
 
+    result = run_with_stub_agent(mock.Mock(side_effect=agent_call), make_budget)
+
+    assert result["answer"].startswith("## Root Cause")
+    assert "8-tool-call limit" in result["answer"]
+    assert "one more log group" not in result["answer"]
+    assert result["truncated"] is True
+
+
+class MaxTokensReached(Exception):
+    """Stands in for strands.types.exceptions.MaxTokensReachedException."""
+
+
+def run_with_stub_agent(
+    agent: Any,
+    make_budget: Any = None,
+    model_id: str = "global.anthropic.claude-haiku-5-5",
+    **env: str,
+) -> Dict[str, Any]:
+    """Run run_diagnosis with the strands package stubbed and `agent` as the Agent."""
     strands = mock.MagicMock()
     strands.tool = lambda fn=None, **_: fn if fn else (lambda f: f)
-    strands.Agent.return_value = mock.Mock(side_effect=agent_call)
+    strands.Agent.return_value = agent
+    strands.types.exceptions.MaxTokensReachedException = MaxTokensReached
+    modules = {
+        "strands": strands,
+        "strands.models": strands.models,
+        "strands.types": strands.types,
+        "strands.types.exceptions": strands.types.exceptions,
+    }
+    environ = {f"TROUBLESHOOTING_{k.upper()}": v for k, v in env.items()}
+    budget_patch = (
+        mock.patch.object(agent_function, "RunBudget", side_effect=make_budget)
+        if make_budget
+        else mock.patch.object(agent_function, "RunBudget", agent_function.RunBudget)
+    )
     with (
-        mock.patch.dict(
-            "sys.modules", {"strands": strands, "strands.models": strands.models}
-        ),
-        mock.patch.object(agent_function, "RunBudget", side_effect=make_budget),
+        mock.patch.dict("sys.modules", modules),
+        mock.patch.dict("os.environ", environ, clear=False),
+        budget_patch,
+        mock.patch.object(agent_function, "configured_model_id", return_value=model_id),
         mock.patch.object(agent_function, "TroubleshootingTools", return_value=FakeTools()),
         mock.patch.object(
             agent_function.troubleshooting_prompt, "get_system_prompt", return_value="p"
         ),
     ):
         result = agent_function.run_diagnosis({"query": "why?"})
+    result["_strands"] = strands
+    return result
 
-    assert result["answer"].startswith("## Root Cause")
-    assert "8-tool-call limit" in result["answer"]
-    assert "one more log group" not in result["answer"]
+
+def agent_stopping_at_output_limit(content: List[Dict[str, Any]]) -> Any:
+    """An Agent whose call raises as Strands does, with the cut-off turn appended."""
+    agent = mock.Mock(side_effect=MaxTokensReached("Model stopped generating"))
+    agent.messages = [
+        {"role": "user", "content": [{"text": "QUESTION: why?"}]},
+        {"role": "assistant", "content": content},
+    ]
+    return agent
+
+
+# ── the output ceiling ──────────────────────────────────────────────────────
+
+
+def test_the_default_output_ceiling_leaves_room_to_reason_before_answering() -> None:
+    """Claude 5 reasons before it answers, billed against the same ceiling;
+    after eight tool calls the answer turn needed more than 4,096."""
+    from troubleshooting_config import _LIMITS
+
+    assert _LIMITS["max_output_tokens"][0] >= 16384
+
+
+def test_a_claude_model_is_given_the_configured_output_ceiling() -> None:
+    with mock.patch.dict("os.environ", {"TROUBLESHOOTING_MAX_OUTPUT_TOKENS": "20000"}):
+        limits = AgentLimits()
+
+    assert agent_function.output_token_ceiling("global.anthropic.claude-haiku-5-5", limits) == 20000
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"), [("16384", 4096), ("2000", 2000)]
+)
+def test_a_model_other_than_claude_keeps_an_output_ceiling_within_its_limit(
+    configured: str, expected: int
+) -> None:
+    with mock.patch.dict("os.environ", {"TROUBLESHOOTING_MAX_OUTPUT_TOKENS": configured}):
+        limits = AgentLimits()
+
+    assert agent_function.output_token_ceiling("amazon.nova-pro-v1:0", limits) == expected
+
+
+def test_the_model_is_built_with_the_resolved_output_ceiling() -> None:
+    result = run_with_stub_agent(mock.Mock(return_value="## Root Cause\nx"))
+
+    kwargs = result["_strands"].models.BedrockModel.call_args.kwargs
+    from troubleshooting_config import _LIMITS
+
+    assert kwargs["max_tokens"] == _LIMITS["max_output_tokens"][0]
+
+
+def test_an_answer_that_reaches_the_output_ceiling_is_returned_marked_incomplete() -> None:
+    """The run returns what the model wrote, not an error, and says it stopped."""
+    agent = agent_stopping_at_output_limit(
+        [
+            {"reasoningContent": {"reasoningText": {"text": "private reasoning"}}},
+            {"text": "Here is what I found.\n\n## Root Cause\n**Confidence:** HIGH\nThe VP"},
+        ]
+    )
+
+    result = run_with_stub_agent(agent, max_output_tokens="9000")
+
+    answer = result["answer"]
+    assert answer.startswith("## Root Cause\n**Confidence:** HIGH\nThe VP")
+    assert "9000-token output limit" in answer
+    assert "private reasoning" not in answer
+    assert "Here is what I found" not in answer
+    assert result["truncated"] is True
+    assert "9000-token output limit" in result["usage"]["endedBecause"]
+
+
+def test_a_turn_that_reaches_the_output_ceiling_before_answering_gets_the_three_sections() -> None:
+    """A turn cut off while reasoning, or while asking for a tool (which
+    Strands rewrites as a sentence), has no answer to return."""
+    agent = agent_stopping_at_output_limit(
+        [
+            {"reasoningContent": {"reasoningText": {"text": "private reasoning"}}},
+            {"text": "The selected tool search_logs's tool use was incomplete due to "
+             "maximum token limits being reached."},
+        ]
+    )
+
+    result = run_with_stub_agent(agent)
+
+    answer = result["answer"]
+    assert answer.startswith("## Root Cause")
+    assert "Not determined" in answer
+    assert "## Recommendations" in answer
+    assert "token output limit for one model turn" in answer
+    assert "tool use was incomplete" not in answer
+    assert "private reasoning" not in answer
     assert result["truncated"] is True
 
 
