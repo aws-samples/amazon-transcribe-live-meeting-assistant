@@ -155,7 +155,10 @@ repeat, however alike the two are: it is a slide built up a point at a time,
 and the later frame is the fuller one. Two frames with no text are repeats
 only when their titles match. Nothing is marked when the earlier frame's text
 has not been read yet, or when the earlier frames cannot be read; such a frame
-is shown, as every frame was before frames were compared.
+is shown, as every frame was before frames were compared. An earlier frame
+whose text is never read (its image is too large to read, or every model
+attempt failed) stops the comparison the same way, so the frame after it is
+never marked.
 
 Repeats are hidden on the **Screen share** strip unless **Show all N frames**
 is selected, and are left out of the exported deck. They are still stored, with
@@ -416,8 +419,9 @@ signal).
 Each key frame is stamped with the moment its picture **first appeared**, not
 the moment it was confirmed, so a slide that went up at 12:30 is listed at
 12:30, and never earlier than the frame before it was taken. No two frames are
-stamped less than a second apart, on the detector's clock or on the
-transcript's, and a meeting keeps at most 1,000.
+stamped less than a second apart on the detector's clock; the Virtual
+Participant also keeps them a second apart on the transcript's clock. A meeting
+keeps at most 1,000.
 
 ### How often frames are kept
 

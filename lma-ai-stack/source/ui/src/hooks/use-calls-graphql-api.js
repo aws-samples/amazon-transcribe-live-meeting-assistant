@@ -55,9 +55,9 @@ export const isRequestTimeout = (error) =>
  * deletion fields and the capture context are selected only by getCall.
  *
  * CallSummaryState is kept for a different reason: the Kinesis pipeline's Call
- * mutations are published to onUpdateCall too, and they select their own fixed
- * field list, so a status or aggregation update arriving during a live meeting
- * would otherwise blank it -- making a hand-edited summary read as generated and
+ * mutations are published to onUpdateCall too, and they select it only when the
+ * deployed schema declares it, so a status or aggregation update arriving
+ * without it during a live meeting would otherwise blank it -- making a hand-edited summary read as generated and
  * hiding a regeneration in flight.
  *
  * The agenda is kept for the same reason, as one unit keyed on AgendaUpdatedAt:
