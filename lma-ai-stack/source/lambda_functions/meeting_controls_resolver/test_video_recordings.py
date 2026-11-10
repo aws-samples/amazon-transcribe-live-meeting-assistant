@@ -18,28 +18,51 @@ STAMP = "2026-10-30T14-05-09-123Z"
 
 
 class FakePaginator:
-    def __init__(self, keys):
-        self.keys = keys
+    def __init__(self, s3):
+        self.s3 = s3
 
     def paginate(self, Bucket, Prefix):  # noqa: N803
         assert Bucket == "bucket"
-        yield {"Contents": [{"Key": k} for k in sorted(self.keys) if k.startswith(Prefix)]}
+        versions, markers = [], []
+        for key in sorted(self.s3.versions):
+            if key.startswith(Prefix):
+                for version in self.s3.versions[key]:
+                    entry = {"Key": key, "VersionId": version}
+                    (markers if version.startswith("dm") else versions).append(entry)
+        yield {"Versions": versions, "DeleteMarkers": markers}
 
 
 class FakeS3:
-    def __init__(self, keys, errors=None):
-        self.keys = set(keys)
+    """A versioned bucket: each key holds its version ids, "dm..." for a delete marker.
+
+    ``deleted`` lists the key of every version deleted, ``deleted_versions``
+    the (key, version id) pairs.
+    """
+
+    def __init__(self, keys, errors=None, versions=None):
+        self.versions = {key: ["v0"] for key in keys}
+        self.versions.update(versions or {})
         self.deleted = []
+        self.deleted_versions = []
         self.errors = errors or []
 
     def get_paginator(self, name):
-        assert name == "list_objects_v2"
-        return FakePaginator(self.keys)
+        assert name == "list_object_versions"
+        return FakePaginator(self)
 
     def delete_objects(self, Bucket, Delete):  # noqa: N803
         assert Bucket == "bucket"
-        self.deleted.extend(o["Key"] for o in Delete["Objects"])
-        return {"Errors": self.errors} if self.errors else {}
+        if self.errors:
+            return {"Errors": self.errors}
+        for entry in Delete["Objects"]:
+            self.deleted.append(entry["Key"])
+            self.deleted_versions.append((entry["Key"], entry["VersionId"]))
+            remaining = self.versions.get(entry["Key"], [])
+            if entry["VersionId"] in remaining:
+                remaining.remove(entry["VersionId"])
+            if not remaining:
+                self.versions.pop(entry["Key"], None)
+        return {}
 
 
 def _url(key, encode=True):

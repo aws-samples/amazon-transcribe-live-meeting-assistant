@@ -23,6 +23,10 @@ some only one party's, and some set requirements a chat reply does not meet.
 Choose the mode with whoever advises your organisation on those rules. Nothing
 on this page is legal advice.
 
+See also [Privacy and Data Handling Controls](privacy-and-data-handling.md),
+which brings together the consent options, what LMA stores and for how long,
+and the deletion controls.
+
 **Current state:** the consent settings, the consent record and its API, the
 evidence check and the meeting page's Consent section are in place. The
 **Virtual Participant** runs the consent flow: it posts the notice in the
@@ -1134,6 +1138,8 @@ also holds the reply classifier described above.
   and the [configuration presets](configuration-guide.md#configuration-presets)
   that set it
 - [Transcript Deletion After the Summary](transcript-deletion.md)
+- [Privacy and Data Handling Controls](privacy-and-data-handling.md) — the
+  consent options together with retention and deletion
 - [Virtual Participant](virtual-participant.md)
 - [Stream Audio](stream-audio.md)
 - [User-Based Access Control](user-based-access-control.md) — who can read a meeting

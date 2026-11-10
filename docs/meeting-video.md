@@ -604,7 +604,11 @@ finds the images. The item has:
   in that meeting's own folder of this deployment's bucket.
 - **Deletion.** Deleting a meeting deletes its key frames and their images,
   and its video recording: the file named on the meeting record, and any
-  Virtual Participant recording segments left under `lma-video-chunks/`.
+  Virtual Participant recording segments left under `lma-video-chunks/`. Each
+  file is deleted with every version the versioned recordings bucket holds of
+  it. A file expired by a lifecycle rule leaves a noncurrent version, which the
+  bucket removes about a day later (see
+  [Earlier versions in the recordings bucket](privacy-and-data-handling.md#earlier-versions-in-the-recordings-bucket)).
 
 ## Reading key frames
 
