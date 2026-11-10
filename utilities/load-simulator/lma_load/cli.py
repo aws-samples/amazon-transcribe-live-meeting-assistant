@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Click command tree for ``lma load ...``.
 
 This module exposes a single ``load_command`` click group that's usable in

@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Drive the voice-enrollment consent lifecycle against a deployed stack.
 
 Five rounds of code review cannot establish that a consent row actually lands

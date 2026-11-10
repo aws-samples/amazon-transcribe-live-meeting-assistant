@@ -19,7 +19,7 @@ and the message says to reload, rather than the later save silently replacing
 the earlier one.
 
 Copyright (c) 2025 Amazon.com
-This file is licensed under the MIT License.
+This file is licensed under the MIT-0 License.
 """
 
 import json

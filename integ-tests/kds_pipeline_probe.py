@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Synthetic Kinesis (KDS) end-to-end pipeline probe.
 
 Drives the *downstream* half of LMA's data flow that neither unit tests nor the
