@@ -148,7 +148,12 @@ def _video_key_from_url(url):
 
 
 def _delete_stored_recording(key, callid, kind):
-    """Delete one recording file by key; 1 if S3 reported no error, else 0."""
+    """Delete one recording file by key; 1 if S3 reported no error, else 0.
+
+    S3 reports no error for a key that is already gone, so 1 means the file is
+    not there now, not that this call removed it: a transcriber recording named
+    by RecordingUrl has usually been removed already by the CallId-prefix scan.
+    """
     response = s3_client.delete_objects(
         Bucket=S3_BUCKET_NAME, Delete={"Objects": [{"Key": key}], "Quiet": True}
     )
@@ -171,7 +176,8 @@ def delete_audio_recording(callid, audio_url=None):
     meeting's CallId, which is how the transcriber names its recordings. The
     Virtual Participant names its file from the meeting name and the time the
     recording was written, so that file is found only through the URL stored on
-    the meeting. Returns the number of files deleted (0 or 1).
+    the meeting. Returns 1 when the file is gone afterwards and 0 otherwise (see
+    _delete_stored_recording).
     """
     if not callid:
         return 0

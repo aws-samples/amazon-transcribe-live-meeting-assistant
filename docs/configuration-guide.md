@@ -386,7 +386,8 @@ change it.
 | Amazon Transcribe › Redact personal information | Off | Off | On | On |
 | Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment | Same geography as this deployment |
 
-Under the Regulated preset nothing is recorded or kept until each participant
+Under the Regulated – consent required preset (`regulated-consent-required`)
+nothing is recorded or kept until each participant
 consents. While it waits, a Virtual Participant listens for consent said aloud:
 the meeting audio is processed by the meeting's transcription engine, and only
 the reply events are kept on the consent record. Turn **Meeting Consent › Read
