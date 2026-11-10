@@ -102,8 +102,10 @@ export type AddTranscriptSegmentEvent = CallEventBase<'ADD_TRANSCRIPT_SEGMENT'> 
     Speaker: string,
     /**
      * The language Amazon Transcribe identified for the result the segment came
-     * from (e.g. `es-US`), when language identification is on. Absent with a
-     * fixed language and on the MicroVM engine, which reports none.
+     * from (e.g. `es-US`), when language identification is on, or the language
+     * the ASR MicroVM engine identified from a final's text (see
+     * microvmRowLanguageCode). Absent when neither engine names one: Amazon
+     * Transcribe with a fixed language, and MicroVM partials and short rows.
      */
     LanguageCode?: string,
     AccessToken?: string,

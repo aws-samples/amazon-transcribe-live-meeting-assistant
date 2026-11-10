@@ -149,6 +149,12 @@ class Final(BaseModel):
     diarization is enabled, else ``None``. It is derived from the SAME audio
     samples and segment boundaries as this transcript, so the label cannot drift
     away from the text the way a separately-run diariser's turns would.
+
+    ``language`` is the base ISO 639-1 code (e.g. ``"es"``, no region) of the
+    language the segment's text is in, identified by the server from that text
+    among the languages the deployed bundle transcribes; ``None`` when the bundle
+    has one language, the row is too short to tell, or the server is not confident.
+    Only finals carry it. Optional, so a client that predates it ignores it.
     """
 
     type: Literal["final"] = "final"
@@ -158,6 +164,7 @@ class Final(BaseModel):
     end: float
     words: list[Word] = Field(default_factory=list)
     speaker: str | None = None
+    language: str | None = None
 
 
 class Embedding(BaseModel):

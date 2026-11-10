@@ -67,6 +67,7 @@ def test_recorded_sequence_produces_exact_envelope_schema() -> None:
     # ``speaker`` is present but ``None``: these events carry no speaker because
     # diarization is not enabled here (the engine emits no label). It still appears
     # in the envelope so the wire schema is stable whether or not diarization is on.
+    # ``language`` likewise on the final: no identifier is configured here.
     assert [m.model_dump() for m in messages] == [
         {
             "type": "partial",
@@ -113,6 +114,7 @@ def test_recorded_sequence_produces_exact_envelope_schema() -> None:
                 {"w": "noon", "s": 13.20, "e": 13.98},
             ],
             "speaker": None,
+            "language": None,
         },
     ]
     assert adapter.segments == 1
@@ -383,3 +385,38 @@ def test_end_to_end_multi_segment_envelope_trajectory() -> None:
     ]
     assert messages[3].start == 0.0 and messages[3].end == 2.0  # type: ignore[union-attr]
     assert messages[-1].start == 2.5 and messages[-1].end == 3.5  # type: ignore[union-attr]
+
+
+# --- Row language -------------------------------------------------------------
+
+
+def test_a_final_carries_the_language_identified_from_its_text() -> None:
+    seen: list[str] = []
+
+    def identify(text: str) -> str | None:
+        seen.append(text)
+        return "es"
+
+    adapter = ProtocolAdapter(identify_language=identify)
+    partial, final = adapter.adapt(
+        [_partial(0, "vamos a", 0.0), _final(0, "Vamos a revisar el presupuesto.", 0.0, 2.0)]
+    )
+
+    assert isinstance(final, Final)
+    assert final.language == "es"
+    # Only finals are identified: a live row is the rough preview text.
+    assert "language" not in partial.model_dump()
+    assert seen == ["Vamos a revisar el presupuesto."]
+
+
+def test_a_final_has_no_language_when_none_is_identified_or_identification_fails() -> None:
+    def boom(text: str) -> str | None:
+        raise RuntimeError("classifier failed")
+
+    (unnamed,) = ProtocolAdapter(identify_language=lambda text: None).adapt(
+        [_final(0, "Okay.", 0.0, 0.5)]
+    )
+    (failed,) = ProtocolAdapter(identify_language=boom).adapt([_final(0, "Okay then.", 0.0, 0.5)])
+
+    assert isinstance(unnamed, Final) and unnamed.language is None
+    assert isinstance(failed, Final) and failed.language is None

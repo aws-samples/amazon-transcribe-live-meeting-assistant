@@ -1046,6 +1046,7 @@ export class TranscriptionService {
             transcript: segment.text,
             isPartial: segment.isPartial,
             speaker,
+            languageCode: segment.languageCode,
         }).catch((error) => {
             log.error('Failed to send transcript to Kinesis:', error);
         });
@@ -1068,6 +1069,7 @@ export class TranscriptionService {
             transcript: segment.text,
             isPartial: segment.isPartial,
             speaker: this.vpName(),
+            languageCode: segment.languageCode,
         }).catch((error) => {
             log.error('Failed to send transcript to Kinesis:', error);
         });

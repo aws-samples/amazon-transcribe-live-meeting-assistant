@@ -16,7 +16,12 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { meterAsrMicrovm } from './metering.js';
 import { createLogger } from './logger.js';
-import { parseBundleLanguages, transcribeOnlyOptions, type TranscribeOnlyOptionSettings } from './configuration-store.js';
+import {
+    microvmRowLanguageCode,
+    parseBundleLanguages,
+    transcribeOnlyOptions,
+    type TranscribeOnlyOptionSettings,
+} from './configuration-store.js';
 import { REMOTE_CHANNEL, type SpeechChannel } from './channels.js';
 
 const log = createLogger('asr-microvm-client');
@@ -80,6 +85,12 @@ export interface AsrSegment {
      * within one value of this.
      */
     session?: string;
+    /**
+     * The row's language as a locale (`es-US`), from the language the engine
+     * named for a final's text (microvmRowLanguageCode). Absent on partials and
+     * when the engine named none.
+     */
+    languageCode?: string;
 }
 
 export type SegmentHandler = (segment: AsrSegment) => void;
@@ -91,6 +102,8 @@ interface AsrServerMessage {
     start?: number;
     end?: number;
     speaker?: string | null;
+    /** Base language (`es`) of a final's text; absent or null when the engine names none. */
+    language?: string | null;
     code?: string;
     message?: string;
     audio_seconds?: number;
@@ -369,6 +382,12 @@ export interface MicrovmAsrSessionOptions {
     run?: number;
     /** Meeting time already covered by earlier runs; rows continue from here. */
     timeBaseSeconds?: number;
+    /**
+     * The meeting's language code, which a row in that language takes as its
+     * LanguageCode. Defaults to the VP's Amazon Transcribe language setting, read
+     * when each row arrives.
+     */
+    meetingLanguageCode?: () => string;
 }
 
 /** The VP's single ASR session: a WebSocket to the MicroVM plus message-to-row mapping. */
@@ -707,6 +726,10 @@ export class MicrovmAsrSession {
         if (endSec > this.observedMaxEnd) {
             this.observedMaxEnd = endSec;
         }
+        const languageCode = microvmRowLanguageCode(
+            message.type === 'final' ? message.language : undefined,
+            this.options.meetingLanguageCode?.() ?? vpTranscribeOnlySettings().languageCode,
+        );
         // The id excludes the speaker: a partial's provisional label can be corrected
         // by its final, and both must land on one row.
         this.options.onSegment({
@@ -717,6 +740,7 @@ export class MicrovmAsrSession {
             isPartial: message.type !== 'final',
             speaker: message.speaker ?? undefined,
             session: `r${this.options.run ?? 0}-g${this.generation}`,
+            ...(languageCode ? { languageCode } : {}),
         });
     }
 }

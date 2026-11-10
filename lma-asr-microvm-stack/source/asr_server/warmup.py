@@ -37,6 +37,7 @@ from typing import cast
 
 from asr_protocol import Config as _Config
 
+from asr_server.language import TextLanguageIdentifier, bundle_languages
 from asr_server.model_env import load_model_env
 from asr_server.offline_recognizer import (
     OfflineModelConfig,
@@ -342,6 +343,28 @@ def _build_recognizer(
     return recognizer_factory(config)
 
 
+def warm_language_identifier(identifier: TextLanguageIdentifier | None = None) -> int:
+    """Load the row-language classifier and name one sentence; a process exit code.
+
+    Fails the build when the bundle has two or more languages and the classifier
+    cannot be loaded, because the server would otherwise run without row languages
+    and say so only in a log line. A one-language bundle has nothing to identify.
+    """
+    if identifier is None:
+        identifier = TextLanguageIdentifier(bundle_languages())
+    if not identifier.enabled:
+        _LOG.info("row language identification not used: bundle has fewer than two languages")
+        return 0
+    if not identifier.preload():
+        _LOG.error("row language identification could not be loaded")
+        return 1
+    _LOG.info(
+        "row language identification ready (sample: %s)",
+        identifier.identify("Thank you all for joining the meeting today."),
+    )
+    return 0
+
+
 def main() -> None:
     """Console entrypoint (``RUN python -m asr_server.warmup`` in the image)."""
     logging.basicConfig(
@@ -359,7 +382,10 @@ def main() -> None:
         def warmer(model: str, threads: int) -> int:
             return warm_sortformer(model, num_threads=threads)
 
-    sys.exit(run(sys.argv[1:], diarizer_warmer=warmer))
+    code = run(sys.argv[1:], diarizer_warmer=warmer)
+    if code == 0:
+        code = warm_language_identifier()
+    sys.exit(code)
 
 
 if __name__ == "__main__":  # pragma: no cover - process entrypoint

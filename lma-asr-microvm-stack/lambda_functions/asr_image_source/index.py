@@ -436,6 +436,9 @@ def render_model_env(selection: dict) -> str:
         f"ASR_MODEL_ENCODER_DATA_FILE={_file_name(files.get('encoder_data'))}",
         *_file_source_lines("ASR_MODEL_", model),
         f"ASR_MODEL_LANGUAGE={model.get('decodeLanguage', '')}",
+        # The languages the bundle transcribes (the AsrModelLanguages output). The
+        # server reports a row's detected language only when it is one of these.
+        f"ASR_BUNDLE_LANGUAGES={','.join(bundle_languages(selection))}",
         # BOTH names, deliberately. The runtime selects its engine from $ASR_ENGINE
         # (warmup.py, ws_server.py); ASR_MODEL_ENGINE is only descriptive. Writing the
         # descriptive one alone meant an 'accurate' bundle still warmed the STREAMING

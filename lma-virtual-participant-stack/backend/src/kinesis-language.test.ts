@@ -94,7 +94,7 @@ describe('the assistant channel and the MicroVM rows', () => {
         assert.equal(segments()[0]?.Channel, 'LOCAL');
     });
 
-    it('sends a MicroVM row, which has no language, without the field', async () => {
+    it('sends a MicroVM row the engine named no language for without the field', async () => {
         await manager.sendAsrTranscriptSegment({
             channel: 'REMOTE',
             segmentId: 'asr-1',
@@ -105,6 +105,20 @@ describe('the assistant channel and the MicroVM rows', () => {
             speaker: 'Alex',
         });
         assert.equal('LanguageCode' in (segments()[0] ?? {}), false);
+    });
+
+    it('sends the language of a MicroVM row the engine named one for', async () => {
+        await manager.sendAsrTranscriptSegment({
+            channel: 'REMOTE',
+            segmentId: 'asr-2',
+            startTime: 0,
+            endTime: 2,
+            transcript: 'Hola a todos, bienvenidos.',
+            isPartial: false,
+            speaker: 'Alex',
+            languageCode: 'es-US',
+        });
+        assert.equal(segments()[0]?.LanguageCode, 'es-US');
     });
 });
 

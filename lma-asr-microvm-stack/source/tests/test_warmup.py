@@ -27,7 +27,9 @@ from pathlib import Path
 
 import pytest
 from asr_protocol import Config
+from asr_server import language as language_module
 from asr_server import ws_server
+from asr_server.language import TextLanguageIdentifier
 from asr_server.offline_recognizer import (
     OfflineModelConfig,
     OfflineResult,
@@ -46,6 +48,7 @@ from asr_server.warmup import (
     config_from_args,
     run,
     synthetic_pcm,
+    warm_language_identifier,
     warmup,
 )
 
@@ -456,3 +459,26 @@ def test_run_warms_the_diarizer_after_the_recogniser_and_fails_the_build_when_it
     )
     assert ok == 0 and failed == 1
     assert [model for model, _ in calls] == ["/opt/models"]
+
+
+# --- Row language identification -------------------------------------------
+
+
+def test_the_language_identifier_is_loaded_at_build_for_a_multilingual_bundle() -> None:
+    identifier = TextLanguageIdentifier(["en", "es"], classifier=lambda text: ("en", 0.99))
+    assert warm_language_identifier(identifier) == 0
+
+
+def test_a_classifier_that_cannot_load_fails_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    def missing(languages: frozenset[str]):
+        raise ModuleNotFoundError("py3langid")
+
+    monkeypatch.setattr(language_module, "_py3langid_classifier", missing)
+    assert warm_language_identifier(TextLanguageIdentifier(["en", "es"])) == 1
+
+
+def test_a_one_language_bundle_builds_without_the_classifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ASR_BUNDLE_LANGUAGES", "en")
+    assert warm_language_identifier() == 0

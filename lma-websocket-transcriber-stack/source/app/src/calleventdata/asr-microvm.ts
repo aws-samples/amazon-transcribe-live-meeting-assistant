@@ -25,7 +25,7 @@ import { CHANNEL_SYSTEM, CallMetaData, SocketCallData } from './eventtypes';
 import { pageSpeakersFor } from './speaker-fusion';
 import { TranscriptSegmentRecord, diarizationSettingsFor, writeSegmentToKds } from './transcribe';
 import { TranscriptionSettings, getSessionSettings } from './session-settings';
-import { parseBundleLanguages, transcribeOnlyOptions } from '../config/configuration-store';
+import { microvmRowLanguageCode, parseBundleLanguages, transcribeOnlyOptions } from '../config/configuration-store';
 import { diarizationEnabledFor } from './diarization';
 // Type-only in the other direction, so this is not a runtime cycle.
 import { fetchEnrolledVoices } from './voice-enrollment';
@@ -133,6 +133,12 @@ interface AsrSessionOptions {
      * the session was created.
      */
     runTag?: string;
+    /**
+     * The meeting's language code (the Amazon Transcribe section's language),
+     * which a row in that language takes as its LanguageCode; see
+     * microvmRowLanguageCode.
+     */
+    meetingLanguageCode?: string;
 }
 
 /** One known voice and the name to label it with. */
@@ -178,6 +184,8 @@ interface AsrServerMessage {
     start?: number;
     end?: number;
     speaker?: string | null;
+    /** Base language (`es`) of a final's text; absent or null when the engine names none. */
+    language?: string | null;
     code?: string;
     message?: string;
     audio_seconds?: number;
@@ -839,6 +847,11 @@ export class AsrChannelSession {
         // SegmentId deliberately excludes the speaker: a partial's provisional
         // speaker can be corrected by its final, and both must land on one row.
         const segmentId = `${this.channelId}-${this.runTag}-g${this.generation}-s${message.segment ?? 0}`;
+        // Only a final names a language; a partial's row gets it when its final lands.
+        const languageCode = microvmRowLanguageCode(
+            isPartial ? undefined : message.language,
+            this.options.meetingLanguageCode ?? ''
+        );
         // The meeting audio is named after who the page showed during the row,
         // or the attendee its voice has been proven to (speaker-fusion.ts); the
         // microphone is the user's own, and the page says nothing about it.
@@ -866,6 +879,7 @@ export class AsrChannelSession {
                         Transcript: text,
                         IsPartial: isPartial,
                         Speaker: speaker,
+                        ...(languageCode ? { LanguageCode: languageCode } : {}),
                     },
                     this.socketData.callMetadata,
                     this.server
@@ -917,6 +931,7 @@ export const startMicrovmAsr = async (
     const optionsFor = (channelId: AsrChannelId): AsrSessionOptions => ({
         diarize: diarizationEnabledFor(channelId, settings),
         maxSpeakers: resolveMaxSpeakers(callMetadata.maxSpeakers, 0),
+        meetingLanguageCode: transcription.languageCode,
     });
     // Started here and awaited after the lease, so asking who has enrolled runs
     // alongside the MicroVM boot instead of adding to it. Resolves to an empty

@@ -214,6 +214,7 @@ def _session(
     drop: bool = False,
     fail_send_after: int | None = None,
     session_id: str | None = None,
+    language_identifier: Any = None,
 ) -> tuple[AsrSession, FakeConnection]:
     conn = FakeConnection(incoming, drop=drop, fail_send_after=fail_send_after)
     if engine is None:
@@ -225,6 +226,7 @@ def _session(
         engine=engine,
         server_config=server_config,
         session_id=session_id,
+        language_identifier=language_identifier,
     )
     return session, conn
 
@@ -471,6 +473,29 @@ async def test_eos_flushes_tail_final_before_termination() -> None:
     await session.run()
     assert conn.types() == ["ready", "partial", "final", "termination"]
     assert next(m for m in conn.messages() if m["type"] == "final")["text"] == "Tail words."
+
+
+async def test_a_final_carries_the_language_the_session_identifier_names() -> None:
+    rec = ScriptedRecognizer(
+        script=[[_partial(0, "hola"), _final(0, "Hola a todos, bienvenidos.", 0.0, 1.0)]],
+    )
+    session, conn = _session(
+        [CHUNK, '{"type":"eos"}'],
+        recognizer=rec,
+        language_identifier=lambda text: "es" if text.startswith("Hola") else None,
+    )
+    await session.run()
+    final = next(m for m in conn.messages() if m["type"] == "final")
+    partial = next(m for m in conn.messages() if m["type"] == "partial")
+    assert final["language"] == "es"
+    assert "language" not in partial
+
+
+async def test_without_an_identifier_a_final_has_no_language() -> None:
+    rec = ScriptedRecognizer(script=[[_final(0, "Hola a todos, bienvenidos.", 0.0, 1.0)]])
+    session, conn = _session([CHUNK, '{"type":"eos"}'], recognizer=rec)
+    await session.run()
+    assert next(m for m in conn.messages() if m["type"] == "final")["language"] is None
 
 
 async def test_binary_first_frame_is_not_lost() -> None:

@@ -31,7 +31,7 @@ recogniser never imports ``asr_protocol`` and the two evolve independently.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from asr_protocol import Final, Partial, Word
 
@@ -69,10 +69,22 @@ class ProtocolAdapter:
     ``word_timestamps`` mirrors the session ``Config.word_timestamps`` flag: when
     ``False`` a ``final`` is emitted with an empty ``words`` list even if the
     engine supplied timings.
+
+    ``identify_language`` names the language of a final's text, or returns ``None``
+    (:class:`asr_server.language.TextLanguageIdentifier`). It is applied here, at
+    the one seam every final crosses, so a row cut by a speaker change, split per
+    speaker or corrected later is identified the same way as any other. Without it
+    finals carry no language.
     """
 
-    def __init__(self, *, word_timestamps: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        word_timestamps: bool = True,
+        identify_language: Callable[[str], str | None] | None = None,
+    ) -> None:
         self._word_timestamps = word_timestamps
+        self._identify_language = identify_language
         # (segment, text) of the last partial actually emitted; used to dedupe
         # identical consecutive partials. Keyed by segment too, so the first
         # partial of a new segment is never mistaken for a repeat of the last.
@@ -162,7 +174,16 @@ class ProtocolAdapter:
             end=_coerce_time(event.end),
             words=words,
             speaker=event.speaker,
+            language=self._language_of(event.text),
         )
+
+    def _language_of(self, text: str) -> str | None:
+        if self._identify_language is None:
+            return None
+        try:
+            return self._identify_language(text)
+        except Exception:  # noqa: BLE001 - the language is optional detail
+            return None
 
     def _wire_words(self, event: Event) -> list[Word]:
         """Convert engine word timings to wire ``Word``s when enabled/present."""

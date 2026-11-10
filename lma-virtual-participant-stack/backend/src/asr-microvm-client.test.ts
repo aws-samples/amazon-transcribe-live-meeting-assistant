@@ -585,3 +585,77 @@ test('a bare Transcribe index still becomes spk_N', () => {
     assert.equal(speakerNameFor('Conference Room', '0'), 'Conference Room (spk_0)');
     assert.equal(speakerNameFor('Conference Room', '29'), 'Conference Room (spk_29)');
 });
+
+test('a final row carries the language the engine named, as a locale; a partial carries none', async () => {
+    const asr = await startFakeAsr((socket) => {
+        ready(socket, false);
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (!isBinary) return;
+            socket.send(JSON.stringify({ type: 'partial', segment: 0, text: 'hola a', start: 0.5, end: 1 }));
+            socket.send(
+                JSON.stringify({ type: 'final', segment: 0, text: 'Hola a todos.', start: 0.5, end: 1.5, language: 'es' }),
+            );
+            socket.send(
+                JSON.stringify({
+                    type: 'final',
+                    segment: 1,
+                    text: 'Thanks everyone for joining.',
+                    start: 2,
+                    end: 3,
+                    language: 'en',
+                }),
+            );
+            socket.send(JSON.stringify({ type: 'final', segment: 2, text: 'Okay.', start: 3.5, end: 4 }));
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const session = new MicrovmAsrSession({
+        callId: 'vp-test-call',
+        lease: { endpointUrl: asr.url },
+        diarize: false,
+        onSegment: (segment) => rows.push(segment),
+        isMeetingLive: () => true,
+        meetingLanguageCode: () => 'en-GB',
+    });
+    try {
+        assert.equal(await session.start(), true);
+        session.pushPcm(Buffer.alloc(3200));
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await session.finish();
+
+        assert.equal(rows.length, 4);
+        assert.equal('languageCode' in rows[0], false, 'a partial names no language');
+        assert.equal(rows[1].languageCode, 'es-US', 'another language gets its default region');
+        assert.equal(rows[2].languageCode, 'en-GB', 'a row in the meeting language keeps the meeting region');
+        assert.equal('languageCode' in rows[3], false, 'a row the engine named no language for has none');
+    } finally {
+        await asr.close();
+    }
+});
+
+test('without a meeting language option a row takes the Virtual Participant language setting', async () => {
+    const previous = process.env.TRANSCRIBE_LANGUAGE_CODE;
+    process.env.TRANSCRIBE_LANGUAGE_CODE = 'es-ES';
+    const asr = await startFakeAsr((socket) => {
+        ready(socket, false);
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (!isBinary) return;
+            socket.send(
+                JSON.stringify({ type: 'final', segment: 0, text: 'Hola a todos.', start: 0.5, end: 1.5, language: 'es' }),
+            );
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const session = newSession(asr, rows, { value: true }, false);
+    try {
+        assert.equal(await session.start(), true);
+        session.pushPcm(Buffer.alloc(3200));
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await session.finish();
+        assert.equal(rows[0]?.languageCode, 'es-ES');
+    } finally {
+        await asr.close();
+        if (previous === undefined) delete process.env.TRANSCRIBE_LANGUAGE_CODE;
+        else process.env.TRANSCRIBE_LANGUAGE_CODE = previous;
+    }
+});
