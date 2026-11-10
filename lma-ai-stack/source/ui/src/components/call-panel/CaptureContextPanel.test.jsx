@@ -151,4 +151,17 @@ describe('CaptureContextPanel', () => {
     renderPanel({ item: { ...ITEM, recordingStatusLabel: IN_PROGRESS_STATUS, recordingUrl: undefined } });
     expect(screen.getByText('Stored when the meeting ends, if audio is recorded')).toBeTruthy();
   });
+
+  it('names the languages the speech engine detected, in the order first heard', () => {
+    renderPanel({ item: { ...ITEM, transcriptionLanguage: 'identify-language', detectedLanguages: ['es-US'] } });
+    expect(screen.getByText('Identified by Amazon Transcribe (one language)')).toBeTruthy();
+    expect(screen.getByText('Detected language')).toBeTruthy();
+    expect(screen.getByText('Spanish (US)')).toBeTruthy();
+  });
+
+  it('says nothing about detected languages when the engine named none', () => {
+    renderPanel({ item: { ...ITEM, transcriptionLanguage: 'en-US' } });
+    expect(screen.getByText('en-US')).toBeTruthy();
+    expect(screen.queryByText(/^Detected language/)).toBeNull();
+  });
 });

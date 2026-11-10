@@ -19,6 +19,7 @@ export default /* GraphQL */ `
         StartTime
         Speaker
         Transcript
+        LanguageCode
         Sentiment
         SentimentScore {
           Positive

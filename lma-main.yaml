@@ -3100,6 +3100,12 @@ Resources:
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrModelBundleName
           - ""
+        # The languages that bundle transcribes; a meeting in another stays on
+        # Amazon Transcribe.
+        AsrModelLanguages: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.AsrModelLanguages
+          - ""
         AsrConfigTableName: !If
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableName
@@ -3214,6 +3220,10 @@ Resources:
         AsrLauncherFunctionArn: !If
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrLauncherFunctionArn
+          - ""
+        AsrModelLanguages: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.AsrModelLanguages
           - ""
         SourceCodeLocation: <VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>
         # Same source, packaged with the Dockerfile at the zip ROOT, which is

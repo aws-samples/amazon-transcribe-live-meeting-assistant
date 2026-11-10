@@ -5,6 +5,7 @@ import { buildDiarizedSegments, type TranscribeItem } from './transcribe-diariza
 import { SpeakerFusion } from './speaker-fusion.js';
 import { agendaStartFields, type VpAgenda } from './meeting-agenda.js';
 import { createLogger } from './logger.js';
+import { resultLanguageCode } from './transcribe-language.js';
 import { MEETING_CHAT_CHANNEL, REMOTE_CHANNEL } from './channels.js';
 import type { AsrEngineName } from './asr-microvm-client.js';
 
@@ -18,7 +19,16 @@ export interface TranscriptSegment {
   transcript: string;
   isPartial: boolean;
   speaker?: string;
-} 
+  /**
+   * The language Amazon Transcribe identified for the row (e.g. `es-US`), when
+   * language identification is on. Absent with a fixed language and on the
+   * MicroVM engine, which reports none.
+   */
+  languageCode?: string;
+}
+
+/** The record's LanguageCode field, or nothing when the language is not known. */
+const languageField = (code: string | undefined): { LanguageCode?: string } => (code ? { LanguageCode: code } : {});
 
 /** The fields of an ADD_VIDEO_KEYFRAME event other than its envelope. */
 export interface VideoKeyframeEvent {
@@ -352,6 +362,8 @@ class KinesisStreamManager {
   async sendTranscriptSegment(speaker: string, transcriptResult: any, timeOffsetSeconds = 0): Promise<number> {
     log.info("Process speaker changes to identify segments within result");
     const segments = this.processTranscriptionResults(speaker, transcriptResult, timeOffsetSeconds);
+    // Every row of a result is in the result's language.
+    const language = languageField(resultLanguageCode(transcriptResult));
     let maxEndTime = timeOffsetSeconds;
 
     for (const segment of Object.values(segments)) {
@@ -378,6 +390,7 @@ class KinesisStreamManager {
           Sentiment: null,
           TranscriptEvent: null,
           Speaker: (segment as any).Speaker,
+          ...language,
           AccessToken: process.env.USER_ACCESS_TOKEN || '',
           IdToken: process.env.USER_ID_TOKEN || '',
           RefreshToken: process.env.USER_REFRESH_TOKEN || '',
@@ -414,6 +427,7 @@ class KinesisStreamManager {
       Sentiment: null,
       TranscriptEvent: null,
       Speaker: segment.speaker,
+      ...languageField(segment.languageCode),
       AccessToken: process.env.USER_ACCESS_TOKEN || '',
       IdToken: process.env.USER_ID_TOKEN || '',
       RefreshToken: process.env.USER_REFRESH_TOKEN || '',

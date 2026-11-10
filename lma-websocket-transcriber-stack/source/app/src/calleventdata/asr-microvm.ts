@@ -25,7 +25,7 @@ import { CHANNEL_SYSTEM, CallMetaData, SocketCallData } from './eventtypes';
 import { pageSpeakersFor } from './speaker-fusion';
 import { TranscriptSegmentRecord, diarizationSettingsFor, writeSegmentToKds } from './transcribe';
 import { TranscriptionSettings, getSessionSettings } from './session-settings';
-import { transcribeOnlyOptions } from '../config/configuration-store';
+import { parseBundleLanguages, transcribeOnlyOptions } from '../config/configuration-store';
 import { diarizationEnabledFor } from './diarization';
 // Type-only in the other direction, so this is not a runtime cycle.
 import { fetchEnrolledVoices } from './voice-enrollment';
@@ -265,8 +265,9 @@ export const resolveMaxSpeakers = (
  *
  * A meeting whose Amazon Transcribe options use one the ASR MicroVM engine does
  * not offer (content redaction, a custom vocabulary or language model, language
- * identification, a language other than English) stays on Amazon Transcribe, so the option is applied rather
- * than dropped. That holds for a client that named the MicroVM engine too: those
+ * identification, a language the deployed bundle does not transcribe) stays on Amazon Transcribe, so the
+ * option is applied rather than dropped. The bundle's languages are ASR_MODEL_LANGUAGES, the ASR stack's
+ * AsrModelLanguages output; without it only English is taken. That holds for a client that named the MicroVM engine too: those
  * options are the deployment's, set by an administrator, and a client's engine
  * request does not override them.
  */
@@ -274,7 +275,8 @@ export const resolveAsrEngine = (
     callMetaData: CallMetaData,
     server?: FastifyInstance,
     runtime?: AsrRuntimeConfig,
-    transcription?: TranscriptionSettings
+    transcription?: TranscriptionSettings,
+    bundleLanguages: readonly string[] = parseBundleLanguages(process.env['ASR_MODEL_LANGUAGES'])
 ): AsrEngineName => {
     const deploymentDefault = runtime
         ? (runtime.streamingEngineMicrovm ? 'microvm' : 'transcribe')
@@ -301,7 +303,7 @@ export const resolveAsrEngine = (
         );
         return 'transcribe';
     }
-    const transcribeOnly = transcription ? transcribeOnlyOptions(transcription) : [];
+    const transcribeOnly = transcription ? transcribeOnlyOptions(transcription, bundleLanguages) : [];
     if (transcribeOnly.length > 0) {
         report(
             `[ASR]: [${callMetaData.callId}] - MicroVM ASR was requested, but this meeting's Amazon Transcribe options use ` +

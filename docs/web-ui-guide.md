@@ -223,6 +223,11 @@ The tab a meeting opens on. Real-time transcription displayed with:
   [The agenda on the Transcript tab](meeting-agenda.md#the-agenda-on-the-transcript-tab)
 - Speaker names and timestamps for each segment; select a name to rename that
   voice (see [Naming the voices](transcription-and-translation.md#naming-the-voices))
+- In a meeting where Amazon Transcribe identified more than one language, a
+  short language code beside each segment's time (**EN**, **ES**, or the full
+  code such as **EN-GB** when two of the languages share one), whose tooltip
+  names the language, *Spanish (United States)*. A meeting in one language shows
+  none. See [Detected languages](transcription-and-translation.md#detected-languages)
 - Sentiment indicators per segment
 - Color-coded entries by channel for easy visual distinction between speakers
 - **Auto-scroll**: while the meeting runs it keeps the newest segment in view;
@@ -484,6 +489,11 @@ as a deck. See [Meeting Video and Key Frames](meeting-video.md#on-the-meeting-pa
     Transcribe), and **Transcription language** — the language code, Amazon
     Transcribe's language identification, or, for the ASR MicroVM, the model's
     own language.
+  - **Detected languages** — when Amazon Transcribe identified the language,
+    the languages it heard, by name, in the order each was first heard
+    (*English (US), Spanish (US)*). Not shown for a meeting in a fixed language
+    or on the ASR MicroVM, which report none. See
+    [Detected languages](transcription-and-translation.md#detected-languages).
   - **Speaker separation** — which channels it was asked for (both, the meeting
     audio, the microphone, or off), with how many voices the transcript tells
     apart.
@@ -550,6 +560,13 @@ marked as chat, *Alice (chat)*, on one line: its line breaks become ` / `. In th
 spreadsheet every value is stored as text exactly as typed, so a message that
 starts with `=`, `+`, `-` or `@` is shown as written and is never treated as a
 formula.
+
+In a meeting with more than one detected language, each segment also carries
+the code of the language it was identified in: after the time in the text, Word
+and Markdown downloads (`Speaker [04:18.2, es-US]: text`), and in a **language**
+column of the spreadsheet. The Markdown downloads list the meeting's detected
+languages with its date and duration. A meeting in one language downloads as
+before.
 
 ## Meeting Sharing
 

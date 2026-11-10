@@ -996,9 +996,10 @@ parameter has no effect and every meeting uses Amazon Transcribe. Set it to
 
 A meeting this engine transcribes does not go through Amazon Transcribe, so the
 redaction, custom vocabulary, custom language model and language identification
-settings are not available on it, and it transcribes English only; a meeting whose
-Amazon Transcribe settings use any of them, or another language, is therefore kept on
-Amazon Transcribe. It is the default because voice enrollment and per-voice speaker
+settings are not available on it, and it transcribes only the languages its model
+bundle supports (20 European languages, English among them, with the default bundle;
+see [Languages](microvm-asr.md#languages)); a meeting whose Amazon Transcribe settings
+use any of them, or another language, is therefore kept on Amazon Transcribe. It is the default because voice enrollment and per-voice speaker
 separation need it, not because its transcripts are better: its quality is below
 Amazon Transcribe's and has not been benchmarked. Two more values are fixed in the `AsrDefaults`
 mapping in `lma-main.yaml` rather than asked: `ModelBundle`, which models the

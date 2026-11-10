@@ -128,6 +128,7 @@ import useChatKeyframeLinks from '../../hooks/use-chat-keyframe-links';
 import { isSharedWith } from '../common/shared-with';
 import useStrandsChatBridge from '../../hooks/use-strands-chat-bridge';
 import { isChatChannel, isSpeechChannel } from '../common/channels';
+import { meetingLanguages, segmentLanguageMark } from '../common/detected-languages';
 import ChatSegment from '../chat-segment/ChatSegment';
 
 const client = generateClient();
@@ -679,6 +680,17 @@ const SpeakerRenamePopover = ({ segment, onRenameSpeaker, locked }) => {
   );
 };
 
+/**
+ * The language a line was identified in, beside its time: a short code in a
+ * badge ("ES"), with the language's name as its tooltip and accessible label.
+ * Shown only in a meeting with more than one language (detected-languages.js).
+ */
+export const LanguageMark = ({ mark }) => (
+  <span className="transcript-language-mark" role="img" aria-label={`Language: ${mark.name}`} title={mark.name}>
+    <Badge color="grey">{mark.text}</Badge>
+  </span>
+);
+
 const TranscriptSegment = ({
   segment,
   translation = '',
@@ -751,6 +763,7 @@ const TranscriptSegment = ({
           ) : (
             <TextContent>{times}</TextContent>
           )}
+          {segment.languageMark && <LanguageMark mark={segment.languageMark} />}
         </SpaceBetween>
         <TranscriptContent segment={segment} translation={translation} query={query} />
       </SpaceBetween>
@@ -764,8 +777,7 @@ const TranscriptSegment = ({
  * - Same speaker
  * - Same channel
  * - The gap between two segments is less than PAUSE_TO_MERGE_IN_SECONDS second
- * - Add language code check if available
- * TODO: Check language code once it is returned
+ * - Not in two different identified languages, so each block has one language
  * @param previous previous segment
  * @param current current segment
  * @returns {boolean} indicates whether to merge or not
@@ -777,6 +789,7 @@ const shouldAppendToPreviousSegment = ({ previous, current }) =>
   && previous.channel === current.channel
   // Each chat message is its own row.
   && !isChatChannel(current.channel)
+  && (!previous.languageCode || !current.languageCode || previous.languageCode === current.languageCode)
   && current.startTime - previous.endTime < PAUSE_TO_MERGE_IN_SECONDS;
 
 /**
@@ -789,6 +802,7 @@ const appendToPreviousSegment = ({ previous, current }) => {
   previous.transcript += ` ${current.transcript}`;
   previous.endTime = current.endTime;
   previous.isPartial = current.isPartial;
+  previous.languageCode = previous.languageCode || current.languageCode;
   // Keep every id that went into this block. A merged block renders under the
   // first segment's id, so a "only this segment" rename recorded against that id
   // alone would cover only part of the text the user was looking at -- visibly so
@@ -1095,6 +1109,12 @@ const CallInProgressTranscript = ({
     () => speakerGroups(getSegments(), speakerIdentities),
     [callTranscriptPerCallId, callId, speakerIdentities],
   );
+  // The meeting's languages, from its record and its segments: each line is
+  // marked with its language only when there is more than one.
+  const languages = useMemo(
+    () => meetingLanguages(item.detectedLanguages, getSegments()),
+    [callTranscriptPerCallId, callId, item.detectedLanguages],
+  );
 
   const getTurnByTurnSegments = () =>
     transcriptChannels
@@ -1126,6 +1146,7 @@ const CallInProgressTranscript = ({
         t.agentTranscript = agentTranscript;
         t.targetLanguage = targetLanguage;
         t.translateOn = translateOn;
+        t.languageMark = segmentLanguageMark(t, languages);
         // Resolve the stored speaker to a display name. This covers both the
         // meeting's speaker identity map (a voice a user has named) and the older
         // behaviour of substituting the participant name typed on the Stream Audio
@@ -1343,6 +1364,7 @@ const CallInProgressTranscript = ({
     agentTranscript,
     translateOn,
     speakerIdentities,
+    languages,
   ]);
 
   // Move to the segment at a requested time (a key frame or a chapter was
@@ -2456,6 +2478,7 @@ export const CallPanel = ({
         vp={meetingVp}
         platform={platform}
         roster={roster}
+        languages={meetingLanguages(item.detectedLanguages, transcriptSegmentsForCall)}
         consentState={meetingConsent}
         onShowConsentRecord={showConsentRecordPanel ? showConsent : undefined}
       />

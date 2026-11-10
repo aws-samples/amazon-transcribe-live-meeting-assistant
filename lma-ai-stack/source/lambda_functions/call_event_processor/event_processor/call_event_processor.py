@@ -80,7 +80,9 @@ from pure import (  # noqa: E402
     apply_meeting_access,
     capture_context_fields,
     convert_keys_to_uppercamelcase,
+    forget_language,
     get_sentiment_per_quarter,
+    language_to_record,
     merge_dicts,
     segment_analyses,
 )
@@ -126,6 +128,9 @@ AGENDA_DERIVATION_AFTER_SECONDS = 300.0
 # Meetings this execution environment has already queued the pass for; see
 # agenda_derivation_due for why this is not what makes the pass run once.
 AGENDA_PASS_QUEUED: set = set()
+# The languages this execution environment has added to each meeting's
+# DetectedLanguages; see language_to_record.
+DETECTED_LANGUAGES_NOTED: Dict[str, set] = {}
 IS_TRANSCRIPT_SUMMARY_ENABLED = getenv("IS_TRANSCRIPT_SUMMARY_ENABLED", "false").lower() == "true"
 
 ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN = getenv("ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN", "")
@@ -381,6 +386,52 @@ def add_transcript_sentiment_analysis(
     tasks.append(task)
 
     return tasks
+
+
+async def add_detected_language(
+    call_id: str,
+    language_code: str,
+    appsync_session: AppsyncAsyncClientSession,
+) -> None:
+    """Add a language to the meeting's DetectedLanguages (addCallDetectedLanguage).
+
+    Made once per new language rather than per segment (language_to_record
+    decides). A language the meeting already lists fails the write's condition,
+    which is the outcome wanted and is not an error. Any other failure is logged
+    and forgotten, so a later segment in the language tries again; it never
+    fails the segment, since the list is a summary of what the segments carry.
+    """
+    if not appsync_session.client.schema:
+        raise ValueError("invalid AppSync schema")
+    schema = DSLSchema(appsync_session.client.schema)
+    if not hasattr(schema.Mutation, "addCallDetectedLanguage"):
+        # The running API predates the mutation (during a stack update).
+        return
+    query = dsl_gql(
+        DSLMutation(
+            schema.Mutation.addCallDetectedLanguage.args(
+                input={"CallId": call_id, "LanguageCode": language_code}
+            ).select(*call_fields(schema))
+        )
+    )
+    try:
+        await execute_gql_query_with_retries(
+            query,
+            client_session=appsync_session,
+            logger=LOGGER,
+            should_ignore_exception_fn=is_put_condition_failure,
+        )
+        LOGGER.info(
+            "Meeting %s: detected language %s recorded or already listed", call_id, language_code
+        )
+    except Exception:  # pylint: disable=broad-except
+        forget_language(call_id, language_code, DETECTED_LANGUAGES_NOTED)
+        LOGGER.warning(
+            "Meeting %s: could not add detected language %s",
+            call_id,
+            language_code,
+            exc_info=True,
+        )
 
 
 async def execute_create_call_mutation(
@@ -1411,6 +1462,7 @@ async def get_call_details(
         CallSummaryText=call_summary,
         Owner=call.get("Owner"),
         SharedWith=people_can_access,
+        DetectedLanguages=call.get("DetectedLanguages"),
     )
 
 
@@ -1734,6 +1786,8 @@ async def execute_process_event_api_mutation(
 
         add_transcript_tasks = []
         add_transcript_sentiment_tasks = []
+        # At most one per language new to the meeting; see language_to_record.
+        detected_language_tasks = []
 
         for normalized_message in normalized_messages:
             # Invoke custom lambda hook (if any) and use returned version of message.
@@ -1749,6 +1803,19 @@ async def execute_process_event_api_mutation(
             # the orchestrator passes its Owner on as the identity of whoever
             # asked, which a wake phrase spoken in the meeting does not have.
             event_owner = normalized_message.get("Owner")
+
+            new_language = language_to_record(
+                normalized_message.get("CallId"),
+                normalized_message.get("LanguageCode"),
+                payload.get("DetectedLanguages"),
+                DETECTED_LANGUAGES_NOTED,
+            )
+            if new_language:
+                detected_language_tasks.append(
+                    add_detected_language(
+                        normalized_message["CallId"], new_language, appsync_session
+                    )
+                )
 
             LOGGER.debug("Add Transcript Segment")
             add_transcript_tasks.extend(
@@ -1814,6 +1881,7 @@ async def execute_process_event_api_mutation(
             *add_transcript_tasks,
             *add_transcript_sentiment_tasks,
             *update_call_aggregation_tasks,
+            *detected_language_tasks,
             return_exceptions=True,
         )
 

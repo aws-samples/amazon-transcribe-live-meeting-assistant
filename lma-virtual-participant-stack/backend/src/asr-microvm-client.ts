@@ -16,7 +16,7 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { meterAsrMicrovm } from './metering.js';
 import { createLogger } from './logger.js';
-import { transcribeOnlyOptions, type TranscribeOnlyOptionSettings } from './configuration-store.js';
+import { parseBundleLanguages, transcribeOnlyOptions, type TranscribeOnlyOptionSettings } from './configuration-store.js';
 import { REMOTE_CHANNEL, type SpeechChannel } from './channels.js';
 
 const log = createLogger('asr-microvm-client');
@@ -126,14 +126,16 @@ export const vpTranscribeOnlySettings = (
  *
  * A VP whose Amazon Transcribe options use one the ASR MicroVM engine does not
  * offer (content redaction, a custom vocabulary or language model, language
- * identification, a language other than English) stays on Amazon Transcribe, so the option is applied rather
- * than dropped. A per-VP ASR_ENGINE=microvm does not override that: the options
- * are the deployment's, set by an administrator.
+ * identification, a language the deployed bundle does not transcribe) stays on Amazon Transcribe, so the
+ * option is applied rather than dropped. The bundle's languages are ASR_MODEL_LANGUAGES, the ASR stack's
+ * AsrModelLanguages output; without it only English is taken. A per-VP ASR_ENGINE=microvm does not override
+ * that: the options are the deployment's, set by an administrator.
  */
 export function resolveVpAsrEngine(
     switches: AsrRuntimeSwitches,
     override: string | undefined = process.env.ASR_ENGINE,
     transcribeOptions: TranscribeOnlyOptionSettings = vpTranscribeOnlySettings(),
+    bundleLanguages: readonly string[] = parseBundleLanguages(process.env.ASR_MODEL_LANGUAGES),
 ): AsrEngineName {
     const explicit = (override || '').trim().toLowerCase();
     const requested = explicit || (switches.virtualParticipantEngineMicrovm ? 'microvm' : 'transcribe');
@@ -155,7 +157,7 @@ export function resolveVpAsrEngine(
         report('[ASR] MicroVM ASR requested but this deployment has no ASR launcher configured; using Amazon Transcribe.');
         return 'transcribe';
     }
-    const transcribeOnly = transcribeOnlyOptions(transcribeOptions);
+    const transcribeOnly = transcribeOnlyOptions(transcribeOptions, bundleLanguages);
     if (transcribeOnly.length > 0) {
         report(
             `[ASR] MicroVM ASR requested, but this VP's Amazon Transcribe options use ${transcribeOnly.join(', ')}, ` +
