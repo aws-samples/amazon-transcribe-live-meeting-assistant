@@ -39,6 +39,7 @@ only when a real engine is actually constructed (fail-closed until provisioned).
 from __future__ import annotations
 
 import contextlib
+import math
 import os
 import sys
 import threading
@@ -95,6 +96,8 @@ _MODEL_FILES: tuple[tuple[str, str, str], ...] = (
 # Silero VAD model default filename + its env override, resolved under the model
 # dir (the offline engine needs BOTH the transducer AND the VAD model to segment).
 _VAD_MODEL_ENV = "ASR_VAD_MODEL"
+_RESCUE_ENV = "ASR_VAD_RESCUE"
+_RESCUE_SILENT_DB = -120.0
 _VAD_MODEL_FILENAME = "silero_vad.onnx"
 
 # A second offline model kind, Qwen3-ASR: convolution frontend + encoder + LLM decoder
@@ -195,11 +198,19 @@ class SherpaOfflineRecognizer(Recognizer):
         sample_rate: int = 16000,
         emit_segment_partial: bool = True,
         max_idle_ms: int = 2000,
+        rescue: RescueConfig | None = None,
     ) -> None:
         if sample_rate <= 0:
             raise ValueError("sample_rate must be positive")
         if max_idle_ms < 0:
             raise ValueError("max_idle_ms must be >= 0")
+        self._rescue = rescue
+        self._rescue_frame = sample_rate * 20 // 1000
+        self._energy_pos = 0
+        self._floor_db: float | None = None
+        self._cand_start: int | None = None
+        self._cand_end = 0
+        self._last_seg_end = 0
         self._vad = vad_gate
         self._backend = backend
         self._sample_rate = sample_rate
@@ -236,6 +247,7 @@ class SherpaOfflineRecognizer(Recognizer):
             sample_rate=config.sample_rate,
             emit_segment_partial=config.emit_segment_partial,
             max_idle_ms=max_idle_ms,
+            rescue=config.rescue,
         )
 
     def accept_pcm(self, pcm: bytes) -> list[Event]:
@@ -245,17 +257,24 @@ class SherpaOfflineRecognizer(Recognizer):
         self._buffer.extend(samples)
         self._total_samples += len(samples)
         events = self._handle_vad_events(self._vad.accept_pcm(pcm))
+        events.extend(self._scan_for_rescue())
         # No segment open (silence / between utterances): cap retained history so a
         # long pause can't grow the buffer without bound. Keeps the most recent
         # ``_max_idle_samples`` so a not-yet-confirmed onset's samples survive.
         if self._seg_start_t is None and len(self._buffer) > self._max_idle_samples:
-            self._prune_to_index(len(self._buffer) - self._max_idle_samples)
+            keep_from = len(self._buffer) - self._max_idle_samples
+            if self._cand_start is not None and self._rescue is not None:
+                pad = self._rescue.pad_ms * self._sample_rate // 1000
+                keep_from = min(keep_from, self._cand_start - pad - self._buffer_base)
+            self._prune_to_index(keep_from)
         return events
 
     def flush(self) -> list[Event]:
         # ``VadGate.flush`` closes any open segment (emitting a final ``speech_end``)
         # and resets the gate; decode that trailing utterance so it is not dropped.
-        return self._handle_vad_events(self._vad.flush())
+        events = self._handle_vad_events(self._vad.flush())
+        events.extend(self._close_rescue_candidate())
+        return events
 
     def current_segment(self) -> int:
         return self._segment
@@ -267,6 +286,11 @@ class SherpaOfflineRecognizer(Recognizer):
         events: list[Event] = []
         for ve in vad_events:
             if ve.kind == "speech_start":
+                if self._cand_start is not None:
+                    onset = round(ve.t * self._sample_rate)
+                    if self._cand_end < onset:
+                        events.extend(self._close_rescue_candidate(limit=onset))
+                    self._cand_start = None
                 # New segment opens: its samples begin here, so anything earlier is
                 # never needed again — prune the buffer up to the (padded) onset.
                 self._seg_start_t = ve.t
@@ -274,9 +298,10 @@ class SherpaOfflineRecognizer(Recognizer):
             elif self._seg_start_t is not None:  # speech_end closes the open segment
                 events.extend(self._decode_segment(self._seg_start_t, ve.t))
                 self._seg_start_t = None
+                self._last_seg_end = round(ve.t * self._sample_rate)
         return events
 
-    def _decode_segment(self, start_t: float, end_t: float) -> list[Event]:
+    def _decode_segment(self, start_t: float, end_t: float, consume: bool = True) -> list[Event]:
         """Decode one closed VAD segment offline and build its ``final`` (+partial)."""
         start_idx = max(0, round(start_t * self._sample_rate))
         end_idx = round(end_t * self._sample_rate)
@@ -286,7 +311,8 @@ class SherpaOfflineRecognizer(Recognizer):
 
         # Consume everything up to the segment end; segments are monotonic and
         # non-overlapping, so those samples can never be needed again (bounds memory).
-        self._prune_to_index(buf_end)
+        if consume:
+            self._prune_to_index(buf_end)
 
         if not segment_samples:
             return []
@@ -333,6 +359,59 @@ class SherpaOfflineRecognizer(Recognizer):
         self._segment += 1
         return events
 
+    def _scan_for_rescue(self) -> list[Event]:
+        cfg = self._rescue
+        if cfg is None:
+            return []
+        frame = self._rescue_frame
+        stop = self._total_samples
+        if self._seg_start_t is not None:
+            stop = min(stop, round(self._seg_start_t * self._sample_rate))
+        self._energy_pos = max(self._energy_pos, self._last_seg_end, self._buffer_base)
+        events: list[Event] = []
+        hangover = cfg.hangover_ms * self._sample_rate // 1000
+        max_len = cfg.max_ms * self._sample_rate // 1000
+        while self._energy_pos + frame <= stop:
+            lo = self._energy_pos - self._buffer_base
+            chunk = self._buffer[lo : lo + frame]
+            power = sum(x * x for x in chunk) / frame
+            level = 10.0 * math.log10(power) if power > 1e-12 else _RESCUE_SILENT_DB
+            floor = level if self._floor_db is None else self._floor_db
+            trigger = max(floor + cfg.rise_db, cfg.min_trigger_db)
+            self._floor_db = min(floor + cfg.floor_rise_db_per_frame, level)
+            end = self._energy_pos + frame
+            if level >= trigger:
+                if self._cand_start is None:
+                    self._cand_start = self._energy_pos
+                self._cand_end = end
+                if end - self._cand_start >= max_len:
+                    events.extend(self._close_rescue_candidate())
+            elif self._cand_start is not None and end - self._cand_end >= hangover:
+                events.extend(self._close_rescue_candidate())
+            self._energy_pos = end
+        return events
+
+    def _close_rescue_candidate(self, limit: int | None = None) -> list[Event]:
+        cfg = self._rescue
+        start, end = self._cand_start, self._cand_end
+        self._cand_start = None
+        if cfg is None or start is None:
+            return []
+        if end - start < cfg.min_ms * self._sample_rate // 1000:
+            return []
+        pad = cfg.pad_ms * self._sample_rate // 1000
+        lo = max(start - pad, self._last_seg_end, self._buffer_base)
+        hi = end + pad
+        if limit is not None:
+            hi = min(hi, limit)
+        hi = min(hi, self._total_samples)
+        if hi <= lo:
+            return []
+        start_t, end_t = lo / self._sample_rate, hi / self._sample_rate
+        events = self._decode_segment(start_t, end_t, consume=False)
+        self._last_seg_end = hi
+        return events
+
     def _prune_before(self, t: float) -> None:
         """Drop buffered samples before absolute time ``t`` (seconds)."""
         idx = max(0, round(t * self._sample_rate))
@@ -348,6 +427,19 @@ class SherpaOfflineRecognizer(Recognizer):
 
 
 # --- Config -----------------------------------------------------------------
+
+
+@dataclass
+class RescueConfig:
+    """Decode audio the VAD skipped when its level stands clear of the channel's floor."""
+
+    rise_db: float = 15.0
+    min_trigger_db: float = -55.0
+    floor_rise_db_per_frame: float = 0.01
+    min_ms: int = 120
+    hangover_ms: int = 300
+    pad_ms: int = 250
+    max_ms: int = 4000
 
 
 @dataclass
@@ -384,6 +476,7 @@ class OfflineModelConfig:
     # utterance length, so leave room for a long monologue's audio and its text.
     max_total_len: int = 4096
     max_new_tokens: int = 1024
+    rescue: RescueConfig | None = field(default_factory=RescueConfig)
 
 
 def build_offline_model_config(
@@ -479,6 +572,7 @@ def build_offline_model_config(
         language=(
             language if language is not None else os.environ.get(_MODEL_LANGUAGE_ENV, "")
         ),
+        rescue=None if os.environ.get(_RESCUE_ENV, "1") == "0" else RescueConfig(),
     )
 
 
@@ -722,6 +816,7 @@ class SherpaOfflineEngine(RecognizerEngine):
             sample_rate=self._config.sample_rate,
             emit_segment_partial=self._config.emit_segment_partial,
             max_idle_ms=self._max_idle_ms,
+            rescue=self._config.rescue,
         )
 
     def warm_up(self, pcm: bytes) -> int:
