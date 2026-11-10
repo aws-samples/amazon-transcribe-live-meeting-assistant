@@ -157,20 +157,27 @@ in one of two ways:
   heard, until it is named. Naming one renames every line that voice spoke.
 
 With no choice made, LMA decides from the transcript. A name is shown as
-several people when any of these holds, and as one person otherwise:
+several people when either of these holds, and as one person otherwise:
 
 | Rule | Example |
 |---|---|
 | The name reads as a room or a room device | `ConfRm_1`, `Conference Room B`, `Zoom Room 4`, `Huddle 3`, `SEA54-12.401`, `BLDG-3-ROOM`, `Polycom Studio` |
-| Two or more of its voices each spoke for at least 20% of the name's speech **and** at least 60 seconds | a shared seat where two people talk at length |
 | Its voices were given different names | voice 1 named *Priya*, voice 2 named *Sam* |
 
-The room-name patterns, the names that stand for nobody, and the two thresholds
-are kept in one file, `speaker_mode_rules.json` in the configuration layer's
-`lma_speakers` module (with a byte-identical copy for the web UI), so they are
-easy to extend. Because the voice-share rule is evaluated over the whole
-transcript, a live meeting's lines can change from one person to several when a
-second voice becomes a real share of a name's speech.
+How many voices a name has, and how long each of them spoke, are deliberately not
+a rule. Speaker separation splitting one person's voice into two or three labels
+that each speak at length looks the same as two people sharing a seat, and the
+first is far more common now that
+[Virtual Participant voice separation](virtual-participant.md#several-people-behind-one-attendee)
+is on by default. So a shared seat whose name does not read as a room is shown as
+one person until somebody switches it, or its voices are given different names.
+
+The room-name patterns and the names that stand for nobody are kept in one file,
+`speaker_mode_rules.json` in the configuration layer's `lma_speakers` module (with
+a byte-identical copy for the web UI), so they are easy to extend. A live meeting's
+lines change from one person to several only when two of a name's voices are given
+different names (by a person, or by **Identify speakers**), or when somebody
+switches the name.
 
 Names that stand for nobody in particular — `Unknown`, `none`, the default
 `Other Participant`, `Other participants`, `Others` and `Me` labels — are never

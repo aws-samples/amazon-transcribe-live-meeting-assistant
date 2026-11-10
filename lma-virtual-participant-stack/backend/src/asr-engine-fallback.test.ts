@@ -19,7 +19,7 @@ import test from 'node:test';
 // hoists static imports).
 const { resolveVpAsrEngine } = await import('./asr-microvm-client.js');
 
-const SHIPPED_DEFAULT = { virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: false };
+const SHIPPED_DEFAULT = { virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: true };
 
 test('the shipped MicroVM default uses Amazon Transcribe where no ASR launcher is deployed', () => {
     assert.equal(resolveVpAsrEngine(SHIPPED_DEFAULT), 'transcribe');

@@ -449,7 +449,7 @@ on the page rather than in the DynamoDB console.
 |---|---|---|
 | Stream Audio, Chrome extension and Desktop Capture: engine | ASR MicroVM engine | Which engine those meetings use |
 | Virtual Participants: engine | ASR MicroVM engine | Which engine Virtual Participants use |
-| Virtual Participant voice separation | off | A VP asks for per-voice labels so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. Honoured on **both** engines: the on-demand engine separates voices itself, and on Amazon Transcribe the VP recovers the turns from Transcribe's own per-item speaker labels. With it on, the VP also uses each voice to correct the roster name once the voice has been heard long enough alongside one attendee (see [Naming rows from the voice as well](virtual-participant.md#naming-rows-from-the-voice-as-well)); on a measured two-person Zoom meeting that cut wrongly named rows from 10 to 6 of 415. Off by default because that is one meeting on one platform, and because a person the engine splits into two voices can then be shown as **Several people** on the Speakers panel. Measured on four voices mixed onto one channel, the on-demand engine gave 3 labels at 79% purity against Amazon Transcribe's 2 at 57%, so prefer this engine for conference rooms, and for the voice correction, which acts only on a voice that is at least 70% one attendee. The voice assistant's own speech is never diarized on either engine, because it is transcribed on its own channel |
+| Virtual Participant voice separation | on | A VP asks for per-voice labels so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. Honoured on **both** engines: the on-demand engine separates voices itself, and on Amazon Transcribe the VP recovers the turns from Transcribe's own per-item speaker labels. With it on, the VP also uses each voice to correct the roster name once the voice has been heard long enough alongside one attendee (see [Naming rows from the voice as well](virtual-participant.md#naming-rows-from-the-voice-as-well)); on a measured two-person Zoom meeting that cut wrongly named rows from 10 to 6 of 415, which is one meeting on one platform. A person the engine splits into two voices is still shown as **one person**: a name is shown as several people only when it reads as a room or its voices are given different names (see [One person or several people](transcription-and-translation.md#one-person-or-several-people)). Clear it to name VP rows from the roster alone; what it costs on this engine is under [Cost and sizing](#cost-and-sizing). Measured on four voices mixed onto one channel, the on-demand engine gave 3 labels at 79% purity against Amazon Transcribe's 2 at 57%, so prefer this engine for conference rooms, and for the voice correction, which acts only on a voice that is at least 70% one attendee. The voice assistant's own speech is never diarized on either engine, because it is transcribed on its own channel |
 
 There is deliberately nothing else. The similarity threshold, minimum utterance
 length, turn-cut behaviour and speaker cap that earlier versions exposed here are the
@@ -723,6 +723,24 @@ validate the pairing on a live multi-speaker meeting before marking it `vetted`.
   in `/aws/lambda-microvms/<stack>-asr-logs`. The size is billed whatever the load, so
   this line is what tells you whether a bundle would fit a smaller size.
   `ASR_LOAD_LOG_INTERVAL_S` changes the interval; `0` turns it off.
+- **Virtual Participant voice separation is on by default, and on this engine it
+  adds work but not billed size.** With it on, a VP's participant session also runs
+  the bundle's speaker diarizer (Sortformer, in the default bundle); with it off the
+  diarizer is not attached to the session. The MicroVM is the same one either way,
+  sized by the bundle (8192 MiB for every bundle in the catalog) and billed for its
+  size and lifetime, so the switch does not change what a meeting is billed. What it
+  does to load has been measured only partly. On one 58-minute, two-person Zoom VP
+  meeting with separation on, the load line read about 32% of 16 CPUs in every minute
+  but one; that meeting was not repeated with separation off, so the diarizer's share
+  of the load is **not measured**. In the one minute that differed, a single diarizer
+  step took 34.1 s, the engine stopped returning text for about 35 s, and it dropped
+  about 1.66 s of audio (see the backlog bullet below). Load that minute fell to 18%,
+  so the engine was blocked rather than short of CPU. The cause is not known, and one
+  occurrence in one meeting says nothing about how often it happens. Whether
+  diarization delays rows reaching the transcript is not measured either. On Amazon
+  Transcribe the switch changes nothing billed: the VP requests speaker labels on
+  every session and the switch only decides whether it reads them. See
+  [Cost of voice separation](virtual-participant.md#cost-of-voice-separation).
 - When the engine falls behind the incoming audio, it holds a bounded backlog
   (`ASR_MAX_QUEUE` frames, default 64) and waits up to `ASR_MAX_WAIT_MS` (default
   2000) for room before dropping a frame, so memory stays fixed. Dropped audio is
@@ -785,6 +803,9 @@ Honest state of validation, so nobody deploys this expecting known numbers:
   `measured` in `catalog.json`, and
   [Calibrating a new bundle](#calibrating-a-new-bundle-developers) for the tool), but
   that is the threshold, not a DER figure.
+- **The diarizer's share of a meeting's CPU load**, and whether it delays rows, have
+  not been measured: no meeting has been run both with and without Virtual
+  Participant voice separation (see [Cost and sizing](#cost-and-sizing)).
 - **MicroVM launch time and the real-time factor** of two concurrent channel
   sessions on one MicroVM have not been measured on Graviton. If a meeting's first
   transcript is slow to appear, or transcripts lag live audio, raise

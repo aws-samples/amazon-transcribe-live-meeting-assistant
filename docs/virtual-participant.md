@@ -9,6 +9,7 @@ title: "Virtual Participant"
 - [Overview](#overview)
 - [When to use Virtual Participant](#when-to-use-virtual-participant)
 - [Several people behind one attendee](#several-people-behind-one-attendee)
+  - [Cost of voice separation](#cost-of-voice-separation)
 - [How Speaker Names Are Assigned](#how-speaker-names-are-assigned)
   - [Naming rows from the voice as well](#naming-rows-from-the-voice-as-well)
 - [Supported Platforms](#supported-platforms)
@@ -64,16 +65,25 @@ one speakerphone shares one roster entry, so a whole room arrives as a single
 speaker.
 
 **Virtual Participant voice separation**, in the **Transcription Engine** section of
-**Configuration ▸ Configuration**, fixes that. With it on, the VP tells
-apart the distinct voices behind one attendee and labels them
+**Configuration ▸ Configuration**, fixes that, and is on by default. With it on, the
+VP tells apart the distinct voices behind one attendee and labels them
 `Conference Room (spk_0)`, `Conference Room (spk_1)` and so on — the roster name
 for who the platform says is talking, the voice id for which voice within it.
 
-It also helps ordinary remote attendees. Once a voice has been heard long enough
-alongside one attendee, its rows are named after that attendee even where the
-platform's active-speaker indicator is late or flickers, which is where short
-replies used to get the previous speaker's name (see
+It also helps ordinary remote attendees, which is why it is on by default. Once a
+voice has been heard long enough alongside one attendee, its rows are named after
+that attendee even where the platform's active-speaker indicator is late or
+flickers, which is where short replies used to get the previous speaker's name (see
 [Naming rows from the voice as well](#naming-rows-from-the-voice-as-well)).
+
+To turn it off, clear **Virtual Participant voice separation** in the
+**Transcription Engine** section and save. Every VP that starts after the save then
+names its rows from the meeting roster alone, with no voice ids. A meeting already
+running keeps the setting it started with. A deployment upgraded from 0.3.x where an
+administrator saved the Transcription Engine page keeps the value saved then, which
+was off unless someone turned it on, and so does a Custom configuration profile that
+holds the switch; turn it on there to get the new default. What it costs is
+described under [Cost of voice separation](#cost-of-voice-separation).
 
 Name them on the
 [Speakers panel](transcription-and-translation.md#naming-the-voices), which
@@ -81,14 +91,20 @@ lists one row per voice and relabels every segment that voice produced.
 
 The voice ids are shown only where they tell people apart. Each roster name is
 shown as **one person** — `Bob Strahan` for every line, however many voice ids
-separation gave him — unless it reads as a room (`Conference Room`, `ConfRm_1`,
-a room device) or two of its voices each spoke at length, in which case it is
-shown as **several people**: `Conference Room · Voice 1`, `Voice 2`. The
+separation gave him and however long each of them spoke — unless it reads as a
+room (`Conference Room`, `ConfRm_1`, a room device) or its voices were given
+different names, in which case it is shown as **several people**:
+`Conference Room · Voice 1`, `Voice 2`. How many voices a name has, or how much
+each said, does not make it several people, because separation splitting one
+person's voice into two or three labels looks exactly like that. The
 one-person / several-people icon beside the name's chips on the
 **Transcript** tab (and beside the name in the Speakers panel) corrects either
 guess with one click, and in **Several people**
 each voice can be named in place; see
 [One person or several people](transcription-and-translation.md#one-person-or-several-people).
+So an attendee whose name does not read as a room, with several people behind it
+(a shared laptop, a room named after a person), shows as one person until somebody
+switches it.
 
 The other two naming routes do **not** apply to a Virtual Participant today, and
 it is worth knowing which:
@@ -162,6 +178,40 @@ not the one that was misattributed.)
 
 The voice assistant's own speech is transcribed on a channel of its own on both
 engines, so it never acquires a voice id.
+
+### Cost of voice separation
+
+What turning voice separation on costs depends on the engine the meeting runs on.
+
+**On Amazon Transcribe** it costs nothing extra. The Virtual Participant asks
+Transcribe for per-item speaker labels (`ShowSpeakerLabel`) on every session
+whether the switch is on or off; the switch only decides whether the VP reads
+them. The request, and so what Transcribe bills for it, is the same either way.
+
+**On the [ASR MicroVM engine](microvm-asr.md)** it does not change what is billed
+but does add work. A meeting gets one MicroVM whatever the switch says, sized by
+the deployed bundle (8192 MiB for every bundle in the shipped catalog), and a
+MicroVM is billed for its size and lifetime, not its load; see
+[Cost and sizing](microvm-asr.md#cost-and-sizing). With the switch on, the engine
+also runs its speaker diarizer (Sortformer, in the default bundle) on the
+participants' session, which it skips when the switch is off. The voice
+assistant's channel is never diarized. What has been measured, and what has not:
+
+- On the 58-minute, two-person Zoom meeting described under
+  [Naming rows from the voice as well](#naming-rows-from-the-voice-as-well), run
+  with voice separation on, the engine's per-minute load line read about 32% of the
+  MicroVM's 16 CPUs in every minute but one. The same meeting was not run with
+  separation off, so how much of that load the diarizer adds is **not measured**.
+- In that meeting one diarizer step took 34.1 s. The engine stopped returning text
+  for about 35 s while its bounded audio backlog filled, and it dropped about
+  1.66 s of audio, which was never transcribed. The load that minute fell to 18%,
+  so the engine was blocked rather than short of CPU. Why the step took that long is
+  not known, and how often it happens is not known: it is one occurrence in one
+  meeting. Rows after a drop keep their place on the meeting's timeline, and the
+  drop is logged (`sortformer step ... took` and `engine behind, dropped ...`); see
+  [Cost and sizing](microvm-asr.md#cost-and-sizing).
+- Whether diarization delays when a row reaches the transcript has not been
+  measured.
 
 ## How Speaker Names Are Assigned
 
@@ -757,9 +807,12 @@ always the mix of both, as is the video recording's audio track.
 **Configuration ▸ Configuration** (admin only), is on every deployment. It asks for
 per-voice labels, on either engine (on the on-demand engine, where its model bundle has
 speaker identification), so several people behind one attendee tile (a conference room,
-a shared screen playing a recording) come out as `Name (spk_0)`, `Name (spk_1)`. Off by
-default: speaker names come from the meeting roster, which is the better label for a
-normal attendee. See [Several people behind one attendee](#several-people-behind-one-attendee).
+a shared screen playing a recording) come out as `Name (spk_0)`, `Name (spk_1)`, and each
+voice corrects the roster name where the platform's speaker indicator lags. On by
+default; a name that does not read as a room is still shown as one person, so an
+ordinary attendee reads as their roster name. Clear it to name rows from the meeting
+roster alone. See [Several people behind one attendee](#several-people-behind-one-attendee)
+and [Cost of voice separation](#cost-of-voice-separation).
 
 On a deployment with the ASR MicroVM engine the same section also shows the engine
 choices:

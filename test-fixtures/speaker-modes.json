@@ -57,40 +57,42 @@
       "groups": {"REMOTE#ConfRm_1": {"mode": "several", "default": "several", "reason": "room-name", "voices": ["spk_0", "spk_1"]}}
     },
     {
-      "name": "two voices each with a real share of the speech are several people",
+      "name": "a person's two voices that each spoke at length are still one person",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Jeremy (spk_0)", "start": 0, "end": 90},
+        {"channel": "REMOTE", "speaker": "Jeremy (spk_1)", "start": 90, "end": 200}
+      ],
+      "names": ["Jeremy", "Jeremy"],
+      "groups": {"REMOTE#Jeremy": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0", "spk_1"]}}
+    },
+    {
+      "name": "three voices sharing a name's speech evenly are still one person",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Alex (spk_0)", "start": 0, "end": 300},
+        {"channel": "REMOTE", "speaker": "Alex (spk_1)", "start": 300, "end": 600},
+        {"channel": "REMOTE", "speaker": "Alex (spk_2)", "start": 600, "end": 900}
+      ],
+      "names": ["Alex", "Alex", "Alex"],
+      "groups": {"REMOTE#Alex": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0", "spk_1", "spk_2"]}}
+    },
+    {
+      "name": "a room name's voices are several people however briefly the second spoke",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Conference Room B (spk_0)", "start": 0, "end": 400},
+        {"channel": "REMOTE", "speaker": "Conference Room B (spk_1)", "start": 400, "end": 401}
+      ],
+      "names": ["Conference Room B · Voice 1", "Conference Room B · Voice 2"],
+      "groups": {"REMOTE#Conference Room B": {"mode": "several", "default": "several", "reason": "room-name", "voices": ["spk_0", "spk_1"]}}
+    },
+    {
+      "name": "a person's long-speaking voices switched to several people show each voice",
+      "identities": {"speakerModes": {"REMOTE#Jeremy": {"mode": "several", "source": "manual"}}},
       "segments": [
         {"channel": "REMOTE", "speaker": "Jeremy (spk_0)", "start": 0, "end": 90},
         {"channel": "REMOTE", "speaker": "Jeremy (spk_1)", "start": 90, "end": 200}
       ],
       "names": ["Jeremy · Voice 1", "Jeremy · Voice 2"],
-      "groups": {"REMOTE#Jeremy": {"mode": "several", "default": "several", "reason": "several-voices", "voices": ["spk_0", "spk_1"]}}
-    },
-    {
-      "name": "a second voice under 60 seconds does not count",
-      "segments": [
-        {"channel": "REMOTE", "speaker": "Alex (spk_0)", "start": 0, "end": 100},
-        {"channel": "REMOTE", "speaker": "Alex (spk_1)", "start": 100, "end": 159.9}
-      ],
-      "names": ["Alex", "Alex"],
-      "groups": {"REMOTE#Alex": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0", "spk_1"]}}
-    },
-    {
-      "name": "a second voice of exactly 60 seconds and 20 percent counts",
-      "segments": [
-        {"channel": "REMOTE", "speaker": "Alex (spk_0)", "start": 0, "end": 240},
-        {"channel": "REMOTE", "speaker": "Alex (spk_1)", "start": 240, "end": 300}
-      ],
-      "names": ["Alex · Voice 1", "Alex · Voice 2"],
-      "groups": {"REMOTE#Alex": {"mode": "several", "default": "several", "reason": "several-voices", "voices": ["spk_0", "spk_1"]}}
-    },
-    {
-      "name": "a second voice under 20 percent of the name's speech does not count",
-      "segments": [
-        {"channel": "REMOTE", "speaker": "Alex (spk_0)", "start": 0, "end": 400},
-        {"channel": "REMOTE", "speaker": "Alex (spk_1)", "start": 400, "end": 470}
-      ],
-      "names": ["Alex", "Alex"],
-      "groups": {"REMOTE#Alex": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0", "spk_1"]}}
+      "groups": {"REMOTE#Jeremy": {"mode": "several", "default": "one", "reason": "one-person", "voices": ["spk_0", "spk_1"]}}
     },
     {
       "name": "voices are numbered in the order they were first heard",

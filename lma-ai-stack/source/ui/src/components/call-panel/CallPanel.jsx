@@ -1103,8 +1103,8 @@ const CallInProgressTranscript = ({
 
   // Whether each platform name's voices are one person or several, decided over
   // the whole transcript (speaker-modes.js). Recomputed as segments arrive, so
-  // a live meeting's lines are relabelled when a second voice becomes a real
-  // share of a name's speech, and whenever the map changes.
+  // a name's new voices are numbered as they are first heard, and whenever the
+  // map changes.
   const groups = useMemo(
     () => speakerGroups(getSegments(), speakerIdentities),
     [callTranscriptPerCallId, callId, speakerIdentities],

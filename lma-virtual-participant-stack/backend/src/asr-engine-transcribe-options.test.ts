@@ -25,7 +25,7 @@ import test from 'node:test';
 const { resolveVpAsrEngine, vpTranscribeOnlySettings } = await import('./asr-microvm-client.js');
 const { isMicrovmLanguage, parseBundleLanguages } = await import('./configuration-store.js');
 
-const SHIPPED_DEFAULT = { virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: false };
+const SHIPPED_DEFAULT = { virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: true };
 const PLAIN = {
     languageCode: 'en-US',
     contentRedactionEnabled: false,
