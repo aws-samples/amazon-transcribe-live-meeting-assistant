@@ -264,6 +264,18 @@ def _first_tier(products: list[dict]) -> float:
     return best[1]
 
 
+def streaming_audio_products(products: list[dict]) -> list[dict]:
+    matched = [
+        p
+        for p in products
+        if str(p.get("product", {}).get("attributes", {}).get("usagetype", "")).split("-")[-1]
+        == "StreamingAudio"
+    ]
+    if len(matched) != 1:
+        raise LookupError(f"expected one Transcribe streaming price, found {len(matched)}")
+    return matched
+
+
 def fetch_rates(session, region: str, arch: str = "arm64") -> Rates:
     pricing = session.client("pricing", region_name="us-east-1")
 
@@ -295,7 +307,9 @@ def fetch_rates(session, region: str, arch: str = "arm64") -> Rates:
             )
         ),
         transcribe_second=_first_tier(
-            products("transcribe", {"regionCode": region, "operation": "StreamingAudio"})
+            streaming_audio_products(
+                products("transcribe", {"regionCode": region, "operation": "StreamingAudio"})
+            )
         ),
         source="AWS Price List API",
     )

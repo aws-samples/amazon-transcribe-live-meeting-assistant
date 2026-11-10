@@ -45,10 +45,52 @@ class AsrBenchmarkParams:
     diarize_system: bool = True
     diarize_mic: bool = False
     keep_bundle: bool = False
+    switch_only: bool = False
     template_bucket: str | None = None
     prices_file: str | None = None
     email_prefix: str = "lma-asr-benchmark"
     email_domain: str = "example.com"
+
+
+def restore_bundle(session, ctx, original: str, bucket: str | None) -> bool:
+    console.print(f"Restoring {original}")
+    try:
+        bundles_mod.switch_bundle(session, ctx.stack_name, original, ctx.run_id, bucket)
+        return True
+    except Exception:
+        logger.exception("Could not restore %s to %s", ctx.stack_name, original)
+        console.print(
+            f"[red]Could not restore {original}.[/] Once the stack is stable, run: "
+            f"make asr-benchmark STACK={ctx.stack_name} SWITCH_ONLY={original}"
+        )
+        return False
+
+
+def remove_run_templates(session, ctx, bucket: str | None) -> None:
+    try:
+        cfn = session.client("cloudformation")
+        template = cfn.get_template(StackName=ctx.stack_name, TemplateStage="Original")[
+            "TemplateBody"
+        ]
+        target = bucket or bundles_mod.template_bucket(template)
+        if target:
+            bundles_mod.delete_run_templates(session, target, ctx.run_id)
+    except Exception:
+        logger.warning("Could not delete this run's uploaded templates", exc_info=True)
+
+
+def switch_only(ctx, bundle: str, bucket: str | None = None) -> bool:
+    ctx.assert_not_prod()
+    bundles_mod.validate_bundles([bundle], bundles_mod.load_catalog())
+    session = boto3.Session(profile_name=ctx.profile, region_name=ctx.region)
+    current = bundles_mod.current_bundle(session.client("cloudformation"), ctx.stack_name)
+    console.print(f"{ctx.stack_name} runs {current}; switching to {bundle}")
+    if ctx.dry_run:
+        return False
+    try:
+        return bundles_mod.switch_bundle(session, ctx.stack_name, bundle, ctx.run_id, bucket)
+    finally:
+        remove_run_templates(session, ctx, bucket)
 
 
 @dataclass
@@ -186,12 +228,15 @@ def run(ctx: RunContext, stack: LMAStackInfo, params: AsrBenchmarkParams) -> lis
             results.append(result)
             ctx.write_json("asr-benchmark.json", results)
     finally:
-        if switched and original and not params.keep_bundle:
-            console.print(f"Restoring {original}")
-            bundles_mod.switch_bundle(
-                session, ctx.stack_name, original, ctx.run_id, params.template_bucket
-            )
-        pool.delete_synthetic_users(ctx.run_id)
+        try:
+            if switched and original and not params.keep_bundle:
+                restore_bundle(session, ctx, original, params.template_bucket)
+        finally:
+            try:
+                pool.delete_synthetic_users(ctx.run_id)
+            finally:
+                if switched:
+                    remove_run_templates(session, ctx, params.template_bucket)
 
     compare(results, reference)
     ctx.write_json("asr-benchmark.json", results)

@@ -310,8 +310,12 @@ recording (stereo 16-bit WAV: channel 0 meeting audio, channel 1 microphone) is
 streamed once, at real time, through each configuration: Amazon Transcribe first if
 `--transcribe` is given, then each bundle. Before a bundle's run the stack is updated
 with its own template and only the `AsrDefaults` `ModelBundle` line changed, every
-parameter kept; the ASR image rebuilds in about 20-25 minutes. The original bundle is
-restored at the end unless `--keep-bundle` is given.
+parameter kept; the ASR image rebuilds in about 20-25 minutes. The switch refuses to
+run if any nested stack's published template (at its `TemplateURL`) differs from the one
+deployed, which happens when `publish.sh` has been re-run since the last deploy. The
+original bundle is restored at the end unless `--keep-bundle` is given;
+`--switch-only <bundle>` switches the stack and exits, which puts it back after an
+interrupted run.
 
 Each run is measured from the transcriber's log (the MicroVM and its lifetime, or the
 Transcribe requests) and the engine's log (CPU per minute, peak memory, the bundle it

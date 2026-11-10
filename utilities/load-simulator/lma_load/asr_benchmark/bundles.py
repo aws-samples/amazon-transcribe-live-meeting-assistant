@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -14,6 +15,16 @@ from urllib.parse import urlparse
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
+
+NESTED_STACK_TYPE = "AWS::CloudFormation::Stack"
+RESOURCE_HEADING_RE = re.compile(r"^  ([A-Za-z0-9]+):\s*$")
+NESTED_URL_RE = re.compile(r"^\s+TemplateURL:\s*(https://\S+)\s*$")
+TEMPLATE_PREFIX = "asr-benchmark"
+
+
+class StaleTemplatesError(RuntimeError):
+    """The stack's published nested templates differ from the ones it runs."""
+
 
 MAIN_BUNDLE_RE = re.compile(
     r"^(?P<indent> {6}ModelBundle: *)(?P<bundle>\S+)(?P<tail> *)$", re.MULTILINE
@@ -81,6 +92,89 @@ def current_bundle(cfn, stack_name: str) -> str:
     raise RuntimeError(f"{nested} has no AsrModelBundleId output; is EnableMicrovmAsr on?")
 
 
+def wait_until_stable(cfn, stack_name: str, timeout_s: int = 5400, poll_s: int = 30) -> str:
+    deadline = time.monotonic() + timeout_s
+    while True:
+        status = cfn.describe_stacks(StackName=stack_name)["Stacks"][0]["StackStatus"]
+        if not status.endswith("_IN_PROGRESS"):
+            return status
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"{stack_name} is still {status} after {timeout_s // 60} minutes")
+        logger.info("%s is %s; waiting before the bundle switch", stack_name, status)
+        time.sleep(poll_s)
+
+
+def nested_template_urls(template: str) -> dict[str, str]:
+    urls, current = {}, None
+    for line in template.splitlines():
+        heading = RESOURCE_HEADING_RE.match(line)
+        if heading:
+            current = heading.group(1)
+            continue
+        found = NESTED_URL_RE.match(line)
+        if found and current:
+            urls[current] = found.group(1)
+    return urls
+
+
+def _s3_location(url: str) -> tuple[str, str]:
+    parsed = urlparse(url)
+    host, path = parsed.netloc, parsed.path.lstrip("/")
+    if host.startswith(("s3.", "s3-")):
+        bucket, _, key = path.partition("/")
+        return bucket, key
+    return host.split(".s3", 1)[0], path
+
+
+def _comparable(text: str) -> str:
+    return "".join(ch if ord(ch) < 128 else "?" for ch in text).strip()
+
+
+def stale_nested_stacks(session, stack_name: str, template: str) -> list[str]:
+    cfn, s3 = session.client("cloudformation"), session.client("s3")
+    physical = {
+        r["LogicalResourceId"]: r["PhysicalResourceId"]
+        for page in cfn.get_paginator("list_stack_resources").paginate(StackName=stack_name)
+        for r in page["StackResourceSummaries"]
+        if r["ResourceType"] == NESTED_STACK_TYPE and r.get("PhysicalResourceId")
+    }
+    stale = []
+    for logical, url in sorted(nested_template_urls(template).items()):
+        if logical not in physical:
+            continue
+        deployed = cfn.get_template(StackName=physical[logical], TemplateStage="Original")[
+            "TemplateBody"
+        ]
+        if not isinstance(deployed, str):
+            deployed = json.dumps(deployed)
+        bucket, key = _s3_location(url)
+        try:
+            published = s3.get_object(Bucket=bucket, Key=key)["Body"].read().decode()
+        except ClientError:
+            stale.append(f"{logical} (published template missing)")
+            continue
+        if _comparable(published) != _comparable(deployed):
+            stale.append(logical)
+    return stale
+
+
+def template_url(s3, bucket: str, key: str) -> str:
+    return f"{s3.meta.endpoint_url.rstrip('/')}/{bucket}/{key}"
+
+
+def delete_run_templates(session, bucket: str, run_id: str) -> int:
+    s3 = session.client("s3")
+    prefix = f"{TEMPLATE_PREFIX}/{run_id}/"
+    keys = [
+        {"Key": o["Key"]}
+        for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix)
+        for o in page.get("Contents", [])
+    ]
+    if keys:
+        s3.delete_objects(Bucket=bucket, Delete={"Objects": keys})
+    return len(keys)
+
+
 def switch_bundle(
     session,
     stack_name: str,
@@ -90,6 +184,7 @@ def switch_bundle(
     wait_minutes: int = 90,
 ) -> bool:
     cfn = session.client("cloudformation")
+    wait_until_stable(cfn, stack_name, timeout_s=wait_minutes * 60)
     if current_bundle(cfn, stack_name) == bundle:
         logger.info("%s already runs %s", stack_name, bundle)
         return False
@@ -102,10 +197,10 @@ def switch_bundle(
         raise RuntimeError(
             "could not tell which bucket the stack's templates live in; pass --template-bucket"
         )
-    key = f"asr-benchmark/{run_id}/lma-main-{bundle}.yaml"
-    session.client("s3").put_object(Bucket=bucket, Key=key, Body=body.encode())
-    region = session.region_name
-    url = f"https://s3.{region}.amazonaws.com/{bucket}/{key}"
+    s3 = session.client("s3")
+    key = f"{TEMPLATE_PREFIX}/{run_id}/lma-main-{bundle}.yaml"
+    s3.put_object(Bucket=bucket, Key=key, Body=body.encode())
+    url = template_url(s3, bucket, key)
 
     stack = cfn.describe_stacks(StackName=stack_name)["Stacks"][0]
     parameters = [
@@ -113,6 +208,13 @@ def switch_bundle(
         for p in stack.get("Parameters", [])
     ]
     capabilities = stack.get("Capabilities") or ["CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"]
+    stale = stale_nested_stacks(session, stack_name, template)
+    if stale:
+        raise StaleTemplatesError(
+            f"the published templates of {', '.join(stale)} differ from what {stack_name} runs "
+            "(publish.sh was re-run since the last deploy), so a bundle switch would also deploy "
+            "them. Deploy that build first, or publish the deployed version again."
+        )
     logger.info("Switching %s to %s (template %s)", stack_name, bundle, url)
     try:
         cfn.update_stack(

@@ -72,12 +72,34 @@ class _FakeWaiter:
         self.cfn.bundle = self.cfn.pending
 
 
+class _FakePaginator:
+    def __init__(self, pages: list[dict]) -> None:
+        self.pages = pages
+
+    def paginate(self, **kwargs):
+        return iter(self.pages)
+
+
 class _FakeCfn:
     def __init__(self, bundle: str, fail_with: str | None = None) -> None:
         self.bundle = bundle
         self.pending = bundle
         self.updates: list[dict] = []
         self.fail_with = fail_with
+        self.statuses: list[str] = []
+        self.nested: dict[str, str] = {}
+        self.nested_templates: dict[str, str] = {}
+
+    def get_paginator(self, name: str):
+        summaries = [
+            {
+                "LogicalResourceId": logical,
+                "PhysicalResourceId": physical,
+                "ResourceType": "AWS::CloudFormation::Stack",
+            }
+            for logical, physical in self.nested.items()
+        ]
+        return _FakePaginator([{"StackResourceSummaries": summaries}])
 
     def describe_stack_resource(self, **kwargs):
         return {"StackResourceDetail": {"PhysicalResourceId": "nested-asr"}}
@@ -89,9 +111,11 @@ class _FakeCfn:
                     {"Outputs": [{"OutputKey": "AsrModelBundleId", "OutputValue": self.bundle}]}
                 ]
             }
+        status = self.statuses.pop(0) if self.statuses else "UPDATE_COMPLETE"
         return {
             "Stacks": [
                 {
+                    "StackStatus": status,
                     "Parameters": [
                         {"ParameterKey": "AdminEmail"},
                         {"ParameterKey": "EnableMicrovmAsr"},
@@ -101,7 +125,9 @@ class _FakeCfn:
             ]
         }
 
-    def get_template(self, **kwargs):
+    def get_template(self, StackName: str = "", **kwargs):
+        if StackName in self.nested_templates:
+            return {"TemplateBody": self.nested_templates[StackName]}
         return {"TemplateBody": TEMPLATE}
 
     def update_stack(self, **kwargs):
@@ -117,11 +143,26 @@ class _FakeCfn:
 
 
 class _FakeS3:
+    meta = type("Meta", (), {"endpoint_url": "https://s3.us-east-1.amazonaws.com"})()
+
     def __init__(self) -> None:
         self.objects: dict[tuple[str, str], bytes] = {}
 
     def put_object(self, Bucket: str, Key: str, Body: bytes) -> None:
         self.objects[(Bucket, Key)] = Body
+
+    def get_object(self, Bucket: str, Key: str):
+        import io
+
+        return {"Body": io.BytesIO(self.objects[(Bucket, Key)])}
+
+    def get_paginator(self, name: str):
+        contents = [{"Key": key} for _, key in self.objects]
+        return _FakePaginator([{"Contents": contents}])
+
+    def delete_objects(self, Bucket: str, Delete: dict) -> None:
+        for item in Delete["Objects"]:
+            self.objects.pop((Bucket, item["Key"]), None)
 
 
 class _FakeSession:
@@ -162,6 +203,58 @@ def test_a_stack_already_on_the_bundle_is_not_updated() -> None:
 def test_a_stack_update_with_nothing_to_change_counts_as_no_switch() -> None:
     session = _FakeSession(_FakeCfn("a", fail_with="No updates are to be performed."))
     assert not bundles.switch_bundle(session, "LMA-dev", "b", "asrb-1")
+
+
+def test_a_switch_is_refused_when_a_published_nested_template_differs_from_the_deployed_one() -> None:
+    session = _FakeSession(_FakeCfn("parakeet-tdt-v3-sortformer"))
+    session.cfn.nested = {"ASRMICROVMSTACK": "nested-asr-stack"}
+    session.cfn.nested_templates = {"nested-asr-stack": "Resources: {deployed: 1}\n"}
+    session.s3.objects[("lma-1234-us-east-1", "lma/0.3/asr.yaml")] = b"Resources: {republished: 2}\n"
+
+    with pytest.raises(bundles.StaleTemplatesError, match="ASRMICROVMSTACK"):
+        bundles.switch_bundle(session, "LMA-dev", "parakeet-tdt-v3-titanet-small", "asrb-1")
+    assert session.cfn.updates == []
+
+
+def test_a_published_template_that_differs_only_in_non_ascii_characters_is_current() -> None:
+    session = _FakeSession(_FakeCfn("parakeet-tdt-v3-sortformer"))
+    session.cfn.nested = {"ASRMICROVMSTACK": "nested-asr-stack"}
+    session.cfn.nested_templates = {"nested-asr-stack": "# a ? b\nResources: {}\n"}
+    session.s3.objects[("lma-1234-us-east-1", "lma/0.3/asr.yaml")] = "# a \u2014 b\nResources: {}\n".encode()
+
+    assert bundles.switch_bundle(session, "LMA-dev", "parakeet-tdt-v3-titanet-small", "asrb-1")
+
+
+def test_a_switch_waits_for_a_stack_that_is_still_updating(monkeypatch) -> None:
+    monkeypatch.setattr(bundles.time, "sleep", lambda s: None)
+    session = _FakeSession(_FakeCfn("parakeet-tdt-v3-sortformer"))
+    session.cfn.statuses = ["UPDATE_IN_PROGRESS", "UPDATE_COMPLETE_CLEANUP_IN_PROGRESS"]
+
+    assert bundles.switch_bundle(session, "LMA-dev", "parakeet-tdt-v3-titanet-small", "asrb-1")
+    assert session.cfn.statuses == []
+
+
+def test_a_runs_uploaded_templates_are_deleted_and_no_others() -> None:
+    session = _FakeSession(_FakeCfn("a"))
+    session.s3.objects = {
+        ("b", "asr-benchmark/run-1/lma-main-x.yaml"): b"",
+        ("b", "asr-benchmark/run-1/lma-main-y.yaml"): b"",
+    }
+    assert bundles.delete_run_templates(session, "b", "run-1") == 2
+    assert session.s3.objects == {}
+
+
+def test_the_transcribe_price_comes_from_exactly_one_streaming_audio_product() -> None:
+    def product(usagetype: str) -> dict:
+        return {"product": {"attributes": {"usagetype": usagetype}}}
+
+    assert measure.streaming_audio_products([product("USE1-StreamingAudio")]) == [
+        product("USE1-StreamingAudio")
+    ]
+    with pytest.raises(LookupError):
+        measure.streaming_audio_products([product("USE1-StreamingAudio"), product("StreamingAudio")])
+    with pytest.raises(LookupError):
+        measure.streaming_audio_products([product("USE1-MedicalStreamingAudio")])
 
 
 def test_a_microvm_run_is_read_from_the_transcriber_log() -> None:
@@ -693,3 +786,82 @@ def test_a_run_that_falls_back_to_transcribe_is_retried_once(monkeypatch, tmp_pa
     assert (
         bench.call_id_for("r1", bench.RunSpec("b", "microvm", "b"), 2) == "asr-bench-r1-b-attempt2"
     )
+
+
+def _benchmark_doubles(monkeypatch, restore_error: Exception | None = None):
+    deleted: list[str] = []
+
+    class _Pool:
+        def __init__(self, **kwargs) -> None:
+            self.users = [type("U", (), {"email": "u", "access_token": "a", "id_token": "i"})()]
+
+        def provision(self, **kwargs) -> None:
+            pass
+
+        def delete_synthetic_users(self, run_id) -> int:
+            deleted.append(run_id)
+            return 1
+
+    def fake_switch(session, stack, bundle, run_id, bucket=None):
+        if bundle == "orig" and restore_error:
+            raise restore_error
+        return True
+
+    monkeypatch.setattr(bench.bundles_mod, "current_bundle", lambda cfn, stack: "orig")
+    monkeypatch.setattr(bench.bundles_mod, "switch_bundle", fake_switch)
+    monkeypatch.setattr(
+        bench.boto3, "Session", lambda **k: type("S", (), {"client": lambda self, n, **kw: None})()
+    )
+    monkeypatch.setattr(bench, "SyntheticUserPool", _Pool)
+    monkeypatch.setattr(bench.measure, "resolve_rates", lambda *a: RATES)
+    monkeypatch.setattr(bench.measure, "transcriber_log_group", lambda cfn, stack: "g")
+    monkeypatch.setattr(
+        bench, "_one_run", lambda ctx, stack, params, spec, *rest, **kw: {"label": spec.label, "engine": spec.engine}
+    )
+    return deleted
+
+
+def _stereo(tmp_path):
+    import wave as wave_mod
+
+    path = tmp_path / "a.wav"
+    with wave_mod.open(str(path), "wb") as out:
+        out.setnchannels(2)
+        out.setsampwidth(2)
+        out.setframerate(16000)
+        out.writeframes(b"\0" * 6400)
+    return path
+
+
+def test_the_synthetic_user_is_deleted_when_the_restore_fails(monkeypatch, tmp_path) -> None:
+    deleted = _benchmark_doubles(monkeypatch, restore_error=RuntimeError("stack is updating"))
+    ctx = bench.RunContext(stack_name="LMA-dev", region="us-east-1", results_dir=tmp_path)
+    params = bench.AsrBenchmarkParams(
+        wav_path=str(_stereo(tmp_path)), bundles=["parakeet-tdt-v3-sortformer"]
+    )
+
+    results = bench.run(
+        ctx, type("S", (), {"user_pool_id": "p", "user_pool_client_id": "c"})(), params
+    )
+
+    assert [r["label"] for r in results] == ["parakeet-tdt-v3-sortformer"]
+    assert deleted == [ctx.run_id]
+
+
+def test_switch_only_switches_the_stack_and_streams_nothing(monkeypatch, tmp_path) -> None:
+    switched: list[str] = []
+    monkeypatch.setattr(bench.bundles_mod, "current_bundle", lambda cfn, stack: "x")
+    monkeypatch.setattr(
+        bench.bundles_mod,
+        "switch_bundle",
+        lambda session, stack, bundle, run_id, bucket=None: switched.append(bundle) or True,
+    )
+    monkeypatch.setattr(
+        bench.boto3, "Session", lambda **k: type("S", (), {"client": lambda self, n, **kw: None})()
+    )
+    ctx = bench.RunContext(stack_name="LMA-dev", region="us-east-1", results_dir=tmp_path)
+
+    assert bench.switch_only(ctx, "parakeet-tdt-v3-sortformer")
+    assert switched == ["parakeet-tdt-v3-sortformer"]
+    with pytest.raises(ValueError):
+        bench.switch_only(ctx, "not-a-bundle")

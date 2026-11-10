@@ -54,7 +54,8 @@ AWS_PROFILE=default lma-load asr-benchmark -s LMA-dev-stack-2 --dataset ami/IS10
 **Run long benchmarks detached** (`setsid nohup make asr-benchmark … > log 2>&1 &`), so
 they survive the session that started them. An interrupted run leaves the stack on the
 bundle it was testing; the next run restores to whatever bundle was current when it
-started, so switch back explicitly if needed.
+started, so switch back explicitly: `make asr-benchmark STACK=<stack>
+SWITCH_ONLY=<original bundle>` switches without streaming anything.
 
 **Reference transcripts (STM).** One line per utterance:
 `<recording> <channel> <speaker> <start> <end> <words>`, channel `0` (meeting audio) or
@@ -65,9 +66,13 @@ headset WAVs and the manual annotations, then
 
 What each run does, in order (Transcribe first, then each bundle):
 1. For a bundle: update the stack with its own template and only the `AsrDefaults`
-   `ModelBundle` line changed, every parameter kept. Only the ASR nested stack
-   changes; the MicroVM image rebuilds (~20-25 min). Skipped when the stack already
-   runs that bundle.
+   `ModelBundle` line changed, every parameter kept. The ASR nested stack changes
+   and the MicroVM image rebuilds (~20-25 min); the stacks that read the ASR stack's
+   outputs (transcriber, Virtual Participant, AI stack) take its new bundle id, name
+   and languages. Skipped when the stack already runs that bundle. Before switching,
+   each nested stack's deployed template is compared with the one its `TemplateURL`
+   now points to; if `publish.sh` has been re-run to that location since the last
+   deploy, the switch refuses rather than deploying that build as a side effect.
 2. Stream the WAV once at real time over the transcriber WebSocket as a temporary
    Cognito user, with `asrEngine` set to `microvm` or `transcribe`.
 3. Wait for the MicroVM release (or the Transcribe stream to close), read the
@@ -105,6 +110,11 @@ Written to `results/<run-id>/`: `asr-benchmark.md` (the table, also printed),
 | Rows, Speakers | Final transcript rows; distinct speaker labels per channel, "of N" against the reference's speaker count |
 | WER meeting / microphone | Only with a reference. Word error rate per channel, with its split into swapped / missing / extra words, after normalisation (case, punctuation, fillers such as um and uh, okay/ok, numbers up to 999, -isation/-ization). Lower is better |
 
+The packaged AMI meetings gate each headset to its wearer's annotated speech, so every
+engine hears close-talk speech without background noise or crosstalk between turns.
+That keeps the comparison fair, since all engines get the same audio, but absolute WERs,
+insertions especially, read better than a real meeting's would.
+
 Prices come from the AWS Price List API, or the deployment's default price table
 (`CallPricing.json`) when the API is unreachable. Cost Explorer shows the day's
 actual usage about a day later; earlier runs agreed within 1%.
@@ -120,8 +130,12 @@ run (two-pass bundles are the most expensive).
 - `engine reported bundle X, expected Y`: the image rebuild did not take effect.
 - `the transcript shrank while it was read`: transcript deletion after the summary
   is on (Configuration → Retention); turn it off for the benchmark.
-- A failed or interrupted run leaves the stack on the last bundle; run again with
-  only the original bundle, or `make asr-benchmark … BUNDLES=<original>` with a
-  short WAV, to restore it.
+- A failed or interrupted run leaves the stack on the last bundle. Restore it with
+  `make asr-benchmark STACK=<stack> SWITCH_ONLY=<original bundle>`; the run's log names
+  the bundle when its own restore fails. Rerunning with `BUNDLES=<original>` does not
+  work: that run would restore to the wrong bundle at its end.
+- `the published templates of … differ from what <stack> runs`: `publish.sh` was run
+  again since the stack was last deployed. Deploy that build, or publish the deployed
+  version again, then rerun.
 
 Unit tests: `make test-load-simulator` (no AWS).

@@ -476,6 +476,9 @@ def rbac_cmd(
               help="Separate speakers on the microphone channel (default off).")
 @click.option("--keep-bundle", is_flag=True, default=False,
               help="Leave the stack on the last bundle instead of restoring the original.")
+@click.option("--switch-only", "switch_to", default=None, metavar="BUNDLE",
+              help="Only switch the stack to BUNDLE and exit, streaming nothing: the way to put a "
+              "stack back on its bundle after an interrupted run.")
 @click.option("--template-bucket", default=None,
               help="S3 bucket for the switched stack template (default: the bucket the stack's nested "
               "templates come from).")
@@ -484,9 +487,13 @@ def rbac_cmd(
 def asr_benchmark_cmd(
     stack, region, profile, run_id, results_dir, dry_run, force, verbose,
     wav_path, dataset, cache_dir, bundles, transcribe, reference_path, diarize_system, diarize_mic,
-    keep_bundle, template_bucket, prices_file,
+    keep_bundle, switch_to, template_bucket, prices_file,
 ):
     """Play one recording through each ASR model configuration; compare cost and quality."""
+    if switch_to:
+        ctx = _make_ctx(stack, region, profile, run_id or make_run_id("asrb"), results_dir, dry_run, force, verbose)
+        asr_benchmark_mod.switch_only(ctx, switch_to, template_bucket)
+        return
     bundle_list = [b.strip() for b in bundles.split(",") if b.strip()]
     if not bundle_list and not transcribe:
         raise click.UsageError("Pass --bundles and/or --transcribe.")

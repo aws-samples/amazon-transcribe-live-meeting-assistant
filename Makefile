@@ -623,15 +623,20 @@ test-vp-microvm-e2e: ## VP MicroVM launch-path e2e against a local container (no
 # stack from STACK, else $LMA_STACK_NAME, else 'LMA'.
 INTEG_STACK ?= $(or $(STACK),$(LMA_STACK_NAME),LMA)
 
-asr-benchmark: ## Compare ASR model configurations on a live stack (Usage: make asr-benchmark STACK=<name> DATASET=ami/IS1009c|WAV=<stereo.wav> [BUNDLES=<a,b>] [TRANSCRIBE=1] [REFERENCE=<stm>] [DRY_RUN=1])
-ifeq ($(WAV)$(DATASET),)
+asr-benchmark: ## Compare ASR model configurations on a live dev stack (Usage: make asr-benchmark STACK=<name> DATASET=ami/IS1009c|WAV=<stereo.wav> [BUNDLES=<a,b>] [TRANSCRIBE=1] [REFERENCE=<stm>] [KEEP_BUNDLE=1] [DRY_RUN=1], or STACK=<name> SWITCH_ONLY=<bundle>)
+ifeq ($(STACK),)
+	$(error Set STACK to the dev stack to benchmark: this target updates that stack's ASR bundle)
+endif
+ifeq ($(WAV)$(DATASET)$(SWITCH_ONLY),)
 	$(error Set DATASET (e.g. ami/IS1009c) or WAV. Usage: make asr-benchmark STACK=<name> DATASET=ami/IS1009c BUNDLES=<a,b> [TRANSCRIBE=1])
 endif
-	@$(PYTHON) -c "import lma_load, numpy" 2>/dev/null || $(PYTHON) -m pip install -q -e lib/lma_sdk -e "$(LOAD_SIM_DIR)[benchmark]"
-	$(PYTHON) -m lma_load.cli asr-benchmark --stack-name "$(INTEG_STACK)" \
-		$(if $(DATASET),--dataset "$(DATASET)",--wav "$(WAV)") \
+	@test -d $(LOAD_SIM_DIR)/.venv || $(PYTHON) -m venv $(LOAD_SIM_DIR)/.venv
+	@$(LOAD_SIM_DIR)/.venv/bin/python -c "import lma_load, numpy" 2>/dev/null || $(LOAD_SIM_DIR)/.venv/bin/pip install -q -e lib/lma_sdk -e "$(LOAD_SIM_DIR)[benchmark]"
+	$(LOAD_SIM_DIR)/.venv/bin/python -m lma_load.cli asr-benchmark --stack-name "$(STACK)" \
+		$(if $(SWITCH_ONLY),--switch-only "$(SWITCH_ONLY)",$(if $(DATASET),--dataset "$(DATASET)",--wav "$(WAV)")) \
 		$(if $(BUNDLES),--bundles "$(BUNDLES)") $(if $(TRANSCRIBE),--transcribe) \
-		$(if $(REFERENCE),--reference "$(REFERENCE)") $(if $(DRY_RUN),--dry-run)
+		$(if $(REFERENCE),--reference "$(REFERENCE)") $(if $(KEEP_BUNDLE),--keep-bundle) \
+		$(if $(DRY_RUN),--dry-run)
 
 integ-tests: ## Run integration tests vs a live stack (Usage: make integ-tests STACK=<name>)
 	@echo -e "$(CYAN)Running LMA integration tests against stack '$(INTEG_STACK)'...$(NC)"
