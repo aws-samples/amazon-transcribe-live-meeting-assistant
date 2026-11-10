@@ -1606,6 +1606,34 @@ def create_vp_browser_control_tool(call_id: str, event_api_http_url: str, messag
     return control_vp_browser
 
 
+# The most answer text, in UTF-8 bytes, the completion marker carries. AppSync
+# delivers a subscription message of at most 240 KB, and the marker's other
+# fields and JSON escaping take some of that, so the limit leaves room for both.
+MAX_COMPLETION_TOKEN_BYTES = 160 * 1024
+
+
+def completion_token_text(answer_text: str) -> str:
+    """The Token the completion marker of a streamed answer carries.
+
+    The whole answer, as generated. AppSync does not guarantee that a
+    subscriber receives every published message, or receives them in the order
+    they were published, so the streamed chunks alone can reassemble into text
+    that differs from the answer. The chat panel orders the chunks it receives by
+    Sequence while the answer streams, and then replaces them with this text.
+
+    An answer too large to fit in one subscription message is sent as an empty
+    Token, which is what the marker carried before: the panel then keeps the
+    text it assembled from the chunks.
+    """
+    if len(answer_text.encode('utf-8')) > MAX_COMPLETION_TOKEN_BYTES:
+        logger.info(
+            "The answer is larger than one subscription message carries; "
+            "its completion marker is sent without the answer text"
+        )
+        return ''
+    return answer_text
+
+
 def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_complete: bool,
                                sequence: int, publisher: Optional[AppsyncPublisher] = None):
     """
@@ -2760,18 +2788,21 @@ def handler(event, context):
                             )
                             sequence += 1
 
-                    # Send completion token
+                    # The completion marker carries the whole answer, so the chat
+                    # panel can show exactly what was generated once streaming
+                    # ends. See completion_token_text.
+                    answer_text = ''.join(full_response)
                     send_chat_token_to_appsync(
                         call_id=call_id,
                         message_id=message_id,
-                        token='',  # nosec B106 - Empty string is not a hardcoded password, it's a completion marker
+                        token=completion_token_text(answer_text),
                         is_complete=True,
                         sequence=sequence,
                         publisher=token_publisher
                     )
 
                     logger.info(f"Streaming complete. Response tokens: {sequence}, Thinking steps: {thinking_sequence}")
-                    return ''.join(full_response)
+                    return answer_text
 
                 # Run the async streaming function
                 try:
