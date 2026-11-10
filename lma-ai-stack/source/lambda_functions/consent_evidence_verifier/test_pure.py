@@ -139,6 +139,76 @@ def test_the_prompt_carries_the_notice_and_treats_the_image_as_content() -> None
     assert "{" in prompt  # the example answer survives formatting
 
 
+NOTICE = (
+    "ana@example.com is using Live Meeting Assistant to record and transcribe this meeting "
+    '(Design review). If you do not agree, reply "I object" in the chat or say so, and '
+    "recording and transcription will stop."
+)
+POSTED = NOTICE + " Live Meeting Assistant reads replies in this chat."
+
+
+def test_the_prompt_says_lmas_own_messages_are_not_replies() -> None:
+    prompt = pure.build_prompt(NOTICE, "notify", ["Bo Chen"], ["I consent"], ["I object"], [POSTED])
+    assert "never a reply, a consent or an objection" in prompt
+    assert 'starts with "LMA"' in prompt
+    assert '"fromLma": false' in prompt
+    assert f"<message>{POSTED}</message>" in prompt
+
+
+def test_the_prompt_lists_each_other_lma_message_once() -> None:
+    prompt = pure.build_prompt(NOTICE, "notify", [], [], [], [NOTICE, POSTED, POSTED, ""])
+    assert prompt.count("<message>") == 1
+    assert "<lma_messages>" not in pure.build_prompt(NOTICE, "notify", [], [], [], [NOTICE])
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        {"name": "Bo Chen", "text": "I object", "decision": "objection", "fromLma": True},
+        {"name": "Bo Chen", "text": "I object", "decision": "objection", "fromLma": "true"},
+        {"name": "LMA (ana@example.com)", "text": "I object", "decision": "objection"},
+        {"name": "lma - ana", "text": "I object", "decision": "objection"},
+        {"name": "LMA", "text": "I object", "decision": "objection"},
+        {"name": "You", "text": "I object", "decision": "objection"},
+        {"name": "From Me to Everyone", "text": "I object", "decision": "objection"},
+        {
+            "name": "ana@example.com",
+            "text": 'If you do not agree, reply "I object" in the chat',
+            "decision": "objection",
+        },
+    ],
+)
+def test_lmas_own_message_is_not_an_objection(reply) -> None:
+    parsed = pure.parse_answer(answer(replies=[reply], anyObjection=True), [POSTED])
+    assert parsed["Replies"] == []
+    assert parsed["AnyObjection"] is False
+    assert pure.verdict(parsed, "notify", None, ["Bo Chen"])["Verdict"] == "supports_consent"
+
+
+@pytest.mark.parametrize("name", ["Bo Chen", "Lmar Ortiz", "Yousef Ali", "Memo Diaz"])
+def test_a_participants_reply_of_the_notices_phrase_is_an_objection(name) -> None:
+    reply = {"name": name, "text": "I object", "decision": "objection", "fromLma": False}
+    parsed = pure.parse_answer(answer(replies=[reply], anyObjection=True), [POSTED])
+    assert [r["Name"] for r in parsed["Replies"]] == [name]
+    assert pure.verdict(parsed, "notify", None, [name])["Verdict"] == "objection_found"
+
+
+def test_a_participants_objection_stands_beside_lmas_message() -> None:
+    replies = [
+        {"name": "LMA (ana@example.com)", "text": "I object", "decision": "objection"},
+        {"name": "Bo Chen", "text": "Please don't record", "decision": "unclear"},
+    ]
+    parsed = pure.parse_answer(answer(replies=replies, anyObjection=True), [POSTED])
+    assert [r["Name"] for r in parsed["Replies"]] == ["Bo Chen"]
+    assert parsed["AnyObjection"] is True
+    assert pure.verdict(parsed, "notify", None, ["Bo Chen"])["Verdict"] == "objection_found"
+
+
+def test_an_objection_reported_without_a_listed_reply_is_kept() -> None:
+    parsed = pure.parse_answer(answer(replies=[], anyObjection=True), [POSTED])
+    assert parsed["AnyObjection"] is True
+
+
 @pytest.mark.parametrize(
     "data,expected",
     [
