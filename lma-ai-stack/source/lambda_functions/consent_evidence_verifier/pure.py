@@ -37,6 +37,17 @@ VERDICT_INCONCLUSIVE = "inconclusive"
 MIN_SUPPORTING_CONFIDENCE = 0.5
 MAX_REPLIES = 100
 MAX_SUMMARY_LENGTH = 500
+MAX_LMA_MESSAGES = 5
+#: A reply this many words long or longer that appears word for word in one of
+#: LMA's messages is that message, read by the model as a reply.
+MIN_QUOTED_WORDS = 6
+
+#: Sender names LMA's own messages are shown under. The screenshot is taken in
+#: LMA's own meeting window, so its messages are the window's own ("You", "Me")
+#: or carry its participant name, which starts with "LMA" ("LMA (ana@example.com)",
+#: "LMA - ana").
+_LMA_SENDER = re.compile(r"^(?:lma(?![a-z0-9])|(?:from )?(?:you|me)(?: to .*)?$)")
+_WORD = re.compile(r"[a-z0-9]+")
 
 #: The image formats Bedrock Converse accepts, by their leading bytes.
 _SIGNATURES = (
@@ -50,10 +61,18 @@ PROMPT = """You are checking one screenshot taken during an online meeting. It i
 supporting evidence of whether the participants were told that the meeting is recorded and \
 transcribed, and of how they replied.
 
-The notice that was posted in the meeting:
+The screenshot is taken from the meeting window of Live Meeting Assistant (LMA), which joined the \
+meeting and posted the notice. The notice that was posted in the meeting:
 <notice>
 {notice}
 </notice>
+{lma_messages}
+LMA's own messages, the notice among them, are shown as sent from this window: depending on the \
+meeting app, on one side of the chat with no sender name, under "You", or under LMA's own name, \
+which starts with "LMA" (for example "LMA (ana@example.com)"). A message from LMA is never a \
+reply, a consent or an objection, and nor is any phrase quoted in one: the notice itself names \
+the phrases participants may reply with. A reply is a message from a participant, shown with \
+that participant's name.
 
 {mode_line}
 Replies containing any of these phrases mean consent: {consent_phrases}
@@ -67,15 +86,16 @@ names written on the screen.
 
 Answer with one JSON object and nothing else, in this form:
 {{"noticeVisible": true, "noticeMatches": true, "replies": [{{"name": "Ana Silva", "text": "I \
-consent", "decision": "consent"}}], "anyObjection": false, "confidence": 0.9, "summary": "One \
-sentence on what the screenshot shows."}}
+consent", "decision": "consent", "fromLma": false}}], "anyObjection": false, "confidence": \
+0.9, "summary": "One sentence on what the screenshot shows."}}
 
 - noticeVisible: the notice, or a message that is clearly the same notice, is on the screen.
 - noticeMatches: what is visible says the same as the notice above, even if cut off.
-- replies: every reply to the notice that is visible, oldest first, with the sender's name \
-exactly as shown and the reply's text. decision is "consent", "objection" or "unclear". A reply \
-that contains an objection phrase is an objection even if it also contains a consent phrase.
-- anyObjection: any participant on the screen objects to the recording or transcription.
+- replies: every visible reply to the notice from a participant, oldest first, with the sender's \
+name exactly as shown and the reply's text. Leave out LMA's own messages; if you list one, set \
+fromLma to true. decision is "consent", "objection" or "unclear". A reply that contains an \
+objection phrase is an objection even if it also contains a consent phrase.
+- anyObjection: a participant on the screen, not LMA, objects to the recording or transcription.
 - confidence: from 0 to 1, how sure you are of the whole answer. Lower it when text is cut off, \
 blurred, small or hidden.
 - summary: one sentence, without guessing."""
@@ -101,20 +121,48 @@ def image_format(data: bytes) -> Optional[str]:
     return None
 
 
+def _other_lma_messages(notice: Optional[str], lma_messages: Sequence[str]) -> List[str]:
+    """LMA's posted messages other than ``notice``, each once, in order."""
+    seen = {(notice or "").strip()}
+    kept: List[str] = []
+    for message in lma_messages:
+        text = str(message or "").strip()[: rules.MAX_NOTICE_LENGTH]
+        if text and text not in seen:
+            seen.add(text)
+            kept.append(text)
+        if len(kept) >= MAX_LMA_MESSAGES:
+            break
+    return kept
+
+
 def build_prompt(
     notice: Optional[str],
     mode: Optional[str],
     participants: Sequence[str],
     consent_phrases: Sequence[str],
     objection_phrases: Sequence[str],
+    lma_messages: Sequence[str] = (),
 ) -> str:
-    """The text that goes with the screenshot."""
+    """The text that goes with the screenshot.
+
+    ``lma_messages`` are the texts LMA posted in the meeting, such as the
+    notice as it went to the chat, which may run longer than ``notice``.
+    """
 
     def quoted(values: Sequence[str]) -> str:
         return ", ".join(json.dumps(str(v)) for v in values) or "(none given)"
 
+    others = _other_lma_messages(notice, lma_messages)
+    posted = (
+        "\nLMA also posted these messages:\n<lma_messages>\n"
+        + "\n".join(f"<message>{text}</message>" for text in others)
+        + "\n</lma_messages>\n"
+        if others
+        else ""
+    )
     return PROMPT.format(
         notice=(notice or "(no notice text was recorded)")[: rules.MAX_NOTICE_LENGTH],
+        lma_messages=posted,
         mode_line=_MODE_LINES.get(mode or "", "Mode: not stated."),
         consent_phrases=quoted(consent_phrases),
         objection_phrases=quoted(objection_phrases),
@@ -141,18 +189,51 @@ def _bool(value: Any) -> bool:
     return value is True
 
 
-def parse_answer(text: str) -> Dict[str, Any]:
+def _words(text: Any) -> List[str]:
+    return _WORD.findall(str(text or "").casefold())
+
+
+def is_lma_message(reply: Mapping[str, Any], lma_messages: Sequence[str] = ()) -> bool:
+    """True when a reply the model listed is one of LMA's own messages.
+
+    So when the model says so, when its sender is shown as the window's own or
+    under LMA's name, or when it is a long run of words from a message LMA
+    posted. A participant's short reply, such as one of the phrases the notice
+    names, is not matched by its text alone: the same words are a real reply
+    when a participant sends them.
+    """
+    if _bool(reply.get("fromLma")):
+        return True
+    if _LMA_SENDER.match(rules.normalize_name(reply.get("name"))):
+        return True
+    words = _words(reply.get("text"))
+    if len(words) < MIN_QUOTED_WORDS:
+        return False
+    needle = f" {' '.join(words)} "
+    return any(needle in f" {' '.join(_words(message))} " for message in lma_messages)
+
+
+def parse_answer(text: str, lma_messages: Sequence[str] = ()) -> Dict[str, Any]:
     """The model's answer in the stored shape.
 
     An answer that holds no JSON object is kept as an unreadable result, with
     nothing claimed: no notice, no replies, confidence 0.
+
+    Replies that are LMA's own messages (see ``is_lma_message``) are left out:
+    only a participant replies to the notice. When the model listed one of
+    LMA's messages as an objection and every participant reply it listed is a
+    consent, its ``anyObjection`` rested on LMA's own words and is not kept.
     """
     answer = _first_json_object(text)
     readable = answer is not None
     answer = answer or {}
     replies: List[Dict[str, Any]] = []
+    lma_objection = False
     for reply in answer.get("replies") or []:
         if not isinstance(reply, Mapping):
+            continue
+        if is_lma_message(reply, lma_messages):
+            lma_objection = lma_objection or reply.get("decision") == rules.DECISION_OBJECTION
             continue
         name = rules.clip(reply.get("name"), rules.MAX_NAME_LENGTH)
         decision = reply.get("decision")
@@ -174,12 +255,15 @@ def parse_answer(text: str) -> Dict[str, Any]:
         confidence = 0.0
     if confidence != confidence:  # NaN
         confidence = 0.0
+    any_objection = _bool(answer.get("anyObjection"))
+    if lma_objection and all(r["Decision"] == rules.DECISION_CONSENT for r in replies):
+        any_objection = False
     return {
         "Readable": readable,
         "NoticeVisible": _bool(answer.get("noticeVisible")),
         "NoticeMatches": _bool(answer.get("noticeMatches")),
         "Replies": replies,
-        "AnyObjection": _bool(answer.get("anyObjection")),
+        "AnyObjection": any_objection,
         "Confidence": round(min(1.0, max(0.0, confidence)), 3),
         "Summary": rules.clip(answer.get("summary"), MAX_SUMMARY_LENGTH),
     }

@@ -608,6 +608,16 @@ def test_a_check_is_stored_on_the_evidence_and_leaves_the_status(dynamo, monkeyp
     assert sent["Participants"] == ["Bo"]
     assert sent["ModelId"] == "amazon.nova-lite-v1:0"
     assert sent["ObjectionPhrases"][0] == "I object"
+    assert sent["LmaMessages"] == []
+
+
+def test_a_check_is_sent_the_notices_as_posted(dynamo, monkeypatch) -> None:
+    verifier = FakeLambda(VERIFIED)
+    evidence_id = evidence_meeting(monkeypatch, verifier)
+    posted = "The notice as it went to the chat, with a line LMA added."
+    call("recordMeetingConsentNotice", BACKEND, Channel="chat", Text=posted)
+    call("verifyMeetingConsentEvidence", user(OWNER), EvidenceId=evidence_id)
+    assert verifier.payloads[0]["LmaMessages"] == [posted]
 
 
 @pytest.mark.parametrize(

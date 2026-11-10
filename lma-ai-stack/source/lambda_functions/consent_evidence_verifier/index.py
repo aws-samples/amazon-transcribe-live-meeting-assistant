@@ -109,12 +109,15 @@ def verify(event: Dict[str, Any]) -> Dict[str, Any]:
     # section's Model inference geography.
     model_id = resolve_model_id(event.get("ModelId") or FALLBACK_MODEL_ID, region=BEDROCK_REGION)
     participants = [str(p) for p in event.get("Participants") or []]
+    # The texts LMA posted, so its own messages in the image are not read as replies.
+    lma_messages = [str(m) for m in event.get("LmaMessages") or [] if m]
     prompt = pure.build_prompt(
         event.get("NoticeText"),
         event.get("Mode"),
         participants,
         event.get("ConsentPhrases") or [],
         event.get("ObjectionPhrases") or [],
+        lma_messages,
     )
     response = BEDROCK.converse(
         modelId=model_id,
@@ -144,7 +147,7 @@ def verify(event: Dict[str, Any]) -> Dict[str, Any]:
         block.get("text", "")
         for block in ((response.get("output") or {}).get("message") or {}).get("content") or []
     )
-    parsed = pure.parse_answer(text)
+    parsed = pure.parse_answer(text, lma_messages)
     judged = pure.verdict(parsed, event.get("Mode"), event.get("Rule"), participants)
     # Sizes and the verdict, never the content: names and replies are meeting data.
     LOGGER.info(

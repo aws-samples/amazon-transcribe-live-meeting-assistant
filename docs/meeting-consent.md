@@ -881,6 +881,20 @@ participants listed as present, and asked to report what the picture shows:
 - whether anybody objected;
 - how sure it is, from 0 to 1, and a one-sentence summary.
 
+The model is also sent the notices as LMA posted them in the chat, and told
+that the screenshot is taken in LMA's own meeting window, where LMA's messages
+appear as the window's own (on one side with no sender name, or under "You") or
+under LMA's participant name, which starts with "LMA". Only a participant's
+message is a reply: LMA's notice and its other messages, and the reply phrases
+the notice quotes (*reply "I object"*), are never read as consent or an
+objection. LMA also leaves out of the answer, before drawing the verdict, any
+reply the model marks as LMA's, any reply under a sender name of that kind, and
+any reply of six words or more that appears word for word in a notice LMA
+posted; and when the only objection the model listed was such a message and
+every other reply it listed is a consent, its report that somebody objected is
+not kept. A short reply such as *"I object"* from a participant is never left
+out for its words alone, although the notice contains them.
+
 From that answer LMA draws a **verdict**, the same way whichever model answered:
 
 | Verdict | When |

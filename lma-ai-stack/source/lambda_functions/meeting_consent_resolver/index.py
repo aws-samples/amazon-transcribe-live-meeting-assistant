@@ -843,6 +843,8 @@ def verify_meeting_consent_evidence(caller: Mapping[str, Any], data: Mapping[str
             "CallId": call_id,
             "S3Key": entry.get("S3Key"),
             "NoticeText": record.get("NoticeText"),
+            # The notices as posted, which can run longer than NoticeText.
+            "LmaMessages": [n.get("Text") for n in record.get("Notices") or [] if n.get("Text")],
             "Mode": record.get("Mode"),
             "Rule": record.get("Rule"),
             "Participants": record.get("Participants") or [],

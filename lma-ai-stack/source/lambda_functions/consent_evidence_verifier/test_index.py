@@ -139,6 +139,28 @@ def test_a_check_returns_the_verdict_and_meters_the_call(fakes) -> None:
     ]
 
 
+def test_lmas_posted_messages_reach_the_prompt_and_are_not_replies(monkeypatch, fakes) -> None:
+    posted = "Reply I consent or I object. Live Meeting Assistant reads replies in this chat."
+    own = json.dumps(
+        {
+            "noticeVisible": True,
+            "noticeMatches": True,
+            "replies": [
+                {"name": "Bo Chen", "text": "I object", "decision": "objection", "fromLma": True}
+            ],
+            "anyObjection": True,
+            "confidence": 0.9,
+            "summary": "The notice is visible.",
+        }
+    )
+    bedrock = FakeBedrock(own)
+    monkeypatch.setattr(index, "BEDROCK", bedrock)
+    verification = index.handler(event(LmaMessages=[posted, None]), None)["Verification"]
+    assert verification["Verdict"] == "supports_consent"
+    assert verification["Replies"] == [] and verification["AnyObjection"] is False
+    assert f"<message>{posted}</message>" in bedrock.calls[0]["messages"][0]["content"][1]["text"]
+
+
 def test_an_image_outside_the_meetings_folder_is_not_read(fakes) -> None:
     _s3, bedrock, _metering = fakes
     for key in ("lma-video-keyframes/x.png", "lma-consent-evidence/other/x.png", None):
