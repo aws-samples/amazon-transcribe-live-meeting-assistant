@@ -68,6 +68,36 @@ the end-of-meeting pipeline replaces when the meeting ends, a stored agenda is
 replaced only by somebody saving a new one or pressing **Derive agenda** (which
 asks first); the automatic derivation pass writes only while a meeting has none.
 
+### The agenda on the Transcript tab
+
+A meeting opens on its **Transcript** tab, which is where a live meeting is
+followed, so the agenda is shown there too, at the top of the tab above the
+transcript (and the player, after the meeting). It is a section that opens and
+closes, headed **Agenda** with the number of items, and holds the same numbered
+list with the same **Edit** and **Derive agenda** controls as the Summary tab's
+panel; a change made in either place shows in both.
+
+- **While the meeting is live** the section is open, so the items are in view
+  beside the transcript as it arrives.
+- **After the meeting** it is closed, and opens with a click. Opening or
+  closing it yourself holds for as long as the page stays on that meeting,
+  including when the meeting ends; choosing **Edit** opens it.
+- **Coverage**: once the summary has been written, each item is marked
+  **Covered**, **Partly covered** or **Not covered**, read from the summary's
+  [AGENDA COVERAGE](#agenda-coverage-in-the-summary) section. The marks are
+  shown only when that section has exactly one line with a status for each
+  item, which is what the shipped prompt asks for; when it does not (an edited
+  summary, say), the items are shown without marks rather than paired with the
+  wrong lines, and the section's full text is still on the Summary tab. There is
+  no item-by-item status during a live meeting: the coverage is written with the
+  summary, when the meeting ends. The **AGENDA CHECK** button on the Meeting
+  Assist panel asks the assistant how the meeting is going against the agenda
+  while it runs; see [Asking the assistant about the agenda](#asking-the-assistant-about-the-agenda).
+- **A meeting without an agenda** shows, while it is live and to those who can
+  change it, the one line **Agenda: None** with **Derive agenda** and **Add
+  agenda**. After the meeting, or for a viewer who cannot change it, the
+  Transcript tab shows nothing for it; the Summary tab still has the line.
+
 ## Deriving an agenda from the transcript
 
 Meetings often open with somebody saying what they will cover — "we have three

@@ -20,6 +20,7 @@ import {
   ONE_PERSON,
   SEVERAL_PEOPLE,
   speakerGroups,
+  speakerModeTip,
   withSpeakerMode,
 } from './speaker-modes';
 
@@ -109,6 +110,27 @@ describe('storing a mode', () => {
       parseSpeakerIdentities(null),
     );
     expect(describeSpeakerMode(groups['REMOTE#ConfRm_1'])).toMatch(/reads as a room/);
+  });
+
+  it("the toggle's tooltip names the mode, why, and what a click does", () => {
+    const groups = speakerGroups(
+      [
+        { channel: 'REMOTE', speaker: 'ConfRm_1 (spk_0)', startTime: 0, endTime: 1 },
+        { channel: 'REMOTE', speaker: 'Bob (spk_0)', startTime: 1, endTime: 100 },
+        { channel: 'REMOTE', speaker: 'Bob (spk_1)', startTime: 100, endTime: 101 },
+      ],
+      parseSpeakerIdentities(null),
+    );
+    expect(speakerModeTip(groups['REMOTE#Bob'])).toEqual({
+      mode: 'One person: every voice under "Bob" is shown as one speaker.',
+      reason: describeSpeakerMode(groups['REMOTE#Bob']),
+      action: 'Click if several people share this name.',
+    });
+    const room = speakerModeTip(groups['REMOTE#ConfRm_1']);
+    expect(room.mode).toBe('Several people: each voice under "ConfRm_1" is shown on its own.');
+    expect(room.action).toBe('Click to show them as one person.');
+    // A viewer who may not change it is told the mode and why, and not to click.
+    expect(speakerModeTip(groups['REMOTE#Bob'], false).action).toBeNull();
   });
 });
 

@@ -1195,8 +1195,8 @@ const CallInProgressTranscript = ({
     () => (onSaveSpeakerIdentities && !readOnly ? new Set(voiceKeysByName.keys()) : null),
     [voiceKeysByName, onSaveSpeakerIdentities, readOnly],
   );
-  // The chips, grouped by platform name, with each group's One person /
-  // Several people menu.
+  // The chips, grouped by platform name, with each group's one-person /
+  // several-people toggle.
   const chipEntries = useMemo(
     () => speakerChipLayout(turnByTurnSegments.filter(isSpeechSegment), groups),
     [turnByTurnSegments, groups],
@@ -2069,6 +2069,23 @@ export const CallPanel = ({
         : { count, more, loaded: Boolean(loaded) },
     );
   }, []);
+  // The key frames the Screen share tab counts, which the player marks on its
+  // seek bar as screen shares beside the chapters.
+  const [screenShares, setScreenShares] = useState([]);
+  useEffect(() => {
+    setScreenShares([]);
+  }, [item.callId]);
+  const onScreenShares = useCallback((frames) => {
+    setScreenShares((previous) =>
+      previous.length === frames.length &&
+      previous.every(
+        (f, i) =>
+          f.FrameId === frames[i].FrameId && f.Title === frames[i].Title && f.VideoOffset === frames[i].VideoOffset,
+      )
+        ? previous
+        : frames,
+    );
+  }, []);
 
   // Chapters from the summary, on the transcript's clock.
   const chapters = useMemo(() => chaptersFromSummary(item.callSummaryText), [item.callSummaryText]);
@@ -2306,16 +2323,28 @@ export const CallPanel = ({
   const showVnc = showVNCPreview && vpData && vpData.vncReady && isLive;
   const sideColumn = chapters.length > 0 || agendaItems.length > 0;
 
-  const agendaPanel = (
-    <AgendaPanel
-      item={item}
-      onSave={sendUpdateCallAgenda ? (text) => sendUpdateCallAgenda(item.callId, text, user?.username) : undefined}
-      onDerive={sendDeriveCallAgenda ? () => sendDeriveCallAgenda(item.callId) : undefined}
-      readOnly={speakerNamesReadOnly}
-      compactWhenEmpty
-      coverage={agendaItems.length && !coverageSaysNoAgenda ? agendaCoverage : null}
-    />
-  );
+  const agendaProps = {
+    item,
+    onSave: sendUpdateCallAgenda ? (text) => sendUpdateCallAgenda(item.callId, text, user?.username) : undefined,
+    onDerive: sendDeriveCallAgenda ? () => sendDeriveCallAgenda(item.callId) : undefined,
+    readOnly: speakerNamesReadOnly,
+    compactWhenEmpty: true,
+    coverage: agendaItems.length && !coverageSaysNoAgenda ? agendaCoverage : null,
+  };
+  // eslint-disable-next-line react/jsx-props-no-spreading
+  const agendaPanel = <AgendaPanel {...agendaProps} />;
+
+  // The agenda again at the top of the Transcript tab, where a live meeting is
+  // followed: a section that opens and closes, open while the meeting is live
+  // and closed after it. A meeting without an agenda shows the one line with
+  // Add agenda while it is live and the viewer can change it, and nothing
+  // otherwise (the Summary tab keeps that line).
+  const canChangeAgenda = !speakerNamesReadOnly && Boolean(sendUpdateCallAgenda || sendDeriveCallAgenda);
+  const transcriptAgenda =
+    agendaItems.length > 0 || (isLive && canChangeAgenda) ? (
+      // eslint-disable-next-line react/jsx-props-no-spreading
+      <AgendaPanel {...agendaProps} collapsible defaultExpanded={isLive} />
+    ) : null;
 
   const summaryTab = (
     <SpaceBetween size="l">
@@ -2378,6 +2407,7 @@ export const CallPanel = ({
           showHeader
         />
       )}
+      {transcriptAgenda}
       <CallTranscriptContainer
         item={item}
         player={
@@ -2388,6 +2418,7 @@ export const CallPanel = ({
               url={media.url}
               clock={clock}
               chapters={chapters}
+              screenShares={screenShares}
               store={playback}
               alternative={media.alternative}
               onSwitch={setChosenMedia}
@@ -2593,6 +2624,7 @@ export const CallPanel = ({
               chapters={chapters}
               onClockAnchors={onClockAnchors}
               onFramesChange={onFramesChange}
+              onScreenShares={onScreenShares}
               selectRequest={frameSelectRequest}
             />,
             timelineNode,

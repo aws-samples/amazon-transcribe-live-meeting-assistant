@@ -22,8 +22,8 @@
  * two Bobs that then confuse every summary.
  *
  * The voices of a platform name that can be shown as one person or several
- * (speaker-modes.js) are listed together under that name, with its One person /
- * Several people menu, and each row reads as its lines do: 'Voice 2' and the
+ * (speaker-modes.js) are listed together under that name, with its
+ * one-person / several-people icon toggle, and each row reads as its lines do: 'Voice 2' and the
  * placeholder 'ConfRm_1 · Voice 2' while unnamed. Under a name shown as one
  * person, naming one of its voices names them all, because the transcript shows
  * that one name for every line under it.
@@ -65,7 +65,7 @@ import {
 } from '../common/speaker-identities';
 import { offersModeChoice, ONE_PERSON, withSpeakerMode } from '../common/speaker-modes';
 import { own } from '../common/speaker-keys';
-import SpeakerModeMenu from './SpeakerModeMenu';
+import SpeakerModeToggle from './SpeakerModeToggle';
 
 const MERGE_PLACEHOLDER = { label: 'Same person as…', value: '' };
 
@@ -93,7 +93,8 @@ const STOP_REASONS = ['ALREADY_NAMED', 'MEETING_ENDED'];
 const PAUSE_REASONS = ['NO_EVIDENCE', 'NO_GROWTH', 'COOLDOWN'];
 
 const PLATFORM_NAMED = 'Every voice already has a name from the meeting platform.';
-const TIDY_HINT = "Choose One person / Several people beside a name's voices to tidy voice labels.";
+const TIDY_HINT =
+  "Use the one-person / several-people icon beside a name's voices to show them as one speaker or apart.";
 
 /** How long a row opened from the meeting header stays outlined. */
 const FOCUS_OUTLINE_MS = 3000;
@@ -655,7 +656,7 @@ const SpeakerIdentitiesPanel = ({
                         <Box variant="small" color="text-body-secondary">
                           {`${section.group.voices.length} ${section.group.voices.length === 1 ? 'voice' : 'voices'}`}
                         </Box>
-                        <SpeakerModeMenu
+                        <SpeakerModeToggle
                           group={section.group}
                           onSetMode={readOnly || saving ? undefined : handleSetMode}
                         />

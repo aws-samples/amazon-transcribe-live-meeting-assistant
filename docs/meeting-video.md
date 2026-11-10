@@ -59,6 +59,11 @@ screen before them are hidden and not counted until asked for (see
   summary is shown either way.
 - **Export slides (PDF)** opens every frame, without the repeated ones, as a
   printable deck; see [Exporting the slides](#exporting-the-slides).
+- **On the player's seek bar**, after the meeting, each frame this tab counts
+  is a small pink dot at the time it went up, beside the dark bars that mark the
+  [chapters](#chapters); hovering over a dot names it (*Screen share: Q3 plan*)
+  and selecting it plays from there. See
+  [The recording player](web-ui-guide.md#the-recording-player).
 
 The pictures are shown through links signed by the server for whoever opened
 the page, after the same access check as the transcript, and they last an
@@ -254,7 +259,12 @@ slide started it. The meeting page reads that section and shows a **Chapters**
 list beside the summary on the **Summary** tab, in place of the section itself.
 Selecting a chapter opens the **Transcript** tab at its time and, after the
 meeting, plays the recording from there. The chapters are also marks on the
-seek bar of the page's [player](web-ui-guide.md#the-recording-player). In the **Screen share** strip, the frame that went up within
+seek bar of the page's [player](web-ui-guide.md#the-recording-player): dark
+bars, distinct from the pink dots that mark the key frames of the shared
+screen, with a legend under the bar naming both and a tooltip on each mark
+(*Chapter: Budget review*, *Screen share: Q3 plan*). A meeting usually has a
+different number of each, because a chapter is a change of topic and a key
+frame a change of what was on screen. In the **Screen share** strip, the frame that went up within
 30 seconds of a chapter's start is labelled with the chapter, unless the frame
 has a title of its own; a chapter that began without a change of slide labels
 no frame, and a camera frame is never matched.
