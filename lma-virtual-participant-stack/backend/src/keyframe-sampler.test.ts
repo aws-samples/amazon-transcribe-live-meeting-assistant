@@ -161,11 +161,43 @@ test('ids sort in time order and keys follow the deletion prefix rule', () => {
     });
 });
 
-test('Zoom and Teams have a share probe; Webex, Chime and Google Meet do not', () => {
+test('Zoom, Teams and Google Meet have a share probe; Webex and Chime do not', () => {
     assert.ok(screenShareProbeFor('ZOOM'));
     assert.ok(screenShareProbeFor('TEAMS', 'dom'));
     assert.ok(screenShareProbeFor('Teams', 'sdk'));
+    assert.ok(screenShareProbeFor('GOOGLE_MEET'));
     assert.equal(screenShareProbeFor('WEBEX'), null);
     assert.equal(screenShareProbeFor('CHIME'), null);
-    assert.equal(screenShareProbeFor('GOOGLE_MEET'), null);
+});
+
+/** A page whose in-page evaluate answers with the given tile labels, or throws. */
+const meetPage = (labels: string[] | null | Error) =>
+    ({
+        evaluate: async () => {
+            if (labels instanceof Error) throw labels;
+            return labels;
+        },
+    }) as any;
+
+test('on Google Meet a share is on screen only while a tile shows a presentation', async () => {
+    const probe = screenShareProbeFor('GOOGLE_MEET')!;
+    assert.equal(await probe(meetPage(['Alice Smith', 'Bob Jones', 'More options for Bob Jones'])), false);
+    assert.equal(await probe(meetPage(['Alice Smith', 'Alice Smith (Presentation)'])), true);
+    assert.equal(await probe(meetPage(['Alice Smith is presenting'])), true);
+    assert.equal(await probe(meetPage(null)), null, 'no visible tile: cannot tell');
+    assert.equal(await probe(meetPage(new Error('navigating'))), null);
+});
+
+test('on Google Meet the participant grid is not judged until a presentation is on screen', async () => {
+    let labels = ['Alice Smith', 'Bob Jones'];
+    const probe = screenShareProbeFor('GOOGLE_MEET')!;
+    const h = harness({ shareActive: () => probe(meetPage(labels)) });
+    h.setShare(await probe(meetPage(labels)));
+    await h.feed(flat(200), 10);
+    assert.equal(h.frames.length, 0, 'a still grid of cameras is not a key frame');
+    labels = ['Alice Smith', 'Alice Smith (Presentation)', 'Bob Jones'];
+    h.setShare(await probe(meetPage(labels)));
+    await h.feed(flat(90), 4);
+    assert.equal(h.frames.length, 1);
+    assert.equal(h.frames[0].ShareDetected, true);
 });
