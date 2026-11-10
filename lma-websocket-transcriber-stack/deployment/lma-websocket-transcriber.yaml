@@ -344,6 +344,14 @@ Parameters:
     Description: >-
       Display name of that bundle, shown in the Transcription Engine section of the Configuration page.
 
+  AsrModelLanguages:
+    Type: String
+    Default: ""
+    Description: >-
+      Comma-separated base language codes (such as "en,es,fr") the deployed ASR
+      bundle transcribes. A meeting in another language stays on Amazon
+      Transcribe; empty means English only.
+
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 14
@@ -1428,6 +1436,10 @@ Resources:
             # and every meeting is transcribed by Amazon Transcribe.
             - Name: ASR_LAUNCHER_FUNCTION_ARN
               Value: !Ref AsrLauncherFunctionArn
+            # The languages the deployed bundle transcribes; a meeting in any
+            # other stays on Amazon Transcribe. Empty means English only.
+            - Name: ASR_MODEL_LANGUAGES
+              Value: !Ref AsrModelLanguages
             - Name: ASR_CONFIG_TABLE_NAME
               Value: !Ref AsrConfigTableName
             - Name: CONFIGURATION_TABLE_NAME
@@ -1833,6 +1845,9 @@ Resources:
         # (getAsrConfig).
         AsrModelBundleId: !Ref AsrModelBundleId
         AsrModelBundleName: !Ref AsrModelBundleName
+        # And which languages that bundle transcribes, so the section can say
+        # which meeting languages it takes.
+        AsrModelLanguages: !Ref AsrModelLanguages
         # Whether the on-demand engine is deployed AT ALL, as distinct from
         # AsrDiarizationAvailable (which is also false for a transcription-only
         # bundle). The Configuration page's Transcription Engine section shows its engine choices only when it

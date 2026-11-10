@@ -44,9 +44,46 @@ const NovaSonicNotice = ({ configuration = {} }) => {
 
 NovaSonicNotice.propTypes = { configuration: PropTypes.shape({}) };
 
-/** Whether a meeting language is one the ASR MicroVM engine transcribes: English, as isMicrovmLanguage. */
-const isMicrovmLanguage = (languageCode) =>
-  !languageCode || languageCode === 'en' || `${languageCode}`.startsWith('en-');
+/** `es` from `es-US`: the part of a meeting's language code a bundle's list names. */
+const baseLanguage = (languageCode) => `${languageCode || ''}`.trim().toLowerCase().split('-')[0];
+
+/**
+ * The deployed bundle's languages, from the AsrModelLanguages setting the
+ * transcriber stack publishes (comma-separated base codes); empty when none is
+ * published, which means English only.
+ */
+export const bundleLanguages = (settings = {}) =>
+  `${settings?.AsrModelLanguages || ''}`
+    .split(',')
+    .map(baseLanguage)
+    .filter((code) => code.length > 0);
+
+/**
+ * Whether a meeting language is one the deployed bundle transcribes, as
+ * isMicrovmLanguage in the transcriber's and the Virtual Participant's
+ * configuration-store.ts: English always, any other base language when the
+ * bundle's list names it.
+ */
+const isMicrovmLanguage = (languageCode, languages = []) => {
+  const language = baseLanguage(languageCode);
+  return language === '' || language === 'en' || languages.includes(language);
+};
+
+/** A language's English name (`Spanish` for `es`), or the code where the browser has none. */
+const languageName = (code) => {
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code;
+  } catch (error) {
+    return code;
+  }
+};
+
+/** The deployed bundle's languages by name, English first, as the section lists them. */
+export const bundleLanguageNames = (languages = []) => {
+  const others = [...new Set(languages.filter((code) => code !== 'en'))].map(languageName);
+  others.sort((a, b) => a.localeCompare(b));
+  return [languageName('en'), ...others];
+};
 
 /**
  * The Amazon Transcribe options a saved transcription section uses that the
@@ -56,7 +93,7 @@ const isMicrovmLanguage = (languageCode) =>
  * as transcribeOnlyOptions in the transcriber's and the Virtual Participant's
  * configuration-store.ts.
  */
-export const transcribeOnlyOptionsInUse = (transcription = {}) => {
+export const transcribeOnlyOptionsInUse = (transcription = {}, languages = []) => {
   const options = [];
   if (transcription?.contentRedactionEnabled === true) options.push({ name: 'content redaction', vp: true });
   if (transcription?.customVocabularyName) options.push({ name: 'a custom vocabulary', vp: true });
@@ -64,15 +101,15 @@ export const transcribeOnlyOptionsInUse = (transcription = {}) => {
   const languageCode = transcription?.languageCode;
   if (['identify-language', 'identify-multiple-languages'].includes(languageCode)) {
     options.push({ name: 'language identification', vp: true });
-  } else if (!isMicrovmLanguage(languageCode)) {
+  } else if (!isMicrovmLanguage(languageCode, languages)) {
     options.push({ name: `the language ${languageCode}`, vp: true });
   }
   return options;
 };
 
 /** The names alone; see transcribeOnlyOptionsInUse. */
-export const transcribeOnlyOptions = (transcription = {}) =>
-  transcribeOnlyOptionsInUse(transcription).map((option) => option.name);
+export const transcribeOnlyOptions = (transcription = {}, languages = []) =>
+  transcribeOnlyOptionsInUse(transcription, languages).map((option) => option.name);
 
 // Without the ASR MicroVM engine every meeting is transcribed by Amazon
 // Transcribe, so the section shows only the voice separation switch, which
@@ -88,17 +125,19 @@ const AsrEngineNotice = ({ settings = {}, configuration = {} }) => {
     );
   }
   const diarization = `${settings?.AsrDiarizationAvailable}` === 'true';
-  const inUse = transcribeOnlyOptionsInUse(configuration?.transcription);
+  const languages = bundleLanguages(settings);
+  const inUse = transcribeOnlyOptionsInUse(configuration?.transcription, languages);
   const affected = inUse.some((option) => option.vp)
     ? 'every streaming meeting and Virtual Participant is'
     : 'every streaming meeting is';
   return (
     <>
       <Alert type="info" header="The ASR MicroVM engine is the default">
-        The ASR MicroVM engine transcribes English only, and does not offer Amazon Transcribe&apos;s content redaction,
-        custom vocabulary, custom language model or language identification. While the Amazon Transcribe section sets
-        another language or uses any of those, meetings stay on Amazon Transcribe whichever engine is selected here. A
-        meeting whose MicroVM cannot start also falls back to Amazon Transcribe.
+        The ASR MicroVM engine transcribes the languages the deployed speech model supports, listed below, and does not
+        offer Amazon Transcribe&apos;s content redaction, custom vocabulary, custom language model or language
+        identification. While the Amazon Transcribe section sets a language the model does not support or uses any of
+        those, meetings stay on Amazon Transcribe whichever engine is selected here. A meeting whose MicroVM cannot
+        start also falls back to Amazon Transcribe.
       </Alert>
       {inUse.length > 0 && (
         <Alert type="warning" header="These settings keep meetings on Amazon Transcribe">
@@ -110,6 +149,7 @@ const AsrEngineNotice = ({ settings = {}, configuration = {} }) => {
         columns={2}
         items={[
           { label: 'Model bundle', value: settings?.AsrModelBundleName || settings?.AsrModelBundleId || '—' },
+          { label: 'Languages', value: bundleLanguageNames(languages).join(', ') },
           {
             label: 'Speaker identification',
             value: diarization ? (
@@ -129,6 +169,7 @@ const SETTINGS = PropTypes.shape({
   AsrDiarizationAvailable: PropTypes.oneOfType([PropTypes.string, PropTypes.bool]),
   AsrModelBundleName: PropTypes.string,
   AsrModelBundleId: PropTypes.string,
+  AsrModelLanguages: PropTypes.string,
 });
 
 AsrEngineNotice.propTypes = { settings: SETTINGS, configuration: PropTypes.shape({}) };
