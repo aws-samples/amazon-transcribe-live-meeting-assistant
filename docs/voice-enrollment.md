@@ -65,8 +65,9 @@ their behalf would make the consent record worthless.
 So consent is **first-party and self-service**. Nobody can enroll anybody else,
 and there is no administrative action that creates a voiceprint:
 
-1. An LMA user opens **Enroll My Voice** (marked Beta) in the navigation (or goes straight to
-   **`/#/voice-enrollment`**) and is shown the consent terms in full, including
+1. An LMA user opens **Enroll My Voice** (marked Beta) in the navigation (or
+   goes straight to **`/#/voice-enrollment`**) and is shown the consent terms in
+   full, including
    what is stored, what it is used for, how long it is kept and how to withdraw.
 2. They consent by an explicit affirmative action — a checkbox they must tick
    plus a button they must press. There is no pre-ticked box and no implied

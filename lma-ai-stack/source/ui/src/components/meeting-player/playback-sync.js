@@ -8,8 +8,8 @@
  * The arithmetic behind the meeting page's player, kept free of React so it
  * can be tested directly: which recording it plays, how a time on the
  * transcript's clock maps to a position in that recording and back, which
- * transcript segment is being heard, where the chapters sit on the seek bar,
- * and which key presses control it.
+ * transcript segment is being heard, where the chapters and the screen shares
+ * sit on the seek bar, and which key presses control it.
  *
  * Two clocks. Transcript segments, chapters and key frames carry times on the
  * transcript's clock (seconds from when transcription of the meeting started).
@@ -224,6 +224,37 @@ export const formatClock = (seconds) => {
   const m = Math.floor((total % 3600) / 60);
   const s = String(total % 60).padStart(2, '0');
   return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+};
+
+/**
+ * The meeting's screen shares as marks on the same seek bar: one per key frame
+ * of the shared screen that the Screen share tab shows (`frames`: FrameId,
+ * Timestamp, VideoOffset, Title), at the frame's place in the recording being
+ * played (recordingSecondsForFrame). A frame past the end of the recording is
+ * left off; with no known duration there are no marks. These are a different
+ * thing from the chapters, which come from the summary: a chapter is a change
+ * of topic and a screen share a change of what was on screen, so a meeting
+ * usually has a different number of each.
+ */
+export const screenShareMarkers = (frames, durationSeconds, { kind = 'video', clock = IDENTITY_CLOCK } = {}) => {
+  const duration = finite(durationSeconds);
+  if (!duration || duration <= 0 || !frames?.length) return [];
+  return frames
+    .filter((frame) => frame?.FrameId && finite(frame.Timestamp) !== null)
+    .map((frame) => {
+      const recordingSeconds = recordingSecondsForFrame(frame, { kind, clock });
+      const title = typeof frame.Title === 'string' ? frame.Title.trim() : '';
+      return {
+        key: frame.FrameId,
+        frameId: frame.FrameId,
+        title,
+        label: formatClock(Number(frame.Timestamp)),
+        transcriptSeconds: Number(frame.Timestamp),
+        recordingSeconds,
+        percent: Math.min(100, Math.max(0, (recordingSeconds / duration) * 100)),
+      };
+    })
+    .filter((marker) => marker.recordingSeconds <= duration);
 };
 
 const TYPING_TAGS = ['INPUT', 'TEXTAREA', 'SELECT'];

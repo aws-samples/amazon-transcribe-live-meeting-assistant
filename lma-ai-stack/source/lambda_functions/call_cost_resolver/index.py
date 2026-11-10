@@ -18,7 +18,8 @@ Serves three fields, dispatching on the field name AppSync reports:
 ``Query.getCallPricing``
     The price table for the calling Admin: the shipped baseline, what the
     active profile stores, the merged result, and the version to send back on
-    save. Admin only.
+    save. While no profile is in force it reports ``default`` and the baseline
+    alone, as every estimate then reads it. Admin only.
 
 ``Mutation.updateCallPricing(input)``
     Store the administrator's prices as the ``call_pricing`` section of the
@@ -46,6 +47,7 @@ from botocore.config import Config as BotoCoreConfig
 # pylint: disable=import-error
 from lma_config import (  # from the configuration layer
     CALL_PRICING,
+    DEFAULT_PROFILE_NAME,
     ConcurrentModification,
     ConfigurationStore,
     ProfileReadOnly,
@@ -68,7 +70,6 @@ EVENT_SOURCING_TABLE = os.environ.get("EVENT_SOURCING_TABLE", "")
 ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
 DEPLOYMENT_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
-OPERATOR_PROFILE = "custom"
 GET_COST_FIELD = "getCallCost"
 GET_PRICING_FIELD = "getCallPricing"
 UPDATE_PRICING_FIELD = "updateCallPricing"
@@ -198,27 +199,30 @@ def get_call_cost(call_id: str) -> Dict[str, Any]:
     return result
 
 
-def _active_profile_name() -> str:
-    """The profile estimates read now: the active one, else ``custom``.
-
-    ``custom`` is what a deployment that has never chosen a profile reads and
-    writes, as it did before profiles could be named.
-    """
-    return CONFIG_STORE.active_profile_name(consistent_read=True) or OPERATOR_PROFILE
-
-
 def get_call_pricing() -> Dict[str, Any]:
-    """The table for an Admin. Read from the stored records, never the cache."""
-    baseline = CONFIG_STORE.read_profile("default", consistent_read=True)
-    name = _active_profile_name()
-    profile = CONFIG_STORE.read_profile(name, consistent_read=True)
+    """The table for an Admin. Read from the stored records, never the cache.
+
+    Reports the profile the store merges over the baseline on every read, so
+    ``Effective`` is the table an estimate drawn now uses. When no profile is
+    in force -- the pointer is unset, names ``default``, or names a profile
+    that is not stored -- the store reads the baseline alone, and so does this:
+    ``Profile`` is ``default``, ``Custom`` is empty and ``Effective`` is the
+    baseline. A save is refused in that state (see ``update_call_pricing``).
+    """
+    baseline = CONFIG_STORE.read_profile(DEFAULT_PROFILE_NAME, consistent_read=True)
     default_section = baseline.body.get(CALL_PRICING.name) or {}
-    custom_section = profile.body.get(CALL_PRICING.name) or {}
-    # The merge the store applies on every read, so "effective" is what an
-    # estimate drawn now would use.
+    name = CONFIG_STORE.active_profile_name(consistent_read=True)
+    profile = CONFIG_STORE.read_profile(name, consistent_read=True) if name else None
+    if profile is None or not profile.exists:
+        # The same fallback as ConfigurationStore._fetch.
+        name, profile = DEFAULT_PROFILE_NAME, baseline
+        custom_section: Dict[str, Any] = {}
+    else:
+        custom_section = profile.body.get(CALL_PRICING.name) or {}
     payload = {
         "Default": default_section,
         "Custom": custom_section,
+        # The merge the store applies on every read.
         "Effective": deep_merge(default_section, custom_section),
         "Version": profile.version,
         "Profile": name,

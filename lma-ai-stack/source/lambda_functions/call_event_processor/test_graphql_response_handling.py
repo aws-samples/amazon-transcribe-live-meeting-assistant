@@ -1338,6 +1338,101 @@ def test_a_failed_summary_does_not_bring_the_transcript_deletion_forward(
     assert _deletion_payloads(deletion_function) == []
 
 
+# ── a summary the resolver will not store is dropped, not failed ─────────────
+
+POST_CALL_HOOK_ARN = "arn:post-call-summary-hook"
+
+
+def _condition_failure() -> TransportQueryError:
+    """What gql raises when dDbPutCondition.response.vtl rejects the write."""
+    return TransportQueryError(
+        "item put condition failure",
+        errors=[{"message": "item put condition failure", "path": ["addCallSummaryText"]}],
+    )
+
+
+def _summary_event() -> Dict[str, Any]:
+    return {
+        "EventType": "ADD_SUMMARY",
+        "CallId": "call-1",
+        "CallSummaryText": json.dumps({"SUMMARY": "Sarah Lee walked through the plan."}),
+    }
+
+
+def _store_rejected_summary(schema, monkeypatch, meeting: Any) -> tuple:
+    """An ADD_SUMMARY whose write is rejected; getCall then answers with ``meeting``.
+
+    Returns the session and the hook client, with the transcript deletion and the
+    post-call summary hook both configured, so a test can assert neither ran.
+    """
+    session = QueuedSession(schema, [_condition_failure(), {"getCall": meeting}])
+    hook = run_with(
+        session,
+        _summary_event(),
+        monkeypatch,
+        TRANSCRIPT_DELETION_FUNCTION_ARN=DELETION_ARN,
+        POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN=POST_CALL_HOOK_ARN,
+    )
+    return session, hook
+
+
+def test_a_summary_for_a_meeting_no_longer_stored_does_not_fail_the_record(
+    schema, emitted, monkeypatch
+):
+    """The meeting was deleted before its summary arrived.
+
+    process_event raising is what fails the Kinesis record (the batch processor
+    attributes the exception to the record's sequence number), so returning is
+    the assertion that the batch is not failed.
+    """
+    session, hook = _store_rejected_summary(schema, monkeypatch, meeting=None)
+
+    assert len(mutation_inputs(session, "addCallSummaryText")) == 1, "a rejection is not retried"
+    assert hook.invocations == [], "nothing was stored, so nobody is told it was"
+    assert any("the meeting is not stored" in m for m in cep.LOGGER.at_level("INFO")), (
+        cep.LOGGER.records
+    )
+    assert not cep.LOGGER.at_level("ERROR")
+
+
+def test_a_summary_rejected_for_a_stored_meeting_is_dropped_with_a_warning(
+    schema, emitted, monkeypatch
+):
+    """The other half of the condition: the row's UpdatedAt is not older than the write."""
+    session, hook = _store_rejected_summary(
+        schema, monkeypatch, meeting={"CallId": "call-1", "Status": "ENDED"}
+    )
+
+    assert len(mutation_inputs(session, "addCallSummaryText")) == 1
+    assert hook.invocations == []
+    assert any(
+        "updated at or after the summary's write time" in m for m in cep.LOGGER.at_level("WARNING")
+    ), cep.LOGGER.records
+
+
+def test_any_other_failure_to_store_a_summary_still_fails_the_record(schema, emitted, monkeypatch):
+    """Only the resolver's condition is dropped; anything else is retried and raised."""
+    unavailable = TransportQueryError(
+        "service unavailable", errors=[{"errorType": "ServiceUnavailable"}]
+    )
+    session = QueuedSession(schema, [unavailable])
+    with pytest.raises(TransportQueryError):
+        run_with(
+            session,
+            _summary_event(),
+            monkeypatch,
+            TRANSCRIPT_DELETION_FUNCTION_ARN=DELETION_ARN,
+            POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN="",
+        )
+    assert len(mutation_inputs(session, "addCallSummaryText")) == 4, "retried, then raised"
+
+
+def test_only_the_not_stored_marker_counts_as_a_summary_not_stored():
+    assert cep.was_summary_not_stored(cep.SUMMARY_NOT_STORED) is True
+    for other in ({"ok": True}, cep.CALL_ALREADY_CREATED, {"addCallSummaryText": {}}, None):
+        assert cep.was_summary_not_stored(other) is False, other
+
+
 # ── the meeting's duration ───────────────────────────────────────────────────
 
 

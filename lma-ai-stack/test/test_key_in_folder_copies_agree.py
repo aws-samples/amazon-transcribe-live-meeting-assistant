@@ -79,6 +79,17 @@ def test_every_copy_refuses_a_folder_without_its_trailing_slash(path) -> None:
     assert _compiled(path)(f"{FOLDER}f.jpg", FOLDER.rstrip("/")) is False
 
 
+def test_every_copy_in_the_functions_is_listed() -> None:
+    """A function that adds its own key_in_folder is compared with the others."""
+    found = {
+        path
+        for path in FUNCTIONS.rglob("*.py")
+        if "def key_in_folder(" in path.read_text(encoding="utf-8")
+        and not path.name.startswith("test_")
+    }
+    assert found == set(COPIES), sorted(p.relative_to(FUNCTIONS).as_posix() for p in found)
+
+
 def test_no_function_checks_a_key_for_dots_as_a_substring() -> None:
     for path in COPIES:
         assert '".." in key' not in path.read_text(), path

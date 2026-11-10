@@ -5,7 +5,15 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { describeAgendaSource, hasAgenda, parseAgendaItems } from './agenda';
+import {
+  agendaCoverageStatuses,
+  COVERED,
+  describeAgendaSource,
+  hasAgenda,
+  NOT_COVERED,
+  PARTLY_COVERED,
+  parseAgendaItems,
+} from './agenda';
 
 describe('parseAgendaItems', () => {
   it('splits one item per line and drops blank lines', () => {
@@ -46,5 +54,34 @@ describe('describeAgendaSource', () => {
   it('returns null for an unknown source rather than guessing', () => {
     expect(describeAgendaSource('elsewhere')).toBeNull();
     expect(describeAgendaSource(undefined)).toBeNull();
+  });
+});
+
+describe('agendaCoverageStatuses', () => {
+  const COVERAGE = [
+    '- **Introductions**: Covered - everyone said hello',
+    '- **Budget**: Partly covered - the total is agreed, the split is not',
+    '- **Hiring**: Not covered - no time left',
+  ].join('\n');
+
+  it('reads one status per item, in agenda order, from the shipped format', () => {
+    expect(agendaCoverageStatuses(COVERAGE, 3)).toEqual([COVERED, PARTLY_COVERED, NOT_COVERED]);
+  });
+
+  it('reads the status after an item name that contains a colon or a status word', () => {
+    expect(agendaCoverageStatuses('- **What is covered: Q3**: Not covered - skipped', 1)).toEqual([NOT_COVERED]);
+  });
+
+  it('reads lines without bold, lines without the item name, and a status inside the bold', () => {
+    expect(
+      agendaCoverageStatuses('1. Budget: covered - done\n2. Partially covered - started\n- **Hiring: Covered**', 3),
+    ).toEqual([COVERED, PARTLY_COVERED, COVERED]);
+  });
+
+  it('gives no statuses when the lines cannot be paired one-to-one with the items', () => {
+    expect(agendaCoverageStatuses(COVERAGE, 4)).toBeNull();
+    expect(agendaCoverageStatuses('No agenda was set for this meeting.', 1)).toBeNull();
+    expect(agendaCoverageStatuses(null, 3)).toBeNull();
+    expect(agendaCoverageStatuses(COVERAGE, 0)).toBeNull();
   });
 });
