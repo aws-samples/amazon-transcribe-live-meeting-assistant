@@ -34,6 +34,7 @@ IMPORTED_NAMES: dict[str, tuple[str, ...]] = {
     "strands.hooks.events": ("AfterToolCallEvent", "BeforeToolCallEvent"),
     "strands._async": ("run_async",),
     "strands.tools.mcp": ("MCPClient",),
+    "strands.types.exceptions": ("MaxTokensReachedException",),
 }
 
 #: Every module registered, parents included.
@@ -45,6 +46,8 @@ MODULE_NAMES = (
     "strands._async",
     "strands.tools",
     "strands.tools.mcp",
+    "strands.types",
+    "strands.types.exceptions",
 )
 
 
@@ -102,6 +105,10 @@ class MCPClient:
 
     def __init__(self, *_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("the stand-in strands.tools.mcp.MCPClient was constructed")
+
+
+class MaxTokensReachedException(Exception):
+    """Raised when a model turn stops at its output token limit."""
 
 
 def build() -> dict[str, types.ModuleType]:
