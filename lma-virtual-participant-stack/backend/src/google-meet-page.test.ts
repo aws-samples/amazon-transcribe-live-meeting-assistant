@@ -26,6 +26,7 @@ import {
     isMeetRefusalRedirect,
     isOwnMeetName,
     meetIndicatorSpeaking,
+    meetPresentationShown,
     meetSoleOtherParticipant,
     meetTileSpeaking,
     normalizeMeetText,
@@ -185,6 +186,16 @@ test("Meet's decorations are stripped from a participant name", () => {
     assert.equal(cleanMeetParticipantName('  Alice   Smith '), 'Alice Smith');
     assert.equal(cleanMeetParticipantName(''), null);
     assert.equal(cleanMeetParticipantName('(You)'), null);
+});
+
+test('a presentation is shown only when a tile is marked as one', () => {
+    assert.equal(meetPresentationShown(['Alice Smith (Presentation)']), true);
+    assert.equal(meetPresentationShown(['Pin Alice Smith (Presentation) to your main screen']), true);
+    assert.equal(meetPresentationShown(['Alice  Smith\nis presenting']), true);
+    assert.equal(meetPresentationShown(['Presenting']), true);
+    assert.equal(meetPresentationShown(['Alice Smith', 'Bob (You)', 'mic_off', null, '']), false);
+    assert.equal(meetPresentationShown(['Representing Sales', 'Presentation Skills Coach']), false);
+    assert.equal(meetPresentationShown([]), false);
 });
 
 test('the text of an icon in a tile is not taken for a participant name', () => {

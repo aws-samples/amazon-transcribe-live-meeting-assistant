@@ -464,9 +464,9 @@ thresholds.
 | Zoom (web client and Zoom Meeting SDK) | The share view's container and the floating video window Zoom switches to during a share | While a share is on screen |
 | Microsoft Teams (web client) | The screen-sharing video stream element | While a share is on screen |
 | Microsoft Teams (Azure Communication Services SDK) | The call's state: a remote screen share or a PowerPoint Live presentation | While a share is on screen |
+| Google Meet | A participant tile marked as a presentation ("(Presentation)" or "is presenting") | While a presentation is on screen |
 | Webex | None | Always, with the stricter thresholds |
 | Amazon Chime | None | Always, with the stricter thresholds |
-| Google Meet | None | Always, with the stricter thresholds |
 
 | Thresholds | Share on screen | No share signal |
 |---|---|---|

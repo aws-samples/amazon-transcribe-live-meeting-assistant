@@ -23,12 +23,18 @@
  *     which teams.ts reads for the active speaker during a share.
  *   - Teams (Azure Communication Services path): the call adapter's state,
  *     exposed by teams-sdk-page.ts as `__lmaScreenShareActive()`.
- *   - Webex, Amazon Chime and Google Meet: no signal; the probe is absent.
+ *   - Google Meet: a visible participant tile (`data-participant-id`) whose
+ *     name or an `aria-label` inside it marks a presentation, "(Presentation)"
+ *     or "is presenting" (meetPresentationShown in google-meet-page.ts). Meet
+ *     gives a presentation a tile of its own beside the cameras; the VP's own
+ *     "Present now" button is in the toolbar, outside every tile.
+ *   - Webex and Amazon Chime: no signal; the probe is absent.
  *
  * A probe answers `null` when it cannot tell (the page is navigating, the
  * evaluate failed); the sampler keeps the previous answer in that case.
  */
 import type { Page } from 'playwright-core';
+import { MEET_IN_PAGE_SELECTORS, meetPresentationShown } from './google-meet-page.js';
 
 export type ScreenShareProbe = (page: Page) => Promise<boolean | null>;
 
@@ -68,11 +74,50 @@ const teamsSdkProbe: ScreenShareProbe = async (page: Page) => {
 };
 
 /**
+ * Google Meet: the names and `aria-label`s of the visible tiles, read in the
+ * page and judged here. Null when the page cannot be read, or when no tile is
+ * visible yet (the meeting grid is not drawn), so the previous answer stands.
+ */
+export const meetProbe: ScreenShareProbe = async (page: Page) => {
+    let labels: string[] | null;
+    try {
+        labels = await page.evaluate(
+            (sels: { tile: string; names: readonly string[] }) => {
+                const out: string[] = [];
+                let visible = 0;
+                for (const tile of Array.from(document.querySelectorAll(sels.tile)).slice(0, 49)) {
+                    const r = (tile as HTMLElement).getBoundingClientRect();
+                    if (r.width === 0 || r.height === 0) continue;
+                    visible++;
+                    const own = tile.getAttribute('aria-label');
+                    if (own) out.push(own);
+                    for (const el of Array.from(tile.querySelectorAll('[aria-label]')).slice(0, 50)) {
+                        out.push(el.getAttribute('aria-label') || '');
+                    }
+                    for (const sel of sels.names) {
+                        for (const el of Array.from(tile.querySelectorAll(sel)).slice(0, 5)) {
+                            out.push(el.getAttribute('data-self-name') || el.textContent || '');
+                        }
+                    }
+                }
+                return visible > 0 ? out : null;
+            },
+            { tile: MEET_IN_PAGE_SELECTORS.participantTile, names: MEET_IN_PAGE_SELECTORS.tileName },
+        );
+    } catch {
+        return null;
+    }
+    return labels === null ? null : meetPresentationShown(labels);
+};
+
+/**
  * The probe for a platform and join method, or null when the platform gives
  * no screen-share signal.
  */
 export function screenShareProbeFor(platform: string, teamsMethod?: string): ScreenShareProbe | null {
     switch ((platform || '').toUpperCase()) {
+        case 'GOOGLE_MEET':
+            return meetProbe;
         case 'ZOOM':
             return selectorProbe(SHARE_SELECTORS.ZOOM);
         case 'TEAMS':

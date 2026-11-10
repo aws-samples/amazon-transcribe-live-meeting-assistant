@@ -394,6 +394,24 @@ export function cleanMeetParticipantName(raw: string | null | undefined): string
     return name;
 }
 
+/**
+ * The decorations Meet gives a presentation's tile: "Alice (Presentation)" as
+ * its name, "Alice is presenting" or "Presenting" on the tile.
+ * ASSUMPTION (verify live): these are on the tile's name or an `aria-label`
+ * inside it while someone presents, and on no tile otherwise. The key frame
+ * sampler logs "[Keyframes] Screen share on screen" when they are first seen.
+ */
+const MEET_PRESENTATION_LABEL = /\(\s*presentation\s*\)|\bis presenting\b|^\s*presenting\b/i;
+
+/**
+ * Whether the labels read from the meeting's visible tiles (their names and
+ * the `aria-label`s inside them) show a presentation. The VP never presents,
+ * so a presentation on a tile is somebody else's shared screen.
+ */
+export function meetPresentationShown(labels: readonly (string | null | undefined)[]): boolean {
+    return labels.some((label) => MEET_PRESENTATION_LABEL.test((label || '').replace(/\s+/g, ' ')));
+}
+
 /** How far above a chat message its group's header is looked for (it was two levels up, live). */
 export const MEET_CHAT_HEADER_MAX_LEVELS = 4;
 
