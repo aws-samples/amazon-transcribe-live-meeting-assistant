@@ -1,7 +1,8 @@
 import { KinesisClient, PutRecordCommand } from '@aws-sdk/client-kinesis';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { details } from './details.js';
-import { VoiceLabelNames, buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
+import { buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
+import { SpeakerFusion } from './speaker-fusion.js';
 import { agendaStartFields, type VpAgenda } from './meeting-agenda.js';
 import { createLogger } from './logger.js';
 import { resultLanguageCode } from './transcribe-language.js';
@@ -142,10 +143,11 @@ class KinesisStreamManager {
   // Whether to recover speaker turns from Transcribe's per-item labels. Off
   // unless the deployment's VP voice-separation switch is on.
   private diarize = false;
-  // Which participant each Transcribe voice label is shown under. Labels
-  // restart with every Transcribe session, and each session has its own
-  // timeline offset, so a new offset starts a new map.
-  private voiceLabels = new VoiceLabelNames();
+  // Which participant each Transcribe voice label is attributed to, and so
+  // which rows it names (speaker-fusion.ts). Labels restart with every
+  // Transcribe session, and each session has its own timeline offset, so a
+  // new offset starts a new vote.
+  private voiceLabels = new SpeakerFusion();
   private voiceLabelsOffset: number | null = null;
 
   constructor() {
@@ -453,7 +455,7 @@ class KinesisStreamManager {
   setDiarization(enabled: boolean): void {
     this.diarize = enabled === true;
     // Set once per meeting, so a new meeting starts with no label owners.
-    this.voiceLabels = new VoiceLabelNames();
+    this.voiceLabels = new SpeakerFusion();
     this.voiceLabelsOffset = null;
   }
 
@@ -531,8 +533,9 @@ class KinesisStreamManager {
    *
    * Every word is named after the participant the platform showed for most
    * of the word, and the result is cut where that changes. With voice
-   * separation on, the voice label is kept as a hint under the participant it
-   * mostly coincides with (see VoiceLabelNames).
+   * separation on, a voice label proven to one participant names its whole
+   * run instead, and any other label is kept as a hint under the participant
+   * it mostly coincides with (see speaker-fusion.ts).
    *
    * Segment ids are keyed on Transcribe's own `ResultId` plus the piece
    * index, NOT on the speaker name. That is what keeps a partial aligned with
@@ -548,7 +551,7 @@ class KinesisStreamManager {
     const resultId =
       result.ResultId ?? KinesisStreamManager.fallbackResultId(result, timeOffsetSeconds);
     if (this.voiceLabelsOffset !== timeOffsetSeconds) {
-      this.voiceLabels = new VoiceLabelNames();
+      this.voiceLabels = new SpeakerFusion();
       this.voiceLabelsOffset = timeOffsetSeconds;
     }
     const labels = this.voiceLabels;
@@ -556,11 +559,20 @@ class KinesisStreamManager {
       resultId,
       timeOffsetSeconds,
       rosterNameFor: (start, end) => this.rosterLookup?.(start, end) ?? speakerName,
+      // Each piece's display only: its evidence was counted once, for the whole
+      // run, by voiceName below.
       nameFor: this.diarize
-        ? (roster, label, seconds) => labels.nameFor(roster, label, seconds)
+        ? (roster, label) => labels.attribute({ label, pageName: roster }).speaker
         : (roster) => roster,
       isPartial: KinesisStreamManager.isPartialResult(result),
       useLabels: this.diarize,
+      voiceName: this.diarize
+        ? (label, evidence) => {
+            const leading = evidence.reduce((best, entry) => (entry[1] > best[1] ? entry : best), evidence[0]);
+            const attribution = labels.attribute({ label, pageName: leading?.[0] ?? speakerName, coverage: evidence });
+            return attribution.source === 'page' ? undefined : attribution.speaker;
+          }
+        : undefined,
     });
 
     if (diagnosticsOn()) {

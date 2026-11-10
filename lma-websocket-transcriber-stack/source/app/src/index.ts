@@ -54,6 +54,7 @@ import {
 import { buildLoggerOptions } from './utils/logger-options';
 import { s3RecordingStore, uploadRecording } from './utils/recording-upload';
 import { SessionLifecycle, parseReconnectGraceMs, recordedAudioSeconds } from './calleventdata/session-lifecycle';
+import { pageSpeakersFor } from './calleventdata/speaker-fusion';
 import { bindLogContext, runWithLogContext, LogContext } from './utils/log-context';
 
 import { jwtVerifier, getAuthenticatedCaller } from './utils/jwt-verifier';
@@ -814,6 +815,13 @@ const onTextMessage = async (
                 );
                 // set active speaker in the socketData structure being used by startTranscribe results loop.
                 socketData.callMetadata.activeSpeaker = callMetaData.activeSpeaker;
+                // And where on the meeting's audio clock the page reported it, so a
+                // meeting-audio row is named after who was shown during its audio
+                // rather than when it was written (calleventdata/speaker-fusion.ts).
+                pageSpeakersFor(socketData.callMetadata).record(
+                    recordedAudioSeconds(socketData),
+                    callMetaData.activeSpeaker
+                );
             } else {
                 server.log.debug(
                     `[${callMetaData.callEvent}]: [${callMetaData.callId}] - active speaker '${activeSpeaker}' not assigned to meeting channel (ch_0) as name matches mic channel (ch_1) speaker '${mic_channel_speaker}'`

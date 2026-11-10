@@ -21,7 +21,8 @@ import WebSocket from 'ws';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 
 import { AsrRuntimeConfig } from './asr-config';
-import { CallMetaData, SocketCallData } from './eventtypes';
+import { CHANNEL_SYSTEM, CallMetaData, SocketCallData } from './eventtypes';
+import { pageSpeakersFor } from './speaker-fusion';
 import { TranscriptSegmentRecord, diarizationSettingsFor, writeSegmentToKds } from './transcribe';
 import { TranscriptionSettings, getSessionSettings } from './session-settings';
 import { parseBundleLanguages, transcribeOnlyOptions } from '../config/configuration-store';
@@ -838,11 +839,21 @@ export class AsrChannelSession {
         // SegmentId deliberately excludes the speaker: a partial's provisional
         // speaker can be corrected by its final, and both must land on one row.
         const segmentId = `${this.channelId}-${this.runTag}-g${this.generation}-s${message.segment ?? 0}`;
-        const speaker = this.registry.nameFor(
-            this.channelId,
-            message.speaker,
-            this.channelName()
-        );
+        // The meeting audio is named after who the page showed during the row,
+        // or the attendee its voice has been proven to (speaker-fusion.ts); the
+        // microphone is the user's own, and the page says nothing about it.
+        const speaker =
+            this.channelId === CHANNEL_SYSTEM
+                ? pageSpeakersFor(this.socketData.callMetadata).nameRow({
+                    session: `${this.runTag}-g${this.generation}`,
+                    label: message.speaker,
+                    startTime: start,
+                    endTime: end,
+                    isPartial,
+                    fallbackName: this.channelName(),
+                    rowId: segmentId,
+                }).speaker
+                : this.registry.nameFor(this.channelId, message.speaker, this.channelName());
 
         this.writes = this.writes
             .then(async () => {

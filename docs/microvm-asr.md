@@ -449,7 +449,7 @@ on the page rather than in the DynamoDB console.
 |---|---|---|
 | Stream Audio, Chrome extension and Desktop Capture: engine | ASR MicroVM engine | Which engine those meetings use |
 | Virtual Participants: engine | ASR MicroVM engine | Which engine Virtual Participants use |
-| Virtual Participant voice separation | off | A VP asks for per-voice labels so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. Honoured on **both** engines: the on-demand engine separates voices itself, and on Amazon Transcribe the VP recovers the turns from Transcribe's own per-item speaker labels. A VP already names speakers from the meeting roster, which is the better label for a normal attendee, hence off. Measured on four voices mixed onto one channel, the on-demand engine gave 3 labels at 79% purity against Amazon Transcribe's 2 at 57%, so prefer this engine for conference rooms. The voice assistant's own speech is never diarized on either engine, because it is transcribed on its own channel |
+| Virtual Participant voice separation | off | A VP asks for per-voice labels so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. Honoured on **both** engines: the on-demand engine separates voices itself, and on Amazon Transcribe the VP recovers the turns from Transcribe's own per-item speaker labels. With it on, the VP also uses each voice to correct the roster name once the voice has been heard long enough alongside one attendee (see [Naming rows from the voice as well](virtual-participant.md#naming-rows-from-the-voice-as-well)); on a measured two-person Zoom meeting that cut wrongly named rows from 10 to 6 of 415. Off by default because that is one meeting on one platform, and because a person the engine splits into two voices can then be shown as **Several people** on the Speakers panel. Measured on four voices mixed onto one channel, the on-demand engine gave 3 labels at 79% purity against Amazon Transcribe's 2 at 57%, so prefer this engine for conference rooms, and for the voice correction, which acts only on a voice that is at least 70% one attendee. The voice assistant's own speech is never diarized on either engine, because it is transcribed on its own channel |
 
 There is deliberately nothing else. The similarity threshold, minimum utterance
 length, turn-cut behaviour and speaker cap that earlier versions exposed here are the
@@ -833,12 +833,20 @@ engine-independent, so it reads the same whether these labels came from here or 
 Amazon Transcribe.
 
 **A Virtual Participant with its voice assistant runs two sessions**, like Stream Audio's
-two channels: meeting audio on `REMOTE`, named after the attendee the platform showed
-for most of the row (see
-[How Speaker Names Are Assigned](virtual-participant.md#how-speaker-names-are-assigned))
-and suffixed with the voice id when voice separation is on, and the assistant's own voice
-on `LOCAL` under the VP's name, never diarized. Wake phrases are detected on meeting rows
+two channels. Meeting audio is on `REMOTE`, and the assistant's own voice is on
+`LOCAL` under the VP's name, never diarized. Wake phrases are detected on meeting rows
 only, so the assistant cannot wake itself.
+
+**A Virtual Participant or Chrome extension meeting-audio row is named from the
+meeting page as well as the voice.** Both read the meeting page's active speaker. A
+row is named after the attendee the page showed for most of the row's audio. With
+voice ids on, once a voice has been heard long enough alongside one attendee, it is
+named after that attendee instead, and its voice id appears only under that
+attendee's name. The rules, their thresholds and what they did on a measured meeting
+are in [Naming rows from the voice as well](virtual-participant.md#naming-rows-from-the-voice-as-well);
+the extension's version is described in
+[How meeting speakers are named](browser-extension.md#how-meeting-speakers-are-named).
+A channel with no page to read, such as Stream Audio's, keeps the format above.
 
 ## Known limitations
 

@@ -38,12 +38,14 @@ import {
 import { transcriptChannelFor } from './channels';
 import type { CaptureContext, TranscriptionContext } from './capture-context';
 import { DEFAULT_REMOTE_SPEAKER_NAME, DEFAULT_SYSTEM_LABEL } from './speaker-fields';
+import { pageSpeakersFor } from './speaker-fusion';
 
 import {
     DEFAULT_MAX_SEGMENT_SECONDS,
     DEFAULT_MIN_RUN_SECONDS,
     DEFAULT_MIN_RUN_WORDS,
     RunThresholds,
+    SpeakerRun,
     anyChannelDiarized,
     appendSpeakerLabel,
     buildSpeakerRuns,
@@ -829,6 +831,21 @@ function buildDiarizedSegments(
     const selection = selectEmittableWindows(windows, isPartial, progress.settledEmitted);
     progress.settledEmitted = selection.settledEmitted;
     const segments: Record<string, Segment> = {};
+    // The meeting audio is named after who the page showed during each turn, or
+    // the attendee its voice has been proven to (speaker-fusion.ts). Labels
+    // restart with each Transcribe session, and each has its own offset.
+    const pageSpeakers = channelId === CHANNEL_SYSTEM ? pageSpeakersFor(callMetadata) : undefined;
+    const speakerOf = (run: SpeakerRun): string =>
+        pageSpeakers === undefined
+            ? appendSpeakerLabel(speakerName, run.label)
+            : pageSpeakers.nameRow({
+                session: `transcribe-${timeOffsetSeconds}`,
+                label: run.label,
+                startTime: run.startTime + timeOffsetSeconds,
+                endTime: run.endTime + timeOffsetSeconds,
+                isPartial,
+                fallbackName: speakerName,
+            }).speaker;
     for (const window of selection.emit) {
         window.runs.forEach((run, runIndex) => {
             // Window and run index both derive from item timestamps, so a given
@@ -836,7 +853,7 @@ function buildDiarizedSegments(
             const segmentId = `${resultId}-${channelId}-w${window.index}-r${runIndex}`;
             segments[segmentId] = {
                 SegmentId: segmentId,
-                Speaker: appendSpeakerLabel(speakerName, run.label),
+                Speaker: speakerOf(run),
                 StartTime: run.startTime + timeOffsetSeconds,
                 EndTime: run.endTime + timeOffsetSeconds,
                 Transcript: runTranscript(run),

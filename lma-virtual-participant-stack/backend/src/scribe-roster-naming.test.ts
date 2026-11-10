@@ -238,6 +238,33 @@ describe('rows from the Zoom standup', () => {
         assert.deepEqual(rows, ['Conference Room (spk_0)', 'Conference Room (spk_1)', 'Conference Room (spk_0)']);
     });
 
+    it("keep a proven voice's turn whole when the platform flickers to someone else under it", async () => {
+        await reportAt(0, 'Sam Lee');
+        // 22.5 s of Sam on one voice proves it.
+        for (let k = 0; k < 5; k += 1) {
+            await emit(finalResult(`p${k}`, 'one two three four five six', k * 5, k * 5 + 4.5, '1'));
+        }
+        // The speaker view shows Ana for 2.7 s in the middle of Sam's next turn.
+        await reportAt(30.5, 'Ana Ruiz');
+        await reportAt(33.2, 'Sam Lee');
+        const text = 'so the build is green and we can ship it today';
+        assert.deepEqual(await emit(finalResult('p5', text, 30, 34, '1')), [['Sam Lee (spk_1)', text]]);
+    });
+
+    it('cut an unproven voice where the platform changes, as before', async () => {
+        await reportAt(0, 'Sam Lee');
+        await reportAt(30.5, 'Ana Ruiz');
+        await reportAt(33.2, 'Sam Lee');
+        const rows = await emit(finalResult('q1', 'so the build is green and we can ship it today', 30, 34, '1'));
+        // With nothing proven, the platform names each piece. The voice id
+        // goes only with Ana, who was shown for most of the voice's speech,
+        // so it is never written under two names.
+        assert.deepEqual(
+            rows.map(([speaker]) => speaker),
+            ['Sam Lee', 'Ana Ruiz (spk_1)', 'Sam Lee'],
+        );
+    });
+
     it('are named by the platform alone when voice separation is off', async () => {
         writer.setDiarization(false);
         await reportAt(7.3, 'Sam Lee');
