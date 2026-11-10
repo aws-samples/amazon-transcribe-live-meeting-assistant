@@ -84,6 +84,9 @@ export const mergeCallUpdate = (existing, call) => ({
   TranscriptionEngine: call.TranscriptionEngine || existing?.TranscriptionEngine,
   TranscriptionLanguage: call.TranscriptionLanguage ?? existing?.TranscriptionLanguage,
   SpeakerSeparation: call.SpeakerSeparation || existing?.SpeakerSeparation,
+  // Selected by getCall and the Kinesis pipeline's writes, not by the list query
+  // or the writes made from the page.
+  DetectedLanguages: call.DetectedLanguages ?? existing?.DetectedLanguages,
   ...(call.AgendaUpdatedAt
     ? {}
     : {
@@ -129,6 +132,7 @@ export const mapTranscriptSegmentValue = (transcriptSegmentValue) => {
     Sentiment: sentiment,
     SentimentScore: sentimentScore,
     SentimentWeighted: sentimentWeighted,
+    LanguageCode: languageCode,
   } = transcriptSegmentValue;
 
   return {
@@ -146,6 +150,9 @@ export const mapTranscriptSegmentValue = (transcriptSegmentValue) => {
     sentiment,
     sentimentScore,
     sentimentWeighted,
+    // The language the speech engine identified, when it named one (see
+    // common/detected-languages.js); absent otherwise.
+    ...(languageCode ? { languageCode } : {}),
   };
 };
 

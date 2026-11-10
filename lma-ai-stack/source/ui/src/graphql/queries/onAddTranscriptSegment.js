@@ -18,6 +18,7 @@ export default /* GraphQL */ `
       Transcript
       IsPartial
       Channel
+      LanguageCode
       Owner
       SharedWith
       Sentiment

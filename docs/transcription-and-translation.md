@@ -16,6 +16,7 @@ title: "Transcription & Translation"
   - [Automatic Single Language Identification](#automatic-single-language-identification)
   - [Automatic Multi-Language Identification](#automatic-multi-language-identification)
   - [Setting the Language](#setting-the-language)
+  - [Detected languages](#detected-languages)
 - [Live Translation](#live-translation)
 - [Content Redaction (PII)](#content-redaction-pii)
 - [Custom Vocabulary](#custom-vocabulary)
@@ -342,6 +343,37 @@ Select this option when participants may switch between languages during a singl
 ### Setting the Language
 
 Configure the language mode using the **Language for Transcription** CloudFormation parameter when deploying or updating the LMA stack.
+
+### Detected languages
+
+With either identification mode, Amazon Transcribe names the language of each
+result it returns, and LMA keeps it with the transcript:
+
+- Each transcript segment stores the language it was identified in as
+  `LanguageCode` (for example `es-US`). The WebSocket transcriber (Stream Audio,
+  the browser extension and the desktop apps) and the Virtual Participant both
+  pass it on, on the meeting channel and on the voice assistant's channel; it is
+  part of the `ADD_TRANSCRIPT_SEGMENT` event, the `TranscriptSegment` type of
+  the GraphQL API and the `onAddTranscriptSegment` subscription.
+- The meeting record lists the languages heard as `DetectedLanguages`, in the
+  order each was first heard. The call event processor adds a language the first
+  time a segment arrives in it, with one conditional write per language rather
+  than per segment.
+- The meeting page names the detected languages on the **Details** tab, beside
+  the language setting, and, when there is more than one, marks each line of the
+  transcript with a short language code whose tooltip names the language (see
+  [Transcript tab](web-ui-guide.md#transcript-tab)). The transcript downloads
+  carry the same codes.
+
+A meeting transcribed in one fixed language has no detected languages: Amazon
+Transcribe names a language only when it identifies one, and the configured
+language is already shown as **Transcription language**. The ASR MicroVM engine
+reports no language either (see [MicroVM ASR](microvm-asr.md)). Upload Audio
+runs its Amazon Transcribe batch jobs in one fixed language, so an uploaded
+recording has none today; a batch transcript that names a language per word, as
+one from multiple-language identification does, gives each segment the language
+most of its words were identified in. Segments stored before this was recorded
+carry no language.
 
 ## Live Translation
 

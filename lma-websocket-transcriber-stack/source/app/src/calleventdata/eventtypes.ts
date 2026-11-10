@@ -100,6 +100,12 @@ export type AddTranscriptSegmentEvent = CallEventBase<'ADD_TRANSCRIPT_SEGMENT'> 
     Sentiment?: string,
     TranscriptEvent?: TranscriptEvent,
     Speaker: string,
+    /**
+     * The language Amazon Transcribe identified for the result the segment came
+     * from (e.g. `es-US`), when language identification is on. Absent with a
+     * fixed language and on the MicroVM engine, which reports none.
+     */
+    LanguageCode?: string,
     AccessToken?: string,
     IdToken?: string,
     RefreshToken?: string,

@@ -34,6 +34,20 @@ def _summary_state(schema: DSLSchema) -> Tuple[DSLField, ...]:
     return ()
 
 
+def _detected_languages(schema: DSLSchema) -> Tuple[DSLField, ...]:
+    """Call.DetectedLanguages, when the schema the API is running declares it.
+
+    Selected so that getCall returns it to the call event processor, which adds
+    a language only when the meeting does not list it yet, and so that every
+    write published to onUpdateCall carries the stored list. Conditional for the
+    reason _summary_state is.
+    """
+    # pylint: disable-next=protected-access
+    if "DetectedLanguages" in schema.Call._type.fields:
+        return (schema.Call.DetectedLanguages,)
+    return ()
+
+
 def call_fields(schema: DSLSchema) -> Tuple[DSLField, ...]:
     """Call type field selector"""
     overall_sentiment_select = schema.SentimentAggregation.OverallSentiment.select(
@@ -64,6 +78,7 @@ def call_fields(schema: DSLSchema) -> Tuple[DSLField, ...]:
         schema.Call.AgentId,
         schema.Call.CallSummaryText,
         *_summary_state(schema),
+        *_detected_languages(schema),
         schema.Call.CustomerPhoneNumber,
         schema.Call.SystemPhoneNumber,
         schema.Call.RecordingUrl,

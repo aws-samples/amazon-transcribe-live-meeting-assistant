@@ -976,7 +976,20 @@ export interface TranscriptSegmentRecord {
     Transcript: string;
     IsPartial: boolean;
     Speaker: string;
+    /** The identified language of the result the segment came from; see AddTranscriptSegmentEvent. */
+    LanguageCode?: string;
 }
+
+/**
+ * The language Amazon Transcribe identified for a result, or undefined when it
+ * names none. A result carries `LanguageCode` only when the stream asked for
+ * language identification (identify-language or identify-multiple-languages);
+ * with a fixed language it is absent, and so is the field on the segment.
+ */
+export const resultLanguageCode = (result: Pick<Result, 'LanguageCode'>): string | undefined => {
+    const code = typeof result.LanguageCode === 'string' ? result.LanguageCode.trim() : '';
+    return code || undefined;
+};
 
 // Shared by every transcription engine (Amazon Transcribe and the MicroVM ASR),
 // so both produce identical ADD_TRANSCRIPT_SEGMENT records downstream.
@@ -1000,6 +1013,9 @@ export const writeSegmentToKds = async (
         Sentiment: undefined,
         TranscriptEvent: undefined,
         Speaker: segment.Speaker,
+        // Left out rather than null when unknown, so a record from a meeting
+        // with a fixed language is the same as before.
+        ...(segment.LanguageCode ? { LanguageCode: segment.LanguageCode } : {}),
         AccessToken: callMetadata.accessToken,
         IdToken: callMetadata.idToken,
         RefreshToken: callMetadata.refreshToken,
@@ -1173,6 +1189,7 @@ export const writeTranscriptionSegment = async function (
                 result.ChannelId === CHANNEL_SYSTEM
                     ? callMetadata.activeSpeaker
                     : callMetadata?.agentId ?? 'n/a';
+            const languageCode = resultLanguageCode(result);
             const segments = processTranscriptionResults(
                 speakerName,
                 result,
@@ -1199,6 +1216,8 @@ export const writeTranscriptionSegment = async function (
                         // Already carries any `(spk_N)` suffix — see
                         // buildDiarizedSegments.
                         Speaker: segment.Speaker,
+                        // Every segment of a result is in the result's language.
+                        LanguageCode: languageCode,
                     },
                     callMetadata,
                     server

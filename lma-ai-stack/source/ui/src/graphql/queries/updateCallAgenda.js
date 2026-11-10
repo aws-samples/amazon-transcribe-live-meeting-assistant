@@ -36,6 +36,7 @@ export default /* GraphQL */ `
       Owner
       SharedWith
       TotalConversationDurationMillis
+      DetectedLanguages
       Sentiment {
         OverallSentiment {
           REMOTE

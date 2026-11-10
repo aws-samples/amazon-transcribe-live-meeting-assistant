@@ -7453,6 +7453,17 @@ Resources:
       RequestMappingTemplateS3Location: ../source/appsync/updateCall.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
 
+  AddCallDetectedLanguageAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Mutation
+      FieldName: addCallDetectedLanguage
+      RequestMappingTemplateS3Location: ../source/appsync/addCallDetectedLanguage.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
   UpdateAgentAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema

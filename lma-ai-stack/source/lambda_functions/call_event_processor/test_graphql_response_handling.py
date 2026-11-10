@@ -1939,3 +1939,121 @@ def test_the_shared_update_template_writes_no_blank_value():
     """What a failed summary's write relies on to leave the stored text alone."""
     template = (SOURCE / "appsync" / "updateCall.request.vtl").read_text(encoding="utf-8")
     assert "!$util.isNullOrBlank($entry.value)" in template
+
+
+# ── the language of each segment, and the meeting's detected languages ──────
+
+
+@pytest.fixture
+def noted_languages(monkeypatch) -> Dict[str, set]:
+    """A fresh record of the languages this environment has written per meeting."""
+    noted: Dict[str, set] = {}
+    monkeypatch.setattr(cep, "DETECTED_LANGUAGES_NOTED", noted)
+    return noted
+
+
+class LanguageWriteSession(QueuedSession):
+    """A segment-path session whose addCallDetectedLanguage writes fail with ``error``."""
+
+    def __init__(self, schema: Any, meeting: Dict[str, Any], error: Exception) -> None:
+        super().__init__(
+            schema,
+            [
+                meeting,
+                SENTIMENT_RESPONSES["populated"],
+                {"addTranscriptSegment": {"CallId": "call-1", "SegmentId": "s1"}},
+            ],
+        )
+        self.error = error
+
+    async def execute(self, query: Any) -> Any:
+        if "addCallDetectedLanguage" in print_ast(query):
+            self.queries.append(query)
+            raise self.error
+        return await super().execute(query)
+
+
+def test_a_segment_is_stored_with_the_language_it_was_identified_in(
+    schema, emitted, noted_languages, monkeypatch
+):
+    session = segment_session(schema, _meeting_record())
+    process_event(session, {**SEGMENT_EVENT, "LanguageCode": "es-US"}, monkeypatch)
+    (written,) = mutation_inputs(session, "addTranscriptSegment")
+    assert written["LanguageCode"] == "es-US"
+
+
+def test_a_segment_without_a_language_is_stored_without_one_and_adds_none(
+    schema, emitted, noted_languages, monkeypatch
+):
+    session = segment_session(schema, _meeting_record())
+    process_event(session, dict(SEGMENT_EVENT), monkeypatch)
+    (written,) = mutation_inputs(session, "addTranscriptSegment")
+    assert "LanguageCode" not in written
+    assert mutation_inputs(session, "addCallDetectedLanguage") == []
+
+
+def test_the_meetings_detected_languages_are_written_once_per_new_language(
+    schema, emitted, noted_languages, monkeypatch
+):
+    """The record getCall returns can predate this environment's own write, as it
+    does here: every read answers with no languages listed. Only the first segment
+    in each language writes; the rest of the meeting's segments do not."""
+    writes: List[Dict[str, Any]] = []
+    for language in ("en-US", "en-US", "es-US", "en-US", "es-US"):
+        session = segment_session(schema, _meeting_record())
+        process_event(session, {**SEGMENT_EVENT, "LanguageCode": language}, monkeypatch)
+        writes.extend(mutation_inputs(session, "addCallDetectedLanguage"))
+    assert writes == [
+        {"CallId": "call-1", "LanguageCode": "en-US"},
+        {"CallId": "call-1", "LanguageCode": "es-US"},
+    ]
+
+
+def test_a_language_the_meeting_already_lists_is_not_written_again(
+    schema, emitted, noted_languages, monkeypatch
+):
+    """A language another environment added reaches this one through getCall."""
+    session = segment_session(schema, _meeting_record(DetectedLanguages=["en-US", "es-US"]))
+    process_event(session, {**SEGMENT_EVENT, "LanguageCode": "es-US"}, monkeypatch)
+    assert mutation_inputs(session, "addCallDetectedLanguage") == []
+    assert mutation_inputs(session, "addTranscriptSegment")[0]["LanguageCode"] == "es-US"
+
+
+def test_a_language_already_listed_by_the_time_it_is_written_is_taken_as_done(
+    schema, emitted, noted_languages, monkeypatch
+):
+    """The write's condition fails for a language another environment added in
+    the meantime; that is the outcome wanted, so nothing is retried later."""
+    rejected = TransportQueryError(
+        "item put condition failure", errors=[{"message": "item put condition failure"}]
+    )
+    session = LanguageWriteSession(schema, _meeting_record(), rejected)
+    process_event(session, {**SEGMENT_EVENT, "LanguageCode": "fr-FR"}, monkeypatch)
+    assert emitted.counts.get(metric_names.TRANSCRIPT_SEGMENTS_WRITTEN) == 1
+    assert noted_languages == {"call-1": {"fr-FR"}}
+    assert not cep.LOGGER.at_level("WARNING")
+
+
+def test_a_failed_language_write_keeps_the_segment_and_is_tried_again(
+    schema, emitted, noted_languages, monkeypatch
+):
+    failure = TransportQueryError("throttled", errors=[{"message": "throttled"}])
+    session = LanguageWriteSession(schema, _meeting_record(), failure)
+    process_event(session, {**SEGMENT_EVENT, "LanguageCode": "fr-FR"}, monkeypatch)
+    assert emitted.counts.get(metric_names.TRANSCRIPT_SEGMENTS_WRITTEN) == 1
+    assert metric_names.TRANSCRIPT_SEGMENT_WRITE_FAILED not in emitted.counts
+    assert noted_languages.get("call-1") == set()
+    assert any("could not add detected language" in m for m in cep.LOGGER.at_level("WARNING"))
+
+    retry = segment_session(schema, _meeting_record())
+    process_event(retry, {**SEGMENT_EVENT, "LanguageCode": "fr-FR"}, monkeypatch)
+    assert mutation_inputs(retry, "addCallDetectedLanguage") == [
+        {"CallId": "call-1", "LanguageCode": "fr-FR"}
+    ]
+
+
+def test_get_call_details_returns_the_meetings_detected_languages(schema):
+    session = FakeSession(schema, _meeting_record(DetectedLanguages=["en-US"]))
+    details = run(cep.get_call_details(message={"CallId": "call-1"}, appsync_session=session))
+    assert details["DetectedLanguages"] == ["en-US"]
+    assert "DetectedLanguages" in print_ast(session.queries[0])
