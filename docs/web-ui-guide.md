@@ -396,8 +396,9 @@ pass over chat messages, since they were typed rather than heard.
   name goes back to *Voice N*; **More options** opens the speaker's dialog. The
   same toggle is beside the name in the Speakers panel. LMA picks a default for
   each name — several people for a
-  room or a room device, or when two voices each spoke at length, one person
-  otherwise — so the toggle is only needed where that guess is wrong; see
+  room or a room device, or when its voices were given different names, and one
+  person otherwise, however many voices it has — so the toggle is only needed
+  where that guess is wrong; see
   [One person or several people](transcription-and-translation.md#one-person-or-several-people).
   The choice is saved with the meeting and applies to the downloads, the summary
   and the Meeting Assistant too. It can be changed by the same people who can
@@ -673,7 +674,7 @@ each edited one section of the configuration. They are now sections of the
 |---|---|
 | `/#/configuration/nova-sonic` | The **Nova Sonic Voice Assistant** section. See [Nova Sonic 2 Setup](nova-sonic-setup.md) |
 | `/#/configuration/transcript-summary` | The **Transcript Summary** section. See [Transcript Summarization](transcript-summarization.md) |
-| `/#/configuration/asr` | The **Transcription Engine** section. Its engine choices (the ASR MicroVM engine by default, or Amazon Transcribe) are shown only when the ASR MicroVM engine is deployed (`EnableMicrovmAsr=true`, the default, in a Region with AWS Lambda MicroVMs); Virtual Participant voice separation is shown on every deployment. See [MicroVM ASR](microvm-asr.md) |
+| `/#/configuration/asr` | The **Transcription Engine** section. Its engine choices (the ASR MicroVM engine by default, or Amazon Transcribe) are shown only when the ASR MicroVM engine is deployed (`EnableMicrovmAsr=true`, the default, in a Region with AWS Lambda MicroVMs); Virtual Participant voice separation, on by default, is shown on every deployment. See [MicroVM ASR](microvm-asr.md) |
 
 ### User Management
 

@@ -47,7 +47,49 @@ def _segments(case):
 def test_unresolved_voices_match_the_shared_table(case) -> None:
     identities = pure.parse_identities(json.dumps(case.get("identities") or {}))
     turns = pure.build_turns(_segments(case))
-    assert sorted(pure.unresolved_voices(turns, identities, turns)) == case["keys"]
+    capture_source = case.get("captureSource")
+    assert sorted(pure.unresolved_voices(turns, identities, turns, capture_source)) == case["keys"]
+
+
+def test_a_virtual_participant_meeting_has_no_channel_labels() -> None:
+    """One roster name with two voices is a channel label only without a VP record."""
+    turns = pure.build_turns(
+        _segments(
+            {
+                "segments": [
+                    {"channel": "REMOTE", "speaker": "Bob (spk_0)", "start": 0, "transcript": "a"},
+                    {"channel": "REMOTE", "speaker": "Bob (spk_1)", "start": 5, "transcript": "b"},
+                ]
+            }
+        )
+    )
+    assert pure.channel_label_bases(turns) == {("REMOTE", "Bob")}
+    assert pure.channel_label_bases(turns, "STREAM_AUDIO") == {("REMOTE", "Bob")}
+    assert pure.channel_label_bases(turns, "VIRTUAL_PARTICIPANT") == set()
+    assert pure.channel_label_bases(turns, " virtual_participant ") == set()
+
+
+def test_a_virtual_participant_attendee_split_in_two_costs_no_model_call() -> None:
+    turns = pure.build_turns(
+        _segments(
+            {
+                "segments": [
+                    {
+                        "channel": "REMOTE",
+                        "speaker": "Bob (spk_0)",
+                        "start": 0,
+                        "transcript": "Hi, I'm Bob",
+                    },
+                    {"channel": "REMOTE", "speaker": "Bob (spk_1)", "start": 5, "transcript": "ok"},
+                ]
+            }
+        )
+    )
+    identities = pure.parse_identities("{}")
+    assert pure.worth_a_model_call(turns, identities, force=True, all_turns=turns)
+    assert not pure.worth_a_model_call(
+        turns, identities, force=True, all_turns=turns, capture_source="VIRTUAL_PARTICIPANT"
+    )
 
 
 def test_a_pass_keeps_the_sections_it_does_not_work_on() -> None:

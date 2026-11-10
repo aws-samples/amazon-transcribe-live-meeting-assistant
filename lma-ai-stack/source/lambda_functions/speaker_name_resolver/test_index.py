@@ -419,6 +419,33 @@ def test_platform_names_with_voice_labels_are_already_named(monkeypatch) -> None
     assert bedrock.prompts == [] and written == []
 
 
+ONE_ATTENDEE_SPLIT = [
+    segment_row("Bob Strahan (spk_0)", 0, "Hi, I'm Bob"),
+    segment_row("Bob Strahan (spk_1)", 5, "anyway, thanks Jeremy"),
+]
+
+
+def test_a_vp_meeting_with_one_attendee_in_two_voices_is_already_named(monkeypatch) -> None:
+    """The meeting record's CaptureSource says the names are roster names, so one
+    attendee split into two voices is not a channel label: no model call, even
+    on the end-of-meeting or button pass."""
+    vp_meeting = {**MEETING_ROW, "CaptureSource": {"S": "VIRTUAL_PARTICIPANT"}}
+    _, bedrock, written = install(monkeypatch, meeting=vp_meeting, segments=ONE_ATTENDEE_SPLIT)
+    result = index.handler(browser_pass(force=True), None)
+    assert result["Reason"] == "ALREADY_NAMED"
+    assert bedrock.prompts == [] and written == []
+
+
+def test_a_meeting_with_no_capture_source_keeps_the_structural_rule(monkeypatch) -> None:
+    """A meeting recorded before CaptureSource existed: one name with two voices
+    is read as the channel's label, as it always was, and a pass runs."""
+    assert "CaptureSource" not in MEETING_ROW
+    _, bedrock, _ = install(monkeypatch, segments=ONE_ATTENDEE_SPLIT)
+    result = index.handler(browser_pass(force=True), None)
+    assert result["Reason"] != "ALREADY_NAMED"
+    assert len(bedrock.prompts) == 1
+
+
 def test_already_named_is_answered_before_the_cooldown(monkeypatch) -> None:
     """A pass inside the cooldown still learns that nothing is left to name, so
     the panel can stop asking instead of retrying after the cooldown."""

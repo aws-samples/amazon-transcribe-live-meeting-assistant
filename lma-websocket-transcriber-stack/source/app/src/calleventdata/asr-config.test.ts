@@ -258,6 +258,24 @@ test('no table named at all gives the defaults without a read', async () => {
     const config = await getAsrRuntimeConfig(fakeServer);
     restore();
 
-    assert.deepEqual(config, SHIPPED);
+    // Amazon Transcribe, with the Virtual Participant's voice separation on as
+    // in the shipped baseline.
+    assert.deepEqual(config, {
+        streamingEngineMicrovm: false,
+        virtualParticipantEngineMicrovm: false,
+        diarizeVirtualParticipant: true,
+    });
     assert.deepEqual(reads, { configuration: 0, legacy: 0 });
+});
+
+test('a saved choice of no voice separation in the previous table wins over the default', async () => {
+    withTables('', 'asr-config-test');
+    const { restore } = stubDynamo(undefined, {
+        AsrConfigId: { S: 'CustomAsrConfig' },
+        diarizeVirtualParticipant: { BOOL: false },
+    });
+    const config = await getAsrRuntimeConfig(fakeServer);
+    restore();
+
+    assert.equal(config.diarizeVirtualParticipant, false);
 });

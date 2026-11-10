@@ -1462,12 +1462,12 @@ def test_a_chosen_mode_outranks_the_default(monkeypatch) -> None:
 
 
 def test_a_key_frames_speech_is_named_from_the_whole_meeting(monkeypatch) -> None:
-    """A frame's excerpt holds one voice of two; it is still named as one of two."""
+    """A frame's excerpt holds one voice of a room's two; it is still numbered as the second."""
     install(
         monkeypatch,
         items=[
-            segment("first", 90, speaker="Jo (spk_0)", StartTime=Decimal("0")),
-            segment("second", 200, speaker="Jo (spk_1)", StartTime=Decimal("90")),
+            segment("first", 90, speaker="Room 4 (spk_0)", StartTime=Decimal("0")),
+            segment("second", 200, speaker="Room 4 (spk_1)", StartTime=Decimal("90")),
         ],
     )
     monkeypatch.setattr(
@@ -1476,5 +1476,5 @@ def test_a_key_frames_speech_is_named_from_the_whole_meeting(monkeypatch) -> Non
     response = index.lambda_handler(
         {"CallId": CALL_ID, "IncludeSpeaker": True, "IncludeKeyframes": True}, None
     )
-    assert response["keyframes"][0]["Said"] == "Jo · Voice 2: second"
-    assert response["transcript"] == "\nJo · Voice 1: first\nJo · Voice 2: second"
+    assert response["keyframes"][0]["Said"] == "Room 4 · Voice 2: second"
+    assert response["transcript"] == "\nRoom 4 · Voice 1: first\nRoom 4 · Voice 2: second"

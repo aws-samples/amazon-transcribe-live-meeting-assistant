@@ -40,7 +40,7 @@ const recordingServer = () => {
 const SHIPPED_DEFAULT: AsrRuntimeConfig = {
     streamingEngineMicrovm: true,
     virtualParticipantEngineMicrovm: true,
-    diarizeVirtualParticipant: false,
+    diarizeVirtualParticipant: true,
 };
 
 const PLAIN: TranscriptionSettings = {

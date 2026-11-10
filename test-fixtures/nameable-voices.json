@@ -1,5 +1,5 @@
 {
-  "description": "Which voices in a transcript are still waiting for a name: what the speaker-name resolver works on (unresolved_voices in lma-ai-stack/source/lambda_functions/speaker_name_resolver/pure.py, which answers ALREADY_NAMED when there are none) and what the Speakers panel counts before it runs automatic passes (nameableVoiceKeys in lma-ai-stack/source/ui/src/components/common/speaker-identities.js). Both are tested against this table so they cannot drift apart: when they disagree, the panel keeps asking for passes the resolver will never run. `keys` is the expected set of voice keys, sorted.",
+  "description": "Which voices in a transcript are still waiting for a name: what the speaker-name resolver works on (unresolved_voices in lma-ai-stack/source/lambda_functions/speaker_name_resolver/pure.py, which answers ALREADY_NAMED when there are none) and what the Speakers panel counts before it runs automatic passes (nameableVoiceKeys in lma-ai-stack/source/ui/src/components/common/speaker-identities.js). Both are tested against this table so they cannot drift apart: when they disagree, the panel keeps asking for passes the resolver will never run. `keys` is the expected set of voice keys, sorted. `captureSource`, when present, is the meeting record's CaptureSource: a Virtual Participant meeting has no channel labels, because its names are meeting-roster names.",
   "cases": [
     {
       "name": "platform names with voice labels are already named",
@@ -124,6 +124,41 @@
         {"channel": "AGENT_ASSISTANT", "speaker": "Other Participant (spk_1)", "start": 5, "transcript": "Hello"}
       ],
       "keys": []
+    },
+    {
+      "name": "a Virtual Participant meeting's one attendee split into two voices is already named",
+      "captureSource": "VIRTUAL_PARTICIPANT",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_0)", "start": 0, "transcript": "Hi Jeremy"},
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_1)", "start": 5, "transcript": "Can you hear me?"}
+      ],
+      "keys": []
+    },
+    {
+      "name": "a Virtual Participant meeting's placeholder voices still need names",
+      "captureSource": "VIRTUAL_PARTICIPANT",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Other Participant (spk_0)", "start": 0, "transcript": "Hi"},
+        {"channel": "REMOTE", "speaker": "Other Participant (spk_1)", "start": 5, "transcript": "Hello"}
+      ],
+      "keys": ["REMOTE#Other Participant (spk_0)", "REMOTE#Other Participant (spk_1)"]
+    },
+    {
+      "name": "a Stream Audio channel's typed label split into two voices needs names",
+      "captureSource": "STREAM_AUDIO",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "alex@example.com (spk_0)", "start": 0, "transcript": "Hi"},
+        {"channel": "REMOTE", "speaker": "alex@example.com (spk_1)", "start": 5, "transcript": "Hello"}
+      ],
+      "keys": ["REMOTE#alex@example.com (spk_0)", "REMOTE#alex@example.com (spk_1)"]
+    },
+    {
+      "name": "a meeting with no capture source keeps the structural rule",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_0)", "start": 0, "transcript": "Hi Jeremy"},
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_1)", "start": 5, "transcript": "Can you hear me?"}
+      ],
+      "keys": ["REMOTE#Bob Strahan (spk_0)", "REMOTE#Bob Strahan (spk_1)"]
     }
   ]
 }
