@@ -118,7 +118,11 @@ Notes:
 - Labels are numbers, not names -- Transcribe distinguishes voices but does not
   identify who they belong to. If you need real names for meeting participants,
   use the [Chrome Extension](browser-extension.md) or a
-  [Virtual Participant](virtual-participant.md), which read them from the meeting.
+  [Virtual Participant](virtual-participant.md), which read them from the meeting
+  and, with speaker identification on, use the voices to correct the meeting
+  page's speaker names (see
+  [How meeting speakers are named](browser-extension.md#how-meeting-speakers-are-named)).
+  Stream Audio has no meeting page to read, so its labels are unchanged.
 - There is no additional Amazon Transcribe charge for speaker identification.
 
 ## If the Connection Drops

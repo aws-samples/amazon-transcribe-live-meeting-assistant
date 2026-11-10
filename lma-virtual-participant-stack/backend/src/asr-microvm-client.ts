@@ -74,6 +74,12 @@ export interface AsrSegment {
     isPartial: boolean;
     /** Engine voice id (spk_0, spk_1, ...) when diarization is active; otherwise undefined. */
     speaker?: string;
+    /**
+     * Which engine session produced the row. Voice ids are numbered afresh by
+     * every session, including a reconnect, so `spk_0` means the same voice only
+     * within one value of this.
+     */
+    session?: string;
 }
 
 export type SegmentHandler = (segment: AsrSegment) => void;
@@ -708,6 +714,7 @@ export class MicrovmAsrSession {
             text,
             isPartial: message.type !== 'final',
             speaker: message.speaker ?? undefined,
+            session: `r${this.options.run ?? 0}-g${this.generation}`,
         });
     }
 }

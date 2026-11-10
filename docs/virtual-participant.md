@@ -9,6 +9,8 @@ title: "Virtual Participant"
 - [Overview](#overview)
 - [When to use Virtual Participant](#when-to-use-virtual-participant)
 - [Several people behind one attendee](#several-people-behind-one-attendee)
+- [How Speaker Names Are Assigned](#how-speaker-names-are-assigned)
+  - [Naming rows from the voice as well](#naming-rows-from-the-voice-as-well)
 - [Supported Platforms](#supported-platforms)
   - [Google Meet](#google-meet)
 - [Joining a Meeting](#joining-a-meeting)
@@ -66,6 +68,12 @@ speaker.
 apart the distinct voices behind one attendee and labels them
 `Conference Room (spk_0)`, `Conference Room (spk_1)` and so on — the roster name
 for who the platform says is talking, the voice id for which voice within it.
+
+It also helps ordinary remote attendees. Once a voice has been heard long enough
+alongside one attendee, its rows are named after that attendee even where the
+platform's active-speaker indicator is late or flickers, which is where short
+replies used to get the previous speaker's name (see
+[Naming rows from the voice as well](#naming-rows-from-the-voice-as-well)).
 
 Name them on the
 [Speakers panel](transcription-and-translation.md#naming-the-voices), which
@@ -140,10 +148,12 @@ Note what that writes: the speaker names on those lines are **participant
 names**, so at `DEBUG` they reach CloudWatch Logs. No transcript text is
 written by this line. Turn the level back down once you have what you need.
 
-Where the two signals disagree, the finer boundary wins: a voice label running
-across a change of platform speaker is split at the change, and the platform's
-name is the one each part carries (see
-[How Speaker Names Are Assigned](#how-speaker-names-are-assigned)). A turn split in two
+Where the two signals disagree on Amazon Transcribe, the finer boundary wins: a
+voice label running across a change of platform speaker is split at the change,
+and the platform's name is the one each part carries. The exception is a voice
+that has been proven to one attendee, whose turn is kept whole under that
+attendee (see
+[Naming rows from the voice as well](#naming-rows-from-the-voice-as-well)). A turn split in two
 can be put right with **Only this segment** on the meeting page, which is the
 affordance for a single turn attributed to the wrong voice; a turn merged under
 one name cannot be separated at all. (Renaming on the Speakers panel would not
@@ -182,29 +192,103 @@ back by an allowance before rows are matched to it:
 The `ASR_ROSTER_LAG_SECONDS` environment variable on the Virtual Participant task
 overrides the allowance for every platform.
 
-**How the voice label combines with the name (Amazon Transcribe).** With voice
-separation on, the name is always the platform's, and Transcribe's voice label is
-kept only as a hint. At any moment a label is shown with **one attendee only**:
-the attendee it has coincided with for the most speech so far in the Transcribe
-session. Under
-anyone else the row carries the bare name. So a room's voices, all of which
-coincide mostly with the room, still read `Conference Room (spk_0)`,
-`Conference Room (spk_1)`. A remote attendee's row that Transcribe happens to label
-with a voice it mostly hears from somebody else reads just `Ana Ruiz`, not
-`Ana Ruiz (spk_3)` alongside `Sam Lee (spk_3)`.
+### Naming rows from the voice as well
 
-The platform's name wins because it is exact for a remote attendee, while
-Transcribe's labels on the mixed meeting audio are not. On the same three-person
-Zoom meeting, one label coincided with all three attendees over the course of the
-meeting. Two consequences are worth knowing:
+With [voice separation](#several-people-behind-one-attendee) on, every row also
+carries the engine's voice label, and the Virtual Participant uses it to correct
+the platform's name rather than only appending it. The two signals fail in
+different ways. The platform's active-speaker indicator names real people, but it
+lags and flickers: on a two-person Zoom meeting the speaker view held each switch
+for about 2.7 s and briefly showed a listener for a backchannel "mm-hmm", so a
+short reply was often named after whoever had spoken before it. The voice label
+names nobody, but it follows the voice.
 
-- Voice labels restart with each Transcribe session, as Transcribe numbers voices
-  afresh after a reconnect.
-- If a label's majority moves to a different attendee during the meeting, rows
-  written before the move keep what they were given. On that meeting, this happened
-  to two of its five labels, once each.
+So each voice label keeps a running, time-weighted count of the attendees the
+platform showed while that voice was speaking:
 
-The on-demand engine appends its voice id to the platform's name as before.
+- **A voice is proven** once it has at least 20 s of speech that the platform
+  attributed to somebody, and one attendee holds at least 70% of it. From then on
+  each of its rows is named after that attendee, whatever the platform shows at
+  that moment. When the voice changes mid-conversation, the new row takes the new
+  voice's attendee as soon as the engine finishes it, without waiting for the
+  platform to catch up. On Amazon Transcribe, a proven voice's turn is also no
+  longer cut where the platform's indicator flickers under it.
+- **Until a voice is proven**, and for a row with no voice label, the row is named
+  by the platform exactly as described above.
+- **Hysteresis.** A proven voice keeps its attendee while that attendee holds at
+  least 60% of the count, so a name does not flap as the count moves by a point.
+  Below that it falls back to the platform's name.
+- **A voice that turns out to be two people.** The platform's indicator is
+  unreliable on short rows and reliable on long ones. A row of 3 s or more that
+  the platform shows as somebody else for at least 90% of its length is named by
+  the platform. Once such rows add up to 8 s (older ones count for less, with a
+  half-life of 120 s of that voice's speech), the voice is demoted to platform
+  naming for the rest of the engine session. That pattern is what the engine
+  giving two people one voice label looks like. A demoted voice is not proven
+  again in the same session, so the worst a false demotion can do is return that
+  voice to platform naming.
+- **A name from [voice enrollment](voice-enrollment.md)** stands on its own and is
+  never outvoted, should the engine report one.
+- Voice labels restart with each engine session (a MicroVM reconnect, or a new
+  Amazon Transcribe session), so the count starts again. Rows already written are
+  never renamed. When the on-demand engine re-sends a finished row to correct its
+  text, the row keeps the name it was first given.
+
+**How the voice id is shown.** A row carries its voice id only under the attendee
+the voice is attributed to: the proven attendee, or before then, the attendee
+holding most of its count. Any other row carries the bare name, so a voice id
+never appears under two names. A room's voices, all of which are counted for the
+room, still read `Conference Room (spk_0)`, `Conference Room (spk_1)`. A remote
+attendee's row that the engine happens to give a voice it mostly hears from
+somebody else reads just `Ana Ruiz`, not `Ana Ruiz (spk_3)` alongside
+`Sam Lee (spk_3)`. Before this change, an on-demand engine row always carried the
+platform's name plus its voice id, so one voice could appear under two names. The
+Speakers panel then counted those rows as a second voice of the wrong person,
+which could push a one-person name towards **Several people**.
+
+**What it does on a real meeting.** The thresholds were chosen by replaying a
+58-minute, two-person Zoom meeting (web client, on-demand engine, 415 rows)
+through this code. The platform's speaker changes and the rows' times were taken
+from the meeting's logs and transcript. Who actually spoke was judged from the
+content for every row where the signals disagreed, and assumed correct where they
+agreed. The meeting ran before the engine kept its timeline across dropped
+audio: midway through, it dropped 1.66 s of audio, and every later row sat that
+much early. The replay moves those rows back by 1.66 s, which is where the engine
+now places them. On the uncorrected times, the platform alone named 37 rows
+wrongly and both signals together named 6.
+
+| Naming | Wrong rows (of 415) | Speech wrongly named |
+|---|---|---|
+| Platform indicator alone (before this change) | 10 | 46 s |
+| Voice label alone, mapped to attendees over the whole meeting | 6 | 5 s |
+| Both, as described above | 6 | 5 s |
+
+Both voices were proven after 95 s and 105 s of the meeting, and neither was
+demoted. The same 6 rows remain wrong with every evidence requirement from 5 s to
+30 s and proving share from 60% to 80%. Those 6 are the first row of the meeting
+and five sub-second fragments that the engine itself labelled with the wrong
+voice; no naming rule can fix them. Every row then carried its voice id under one
+name only. Before, 33 s of one person's speech and 25 s of the other's sat under
+the wrong voice id.
+
+To check the guard against one voice carrying two people, the replay was repeated
+with one attendee's later speech relabelled as the other's voice. Counted from
+the point where that relabelling starts:
+
+| Relabelled | Platform alone | Voice label alone | Both |
+|---|---|---|---|
+| The second person, from 25 min | 7 | 62 | 11 |
+| The second person, from 42 min | 3 | 37 | 7 |
+| The first person, from 25 min | 7 | 176 | 8 |
+
+Treat these as directional. They come from one meeting, with two people, on one
+platform. Teams, Chime, Webex and Google Meet report the active speaker
+differently and have not been measured. Amazon Transcribe's labels are much less
+pure on meeting audio (one label coincided with all three people of a three-person
+Zoom standup), so on that engine fewer voices are proven and more rows keep the
+platform's name. To see how a meeting was named, compare its rows' voice ids with
+their names: a voice id that appears under one name throughout, and names that
+change at the voice changes, mean the voices were proven.
 
 ## Supported Platforms
 
