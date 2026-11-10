@@ -431,6 +431,69 @@ def test_every_log_group_is_encrypted_with_the_customer_managed_key(resources: d
     assert not unencrypted, f"log groups without KmsKeyId: {unencrypted}"
 
 
+CUSTOMER_MANAGED_KEY = {"Ref": "CustomerManagedEncryptionKeyArn"}
+
+
+def _role_of(function: dict) -> str | None:
+    """The logical id of the role a function names with ``!GetAtt <Role>.Arn``."""
+    role = (function.get("Properties") or {}).get("Role")
+    if not isinstance(role, dict) or "Fn::GetAtt" not in role:
+        return None
+    target = role["Fn::GetAtt"]
+    return target[0] if isinstance(target, list) else str(target).split(".")[0]
+
+
+def _inline_statements(role: dict) -> list:
+    return [
+        statement
+        for policy in (role.get("Properties") or {}).get("Policies") or []
+        for statement in _as_list((policy.get("PolicyDocument") or {}).get("Statement") or [])
+    ]
+
+
+def test_a_function_that_passes_a_key_to_cloudwatch_logs_can_describe_it(resources: dict):
+    """CloudWatch Logs checks a ``kmsKeyId`` given to CreateLogGroup or
+    AssociateKmsKey with the caller's own permissions, so the caller needs
+    ``kms:DescribeKey`` on that key. The key policy granting the Logs service
+    does not cover it. Without the grant the call is denied, and a custom
+    resource that runs on create (AppSyncLogRetention) fails its stack: a new
+    deployment, and equally the update that first adds the resource, which an
+    upgrade from v0.3.x is. A later update that leaves its properties unchanged
+    does not run it, so an already-deployed stack does not show the gap.
+
+    The grant is asserted as a plain statement on the customer-managed key: an
+    ``Fn::If`` around it, or a wildcard resource, would not be found here.
+    """
+    roles = _of_type(resources, "AWS::IAM::Role")
+    callers = {
+        name: function
+        for name, function in _functions(resources).items()
+        if "kmsKeyId=" in str(((function.get("Properties") or {}).get("Code") or {}).get("ZipFile"))
+    }
+    assert "AppSyncLogRetentionFunction" in callers, "the check no longer finds its known caller"
+
+    without = []
+    for name, function in callers.items():
+        role = _role_of(function)
+        granted = any(
+            statement.get("Effect") == "Allow"
+            and "kms:DescribeKey" in _as_list(statement.get("Action") or [])
+            and CUSTOMER_MANAGED_KEY in _as_list(statement.get("Resource") or [])
+            for statement in _inline_statements(roles.get(role, {}))
+        )
+        if not granted:
+            without.append(f"{name} (role {role})")
+    assert not without, f"functions passing kmsKeyId without kms:DescribeKey on the key: {without}"
+
+
+def test_the_appsync_log_group_is_encrypted_with_the_key_its_role_can_describe(resources: dict):
+    """The key the custom resource hands its function is the one the role's grant
+    names; a different key would be denied just the same."""
+    properties = resources["AppSyncLogRetention"]["Properties"]
+    assert properties["KmsKeyId"] == CUSTOMER_MANAGED_KEY
+    assert properties["ServiceToken"] == {"Fn::GetAtt": "AppSyncLogRetentionFunction.Arn"}
+
+
 def test_every_cfn_nag_suppression_gives_a_reason(resources: dict):
     """A suppression without a rationale cannot be reviewed, only trusted."""
     unexplained = []
