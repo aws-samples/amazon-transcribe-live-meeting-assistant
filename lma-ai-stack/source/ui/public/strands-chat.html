@@ -933,6 +933,33 @@
             });
         }
 
+        // Assembles a streamed answer from its chunks. AppSync does not
+        // guarantee that a subscriber receives the chunks in the order they were
+        // published, so each is placed by its Sequence (the producer numbers an
+        // answer's chunks 0, 1, 2, ...) and a chunk received twice is kept once.
+        // A chunk without a Sequence is placed after every numbered one, in the
+        // order received. add() returns false for a chunk already held.
+        function createAnswerAssembler() {
+            const numbered = new Map();
+            const unnumbered = [];
+            return {
+                add(token) {
+                    const sequence = token.Sequence;
+                    if (Number.isInteger(sequence)) {
+                        if (numbered.has(sequence)) return false;
+                        numbered.set(sequence, token.Token);
+                    } else {
+                        unnumbered.push(token.Token);
+                    }
+                    return true;
+                },
+                text() {
+                    const ordered = [...numbered.keys()].sort((a, b) => a - b).map((key) => numbered.get(key));
+                    return ordered.concat(unnumbered).join('');
+                },
+            };
+        }
+
         function subscribeToTokenStream(messageId) {
             const streamingMessageDiv = document.createElement('div');
             streamingMessageDiv.className = 'message assistant';
@@ -941,7 +968,8 @@
             chatMessages.appendChild(streamingMessageDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
             
-            // Track accumulated text for markdown rendering
+            // The answer's chunks, put back in the order they were published.
+            const answer = createAnswerAssembler();
             let accumulatedText = '';
             
             window.parent.postMessage({
@@ -963,7 +991,14 @@
                         
                         if (token.IsComplete) {
                             finalizeThinkingContainer(messageId);
-                            
+
+                            // The completion marker carries the whole answer as
+                            // generated; it replaces the chunks received. A marker
+                            // without it keeps the text assembled from the chunks.
+                            if (token.Token) {
+                                accumulatedText = token.Token;
+                            }
+
                             // Final render with markdown
                             if (accumulatedText) {
                                 const finalHtml = renderAssistantMarkdown(accumulatedText);
@@ -993,9 +1028,10 @@
                             appendInlineSuggestionButtons();
                             
                             window.removeEventListener('message', tokenHandler);
-                        } else if (token.Token) {
+                        } else if (token.Token && !token.ThinkingStep) {
                             // Only accumulate if there's actual token text (not just thinking steps)
-                            accumulatedText += token.Token;
+                            if (!answer.add(token)) return;
+                            accumulatedText = answer.text();
                             
                             // Render markdown incrementally during streaming
                             const partialHtml = renderAssistantMarkdown(accumulatedText);

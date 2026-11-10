@@ -446,7 +446,8 @@ def test_an_answer_with_a_subscriber_is_streamed_over_a_single_connection(
     assert result["message"] == "Hello world"
     assert entry_points == ["stream"]
     tokens = [call[2] for call in clients.token_calls]
-    assert [token["Token"] for token in tokens] == ["Hello ", "world", ""]
+    assert [token["Token"] for token in tokens] == ["Hello ", "world", "Hello world"]
+    assert [token["Sequence"] for token in tokens] == [0, 1, 2]
     assert tokens[-1]["IsComplete"] is True
     assert len(clients.token_clients) == 1
     assert clients.token_clients[0].connects == 1
@@ -497,3 +498,23 @@ def test_the_wake_phrase_path_is_still_streamed(
     )
     assert entry_points == ["stream"]
     assert [call[2]["MessageId"] for call in clients.token_calls] == ["6d2a"] * 3
+
+
+# ── the completion marker ───────────────────────────────────────────────────
+
+
+def test_the_completion_marker_carries_the_whole_answer(strands_module):
+    assert strands_module.completion_token_text("offline sync") == "offline sync"
+
+
+def test_an_answer_too_large_for_one_message_completes_without_its_text(strands_module):
+    limit = strands_module.MAX_COMPLETION_TOKEN_BYTES
+    assert strands_module.completion_token_text("a" * limit) == "a" * limit
+    assert strands_module.completion_token_text("a" * (limit + 1)) == ""
+
+
+def test_the_completion_marker_limit_is_measured_in_utf8_bytes(strands_module):
+    # Three bytes per character in UTF-8: fewer characters than the limit, more bytes.
+    text = "\u2014" * (strands_module.MAX_COMPLETION_TOKEN_BYTES // 3 + 1)
+    assert len(text) < strands_module.MAX_COMPLETION_TOKEN_BYTES
+    assert strands_module.completion_token_text(text) == ""
