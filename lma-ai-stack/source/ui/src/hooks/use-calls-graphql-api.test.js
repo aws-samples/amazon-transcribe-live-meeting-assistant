@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import { describe, it, expect, vi } from 'vitest';
@@ -27,6 +27,13 @@ describe('isRequestTimeout', () => {
 });
 
 describe('mapTranscriptSegmentValue', () => {
+  it('carries the identified language, and no field when there is none', () => {
+    expect(mapTranscriptSegmentValue({ SegmentId: 's1', Channel: 'REMOTE', LanguageCode: 'es-US' }).languageCode).toBe(
+      'es-US',
+    );
+    expect('languageCode' in mapTranscriptSegmentValue({ SegmentId: 's2', Channel: 'REMOTE' })).toBe(false);
+  });
+
   it('holds a segment stored under an older channel name on the current one', () => {
     expect(mapTranscriptSegmentValue({ SegmentId: 's1', Channel: 'CALLER' }).channel).toBe('REMOTE');
     expect(mapTranscriptSegmentValue({ SegmentId: 's2', Channel: 'AGENT' }).channel).toBe('LOCAL');
@@ -78,6 +85,14 @@ describe('mergeCallUpdate', () => {
     expect(merged.TranscriptionLanguage).toBe('');
     expect(merged.SpeakerSeparation).toBe('REMOTE');
     expect(merged.ExpiresAfter).toBe(1800000000);
+  });
+
+  it('keeps the detected languages when an update does not select them, and takes them when it does', () => {
+    const withLanguages = { ...recorded, DetectedLanguages: ['en-US'] };
+    expect(mergeCallUpdate(withLanguages, { CallId: 'c1', Status: 'ENDED' }).DetectedLanguages).toEqual(['en-US']);
+    expect(
+      mergeCallUpdate(withLanguages, { CallId: 'c1', DetectedLanguages: ['en-US', 'es-US'] }).DetectedLanguages,
+    ).toEqual(['en-US', 'es-US']);
   });
 
   it('takes a capture field the update does carry', () => {

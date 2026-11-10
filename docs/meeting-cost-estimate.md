@@ -2,7 +2,7 @@
 title: "Meeting Cost Estimate"
 ---
 
-<!-- Copyright (c) 2025 Amazon.com. This file is licensed under the MIT License. -->
+<!-- Copyright (c) 2025 Amazon.com. This file is licensed under the MIT-0 License. -->
 <!-- See the LICENSE file in the project root for full license information. -->
 
 # Meeting Cost Estimate
@@ -347,7 +347,10 @@ the shipped one — exactly as it marks a price an administrator changed — and
 meeting page shows its lines as **Your price** with the new shipped price beside
 them. **Reset to default** on that price, or **Reset section to defaults**, takes
 the release's price. Prices and sources a later release adds that the profile
-does not hold come from the release.
+does not hold come from the release. The source shown for a price is always the
+shipped table's: the editor and the estimate read `sources` from the shipped
+table only, so `sources` a profile holds (for example, from an imported export of
+an earlier release) are stored but not read.
 
 ### Through the API
 
@@ -356,7 +359,10 @@ Both operations are Admin only.
 - `Query.getCallPricing` returns the shipped table (`Default`), what the active
   profile stores for the section (`Custom`), the merged table every estimate uses
   (`Effective`), the active profile's name (`Profile`) and the `Version` to send
-  back on save.
+  back on save. While no profile is in force (the shipped default is active),
+  `Profile` is `default`, `Custom` is empty and `Effective` is the shipped table,
+  which is what every estimate then uses; `updateCallPricing` is refused in that
+  state.
 - `Mutation.updateCallPricing(input: {Pricing, ExpectedVersion, Comment})` stores
   `Pricing`, a JSON object in the shape of the shipped table, as the active
   profile's `call_pricing` section — for example

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -9,8 +9,8 @@
  *
  * A chip limits the transcript to one speaker. Where a platform name carries
  * several voice labels -- 'Bob Strahan (spk_0)', 'Bob Strahan (spk_1)' -- its
- * chips sit together with a small One person / Several people menu
- * (SpeakerModeMenu):
+ * chips sit together with a one-person / several-people icon toggle
+ * (SpeakerModeToggle):
  *
  *  - One person: every line under the name shows the name alone, and the chip's
  *    edit button opens the speaker modal (rename, combine, separate).
@@ -27,7 +27,7 @@ import PropTypes from 'prop-types';
 import { Box, Button, Input, ToggleButton } from '@cloudscape-design/components';
 
 import { SEVERAL_PEOPLE } from '../common/speaker-modes';
-import SpeakerModeMenu from './SpeakerModeMenu';
+import SpeakerModeToggle from './SpeakerModeToggle';
 
 /** The chip itself: a filter toggle when there is more than one speaker, else the name. */
 const ChipLabel = ({ name, filterable, selected, onToggle }) =>
@@ -209,7 +209,7 @@ const TranscriptSpeakerChips = ({
                 {editButton(chip.name)}
               </span>
             ))}
-        <SpeakerModeMenu group={entry.group} onSetMode={onSetMode} compact />
+        <SpeakerModeToggle group={entry.group} onSetMode={onSetMode} />
       </span>
     );
   });

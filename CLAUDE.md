@@ -110,7 +110,7 @@ dependency-specific gaps.
 | `lma-ai-stack/` | Core stack: Lambda functions, AppSync GraphQL API, Cognito auth, DynamoDB, UI (React/CloudFront) | Python (Lambdas), React (UI) |
 | `lma-websocket-transcriber-stack/` | WebSocket server on ECS Fargate ingesting stereo audio, streaming to Amazon Transcribe, writing to Kinesis | TypeScript/Fastify |
 | `lma-virtual-participant-stack/` | Headless CloakBrowser/Chromium (Playwright) on ECS Fargate joining meetings, optional voice assistant + avatar | TypeScript |
-| `lma-asr-microvm-stack/` | Optional on-demand streaming ASR + speaker diarization on Lambda MicroVMs (alternative to Amazon Transcribe); model selectable by CFN parameter | Python (sherpa-onnx) |
+| `lma-asr-microvm-stack/` | On-demand streaming ASR + speaker diarization on Lambda MicroVMs, the default transcription engine (Amazon Transcribe is the alternative and fallback); deployed by default where Lambda MicroVMs are available | Python (sherpa-onnx) |
 | `lma-vpc-stack/` | VPC networking, security groups, NAT gateways | CloudFormation |
 | `lma-meetingassist-setup-stack/` | Meeting assistant configuration | CloudFormation |
 | `lma-bedrockkb-stack/` | Bedrock Knowledge Base setup | CloudFormation |
@@ -119,9 +119,9 @@ dependency-specific gaps.
 | `lma-chat-button-config-stack/` | Chat UI button configuration | CloudFormation |
 | `lma-nova-sonic-config-stack/` | Nova Sonic voice assistant config | CloudFormation |
 
-**Data flow:** Browser audio -> WebSocket server (Fargate) -> Amazon Transcribe -> Kinesis Data Stream -> Call Event Processor Lambda (Strands Agents SDK) -> DynamoDB + AppSync (real-time GraphQL subscriptions) -> React UI.
+**Data flow:** Browser audio -> WebSocket server (Fargate) -> speech engine (ASR MicroVM by default, or Amazon Transcribe) -> Kinesis Data Stream -> Call Event Processor Lambda (Strands Agents SDK) -> DynamoDB + AppSync (real-time GraphQL subscriptions) -> React UI.
 
-The Amazon Transcribe step is pluggable: when `EnableMicrovmAsr=true` and an admin moves a meeting source onto it in the Transcription Engine section of the Configuration page, meetings are instead transcribed by an ASR MicroVM (one per meeting, one WebSocket session per audio channel), which returns text and speaker labels together. Both engines emit identical `ADD_TRANSCRIPT_SEGMENT` events, so nothing downstream of Kinesis is engine-aware. See `docs/microvm-asr.md`.
+The speech engine is pluggable. By default meetings are transcribed by an ASR MicroVM (one per meeting, one WebSocket session per audio channel), which returns text and speaker labels together: `EnableMicrovmAsr` defaults to `true`, the ASR stack is deployed in Regions with AWS Lambda MicroVMs, and the Transcription Engine section of the Configuration page ships with every meeting source on it. Amazon Transcribe is the alternative an admin can choose per meeting source, and the fallback where the ASR stack is not deployed or a MicroVM cannot start. Both engines emit identical `ADD_TRANSCRIPT_SEGMENT` events, so nothing downstream of Kinesis is engine-aware. See `docs/microvm-asr.md`.
 
 **Key source locations:**
 - Lambda functions: `lma-ai-stack/source/lambda_functions/` (19 functions)

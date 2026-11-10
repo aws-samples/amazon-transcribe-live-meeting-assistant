@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.12
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """The troubleshooting agent's evidence-gathering tools.
@@ -1268,11 +1268,13 @@ class TroubleshootingTools:
             "the opposite holds."
         ),
         "EnableMicrovmAsr": (
-            "Whether the on-demand ASR engine is deployed at all. Even when "
-            "true, a meeting is only transcribed by it once an admin moves its "
-            "source onto it in the Transcription Engine section of the Configuration page, so a deployment "
-            "with this on may still be using Amazon Transcribe for every "
-            "meeting."
+            "Whether the on-demand ASR engine is deployed (true by default). "
+            "It is deployed only in a Region with Lambda MicroVMs, so true "
+            "does not guarantee it exists. Where it is deployed it is the "
+            "default engine for every source, but an admin can move a source "
+            "onto Amazon Transcribe in the Transcription Engine section of the "
+            "Configuration page, and a meeting whose MicroVM could not start "
+            "falls back to Amazon Transcribe."
         ),
         "MeetingAssistService": (
             "Which assistant backend is deployed. Decides whether the "

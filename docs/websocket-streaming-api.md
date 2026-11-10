@@ -318,6 +318,29 @@ Sent during a session to update who is currently speaking on the meeting channel
 
 > **Behavior:** The server only updates the meeting channel (channel 0) speaker. If `activeSpeaker` equals `localSpeakerName`, the event is ignored because that speaker is already attributed to channel 1.
 
+**Where the change is placed.** The server places each change on the meeting's
+audio clock at the point it arrives, which is the amount of audio received on the
+session so far. It then names each meeting-channel segment after whoever was
+active for most of the segment's audio, with every change moved back by 0.75 s
+(the `SPEAKER_CHANGE_LAG_SECONDS` environment variable on the transcriber task
+overrides this). For that to be right, send a change as soon as it happens, on the
+same connection as the audio, and keep sending audio as it is captured rather than
+in large batches. This applies on the ASR MicroVM engine, and on Amazon Transcribe
+when the meeting channel is diarized. Otherwise, a segment takes the speaker active
+when Amazon Transcribe returns it. An `activeSpeaker` of `none` or `n/a` means
+nobody is speaking: the previous speaker carries on.
+
+**With the meeting channel diarized**, the speaker changes are also counted
+against each voice label. Once a voice has at least 20 s of speech and one name
+holds at least 70% of it, that voice's segments are named after that name even
+where the reported changes lag or flicker. The voice id is written only under the
+name the voice is attributed to, so `Ana (spk_1)` and `Sam (spk_1)` do not both
+appear. See
+[Naming rows from the voice as well](virtual-participant.md#naming-rows-from-the-voice-as-well),
+which describes the same rule for the Virtual Participant. A client that never
+sends `SPEAKER_CHANGE` gets the meeting channel's own name plus the voice id, as
+before.
+
 #### 6.1.3 END Message
 
 Sent to signal the end of the audio streaming session.

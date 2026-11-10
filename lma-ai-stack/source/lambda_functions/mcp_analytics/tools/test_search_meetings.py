@@ -117,9 +117,8 @@ class TestExecuteResolvesArn(unittest.TestCase):
 
     def test_generation_and_orchestration_prompts_are_sent(self):
         """Claude 5.5 models are refused by RetrieveAndGenerate without both prompts."""
-        env = {**self.ENV}
         with (
-            patch.dict(os.environ, env, clear=False),
+            patch.dict(os.environ, self.ENV, clear=False),
             patch.object(
                 search_meetings,
                 "_configured_model_id",

@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 AWSTemplateFormatVersion: "2010-09-09"
@@ -537,6 +537,14 @@ Parameters:
       engine is not deployed and every Virtual Participant is transcribed by Amazon
       Transcribe. When set, a VP still uses Amazon Transcribe unless the Transcription Engine
       page's deployment default says otherwise; it reads that switch at meeting start.
+
+  AsrModelLanguages:
+    Type: String
+    Default: ""
+    Description: >-
+      Comma-separated base language codes (such as "en,es,fr") the deployed ASR
+      bundle transcribes. A Virtual Participant whose language is another stays on
+      Amazon Transcribe; empty means English only.
 
   CloudWatchLogsExpirationInDays:
     Type: Number
@@ -2770,6 +2778,8 @@ Resources:
               Value: !Ref CustomVocabularyName
             - Name: ASR_LAUNCHER_FUNCTION_ARN
               Value: !Ref AsrLauncherFunctionArn
+            - Name: ASR_MODEL_LANGUAGES
+              Value: !Ref AsrModelLanguages
             # The container's own diagnostics, including the per-result
             # separation log, were gated on a DEBUG variable nothing set -- so
             # the one tool for working out why a room separated badly could not

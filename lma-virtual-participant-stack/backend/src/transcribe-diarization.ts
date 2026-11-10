@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -268,6 +268,18 @@ export const buildDiarizedSegments = (
          * only where the participant changes, and no label is read.
          */
         useLabels?: boolean;
+        /**
+         * Called once per labelled run of a final, with the run's absolute span
+         * on the meeting timeline. Returns the speaker string for the WHOLE run
+         * when its voice label names it, or undefined to cut the run by
+         * participant and name each piece with `nameFor`.
+         *
+         * The caller builds the label's evidence from who the platform actually
+         * showed over that span, not from the pieces: a piece's participant is
+         * a display name, which falls back to a guess where the platform has
+         * shown nobody yet, and a guess must not count as evidence.
+         */
+        voiceName?: (label: string, absoluteStart: number, absoluteEnd: number) => string | undefined;
     },
 ): Record<string, DiarizedSegment> => {
     const useLabels = options.useLabels ?? true;
@@ -322,7 +334,28 @@ export const buildDiarizedSegments = (
         // right with "Only this segment" on the meeting page; a turn merged
         // under one name cannot be separated at all. Splitting here can only
         // ever ADD boundaries relative to the run structure, never remove one.
-        for (const piece of splitRunByRoster(run, options.timeOffsetSeconds, options.rosterNameFor)) {
+        //
+        // The exception is a label proven to one participant (speaker-fusion.ts):
+        // its voice is then the better boundary, and the page's lag or flicker
+        // under it is exactly what would cut a turn in the wrong place. The
+        // label's vote is built from the platform's reports over the run's span.
+        const pieces = splitRunByRoster(run, options.timeOffsetSeconds, options.rosterNameFor);
+        const runStart = pieces[0].startTime;
+        const runEnd = Math.max(...pieces.map((piece) => piece.endTime));
+        const voiced = run.label !== undefined ? options.voiceName?.(run.label, runStart, runEnd) : undefined;
+        if (voiced !== undefined) {
+            const segmentId = `${options.resultId}-r${pieceIndex}`;
+            segments[segmentId] = {
+                SegmentId: segmentId,
+                Speaker: voiced,
+                StartTime: runStart,
+                EndTime: runEnd,
+                Transcript: runTranscript(run),
+            };
+            pieceIndex += 1;
+            continue;
+        }
+        for (const piece of pieces) {
             const segmentId = `${options.resultId}-r${pieceIndex}`;
             segments[segmentId] = {
                 SegmentId: segmentId,
@@ -423,57 +456,3 @@ const firstSpokenTime = (
     }
     return fallback + timeOffsetSeconds;
 };
-
-/**
- * Which rows carry Amazon Transcribe's voice label, and so the rule for a
- * label that disagrees with the meeting platform.
- *
- * The row's NAME is always the participant the platform showed during the
- * row's audio. For remote participants that is exact -- each has their own
- * roster entry -- while Transcribe's labels on the mixed meeting audio are
- * not: on a three-person Zoom standup one label coincided with all three
- * participants. The label is therefore only a hint, and it is kept where it
- * adds something: telling apart several voices behind ONE participant, such
- * as a conference room's speakerphone.
- *
- * At any moment a label is shown under one name only: the participant it has
- * coincided with for the most speech so far in this Transcribe session. Under
- * any other participant the row is written with the bare name. So `Ana (spk_3)`
- * is not written while spk_3 belongs to Sam, while a room's voices
- * -- every one of which coincides mostly with the room -- stay `Room (spk_0)`,
- * `Room (spk_1)`.
- *
- * Labels restart with each Transcribe session, so a new instance is used per
- * session. A row already written is not renamed if a label's majority later
- * moves to someone else.
- */
-export class VoiceLabelNames {
-    private readonly seconds = new Map<string, Map<string, number>>();
-
-    /** The speaker string for one row, recording its speech against the label first. */
-    nameFor(rosterName: string, label: string | undefined, seconds: number): string {
-        if (label === undefined) {
-            return rosterName;
-        }
-        let perName = this.seconds.get(label);
-        if (perName === undefined) {
-            perName = new Map<string, number>();
-            this.seconds.set(label, perName);
-        }
-        perName.set(rosterName, (perName.get(rosterName) ?? 0) + Math.max(seconds, 0));
-        return this.ownerOf(label) === rosterName ? `${rosterName} (${label})` : rosterName;
-    }
-
-    /** The participant a label has coincided with for the most speech; the earliest wins a tie. */
-    ownerOf(label: string): string | undefined {
-        let owner: string | undefined;
-        let most = -1;
-        for (const [name, total] of this.seconds.get(label) ?? []) {
-            if (total > most) {
-                owner = name;
-                most = total;
-            }
-        }
-        return owner;
-    }
-}

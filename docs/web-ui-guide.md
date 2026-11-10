@@ -206,15 +206,28 @@ recording that began before transcription can be longer than either.
   [Meeting Video and Key Frames](meeting-video.md#chapters).
 - **Agenda** — the meeting's agenda, who last changed it, and its coverage. A
   meeting without an agenda shows one line with **Derive agenda** and **Add
-  agenda** for those who can change it. See [Meeting Agenda](meeting-agenda.md).
+  agenda** for those who can change it. The agenda is also at the top of the
+  **Transcript** tab. See [Meeting Agenda](meeting-agenda.md).
 - **Sentiment** charts, when sentiment analysis is enabled; see
   [Sentiment Analysis](#sentiment-analysis).
 
 ### Transcript tab
 
 The tab a meeting opens on. Real-time transcription displayed with:
+- **Agenda**, at the top of the tab when the meeting has one: a section that
+  opens and closes, with the numbered items and, once the summary has been
+  written, each item's coverage (*Covered*, *Partly covered*, *Not covered*).
+  It is open while the meeting is live and closed afterwards, until you open or
+  close it. During a live meeting without an agenda, those who can change it see
+  one line with **Derive agenda** and **Add agenda** instead. See
+  [The agenda on the Transcript tab](meeting-agenda.md#the-agenda-on-the-transcript-tab)
 - Speaker names and timestamps for each segment; select a name to rename that
   voice (see [Naming the voices](transcription-and-translation.md#naming-the-voices))
+- In a meeting where Amazon Transcribe identified more than one language, a
+  short language code beside each segment's time (**EN**, **ES**, or the full
+  code such as **EN-GB** when two of the languages share one), whose tooltip
+  names the language, *Spanish (United States)*. A meeting in one language shows
+  none. See [Detected languages](transcription-and-translation.md#detected-languages)
 - Sentiment indicators per segment
 - Color-coded entries by channel for easy visual distinction between speakers
 - **Auto-scroll**: while the meeting runs it keeps the newest segment in view;
@@ -244,10 +257,21 @@ the page is scrolled.
 - **Controls** — play/pause, the time, the seek bar, the speed (0.75x to 2x),
   mute and, for video, full screen. Each has an accessible name, and the seek
   bar is a slider that the keyboard moves.
-- **Chapters on the seek bar** — each of the meeting's
-  [chapters](meeting-video.md#chapters) is a mark on the seek bar, with its
-  title shown on hover or focus; selecting a mark plays from that chapter. The
-  chapter being played is named under the bar.
+- **Chapters and screen shares on the seek bar** — the seek bar carries two
+  kinds of mark. Each of the meeting's [chapters](meeting-video.md#chapters)
+  (from the summary's **CHAPTERS** section) is a dark vertical bar, and each
+  [key frame](meeting-video.md) of the shared screen that the **Screen share**
+  tab shows is a small pink dot. Hovering over or focusing a mark shows its time
+  and what it is — *Chapter: Budget review*, or *Screen share: Q3 plan* (just
+  *Screen share* for a frame without a title) — and selecting it plays from
+  there. A legend under the bar names the two kinds and how many of each there
+  are, for example *2 chapters* and *5 screen shares*. The two counts usually
+  differ: a chapter is a change of topic, chosen by the model writing the
+  summary, and a screen share is a change of what was on screen, so one chapter
+  can span several slides and a chapter can begin with no change of slide. The
+  dots are the frames the **Screen share** tab counts, so repeated frames and
+  camera frames are not marked, and with more than a hundred frames only the
+  ones loaded so far are. The chapter being played is named under the bar.
 - **The transcript follows the recording** — the segment being heard is
   highlighted, and kept in view while **Auto-scroll** is on. Scrolling the
   transcript while it plays stops it following (a notice says so, with
@@ -358,21 +382,22 @@ pass over chat messages, since they were typed rather than heard.
   in the transcript. Choosing speakers shows only their segments (and hides the
   assistant's answers); choosing **All** shows everything again. The search
   works within the speakers chosen.
-- **One person | Several people** — the chips are grouped by the name the
+- **One person or several people** — the chips are grouped by the name the
   meeting platform showed, and a name that speaker separation heard several
-  voices under has a small menu beside it, shown as a person icon (one person)
-  or a group icon (several people); its tooltip says why the name is shown that
-  way. **One person** shows every line under
+  voices under has a small icon toggle beside it: a person icon while the name is
+  shown as one person, a group icon while it is shown as several people.
+  Clicking it switches to the other. Its tooltip, on hover or keyboard focus,
+  says which mode the name is in, why, and what a click does. **One person** shows every line under
   the name alone (`Bob Strahan`, not `Bob Strahan (spk_0)` and `(spk_1)`);
   **Several people** gives each voice a chip of its own — `ConfRm_1 · Voice 1`,
   `Voice 2` — with a pencil to name that voice in place, which renames every line
   it spoke. The field opens empty, with *ConfRm_1 · Voice 1* as its placeholder;
   **Enter** or moving away saves the name, **Escape** cancels, and clearing a
   name goes back to *Voice N*; **More options** opens the speaker's dialog. The
-  same menu is beside the name in the Speakers panel. LMA picks a default for
+  same toggle is beside the name in the Speakers panel. LMA picks a default for
   each name — several people for a
   room or a room device, or when two voices each spoke at length, one person
-  otherwise — so the menu is only needed where that guess is wrong; see
+  otherwise — so the toggle is only needed where that guess is wrong; see
   [One person or several people](transcription-and-translation.md#one-person-or-several-people).
   The choice is saved with the meeting and applies to the downloads, the summary
   and the Meeting Assistant too. It can be changed by the same people who can
@@ -464,6 +489,11 @@ as a deck. See [Meeting Video and Key Frames](meeting-video.md#on-the-meeting-pa
     Transcribe), and **Transcription language** — the language code, Amazon
     Transcribe's language identification, or, for the ASR MicroVM, the model's
     own language.
+  - **Detected languages** — when Amazon Transcribe identified the language,
+    the languages it heard, by name, in the order each was first heard
+    (*English (US), Spanish (US)*). Not shown for a meeting in a fixed language
+    or on the ASR MicroVM, which report none. See
+    [Detected languages](transcription-and-translation.md#detected-languages).
   - **Speaker separation** — which channels it was asked for (both, the meeting
     audio, the microphone, or off), with how many voices the transcript tells
     apart.
@@ -530,6 +560,13 @@ marked as chat, *Alice (chat)*, on one line: its line breaks become ` / `. In th
 spreadsheet every value is stored as text exactly as typed, so a message that
 starts with `=`, `+`, `-` or `@` is shown as written and is never treated as a
 formula.
+
+In a meeting with more than one detected language, each segment also carries
+the code of the language it was identified in: after the time in the text, Word
+and Markdown downloads (`Speaker [04:18.2, es-US]: text`), and in a **language**
+column of the spreadsheet. The Markdown downloads list the meeting's detected
+languages with its date and duration. A meeting in one language downloads as
+before.
 
 ## Meeting Sharing
 
@@ -636,7 +673,7 @@ each edited one section of the configuration. They are now sections of the
 |---|---|
 | `/#/configuration/nova-sonic` | The **Nova Sonic Voice Assistant** section. See [Nova Sonic 2 Setup](nova-sonic-setup.md) |
 | `/#/configuration/transcript-summary` | The **Transcript Summary** section. See [Transcript Summarization](transcript-summarization.md) |
-| `/#/configuration/asr` | The **Transcription Engine** section. Its engine choices are shown only when the on-demand speech engine is deployed (`EnableMicrovmAsr=true`); Virtual Participant voice separation is shown on every deployment. See [MicroVM ASR](microvm-asr.md) |
+| `/#/configuration/asr` | The **Transcription Engine** section. Its engine choices (the ASR MicroVM engine by default, or Amazon Transcribe) are shown only when the ASR MicroVM engine is deployed (`EnableMicrovmAsr=true`, the default, in a Region with AWS Lambda MicroVMs); Virtual Participant voice separation is shown on every deployment. See [MicroVM ASR](microvm-asr.md) |
 
 ### User Management
 

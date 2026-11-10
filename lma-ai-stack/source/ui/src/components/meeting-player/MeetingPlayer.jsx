@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -11,7 +11,10 @@
  * docs/web-ui-guide.md for the behaviour).
  *
  * Its own controls rather than the browser's, so the seek bar can carry the
- * meeting's chapters as marks: play/pause, the time, the seek bar, the speed,
+ * meeting's chapters and its screen shares as marks -- a bar for each chapter
+ * (from the summary) and a dot for each key frame of the shared screen (the
+ * frames the Screen share tab shows, `screenShares`), named in a legend under
+ * the bar and on hover or focus: play/pause, the time, the seek bar, the speed,
  * mute and (for video) full screen. Each has an accessible name; the seek bar
  * is a native range input, so it is operable from the keyboard as it is.
  *
@@ -33,7 +36,14 @@ import { Box, Button, ButtonDropdown, SegmentedControl, SpaceBetween, Spinner } 
 
 import useAppContext from '../../contexts/app';
 import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
-import { IDENTITY_CLOCK, chapterAt, chapterMarkers, formatClock, toTranscriptSeconds } from './playback-sync';
+import {
+  IDENTITY_CLOCK,
+  chapterAt,
+  chapterMarkers,
+  formatClock,
+  screenShareMarkers,
+  toTranscriptSeconds,
+} from './playback-sync';
 import './MeetingPlayer.css';
 
 const logger = new ConsoleLogger('MeetingPlayer');
@@ -47,6 +57,7 @@ const MeetingPlayer = ({
   controllerRef = null,
   clock = IDENTITY_CLOCK,
   chapters = [],
+  screenShares = [],
   store = null,
   alternative = null,
   onSwitch = undefined,
@@ -259,6 +270,10 @@ const MeetingPlayer = ({
   };
 
   const markers = useMemo(() => chapterMarkers(chapters, duration, clock), [chapters, duration, clock]);
+  const shareMarkers = useMemo(
+    () => screenShareMarkers(screenShares, duration, { kind, clock }),
+    [screenShares, duration, kind, clock],
+  );
   const chapter = chapterAt(markers, position);
   const ready = duration > 0;
   const progress = ready ? Math.min(100, (position / duration) * 100) : 0;
@@ -335,18 +350,37 @@ const MeetingPlayer = ({
             }`}
             onChange={(event) => seek(Number(event.target.value), {})}
           />
+          {/* Screen shares first, so a chapter that starts with one is drawn over it. */}
+          {shareMarkers.map((marker) => {
+            const name = marker.title ? `Screen share: ${marker.title}` : 'Screen share';
+            return (
+              <button
+                type="button"
+                key={marker.key}
+                className="meeting-player-marker meeting-player-marker-share"
+                style={{ left: `${marker.percent}%` }}
+                aria-label={`Screen share at ${marker.label}${marker.title ? `: ${marker.title}` : ''}`}
+                data-testid="meeting-player-share-marker"
+                onClick={() => seek(marker.recordingSeconds, { play: true })}
+              >
+                <span className="meeting-player-marker-tip" aria-hidden="true">
+                  <span className="meeting-player-marker-time">{marker.label}</span> {name}
+                </span>
+              </button>
+            );
+          })}
           {markers.map((marker) => (
             <button
               type="button"
               key={marker.key}
-              className="meeting-player-marker"
+              className="meeting-player-marker meeting-player-marker-chapter"
               style={{ left: `${marker.percent}%` }}
               aria-label={`Chapter at ${marker.label}: ${marker.title}`}
               data-testid="meeting-player-marker"
               onClick={() => seek(marker.recordingSeconds, { play: true })}
             >
               <span className="meeting-player-marker-tip" aria-hidden="true">
-                <span className="meeting-player-marker-time">{marker.label}</span> {marker.title}
+                <span className="meeting-player-marker-time">{marker.label}</span> Chapter: {marker.title}
               </span>
             </button>
           ))}
@@ -388,6 +422,23 @@ const MeetingPlayer = ({
           />
         )}
         {!signedUrl && <Spinner />}
+        {(markers.length > 0 || shareMarkers.length > 0) && (
+          // What the marks on the seek bar are, and how many of each.
+          <span className="meeting-player-legend" data-testid="meeting-player-legend">
+            {markers.length > 0 && (
+              <span className="meeting-player-legend-item">
+                <span className="meeting-player-legend-swatch meeting-player-legend-chapter" aria-hidden="true" />
+                {`${markers.length} ${markers.length === 1 ? 'chapter' : 'chapters'}`}
+              </span>
+            )}
+            {shareMarkers.length > 0 && (
+              <span className="meeting-player-legend-item">
+                <span className="meeting-player-legend-swatch meeting-player-legend-share" aria-hidden="true" />
+                {`${shareMarkers.length} ${shareMarkers.length === 1 ? 'screen share' : 'screen shares'}`}
+              </span>
+            )}
+          </span>
+        )}
         {chapter && (
           <Box variant="small" color="text-body-secondary">
             <span data-testid="meeting-player-chapter">{`Chapter: ${chapter.title}`}</span>
@@ -413,6 +464,15 @@ MeetingPlayer.propTypes = {
   }),
   chapters: PropTypes.arrayOf(
     PropTypes.shape({ seconds: PropTypes.number, label: PropTypes.string, title: PropTypes.string }),
+  ),
+  /** The key frames of the shared screen the Screen share tab shows: FrameId, Timestamp, VideoOffset, Title. */
+  screenShares: PropTypes.arrayOf(
+    PropTypes.shape({
+      FrameId: PropTypes.string,
+      Timestamp: PropTypes.number,
+      VideoOffset: PropTypes.number,
+      Title: PropTypes.string,
+    }),
   ),
   // eslint-disable-next-line react/forbid-prop-types
   store: PropTypes.object,

@@ -25,11 +25,11 @@ import {
     fetchAsrRuntimeSwitches,
     releaseLease,
     resolveVpAsrEngine,
-    speakerNameFor,
 } from './asr-microvm-client.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { meterTranscribeRequest, pcmSeconds } from './metering.js';
 import { RosterTimeline } from './roster-timeline.js';
+import { SpeakerFusion } from './speaker-fusion.js';
 import { recordedAudio } from './recorded-audio.js';
 import { noteParticipantSeen } from './consent-roster.js';
 import { noteSpokenUtterance } from './spoken-replies.js';
@@ -276,6 +276,11 @@ export class TranscriptionService {
     // The meeting has ended: no MicroVM is acquired for listening any more.
     private meetingOver = false;
     private readonly rosterTimeline = new RosterTimeline([details.lmaIdentity, details.scribeIdentity]);
+    // Which attendee each of the on-demand engine's voice ids is attributed to
+    // (speaker-fusion.ts), for the engine session in `speakerFusionSession`:
+    // ids are renumbered by every session, so a new one starts a new vote.
+    private speakerFusion = new SpeakerFusion();
+    private speakerFusionSession: string | undefined;
     private isTranscribing = false;
     private mockTranscriptionInterval: NodeJS.Timeout | null = null;
     
@@ -501,6 +506,9 @@ export class TranscriptionService {
         // Transcribe rows are named from the same roster timeline as the
         // engine's, by each word's span on the meeting timeline.
         kinesisStreamManager.setRosterLookup((start, end) => this.rosterNameFor(start, end));
+        // And their voice labels' evidence from what the platform actually
+        // showed, exactly as the engine's rows count it.
+        kinesisStreamManager.setRosterCoverage((start, end) => this.rosterCoverageFor(start, end));
         if (switches.diarizeVirtualParticipant) {
             log.info('[DIARIZATION] VP voice separation is on for this meeting');
         }
@@ -1001,17 +1009,34 @@ export class TranscriptionService {
         }
     }
 
-    /** A meeting row: the attendee the platform showed for most of the row, plus the voice id when per-voice labels are on. */
+    /**
+     * A meeting row: the attendee the platform showed for most of the row, or
+     * with per-voice labels on, the attendee its voice id has been proven to
+     * (speaker-fusion.ts), plus the voice id.
+     */
     private handleMeetingAsrSegment(segment: AsrSegment): void {
-        const roster = this.rosterTimeline.speakerFor(segment.startSec, segment.endSec, rosterLagSeconds());
-        const speaker = speakerNameFor(roster, segment.speaker);
+        const lag = rosterLagSeconds();
+        if (segment.session !== this.speakerFusionSession) {
+            this.speakerFusion = new SpeakerFusion();
+            this.speakerFusionSession = segment.session;
+        }
+        const attribution = this.speakerFusion.attribute({
+            label: segment.speaker,
+            pageName: this.rosterTimeline.speakerFor(segment.startSec, segment.endSec, lag),
+            coverage: segment.isPartial
+                ? undefined
+                : this.rosterTimeline.coverage(segment.startSec, segment.endSec, lag),
+            isPartial: segment.isPartial,
+            rowId: segment.segmentId,
+        });
+        const speaker = attribution.speaker;
         if (!segment.isPartial) {
             // A spoken consent reply or objection, attributed to the attendee
             // the row is named after (without the voice id, which is no name).
             // An objection stops capture at once; this row, the objection's own
             // words said while capture was on, still closes the row its
             // partials opened.
-            noteSpokenUtterance({ speaker: roster, text: segment.text });
+            noteSpokenUtterance({ speaker: attribution.name, text: segment.text });
         }
         sendAsrTranscriptSegment({
             channel: REMOTE_CHANNEL,
@@ -1782,6 +1807,15 @@ export class TranscriptionService {
         return this.rosterTimeline.isEmpty
             ? undefined
             : this.rosterTimeline.speakerFor(startSec, endSec, rosterLagSeconds());
+    }
+
+    /**
+     * Seconds of a span of the meeting timeline the platform showed each
+     * participant for, with the same lag as rosterNameFor. Time before the
+     * first report belongs to nobody, so it is never evidence for a voice.
+     */
+    rosterCoverageFor(startSec: number, endSec: number): Map<string, number> {
+        return this.rosterTimeline.coverage(startSec, endSec, rosterLagSeconds());
     }
 
     /**

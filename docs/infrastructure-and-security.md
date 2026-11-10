@@ -412,15 +412,25 @@ The MCP API Gateway includes the following security controls regardless of WAF e
 
 ## Data Retention
 
-| Data Type | Retention | Configuration |
-|-----------|-----------|---------------|
-| Meeting records | Configurable, default 90 days | DynamoDB TTL via the `MeetingRecordExpirationInDays` parameter, which an Admin can shorten, and not lengthen, on the Configuration page ([Retention](configuration-guide.md#retention-settings-the-stack-limits)) |
-| Transcript segments | Configurable, default 90 days | DynamoDB TTL via the `TranscriptionExpirationInDays` parameter, shortened the same way |
-| Audio recordings | Configurable | S3 lifecycle policy |
-| Transcript KB data | Configurable | S3 lifecycle policy |
-| CloudWatch logs | Configurable | `CloudWatchLogsExpirationInDays` parameter |
+[What LMA stores, and for how long](privacy-and-data-handling.md#what-lma-stores-and-for-how-long)
+on the Privacy and Data Handling Controls page is the inventory of meeting data:
+each kind of data, where it is stored, how long it is kept by default, what
+controls that, and what deleting a meeting or the stack does to it. These stack
+parameters set the retention periods; each is described in the
+[CloudFormation Parameters Reference](cloudformation-parameters.md):
 
-The stack parameter **EnableDataRetentionOnDelete** controls whether DynamoDB tables, S3 buckets, and KMS keys are retained when the stack is deleted. When enabled, these resources persist after stack deletion to prevent data loss.
+| Parameter | Default | What it sets |
+|-----------|---------|--------------|
+| `MeetingRecordExpirationInDays` | 90 | The DynamoDB time to live of meeting records (with their summaries and consent records), usage records and Virtual Participant records. An Admin can shorten it, and not lengthen it, for meeting and usage records on the Configuration page ([Retention](configuration-guide.md#retention-settings-the-stack-limits)) |
+| `TranscriptionExpirationInDays` | 90 | The DynamoDB time to live of transcript segments and key-frame items, shortened the same way, and the S3 lifecycle rules on transcript and summary files, key-frame images and consent evidence images |
+| `AudioRecordingExpirationInDays` | 90 | The S3 lifecycle rules on audio and video recordings |
+| `CloudWatchLogsExpirationInDays` | 90 | The retention of the stack's CloudWatch log groups |
+| `VPSchedulerStateMachineLogsExpirationInDays` | 7 | The retention of the scheduled Virtual Participant state machine's log group |
+| `EnableDataRetentionOnDelete` | `true` | Whether the DynamoDB tables, S3 buckets and KMS key are kept when the stack is deleted; see [Cleanup](cleanup.md#retained-resources) |
+
+The recordings bucket is versioned, and removes noncurrent object versions one
+day after they stop being current; see
+[Earlier versions in the recordings bucket](privacy-and-data-handling.md#earlier-versions-in-the-recordings-bucket).
 
 ## Where meeting content is processed
 
@@ -433,7 +443,7 @@ deployment with a data-residency requirement can check each one.
 
 LMA's own resources all run in the AWS Region the stack is deployed to: the
 WebSocket transcriber, the Virtual Participant tasks, the Lambda functions, the
-optional on-demand speech engine (see [MicroVM ASR](microvm-asr.md)), and the
+ASR MicroVM speech engine where it is deployed (see [MicroVM ASR](microvm-asr.md)), and the
 DynamoDB tables, S3 buckets, Kinesis stream and AppSync API that store and carry
 meeting content. The web UI is served through CloudFront, whose edge locations
 cache the UI's static files only; meeting content reaches the browser from the

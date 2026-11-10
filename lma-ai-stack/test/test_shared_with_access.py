@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """How the AppSync resolvers read a meeting's SharedWith (no AWS).
 
@@ -380,7 +380,10 @@ def test_every_mutation_a_filtered_subscription_receives_publishes_shared_with(
             if mutation == "createVirtualParticipant":
                 # A new row is shared with nobody, so its message reaches the
                 # owner and Admins alone.
-                assert '$util.qr($input.put("SharedWith", ""))' in props["RequestMappingTemplate"]
+                request = props["RequestMappingTemplate"]
+                if isinstance(request, dict):
+                    request = request["Fn::Sub"]
+                assert '$util.qr($input.put("SharedWith", ""))' in request
                 continue
             assert _publishes(resources, props), f"{mutation} (published to {subscription})"
             checked.append(mutation)
@@ -548,7 +551,8 @@ def _request_template(resources: dict, field: str) -> str:
     location = props.get("RequestMappingTemplateS3Location")
     if location:
         return _read(Path(location).name)
-    return props["RequestMappingTemplate"]
+    request = props["RequestMappingTemplate"]
+    return request["Fn::Sub"] if isinstance(request, dict) else request
 
 
 def _response_template(resources: dict, field: str) -> str:

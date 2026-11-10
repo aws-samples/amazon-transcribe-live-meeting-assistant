@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -180,6 +180,29 @@ describe('VideoTimeline', () => {
     ]);
     fireEvent.click(screen.getByText('Hide repeated frames'));
     expect(shownTimes()).toHaveLength(2);
+  });
+
+  it('gives the page the frames it counts as screen shares, without repeats or camera frames', async () => {
+    const onScreenShares = vi.fn();
+    const loadFrames = vi.fn().mockResolvedValue({
+      VideoKeyframes: [
+        frame(30000, { Title: 'Dashboard' }),
+        frame(45000, { ContentKind: 'CAMERA' }),
+        frame(60000, { DuplicateOf: '0000030000-ab12cd' }),
+        frame(90000, { Title: 'Roadmap' }),
+      ],
+      nextToken: null,
+    });
+    render(
+      <VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} onScreenShares={onScreenShares} />,
+    );
+    await screen.findByTitle('Key frame at 0:30');
+    await waitFor(() =>
+      expect(onScreenShares).toHaveBeenLastCalledWith([
+        { FrameId: '0000030000-ab12cd', Timestamp: 30, VideoOffset: 40, Title: 'Dashboard' },
+        { FrameId: '0000090000-ab12cd', Timestamp: 90, VideoOffset: 100, Title: 'Roadmap' },
+      ]),
+    );
   });
 
   it('offers no toggle when no frame repeats another', async () => {

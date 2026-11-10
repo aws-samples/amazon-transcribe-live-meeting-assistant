@@ -122,6 +122,8 @@ While the stack has many configurable parameters, pay special attention to these
 
 - **Transcript Knowledge Base** -- Default value is `BEDROCK_KNOWLEDGE_BASE`. When using `STRANDS_BEDROCK_WITH_KB`, choose **Create** to auto-provision a new knowledge base or **Use Existing** to reference one you already have.
 
+- **EnableMicrovmAsr** -- Default `true`. Deploys the [ASR MicroVM speech engine](microvm-asr.md), LMA's default transcription engine for Stream Audio, the Chrome extension, the Desktop Capture apps and the Virtual Participant, which [voice enrollment](voice-enrollment.md) also needs. It is deployed only in Regions with AWS Lambda MicroVMs (us-east-1, us-east-2, us-west-2, ap-northeast-1 and eu-west-1); elsewhere every meeting uses Amazon Transcribe. Set it to `false` to use Amazon Transcribe for every meeting. While the Amazon Transcribe settings on the Configuration page use content redaction (the Regulated presets turn it on), a custom vocabulary or language model, language identification, or a language the deployed speech model does not support (see [Languages](microvm-asr.md#languages)), meetings stay on Amazon Transcribe automatically, because this engine does not offer those options. The engine is the default because voice enrollment and per-voice speaker separation need it; its transcript quality is below Amazon Transcribe's and has not been benchmarked, so measure it in a dev stack before relying on it (see [MicroVM ASR](microvm-asr.md)). With the engine deployed, an Admin can also move each kind of meeting onto Amazon Transcribe in the Transcription Engine section of the Configuration page. The first deployment builds the engine's image, which adds several minutes.
+
 For a complete list of all available parameters, see the [CloudFormation Parameters Reference](cloudformation-parameters.md).
 
 ## What the Stack Creates
@@ -136,6 +138,7 @@ The CloudFormation deployment provisions the following resources:
 - **AWS AppSync GraphQL API** -- Manages real-time data synchronization between the backend and the web UI.
 - **Amazon CloudFront distribution and Amazon Cognito** -- Serves the LMA web application with user authentication and authorization.
 - **Amazon VPC** -- Network isolation for Fargate tasks and other compute resources.
+- **ASR MicroVM speech engine** (by default, in Regions with AWS Lambda MicroVMs) -- A MicroVM image with the speech and speaker models, and the Lambda function that launches one MicroVM per meeting and terminates it when the meeting ends.
 - **IAM roles and policies** -- Least-privilege permissions for all service components.
 
 ## Deployment Time

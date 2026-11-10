@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -44,30 +44,112 @@ const NovaSonicNotice = ({ configuration = {} }) => {
 
 NovaSonicNotice.propTypes = { configuration: PropTypes.shape({}) };
 
-// Without the on-demand engine every meeting is transcribed by Amazon
+/** `es` from `es-US`: the part of a meeting's language code a bundle's list names. */
+const baseLanguage = (languageCode) => `${languageCode || ''}`.trim().toLowerCase().split('-')[0];
+
+/**
+ * The deployed bundle's languages, from the AsrModelLanguages setting the
+ * transcriber stack publishes (comma-separated base codes); empty when none is
+ * published, which means English only.
+ */
+export const bundleLanguages = (settings = {}) =>
+  `${settings?.AsrModelLanguages || ''}`
+    .split(',')
+    .map(baseLanguage)
+    .filter((code) => code.length > 0);
+
+/**
+ * Whether a meeting language is one the deployed bundle transcribes, as
+ * isMicrovmLanguage in the transcriber's and the Virtual Participant's
+ * configuration-store.ts: English always, any other base language when the
+ * bundle's list names it.
+ */
+const isMicrovmLanguage = (languageCode, languages = []) => {
+  const language = baseLanguage(languageCode);
+  return language === '' || language === 'en' || languages.includes(language);
+};
+
+/** A language's English name (`Spanish` for `es`), or the code where the browser has none. */
+const languageName = (code) => {
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code;
+  } catch (error) {
+    return code;
+  }
+};
+
+/** The deployed bundle's languages by name, English first, as the section lists them. */
+export const bundleLanguageNames = (languages = []) => {
+  const others = [...new Set(languages.filter((code) => code !== 'en'))].map(languageName);
+  others.sort((a, b) => a.localeCompare(b));
+  return [languageName('en'), ...others];
+};
+
+/**
+ * The Amazon Transcribe options a saved transcription section uses that the
+ * ASR MicroVM engine does not offer, as the page names them, each with whether
+ * it also concerns Virtual Participants (which have no custom language model
+ * setting). A meeting using any of them stays on Amazon Transcribe: the same rule
+ * as transcribeOnlyOptions in the transcriber's and the Virtual Participant's
+ * configuration-store.ts.
+ */
+export const transcribeOnlyOptionsInUse = (transcription = {}, languages = []) => {
+  const options = [];
+  if (transcription?.contentRedactionEnabled === true) options.push({ name: 'content redaction', vp: true });
+  if (transcription?.customVocabularyName) options.push({ name: 'a custom vocabulary', vp: true });
+  if (transcription?.customLanguageModelName) options.push({ name: 'a custom language model', vp: false });
+  const languageCode = transcription?.languageCode;
+  if (['identify-language', 'identify-multiple-languages'].includes(languageCode)) {
+    options.push({ name: 'language identification', vp: true });
+  } else if (!isMicrovmLanguage(languageCode, languages)) {
+    options.push({ name: `the language ${languageCode}`, vp: true });
+  }
+  return options;
+};
+
+/** The names alone; see transcribeOnlyOptionsInUse. */
+export const transcribeOnlyOptions = (transcription = {}, languages = []) =>
+  transcribeOnlyOptionsInUse(transcription, languages).map((option) => option.name);
+
+// Without the ASR MicroVM engine every meeting is transcribed by Amazon
 // Transcribe, so the section shows only the voice separation switch, which
 // that engine honours too, and says where the engine choices went.
-const AsrEngineNotice = ({ settings = {} }) => {
+const AsrEngineNotice = ({ settings = {}, configuration = {} }) => {
   if (`${settings?.AsrEngineAvailable}` !== 'true') {
     return (
       <Alert type="info" header="Every meeting is transcribed by Amazon Transcribe">
-        The on-demand speech engine is not deployed, so the choice of engine for each kind of meeting is not shown.
-        Virtual Participant voice separation works on Amazon Transcribe. To evaluate the experimental on-demand engine,
-        set EnableMicrovmAsr to true on the main stack; Amazon Transcribe remains the recommended engine.
+        The ASR MicroVM speech engine is not deployed, so the choice of engine for each kind of meeting is not shown.
+        Virtual Participant voice separation works on Amazon Transcribe. The ASR MicroVM engine is deployed when
+        EnableMicrovmAsr is true on the main stack (the default) in a Region with AWS Lambda MicroVMs.
       </Alert>
     );
   }
   const diarization = `${settings?.AsrDiarizationAvailable}` === 'true';
+  const languages = bundleLanguages(settings);
+  const inUse = transcribeOnlyOptionsInUse(configuration?.transcription, languages);
+  const affected = inUse.some((option) => option.vp)
+    ? 'every streaming meeting and Virtual Participant is'
+    : 'every streaming meeting is';
   return (
     <>
-      <Alert type="warning" header="Experimental — not production ready">
-        Transcript quality on the on-demand engine is below Amazon Transcribe&apos;s and its defaults may change between
-        releases. It falls back to Amazon Transcribe if it cannot start.
+      <Alert type="info" header="The ASR MicroVM engine is the default">
+        The ASR MicroVM engine transcribes the languages the deployed speech model supports, listed below, and does not
+        offer Amazon Transcribe&apos;s content redaction, custom vocabulary, custom language model or language
+        identification. While the Amazon Transcribe section sets a language the model does not support or uses any of
+        those, meetings stay on Amazon Transcribe whichever engine is selected here. A meeting whose MicroVM cannot
+        start also falls back to Amazon Transcribe.
       </Alert>
+      {inUse.length > 0 && (
+        <Alert type="warning" header="These settings keep meetings on Amazon Transcribe">
+          The Amazon Transcribe section uses {inUse.map((option) => option.name).join(', ')}, so {affected} transcribed
+          by Amazon Transcribe, even where the ASR MicroVM engine is selected below.
+        </Alert>
+      )}
       <KeyValuePairs
         columns={2}
         items={[
           { label: 'Model bundle', value: settings?.AsrModelBundleName || settings?.AsrModelBundleId || '—' },
+          { label: 'Languages', value: bundleLanguageNames(languages).join(', ') },
           {
             label: 'Speaker identification',
             value: diarization ? (
@@ -87,9 +169,10 @@ const SETTINGS = PropTypes.shape({
   AsrDiarizationAvailable: PropTypes.oneOfType([PropTypes.string, PropTypes.bool]),
   AsrModelBundleName: PropTypes.string,
   AsrModelBundleId: PropTypes.string,
+  AsrModelLanguages: PropTypes.string,
 });
 
-AsrEngineNotice.propTypes = { settings: SETTINGS };
+AsrEngineNotice.propTypes = { settings: SETTINGS, configuration: PropTypes.shape({}) };
 
 // The model settings the Model inference geography applies to, as the page
 // labels them. The consent evidence check model is the Meeting Consent

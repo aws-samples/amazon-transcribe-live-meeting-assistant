@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """What a Virtual Participant was created with, as its page reads it back.
 
@@ -77,7 +77,9 @@ def _block(sdl: str, header: str) -> str:
 
 
 def _create_template(resources: dict) -> str:
-    return resources["CreateVirtualParticipantResolver"]["Properties"]["RequestMappingTemplate"]
+    # An !Sub, for the record's expiry (MeetingRecordExpirationInDays).
+    request = resources["CreateVirtualParticipantResolver"]["Properties"]["RequestMappingTemplate"]
+    return request["Fn::Sub"] if isinstance(request, dict) else request
 
 
 def _page_query() -> str:

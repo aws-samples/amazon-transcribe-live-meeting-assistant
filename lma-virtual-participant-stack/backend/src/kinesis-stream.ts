@@ -1,9 +1,11 @@
 import { KinesisClient, PutRecordCommand } from '@aws-sdk/client-kinesis';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { details } from './details.js';
-import { VoiceLabelNames, buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
+import { buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
+import { SpeakerFusion } from './speaker-fusion.js';
 import { agendaStartFields, type VpAgenda } from './meeting-agenda.js';
 import { createLogger } from './logger.js';
+import { resultLanguageCode } from './transcribe-language.js';
 import { MEETING_CHAT_CHANNEL, REMOTE_CHANNEL } from './channels.js';
 import type { AsrEngineName } from './asr-microvm-client.js';
 
@@ -17,7 +19,16 @@ export interface TranscriptSegment {
   transcript: string;
   isPartial: boolean;
   speaker?: string;
-} 
+  /**
+   * The language Amazon Transcribe identified for the row (e.g. `es-US`), when
+   * language identification is on. Absent with a fixed language and on the
+   * MicroVM engine, which reports none.
+   */
+  languageCode?: string;
+}
+
+/** The record's LanguageCode field, or nothing when the language is not known. */
+const languageField = (code: string | undefined): { LanguageCode?: string } => (code ? { LanguageCode: code } : {});
 
 /** The fields of an ADD_VIDEO_KEYFRAME event other than its envelope. */
 export interface VideoKeyframeEvent {
@@ -129,13 +140,21 @@ class KinesisStreamManager {
   // Undefined, or no lookup at all, means nobody is known yet, and the name
   // the caller passed is used instead.
   private rosterLookup: ((absoluteStart: number, absoluteEnd: number) => string | undefined) | null = null;
+  // Seconds of a span the platform actually showed each participant for, from
+  // the same roster timeline: the evidence a voice label's vote is built from.
+  // Unlike the lookup above it never guesses -- time before the platform's
+  // first report belongs to nobody -- and with no source set there is none.
+  private rosterCoverage:
+    | ((absoluteStart: number, absoluteEnd: number) => Iterable<[string, number]>)
+    | null = null;
   // Whether to recover speaker turns from Transcribe's per-item labels. Off
   // unless the deployment's VP voice-separation switch is on.
   private diarize = false;
-  // Which participant each Transcribe voice label is shown under. Labels
-  // restart with every Transcribe session, and each session has its own
-  // timeline offset, so a new offset starts a new map.
-  private voiceLabels = new VoiceLabelNames();
+  // Which participant each Transcribe voice label is attributed to, and so
+  // which rows it names (speaker-fusion.ts). Labels restart with every
+  // Transcribe session, and each session has its own timeline offset, so a
+  // new offset starts a new vote.
+  private voiceLabels = new SpeakerFusion();
   private voiceLabelsOffset: number | null = null;
 
   constructor() {
@@ -350,6 +369,8 @@ class KinesisStreamManager {
   async sendTranscriptSegment(speaker: string, transcriptResult: any, timeOffsetSeconds = 0): Promise<number> {
     log.info("Process speaker changes to identify segments within result");
     const segments = this.processTranscriptionResults(speaker, transcriptResult, timeOffsetSeconds);
+    // Every row of a result is in the result's language.
+    const language = languageField(resultLanguageCode(transcriptResult));
     let maxEndTime = timeOffsetSeconds;
 
     for (const segment of Object.values(segments)) {
@@ -376,6 +397,7 @@ class KinesisStreamManager {
           Sentiment: null,
           TranscriptEvent: null,
           Speaker: (segment as any).Speaker,
+          ...language,
           AccessToken: process.env.USER_ACCESS_TOKEN || '',
           IdToken: process.env.USER_ID_TOKEN || '',
           RefreshToken: process.env.USER_REFRESH_TOKEN || '',
@@ -412,6 +434,7 @@ class KinesisStreamManager {
       Sentiment: null,
       TranscriptEvent: null,
       Speaker: segment.speaker,
+      ...languageField(segment.languageCode),
       AccessToken: process.env.USER_ACCESS_TOKEN || '',
       IdToken: process.env.USER_ID_TOKEN || '',
       RefreshToken: process.env.USER_REFRESH_TOKEN || '',
@@ -439,7 +462,7 @@ class KinesisStreamManager {
   setDiarization(enabled: boolean): void {
     this.diarize = enabled === true;
     // Set once per meeting, so a new meeting starts with no label owners.
-    this.voiceLabels = new VoiceLabelNames();
+    this.voiceLabels = new SpeakerFusion();
     this.voiceLabelsOffset = null;
   }
 
@@ -456,6 +479,19 @@ class KinesisStreamManager {
    */
   setRosterLookup(lookup: ((absoluteStart: number, absoluteEnd: number) => string | undefined) | null): void {
     this.rosterLookup = lookup;
+  }
+
+  /**
+   * Where a voice label's evidence comes from: the seconds of a span of the
+   * meeting timeline the platform showed each participant for, as the
+   * on-demand engine's path counts it (RosterTimeline.coverage). Kept apart
+   * from the roster lookup because that one names a row even where the
+   * platform has shown nobody, and such a name must not prove a label.
+   */
+  setRosterCoverage(
+    coverage: ((absoluteStart: number, absoluteEnd: number) => Iterable<[string, number]>) | null,
+  ): void {
+    this.rosterCoverage = coverage;
   }
 
   /**
@@ -517,8 +553,9 @@ class KinesisStreamManager {
    *
    * Every word is named after the participant the platform showed for most
    * of the word, and the result is cut where that changes. With voice
-   * separation on, the voice label is kept as a hint under the participant it
-   * mostly coincides with (see VoiceLabelNames).
+   * separation on, a voice label proven to one participant names its whole
+   * run instead, and any other label is kept as a hint under the participant
+   * it mostly coincides with (see speaker-fusion.ts).
    *
    * Segment ids are keyed on Transcribe's own `ResultId` plus the piece
    * index, NOT on the speaker name. That is what keeps a partial aligned with
@@ -534,7 +571,7 @@ class KinesisStreamManager {
     const resultId =
       result.ResultId ?? KinesisStreamManager.fallbackResultId(result, timeOffsetSeconds);
     if (this.voiceLabelsOffset !== timeOffsetSeconds) {
-      this.voiceLabels = new VoiceLabelNames();
+      this.voiceLabels = new SpeakerFusion();
       this.voiceLabelsOffset = timeOffsetSeconds;
     }
     const labels = this.voiceLabels;
@@ -542,11 +579,31 @@ class KinesisStreamManager {
       resultId,
       timeOffsetSeconds,
       rosterNameFor: (start, end) => this.rosterLookup?.(start, end) ?? speakerName,
+      // A piece is only ever named here when its run's label did not name the
+      // whole run -- the label is unproven, or the page strongly contradicts
+      // it on this run -- so the page names it, as on the on-demand engine's
+      // path. Naming it through `attribute` instead would hand a contradicted
+      // run's pieces straight back to the label's proven name.
       nameFor: this.diarize
-        ? (roster, label, seconds) => labels.nameFor(roster, label, seconds)
+        ? (roster, label) => labels.attributeByPage(label, roster).speaker
         : (roster) => roster,
       isPartial: KinesisStreamManager.isPartialResult(result),
       useLabels: this.diarize,
+      // Once per labelled run: its evidence is what the platform actually
+      // showed over the run's span, never a fallback name. On a three-person
+      // Zoom standup one Transcribe label coincided with all three
+      // participants, so a Transcribe label often never reaches the share
+      // that lets it name a row, and its rows are then named by the platform.
+      voiceName: this.diarize
+        ? (label, start, end) => {
+            const attribution = labels.attribute({
+              label,
+              pageName: this.rosterLookup?.(start, end) ?? speakerName,
+              coverage: this.rosterCoverage?.(start, end) ?? [],
+            });
+            return attribution.source === 'page' ? undefined : attribution.speaker;
+          }
+        : undefined,
     });
 
     if (diagnosticsOn()) {

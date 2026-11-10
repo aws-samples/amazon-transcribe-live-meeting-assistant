@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
@@ -152,5 +152,88 @@ describe('AgendaPanel on the Summary tab', () => {
     );
     expect(screen.getByText('Coverage')).toBeTruthy();
     expect(screen.getByText(': Covered', { exact: false })).toBeTruthy();
+  });
+});
+
+describe('AgendaPanel on the Transcript tab', () => {
+  const COVERAGE = [
+    '- **Introductions**: Covered - done',
+    '- **Budget**: Partly covered - total agreed',
+    '- **Hiring**: Not covered - no time',
+  ].join('\n');
+  const sectionToggle = () => screen.getByTestId('agenda-collapsible').querySelector('[aria-expanded]');
+  const itemTexts = (container) => [...container.querySelectorAll('ol li')].map((li) => li.textContent);
+
+  it('is open with its numbered items while the meeting is live', () => {
+    const { container } = render(
+      <AgendaPanel item={ITEM} onSave={vi.fn()} readOnly={false} compactWhenEmpty collapsible defaultExpanded />,
+    );
+    expect(sectionToggle().getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByText('(3)')).toBeTruthy();
+    expect(itemTexts(container)).toEqual(['Introductions', 'Budget', 'Hiring']);
+  });
+
+  it('is closed by default after the meeting, and opens when the viewer asks', () => {
+    render(<AgendaPanel item={ITEM} onSave={vi.fn()} readOnly={false} compactWhenEmpty collapsible />);
+    expect(sectionToggle().getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(sectionToggle());
+    expect(sectionToggle().getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('opens itself when Edit is chosen while closed', () => {
+    const { container } = render(
+      <AgendaPanel item={ITEM} onSave={vi.fn()} readOnly={false} compactWhenEmpty collapsible />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Edit/ }));
+    expect(sectionToggle().getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelector('textarea').value).toBe(ITEM.agenda);
+  });
+
+  it("marks each item with the summary's coverage status, in agenda order", () => {
+    const { container } = render(
+      <AgendaPanel
+        item={ITEM}
+        onSave={vi.fn()}
+        readOnly={false}
+        compactWhenEmpty
+        collapsible
+        defaultExpanded
+        coverage={COVERAGE}
+      />,
+    );
+    expect(itemTexts(container)).toEqual(['IntroductionsCovered', 'BudgetPartly covered', 'HiringNot covered']);
+    // The coverage text itself stays on the Summary tab.
+    expect(screen.queryByText('Coverage')).toBeNull();
+  });
+
+  it('shows no statuses when the coverage lines do not pair with the items', () => {
+    const { container } = render(
+      <AgendaPanel
+        item={ITEM}
+        onSave={vi.fn()}
+        readOnly={false}
+        compactWhenEmpty
+        collapsible
+        defaultExpanded
+        coverage="- **Budget**: Covered"
+      />,
+    );
+    expect(container.querySelectorAll('.agenda-item-status')).toHaveLength(0);
+  });
+
+  it('is the one line with Add agenda for a meeting with no agenda', () => {
+    render(
+      <AgendaPanel
+        item={{ callId: 'c1' }}
+        onSave={vi.fn()}
+        readOnly={false}
+        compactWhenEmpty
+        collapsible
+        defaultExpanded
+      />,
+    );
+    expect(screen.getByTestId('agenda-compact')).toBeTruthy();
+    expect(screen.queryByTestId('agenda-collapsible')).toBeNull();
+    expect(screen.getByRole('button', { name: /Add agenda/ })).toBeTruthy();
   });
 });

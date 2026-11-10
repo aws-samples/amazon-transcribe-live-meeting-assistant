@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """LMA end-to-end integration tests against a live deployed stack.
 
 Run with ``make integ-tests STACK=<name>`` (see the ``integ-tests`` skill).
@@ -251,7 +251,9 @@ def test_ws_stream_transcribes_to_meeting(client: LMAClient) -> None:
     DynamoDB, AND transcript segments were produced. In one shot this guards
     every regression this batch hit:
       * @fastify/websocket 11 upgrade ordering  (500 -> connection drops)
-      * fastify 5 audio handling / Transcribe streaming
+      * fastify 5 audio handling / the speech engine: the ASR MicroVM engine by
+        default where the stack has it (EnableMicrovmAsr=true and the streaming
+        engine switch on), Amazon Transcribe streaming otherwise or on fallback
       * gql 3.5 <-> AppSync                      (gql-4 break -> no meeting/segments)
 
     Opt-in: requires LMA_TEST_USERNAME / LMA_TEST_PASSWORD (a Cognito user in the
@@ -282,8 +284,10 @@ def test_ws_stream_transcribes_to_meeting(client: LMAClient) -> None:
         )
         assert result["segment_count"] > 0, (
             f"connected and meeting created, but 0 transcript segments for "
-            f"{result['call_id']} — Amazon Transcribe streaming or the segment "
-            f"write path is broken (check transcriber processTranscriptionResults)."
+            f"{result['call_id']} — the speech engine (the ASR MicroVM engine by "
+            f"default, or Amazon Transcribe streaming) or the segment write path is "
+            f"broken. Check the transcriber log's [ASR] lines for which engine ran, "
+            f"then processTranscriptionResults."
         )
     finally:
         cleanup(client.stack_name, result["call_id"], region=client.region)
@@ -405,8 +409,9 @@ def test_voice_enrollment_consent_lifecycle(client: LMAClient) -> None:
     )
 
     # The voiceprint itself. A failure here is usually the embedding path:
-    # enrolling needs EnableMicrovmAsr=true, because that engine computes the
-    # speaker embeddings and Amazon Transcribe exposes none.
+    # enrolling needs the ASR MicroVM engine (EnableMicrovmAsr=true, the
+    # default, in a Region with Lambda MicroVMs), because that engine computes
+    # the speaker embeddings and Amazon Transcribe exposes none.
     assert observed["enrolled"], (
         f"enrolMyVoice failed ({observed['enrol_message']}) after sending "
         f"{observed['clips']} clips / {observed['seconds']}s. If it says the "

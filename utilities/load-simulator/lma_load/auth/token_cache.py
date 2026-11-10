@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Persist synthetic-user tokens to disk so long-running scenarios can
 survive restarts / replays without re-minting Cognito users."""
 

@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Meeting consent over the Stream Audio socket, end to end.
 
@@ -176,8 +176,34 @@ class ConsentSettingsOverride:
     #: on its default profile, which is read-only; removed again by restore().
     TEMPORARY_PROFILE = "integ-tests"
 
+    def _put_back_a_left_over_temporary_profile(self) -> None:
+        """Reactivate what the temporary profile replaced, and remove it.
+
+        A run that was stopped before its teardown -- cancelled, or cut short by
+        a deployment -- leaves the temporary profile active with that run's
+        overrides in it. Taken for an operator's Custom profile, it would be
+        edited in place and kept, and its overrides would apply to every later
+        meeting on the deployment; a Retention override deletes their
+        transcripts once they are summarized. The profile is created as a copy
+        of the one it replaced, so its origin names the profile to reactivate.
+        """
+        record = self.store.read_profile(self.TEMPORARY_PROFILE, consistent_read=True)
+        origin = str((record.metadata or {}).get("ProfileOrigin") or "")
+        previous = origin[len("copied-from-"):] if origin.startswith("copied-from-") else ""
+        if not previous or not self.store.read_profile(previous, consistent_read=True).exists:
+            previous = "default"
+        print(
+            f"configuration: the {self.TEMPORARY_PROFILE!r} profile an earlier run left active "
+            f"is replaced by {previous!r} again before this test changes anything"
+        )
+        self.store.activate_profile(previous)
+        self.store.delete_profile(self.TEMPORARY_PROFILE)
+
     def save(self) -> None:
         active = self.store.active_profile_name(consistent_read=True)
+        if active == self.TEMPORARY_PROFILE:
+            self._put_back_a_left_over_temporary_profile()
+            active = self.store.active_profile_name(consistent_read=True)
         self.created_profile = False
         managed = bool(
             active and self.store.read_profile(active, consistent_read=True).metadata.get("Managed")

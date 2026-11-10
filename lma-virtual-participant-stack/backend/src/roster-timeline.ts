@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -59,10 +59,41 @@ export class RosterTimeline {
      * included, so it searches rather than scanning or copying the timeline.
      */
     speakerFor(startSec: number, endSec: number, lagSeconds = 0): string {
-        const count = this.times.length;
-        if (count === 0) {
+        if (this.times.length === 0) {
             return 'Unknown';
         }
+        const { covered, inEffect } = this.cover(startSec, endSec, lagSeconds);
+        let best = '';
+        let bestCovered = 0;
+        for (const [name, seconds] of covered) {
+            if (seconds >= bestCovered) {
+                best = name;
+                bestCovered = seconds;
+            }
+        }
+        if (best) {
+            return best;
+        }
+        return inEffect < 0 ? this.names[0] : this.names[inEffect];
+    }
+
+    /**
+     * Seconds of [startSec, endSec] each participant was shown for, with the
+     * same lag as speakerFor. Time before the first entry belongs to nobody,
+     * so it is absent rather than credited to the first participant: this is
+     * the evidence a voice label's name vote is built from (speaker-fusion.ts),
+     * and a guess must not count as evidence.
+     */
+    coverage(startSec: number, endSec: number, lagSeconds = 0): Map<string, number> {
+        return this.times.length === 0 ? new Map() : this.cover(startSec, endSec, lagSeconds).covered;
+    }
+
+    private cover(
+        startSec: number,
+        endSec: number,
+        lagSeconds: number,
+    ): { covered: Map<string, number>; inEffect: number } {
+        const count = this.times.length;
         const end = Math.max(endSec, startSec);
         const shifted = (i: number): number => this.times[i] - lagSeconds;
         // Entries up to `inEffect` start at or before the span; only the last
@@ -86,17 +117,6 @@ export class RosterTimeline {
                 covered.set(this.names[i], (covered.get(this.names[i]) ?? 0) + (to - from));
             }
         }
-        let best = '';
-        let bestCovered = 0;
-        for (const [name, seconds] of covered) {
-            if (seconds >= bestCovered) {
-                best = name;
-                bestCovered = seconds;
-            }
-        }
-        if (best) {
-            return best;
-        }
-        return inEffect < 0 ? this.names[0] : this.names[inEffect];
+        return { covered, inEffect };
     }
 }

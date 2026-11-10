@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -76,6 +76,45 @@ describe('MeetingPlayer', () => {
     expect(markers.map((m) => m.style.left)).toEqual(['0%', '50%']);
     expect(markers[1].getAttribute('aria-label')).toBe('Chapter at 05:00: Budget review');
     expect(markers[1].textContent).toContain('Budget review');
+  });
+
+  it('marks each screen share as a dot of its own, named as a screen share, apart from the chapters', async () => {
+    const shares = [
+      { FrameId: '0000060000-a', Timestamp: 60, VideoOffset: 60, Title: 'Q3 budget' },
+      { FrameId: '0000120000-b', Timestamp: 120, VideoOffset: 120, Title: null },
+      { FrameId: '0000420000-c', Timestamp: 420, VideoOffset: 420, Title: 'Hiring plan' },
+    ];
+    const { media } = await renderPlayer({ screenShares: shares });
+    loadMedia(media, 600);
+    const dots = screen.getAllByTestId('meeting-player-share-marker');
+    expect(dots.map((m) => m.style.left)).toEqual(['10%', '20%', '70%']);
+    expect(dots.map((m) => m.getAttribute('aria-label'))).toEqual([
+      'Screen share at 1:00: Q3 budget',
+      'Screen share at 2:00',
+      'Screen share at 7:00: Hiring plan',
+    ]);
+    expect(dots[0].textContent).toContain('Screen share: Q3 budget');
+    expect(dots[0].className).toContain('meeting-player-marker-share');
+    const chapterMarks = screen.getAllByTestId('meeting-player-marker');
+    expect(chapterMarks[1].textContent).toContain('Chapter: Budget review');
+    expect(chapterMarks[1].className).toContain('meeting-player-marker-chapter');
+    // The legend says what each kind is and how many there are.
+    expect(screen.getByTestId('meeting-player-legend').textContent).toBe('2 chapters3 screen shares');
+  });
+
+  it('plays from a screen share mark when it is clicked', async () => {
+    const shares = [{ FrameId: '0000060000-a', Timestamp: 60, VideoOffset: 75, Title: 'Q3 budget' }];
+    const { media } = await renderPlayer({ screenShares: shares });
+    loadMedia(media, 600);
+    fireEvent.click(screen.getByRole('button', { name: 'Screen share at 1:00: Q3 budget' }));
+    expect(media.currentTime).toBe(75);
+    expect(media.paused).toBe(false);
+  });
+
+  it('shows no legend when there are no marks', async () => {
+    const { media } = await renderPlayer({ chapters: [] });
+    loadMedia(media, 600);
+    expect(screen.queryByTestId('meeting-player-legend')).toBeNull();
   });
 
   it('places the marks on the recording clock', async () => {

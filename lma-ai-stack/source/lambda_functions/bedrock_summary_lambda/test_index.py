@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Tests for the meeting-summary Lambda that prompts Amazon Bedrock.
 
@@ -43,6 +43,8 @@ os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("FETCH_TRANSCRIPT_LAMBDA_ARN", FETCH_ARN)
 os.environ.setdefault("S3_BUCKET_NAME", BUCKET)
 os.environ.setdefault("S3_PREFIX", PREFIX)
+# The stack's default deploys the transcript knowledge base.
+os.environ.setdefault("TRANSCRIPT_KB_ID", "KB12345678")
 os.environ.setdefault("CONFIGURATION_TABLE_NAME", TABLE_NAME)
 # PROCESS_TRANSCRIPT is deliberately left unset: its default
 # are asserted below.
@@ -1284,6 +1286,30 @@ def test_a_meeting_without_key_frames_keeps_its_transcript_document_as_it_was(mo
     assert s3.objects[f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt"]["Body"] == TRANSCRIPT
 
 
+def test_the_summary_file_is_written_for_the_transcript_knowledge_base(monkeypatch):
+    _, s3 = install(monkeypatch)
+    monkeypatch.setattr(index, "TRANSCRIPT_KB_ID", "KB12345678")
+    index.write_to_s3(CALL_ID, METADATA, TRANSCRIPT, '{"SUMMARY": "x"}')
+    assert sorted(s3.objects) == [
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-SUMMARY.txt",
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-SUMMARY.txt.metadata.json",
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt",
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt.metadata.json",
+    ]
+
+
+def test_without_a_transcript_knowledge_base_only_the_transcript_file_is_written(monkeypatch):
+    """The summary stays on the meeting record only; the transcript file is still
+    written, for the MCP server's transcript tool."""
+    _, s3 = install(monkeypatch)
+    monkeypatch.setattr(index, "TRANSCRIPT_KB_ID", "")
+    index.write_to_s3(CALL_ID, METADATA, TRANSCRIPT, '{"SUMMARY": "x"}')
+    assert sorted(s3.objects) == [
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt",
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt.metadata.json",
+    ]
+
+
 # --------------------------------------------------------------------------
 # The screen share summary section
 # --------------------------------------------------------------------------
@@ -1461,6 +1487,7 @@ def test_text_inserted_for_the_slides_is_not_read_as_another_placeholder(
 
 def test_the_knowledge_base_summary_names_its_pictures_in_words(monkeypatch):
     _, s3 = install(monkeypatch)
+    monkeypatch.setattr(index, "TRANSCRIPT_KB_ID", "KB12345678")
     summary = json.dumps(
         {
             "SCREEN SHARE SUMMARY": "**[00:30] Budget**\n\n![Slide at 00:30](keyframe:0000030000-ab12cd)"

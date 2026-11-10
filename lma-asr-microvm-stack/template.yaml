@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
@@ -763,6 +763,13 @@ Outputs:
       operating point to measure and is still being validated live;
       "uncalibrated" when the catalog states no status.
     Value: !GetAtt AsrImageSource.BundleStatus
+
+  AsrModelLanguages:
+    Description: >-
+      Comma-separated base language codes (such as "en,es,fr") that every model
+      writing this bundle's text transcribes. The WebSocket transcriber and the
+      Virtual Participant keep a meeting in any other language on Amazon Transcribe.
+    Value: !GetAtt AsrImageSource.Languages
 
   AsrLicenceSummary:
     Description: Licences of every weight in the bundle.

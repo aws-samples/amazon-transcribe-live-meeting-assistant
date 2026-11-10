@@ -202,6 +202,6 @@ Add as a remote MCP server in Quick Suite:
 - **URL**: The `MCPServerApiKeyEndpoint` stack output (e.g. `https://xxx.execute-api.us-west-2.amazonaws.com/mcp`)
 - **Token**: Your LMA API key (e.g. `lma_a1b2c3d4-e5f6-7890-abcd-ef1234567890`)
 
-Quick Suite sends `Authorization: Bearer <key>` on all requests via `streamablehttp_client`.
+Quick Suite sends `Authorization: Bearer <key>` on all requests through its streamable HTTP client.
 
 > **To confirm on a deployed stack:** this has not been verified against a live Quick Suite tenant, and the Quick Suite setup guide documents only user-authentication (OAuth) for a remote MCP server. If your Quick Suite version has no bearer-token or API-key field, use Quick Desktop, Claude Desktop or another MCP client for the API key route. LMA's endpoint accepts the key over `Authorization: Bearer` or `x-api-key` regardless of the client.

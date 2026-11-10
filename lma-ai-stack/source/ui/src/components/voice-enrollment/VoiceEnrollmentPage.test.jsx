@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -14,7 +14,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
 
 /* eslint-disable react/prop-types */
 
@@ -86,7 +86,8 @@ describe('the page header', () => {
   it('marks the Enroll My Voice page Beta', async () => {
     renderWith(state());
     await waitFor(() => expect(screen.getByText('Your voice')).toBeTruthy());
-    expect(screen.getByText('Beta')).toBeTruthy();
+    // Scoped to the page heading, so other text on the page reading "Beta" cannot match.
+    expect(within(screen.getByRole('heading', { level: 1 })).getByText('Beta')).toBeTruthy();
   });
 
   it('says enrollment needs the on-demand speech engine', async () => {

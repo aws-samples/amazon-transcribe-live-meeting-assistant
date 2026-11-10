@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -45,6 +45,33 @@ const TRANSCRIPT = {
     },
   },
 };
+
+describe('the language of each row', () => {
+  const lines = (...segments) => ({ [CALL_ID]: { REMOTE: { segments } } });
+  const spoken = (id, text, start, languageCode) => ({
+    ...segment(id, 'REMOTE', 'Ana', text, start, start + 1),
+    ...(languageCode ? { languageCode } : {}),
+  });
+
+  it('is written after the time in a meeting with more than one language', () => {
+    const transcript = lines(spoken('s1', 'Good morning.', 1, 'en-US'), spoken('s2', 'Hola.', 5, 'es-US'));
+    expect(transcriptDownloadRows(transcript, MEETING).map((r) => r.language)).toEqual(['en-US', 'es-US']);
+    expect(transcriptDownloadText(transcript, MEETING)).toBe(
+      'Ana [00:01.0, en-US]: Good morning.\nAna [00:05.0, es-US]: Hola.',
+    );
+    expect(parseTranscriptLine('Ana [00:05.0, es-US]: Hola.')).toEqual({
+      speaker: 'Ana',
+      timestamp: '00:05.0, es-US',
+      content: 'Hola.',
+    });
+  });
+
+  it('is left out of a meeting in one language, which downloads as before', () => {
+    const transcript = lines(spoken('s1', 'Hola.', 1, 'es-US'), spoken('s2', 'Adiós.', 5, 'es-US'));
+    expect('language' in transcriptDownloadRows(transcript, MEETING)[0]).toBe(false);
+    expect(transcriptDownloadText(transcript, MEETING)).toBe('Ana [00:01.0]: Hola.\nAna [00:05.0]: Adiós.');
+  });
+});
 
 describe('transcriptDownloadRows', () => {
   it('holds every channel the meeting has, in time order, chat lines under "<sender> (chat)"', () => {

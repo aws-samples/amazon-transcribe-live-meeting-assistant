@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Round-trip serialization tests for every wire message.
 
@@ -155,3 +155,12 @@ def test_parse_rejects_unknown_type() -> None:
     """An unknown discriminator is rejected rather than silently accepted."""
     with pytest.raises(ValidationError):
         parse_client_message('{"type": "nope"}')
+
+
+def test_termination_dropped_seconds_is_optional() -> None:
+    """A termination without ``dropped_seconds`` still parses, defaulting to none."""
+    parsed = parse_server_message('{"type": "termination", "audio_seconds": 3.0, "segments": 1}')
+    assert isinstance(parsed, Termination)
+    assert parsed.dropped_seconds == 0.0
+    with_drop = Termination(audio_seconds=3.0, segments=1, dropped_seconds=1.664)
+    assert parse_server_message(with_drop.model_dump_json()) == with_drop

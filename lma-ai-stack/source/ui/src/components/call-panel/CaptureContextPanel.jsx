@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -14,7 +14,9 @@
  * (common/meeting-context.js). The capture source, transcription engine,
  * language and speaker separation are the ones the meeting recorded when it
  * started; a meeting started before those were recorded shows its source and
- * speaker separation as inferred, and says so, and no engine or language.
+ * speaker separation as inferred, and says so, and no engine or language. The
+ * detected languages are the ones the speech engine identified in the meeting
+ * (common/detected-languages.js), shown only when it identified any.
  */
 import React from 'react';
 import PropTypes from 'prop-types';
@@ -33,6 +35,7 @@ import {
   transcriptionLanguage,
   transcriptRetention,
 } from '../common/meeting-context';
+import { detectedLanguagesText, meetingLanguages } from '../common/detected-languages';
 
 export const CONSENT_SETTING_ID = 'meeting-consent-setting';
 
@@ -182,6 +185,7 @@ const CaptureContextPanel = ({
   vp = null,
   platform = '',
   roster = [],
+  languages = null,
   consentState = null,
   onShowConsentRecord = undefined,
 }) => {
@@ -192,6 +196,7 @@ const CaptureContextPanel = ({
   const videoOff = Boolean(vp) && vp.enableVideoRecording === false;
   const engine = transcriptionEngine(item);
   const language = transcriptionLanguage(item);
+  const detected = languages || meetingLanguages(item.detectedLanguages);
   const separation = separationValue(
     speakerSeparation(roster),
     retention.state === 'deleted',
@@ -202,6 +207,14 @@ const CaptureContextPanel = ({
     { label: 'Captured with', value: sourceValue(source, vp, platform) },
     ...(engine ? [{ label: 'Transcription engine', value: engine }] : []),
     ...(language ? [{ label: 'Transcription language', value: language }] : []),
+    ...(detected.length
+      ? [
+          {
+            label: detected.length === 1 ? 'Detected language' : 'Detected languages',
+            value: detectedLanguagesText(detected),
+          },
+        ]
+      : []),
     { label: 'Speaker separation', value: separation },
     { label: 'Audio recording', value: recordingValue(item.recordingUrl, { live, kind: 'audio' }) },
     { label: 'Video recording', value: recordingValue(item.videoRecordingUrl, { live, off: videoOff, kind: 'video' }) },
@@ -243,6 +256,9 @@ CaptureContextPanel.propTypes = {
   // buildSpeakerRoster's rows.
   // eslint-disable-next-line react/forbid-prop-types
   roster: PropTypes.arrayOf(PropTypes.object),
+  // The meeting's detected languages (meetingLanguages), when the caller has
+  // read them from the transcript as well; the meeting record's otherwise.
+  languages: PropTypes.arrayOf(PropTypes.string),
   // What useMeetingConsent returns.
   // eslint-disable-next-line react/forbid-prop-types
   consentState: PropTypes.object,
