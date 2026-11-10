@@ -51,6 +51,11 @@ FETCH_TRANSCRIPT_LAMBDA_ARN = os.environ["FETCH_TRANSCRIPT_LAMBDA_ARN"]
 PROCESS_TRANSCRIPT = os.getenv("PROCESS_TRANSCRIPT", "False") == "True"
 S3_BUCKET_NAME = os.environ["S3_BUCKET_NAME"]
 S3_PREFIX = os.environ["S3_PREFIX"]
+# The transcript knowledge base's id, blank when the stack deploys none. The
+# summary file in S3_PREFIX is a document of that knowledge base and nothing
+# else reads it, so without one it is not written. The transcript file is
+# written either way: the MCP server's transcript tool reads it.
+TRANSCRIPT_KB_ID = os.environ.get("TRANSCRIPT_KB_ID", "")
 
 # A prompt template is stored under a key of the form "N#Title", where N orders
 # the sections of the summary. Kept identical to the pattern that the
@@ -783,18 +788,29 @@ def speech_only(transcript):
 
 
 def write_to_s3(callId, metadata, transcript, summary, keyframes=None):
+    """Write the meeting's transcript file, and its summary file for the knowledge base.
+
+    Both are kept for TranscriptionExpirationInDays by the recordings bucket's
+    lifecycle rule on S3_PREFIX. The summary file is written only when the
+    stack deploys the transcript knowledge base (TRANSCRIPT_KB_ID).
+    """
     s3 = boto3.client("s3")
     filename = posixify_filename(f"{callId}")
     summary_file_key = f"{S3_PREFIX}{filename}-SUMMARY.txt"
     transcript_file_key = f"{S3_PREFIX}{filename}-TRANSCRIPT.txt"
-    summary = format_summary(summary, metadata)
     kbMetadata = getKBMetadata(metadata)
-    logger.debug("KB Summary: %s", summary)
     print(f"KB Metadata: {kbMetadata}")
-    s3.put_object(Bucket=S3_BUCKET_NAME, Key=summary_file_key, Body=summary)
-    print(f"Wrote summary to S3: s3://{S3_BUCKET_NAME}/{summary_file_key}")
-    s3.put_object(Bucket=S3_BUCKET_NAME, Key=f"{summary_file_key}.metadata.json", Body=kbMetadata)
-    print(f"Wrote summary metadata to S3: s3://{S3_BUCKET_NAME}/{summary_file_key}.metadata.json")
+    if TRANSCRIPT_KB_ID:
+        summary = format_summary(summary, metadata)
+        logger.debug("KB Summary: %s", summary)
+        s3.put_object(Bucket=S3_BUCKET_NAME, Key=summary_file_key, Body=summary)
+        print(f"Wrote summary to S3: s3://{S3_BUCKET_NAME}/{summary_file_key}")
+        s3.put_object(
+            Bucket=S3_BUCKET_NAME, Key=f"{summary_file_key}.metadata.json", Body=kbMetadata
+        )
+        print(
+            f"Wrote summary metadata to S3: s3://{S3_BUCKET_NAME}/{summary_file_key}.metadata.json"
+        )
     s3.put_object(
         Bucket=S3_BUCKET_NAME,
         Key=transcript_file_key,
@@ -805,7 +821,7 @@ def write_to_s3(callId, metadata, transcript, summary, keyframes=None):
         Bucket=S3_BUCKET_NAME, Key=f"{transcript_file_key}.metadata.json", Body=kbMetadata
     )
     print(
-        f"Wrote transcript metadata to S3: s3://{S3_BUCKET_NAME}/{summary_file_key}.metadata.json"
+        f"Wrote transcript metadata to S3: s3://{S3_BUCKET_NAME}/{transcript_file_key}.metadata.json"
     )
 
 

@@ -175,7 +175,10 @@ for more:
   key-frame images after `TranscriptionExpirationInDays` days and recordings
   after `AudioRecordingExpirationInDays` days, follow the stack parameters only.
   Shortening transcript retention on the page does not delete those files
-  sooner.
+  sooner. Nor does shortening meeting-record retention shorten the expiry of
+  Virtual Participant records, which follows
+  `MeetingRecordExpirationInDays` only. See
+  [What LMA stores, and for how long](privacy-and-data-handling.md#what-lma-stores-and-for-how-long).
 
 ## Configuration profiles
 

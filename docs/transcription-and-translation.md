@@ -348,7 +348,9 @@ Amazon Translate takes one line per request, so a long meeting is translated a l
 
 LMA can automatically redact personally identifiable information (PII) from transcripts using Amazon Transcribe's built-in content redaction.
 
-**Enabling redaction:** Set the **Enable Content Redaction for Transcripts** CloudFormation parameter to `true`.
+**Enabling redaction:** Since v0.4.0 redaction is a setting, not a stack parameter. An Admin turns on **Amazon Transcribe › Redact personal information** on the [Configuration page](configuration-guide.md) and chooses the types in **Entity types to redact**; the change applies to meetings that start after it is saved, with no stack update (see [Configuration Parameters](#configuration-parameters) below). The two regulated [configuration presets](configuration-guide.md#configuration-presets) turn it on.
+
+Redaction applies to meetings transcribed by Amazon Transcribe. It does not apply to meetings that use language identification, or to meetings on the on-demand MicroVM engine, which has no redaction. It redacts the transcript text only: the audio recording, the meeting video, key frames and their text, and the meeting chat are not redacted.
 
 **Supported languages:** Content redaction is supported for the following languages only:
 
@@ -394,7 +396,7 @@ LMA can optionally record meeting audio as stereo WAV files stored in Amazon S3.
 
 - **Format:** Stereo WAV files preserving the two-channel audio (microphone and incoming).
 - **Storage:** Recordings are stored in the S3 bucket created by the LMA stack.
-- **Retention:** Configurable via the **Record Expiration In Days** CloudFormation parameter. The default retention period is 90 days, after which recordings are automatically deleted by an S3 lifecycle policy.
+- **Retention:** Set by the `AudioRecordingExpirationInDays` stack parameter (console label *Audio Recording Expiration In Days*). The default is 90 days, after which an S3 lifecycle rule expires the recording; the earlier version that S3 keeps in the versioned bucket is removed about a day later. See [Privacy and Data Handling Controls](privacy-and-data-handling.md#what-lma-stores-and-for-how-long).
 - **Playback:** Recordings are accessible via the audio player in the meeting details view of the LMA UI.
 
 ## Partial vs Non-Partial Transcripts
