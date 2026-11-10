@@ -39,6 +39,7 @@ const service = transcriptionService as unknown as {
     rosterTimeline: RosterTimeline;
     speakerChange: (speaker: string) => Promise<void>;
     rosterNameFor: (start: number, end: number) => string | undefined;
+    rosterCoverageFor: (start: number, end: number) => Map<string, number>;
     handleTranscriptEvents: (response: unknown, stereo?: boolean) => Promise<void>;
 };
 
@@ -46,6 +47,7 @@ const writer = kinesisStreamManager as unknown as {
     sendRecord: (record: Row) => Promise<void>;
     setDiarization: (on: boolean) => void;
     setRosterLookup: (lookup: ((start: number, end: number) => string | undefined) | null) => void;
+    setRosterCoverage: (coverage: ((start: number, end: number) => Iterable<[string, number]>) | null) => void;
     sendTranscriptSegment: (speaker: string, result: unknown, offset?: number) => Promise<number>;
 };
 
@@ -100,6 +102,7 @@ beforeEach(() => {
     service.sessionAudioBytes = 0;
     service.sessionChannels = 1;
     writer.setRosterLookup((start, end) => service.rosterNameFor(start, end));
+    writer.setRosterCoverage((start, end) => service.rosterCoverageFor(start, end));
     writer.setDiarization(true);
     // The Zoom web client's allowance, pinned so the fixtures do not depend on
     // the platform this test process happens to resolve.
@@ -108,6 +111,7 @@ beforeEach(() => {
 
 afterEach(() => {
     writer.setRosterLookup(null);
+    writer.setRosterCoverage(null);
     writer.setDiarization(false);
     if (savedLag === undefined) delete process.env.ASR_ROSTER_LAG_SECONDS;
     else process.env.ASR_ROSTER_LAG_SECONDS = savedLag;
@@ -251,6 +255,39 @@ describe('rows from the Zoom standup', () => {
         assert.deepEqual(await emit(finalResult('p5', text, 30, 34, '1')), [['Sam Lee (spk_1)', text]]);
     });
 
+    it('name a long row the platform shows as someone else after the platform, not the proven voice', async () => {
+        await reportAt(0, 'Sam Lee');
+        // 22.5 s of Sam on one voice proves it.
+        for (let k = 0; k < 5; k += 1) {
+            await emit(finalResult(`p${k}`, 'one two three four five six', k * 5, k * 5 + 4.5, '1'));
+        }
+        // A 4 s row on the same voice that the platform shows as Ana throughout:
+        // what one voice label carrying two people looks like.
+        await reportAt(29, 'Ana Ruiz');
+        const text = 'I think we should hold the release until Friday';
+        assert.deepEqual(await emit(finalResult('p5', text, 30, 34, '1')), [['Ana Ruiz', text]]);
+    });
+
+    it('take a voice label\'s evidence only from what the platform showed, not from the fallback name', async () => {
+        // 24 s of speech on one voice before the platform reports anyone. Those
+        // rows carry the name the result was emitted under, but that name is a
+        // fallback, so it must not prove the voice to anybody.
+        for (let k = 0; k < 6; k += 1) {
+            await emit(finalResult(`e${k}`, 'one two three four five six', k * 5, k * 5 + 4, '1'), 'Sam Lee');
+        }
+        // Then the platform shows Ana while the same voice speaks under a brief
+        // flicker to Sam. Had the fallback rows proven the voice to Sam, the
+        // whole turn would be written as Sam's.
+        await reportAt(30, 'Ana Ruiz');
+        await reportAt(32, 'Sam Lee');
+        await reportAt(32.8, 'Ana Ruiz');
+        const rows = await emit(finalResult('e6', 'so the build is green and we can ship it today', 30, 34, '1'), 'Ana Ruiz');
+        assert.deepEqual(
+            rows.map(([speaker]) => speaker),
+            ['Ana Ruiz (spk_1)', 'Sam Lee', 'Ana Ruiz (spk_1)'],
+        );
+    });
+
     it('cut an unproven voice where the platform changes, as before', async () => {
         await reportAt(0, 'Sam Lee');
         await reportAt(30.5, 'Ana Ruiz');
@@ -297,6 +334,16 @@ describe('wiring', () => {
     it('names Transcribe rows from the roster timeline before either engine is chosen', () => {
         const start = scribe.indexOf('async startTranscription');
         const wired = scribe.indexOf('kinesisStreamManager.setRosterLookup((start, end) => this.rosterNameFor(start, end))', start);
+        const engine = scribe.indexOf('resolveVpAsrEngine(switches)', start);
+        assert.ok(start !== -1 && wired > start && wired < engine);
+    });
+
+    it("counts Transcribe voice evidence from the roster timeline's coverage", () => {
+        const start = scribe.indexOf('async startTranscription');
+        const wired = scribe.indexOf(
+            'kinesisStreamManager.setRosterCoverage((start, end) => this.rosterCoverageFor(start, end))',
+            start,
+        );
         const engine = scribe.indexOf('resolveVpAsrEngine(switches)', start);
         assert.ok(start !== -1 && wired > start && wired < engine);
     });

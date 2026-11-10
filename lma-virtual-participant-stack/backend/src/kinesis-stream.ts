@@ -140,6 +140,13 @@ class KinesisStreamManager {
   // Undefined, or no lookup at all, means nobody is known yet, and the name
   // the caller passed is used instead.
   private rosterLookup: ((absoluteStart: number, absoluteEnd: number) => string | undefined) | null = null;
+  // Seconds of a span the platform actually showed each participant for, from
+  // the same roster timeline: the evidence a voice label's vote is built from.
+  // Unlike the lookup above it never guesses -- time before the platform's
+  // first report belongs to nobody -- and with no source set there is none.
+  private rosterCoverage:
+    | ((absoluteStart: number, absoluteEnd: number) => Iterable<[string, number]>)
+    | null = null;
   // Whether to recover speaker turns from Transcribe's per-item labels. Off
   // unless the deployment's VP voice-separation switch is on.
   private diarize = false;
@@ -475,6 +482,19 @@ class KinesisStreamManager {
   }
 
   /**
+   * Where a voice label's evidence comes from: the seconds of a span of the
+   * meeting timeline the platform showed each participant for, as the
+   * on-demand engine's path counts it (RosterTimeline.coverage). Kept apart
+   * from the roster lookup because that one names a row even where the
+   * platform has shown nobody, and such a name must not prove a label.
+   */
+  setRosterCoverage(
+    coverage: ((absoluteStart: number, absoluteEnd: number) => Iterable<[string, number]>) | null,
+  ): void {
+    this.rosterCoverage = coverage;
+  }
+
+  /**
    * Whether a result is still in progress.
    *
    * Derived once and shared, because the places that used to decide it
@@ -559,17 +579,28 @@ class KinesisStreamManager {
       resultId,
       timeOffsetSeconds,
       rosterNameFor: (start, end) => this.rosterLookup?.(start, end) ?? speakerName,
-      // Each piece's display only: its evidence was counted once, for the whole
-      // run, by voiceName below.
+      // A piece is only ever named here when its run's label did not name the
+      // whole run -- the label is unproven, or the page strongly contradicts
+      // it on this run -- so the page names it, as on the on-demand engine's
+      // path. Naming it through `attribute` instead would hand a contradicted
+      // run's pieces straight back to the label's proven name.
       nameFor: this.diarize
-        ? (roster, label) => labels.attribute({ label, pageName: roster }).speaker
+        ? (roster, label) => labels.attributeByPage(label, roster).speaker
         : (roster) => roster,
       isPartial: KinesisStreamManager.isPartialResult(result),
       useLabels: this.diarize,
+      // Once per labelled run: its evidence is what the platform actually
+      // showed over the run's span, never a fallback name. On a three-person
+      // Zoom standup one Transcribe label coincided with all three
+      // participants, so a Transcribe label often never reaches the share
+      // that lets it name a row, and its rows are then named by the platform.
       voiceName: this.diarize
-        ? (label, evidence) => {
-            const leading = evidence.reduce((best, entry) => (entry[1] > best[1] ? entry : best), evidence[0]);
-            const attribution = labels.attribute({ label, pageName: leading?.[0] ?? speakerName, coverage: evidence });
+        ? (label, start, end) => {
+            const attribution = labels.attribute({
+              label,
+              pageName: this.rosterLookup?.(start, end) ?? speakerName,
+              coverage: this.rosterCoverage?.(start, end) ?? [],
+            });
             return attribution.source === 'page' ? undefined : attribution.speaker;
           }
         : undefined,

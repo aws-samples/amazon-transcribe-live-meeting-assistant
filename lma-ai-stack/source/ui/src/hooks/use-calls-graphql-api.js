@@ -84,8 +84,10 @@ export const mergeCallUpdate = (existing, call) => ({
   TranscriptionEngine: call.TranscriptionEngine || existing?.TranscriptionEngine,
   TranscriptionLanguage: call.TranscriptionLanguage ?? existing?.TranscriptionLanguage,
   SpeakerSeparation: call.SpeakerSeparation || existing?.SpeakerSeparation,
-  // Selected by getCall and the Kinesis pipeline's writes, not by the list query
-  // or the writes made from the page.
+  // Selected by getCall, onUpdateCall and the writes it follows: the Kinesis
+  // pipeline's, the agenda, speaker-name and summary Lambdas', and the page's
+  // own (updateCallAgenda, updateCallSummaryText, updateSpeakerIdentities).
+  // Not by the list query, so an update without it keeps the stored list.
   DetectedLanguages: call.DetectedLanguages ?? existing?.DetectedLanguages,
   ...(call.AgendaUpdatedAt
     ? {}
