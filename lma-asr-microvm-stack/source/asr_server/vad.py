@@ -157,7 +157,7 @@ class VadGate:
         neg_threshold: float | None = None,
         min_silence_ms: int = 100,
         min_speech_ms: int = 250,
-        speech_pad_ms: int = 30,
+        speech_pad_ms: int = 300,
         max_speech_ms: int = 0,
         long_speech_ms: int = 0,
         long_speech_silence_ms: int = 0,
@@ -374,7 +374,7 @@ class SileroVadConfig:
     neg_threshold: float | None = None
     min_silence_ms: int = 100
     min_speech_ms: int = 100
-    speech_pad_ms: int = 30
+    speech_pad_ms: int = 300
     max_speech_ms: int = 20000
     long_speech_ms: int = 10000
     long_speech_silence_ms: int = 300
