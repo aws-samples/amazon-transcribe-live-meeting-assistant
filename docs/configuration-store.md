@@ -1209,7 +1209,8 @@ a release that updates a price reaches the baseline on its next stack update. An
 Admin changes prices in the section's price table on the Configuration page, or
 through `updateCallPricing`; both save into the active profile, with the same
 version check. `getCallPricing` reads the shipped table, what the active profile
-stores and the merge of the two. The estimate reads the section's baseline values
+stores and the merge of the two; while the baseline is active it reports
+`default` and the baseline alone, as the store reads it. The estimate reads the section's baseline values
 beside its merged ones (`ResolvedSection.baseline_values`), which is how each line
 says whether its price is the release's or the profile's. There was no earlier
 store for prices, so nothing is adopted on upgrade.

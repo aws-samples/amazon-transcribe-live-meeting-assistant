@@ -1932,16 +1932,19 @@ type CallCostLineItem @aws_cognito_user_pools @aws_iam {
 	ShippedUnitPrice: Float
 }
 
-# A JSON string: {"Default", "Custom", "Effective", "Version", "UpdatedBy",
-# "UpdatedAt", "Region"}. Default is the table this release ships, Custom the
-# Admin's changes over it, Effective the merge every estimate uses.
+# A JSON string: {"Default", "Custom", "Effective", "Version", "Profile",
+# "UpdatedBy", "UpdatedAt", "Region"}. Default is the table this release ships,
+# Custom what the active profile stores for the section (empty while the
+# default is active), Effective the merge every estimate uses, Profile the name
+# of the profile in force ("default" when none is).
 type CallPricing @aws_cognito_user_pools {
 	Pricing: String
 }
 
 input UpdateCallPricingInput {
-	# A JSON object holding the changes over the shipped table -- the same shape,
-	# naming only what differs. "{}" returns every price to the shipped value.
+	# A JSON object in the shape of the shipped table, stored as the active
+	# profile's call_pricing section; whatever it leaves out takes the shipped
+	# value, so "{}" returns every price to the shipped value.
 	Pricing: String!
 	# The Version getCallPricing returned; a save against a newer record is refused.
 	ExpectedVersion: Int!
