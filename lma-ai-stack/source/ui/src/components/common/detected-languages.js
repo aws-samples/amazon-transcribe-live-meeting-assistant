@@ -13,8 +13,10 @@
  * on (the identify-language and identify-multiple-languages settings of the
  * Amazon Transcribe section); the producers put it on each transcript segment as
  * LanguageCode, and the call event processor lists each new one on the meeting
- * record as DetectedLanguages, in the order first heard. A fixed language and the
- * ASR MicroVM engine name none, so a meeting transcribed either way has neither.
+ * record as DetectedLanguages, in the order first heard. The ASR MicroVM engine,
+ * with a multilingual bundle, names the language of each final row from its text
+ * the same way. A fixed language on Amazon Transcribe names none, so such a
+ * meeting has neither.
  *
  * A segment is marked with its language only when the meeting has more than one,
  * so a meeting in one language reads exactly as before. The mark is a short text

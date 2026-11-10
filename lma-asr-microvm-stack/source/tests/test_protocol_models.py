@@ -164,3 +164,19 @@ def test_termination_dropped_seconds_is_optional() -> None:
     assert parsed.dropped_seconds == 0.0
     with_drop = Termination(audio_seconds=3.0, segments=1, dropped_seconds=1.664)
     assert parse_server_message(with_drop.model_dump_json()) == with_drop
+
+
+def test_final_language_is_optional_so_older_frames_still_parse() -> None:
+    older = parse_server_message(
+        '{"type":"final","segment":0,"text":"Hola a todos.","start":0.0,"end":1.0}'
+    )
+    assert isinstance(older, Final)
+    assert older.language is None
+
+    newer = parse_server_message(
+        '{"type":"final","segment":0,"text":"Hola a todos.","start":0.0,"end":1.0,'
+        '"language":"es"}'
+    )
+    assert isinstance(newer, Final)
+    assert newer.language == "es"
+    assert parse_server_message(newer.model_dump_json()) == newer

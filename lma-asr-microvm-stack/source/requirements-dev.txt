@@ -14,4 +14,7 @@ pytest-cov==7.1.0
 pydantic==2.14.2
 websockets==17.4
 numpy==2.4.6
+# The row-language classifier, which the image installs too (see the Dockerfile).
+# Pure Python, so tests exercise the real classifier rather than a fake.
+py3langid==0.4.0
 ruff==0.17.3

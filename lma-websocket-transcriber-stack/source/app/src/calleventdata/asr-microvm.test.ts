@@ -34,6 +34,7 @@ import { SpeakerNameRegistry } from './asr-audio';
 import { pageSpeakersFor } from './speaker-fusion';
 import { TranscriptSegmentRecord } from './transcribe';
 import { CallMetaData, SocketCallData } from './eventtypes';
+import { microvmRowLanguageCode } from '../config/configuration-store';
 
 const fakeServer = {
     log: {
@@ -564,4 +565,63 @@ test('meeting-audio rows are named from the page speakers the client reported, a
             'Ana Ruiz (spk_0)',
         ]
     );
+});
+
+test('a final carries the language the engine named, as a locale, and its partial carries none', async () => {
+    const asr = await startFakeAsr((socket) => {
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (isBinary || (JSON.parse(data.toString()) as { type: string }).type !== 'config') {
+                return;
+            }
+            send(socket, ready(false));
+            send(socket, { type: 'partial', segment: 0, text: 'hola a', start: 0.5 });
+            send(socket, { type: 'final', segment: 0, text: 'Hola a todos.', start: 0.5, end: 1.5, language: 'es' });
+            send(socket, {
+                type: 'final',
+                segment: 1,
+                text: 'Thanks everyone for joining.',
+                start: 2,
+                end: 3,
+                language: 'en',
+            });
+            send(socket, { type: 'final', segment: 2, text: 'Okay.', start: 3.5, end: 4, language: null });
+        });
+    });
+    const rows: TranscriptSegmentRecord[] = [];
+    const session = new AsrChannelSession(
+        fakeServer,
+        makeSocketData(),
+        'ch_1',
+        { endpointUrl: asr.url },
+        new SpeakerNameRegistry(),
+        { diarize: false, maxSpeakers: 0, runTag: 'r1', meetingLanguageCode: 'en-GB' },
+        async (segment) => {
+            rows.push(segment);
+        }
+    );
+    assert.equal(await session.start(), true);
+    await waitFor(() => rows.length === 4);
+    await session.finish();
+    await asr.close();
+
+    assert.equal('LanguageCode' in rows[0], false, 'a partial names no language');
+    assert.equal(rows[1].LanguageCode, 'es-US', 'another language gets its default region');
+    assert.equal(rows[2].LanguageCode, 'en-GB', 'a row in the meeting language keeps the meeting region');
+    assert.equal('LanguageCode' in rows[3], false, 'a row the engine named no language for has none');
+});
+
+test('microvmRowLanguageCode turns a base language into a locale', () => {
+    assert.equal(microvmRowLanguageCode('es', 'es-ES'), 'es-ES');
+    assert.equal(microvmRowLanguageCode('es', 'en-US'), 'es-US');
+    assert.equal(microvmRowLanguageCode('pt', 'en-US'), 'pt-BR');
+    assert.equal(microvmRowLanguageCode('de', ''), 'de-DE');
+    assert.equal(microvmRowLanguageCode('en', ''), 'en-US');
+    assert.equal(microvmRowLanguageCode('en', 'en-AU'), 'en-AU');
+    // A language with no entry in the region table is kept as its base code.
+    assert.equal(microvmRowLanguageCode('ga', 'en-US'), 'ga');
+    // A meeting set to identify its language has no region to lend.
+    assert.equal(microvmRowLanguageCode('fr', 'identify-language'), 'fr-FR');
+    for (const none of [undefined, null, '', ' ', 'not a code']) {
+        assert.equal(microvmRowLanguageCode(none, 'en-US'), undefined);
+    }
 });

@@ -370,6 +370,42 @@ export const isMicrovmLanguage = (languageCode: string, bundleLanguages: readonl
     return language === '' || language === 'en' || bundleLanguages.includes(language);
 };
 
+/**
+ * The locale given to a language the ASR MicroVM engine names that is not the
+ * meeting's, in the form of Amazon Transcribe's language codes. A language spoken
+ * in several regions gets one fixed choice: en-US, es-US, fr-FR and pt-BR.
+ */
+const MICROVM_DEFAULT_LOCALES: Readonly<Record<string, string>> = {
+    bg: 'bg-BG', cs: 'cs-CZ', da: 'da-DK', de: 'de-DE', el: 'el-GR', en: 'en-US', es: 'es-US',
+    et: 'et-EE', fi: 'fi-FI', fr: 'fr-FR', hr: 'hr-HR', hu: 'hu-HU', it: 'it-IT', lt: 'lt-LT',
+    lv: 'lv-LV', mt: 'mt-MT', nl: 'nl-NL', pl: 'pl-PL', pt: 'pt-BR', ro: 'ro-RO', ru: 'ru-RU',
+    sk: 'sk-SK', sl: 'sl-SI', sv: 'sv-SE', uk: 'uk-UA',
+};
+
+/**
+ * The LanguageCode for an ASR MicroVM row, in the form Amazon Transcribe gives
+ * one (`es-US`), from the base language the engine named for the row's final
+ * text (`es`). The engine names no region, because the text does not say which
+ * region's Spanish it is: a row in the meeting's own language takes the
+ * meeting's code (a meeting set to en-GB gets en-GB), and any other language its
+ * MICROVM_DEFAULT_LOCALES entry, or the base code when it has none. Undefined
+ * when the engine named no language, so the row is written without one.
+ */
+export const microvmRowLanguageCode = (
+    language: string | null | undefined,
+    meetingLanguageCode: string,
+): string | undefined => {
+    const base = baseLanguage(language ?? '');
+    if (!/^[a-z]{2,3}$/.test(base)) {
+        return undefined;
+    }
+    const meeting = meetingLanguageCode.trim();
+    if (baseLanguage(meeting) === base && /^[a-z]{2,3}-[a-z0-9]+$/i.test(meeting)) {
+        return meeting;
+    }
+    return MICROVM_DEFAULT_LOCALES[base] ?? base;
+};
+
 /** The Amazon Transcribe options whose combination is checked; see transcribeOptionsProblem. */
 export interface TranscribeOptionCombination {
     readonly languageCode: string;

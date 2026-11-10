@@ -81,6 +81,7 @@ from asr_server.diarization import (
     diarization_enabled,
     pcm16_to_float32,
 )
+from asr_server.language import default_language_identifier
 from asr_server.model_env import load_model_env
 from asr_server.offline_recognizer import (
     build_offline_model_config,
@@ -437,9 +438,13 @@ class AsrSession:
         engine: RecognizerEngine,
         server_config: ServerConfig | None = None,
         session_id: str | None = None,
+        language_identifier: Callable[[str], str | None] | None = None,
     ) -> None:
         self._conn = conn
         self._path = path
+        # Names the language of each final's text (asr_server.language); shared by
+        # every session, like the engine. None leaves finals without a language.
+        self._language_identifier = language_identifier
         # The heavy model, built ONCE at startup and shared across all sessions.
         # This session only acquires a lightweight per-connection stream from it
         # (``engine.new_session()``) — no per-connection model allocation.
@@ -548,7 +553,10 @@ class AsrSession:
 
             self._sample_rate = config.sample_rate
             self._interim_results = config.interim_results
-            self._adapter = ProtocolAdapter(word_timestamps=config.word_timestamps)
+            self._adapter = ProtocolAdapter(
+                word_timestamps=config.word_timestamps,
+                identify_language=self._language_identifier,
+            )
 
             if config.mode == "embed":
                 ending = await self._run_embed_session(first_pcm, ended)
@@ -1256,6 +1264,13 @@ async def serve_asr(
     _LOG.info(
         "recognizer ready in %.2fs", asyncio.get_running_loop().time() - build_start
     )
+    # Loaded now, like the engine, so it is resident in the snapshot rather than
+    # loaded by the first final after a resume.
+    language_identifier = default_language_identifier()
+    _LOG.info(
+        "row language identification: %s",
+        "on" if language_identifier.preload() else "off",
+    )
 
     # Startup memory FLOOR: the baked-warm model is now resident and no session has
     # connected yet, so this is the idle resident baseline the 8GB→4GB sizing call is
@@ -1280,6 +1295,7 @@ async def serve_asr(
             path=path,
             engine=engine,
             server_config=cfg,
+            language_identifier=language_identifier,
         )
         reporter.active_sessions += 1
         try:

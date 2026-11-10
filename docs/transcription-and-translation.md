@@ -17,6 +17,7 @@ title: "Transcription & Translation"
   - [Automatic Multi-Language Identification](#automatic-multi-language-identification)
   - [Setting the Language](#setting-the-language)
   - [Detected languages](#detected-languages)
+    - [On the ASR MicroVM engine](#on-the-asr-microvm-engine)
 - [Live Translation](#live-translation)
 - [Content Redaction (PII)](#content-redaction-pii)
 - [Custom Vocabulary](#custom-vocabulary)
@@ -358,7 +359,10 @@ Configure the language mode using the **Language for Transcription** CloudFormat
 ### Detected languages
 
 With either identification mode, Amazon Transcribe names the language of each
-result it returns, and LMA keeps it with the transcript:
+result it returns. The ASR MicroVM engine, with a multilingual model bundle,
+names the language of each final row it writes (see
+[On the ASR MicroVM engine](#on-the-asr-microvm-engine) below). LMA keeps the
+language with the transcript:
 
 - Each transcript segment stores the language it was identified in as
   `LanguageCode` (for example `es-US`). The WebSocket transcriber (Stream Audio,
@@ -376,15 +380,46 @@ result it returns, and LMA keeps it with the transcript:
   [Transcript tab](web-ui-guide.md#transcript-tab)). The transcript downloads
   carry the same codes.
 
-A meeting transcribed in one fixed language has no detected languages: Amazon
-Transcribe names a language only when it identifies one, and the configured
-language is already shown as **Transcription language**. The ASR MicroVM engine
-reports no language either (see [MicroVM ASR](microvm-asr.md)). Upload Audio
-runs its Amazon Transcribe batch jobs in one fixed language, so an uploaded
+A meeting Amazon Transcribe transcribes in one fixed language has no detected
+languages: Amazon Transcribe names a language only when it identifies one, and
+the configured language is already shown as **Transcription language**. Upload
+Audio runs its Amazon Transcribe batch jobs in one fixed language, so an uploaded
 recording has none today; a batch transcript that names a language per word, as
 one from multiple-language identification does, gives each segment the language
 most of its words were identified in. Segments stored before this was recorded
 carry no language.
+
+#### On the ASR MicroVM engine
+
+A multilingual bundle transcribes whatever language is spoken, whatever the
+meeting's language setting (see [Languages](microvm-asr.md#languages)), but none
+of its speech models reports which language that was. So the engine identifies
+the language of each **final** row from the row's text, and the row's
+`LanguageCode` is set from that:
+
+- **Only the deployed bundle's languages can be named.** With the default bundle
+  that is the 20 languages listed in [Languages](microvm-asr.md#languages). A
+  bundle with one language, such as an English-only bundle, names none, so its
+  meetings have no detected languages, as with a fixed language on Amazon
+  Transcribe.
+- **Some rows carry no language.** Live (partial) rows never do; the row's final
+  sets it. Neither does a row of one or two words, such as *Okay.* or *Sí,
+  claro.*, nor one the classifier is not confident about. In a meeting with more
+  than one language, such a line shows no language mark.
+- **The region comes from the meeting, not from the speech.** The engine names a
+  base language (`es`), because text does not say which region's Spanish it is.
+  A row in the meeting's own language takes the meeting's code (a meeting set to
+  `en-GB` gets `en-GB`); any other language gets a fixed region: `en-US`,
+  `es-US`, `fr-FR`, `pt-BR`, `de-DE`, `it-IT`, `nl-NL` and so on, the form
+  Amazon Transcribe's codes take. A Spanish speaker in an `en-US` meeting is
+  therefore listed as `es-US` whether they spoke Castilian or Mexican Spanish.
+- **A meeting in one language lists that language.** Because rows in the
+  meeting's language are named too, a MicroVM meeting's **Details** tab shows its
+  own language under detected languages, where an Amazon Transcribe meeting in a
+  fixed language shows none. Lines are marked only when there is more than one.
+
+How the engine identifies the language, and how accurately, is described in
+[Row languages](microvm-asr.md#row-languages).
 
 ## Live Translation
 

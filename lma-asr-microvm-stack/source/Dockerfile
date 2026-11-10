@@ -32,6 +32,14 @@ RUN SHERPA="$(sed -n 's/^SHERPA_ONNX_VERSION=//p' /build/model.env | tr -d '"' |
         pydantic==2.9.2 \
         numpy==1.26.4
 
+# py3langid (BSD-3-Clause, ~4.5 MB) names the language of each final row
+# (asr_server/language.py). It is installed without its dependencies: 0.4.0 declares
+# numpy>=2, but it runs unchanged on the numpy pinned above (identical output on the
+# 185-row evaluation set in docs/microvm-asr.md), and moving the whole runtime to
+# numpy 2 would be a separate change. The build-time warmup loads it, so an install
+# that does not work fails the build.
+RUN python3.11 -m pip install --no-cache-dir --no-deps py3langid==0.4.0
+
 # The sherpa-onnx aarch64 wheel does not bundle onnxruntime; its native library
 # dlopen()s an unversioned libonnxruntime.so that the onnxruntime wheel does not
 # ship. Without this symlink + ld.so registration both the build-time warmup and

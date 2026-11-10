@@ -21,8 +21,10 @@ export interface TranscriptSegment {
   speaker?: string;
   /**
    * The language Amazon Transcribe identified for the row (e.g. `es-US`), when
-   * language identification is on. Absent with a fixed language and on the
-   * MicroVM engine, which reports none.
+   * language identification is on, or the language the ASR MicroVM engine
+   * identified from a final's text (microvmRowLanguageCode). Absent when neither
+   * names one: Amazon Transcribe with a fixed language, and MicroVM partials and
+   * short rows.
    */
   languageCode?: string;
 }

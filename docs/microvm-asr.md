@@ -102,7 +102,7 @@ these Transcribe features are not available on it:
 | Custom language model | Not available |
 | Language identification / multi-language | Not available |
 | Languages | Those the deployed model bundle supports: 20 European languages with the default bundle, English only with some others (see below) |
-| Detected language | Not reported; the models identify the spoken language but do not label it |
+| Detected language | Per final row, identified from the row's text, with a multilingual bundle; none on live rows or rows of one or two words (see [Row languages](#row-languages)) |
 | Speaker labels | Per voice, per channel (the reason to use it) |
 
 **These options keep a meeting on Amazon Transcribe.** When the effective
@@ -153,9 +153,10 @@ bundle it was built from, and is decided as follows.
   that). A deployment that publishes no list, such as one deployed from an earlier
   release, takes English only.
 - **Language identification stays on Amazon Transcribe.** `identify-language` and
-  `identify-multiple-languages` keep a meeting on Amazon Transcribe with every bundle,
-  because Amazon Transcribe reports the language it identified and this engine does
-  not report one.
+  `identify-multiple-languages` keep a meeting on Amazon Transcribe with every bundle.
+  This engine names the language of each final row (see
+  [Row languages](#row-languages)), but not of live rows or of rows of one or two
+  words, so it is not used in place of Amazon Transcribe's identification.
 
 | Bundle | Languages it takes |
 |---|---|
@@ -193,7 +194,8 @@ Spanish within one meeting. The live preview, from Nemotron 3.5, is rougher in e
 language, and the final replaces it on every row, so its errors do not reach the
 stored transcript. Forcing a language on the preview model did not improve it and
 dropped the other language's speech in a mixed-language clip, so the engine sets
-none. Neither model reported the language it identified.
+none. Neither model reports the language it identified in time to label a row, so
+the server identifies it from the final text (see [Row languages](#row-languages)).
 
 These figures are optimistic. The audio was clean synthetic speech with one speaker
 per clip and one clip per language. With about 50 words per clip, one wrong word
@@ -201,6 +203,98 @@ moves the WER by about 2 points. The run was on x86_64, not on the ARM64 MicroVM
 image. The other 13 languages of the default bundle were not tested, and no real
 meeting audio was. Measure the languages that matter to you on real meetings before
 relying on them.
+
+### Row languages
+
+With a bundle of two or more languages, the engine names the language of each final
+row. The `final` message carries it as `language`, a base ISO 639-1 code such as
+`es`, and the WebSocket transcriber and the Virtual Participant write it on the
+row's `ADD_TRANSCRIPT_SEGMENT` event as `LanguageCode`, the field Amazon Transcribe's
+language identification fills. What the meeting page does with it is described in
+[Detected languages](transcription-and-translation.md#detected-languages).
+
+**Where the language comes from.** None of the bundle's speech models gives the
+server a language for a row. The offline models that write the final text
+(Parakeet TDT, for example) output none. Nemotron 3.5, the default bundle's live
+preview model, does write a locale tag such as `<es-ES>` after each sentence, and
+its vocabulary has 39 of them. sherpa-onnx 1.13.4 removes tokens of that shape from
+every result and has no option to keep them, but renaming them in the model's
+`tokens.txt` does bring them through, and on whole recordings the tags named the
+right base language every time. They are not usable for rows, though: the model
+writes a sentence's tag only once it has heard the next sentence begin or a long
+pause, and the engine has sent the row's final by then. On the engine path, 1 of
+34 final rows had a tag by the time its final was sent. Finishing the preview
+stream when the utterance closes did not produce the missing tags. The region in
+the tags was also wrong on both regional clips (es-US speech tagged `es-ES`, pt-BR
+speech tagged `pt-PT`).
+
+So the server identifies the language of the final text instead, which in a
+multilingual bundle is already written in the spoken language:
+
+- **The classifier** is [py3langid](https://github.com/adbar/py3langid) 0.4.0
+  (BSD-3-Clause), an n-gram model of about 4.5 MB installed into the image. It is
+  loaded when the server starts, so it is in the MicroVM snapshot, and the
+  build-time warmup fails the image build if a multilingual bundle cannot load it.
+- **It chooses only among the bundle's languages.** `AsrImageSource` writes the
+  bundle's list into the image's `model.env` as `ASR_BUNDLE_LANGUAGES`, the same
+  list it reports as `AsrModelLanguages`. A bundle with one language names none.
+- **It names none for a row of one or two words, or below a probability of
+  0.8.** On the evaluation set below, every misidentification was on a row of one
+  or two words.
+- **Only finals are identified.** A live row is the preview model's rougher text
+  and is replaced by its final moments later.
+- **The client chooses the region.** The engine reports `es`, not `es-US`. The
+  transcriber and the Virtual Participant give a row in the meeting's own language
+  the meeting's code, and any other language a fixed region (`microvmRowLanguageCode`
+  in both `configuration-store.ts` files): `en-US`, `es-US`, `fr-FR`, `pt-BR`,
+  `de-DE`, and so on.
+
+**What has been measured.** On 2026-11-10 the classifier was evaluated on 185 rows.
+34 were the final rows the default bundle's engine wrote for the synthetic clips
+described above, run in-process on x86_64 through the same protocol adapter the
+server uses. The other 151 were hand-written meeting utterances: 50 in English,
+many of them short or carrying foreign names and product terms (*"Let's ping Juan
+about the Kubernetes rollout."*), and 101 in Spanish, French, German, Italian,
+Portuguese, Dutch, Polish and Swedish. The classifier was restricted to the default
+bundle's 20 languages.
+
+| Rows | Labelled | Correct | English rows named as another language |
+|---|---|---|---|
+| All 34 engine-path rows, with the rules above | 28 | 28 | 0 |
+| The 143 rows of three or more words, probability 0.8 | 133 | 133 | 0 of 49 |
+| The 143 rows of three or more words, any probability | 143 | 143 | 0 of 49 |
+| All 185 rows, any probability (no word floor) | 185 | 168 | 2 of 61 |
+
+The 6 unlabelled engine-path rows were three of one or two words (*Okay.*,
+*Por favor.*) and three below the threshold (*The vendor contract renewal*, twice,
+and one Portuguese sentence). Both mixed-language clips were labelled English and
+then Spanish, row by row.
+
+Other classifiers were compared on the same rows. lingua-language-detector 2.1.1
+in its low-accuracy mode named 10 of the 49 English rows of three or more words as
+another language, and its high-accuracy mode used about 950 MB of memory and
+labelled 72 of the 143 rows at a probability of 0.8. py3langid 0.2.2, the last
+release that declares support for numpy 1.x, named 4 of those English rows as
+another language. fastText's `lid.176` model was not evaluated, because its licence
+is CC-BY-SA-3.0 and its Python package publishes no official wheels. A spoken
+language-identification model (sherpa-onnx can run Whisper for this) was not
+evaluated either. It would add a Whisper model to the image and an encoder pass per
+row, where the text classifier costs well under a millisecond per row.
+
+**Cost.** The image grows by about 4.5 MB. Loading the classifier takes 0.5–1 s at
+server start and adds about 105 MB of resident memory. Identifying a row took
+0.14 ms on average (0.36 ms at most) on the x86_64 run above. py3langid 0.4.0
+declares numpy 2 or later, while the image pins numpy 1.26.4, so the Dockerfile
+installs it without its dependencies; its output on the 185 rows was identical on
+numpy 1.26.4 and 2.4.6.
+
+**Caveats.** The 151 hand-written rows were written for this test, and the 34
+engine rows come from clean synthetic speech, so real meetings, with recognition
+errors, disfluencies and code-switching inside a sentence, will do worse. A row
+that mixes two languages gets one of them. The region is a convention, not a
+detection. On ARM64 (Python 3.11 with numpy 1.26.4, under emulation) the
+classifier installed without its dependencies, loaded and named sample rows
+correctly, but it has not been run inside a built MicroVM image.
 
 The two engines coexist in one deployment, and which one a meeting uses is chosen
 per meeting source (see [Choosing the engine](#choosing-the-engine)).
@@ -872,10 +966,12 @@ A channel with no page to read, such as Stream Audio's, keeps the format above.
 ## Known limitations
 
 - **The meeting languages it takes depend on the deployed bundle** (see
-  [Languages](#languages)), and **no detected language is reported**: a row carries
-  no language label, so `identify-language` and `identify-multiple-languages` stay on
-  Amazon Transcribe. `language`, `punctuate` and `latency_mode` are accepted by the
-  protocol but do not change behaviour.
+  [Languages](#languages)), and **a row's language is identified from its final
+  text** (see [Row languages](#row-languages)): live rows and rows of one or two
+  words carry none, and the region is the meeting's or a fixed one, not detected.
+  `identify-language` and `identify-multiple-languages` stay on Amazon Transcribe.
+  `language`, `punctuate` and `latency_mode` are accepted by the protocol but do not
+  change behaviour.
 - **Overlapping speech resolves to one speaker.** The engine detects overlap but
   attributes the span to a single voice rather than emitting both.
 - **A live cut lands slightly late**, because a speaker change is only acted on once
@@ -978,6 +1074,7 @@ complying with their licences.**
 | Component | Licence |
 |---|---|
 | `sherpa-onnx` runtime | Apache-2.0 |
+| `py3langid` row-language classifier, with its bundled model (every bundle) | BSD-3-Clause |
 | NVIDIA FastConformer streaming EN 480 ms (ASR, FastConformer bundles and the Parakeet v3 live preview) | CC-BY-4.0 |
 | NVIDIA Nemotron 3.5 ASR streaming 0.6B (ASR, `nemotron35-titanet-small` and the Nemotron 3.5 live preview) | OpenMDW-1.1 |
 | NVIDIA Nemotron speech streaming EN 0.6B (ASR, `nemotron-titanet-small`) | NVIDIA Open Model License, not redistributable |

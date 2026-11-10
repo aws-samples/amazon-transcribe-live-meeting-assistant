@@ -1154,7 +1154,14 @@ def test_the_default_bundle_reports_the_languages_both_its_models_list() -> None
     assert "ja" not in languages
 
 
-def test_the_language_list_is_not_baked_into_the_image() -> None:
-    """The list is reported to the stack; the image does not read it."""
-    rendered = index.render_model_env(index.resolve({}, _shipped_catalog()))
-    assert "LANGUAGES" not in rendered
+def test_the_image_is_given_the_same_language_list_the_stack_reports() -> None:
+    """The ASR server names a row's language only from this list (asr_server/language.py)."""
+    selection = index.resolve({}, _shipped_catalog())
+    rendered = index.render_model_env(selection)
+    lines = [line for line in rendered.splitlines() if line.startswith("ASR_BUNDLE_LANGUAGES=")]
+    assert lines == [f"ASR_BUNDLE_LANGUAGES={','.join(index.bundle_languages(selection))}"]
+
+
+def test_a_one_language_bundle_bakes_a_one_language_list() -> None:
+    rendered = index.render_model_env(index.resolve({"BundleId": "bundle-a"}, CATALOG))
+    assert "ASR_BUNDLE_LANGUAGES=en" in rendered.splitlines()
