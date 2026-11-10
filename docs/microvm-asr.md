@@ -454,12 +454,14 @@ A transducer may also give an `encoder_data` file, for an encoder whose weights 
 stored outside its ONNX graph; that file keeps its own name in the image, because the
 graph records it. Every Parakeet v3 bundle uses the full-precision export of Parakeet TDT
 0.6B v3 this way (about 2.5 GB, exported by the sherpa-onnx maintainer), not the int8
-export (0.5 GB). On AMI meeting audio the int8 export left out the rest of some
+export (0.7 GB). On AMI meeting audio the int8 export left out the rest of some
 utterances after their first sentences; the full-precision export transcribed the same
 audio in full, with word error rates matching NVIDIA's published AMI figure, for about 10%
 more decode time and about 2.8 GB resident instead of 1.2 GB. The offline engine also
-keeps 300 ms of audio either side of each utterance the voice activity detector finds, so
-the first and last words of an utterance are not clipped.
+keeps up to 300 ms of audio before each utterance the voice activity detector finds (less
+when the previous utterance ended closer than that) and the pause that ends it, so the
+first and last words of an utterance are not clipped. A row's start and end are those of
+the audio decoded for it, so consecutive rows do not overlap.
 
 The runtime also carries an offline (`accurate`) engine — VAD-segmented, one decode
 per closed utterance, for transducer models that cannot stream — which the
