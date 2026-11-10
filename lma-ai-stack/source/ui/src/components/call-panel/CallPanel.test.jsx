@@ -1403,3 +1403,68 @@ describe('the agenda on the Transcript tab', () => {
     expect(within(transcriptPanel()).queryByTestId('agenda-collapsible')).toBeNull();
   });
 });
+
+describe('the language of each line', () => {
+  const line = (id, transcript, startTime, languageCode) => ({
+    segmentId: id,
+    createdAt: `2026-11-03T14:05:${String(startTime).padStart(2, '0')}.000Z`,
+    channel: 'REMOTE',
+    speaker: 'Ana',
+    transcript,
+    startTime,
+    endTime: startTime + 2,
+    isPartial: false,
+    ...(languageCode ? { languageCode } : {}),
+  });
+  const transcriptOf = (...segments) => ({ [ITEM.callId]: { REMOTE: { segments } } });
+  const marks = () => [...document.querySelectorAll('.transcript-language-mark')].map((m) => m.textContent);
+
+  it('marks no line of a meeting in one language', () => {
+    renderPage({
+      item: { ...ITEM, detectedLanguages: ['es-US'] },
+      transcript: transcriptOf(line('s1', 'Hola a todos.', 0, 'es-US'), line('s2', 'Empecemos.', 10, 'es-US')),
+    });
+    expect(screen.getByText('Hola a todos.')).toBeTruthy();
+    expect(marks()).toEqual([]);
+  });
+
+  it('marks each line of a meeting in two languages, naming the language in its tooltip and label', () => {
+    renderPage({
+      transcript: transcriptOf(line('s1', 'Good morning.', 0, 'en-US'), line('s2', 'Buenos días.', 10, 'es-US')),
+    });
+    expect(marks()).toEqual(['EN', 'ES']);
+    const spanish = screen.getByRole('img', { name: 'Language: Spanish (United States)' });
+    expect(spanish.getAttribute('title')).toBe('Spanish (United States)');
+  });
+
+  it('marks the lines once the meeting record lists a second language, and not a line with none', () => {
+    renderPage({
+      item: { ...ITEM, detectedLanguages: ['en-US', 'fr-FR'] },
+      transcript: transcriptOf(line('s1', 'Good morning.', 0, 'en-US'), line('s2', 'No language.', 10)),
+    });
+    expect(marks()).toEqual(['EN']);
+  });
+
+  it("does not run one speaker's lines in two languages together", () => {
+    renderPage({
+      transcript: transcriptOf(
+        line('s1', 'Good morning.', 0, 'en-US'),
+        line('s2', 'Buenos días.', 2.5, 'es-US'),
+        line('s3', 'Bienvenidos.', 4.6, 'es-US'),
+      ),
+    });
+    expect(document.querySelectorAll('[data-row-id]').length).toBe(2);
+    expect(marks()).toEqual(['EN', 'ES']);
+  });
+
+  it('names the detected languages on the Details tab, beside the language setting', () => {
+    renderPage({
+      url: '/calls/m?tab=details',
+      item: { ...ITEM, transcriptionLanguage: 'identify-multiple-languages', detectedLanguages: ['en-US'] },
+      transcript: transcriptOf(line('s1', 'Buenos días.', 0, 'es-US')),
+    });
+    expect(screen.getByText('Identified by Amazon Transcribe (several languages)')).toBeTruthy();
+    expect(screen.getByText('Detected languages')).toBeTruthy();
+    expect(screen.getByText('English (US), Spanish (US)')).toBeTruthy();
+  });
+});

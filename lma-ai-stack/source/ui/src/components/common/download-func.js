@@ -7,6 +7,7 @@
 import * as XLSX from 'xlsx';
 import { canonicalChannel, isChatChannel, isSpeechChannel, REMOTE_CHANNEL } from './channels';
 import { parseSpeakerIdentities, resolveSpeakerName, speakerGroups } from './speaker-identities';
+import { detectedLanguagesText, meetingLanguages, showsLanguageMarks } from './detected-languages';
 import { keyframeImagesAsText, summarySections } from './summary';
 import { consentAsText } from './meeting-consent';
 import { meetingTitle } from './meeting-header';
@@ -191,7 +192,9 @@ const oneLine = (text) =>
  * The transcript's segments as a download writes them, in time order:
  * [{ startTimestamp, endTimestamp, speaker, transcript }]. Every channel the
  * meeting has is included. A message typed in the meeting chat is under
- * "<sender> (chat)", on one line.
+ * "<sender> (chat)", on one line. In a meeting with more than one detected
+ * language each row also carries `language`, the code of the language it was
+ * identified in ('' when it names none), as the Transcript tab marks each line.
  */
 export const transcriptDownloadRows = (callTranscriptPerCallId, meeting) => {
   const { callId, remoteParticipantName } = meeting;
@@ -212,6 +215,7 @@ export const transcriptDownloadRows = (callTranscriptPerCallId, meeting) => {
   // Whether each platform name's voices are one person or several, decided over
   // the whole transcript exactly as the Transcript tab decides it.
   const groups = speakerGroups(allSegments, speakerIdentities);
+  const withLanguage = showsLanguageMarks(meetingLanguages(meeting.detectedLanguages, allSegments));
 
   const currentTurnByTurnSegments = allSegments
     // only extract the start time, end time, speaker and transcript
@@ -265,16 +269,26 @@ export const transcriptDownloadRows = (callTranscriptPerCallId, meeting) => {
       // modify start and end time from seconds to timestamp, e.g. 258.285 to 04:18.2
       const startTimestamp = getTimestampFromSeconds(startTime);
       const endTimestamp = getTimestampFromSeconds(endTime);
+      if (withLanguage) {
+        return { startTimestamp, endTimestamp, speaker, language: c.languageCode || '', transcript };
+      }
       return { startTimestamp, endTimestamp, speaker, transcript };
     });
 
   return currentTurnByTurnSegments;
 };
 
-/** The transcript as the text and Word downloads write it: "Speaker [start]: text", a line per segment. */
+// The bracket after the speaker: the start time, and the row's language when
+// the rows carry one ("04:18.2, es-US").
+const rowStamp = (row) => (row.language ? `${row.startTimestamp}, ${row.language}` : row.startTimestamp);
+
+/**
+ * The transcript as the text and Word downloads write it: "Speaker [start]: text", a line per segment,
+ * with the line's language after the time in a meeting with more than one ("Speaker [start, es-US]: text").
+ */
 export const transcriptDownloadText = (callTranscriptPerCallId, meeting) =>
   transcriptDownloadRows(callTranscriptPerCallId, meeting)
-    .map((c) => `${c.speaker} [${c.startTimestamp}]: ${c.transcript}`)
+    .map((c) => `${c.speaker} [${rowStamp(c)}]: ${c.transcript}`)
     .join('\n');
 
 export const downloadTranscriptAsExcel = async (callTranscriptPerCallId, meeting) => {
@@ -307,6 +321,9 @@ const markdownMeetingFacts = (meeting) =>
     `- **Meeting ID:** ${escapeMarkdown(meeting.callId)}`,
     meeting.initiationTimeStamp ? `- **Date:** ${meeting.initiationTimeStamp}` : null,
     meeting.conversationDurationTimeStamp ? `- **Duration:** ${meeting.conversationDurationTimeStamp}` : null,
+    meeting.detectedLanguages?.length
+      ? `- **Detected languages:** ${escapeMarkdown(detectedLanguagesText(meeting.detectedLanguages))}`
+      : null,
   ]
     .filter(Boolean)
     .join('\n');
@@ -355,7 +372,7 @@ export const summaryDownloadMarkdown = (meeting, consent = null) => {
  */
 export const transcriptDownloadMarkdown = (callTranscriptPerCallId, meeting) => {
   const lines = transcriptDownloadRows(callTranscriptPerCallId, meeting).map(
-    (row) => `**${escapeMarkdown(row.speaker)}** [${row.startTimestamp}]: ${String(row.transcript ?? '').trim()}`,
+    (row) => `**${escapeMarkdown(row.speaker)}** [${rowStamp(row)}]: ${String(row.transcript ?? '').trim()}`,
   );
   const head = [`# Transcript: ${escapeMarkdown(meetingTitle(meeting.callId))}`, markdownMeetingFacts(meeting)];
   return `${[...head, ...lines].join('\n\n')}\n`;

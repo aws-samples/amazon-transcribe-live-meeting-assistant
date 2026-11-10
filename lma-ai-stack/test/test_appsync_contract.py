@@ -219,6 +219,7 @@ OTHER_FIELDS = [
     ("Mutation", "updateRecordingUrl"),
     ("Mutation", "updateVideoRecordingUrl"),
     ("Mutation", "updateCaptureContext"),
+    ("Mutation", "addCallDetectedLanguage"),
     ("Mutation", "updateAgent"),
     ("Mutation", "addCallSummaryText"),
     ("Mutation", "addTranscriptSegment"),

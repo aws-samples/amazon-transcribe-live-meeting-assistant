@@ -197,3 +197,23 @@ def test_call_selector_works_against_a_schema_without_the_summary_state(dsl_sche
     selected = {str(field.name) for field in call_fields(older)}
     assert "CallSummaryState" not in selected
     assert "CallSummaryText" in selected
+
+
+def test_the_selectors_carry_the_language_fields(dsl_schema: DSLSchema):
+    """onAddTranscriptSegment and onUpdateCall are filled from these selections,
+    so the browser sees a segment's language and the meeting's list only if they
+    are selected here."""
+    assert "LanguageCode" in {str(f.name) for f in transcript_segment_fields(dsl_schema)}
+    assert "DetectedLanguages" in {str(f.name) for f in call_fields(dsl_schema)}
+
+
+def test_the_selectors_work_against_a_schema_without_the_language_fields(dsl_schema: DSLSchema):
+    """During a stack update the running schema can predate these fields."""
+    text = SCHEMA.read_text()
+    without = text.replace("\tLanguageCode: String\n", "").replace(
+        "\tDetectedLanguages: [String]\n", ""
+    )
+    assert without != text
+    older = DSLSchema(build_ast_schema(parse(APPSYNC_PRELUDE + without), assume_valid_sdl=True))
+    assert "LanguageCode" not in {str(f.name) for f in transcript_segment_fields(older)}
+    assert "DetectedLanguages" not in {str(f.name) for f in call_fields(older)}

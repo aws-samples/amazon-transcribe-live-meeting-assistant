@@ -273,3 +273,54 @@ def capture_context_fields(message: Dict[str, Any]) -> Dict[str, str]:
         for field in CAPTURE_CONTEXT_FIELDS
         if isinstance(message.get(field), str) and message[field].strip()
     }
+
+
+#: How many meetings an execution environment remembers the languages of before
+#: forgetting them all; forgetting costs at most one conditional write per
+#: language of a meeting it sees again.
+DETECTED_LANGUAGES_MEMORY = 5000
+
+
+def language_to_record(
+    call_id: Optional[str],
+    language_code: Optional[str],
+    stored_languages: Any,
+    noted: "Dict[str, set[str]]",
+) -> Optional[str]:
+    """The language a segment adds to its meeting's DetectedLanguages, or None.
+
+    ``stored_languages`` is the list ``getCall`` returned for the meeting, which
+    the processor reads for every segment anyway, and ``noted`` the languages
+    this execution environment has already written per meeting. Both are
+    needed: the record read for a segment can predate the write made for an
+    earlier segment of the same batch, and without ``noted`` every segment of a
+    batch in a new language would write it again. Neither is what keeps the
+    list free of repeats -- other environments write too, and the write's own
+    condition does that -- so this only decides whether a write is worth making.
+
+    A language returned here is noted at once, so a second segment in the same
+    batch does not ask again; ``forget_language`` takes it back when the write
+    did not succeed.
+    """
+    if not call_id or not isinstance(language_code, str) or not language_code.strip():
+        return None
+    code = language_code.strip()
+    stored = stored_languages if isinstance(stored_languages, list) else []
+    if code in stored:
+        return None
+    seen = noted.get(call_id)
+    if seen is not None and code in seen:
+        return None
+    if seen is None:
+        if len(noted) >= DETECTED_LANGUAGES_MEMORY:
+            noted.clear()
+        seen = noted.setdefault(call_id, set())
+    seen.add(code)
+    return code
+
+
+def forget_language(call_id: str, language_code: str, noted: "Dict[str, set[str]]") -> None:
+    """Undo ``language_to_record`` for a write that failed, so a later segment retries it."""
+    seen = noted.get(call_id)
+    if seen is not None:
+        seen.discard(language_code)
