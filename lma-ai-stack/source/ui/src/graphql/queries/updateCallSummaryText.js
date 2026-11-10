@@ -19,9 +19,9 @@
  * what it receives, a two-field payload would blank out the meeting's status,
  * timestamps and speaker names in every connected client's meeting list. Every
  * other browser-reachable Call mutation enumerates the full set for the same
- * reason. The pipeline's own Call mutations select a fixed list that leaves
- * CallSummaryState out, deliberately -- see setCallsDeduped, which carries the
- * stored value over when one of those arrives.
+ * reason. The pipeline's own Call mutations select CallSummaryState only when
+ * the deployed schema declares it; when one arrives without it, mergeCallUpdate
+ * (in use-calls-graphql-api.js) carries the stored value over.
  */
 export default /* GraphQL */ `
   mutation UpdateCallSummaryText($input: UpdateCallSummaryTextInput!) {

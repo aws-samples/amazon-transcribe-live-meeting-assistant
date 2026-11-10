@@ -176,8 +176,9 @@ def _video_key_from_url(url):
 def _delete_stored_recording(key, callid, kind):
     """Delete every version of one recording file.
 
-    1 if the file had a version and S3 deleted them all, else 0. A version S3
-    does not delete is logged.
+    1 if the file had a version and S3 deleted them all, else 0 (a transcriber
+    recording named by RecordingUrl has usually been removed already by the
+    CallId-prefix scan, so 0 is common). A version S3 does not delete is logged.
     """
     versions = []
     paginator = s3_client.get_paginator("list_object_versions")
@@ -210,7 +211,8 @@ def delete_audio_recording(callid, audio_url=None):
     meeting's CallId, which is how the transcriber names its recordings. The
     Virtual Participant names its file from the meeting name and the time the
     recording was written, so that file is found only through the URL stored on
-    the meeting. Returns the number of files deleted (0 or 1).
+    the meeting. Returns 1 when the file is gone afterwards and 0 otherwise (see
+    _delete_stored_recording).
     """
     if not callid:
         return 0

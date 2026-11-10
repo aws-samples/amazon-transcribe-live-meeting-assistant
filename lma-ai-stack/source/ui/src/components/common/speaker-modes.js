@@ -274,7 +274,7 @@ export const speakerChipLayout = (segments, groups) => {
   return entries;
 };
 
-/** Why a group is shown as it is, for the One person / Several people menu's tooltip. */
+/** Why a group is shown as it is, for the one-person / several-people toggle's tooltip. */
 export const describeSpeakerMode = (group) => {
   if (!group) return '';
   if (group.override) return 'Chosen for this meeting.';
@@ -288,4 +288,24 @@ export const describeSpeakerMode = (group) => {
     default:
       return 'Shown as one person: the other voices heard under this name spoke too little to be someone else.';
   }
+};
+
+/**
+ * What the one-person / several-people toggle's tooltip says for a group: the
+ * mode it is shown in, why (describeSpeakerMode), and -- when the viewer may
+ * change it -- what a click does. `{ mode, reason, action }`, with action null
+ * for a viewer who may not change it.
+ */
+export const speakerModeTip = (group, canChange = true) => {
+  if (!group) return { mode: '', reason: '', action: null };
+  const several = group.mode === SEVERAL_PEOPLE;
+  let action = null;
+  if (canChange) action = several ? 'Click to show them as one person.' : 'Click if several people share this name.';
+  return {
+    mode: several
+      ? `Several people: each voice under "${group.base}" is shown on its own.`
+      : `One person: every voice under "${group.base}" is shown as one speaker.`,
+    reason: describeSpeakerMode(group),
+    action,
+  };
 };

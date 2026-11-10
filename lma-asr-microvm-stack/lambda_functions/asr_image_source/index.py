@@ -128,8 +128,8 @@ def _check_sources(model: dict, keys: tuple, label: str) -> None:
 def _file_source_lines(prefix: str, model: dict) -> list[str]:
     """Per-file URL and checksum lines for a model pinned file by file; none otherwise.
 
-    Archive models render exactly as before, so their image source fingerprint (and
-    therefore their image) is unchanged.
+    Archive models render exactly as before, so their ``model.env``, and therefore
+    their contribution to the image source fingerprint, is unchanged.
     """
     if not _is_files_model(model):
         return []
