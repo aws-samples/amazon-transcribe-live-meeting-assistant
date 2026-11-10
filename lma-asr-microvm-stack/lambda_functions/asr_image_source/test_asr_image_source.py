@@ -1096,3 +1096,65 @@ def test_every_shipped_file_pinned_model_names_a_fixed_revision() -> None:
         for source in sources:
             assert re.search(r"/resolve/[0-9a-f]{40}/", source["url"]), source["url"]
             assert re.fullmatch(r"[0-9a-f]{64}", source["sha256"]), source
+
+
+def _shipped_catalog() -> dict:
+    return json.loads((Path(__file__).parents[2] / "source" / "catalog.json").read_text())
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        ({"languages": ["en", "es-ES", "FR"]}, ["en", "es", "fr"]),
+        # One baked language is the only one decoded, whatever else the model covers.
+        ({"languages": ["en", "fr", "de"], "decodeLanguage": "fr"}, ["fr"]),
+        ({"languages": ["multilingual"]}, None),
+        ({}, None),
+    ],
+)
+def test_a_models_languages_are_its_listed_base_languages(model: dict, expected) -> None:
+    assert index.model_languages(model) == expected
+
+
+def test_a_two_pass_bundles_languages_are_those_both_models_transcribe() -> None:
+    final = {"languages": ["en", "es", "el", "mt"]}
+    preview = {"languages": ["en", "es", "ja"]}
+    assert index.bundle_languages({"model": final, "preview": preview}) == ["en", "es"]
+    assert index.bundle_languages({"model": final, "preview": None}) == ["el", "en", "es", "mt"]
+
+
+def test_a_model_without_a_language_list_makes_the_bundle_english_only() -> None:
+    final = {"languages": ["en", "es"]}
+    multilingual = {"languages": ["multilingual"]}
+    assert index.bundle_languages({"model": final, "preview": multilingual}) == ["en"]
+    assert index.bundle_languages({"model": multilingual}) == ["en"]
+
+
+def test_build_reports_the_bundles_languages() -> None:
+    catalog = json.loads(json.dumps(CATALOG))
+    catalog["models"][0]["languages"] = ["fr", "en"]
+    zipped = make_source_zip(catalog)
+    with mock.patch.object(
+        index.s3, "get_object", return_value={"Body": io.BytesIO(zipped)}
+    ), mock.patch.object(index.s3, "put_object"):
+        _, data = index.build({"SourceLocation": "bucket/key.zip", "DestBucket": "dest"})
+    assert data["Languages"] == "en,fr"
+
+
+def test_the_default_bundle_reports_the_languages_both_its_models_list() -> None:
+    selection = index.resolve({}, _shipped_catalog())
+    languages = index.bundle_languages(selection)
+    assert languages == sorted(
+        set(selection["model"]["languages"]) & set(selection["preview"]["languages"])
+    )
+    for code in ("en", "es", "fr", "de", "it", "pt", "nl"):
+        assert code in languages
+    # Parakeet v3 lists Greek; the Nemotron 3.5 preview does not, so the bundle does not.
+    assert "el" not in languages
+    assert "ja" not in languages
+
+
+def test_the_language_list_is_not_baked_into_the_image() -> None:
+    """The list is reported to the stack; the image does not read it."""
+    rendered = index.render_model_env(index.resolve({}, _shipped_catalog()))
+    assert "LANGUAGES" not in rendered

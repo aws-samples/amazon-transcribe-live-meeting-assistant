@@ -282,7 +282,7 @@ def _priced_line(
     if shipped_price is not None and price == shipped_price:
         line["PriceOrigin"] = ORIGIN_SHIPPED
         line["PriceSource"] = shipped_text or "The price table LMA ships"
-        line["PriceSourceUrl"] = (source or {}).get("url") if isinstance(source, Mapping) else None
+        line["PriceSourceUrl"] = source.get("url") if isinstance(source, Mapping) else None
         return cost
     where = f"the {profile} configuration profile" if profile else "this deployment's configuration"
     if shipped_price is None:

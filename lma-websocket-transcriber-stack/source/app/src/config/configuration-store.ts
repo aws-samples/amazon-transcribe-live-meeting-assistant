@@ -292,6 +292,84 @@ export const RETENTION = declareSection({
         'How many days meeting records and transcript segments are kept, at most the stack parameters\' values.',
 });
 
+/** The Amazon Transcribe options only that engine offers; see transcribeOnlyOptions. */
+export interface TranscribeOnlyOptionSettings {
+    readonly languageCode: string;
+    /** The redaction flag as saved, whatever the language. */
+    readonly contentRedactionEnabled: boolean;
+    readonly customVocabularyName: string;
+    readonly customLanguageModelName: string;
+}
+
+/**
+ * The Amazon Transcribe options a meeting's settings use that the ASR MicroVM
+ * engine does not offer, named for a log line; empty when there are none.
+ *
+ * A meeting that uses any of them stays on Amazon Transcribe whatever the
+ * Transcription Engine section selects, so a configured option is applied rather
+ * than dropped. Redaction counts when its flag is set, whatever the language,
+ * because the flag is what an administrator chose. Here rather than in a reader
+ * because both readers choose the engine, the WebSocket transcriber and the
+ * Virtual Participant. `bundleLanguages` is the deployed bundle's language list
+ * (see parseBundleLanguages); a language outside it counts as one of these options.
+ */
+export const transcribeOnlyOptions = (
+    settings: TranscribeOnlyOptionSettings,
+    bundleLanguages: readonly string[] = [],
+): string[] => {
+    const options: string[] = [];
+    if (settings.contentRedactionEnabled) {
+        options.push('content redaction');
+    }
+    if (settings.customVocabularyName) {
+        options.push(`custom vocabulary ${settings.customVocabularyName}`);
+    }
+    if (settings.customLanguageModelName) {
+        options.push(`custom language model ${settings.customLanguageModelName}`);
+    }
+    if (settings.languageCode === 'identify-language' || settings.languageCode === 'identify-multiple-languages') {
+        options.push(`language identification (${settings.languageCode})`);
+    } else if (!isMicrovmLanguage(settings.languageCode, bundleLanguages)) {
+        options.push(`language ${settings.languageCode}`);
+    }
+    return options;
+};
+
+/** `es` from `es-US`: the part of a meeting's language code a bundle's list names. */
+export const baseLanguage = (languageCode: string): string =>
+    languageCode.trim().toLowerCase().split('-')[0] ?? '';
+
+/**
+ * The deployed bundle's languages from their published form, a comma-separated
+ * list of base codes such as `en,es,fr`: the ASR stack's AsrModelLanguages
+ * output, which reaches both readers as ASR_MODEL_LANGUAGES. Empty when nothing
+ * is published, which isMicrovmLanguage reads as English only.
+ */
+export const parseBundleLanguages = (value: string | undefined): string[] =>
+    (value ?? '')
+        .split(',')
+        .map(baseLanguage)
+        .filter((code) => code.length > 0);
+
+/**
+ * Whether a meeting language is one the deployed ASR MicroVM bundle transcribes.
+ *
+ * The engine is given no language: a multilingual bundle identifies the spoken
+ * language itself, and an English-only one decodes English whatever it hears. So
+ * a meeting goes to it only when the base language of its code (`es` from
+ * `es-US`) is in the bundle's list, which holds the languages every model writing
+ * the bundle's text transcribes (bundle_languages in
+ * lma-asr-microvm-stack/lambda_functions/asr_image_source/index.py). English is
+ * always served, because every bundle in lma-asr-microvm-stack/source/catalog.json
+ * transcribes it (its test_catalog_languages test holds that), and an empty list,
+ * which is what a deployment that publishes none has, means English only. An
+ * empty code is the readers' en-US default.
+ */
+export const isMicrovmLanguage = (languageCode: string, bundleLanguages: readonly string[] = []): boolean => {
+    const language = baseLanguage(languageCode);
+    return language === '' || language === 'en' || bundleLanguages.includes(language);
+};
+
 /** The Amazon Transcribe options whose combination is checked; see transcribeOptionsProblem. */
 export interface TranscribeOptionCombination {
     readonly languageCode: string;

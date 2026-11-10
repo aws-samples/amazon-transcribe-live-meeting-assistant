@@ -34,6 +34,7 @@ export default /* GraphQL */ `
       TranscriptionEngine
       TranscriptionLanguage
       SpeakerSeparation
+      DetectedLanguages
       TotalConversationDurationMillis
       Sentiment {
         OverallSentiment {

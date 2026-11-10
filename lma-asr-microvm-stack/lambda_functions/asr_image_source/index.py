@@ -36,6 +36,9 @@ Returns:
     Redistributable      "true" when every weight in the bundle may be redistributed
     ModelLicense         licence of the resolved model, for the stack outputs
     LicenceSummary       one-line licence summary for the whole bundle
+    Languages            comma-separated base language codes the bundle transcribes
+                         (see bundle_languages), which the transcriber and the Virtual
+                         Participant check a meeting's language against
 
 Every model is a curated catalog entry: there is no parameter for supplying a URL,
 so a new model is added by editing catalog.json (with its checksum pinned and its
@@ -76,6 +79,12 @@ OFFLINE_ONLY_KINDS = ("qwen3_asr", "cohere_transcribe")
 FILES_ARCHIVE = "files"
 # A tokenizer is a directory, which cannot be fetched as one pinned file.
 DIRECTORY_FILE_KEYS = ("tokenizer",)
+
+
+#: The ``languages`` entry of a model the catalog knows to be multilingual without
+#: listing its languages.
+MULTILINGUAL = "multilingual"
+ENGLISH = "en"
 
 
 class ResolutionError(Exception):
@@ -128,8 +137,8 @@ def _check_sources(model: dict, keys: tuple, label: str) -> None:
 def _file_source_lines(prefix: str, model: dict) -> list[str]:
     """Per-file URL and checksum lines for a model pinned file by file; none otherwise.
 
-    Archive models render exactly as before, so their image source fingerprint (and
-    therefore their image) is unchanged.
+    Archive models render exactly as before, so their ``model.env``, and therefore
+    their contribution to the image source fingerprint, is unchanged.
     """
     if not _is_files_model(model):
         return []
@@ -347,6 +356,49 @@ def resolve(properties: dict, catalog: dict) -> dict:
     }
 
 
+def _base_language(code) -> str:
+    """``es`` from ``es-US``: the part of a BCP-47 code a model's language list names."""
+    return str(code).strip().lower().split("-")[0]
+
+
+def model_languages(model: dict) -> list[str] | None:
+    """The base languages a model transcribes, or None when the catalog does not list them.
+
+    A model decoded in one baked language (``decodeLanguage``) transcribes that one
+    language whatever else it covers. A model listed only as ``multilingual`` has no
+    known list, so nothing can be routed to it on the strength of the list.
+    """
+    baked = _base_language(model.get("decodeLanguage") or "")
+    if baked:
+        return [baked]
+    listed = [_base_language(code) for code in model.get("languages") or []]
+    if not listed or MULTILINGUAL in listed:
+        return None
+    return listed
+
+
+def bundle_languages(selection: dict) -> list[str]:
+    """The base languages every model writing a bundle's text transcribes, sorted.
+
+    The intersection of the final model's languages and, in a two-pass bundle, the
+    preview model's, because a meeting in a language only one of them transcribes
+    would get either a wrong live row or a wrong final one. A model without a known
+    list makes the bundle's English only, which is what the readers assume of a
+    deployment that publishes no list at all.
+    """
+    known = [
+        model_languages(model)
+        for model in (selection["model"], selection.get("preview"))
+        if model
+    ]
+    if any(languages is None for languages in known):
+        return [ENGLISH]
+    common = set(known[0])
+    for languages in known[1:]:
+        common &= set(languages)
+    return sorted(common)
+
+
 def render_model_env(selection: dict) -> str:
     model = selection["model"]
     speaker = selection["speaker"]
@@ -509,6 +561,7 @@ def build(properties: dict) -> tuple[str, dict]:
             "two_pass" if selection.get("preview") else selection["model"].get("engine", "streaming")
         ),
         "VadModelId": selection["vad"].get("id", "none"),
+        "Languages": ",".join(bundle_languages(selection)),
     }
 
 

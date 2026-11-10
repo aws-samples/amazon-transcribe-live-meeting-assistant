@@ -17,6 +17,13 @@
  * rather than a whole panel saying so; the panel opens once there is something
  * to edit or show. The summary's AGENDA COVERAGE section (`coverage`) is shown
  * under the items it is about.
+ *
+ * On the Transcript tab the same panel is `collapsible`: a section that opens
+ * and closes, open by default while the meeting is live (`defaultExpanded`)
+ * and closed after it, until the viewer opens or closes it. There the
+ * coverage is shown as a status beside each item (Covered, Partly covered,
+ * Not covered) when the section pairs one line with each item, rather than
+ * as its text.
  */
 import React, { useEffect, useState } from 'react';
 import {
@@ -25,13 +32,22 @@ import {
   Box,
   Button,
   Container,
+  ExpandableSection,
   Header,
   SpaceBetween,
   StatusIndicator,
   Textarea,
 } from '@cloudscape-design/components';
 
-import { describeAgendaSource, MAX_AGENDA_CHARS, parseAgendaItems } from '../common/agenda';
+import {
+  agendaCoverageStatuses,
+  COVERED,
+  describeAgendaSource,
+  MAX_AGENDA_CHARS,
+  NOT_COVERED,
+  PARTLY_COVERED,
+  parseAgendaItems,
+} from '../common/agenda';
 import SummaryMarkdown from '../summary-markdown/SummaryMarkdown';
 
 /* eslint-disable react/prop-types */
@@ -66,7 +82,29 @@ export const deriveStatus = (result) => {
   return { type: 'info', text: result.Message || 'no agenda was stated in the meeting' };
 };
 
-const AgendaPanel = ({ item, onSave, onDerive, readOnly, compactWhenEmpty = false, coverage = null }) => {
+/** How each coverage status reads beside its item. */
+const COVERAGE_DISPLAY = {
+  [COVERED]: { type: 'success', text: 'Covered' },
+  [PARTLY_COVERED]: { type: 'in-progress', text: 'Partly covered' },
+  [NOT_COVERED]: { type: 'stopped', text: 'Not covered' },
+};
+
+const AgendaPanel = ({
+  item,
+  onSave,
+  onDerive,
+  readOnly,
+  compactWhenEmpty = false,
+  coverage = null,
+  collapsible = false,
+  defaultExpanded = false,
+}) => {
+  // The viewer's own choice of open or closed; null until they make one.
+  const [expandedChoice, setExpandedChoice] = useState(null);
+  useEffect(() => {
+    setExpandedChoice(null);
+  }, [item.callId]);
+  const expanded = expandedChoice ?? defaultExpanded;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
@@ -91,6 +129,7 @@ const AgendaPanel = ({ item, onSave, onDerive, readOnly, compactWhenEmpty = fals
     setDraft(item.agenda || '');
     setConfirmReplace(false);
     setEditing(true);
+    setExpandedChoice(true);
   };
 
   const save = async (text) => {
@@ -122,6 +161,7 @@ const AgendaPanel = ({ item, onSave, onDerive, readOnly, compactWhenEmpty = fals
     // asks first. A derived one has nothing to lose, and neither does none.
     if (items.length && item.agendaSource !== 'derived') {
       setConfirmReplace(true);
+      setExpandedChoice(true);
       return;
     }
     derive();
@@ -177,6 +217,89 @@ const AgendaPanel = ({ item, onSave, onDerive, readOnly, compactWhenEmpty = fals
     );
   }
 
+  // Beside each item on the Transcript tab, how far the meeting got with it.
+  const statuses = collapsible && !editing ? agendaCoverageStatuses(coverage, items) : null;
+
+  const body = (
+    <SpaceBetween size="s">
+      {confirmReplace && (
+        <Alert
+          type="warning"
+          action={
+            <SpaceBetween size="xxs" direction="horizontal">
+              <Button onClick={() => setConfirmReplace(false)}>Keep it</Button>
+              <Button onClick={derive}>Replace</Button>
+            </SpaceBetween>
+          }
+        >
+          This meeting already has an agenda. Deriving replaces it with the agenda stated in the meeting, if one was
+          stated; if none was, the current agenda is kept.
+        </Alert>
+      )}
+      {editing && (
+        <SpaceBetween size="xs">
+          <Textarea
+            value={draft}
+            onChange={({ detail }) => setDraft(detail.value)}
+            rows={Math.min(12, Math.max(4, draft.split('\n').length + 1))}
+            placeholder={'One item per line, for example:\nIntroductions\nQ3 budget review\nHiring plan'}
+            ariaLabel="Agenda, one item per line"
+            invalid={tooLong}
+          />
+          <Box variant="small" color={tooLong ? 'text-status-error' : 'text-body-secondary'}>
+            One item per line. Saving an empty agenda clears it.
+            {tooLong && ` The agenda is limited to ${MAX_AGENDA_CHARS} characters.`}
+          </Box>
+        </SpaceBetween>
+      )}
+      {!editing && items.length > 0 && (
+        <ol className="agenda-items" style={{ margin: 0, paddingInlineStart: '1.5em' }}>
+          {items.map((text, index) => (
+            // Items are plain text lines; two identical lines are two items, so
+            // the position is part of the key.
+            // eslint-disable-next-line react/no-array-index-key
+            <li key={`${index}-${text}`}>
+              {text}
+              {statuses && (
+                <span className="agenda-item-status">
+                  <StatusIndicator type={COVERAGE_DISPLAY[statuses[index]].type}>
+                    {COVERAGE_DISPLAY[statuses[index]].text}
+                  </StatusIndicator>
+                </span>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+      {!editing && items.length === 0 && <Box color="text-body-secondary">No agenda for this meeting.</Box>}
+      {!collapsible && !editing && items.length > 0 && coverage && (
+        <SpaceBetween size="xxs">
+          <Box variant="awsui-key-label">Coverage</Box>
+          <Box color="text-body-secondary">
+            <SummaryMarkdown callId={item.callId}>{coverage}</SummaryMarkdown>
+          </Box>
+        </SpaceBetween>
+      )}
+    </SpaceBetween>
+  );
+
+  if (collapsible) {
+    return (
+      <div data-testid="agenda-collapsible">
+        <ExpandableSection
+          variant="container"
+          headerText="Agenda"
+          headerCounter={items.length ? `(${items.length})` : undefined}
+          headerActions={actions}
+          expanded={expanded}
+          onChange={({ detail }) => setExpandedChoice(detail.expanded)}
+        >
+          {body}
+        </ExpandableSection>
+      </div>
+    );
+  }
+
   return (
     <Container
       header={
@@ -185,57 +308,7 @@ const AgendaPanel = ({ item, onSave, onDerive, readOnly, compactWhenEmpty = fals
         </Header>
       }
     >
-      <SpaceBetween size="s">
-        {confirmReplace && (
-          <Alert
-            type="warning"
-            action={
-              <SpaceBetween size="xxs" direction="horizontal">
-                <Button onClick={() => setConfirmReplace(false)}>Keep it</Button>
-                <Button onClick={derive}>Replace</Button>
-              </SpaceBetween>
-            }
-          >
-            This meeting already has an agenda. Deriving replaces it with the agenda stated in the meeting, if one was
-            stated; if none was, the current agenda is kept.
-          </Alert>
-        )}
-        {editing && (
-          <SpaceBetween size="xs">
-            <Textarea
-              value={draft}
-              onChange={({ detail }) => setDraft(detail.value)}
-              rows={Math.min(12, Math.max(4, draft.split('\n').length + 1))}
-              placeholder={'One item per line, for example:\nIntroductions\nQ3 budget review\nHiring plan'}
-              ariaLabel="Agenda, one item per line"
-              invalid={tooLong}
-            />
-            <Box variant="small" color={tooLong ? 'text-status-error' : 'text-body-secondary'}>
-              One item per line. Saving an empty agenda clears it.
-              {tooLong && ` The agenda is limited to ${MAX_AGENDA_CHARS} characters.`}
-            </Box>
-          </SpaceBetween>
-        )}
-        {!editing && items.length > 0 && (
-          <ol className="agenda-items" style={{ margin: 0, paddingInlineStart: '1.5em' }}>
-            {items.map((text, index) => (
-              // Items are plain text lines; two identical lines are two items, so
-              // the position is part of the key.
-              // eslint-disable-next-line react/no-array-index-key
-              <li key={`${index}-${text}`}>{text}</li>
-            ))}
-          </ol>
-        )}
-        {!editing && items.length === 0 && <Box color="text-body-secondary">No agenda for this meeting.</Box>}
-        {!editing && items.length > 0 && coverage && (
-          <SpaceBetween size="xxs">
-            <Box variant="awsui-key-label">Coverage</Box>
-            <Box color="text-body-secondary">
-              <SummaryMarkdown callId={item.callId}>{coverage}</SummaryMarkdown>
-            </Box>
-          </SpaceBetween>
-        )}
-      </SpaceBetween>
+      {body}
     </Container>
   );
 };

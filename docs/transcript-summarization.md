@@ -32,7 +32,7 @@ LMA summarizes meeting transcripts automatically when a meeting ends, and on-dem
 
 A meeting's summary is generated once, from the transcript and the prompt templates as they were at the time. The Meeting Summary panel on the meeting page lets you run it again, or write the summary yourself.
 
-The summary of a long meeting takes a few minutes after the meeting ends. Until it arrives, the Meeting Summary panel -- and the Summary column of the meetings list -- shows **Summary in progress…**, and the summary replaces it by itself, with nothing to reload. If the summary could not be generated, the panel says so and **Regenerate** tries again. If no summary has arrived after 10 minutes, the panel stops waiting and offers **Regenerate**. With summaries switched off for the deployment, an ended meeting shows **Not available** straight away. The summarizer is waited for for up to 13 minutes; a summary that takes longer than that is reported as not generated.
+The summary of a long meeting takes a few minutes after the meeting ends. Until it arrives, the Meeting Summary panel -- and the Summary column of the meetings list -- shows **Summary in progress…**, and the summary replaces it by itself, with nothing to reload. If the summary could not be generated, the panel says so and **Regenerate** tries again. If no summary has arrived after 10 minutes, the panel stops waiting and offers **Regenerate**. With summaries switched off for the deployment, an ended meeting shows **Not available** straight away. The meeting's summary has up to 13 minutes to finish; one that takes longer is reported as not generated.
 
 ## Regenerating and Editing a Summary
 

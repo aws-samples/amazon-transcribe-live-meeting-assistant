@@ -7,7 +7,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 from os import getenv
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 import jwt
 from jwt import PyJWKClient
@@ -186,6 +186,19 @@ def verify_cognito_token(token):
         return None
 
 
+def segment_language_code(message: Dict) -> Optional[str]:
+    """The ``LanguageCode`` a producer sent on a segment, or None.
+
+    Amazon Transcribe names a language per result only with language
+    identification on; the producers pass it on as ``LanguageCode``. Anything
+    that is not a non-empty string is treated as no language.
+    """
+    value = message.get("LanguageCode")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
 # Transform Transcript segment fields
 def normalize_transcript_segments(message: Dict) -> List[Dict]:
     """Transforms Kinesis Stream Transcript Payload to addTranscript API"""
@@ -299,6 +312,14 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
                 RefreshToken=message.get("RefreshToken", None),
             )
         )
+
+    # The language the speech engine identified for the segment, when it named
+    # one. Left out otherwise, so a segment with no language is written exactly
+    # as before.
+    language_code = segment_language_code(transcriptEvent or message)
+    if language_code:
+        for segment in segments:
+            segment["LanguageCode"] = language_code
 
     return segments
 

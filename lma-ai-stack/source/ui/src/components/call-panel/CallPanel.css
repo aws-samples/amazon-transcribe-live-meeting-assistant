@@ -282,8 +282,8 @@ mark.transcript-search-match {
   align-items: center;
 }
 
-/* The chips of one platform name's voices, with its One person / Several people
-   menu, kept together and set apart from the other speakers. */
+/* The chips of one platform name's voices, with its one-person / several-people
+   toggle, kept together and set apart from the other speakers. */
 .transcript-speaker-group {
   display: inline-flex;
   flex-wrap: wrap;
@@ -329,7 +329,7 @@ mark.transcript-search-match {
   box-shadow: 0 0 0 2px #0972d3;
 }
 
-/* A platform name's voices in the Speakers panel, under the name and its One person / Several people menu. */
+/* A platform name's voices in the Speakers panel, under the name and its one-person / several-people toggle. */
 .speaker-group-rows {
   padding-left: 12px;
   border-left: 2px solid #e9ebed;
@@ -337,4 +337,10 @@ mark.transcript-search-match {
 
 .awsui-dark-mode .speaker-group-rows {
   border-color: #414d5c;
+}
+
+/* How far the meeting got with an agenda item, beside it in the Transcript tab's agenda. */
+.agenda-item-status {
+  margin-left: 8px;
+  white-space: nowrap;
 }

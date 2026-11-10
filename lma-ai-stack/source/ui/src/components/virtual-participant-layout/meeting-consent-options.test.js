@@ -54,8 +54,12 @@ describe('meetingConsentOptionsFor', () => {
     expect(meetingConsentOptionsFor('ZOOM')).toEqual(MEETING_CONSENT_OPTIONS);
   });
 
-  it('offers the each-participant rule on Google Meet', () => {
-    expect(meetingConsentOptionsFor('GOOGLE_MEET')).toEqual(MEETING_CONSENT_OPTIONS);
+  it('offers the each-participant rule on Google Meet, with a note on how replies are attributed', () => {
+    const meet = meetingConsentOptionsFor('GOOGLE_MEET').find((o) => o.value === 'opt_in:each_participant');
+    expect(meet.disabled).toBeUndefined();
+    expect(meet.description).toMatch(/not been confirmed in a live meeting/);
     expect(meetingConsentChoiceAvailable('opt_in:each_participant', 'GOOGLE_MEET')).toBe(true);
+    const others = meetingConsentOptionsFor('GOOGLE_MEET').filter((o) => o.value !== 'opt_in:each_participant');
+    expect(others).toEqual(MEETING_CONSENT_OPTIONS.filter((o) => o.value !== 'opt_in:each_participant'));
   });
 });
