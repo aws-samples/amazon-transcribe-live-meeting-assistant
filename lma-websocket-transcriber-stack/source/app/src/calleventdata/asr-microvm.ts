@@ -23,7 +23,8 @@ import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { AsrRuntimeConfig } from './asr-config';
 import { CallMetaData, SocketCallData } from './eventtypes';
 import { TranscriptSegmentRecord, diarizationSettingsFor, writeSegmentToKds } from './transcribe';
-import { getSessionSettings } from './session-settings';
+import { TranscriptionSettings, getSessionSettings } from './session-settings';
+import { transcribeOnlyOptions } from '../config/configuration-store';
 import { diarizationEnabledFor } from './diarization';
 // Type-only in the other direction, so this is not a runtime cycle.
 import { fetchEnrolledVoices } from './voice-enrollment';
@@ -260,11 +261,19 @@ export const resolveMaxSpeakers = (
  *
  * The engine is the deployment's choice (the Configuration page's Transcription Engine section) and diarization the client's;
  * a client may still name an engine (--asr-engine). Unservable requests fall back.
+ *
+ * A meeting whose Amazon Transcribe options use one the ASR MicroVM engine does
+ * not offer (content redaction, a custom vocabulary or language model, language
+ * identification) stays on Amazon Transcribe, so the option is applied rather
+ * than dropped. That holds for a client that named the MicroVM engine too: those
+ * options are the deployment's, set by an administrator, and a client's engine
+ * request does not override them.
  */
 export const resolveAsrEngine = (
     callMetaData: CallMetaData,
     server?: FastifyInstance,
-    runtime?: AsrRuntimeConfig
+    runtime?: AsrRuntimeConfig,
+    transcription?: TranscriptionSettings
 ): AsrEngineName => {
     const deploymentDefault = runtime
         ? (runtime.streamingEngineMicrovm ? 'microvm' : 'transcribe')
@@ -273,17 +282,30 @@ export const resolveAsrEngine = (
     if (requested !== 'microvm') {
         return 'transcribe';
     }
-    if (!isMicrovmAsrConfigured()) {
-        // The shipped default selects the MicroVM engine, so on a deployment
-        // without it (EnableMicrovmAsr=false, or a Region without Lambda
-        // MicroVMs) every meeting arrives here: that is the expected fallback,
-        // logged at info. A client that named the engine itself is told louder.
-        const message = `[ASR]: [${callMetaData.callId}] - MicroVM ASR was requested but this deployment has no ASR launcher configured; using Amazon Transcribe.`;
+    // Info for a meeting that took the deployment's default; a client that
+    // named the engine itself is told louder.
+    const report = (message: string): void => {
         if (callMetaData.asrEngine) {
             server?.log.warn(message);
         } else {
             server?.log.info(message);
         }
+    };
+    if (!isMicrovmAsrConfigured()) {
+        // The shipped default selects the MicroVM engine, so on a deployment
+        // without it (EnableMicrovmAsr=false, or a Region without Lambda
+        // MicroVMs) every meeting arrives here: that is the expected fallback.
+        report(
+            `[ASR]: [${callMetaData.callId}] - MicroVM ASR was requested but this deployment has no ASR launcher configured; using Amazon Transcribe.`
+        );
+        return 'transcribe';
+    }
+    const transcribeOnly = transcription ? transcribeOnlyOptions(transcription) : [];
+    if (transcribeOnly.length > 0) {
+        report(
+            `[ASR]: [${callMetaData.callId}] - MicroVM ASR was requested, but this meeting's Amazon Transcribe options use ` +
+                `${transcribeOnly.join(', ')}, which the MicroVM engine does not offer; using Amazon Transcribe.`
+        );
         return 'transcribe';
     }
     return 'microvm';

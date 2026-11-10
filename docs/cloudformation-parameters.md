@@ -996,7 +996,8 @@ parameter has no effect and every meeting uses Amazon Transcribe. Set it to
 
 A meeting this engine transcribes does not go through Amazon Transcribe, so the
 redaction, custom vocabulary, custom language model and language identification
-settings do not apply to it. Two more values are fixed in the `AsrDefaults`
+settings are not available on it; a meeting whose Amazon Transcribe settings use
+any of them is therefore kept on Amazon Transcribe. Two more values are fixed in the `AsrDefaults`
 mapping in `lma-main.yaml` rather than asked: `ModelBundle`, which models the
 MicroVM image is built from (`parakeet-tdt-v3-live-nemotron35-sortformer` by
 default), and `MaxMeetingSeconds` (`14400`), the hard lifetime ceiling per MicroVM.

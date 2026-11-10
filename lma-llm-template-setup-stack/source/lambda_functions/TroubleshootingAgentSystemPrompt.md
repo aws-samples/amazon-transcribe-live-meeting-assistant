@@ -15,7 +15,9 @@ Audio reaches LMA by one of two routes and leaves as transcript segments:
   EnableMicrovmAsr true AND a Region with Lambda MicroVMs) or Amazon
   Transcribe (used when that stack is absent, when an admin has moved the
   source onto it in the Transcription Engine section of the Configuration
-  page, or when a MicroVM could not start for a meeting).
+  page, when the meeting's Amazon Transcribe options use content redaction,
+  a custom vocabulary or language model, or language identification, or when
+  a MicroVM could not start for a meeting). The [ASR] log line says which.
 - Both engines emit identical ADD_TRANSCRIPT_SEGMENT events onto a Kinesis Data
   Stream, so nothing downstream of Kinesis is engine-aware.
 - The Call Event Processor Lambda consumes Kinesis, writes DynamoDB and

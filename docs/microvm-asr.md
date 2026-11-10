@@ -14,9 +14,10 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 > Transcribe is the alternative, and the fallback: it is used for every meeting where
 > the engine is not deployed (`EnableMicrovmAsr=false`, or a Region without AWS Lambda
 > MicroVMs, GovCloud included), and for any meeting whose MicroVM cannot start.
-> [Voice enrollment](voice-enrollment.md) depends on this engine. Choose Amazon
-> Transcribe for meetings that need content redaction, custom vocabularies, custom
-> language models or language identification, which this engine does not offer (see
+> [Voice enrollment](voice-enrollment.md) depends on this engine. A meeting whose
+> Amazon Transcribe options use content redaction, a custom vocabulary, a custom
+> language model or language identification, which this engine does not offer, stays
+> on Amazon Transcribe whichever engine is selected (see
 > [Feature trade-offs](#feature-trade-offs-versus-amazon-transcribe)). Accuracy (WER)
 > and diarization error rate have not yet been benchmarked — see
 > [What is not yet measured](#what-is-not-yet-measured).
@@ -81,7 +82,7 @@ weights live inside your account.
 ## Feature trade-offs versus Amazon Transcribe
 
 A meeting transcribed by this engine does **not** go through Amazon Transcribe, so
-these Transcribe features do not apply to it:
+these Transcribe features are not available on it:
 
 | Feature | On this engine |
 |---|---|
@@ -90,6 +91,24 @@ these Transcribe features do not apply to it:
 | Custom language model | Not available |
 | Language identification / multi-language | Not available |
 | Languages | The default model is **English only** |
+
+**These options keep a meeting on Amazon Transcribe.** When the effective
+**Amazon Transcribe** section of the Configuration page turns on content redaction
+(the Regulated presets do), names a custom vocabulary or a custom language model,
+or sets the language to identify-language or identify-multiple-languages, a meeting
+that would otherwise use this engine is transcribed by Amazon Transcribe instead, so
+the option is applied rather than silently dropped. Redaction counts when its switch
+is on, whatever the language. The rule is applied each time a meeting starts, by the
+WebSocket transcriber for Stream Audio, Chrome extension and Desktop Capture meetings
+and by the Virtual Participant for its own, and each logs the reason at info level
+(`[ASR] ... Amazon Transcribe options use content redaction, ...`). It also wins over
+an explicit request for this engine (`--asr-engine microvm` from a Desktop Capture
+app, or a Virtual Participant's `ASR_ENGINE=microvm`), which is then logged as a
+warning: those options are the deployment's, and a client's engine request does not
+switch them off. The Transcription Engine section of the Configuration page says
+when the saved Amazon Transcribe options do this. To put meetings on this engine,
+clear those options. The Virtual Participant has no custom language model setting,
+so for it only the other three apply.
 | Speaker labels | Per voice, per channel (the reason to use it) |
 
 The two engines coexist in one deployment, and which one a meeting uses is chosen
