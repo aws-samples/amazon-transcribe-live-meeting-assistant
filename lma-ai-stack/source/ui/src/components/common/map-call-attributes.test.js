@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import { describe, it, expect } from 'vitest';
-import mapCallsAttributes from './map-call-attributes';
+import mapCallsAttributes, { adoptMeetingCopy, agendaChanged } from './map-call-attributes';
 
 const call = (sentiment) => ({ CallId: 'c1', CreatedAt: '2026-01-01T00:00:00Z', Sentiment: sentiment });
 const quarters = (score) => [1, 2, 3, 4].map((i) => ({ BeginOffsetMillis: i, EndOffsetMillis: i + 1, Score: score }));
@@ -40,5 +40,45 @@ describe('mapCallsAttributes sentiment', () => {
     const [item] = mapCallsAttributes([call(undefined)]);
     expect(item.callerAverageSentiment).toBe(0);
     expect(item.agentAverageSentiment).toBe(0);
+  });
+});
+
+describe('adoptMeetingCopy', () => {
+  const AGENDA = {
+    agenda: 'Budget\nHiring',
+    agendaSource: 'scheduled',
+    agendaUpdatedBy: 'alice',
+    agendaUpdatedAt: '2026-11-08T15:13:11.973Z',
+  };
+  const onScreen = {
+    callId: 'c1',
+    updatedAt: '2026-11-08T15:20:00Z',
+    ...AGENDA,
+    captureSource: 'virtual-participant',
+    transcriptionEngine: 'transcribe',
+  };
+
+  it('keeps the agenda and capture context when the newer copy carries none', () => {
+    const live = { callId: 'c1', updatedAt: '2026-11-08T15:21:00Z', agenda: undefined, agendaUpdatedAt: null };
+    const next = adoptMeetingCopy(onScreen, live);
+    expect(next).toMatchObject({ ...AGENDA, updatedAt: '2026-11-08T15:21:00Z' });
+    expect(next.captureSource).toBe('virtual-participant');
+    expect(next.transcriptionEngine).toBe('transcribe');
+  });
+
+  it('takes the agenda from a copy that carries one, including a cleared agenda', () => {
+    const cleared = { callId: 'c1', agenda: '', agendaSource: 'ui', agendaUpdatedAt: '2026-11-08T15:30:00Z' };
+    expect(adoptMeetingCopy(onScreen, cleared)).toMatchObject({ agenda: '', agendaSource: 'ui' });
+    expect(agendaChanged(onScreen, cleared)).toBe(true);
+  });
+
+  it('reports an agenda change only for a copy with a different agenda timestamp', () => {
+    expect(agendaChanged(onScreen, { callId: 'c1' })).toBe(false);
+    expect(agendaChanged(onScreen, { ...onScreen })).toBe(false);
+  });
+
+  it('takes the newer copy as it is when there is nothing on screen', () => {
+    const live = { callId: 'c1' };
+    expect(adoptMeetingCopy(null, live)).toBe(live);
   });
 });

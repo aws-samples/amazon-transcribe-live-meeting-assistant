@@ -120,4 +120,48 @@ const mapCallsAttributes = (calls) => {
   });
 };
 
+/**
+ * A newer copy of the meeting a page shows (mapped), keeping from the copy on
+ * screen the fields that only getCall selects when the newer copy has none.
+ *
+ * The meeting page reads its meeting with getCall, then takes up the copy in
+ * the shared meeting list whenever the meeting changes. That copy is built from
+ * the list query and the onUpdateCall subscription, and neither carries these
+ * fields for an update the Kinesis pipeline made: a page opened during a live
+ * meeting would otherwise lose them at the first transcript update.
+ *
+ * The agenda is one unit keyed on agendaUpdatedAt, as in mergeCallUpdate:
+ * every agenda write sets that timestamp, so a copy that has one is
+ * authoritative for all four fields, including an agenda that was cleared.
+ */
+export const adoptMeetingCopy = (current, incoming) => {
+  if (!current || !incoming) return incoming;
+  const keep = (field) =>
+    incoming[field] === undefined || incoming[field] === null ? current[field] : incoming[field];
+  return {
+    ...incoming,
+    ...(incoming.agendaUpdatedAt
+      ? {}
+      : {
+          agenda: current.agenda,
+          agendaSource: current.agendaSource,
+          agendaUpdatedBy: current.agendaUpdatedBy,
+          agendaUpdatedAt: current.agendaUpdatedAt,
+        }),
+    captureSource: keep('captureSource'),
+    transcriptionEngine: keep('transcriptionEngine'),
+    transcriptionLanguage: keep('transcriptionLanguage'),
+    speakerSeparation: keep('speakerSeparation'),
+    transcriptDeletionScheduledFor: keep('transcriptDeletionScheduledFor'),
+    transcriptDeletedAt: keep('transcriptDeletedAt'),
+    transcriptSegmentsDeleted: keep('transcriptSegmentsDeleted'),
+    transcriptFilesDeleted: keep('transcriptFilesDeleted'),
+    expiresAfter: keep('expiresAfter'),
+  };
+};
+
+/** Whether a newer copy of a meeting carries a different agenda from the copy on screen. */
+export const agendaChanged = (current, incoming) =>
+  Boolean(incoming?.agendaUpdatedAt) && incoming.agendaUpdatedAt !== current?.agendaUpdatedAt;
+
 export default mapCallsAttributes;

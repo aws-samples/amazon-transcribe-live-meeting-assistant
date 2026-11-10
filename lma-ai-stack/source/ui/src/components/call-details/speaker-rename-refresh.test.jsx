@@ -175,6 +175,12 @@ describe('every view that renders CallPanel uses the same refresh guard', () => 
     expect(source).toContain('const summaryChanged =');
     expect(source).toContain('timestampAdvanced || speakerNamesChanged || summaryChanged');
   });
+
+  it.each(views)('%s takes up an agenda change and keeps the fields only getCall reads', async (view) => {
+    const source = await read(view);
+    expect(source).toContain('agendaChanged(call, callDetails)');
+    expect(source).toContain('setCall(adoptMeetingCopy(call, callDetails))');
+  });
 });
 
 /**

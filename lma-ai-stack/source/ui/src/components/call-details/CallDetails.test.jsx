@@ -23,7 +23,12 @@ const context = vi.hoisted(() => ({ value: null }));
 vi.mock('../call-panel', () => ({
   default: (props) => {
     panel.props = props;
-    return <div data-testid="panel">{props.item.recordingStatusLabel}</div>;
+    return (
+      <div>
+        <div data-testid="panel">{props.item.recordingStatusLabel}</div>
+        <div data-testid="agenda">{props.item.agenda || 'None'}</div>
+      </div>
+    );
   },
 }));
 vi.mock('../../contexts/calls', () => ({ default: () => context.value }));
@@ -37,8 +42,8 @@ const meeting = (fields = {}) => ({
   ...fields,
 });
 
-const renderPage = (calls = []) => {
-  const getCallDetailsFromCallIds = vi.fn().mockResolvedValue([meeting()]);
+const renderPage = (calls = [], loaded = meeting()) => {
+  const getCallDetailsFromCallIds = vi.fn().mockResolvedValue([loaded]);
   context.value = {
     calls,
     callTranscriptPerCallId: { [CALL_ID]: {} },
@@ -98,5 +103,37 @@ describe('the meeting page follows the meeting', () => {
     context.value = { ...context.value, calls: [meeting()] };
     rerender(view());
     await waitFor(() => expect(getByTestId('panel').textContent).toBe('Done'));
+  });
+});
+
+describe('the meeting page keeps the agenda during a live meeting', () => {
+  const AGENDA = {
+    Agenda: 'Budget\nHiring',
+    AgendaSource: 'scheduled',
+    AgendaUpdatedBy: 'alice',
+    AgendaUpdatedAt: '2026-11-03T14:05:10.000Z',
+  };
+
+  it('keeps the agenda it read when a live update carries none', async () => {
+    const { rerender, view, getByTestId } = renderPage([], meeting(AGENDA));
+    await waitFor(() => expect(getByTestId('agenda').textContent).toBe('Budget\nHiring'));
+    // A transcript update from the pipeline, merged into the list's copy, which has no agenda.
+    context.value = { ...context.value, calls: [meeting({ UpdatedAt: '2026-11-03T14:31:00.000Z' })] };
+    rerender(view());
+    await waitFor(() => expect(panel.props.item.updatedAt).toBe('2026-11-03T14:31:00.000Z'));
+    expect(getByTestId('agenda').textContent).toBe('Budget\nHiring');
+  });
+
+  it('takes up an agenda change, which leaves UpdatedAt alone', async () => {
+    const { rerender, view, getByTestId } = renderPage([], meeting(AGENDA));
+    await waitFor(() => expect(getByTestId('agenda').textContent).toBe('Budget\nHiring'));
+    context.value = {
+      ...context.value,
+      calls: [
+        meeting({ ...AGENDA, Agenda: 'Roadmap', AgendaSource: 'ui', AgendaUpdatedAt: '2026-11-03T14:40:00.000Z' }),
+      ],
+    };
+    rerender(view());
+    await waitFor(() => expect(getByTestId('agenda').textContent).toBe('Roadmap'));
   });
 });
