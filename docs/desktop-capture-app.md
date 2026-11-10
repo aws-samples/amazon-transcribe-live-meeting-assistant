@@ -87,9 +87,9 @@ setting applies.
 
 Both engines produce speaker labels, so the two flags above do **not** pick an engine.
 The on-demand engine separates voices sharing a single microphone more reliably, but it
-is English only and does not support content redaction, custom vocabularies, custom
+transcribes only the languages its deployed model bundle supports (see [Languages](microvm-asr.md#languages)) and does not support content redaction, custom vocabularies, custom
 language models or language identification. While the deployment's Amazon Transcribe
-settings set a language other than English or use any of those, meetings stay on Amazon Transcribe, and
+settings set a language that bundle does not support or use any of those, meetings stay on Amazon Transcribe, and
 `--asr-engine microvm` does not change that. A meeting whose MicroVM cannot start falls
 back to Amazon Transcribe on its own.
 

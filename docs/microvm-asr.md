@@ -15,9 +15,9 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 > the engine is not deployed (`EnableMicrovmAsr=false`, or a Region without AWS Lambda
 > MicroVMs, GovCloud included), and for any meeting whose MicroVM cannot start. A
 > meeting whose Amazon Transcribe options use content redaction, a custom vocabulary,
-> a custom language model, language identification or a language other than English,
-> which this engine does not offer, stays on Amazon Transcribe whichever engine is
-> selected (see [Feature trade-offs](#feature-trade-offs-versus-amazon-transcribe)).
+> a custom language model, language identification or a language the deployed model
+> bundle does not support, which this engine does not offer, stays on Amazon Transcribe
+> whichever engine is selected (see [Feature trade-offs](#feature-trade-offs-versus-amazon-transcribe)).
 >
 > **Why it is the default, and what that does not mean.** It is the default because
 > two features need it: [voice enrollment](voice-enrollment.md), whose speaker
@@ -101,25 +101,19 @@ these Transcribe features are not available on it:
 | Custom vocabulary | Not available |
 | Custom language model | Not available |
 | Language identification / multi-language | Not available |
-| Languages | Treated as **English only** (see below) |
+| Languages | Those the deployed model bundle supports: 20 European languages with the default bundle, English only with some others (see below) |
+| Detected language | Not reported; the models identify the spoken language but do not label it |
 | Speaker labels | Per voice, per channel (the reason to use it) |
 
 **These options keep a meeting on Amazon Transcribe.** When the effective
 **Amazon Transcribe** section of the Configuration page turns on content redaction
 (the Regulated presets do), names a custom vocabulary or a custom language model,
-sets the language to identify-language or identify-multiple-languages, or sets any
-language other than English (anything not `en-*`, such as `de-DE` or `es-US`), a
-meeting that would otherwise use this engine is transcribed by Amazon Transcribe
-instead, so the option is applied rather than silently dropped. Redaction counts
-when its switch is on, whatever the language.
-
-**Why only English.** The engine decodes the language its model bundle was built
-with and ignores the `language` a session asks for. English is the one language every
-bundle in `catalog.json` decodes: its models record `en` or `multilingual`, and the one
-that bakes a single decode language bakes `en`
-(`lma-asr-microvm-stack/source/tests/test_catalog_languages.py` holds the catalog to
-that). The readers do not know which bundle is deployed, so they put only English
-meetings on the engine, even with a bundle whose model could decode another language. The rule is applied each time a meeting starts, by the
+sets the language to identify-language or identify-multiple-languages, or sets a
+language the deployed model bundle does not support (see
+[Languages](#languages) below; with the default bundle, for example, `ja-JP` or
+`el-GR`), a meeting that would otherwise use this engine is transcribed by Amazon
+Transcribe instead, so the option is applied rather than silently dropped. Redaction
+counts when its switch is on, whatever the language. The rule is applied each time a meeting starts, by the
 WebSocket transcriber for Stream Audio, Chrome extension and Desktop Capture meetings
 and by the Virtual Participant for its own, and each logs the reason at info level
 (`[ASR] ... Amazon Transcribe options use content redaction, ...`). It also wins over
@@ -130,6 +124,83 @@ switch them off. The Transcription Engine section of the Configuration page says
 when the saved Amazon Transcribe options do this. To put meetings on this engine,
 clear those options. The Virtual Participant has no custom language model setting,
 so for it only the other options apply.
+
+### Languages
+
+The engine is given no language. A multilingual model identifies the language being
+spoken on its own, and an English-only model decodes English whatever it hears. So
+which meeting languages a deployment can put on the engine depends on the model
+bundle it was built from, and is decided as follows.
+
+- **A bundle's languages** are the languages every model that writes its text
+  supports: the main model and, in a two-pass bundle, the live preview model. A
+  language only one of them supports would get a wrong live row or a wrong final row.
+  Each model's list is the `languages` entry in
+  `lma-asr-microvm-stack/source/catalog.json`, taken from its model card. A model the
+  catalog lists only as `multilingual`, without its languages, counts as English only,
+  and a model decoded in one baked language (`decodeLanguage`) counts as that language.
+- **The deployed bundle's list is published at deploy time.** The `AsrImageSource`
+  custom resource computes it from the catalog. The ASR stack returns it as its
+  `AsrModelLanguages` output, a comma-separated list of base language codes such as
+  `bg,cs,da,de,en,es,...`. The main stack passes that output to the WebSocket
+  transcriber and the Virtual Participant, which read it as the
+  `ASR_MODEL_LANGUAGES` environment variable, and to the web UI through the
+  `AsrModelLanguages` key of the LMA settings parameter.
+- **A meeting's language is compared by its base language**, the part of the code
+  before the first `-` (`es` from `es-US`, `pt` from `pt-BR`). English is always
+  taken, because every bundle in the catalog supports it
+  (`lma-asr-microvm-stack/source/tests/test_catalog_languages.py` holds the catalog to
+  that). A deployment that publishes no list, such as one deployed from an earlier
+  release, takes English only.
+- **Language identification stays on Amazon Transcribe.** `identify-language` and
+  `identify-multiple-languages` keep a meeting on Amazon Transcribe with every bundle,
+  because Amazon Transcribe reports the language it identified and this engine does
+  not report one.
+
+| Bundle | Languages it takes |
+|---|---|
+| `parakeet-tdt-v3-live-nemotron35-sortformer` (default) and `parakeet-tdt-v3-live-nemotron35-titanet-small` | 20: Bulgarian, Croatian, Czech, Danish, Dutch, English, Estonian, Finnish, French, German, Hungarian, Italian, Polish, Portuguese, Romanian, Russian, Slovak, Spanish, Swedish, Ukrainian |
+| `parakeet-tdt-v3-titanet-small` and `parakeet-tdt-v3-sortformer` | The 25 of Parakeet TDT 0.6B v3's model card: the 20 above and Greek, Latvian, Lithuanian, Maltese and Slovenian |
+| `nemotron35-titanet-small` | The 28 base languages of the 32 locales Nemotron 3.5's model card lists as transcription-ready or broad-coverage, including Arabic, Chinese, Hindi, Japanese, Korean, Turkish and Vietnamese |
+| `parakeet-tdt-v3-live-titanet-small` and `parakeet-tdt-v3-live-sortformer` | English only, because their live preview model (FastConformer) is English only |
+| Every other bundle | English only |
+
+The Transcription Engine section of the Configuration page lists the deployed
+bundle's languages next to its name.
+
+**What has been measured.** On 2026-11-10 the default bundle's engine was run
+in-process on synthetic single-speaker clips (Amazon Polly neural voices, about 50
+words or 20 seconds each), with no language configured:
+
+| Clip | Final text WER | Live preview WER |
+|---|---|---|
+| en-US (baseline) | 0.0% | 16.4% |
+| es-ES | 0.0% | 13.5% |
+| es-US | 0.0% | 23.1% |
+| fr-FR | 1.8% | 12.5% |
+| de-DE | 6.2% | 31.2% |
+| it-IT | 6.0% | 20.0% |
+| pt-BR | 3.9% | 11.8% |
+| nl-NL | 0.0% | 16.7% |
+| English, then Spanish | 0.0% | 29.4–35.3% |
+
+WER is word error rate after lowercasing, stripping punctuation and writing spoken
+numbers as digits. The live preview figure is the last preview text shown for each
+row before its final replaced it, so it counts words the preview had not yet caught
+up with at either end of the row. The final text, from Parakeet TDT 0.6B v3, was
+within 0–6% in all seven non-English locales and followed a switch from English to
+Spanish within one meeting. The live preview, from Nemotron 3.5, is rougher in every
+language, and the final replaces it on every row, so its errors do not reach the
+stored transcript. Forcing a language on the preview model did not improve it and
+dropped the other language's speech in a mixed-language clip, so the engine sets
+none. Neither model reported the language it identified.
+
+These figures are optimistic. The audio was clean synthetic speech with one speaker
+per clip and one clip per language. With about 50 words per clip, one wrong word
+moves the WER by about 2 points. The run was on x86_64, not on the ARM64 MicroVM
+image. The other 13 languages of the default bundle were not tested, and no real
+meeting audio was. Measure the languages that matter to you on real meetings before
+relying on them.
 
 The two engines coexist in one deployment, and which one a meeting uses is chosen
 per meeting source (see [Choosing the engine](#choosing-the-engine)).
@@ -706,6 +777,9 @@ Honest state of validation, so nobody deploys this expecting known numbers:
 
 - **Word error rate has not been benchmarked** against Amazon Transcribe on real
   meeting audio.
+- **Languages other than English have been measured only on synthetic clips**, in
+  seven locales (see [Languages](#languages)). The default bundle's other 13
+  languages, and every language on real meeting audio, have not been measured.
 - **Diarization error rate has not been measured** end to end. The *operating point*
   for the shipped speaker model has been measured on real meeting audio (see
   `measured` in `catalog.json`, and
@@ -768,8 +842,11 @@ only, so the assistant cannot wake itself.
 
 ## Known limitations
 
-- **English only** with the default model; `language`, `punctuate` and
-  `latency_mode` are accepted by the protocol but do not change behaviour.
+- **The meeting languages it takes depend on the deployed bundle** (see
+  [Languages](#languages)), and **no detected language is reported**: a row carries
+  no language label, so `identify-language` and `identify-multiple-languages` stay on
+  Amazon Transcribe. `language`, `punctuate` and `latency_mode` are accepted by the
+  protocol but do not change behaviour.
 - **Overlapping speech resolves to one speaker.** The engine detects overlap but
   attributes the span to a single voice rather than emitting both.
 - **A live cut lands slightly late**, because a speaker change is only acted on once

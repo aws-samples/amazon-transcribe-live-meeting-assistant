@@ -8,9 +8,12 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import SectionNotice, { transcribeOnlyOptions } from './section-notices';
+import SectionNotice, { bundleLanguages, transcribeOnlyOptions } from './section-notices';
 
 const WITH_ENGINE = { AsrEngineAvailable: 'true' };
+// The default bundle's languages as the transcriber stack publishes them.
+const PARAKEET_V3 = 'bg,cs,da,de,en,es,et,fi,fr,hr,hu,it,nl,pl,pt,ro,ru,sk,sv,uk';
+const PARAKEET_V3_LANGUAGES = PARAKEET_V3.split(',');
 const KEEPS_ON_TRANSCRIBE = 'These settings keep meetings on Amazon Transcribe';
 
 describe('transcribeOnlyOptions', () => {
@@ -34,6 +37,31 @@ describe('transcribeOnlyOptions', () => {
 
   it.each(['en-US', 'en-GB', 'en-AU', undefined])('names nothing for the English language %s', (languageCode) => {
     expect(transcribeOnlyOptions({ languageCode })).toEqual([]);
+  });
+
+  it.each(['es-US', 'de-DE', 'fr-FR'])('names nothing for %s when the bundle transcribes it', (languageCode) => {
+    expect(transcribeOnlyOptions({ languageCode }, PARAKEET_V3_LANGUAGES)).toEqual([]);
+  });
+
+  it('names a language the deployed bundle does not transcribe', () => {
+    expect(transcribeOnlyOptions({ languageCode: 'ja-JP' }, PARAKEET_V3_LANGUAGES)).toEqual(['the language ja-JP']);
+  });
+
+  it('names language identification whatever the bundle transcribes', () => {
+    expect(transcribeOnlyOptions({ languageCode: 'identify-language' }, PARAKEET_V3_LANGUAGES)).toEqual([
+      'language identification',
+    ]);
+  });
+});
+
+describe('bundleLanguages', () => {
+  it('reads the published list as lower-case base codes', () => {
+    expect(bundleLanguages({ AsrModelLanguages: ' en, ES-us ,,fr ' })).toEqual(['en', 'es', 'fr']);
+  });
+
+  it('is empty, meaning English only, when nothing is published', () => {
+    expect(bundleLanguages({})).toEqual([]);
+    expect(bundleLanguages(undefined)).toEqual([]);
   });
 });
 
@@ -67,6 +95,23 @@ describe('the Transcription Engine notice', () => {
     expect(
       screen.getByText(/uses the language fr-FR, so every streaming meeting and Virtual Participant is/),
     ).toBeTruthy();
+  });
+
+  it('does not warn about a language the deployed bundle transcribes, and lists its languages', () => {
+    render(
+      <SectionNotice
+        section="asr_engine"
+        settings={{ ...WITH_ENGINE, AsrModelLanguages: PARAKEET_V3 }}
+        configuration={{ transcription: { languageCode: 'es-US' } }}
+      />,
+    );
+    expect(screen.queryByText(KEEPS_ON_TRANSCRIBE)).toBeNull();
+    expect(screen.getByText(/^English, .*Spanish/)).toBeTruthy();
+  });
+
+  it('lists English alone when the deployment publishes no languages', () => {
+    render(<SectionNotice section="asr_engine" settings={WITH_ENGINE} configuration={{}} />);
+    expect(screen.getByText('English')).toBeTruthy();
   });
 
   it('names only streaming meetings when a custom language model is the only such option', () => {
