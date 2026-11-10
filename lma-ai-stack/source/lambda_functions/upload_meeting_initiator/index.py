@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """
@@ -49,6 +49,35 @@ MAX_SPEAKERS = 30
 
 ALLOWED_CONTENT_TYPE_PREFIXES = ("audio/", "video/")
 
+# The media formats Amazon Transcribe accepts as StartTranscriptionJob's
+# MediaFormat. An upload whose format is one of these is keyed with it as the
+# extension and the format is stored on the UploadJob row for Stage 2 to pass.
+SUPPORTED_MEDIA_FORMATS = frozenset({"mp3", "mp4", "wav", "flac", "ogg", "amr", "webm", "m4a"})
+
+# The format for a browser-reported content type, used when the file name has no
+# supported extension. Browsers report the same format under several types.
+CONTENT_TYPE_MEDIA_FORMATS = {
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/mpeg3": "mp3",
+    "audio/x-mpeg-3": "mp3",
+    "audio/mp4": "m4a",
+    "audio/m4a": "m4a",
+    "audio/x-m4a": "m4a",
+    "video/mp4": "mp4",
+    "audio/wav": "wav",
+    "audio/wave": "wav",
+    "audio/x-wav": "wav",
+    "audio/vnd.wave": "wav",
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
+    "audio/ogg": "ogg",
+    "video/ogg": "ogg",
+    "audio/amr": "amr",
+    "audio/webm": "webm",
+    "video/webm": "webm",
+}
+
 # ---------------------------------------------------------------------------
 # Logging / clients
 # ---------------------------------------------------------------------------
@@ -56,7 +85,25 @@ logger = logging.getLogger(__name__)
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 # signature_version=s3v4 is required for presigned URLs on KMS-encrypted buckets.
-s3_client = boto3.client("s3", config=Config(signature_version="s3v4", region_name=AWS_REGION))
+# The regional endpoint matters for the browser PUT: a URL on the global
+# endpoint (<bucket>.s3.amazonaws.com) gets a 307 redirect to the regional one
+# for a bucket outside us-east-1 until its DNS settles (up to a day after it is
+# created), and a browser does not follow a redirect on a CORS request, so the
+# upload fails as a network error.
+#
+# Without an addressing style botocore presigns on that global endpoint, so the
+# style is set to virtual, and us-east-1 is asked for its regional endpoint too.
+# The host itself is left to botocore's endpoint rules, which give each
+# partition its own DNS suffix (amazonaws.com.cn in China, for one); no
+# endpoint_url is set, since one would fix the suffix for every partition.
+s3_client = boto3.client(
+    "s3",
+    region_name=AWS_REGION,
+    config=Config(
+        signature_version="s3v4",
+        s3={"addressing_style": "virtual", "us_east_1_regional_endpoint": "regional"},
+    ),
+)
 ddb = boto3.resource("dynamodb")
 job_table = ddb.Table(EVENT_SOURCING_TABLE)
 
@@ -76,16 +123,38 @@ def _slugify(value: str, fallback: str = "meeting") -> str:
     return slug[:64] or fallback
 
 
-def _sanitize_filename(name: str) -> str:
-    """Strip any path components the browser may have included and restrict to a
-    conservative character set."""
-    base = os.path.basename(name or "")
-    base = re.sub(r"[^a-zA-Z0-9._-]+", "_", base)
-    base = base.strip("._") or "recording"
-    if len(base) > 128:
-        root, ext = os.path.splitext(base)
-        base = (root[: 128 - len(ext)]) + ext
-    return base
+def _split_media_extension(base: str) -> tuple[str, str | None]:
+    """Split ``base`` into a name and a supported media format. Only an extension
+    that is one of SUPPORTED_MEDIA_FORMATS (in any case) counts; anything else
+    after the last dot ("Weekly 1.5 sync", "notes.txt") stays part of the name."""
+    if "." in base:
+        stem, ext = base.rsplit(".", 1)
+        ext = ext.strip().lower()
+        if ext in SUPPORTED_MEDIA_FORMATS:
+            return stem, ext
+    return base, None
+
+
+def _media_format(filename: str, content_type: str) -> str | None:
+    """The upload's media format: the file name's extension when it is a
+    supported one, else the format the content type names, else None (the key
+    then has no extension and Transcribe is left to detect the format)."""
+    _, ext = _split_media_extension(os.path.basename(filename or ""))
+    if ext:
+        return ext
+    return CONTENT_TYPE_MEDIA_FORMATS.get(content_type.split(";", 1)[0].strip())
+
+
+def _sanitize_filename(name: str, media_format: str | None) -> str:
+    """Strip any path components the browser may have included and restrict the
+    name to a conservative character set, then end it with ``media_format`` as
+    the extension. The extension is never derived from what is left of the name
+    after the restriction, so a name the set cannot carry (one in a non-Latin
+    script, say) loses the name, not the format: ``recording.<format>``."""
+    stem, _ = _split_media_extension(os.path.basename(name or ""))
+    ext = f".{media_format}" if media_format else ""
+    stem = re.sub(r"[^a-zA-Z0-9._-]+", "_", stem).lstrip("._").rstrip(".") or "recording"
+    return stem[: 128 - len(ext)] + ext
 
 
 def _get_username(event: dict) -> str:
@@ -129,10 +198,6 @@ def _parse_and_validate_input(arguments: dict) -> dict:
     )
     to_number = (raw.get("toNumber") or "").strip() or "System"
 
-    filename = _sanitize_filename(raw.get("filename") or "")
-    if not filename:
-        raise ValidationError("filename is required")
-
     content_type = (raw.get("contentType") or "").strip().lower()
     if not content_type:
         raise ValidationError("contentType is required")
@@ -140,6 +205,11 @@ def _parse_and_validate_input(arguments: dict) -> dict:
         raise ValidationError(
             f"contentType must start with one of: {', '.join(ALLOWED_CONTENT_TYPE_PREFIXES)}"
         )
+
+    media_format = _media_format(raw.get("filename") or "", content_type)
+    filename = _sanitize_filename(raw.get("filename") or "", media_format)
+    if not filename:
+        raise ValidationError("filename is required")
 
     file_size = raw.get("fileSize")
     if file_size is not None:
@@ -187,6 +257,7 @@ def _parse_and_validate_input(arguments: dict) -> dict:
         "toNumber": to_number,
         "filename": filename,
         "contentType": content_type,
+        "mediaFormat": media_format,
         "fileSize": file_size,
         "enableDiarization": enable_diarization,
         "maxSpeakers": max_speakers,
@@ -258,6 +329,9 @@ def _write_upload_job(
         "ToNumber": normalized["toNumber"],
         "Filename": normalized["filename"],
         "ContentType": normalized["contentType"],
+        # Absent when neither the file name nor the content type names a format
+        # Transcribe accepts; Stage 2 then leaves MediaFormat for it to detect.
+        "MediaFormat": normalized.get("mediaFormat"),
         "FileSize": normalized.get("fileSize"),
         "EnableDiarization": normalized["enableDiarization"],
         "MaxSpeakers": normalized["maxSpeakers"],

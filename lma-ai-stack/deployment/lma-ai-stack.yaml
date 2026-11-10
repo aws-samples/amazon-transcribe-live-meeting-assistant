@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 ---
@@ -7131,6 +7131,15 @@ Resources:
                   - logs:PutRetentionPolicy
                   - logs:AssociateKmsKey
                 Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/appsync/apis/${AppSyncApiEncrypted.ApiId}*"
+              # CloudWatch Logs checks a key passed as kmsKeyId (to CreateLogGroup
+              # or AssociateKmsKey) with the caller's own permissions, so the
+              # function needs kms:DescribeKey on it; without it AppSyncLogRetention
+              # fails with AccessDenied when it is created (a new stack, or the
+              # upgrade that adds it).
+              - Effect: Allow
+                Action:
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
 
   AppSyncLogRetentionFunctionLogGroup:
     Type: AWS::Logs::LogGroup
