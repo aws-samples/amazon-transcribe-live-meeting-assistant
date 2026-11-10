@@ -653,7 +653,11 @@ In addition to the audio recording, the Virtual Participant can capture the meet
 
 ## Transcription Engine
 
-A Virtual Participant is transcribed by Amazon Transcribe. With a voice assistant
+A Virtual Participant is transcribed by the [ASR MicroVM engine](microvm-asr.md) by
+default, wherever that engine is deployed (`EnableMicrovmAsr=true`, the default, in a
+Region with AWS Lambda MicroVMs), and by Amazon Transcribe otherwise, when an admin has
+chosen Amazon Transcribe for Virtual Participants, or when a MicroVM cannot be
+acquired. On Amazon Transcribe, with a voice assistant
 configured, the VP sends Amazon Transcribe one stream with two channels, with channel
 identification on: the meeting's participants on the first channel and the assistant's
 voice on the second, the same layout as Stream Audio's tab and microphone. Participant
@@ -673,12 +677,12 @@ a shared screen playing a recording) come out as `Name (spk_0)`, `Name (spk_1)`.
 default: speaker names come from the meeting roster, which is the better label for a
 normal attendee. See [Several people behind one attendee](#several-people-behind-one-attendee).
 
-A deployment with
-`EnableMicrovmAsr=true` can also move Virtual Participants onto the on-demand MicroVM
-ASR engine instead, from the same section, which then also shows the engine choices:
+On a deployment with the ASR MicroVM engine the same section also shows the engine
+choices:
 
 - **Virtual Participants: engine** chooses the engine for every VP that starts after the
-  change. The VP acquires and releases its own MicroVM, and falls back to Amazon
+  change: the ASR MicroVM engine (the default) or Amazon Transcribe. On the MicroVM
+  engine the VP acquires and releases its own MicroVM, and falls back to Amazon
   Transcribe when none can be acquired.
 - **The voice assistant is its own channel.** With the assistant enabled, its speech is
   transcribed from a second engine session on the same MicroVM and appears on the `LOCAL`

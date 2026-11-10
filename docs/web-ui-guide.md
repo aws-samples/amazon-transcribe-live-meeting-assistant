@@ -636,7 +636,7 @@ each edited one section of the configuration. They are now sections of the
 |---|---|
 | `/#/configuration/nova-sonic` | The **Nova Sonic Voice Assistant** section. See [Nova Sonic 2 Setup](nova-sonic-setup.md) |
 | `/#/configuration/transcript-summary` | The **Transcript Summary** section. See [Transcript Summarization](transcript-summarization.md) |
-| `/#/configuration/asr` | The **Transcription Engine** section. Its engine choices are shown only when the on-demand speech engine is deployed (`EnableMicrovmAsr=true`); Virtual Participant voice separation is shown on every deployment. See [MicroVM ASR](microvm-asr.md) |
+| `/#/configuration/asr` | The **Transcription Engine** section. Its engine choices (the ASR MicroVM engine by default, or Amazon Transcribe) are shown only when the ASR MicroVM engine is deployed (`EnableMicrovmAsr=true`, the default, in a Region with AWS Lambda MicroVMs); Virtual Participant voice separation is shown on every deployment. See [MicroVM ASR](microvm-asr.md) |
 
 ### User Management
 

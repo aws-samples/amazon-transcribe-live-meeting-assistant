@@ -238,9 +238,10 @@ CLASSIFICATION: Dict[str, Classification] = {
         RUNTIME,
         "Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts.",
     ),
-    # On-demand speech engine
+    # ASR MicroVM speech engine
     "EnableMicrovmAsr": _c(
-        RESOURCE, "Decides whether the on-demand speech engine's nested stack exists."
+        RESOURCE,
+        "Decides whether the ASR MicroVM engine's nested stack exists, in a Region with AWS Lambda MicroVMs.",
     ),
     # Voice enrollment
     "EnableVoiceEnrollment": _c(

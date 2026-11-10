@@ -44,25 +44,26 @@ const NovaSonicNotice = ({ configuration = {} }) => {
 
 NovaSonicNotice.propTypes = { configuration: PropTypes.shape({}) };
 
-// Without the on-demand engine every meeting is transcribed by Amazon
+// Without the ASR MicroVM engine every meeting is transcribed by Amazon
 // Transcribe, so the section shows only the voice separation switch, which
 // that engine honours too, and says where the engine choices went.
 const AsrEngineNotice = ({ settings = {} }) => {
   if (`${settings?.AsrEngineAvailable}` !== 'true') {
     return (
       <Alert type="info" header="Every meeting is transcribed by Amazon Transcribe">
-        The on-demand speech engine is not deployed, so the choice of engine for each kind of meeting is not shown.
-        Virtual Participant voice separation works on Amazon Transcribe. To evaluate the experimental on-demand engine,
-        set EnableMicrovmAsr to true on the main stack; Amazon Transcribe remains the recommended engine.
+        The ASR MicroVM speech engine is not deployed, so the choice of engine for each kind of meeting is not shown.
+        Virtual Participant voice separation works on Amazon Transcribe. The ASR MicroVM engine is deployed when
+        EnableMicrovmAsr is true on the main stack (the default) in a Region with AWS Lambda MicroVMs.
       </Alert>
     );
   }
   const diarization = `${settings?.AsrDiarizationAvailable}` === 'true';
   return (
     <>
-      <Alert type="warning" header="Experimental — not production ready">
-        Transcript quality on the on-demand engine is below Amazon Transcribe&apos;s and its defaults may change between
-        releases. It falls back to Amazon Transcribe if it cannot start.
+      <Alert type="info" header="The ASR MicroVM engine is the default">
+        Meetings on the ASR MicroVM engine do not use Amazon Transcribe&apos;s content redaction, custom vocabulary,
+        custom language model or language identification; choose Amazon Transcribe for meetings that need them. A
+        meeting whose MicroVM cannot start falls back to Amazon Transcribe.
       </Alert>
       <KeyValuePairs
         columns={2}

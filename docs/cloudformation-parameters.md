@@ -436,21 +436,21 @@ Console label: *Content Redaction Type for Transcription*
 
 Type of content redaction from Amazon Transcribe transcription output.
 
-## On-demand speech engine (EXPERIMENTAL)
+## ASR MicroVM speech engine (default transcription engine)
 
 | Parameter | Default | Kind |
 |---|---|---|
-| [`EnableMicrovmAsr`](#enablemicrovmasr) | `false` | Resource |
+| [`EnableMicrovmAsr`](#enablemicrovmasr) | `true` | Resource |
 
 ### `EnableMicrovmAsr`
 
-Console label: *Deploy the on-demand speech engine (EXPERIMENTAL)*
+Console label: *Deploy the ASR MicroVM speech engine*
 
-- **Default:** `false`
+- **Default:** `true`
 - **Allowed values:** `true`, `false`
-- **Kind:** Resource. Decides whether the on-demand speech engine's nested stack exists.
+- **Kind:** Resource. Decides whether the ASR MicroVM engine's nested stack exists, in a Region with AWS Lambda MicroVMs.
 
-Deploys the EXPERIMENTAL on-demand speech engine (open-source models on AWS Lambda MicroVMs in this account) alongside Amazon Transcribe. Nothing changes until an admin moves Stream Audio, Chrome extension and Desktop Capture meetings, or Virtual Participants, onto it in the Transcription Engine section of the Configuration page. English only; requires a region with AWS Lambda MicroVMs. See docs/microvm-asr.md.
+Deploys the ASR MicroVM speech engine (open-source models on AWS Lambda MicroVMs in this account), the default transcription engine for Stream Audio, Chrome extension, Desktop Capture and Virtual Participant meetings; it also provides the speaker embeddings voice enrollment needs. Deployed only in Regions with AWS Lambda MicroVMs (us-east-1, us-east-2, us-west-2, ap-northeast-1, eu-west-1 -- not GovCloud); elsewhere this setting has no effect and every meeting uses Amazon Transcribe. Set false to use Amazon Transcribe for every meeting. Each source's engine can be changed in the Transcription Engine section of the Configuration page. See docs/microvm-asr.md.
 
 ## Voice enrollment (Beta; biometric; off by default)
 
@@ -468,7 +468,7 @@ Console label: *Enable voice enrollment (stores biometric data)*
 - **Allowed values:** `true`, `false`
 - **Kind:** Resource. Decides whether the enrollment table, the consent log and the enrollment portal exist.
 
-Let people enroll their voice so they are labelled by name in meetings from their first word. A voiceprint is biometric data about a person: while this is false the enrollment table, the consent log and the consent portal do not exist in the deployment at all. Turning it on creates obligations that are yours -- biometric data is separately regulated in many jurisdictions and typically requires informed consent before collection, a published retention schedule and deletion on request. See docs/voice-enrollment.md. Matching also needs EnableMicrovmAsr=true, since Amazon Transcribe exposes no speaker embedding.
+Let people enroll their voice so they are labelled by name in meetings from their first word. A voiceprint is biometric data about a person: while this is false the enrollment table, the consent log and the consent portal do not exist in the deployment at all. Turning it on creates obligations that are yours -- biometric data is separately regulated in many jurisdictions and typically requires informed consent before collection, a published retention schedule and deletion on request. See docs/voice-enrollment.md. Matching also needs the ASR MicroVM engine (EnableMicrovmAsr, deployed in Regions with AWS Lambda MicroVMs), since Amazon Transcribe exposes no speaker embedding.
 
 ### `VoiceEnrollmentRetentionDays`
 
@@ -982,20 +982,25 @@ harmless in practice: the draining task keeps serving the sessions already
 attached to it and the new task only receives new meetings, so no meeting is ever
 split across the two.
 
-### The on-demand speech engine
+### The ASR MicroVM speech engine
 
-> **EXPERIMENTAL — not production ready.** Transcript quality is below Amazon
-> Transcribe's and defaults may change between releases. Amazon Transcribe remains
-> the recommended engine for production meetings.
+`EnableMicrovmAsr` is the only deploy-time question for this engine, and it
+defaults to `true`: the ASR MicroVM engine is the default transcription engine for
+Stream Audio, Chrome extension, Desktop Capture and Virtual Participant meetings,
+with Amazon Transcribe as the alternative and the fallback. The nested stack is
+created only in a Region with AWS Lambda MicroVMs (us-east-1, us-east-2,
+us-west-2, ap-northeast-1 and eu-west-1, the Region list in the Conditions
+of `lma-main.yaml`); in any other Region, GovCloud included, the
+parameter has no effect and every meeting uses Amazon Transcribe. Set it to
+`false` to use Amazon Transcribe for every meeting.
 
-`EnableMicrovmAsr` is the only deploy-time question for this engine. A meeting it
-transcribes does not go through Amazon Transcribe, so the redaction, custom
-vocabulary, custom language model and language identification parameters do not
-apply to it. Two more values are fixed in the `AsrDefaults` mapping in
-`lma-main.yaml` rather than asked: `ModelBundle`, which models the MicroVM image is
-built from (`parakeet-tdt-v3-live-nemotron35-sortformer` by default), and
-`MaxMeetingSeconds` (`14400`), the hard lifetime ceiling per MicroVM. Which
-meetings use the engine is chosen in the Transcription Engine section of the
+A meeting this engine transcribes does not go through Amazon Transcribe, so the
+redaction, custom vocabulary, custom language model and language identification
+settings do not apply to it. Two more values are fixed in the `AsrDefaults`
+mapping in `lma-main.yaml` rather than asked: `ModelBundle`, which models the
+MicroVM image is built from (`parakeet-tdt-v3-live-nemotron35-sortformer` by
+default), and `MaxMeetingSeconds` (`14400`), the hard lifetime ceiling per MicroVM.
+Which meetings use the engine is chosen in the Transcription Engine section of the
 Configuration page, with no stack update. The bundles, their licences and how one
 is selected are described in [On-demand ASR & Speaker Diarization](microvm-asr.md).
 
@@ -1007,8 +1012,9 @@ is selected are described in [On-demand ASR & Speaker Diarization](microvm-asr.m
 
 While `EnableVoiceEnrollment` is `false` the tables, the consent portal and the
 matching step do not exist in the deployment at all. Both enrolling and matching
-need `EnableMicrovmAsr=true`, because that engine is what computes speaker
-embeddings; with enrollment on and that engine off, the tables, the portal and the
+need the ASR MicroVM engine (`EnableMicrovmAsr=true`, the default, in a Region
+with AWS Lambda MicroVMs), because that engine is what computes speaker
+embeddings; with enrollment on and that engine absent, the tables, the portal and the
 consent log all exist and work, and the step that would create a voiceprint
 reports that the engine is missing.
 

@@ -123,8 +123,9 @@ MicroVM really computes a voiceprint from real audio, or that a withdrawal
 really destroys it.
 
 Requires `LMA_TEST_USERNAME` / `LMA_TEST_PASSWORD` like the streaming probe, and
-a stack with `EnableVoiceEnrollment=true` **and** `EnableMicrovmAsr=true` —
-enrolling needs the on-demand engine, because that is what computes speaker
+a stack with `EnableVoiceEnrollment=true` **and** the ASR MicroVM engine deployed
+(`EnableMicrovmAsr=true`, the default, in a Region with AWS Lambda MicroVMs) —
+enrolling needs that engine, because that is what computes speaker
 embeddings. It skips cleanly on a deployment without the feature, which is the
 default. Self-cleaning: it withdraws at the end, which deletes the voiceprint it
 created.

@@ -17,7 +17,7 @@ described in the [Unified Configuration Store](configuration-store.md) reference
 
 Two kinds of setting control LMA. **Stack parameters** are chosen when the
 CloudFormation stack is deployed or updated; they decide which resources exist,
-such as whether the Virtual Participant or the on-demand speech engine is
+such as whether the Virtual Participant or the ASR MicroVM speech engine is
 deployed at all, and changing one means a stack update. They are listed in
 [CloudFormation Parameters](cloudformation-parameters.md). **Runtime settings**
 are what this page is about: they are stored in the stack's configuration table,
@@ -38,7 +38,7 @@ see [Retention: settings the stack limits](#retention-settings-the-stack-limits)
 | Transcript Summary | The sections of the end-of-meeting summary and the prompt behind each | To summaries generated within about five minutes of the save. **Regenerate** on a meeting page uses it at once |
 | Meeting Assist Chat Buttons | The quick-action buttons in the chat panel. A saved list replaces the shipped buttons as a whole | At once, to chat panels opened after the save |
 | Nova Sonic Voice Assistant | The voice assistant's system prompt and prompt mode, model, voice, turn-taking sensitivity, meeting mode and translator settings | To the next meeting the voice assistant joins |
-| Transcription Engine | Virtual Participant voice separation, which works on Amazon Transcribe, and, where the experimental on-demand speech engine is deployed, which engine transcribes streaming meetings and which transcribes Virtual Participants. Without that engine only the voice separation switch is shown | To meetings that start within 30 seconds of the save or later |
+| Transcription Engine | Virtual Participant voice separation, which works on either engine, and, where the ASR MicroVM speech engine is deployed (`EnableMicrovmAsr=true`, the default, in a Region with AWS Lambda MicroVMs), which engine transcribes streaming meetings and which transcribes Virtual Participants: the ASR MicroVM engine by default, or Amazon Transcribe. Without that engine only the voice separation switch is shown, and every meeting uses Amazon Transcribe. The Amazon Transcribe section's options apply only to meetings transcribed by Amazon Transcribe | To meetings that start within 30 seconds of the save or later |
 | Meeting Cost Prices | The unit prices the per-meeting [cost estimate](meeting-cost-estimate.md) is computed with, by region, shown as a table with the source of every shipped price; change one to use your own rate, and export or import the whole table (see [Changing prices](meeting-cost-estimate.md#changing-prices)). Also opened from **Configuration ▸ Meeting Cost Prices** in the navigation | To estimates drawn within about five minutes of the save |
 | Amazon Bedrock Models | The Amazon Bedrock model used for summaries and meeting insights, for the meeting assistant and the troubleshooting agent, for the meeting assistant's knowledge bases, and for reading the text of key frames, and the **Model inference geography**: whether those models, the consent evidence check model and the Virtual Participant's page-automation model may run in any commercial AWS Region, only within this deployment's geography, or only in its Region (see [Where meeting content is processed](infrastructure-and-security.md#where-meeting-content-is-processed)) | To each summary, answer or key frame started about five minutes after the save or later |
 | Amazon Transcribe | The Amazon Transcribe options of meetings streamed from the Stream Audio page, the browser extension and the desktop app, and of Virtual Participants: language or language identification, redaction, custom vocabulary and language model, and the default for identifying speakers within a channel | To streaming meetings that start after the save, and to the next Virtual Participant to start |
@@ -350,7 +350,7 @@ select **Save changes**.
   release's defaults for everything the file does not change. A section the file
   holds that this deployment does not have is listed and left out, and so is a
   setting the page does not show here, such as the engine choices on a deployment
-  without the on-demand speech engine, which keeps its current value. The save
+  without the ASR MicroVM speech engine, which keeps its current value. The save
   comment is filled in with the file's name; change it if you like. To make a
   new profile of the file instead, leaving every existing profile as it is, use
   **Import** in the Configuration Profiles list: it reads the file the same way,

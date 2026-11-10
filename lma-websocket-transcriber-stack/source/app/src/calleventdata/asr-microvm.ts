@@ -274,9 +274,16 @@ export const resolveAsrEngine = (
         return 'transcribe';
     }
     if (!isMicrovmAsrConfigured()) {
-        server?.log.warn(
-            `[ASR]: [${callMetaData.callId}] - MicroVM ASR was requested but this deployment has no ASR launcher configured; using Amazon Transcribe.`
-        );
+        // The shipped default selects the MicroVM engine, so on a deployment
+        // without it (EnableMicrovmAsr=false, or a Region without Lambda
+        // MicroVMs) every meeting arrives here: that is the expected fallback,
+        // logged at info. A client that named the engine itself is told louder.
+        const message = `[ASR]: [${callMetaData.callId}] - MicroVM ASR was requested but this deployment has no ASR launcher configured; using Amazon Transcribe.`;
+        if (callMetaData.asrEngine) {
+            server?.log.warn(message);
+        } else {
+            server?.log.info(message);
+        }
         return 'transcribe';
     }
     return 'microvm';

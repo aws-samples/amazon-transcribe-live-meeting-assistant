@@ -7,18 +7,24 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 
 # On-demand ASR & Speaker Diarization (MicroVM)
 
-> **Status: EXPERIMENTAL — not production ready.** Opt-in and off by default.
-> **Amazon Transcribe remains the recommended engine for production meetings**;
-> transcript quality here is below it and defaults may change between releases.
-> Deploying it changes nothing on its own: meetings still use Amazon Transcribe until
-> an admin switches streaming meetings or Virtual Participants onto it in the
-> Transcription Engine section of the Configuration page. Accuracy (WER) and
-> diarization error rate have not yet been benchmarked — see [What is not yet measured](#what-is-not-yet-measured).
+> **The default transcription engine.** `EnableMicrovmAsr` defaults to `true`, and
+> where the engine is deployed it transcribes Stream Audio, Chrome extension, Desktop
+> Capture and Virtual Participant meetings unless an admin moves them onto Amazon
+> Transcribe in the Transcription Engine section of the Configuration page. Amazon
+> Transcribe is the alternative, and the fallback: it is used for every meeting where
+> the engine is not deployed (`EnableMicrovmAsr=false`, or a Region without AWS Lambda
+> MicroVMs, GovCloud included), and for any meeting whose MicroVM cannot start.
+> [Voice enrollment](voice-enrollment.md) depends on this engine. Choose Amazon
+> Transcribe for meetings that need content redaction, custom vocabularies, custom
+> language models or language identification, which this engine does not offer (see
+> [Feature trade-offs](#feature-trade-offs-versus-amazon-transcribe)). Accuracy (WER)
+> and diarization error rate have not yet been benchmarked — see
+> [What is not yet measured](#what-is-not-yet-measured).
 >
-> Because it is experimental, nothing about it is tunable at deploy time:
-> `EnableMicrovmAsr` is the only CloudFormation question, the model bundle ships
-> with its diarization operating point already measured, and the only runtime
-> settings are three switches in the Transcription Engine section of the Configuration page.
+> Nothing about it is tunable at deploy time: `EnableMicrovmAsr` is the only
+> CloudFormation question, the model bundle ships with its diarization operating
+> point already measured, and the only runtime settings are three switches in the
+> Transcription Engine section of the Configuration page.
 
 ## Table of Contents
 
@@ -86,20 +92,35 @@ these Transcribe features do not apply to it:
 | Languages | The default model is **English only** |
 | Speaker labels | Per voice, per channel (the reason to use it) |
 
-Meetings that do not opt in are unaffected. The two engines coexist in one
-deployment, chosen per meeting.
+The two engines coexist in one deployment, and which one a meeting uses is chosen
+per meeting source (see [Choosing the engine](#choosing-the-engine)).
 
 ## Deploying it
 
-Set **`EnableMicrovmAsr` = `true`** on the main stack. This creates the
+**`EnableMicrovmAsr`** on the main stack defaults to `true`. It creates the
 `lma-asr-microvm-stack` nested stack: a MicroVM image, a session launcher Lambda,
 the table the runtime switches were stored in before they moved into the shared
 [configuration store](configuration-store.md) (kept so a deployment can be rolled
 back), and the IAM roles they need.
 
-**Region requirement.** AWS Lambda MicroVMs must be available in your region. It is
-not available in GovCloud. Deploying with `MicrovmAsr` in an unsupported region
-fails with `Unrecognized resource types: [AWS::Lambda::MicrovmImage]`.
+**Region requirement.** AWS Lambda MicroVMs must be available in your Region: today
+us-east-1, us-east-2, us-west-2, ap-northeast-1 and eu-west-1, and not GovCloud (the
+same list as the `VPLaunchType` parameter's). The nested stack is created only in
+those Regions, through the `IsMicrovmRegion` condition in `lma-main.yaml`, because
+elsewhere `AWS::Lambda::MicrovmImage` is not a recognised resource type and the
+deployment would fail. In any other Region `EnableMicrovmAsr` has no effect, the
+Transcription Engine section shows no engine choice, and every meeting uses Amazon
+Transcribe. When Lambda MicroVMs reach another Region, add it to that condition.
+
+**Using Amazon Transcribe for every meeting.** Set `EnableMicrovmAsr` to `false`, or
+keep the engine deployed and move both meeting sources onto Amazon Transcribe in the
+Transcription Engine section (see [Choosing the engine](#choosing-the-engine)).
+
+**Upgrading.** A stack update keeps the value the stack was deployed with unless you
+change it: the console and `lma deploy` both reuse a parameter's previous value, so a
+deployment created with `EnableMicrovmAsr=false` stays on Amazon Transcribe until
+you set it to `true`. See [Choosing the engine](#choosing-the-engine) for what
+happens to the engine switches on upgrade.
 
 **First deployment builds the image**, which downloads the models (~1.1 GB for the
 default bundle) and warms them. Expect several extra minutes on the first create and
@@ -267,11 +288,28 @@ each meeting, so a change needs no redeploy:
 
 | Setting | Covers | Default |
 |---|---|---|
-| Stream Audio, Chrome extension and Desktop Capture | Every meeting from those three sources | Amazon Transcribe |
-| Virtual Participants | Every Virtual Participant | Amazon Transcribe |
+| Stream Audio, Chrome extension and Desktop Capture | Every meeting from those three sources | ASR MicroVM engine |
+| Virtual Participants | Every Virtual Participant | ASR MicroVM engine |
 
-Deploying the engine changes nothing on its own: both settings start on Amazon
-Transcribe. Diarization stays a per-meeting choice — the Stream Audio form still asks
+Both settings ship on the ASR MicroVM engine. Choosing **Amazon Transcribe** for a
+setting moves every meeting of that kind onto it. Upload Audio always uses Amazon
+Transcribe batch transcription and has no engine setting.
+
+The shipped values are part of the deployment's baseline configuration, so they reach
+every deployment whose admin has not chosen an engine. A choice an admin saved is
+kept on upgrade and keeps winning: one saved in the Transcription Engine section is
+stored in the active configuration profile, and one saved on the Transcription
+Engine page of a release before v0.4.0 is carried into that profile by the upgrade.
+A deployment upgraded from such a release on which nobody saved that page moves onto
+the ASR MicroVM engine wherever the engine is deployed; choose Amazon Transcribe in
+the section to keep it. A Custom profile is a full copy of the configuration, so one
+created before this release holds the engine values the baseline had when it was
+copied.
+
+On a deployment without the engine (`EnableMicrovmAsr=false`, or a Region without
+AWS Lambda MicroVMs) the settings are not shown and have no effect: the transcriber
+and the Virtual Participant find no ASR launcher configured and use Amazon
+Transcribe, logging that at info level. Diarization stays a per-meeting choice — the Stream Audio form still asks
 which channels to identify speakers on, because only the person in the meeting knows
 whether several people share their microphone. The Desktop Capture apps can force an
 engine for one run with `--asr-engine`, which wins over the deployment setting.
@@ -294,8 +332,8 @@ on the page rather than in the DynamoDB console.
 
 | Setting | Default | Effect |
 |---|---|---|
-| Stream Audio, Chrome extension and Desktop Capture: engine | Amazon Transcribe | Which engine those meetings use |
-| Virtual Participants: engine | Amazon Transcribe | Which engine Virtual Participants use |
+| Stream Audio, Chrome extension and Desktop Capture: engine | ASR MicroVM engine | Which engine those meetings use |
+| Virtual Participants: engine | ASR MicroVM engine | Which engine Virtual Participants use |
 | Virtual Participant voice separation | off | A VP asks for per-voice labels so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. Honoured on **both** engines: the on-demand engine separates voices itself, and on Amazon Transcribe the VP recovers the turns from Transcribe's own per-item speaker labels. A VP already names speakers from the meeting roster, which is the better label for a normal attendee, hence off. Measured on four voices mixed onto one channel, the on-demand engine gave 3 labels at 79% purity against Amazon Transcribe's 2 at 57%, so prefer this engine for conference rooms. The voice assistant's own speech is never diarized on either engine, because it is transcribed on its own channel |
 
 There is deliberately nothing else. The similarity threshold, minimum utterance
@@ -555,6 +593,11 @@ validate the pairing on a live multi-speaker meeting before marking it `vetted`.
 
 - **No idle cost.** MicroVMs run per meeting. There is no warm pool and no
   always-on ASR capacity.
+- **What a meeting is billed for depends on its engine.** A meeting on this engine
+  incurs Lambda MicroVM compute for the MicroVM's size and lifetime rather than
+  Amazon Transcribe streaming per-second charges; one that falls back to Amazon
+  Transcribe incurs the latter. The [meeting cost estimate](meeting-cost-estimate.md)
+  itemises whichever applied.
 - **The transcriber task is unchanged** (`256` CPU / `1024` MB, or `1024`/`2048`
   with video recording): inference happens in the MicroVM, not in the task.
 - One MicroVM serves both audio channels of a meeting. An 8 GiB MicroVM exposed 16 CPUs
@@ -623,8 +666,7 @@ Honest state of validation, so nobody deploys this expecting known numbers:
   refuses anything else up front rather than letting the stack fail minutes later at
   `AWS::Lambda::MicrovmImage`.
 
-Measure these in a dev stack before offering the engine to users. Every number
-needed is in the MicroVM log group: per-session summaries carry audio seconds,
+Every number needed to measure these on your own meetings is in the MicroVM log group: per-session summaries carry audio seconds,
 segment counts and resident memory.
 
 ## Speaker names
@@ -690,7 +732,8 @@ only, so the assistant cannot wake itself.
 **The "Speakers per channel" field is missing from Stream Audio.** It is shown only
 when speaker identification is ticked for at least one channel and the
 streaming-meetings engine in the **Transcription Engine** section of **Configuration ▸ Configuration** is the on-demand engine. A
-deployment without `EnableMicrovmAsr=true` never shows it.
+deployment without the engine (`EnableMicrovmAsr=false`, or a Region without AWS
+Lambda MicroVMs) never shows it.
 
 **Transcripts appear but are labelled by channel.** The image has no speaker model.
 Look for `diarization was requested but this ASR image has no speaker model baked

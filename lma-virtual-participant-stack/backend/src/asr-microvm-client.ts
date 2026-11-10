@@ -102,14 +102,22 @@ export function resolveVpAsrEngine(
     switches: AsrRuntimeSwitches,
     override: string | undefined = process.env.ASR_ENGINE,
 ): AsrEngineName {
-    const requested =
-        (override || '').trim().toLowerCase() ||
-        (switches.virtualParticipantEngineMicrovm ? 'microvm' : 'transcribe');
+    const explicit = (override || '').trim().toLowerCase();
+    const requested = explicit || (switches.virtualParticipantEngineMicrovm ? 'microvm' : 'transcribe');
     if (requested !== 'microvm') {
         return 'transcribe';
     }
     if (!isMicrovmAsrConfigured()) {
-        log.warn('[ASR] MicroVM ASR requested but this deployment has no ASR launcher configured; using Amazon Transcribe.');
+        // The shipped default selects the MicroVM engine, so on a deployment
+        // without it every VP arrives here: the expected fallback, logged at
+        // info. A per-VP ASR_ENGINE override is told louder.
+        const message =
+            '[ASR] MicroVM ASR requested but this deployment has no ASR launcher configured; using Amazon Transcribe.';
+        if (explicit) {
+            log.warn(message);
+        } else {
+            log.info(message);
+        }
         return 'transcribe';
     }
     return 'microvm';

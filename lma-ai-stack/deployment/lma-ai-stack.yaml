@@ -553,8 +553,8 @@ Parameters:
       are yours -- biometric data is separately regulated in many jurisdictions
       and typically requires informed consent before collection, a published
       retention schedule and deletion on request. See docs/voice-enrollment.md.
-      Matching also needs EnableMicrovmAsr=true, since Amazon Transcribe exposes
-      no speaker embedding.
+      Matching also needs the ASR MicroVM engine (EnableMicrovmAsr), since
+      Amazon Transcribe exposes no speaker embedding.
     AllowedValues:
       - "true"
       - "false"

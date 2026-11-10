@@ -208,16 +208,20 @@ Parameters:
 
   EnableMicrovmAsr:
     Type: String
-    Default: "false"
+    Default: "true"
     AllowedValues:
       - "true"
       - "false"
     Description: >-
-      Deploys the EXPERIMENTAL on-demand speech engine (open-source models on AWS
-      Lambda MicroVMs in this account) alongside Amazon Transcribe. Nothing changes
-      until an admin moves Stream Audio, Chrome extension and Desktop Capture
-      meetings, or Virtual Participants, onto it in the Transcription Engine section of the Configuration page.
-      English only; requires a region with AWS Lambda MicroVMs. See
+      Deploys the ASR MicroVM speech engine (open-source models on AWS Lambda
+      MicroVMs in this account), the default transcription engine for Stream
+      Audio, Chrome extension, Desktop Capture and Virtual Participant meetings;
+      it also provides the speaker embeddings voice enrollment needs. Deployed
+      only in Regions with AWS Lambda MicroVMs (us-east-1, us-east-2, us-west-2,
+      ap-northeast-1, eu-west-1 -- not GovCloud); elsewhere this setting has no
+      effect and every meeting uses Amazon Transcribe. Set false to use Amazon
+      Transcribe for every meeting. Each source's engine can be changed in the
+      Transcription Engine section of the Configuration page. See
       docs/microvm-asr.md.
 
   EnableVoiceEnrollment:
@@ -234,8 +238,9 @@ Parameters:
       are yours -- biometric data is separately regulated in many jurisdictions
       and typically requires informed consent before collection, a published
       retention schedule and deletion on request. See docs/voice-enrollment.md.
-      Matching also needs EnableMicrovmAsr=true, since Amazon Transcribe exposes
-      no speaker embedding.
+      Matching also needs the ASR MicroVM engine (EnableMicrovmAsr, deployed in
+      Regions with AWS Lambda MicroVMs), since Amazon Transcribe exposes no
+      speaker embedding.
 
   VoiceEnrollmentRetentionDays:
     Type: Number
@@ -923,7 +928,7 @@ Metadata:
           - IsPartialTranscriptEnabled
           - TranscribeContentRedactionType
       - Label:
-          default: On-demand speech engine (EXPERIMENTAL)
+          default: ASR MicroVM speech engine (default transcription engine)
         Parameters:
           - EnableMicrovmAsr
       - Label:
@@ -1055,7 +1060,7 @@ Metadata:
       TranscribeContentRedactionType:
         default: Content Redaction Type for Transcription
       EnableMicrovmAsr:
-        default: Deploy the on-demand speech engine (EXPERIMENTAL)
+        default: Deploy the ASR MicroVM speech engine
       EnableVoiceEnrollment:
         default: Enable voice enrollment (stores biometric data)
       VoiceEnrollmentRetentionDays:
@@ -1220,7 +1225,7 @@ Rules:
           not both.
 
 Mappings:
-  # Deploy-time values for the on-demand ASR engine that are deliberately not
+  # Deploy-time values for the ASR MicroVM engine that are deliberately not
   # CloudFormation parameters: EnableMicrovmAsr is the only deploy-time question,
   # and the bundle carries its own calibrated operating point.
   #
@@ -1300,7 +1305,20 @@ Conditions:
     - !Or
       - !Condition HasZoomMeetingSdkClientSecretValue
       - !Condition HasZoomMeetingSdkClientSecretArn
-  ShouldDeployMicrovmAsr: !Equals [!Ref EnableMicrovmAsr, "true"]
+  # The Regions where AWS Lambda MicroVMs, which the ASR MicroVM engine runs on,
+  # are available: the same list VPLaunchType's description gives. Outside them
+  # AWS::Lambda::MicrovmImage is not a recognised resource type, so the ASR
+  # nested stack is not created whatever EnableMicrovmAsr says, and every meeting
+  # uses Amazon Transcribe. Extend this list when MicroVMs reach another Region.
+  IsMicrovmRegion: !Or
+    - !Equals [!Ref AWS::Region, us-east-1]
+    - !Equals [!Ref AWS::Region, us-east-2]
+    - !Equals [!Ref AWS::Region, us-west-2]
+    - !Equals [!Ref AWS::Region, ap-northeast-1]
+    - !Equals [!Ref AWS::Region, eu-west-1]
+  ShouldDeployMicrovmAsr: !And
+    - !Equals [!Ref EnableMicrovmAsr, "true"]
+    - !Condition IsMicrovmRegion
   ShouldCreateOperationalAlarms: !Equals [!Ref EnableOperationalAlarms, "true"]
   # AdminEmail is a required parameter with an AllowedPattern that an empty
   # string does not match, so in practice this is always true. It is asserted
@@ -3003,7 +3021,9 @@ Resources:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
 
   # On-demand streaming ASR + speaker diarization on AWS Lambda MicroVMs, used by
-  # the WebSocket transcriber as an alternative to Amazon Transcribe streaming.
+  # the WebSocket transcriber and the Virtual Participant as the default engine,
+  # with Amazon Transcribe streaming as the alternative and fallback. Created only
+  # in Regions with Lambda MicroVMs (see the IsMicrovmRegion condition).
   # One MicroVM per meeting, launched at meeting start and terminated at the end.
   ASRMICROVMSTACK:
     Type: AWS::CloudFormation::Stack
