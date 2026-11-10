@@ -660,6 +660,31 @@ def test_the_language_defaults_when_the_row_does_not_name_one(env) -> None:
     assert transcribe.params["LanguageCode"] == "en-US"
 
 
+def test_the_media_format_stage_one_recorded_is_passed_to_transcribe(env, monkeypatch) -> None:
+    """Stage 1 decides the format from the file name and the content type; naming
+    it keeps the job independent of what the pending key's extension looks like."""
+    monkeypatch.setattr(index, "job_table", FakeTable(job_row(MediaFormat="m4a")))
+    _, _, transcribe = env
+    index.lambda_handler(s3_event(), None)
+    assert transcribe.params["MediaFormat"] == "m4a"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{}, {"MediaFormat": "mov"}, {"MediaFormat": ""}],
+    ids=["row-written-before-the-field", "unsupported-value", "empty"],
+)
+def test_no_media_format_is_sent_unless_the_row_names_a_supported_one(
+    env, monkeypatch, overrides
+) -> None:
+    """Transcribe rejects a MediaFormat outside its list, and an older row has
+    none; either way the parameter is left out for Transcribe to detect."""
+    monkeypatch.setattr(index, "job_table", FakeTable(job_row(**overrides)))
+    _, _, transcribe = env
+    index.lambda_handler(s3_event(), None)
+    assert "MediaFormat" not in transcribe.params
+
+
 # ---------------------------------------------------------------------------
 # Idempotency and partial failure
 # ---------------------------------------------------------------------------
@@ -820,3 +845,10 @@ def test_a_row_written_by_stage_one_is_processed_by_this_stage(monkeypatch) -> N
     assert transcribe.params["Settings"] == {"ShowSpeakerLabels": True, "MaxSpeakerLabels": 5}
     assert transcribe.params["Media"]["MediaFileUri"] == f"s3://{BUCKET}/{created['uploadKey']}"
     assert transcribe.params["OutputKey"] == f"lma-transcripts/{call_id}.transcribe.json"
+    assert transcribe.params["MediaFormat"] == "mp4"
+
+
+def test_both_stages_hold_the_same_list_of_media_formats() -> None:
+    """The two Lambdas deploy separately, so each keeps its own copy of the list;
+    a format Stage 1 records that Stage 2 does not know would be silently dropped."""
+    assert index.SUPPORTED_MEDIA_FORMATS == initiator.SUPPORTED_MEDIA_FORMATS
