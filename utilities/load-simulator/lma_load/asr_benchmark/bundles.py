@@ -138,15 +138,17 @@ def stale_nested_stacks(session, stack_name: str, template: str) -> list[str]:
         for r in page["StackResourceSummaries"]
         if r["ResourceType"] == NESTED_STACK_TYPE and r.get("PhysicalResourceId")
     }
-    stale = []
-    for logical, url in sorted(nested_template_urls(template).items()):
+    urls = nested_template_urls(template)
+    stale = [f"{logical} (no TemplateURL found)" for logical in sorted(set(physical) - set(urls))]
+    for logical, url in sorted(urls.items()):
         if logical not in physical:
             continue
         deployed = cfn.get_template(StackName=physical[logical], TemplateStage="Original")[
             "TemplateBody"
         ]
         if not isinstance(deployed, str):
-            deployed = json.dumps(deployed)
+            stale.append(f"{logical} (JSON template, not compared)")
+            continue
         bucket, key = _s3_location(url)
         try:
             published = s3.get_object(Bucket=bucket, Key=key)["Body"].read().decode()
@@ -197,6 +199,13 @@ def switch_bundle(
         raise RuntimeError(
             "could not tell which bucket the stack's templates live in; pass --template-bucket"
         )
+    stale = stale_nested_stacks(session, stack_name, template)
+    if stale:
+        raise StaleTemplatesError(
+            f"the published templates of {', '.join(stale)} do not match what {stack_name} runs "
+            "(for example, publish.sh was re-run since the last deploy), so a bundle switch would "
+            "also deploy them. Deploy that build first, or publish the deployed version again."
+        )
     s3 = session.client("s3")
     key = f"{TEMPLATE_PREFIX}/{run_id}/lma-main-{bundle}.yaml"
     s3.put_object(Bucket=bucket, Key=key, Body=body.encode())
@@ -208,13 +217,6 @@ def switch_bundle(
         for p in stack.get("Parameters", [])
     ]
     capabilities = stack.get("Capabilities") or ["CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"]
-    stale = stale_nested_stacks(session, stack_name, template)
-    if stale:
-        raise StaleTemplatesError(
-            f"the published templates of {', '.join(stale)} differ from what {stack_name} runs "
-            "(publish.sh was re-run since the last deploy), so a bundle switch would also deploy "
-            "them. Deploy that build first, or publish the deployed version again."
-        )
     logger.info("Switching %s to %s (template %s)", stack_name, bundle, url)
     try:
         cfn.update_stack(

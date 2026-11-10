@@ -840,12 +840,11 @@ def test_the_synthetic_user_is_deleted_when_the_restore_fails(monkeypatch, tmp_p
         wav_path=str(_stereo(tmp_path)), bundles=["parakeet-tdt-v3-sortformer"]
     )
 
-    results = bench.run(
-        ctx, type("S", (), {"user_pool_id": "p", "user_pool_client_id": "c"})(), params
-    )
+    with pytest.raises(bench.BundleNotRestoredError, match="SWITCH_ONLY=orig"):
+        bench.run(ctx, type("S", (), {"user_pool_id": "p", "user_pool_client_id": "c"})(), params)
 
-    assert [r["label"] for r in results] == ["parakeet-tdt-v3-sortformer"]
     assert deleted == [ctx.run_id]
+    assert (ctx.results_dir / "asr-benchmark.md").exists()
 
 
 def test_switch_only_switches_the_stack_and_streams_nothing(monkeypatch, tmp_path) -> None:
@@ -865,3 +864,15 @@ def test_switch_only_switches_the_stack_and_streams_nothing(monkeypatch, tmp_pat
     assert switched == ["parakeet-tdt-v3-sortformer"]
     with pytest.raises(ValueError):
         bench.switch_only(ctx, "not-a-bundle")
+
+
+def test_a_deployed_nested_stack_whose_template_url_cannot_be_read_is_not_switched() -> None:
+    session = _FakeSession(_FakeCfn("parakeet-tdt-v3-sortformer"))
+    session.cfn.nested = {"ASRMICROVMSTACK": "nested-asr-stack", "OTHERSTACK": "nested-other"}
+    session.cfn.nested_templates = {"nested-asr-stack": "Resources: {}\n"}
+    session.s3.objects[("lma-1234-us-east-1", "lma/0.3/asr.yaml")] = b"Resources: {}\n"
+
+    with pytest.raises(bundles.StaleTemplatesError, match="OTHERSTACK"):
+        bundles.switch_bundle(session, "LMA-dev", "parakeet-tdt-v3-titanet-small", "asrb-1")
+    assert session.cfn.updates == []
+    assert not any(key.startswith("asr-benchmark/") for _, key in session.s3.objects)

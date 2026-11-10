@@ -784,7 +784,11 @@ error rate per channel. `DATASET=ami/IS1009c` and `ami/IS1009d` (clean audio) an
 Meeting Corpus (CC BY 4.0) whose reference transcripts ship with the tool; their audio is
 downloaded and mixed into a stereo recording on first use. Your own recording works with
 `WAV=` and an optional `REFERENCE=` STM file. The original
-bundle is restored at the end. See the load simulator's
+bundle is restored at the end; `SWITCH_ONLY=<bundle>` puts a stack back after an
+interrupted run. The switch refuses to run when a nested stack's published template
+differs from the deployed one, so it never deploys a re-published build as a side
+effect. The packaged AMI meetings are close-talk headset audio without crosstalk, so
+every engine hears the same clean speech. See the load simulator's
 [`asr-benchmark`](../utilities/load-simulator/README.md#5-asr-benchmark--compare-model-configurations)
 scenario. This is a lab comparison; the cost of real meetings is
 [estimated per meeting](meeting-cost-estimate.md).

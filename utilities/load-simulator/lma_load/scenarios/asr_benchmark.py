@@ -45,11 +45,14 @@ class AsrBenchmarkParams:
     diarize_system: bool = True
     diarize_mic: bool = False
     keep_bundle: bool = False
-    switch_only: bool = False
     template_bucket: str | None = None
     prices_file: str | None = None
     email_prefix: str = "lma-asr-benchmark"
     email_domain: str = "example.com"
+
+
+class BundleNotRestoredError(RuntimeError):
+    """The benchmark finished but could not put the stack back on its bundle."""
 
 
 def restore_bundle(session, ctx, original: str, bucket: str | None) -> bool:
@@ -57,12 +60,14 @@ def restore_bundle(session, ctx, original: str, bucket: str | None) -> bool:
     try:
         bundles_mod.switch_bundle(session, ctx.stack_name, original, ctx.run_id, bucket)
         return True
-    except Exception:
-        logger.exception("Could not restore %s to %s", ctx.stack_name, original)
+    except BaseException as err:
+        logger.error("Could not restore %s to %s: %s", ctx.stack_name, original, err)
         console.print(
             f"[red]Could not restore {original}.[/] Once the stack is stable, run: "
             f"make asr-benchmark STACK={ctx.stack_name} SWITCH_ONLY={original}"
         )
+        if not isinstance(err, Exception):
+            raise
         return False
 
 
@@ -184,6 +189,7 @@ def run(ctx: RunContext, stack: LMAStackInfo, params: AsrBenchmarkParams) -> lis
     user = pool.users[0]
     results: list[dict[str, Any]] = []
     switched = False
+    restored = True
     try:
         for spec in runs:
             try:
@@ -230,7 +236,7 @@ def run(ctx: RunContext, stack: LMAStackInfo, params: AsrBenchmarkParams) -> lis
     finally:
         try:
             if switched and original and not params.keep_bundle:
-                restore_bundle(session, ctx, original, params.template_bucket)
+                restored = restore_bundle(session, ctx, original, params.template_bucket)
         finally:
             try:
                 pool.delete_synthetic_users(ctx.run_id)
@@ -243,6 +249,11 @@ def run(ctx: RunContext, stack: LMAStackInfo, params: AsrBenchmarkParams) -> lis
     table = render_table(results, rates, reference)
     (ctx.results_dir / "asr-benchmark.md").write_text(table + "\n")
     print(table)
+    if not restored:
+        raise BundleNotRestoredError(
+            f"{ctx.stack_name} was left on a benchmark bundle; restore it with "
+            f"make asr-benchmark STACK={ctx.stack_name} SWITCH_ONLY={original}"
+        )
     return results
 
 
