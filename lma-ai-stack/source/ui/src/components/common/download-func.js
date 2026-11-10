@@ -235,8 +235,8 @@ export const transcriptDownloadRows = (callTranscriptPerCallId, meeting) => {
         // Under the sender the meeting's chat gave, marked as chat, on one line.
         speaker = `${`${speaker ?? ''}`.trim() || 'Unknown sender'} (chat)`;
         transcript = oneLine(transcript);
-      } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
-        // The speaker for the assistant will just be "Other participant", override this
+      } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT' || channel === 'CHAT_ASSISTANT') {
+        // An assistant answer is under the assistant's name, whatever speaker it was stored with.
         speaker = 'MEETING ASSISTANT';
 
         // Clean up the transcript for the assistant to replace markdown and html

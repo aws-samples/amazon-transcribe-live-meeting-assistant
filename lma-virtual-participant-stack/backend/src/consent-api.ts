@@ -66,11 +66,16 @@ export interface StartConsentInput {
     MeetingName?: string;
 }
 
+/** Where a reply was read: typed in the meeting chat, or said aloud and heard. */
+export type ReplySource = 'chat' | 'voice';
+
 export interface RecordEventInput {
     ParticipantName: string;
     Decision: 'consent' | 'objection';
     Text?: string;
     OccurredAt?: string;
+    /** `chat` when omitted. */
+    Source?: ReplySource;
 }
 
 export interface AddEvidenceInput {
@@ -192,7 +197,7 @@ export function createConsentApi(callId: string, send: GraphqlSender): ConsentAp
         setParticipants: (names) =>
             mutate('setMeetingConsentParticipants', 'SetMeetingConsentParticipantsInput', { Participants: names }),
         recordEvent: (input) =>
-            mutate('recordMeetingConsentEvent', 'RecordMeetingConsentEventInput', { ...input, Source: 'chat' }),
+            mutate('recordMeetingConsentEvent', 'RecordMeetingConsentEventInput', { ...input, Source: input.Source ?? 'chat' }),
         addEvidence: (input) =>
             mutate('addMeetingConsentEvidence', 'AddMeetingConsentEvidenceInput', { ...input, Kind: 'screenshot' }),
         verifyEvidence: async (evidenceId) => {

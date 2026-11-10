@@ -13,6 +13,7 @@ title: "Meeting Assistant"
   - [Chat Interface](#chat-interface)
   - [Chat Shortcut Buttons](#chat-shortcut-buttons)
 - [Built-in Tools](#built-in-tools)
+  - [In-meeting requests](#in-meeting-requests)
 - [Knowledge Base Configuration](#knowledge-base-configuration)
   - [S3 Data Source](#s3-data-source)
   - [Web Crawler](#web-crawler)
@@ -44,7 +45,7 @@ LMA supports three service modes for the Meeting Assistant, configured during st
 
 ### Wake Phrase
 
-Say **"OK Assistant"** during a meeting to activate the assistant by voice. The assistant detects the wake phrase in the transcript, processes your spoken question, and inserts its response inline in the transcript.
+Say **"OK Assistant"** during a meeting to activate the assistant by voice. The assistant detects the wake phrase in the transcript, processes your spoken question, and inserts its response inline in the transcript. Anyone in the meeting can say it, so it is answered as an [in-meeting request](#in-meeting-requests): from the current meeting only, unless the In-meeting requests setting is Unrestricted.
 
 The wake phrase pattern is **Wake phrase (regular expression)** in the Meeting Assistant section of the [Configuration page](configuration-guide.md), where an Admin can change it while the stack runs, with no stack update. The default regex matches "OK Assistant" and common variations. A pattern saved on the page that is not a valid regular expression is logged by the call event processor, which uses the shipped pattern until it is corrected.
 
@@ -60,11 +61,11 @@ Pre-configured suggestion buttons appear in the chat panel, allowing users to tr
 
 ## Built-in Tools
 
-The Meeting Assistant has access to the following tools:
+The Meeting Assistant has access to the following tools. A request made in the meeting — the meeting chat, the voice assistant or the wake phrase — is offered only `current_meeting_transcript`, `get_meeting_agenda` and `get_meeting_frames` unless **Meeting Assistant › In-meeting requests** offers more; see [In-meeting requests](#in-meeting-requests).
 
 | Tool | Description |
 |---|---|
-| `current_meeting_transcript` | Retrieves and summarizes the current meeting transcript. Use this to answer questions about what has been discussed in the ongoing meeting. It can prefix each line with its time from the start of the meeting (`[MM:SS]`), which the assistant uses when an answer should say when something was discussed. |
+| `current_meeting_transcript` | Retrieves and summarizes the current meeting transcript. Use this to answer questions about what has been discussed in the ongoing meeting. The messages typed in the meeting chat are among the lines, each as `[chat] <sender>: <message>` in time order with the speech. It can prefix each line with its time from the start of the meeting (`[MM:SS]`), which the assistant uses when an answer should say when something was discussed. |
 | `get_meeting_agenda` | Reads the current meeting's agenda, numbered as the meeting page lists it, with where it came from. The assistant uses it for questions about the agenda and for progress checks — each item reported as covered, in progress or remaining, with the transcript times where it was discussed — and says so plainly when the meeting has no agenda rather than inventing one. Offered in every tool scope, including questions typed in the meeting chat. See [Meeting Agenda](meeting-agenda.md#asking-the-assistant-about-the-agenda). |
 | `get_meeting_frames` | Reads the key frames of the meeting's shared screen — the last few, those in a time range, or the one on screen at a moment — each with what was said while it was on screen, and passes the pictures themselves to the model when it reads images (every model the stack offers except Amazon Nova Micro, which gets the times and transcript only). It answers "summarize that slide", "translate the last slide into French" or "show me the last two slides"; in the meeting page's chat the answer can show the frames, while in the meeting chat and by voice it describes them. Offered in every tool scope, including questions typed in the meeting chat. See [Meeting Video and Key Frames](meeting-video.md#asking-the-assistant-about-the-shared-screen). |
 | `document_search` | Searches the Bedrock Knowledge Base for relevant documents. Available only when a Knowledge Base is configured (STRANDS_BEDROCK_WITH_KB modes). |
@@ -73,6 +74,21 @@ The Meeting Assistant has access to the following tools:
 | `web_search` | Performs web searches via Tavily to find current information from the internet. Requires a Tavily API key to be configured. |
 | `control_vnc_preview` | Shows or hides the Virtual Participant (VP) browser screen on the meeting page, allowing users to see what the VP browser is displaying. |
 | `control_vp_browser` | Controls the VP browser to navigate web pages and perform web research during meetings, enabling the assistant to look up information in real time. |
+
+### In-meeting requests
+
+The meeting assistant is asked for things in two ways. The **meeting page's chat** is used by the signed-in LMA user, and is always offered every tool above, acting for that user. An **in-meeting request** is made in the meeting by whoever is in it, and its answer reaches the meeting:
+
+| In-meeting request | Where the answer goes |
+|---|---|
+| A question typed in the meeting chat (the Virtual Participant's `LMA ask`; see [Asking the Meeting Assistant from Chat](virtual-participant.md#asking-the-meeting-assistant-from-chat)) | Posted in the meeting chat |
+| A request spoken to the Virtual Participant's [voice assistant](voice-assistant.md#what-the-voice-assistant-can-look-up) that needs a lookup | Spoken in the meeting |
+| A request spoken with the [wake phrase](#wake-phrase) | Added to the meeting's transcript |
+
+None of these can tell who in the meeting asked: a chat sender is known only by the display name the meeting shows, and a spoken request only by the voice that said it. So all three are answered as **Meeting Assistant › In-meeting requests** on the [Configuration page](configuration-guide.md) (`meeting_assist.inMeetingRequestTools`) allows, and a change applies within about five minutes to requests made after that:
+
+- **Current meeting only** (`current_meeting_only`, the default). The answer comes from the current meeting alone, through three tools: `current_meeting_transcript` (what was said, and the messages typed in the meeting chat, each as a line `[chat] <sender>: <message>`), `get_meeting_agenda`, and `get_meeting_frames` (what was shown on the shared screen: each frame's title, its text, when it was on screen and what was said meanwhile). No other tool is offered, and no user is acted for, so past meetings are not searched.
+- **Unrestricted** (`unrestricted`). Every tool above, acting for the meeting's LMA user (the Virtual Participant's user for the chat and the voice assistant; the user the transcript was streamed for, for the wake phrase). This is how in-meeting requests were answered before the setting existed. Choose it only where everyone who can join a meeting may read or hear what those tools return.
 
 ## Knowledge Base Configuration
 

@@ -218,6 +218,60 @@ def test_the_estimate_uses_an_administrators_price_change(tables) -> None:
     assert result["TotalCost"] == pytest.approx(0.01 + 0.0005)
 
 
+def test_the_estimate_names_a_price_the_active_profile_sets_beside_the_shipped_one(tables) -> None:
+    config, _ = tables
+    config.seed(
+        "Config#custom",
+        {"call_pricing": {"regions": {"default": {"bedrock/m": {"inputTokens": 0.00001}}}}},
+    )
+    result = invoke("getCallCost", OWNER, CallId="Meeting-1")
+    by_unit = {line["Unit"]: line for line in result["Items"]}
+    assert by_unit["inputTokens"]["PriceOrigin"] == "custom"
+    assert by_unit["inputTokens"]["UnitPrice"] == 0.00001
+    assert by_unit["inputTokens"]["ShippedUnitPrice"] == 0.000001
+    assert "custom configuration profile" in by_unit["inputTokens"]["PriceSource"]
+    assert by_unit["outputTokens"]["PriceOrigin"] == "shipped"
+    assert result["CustomPriceCount"] == 1
+    assert result["PriceProfile"] == "custom"
+
+
+def _activate(config: FakeConfigurationTable, name: str) -> None:
+    config.items[ACTIVE_POINTER_KEY] = {
+        codec.KEY_ATTRIBUTE: {"S": ACTIVE_POINTER_KEY},
+        "ActiveProfile": {"S": name},
+    }
+
+
+def test_the_editor_reads_the_active_profile(tables) -> None:
+    config, _ = tables
+    delta = {"regions": {"default": {"bedrock/m": {"inputTokens": 0.0000005}}}}
+    config.seed("Config#negotiated", {"call_pricing": delta}, version=3)
+    _activate(config, "negotiated")
+    payload = json.loads(invoke("getCallPricing", ADMIN)["Pricing"])
+    assert payload["Profile"] == "negotiated"
+    assert payload["Custom"] == delta
+    assert payload["Version"] == 3
+
+
+def test_a_saved_price_goes_into_the_active_profile(tables) -> None:
+    config, _ = tables
+    config.seed("Config#negotiated", {}, version=3)
+    _activate(config, "negotiated")
+    delta = {"regions": {"default": {"bedrock/m": {"inputTokens": 0.0000005}}}}
+    invoke("updateCallPricing", ADMIN, input={"Pricing": json.dumps(delta), "ExpectedVersion": 3})
+    assert codec.decode_body(config.items["Config#negotiated"]["Body"]["B"]) == {
+        "call_pricing": delta
+    }
+    assert codec.decode_body(config.items["Config#custom"]["Body"]["B"]) == {}
+
+
+def test_a_price_save_is_refused_while_the_shipped_default_is_active(tables) -> None:
+    config, _ = tables
+    _activate(config, "default")
+    with pytest.raises(Exception, match="^Refused: "):
+        invoke("updateCallPricing", ADMIN, input={"Pricing": "{}", "ExpectedVersion": 1})
+
+
 @pytest.mark.parametrize("identity", [OWNER, BACKEND])
 def test_the_price_table_is_only_for_admins(tables, identity) -> None:
     with pytest.raises(index.ForbiddenError):

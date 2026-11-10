@@ -452,7 +452,7 @@ Console label: *Deploy the on-demand speech engine (EXPERIMENTAL)*
 
 Deploys the EXPERIMENTAL on-demand speech engine (open-source models on AWS Lambda MicroVMs in this account) alongside Amazon Transcribe. Nothing changes until an admin moves Stream Audio, Chrome extension and Desktop Capture meetings, or Virtual Participants, onto it in the Transcription Engine section of the Configuration page. English only; requires a region with AWS Lambda MicroVMs. See docs/microvm-asr.md.
 
-## Voice enrollment (biometric; off by default)
+## Voice enrollment (Beta; biometric; off by default)
 
 | Parameter | Default | Kind |
 |---|---|---|
@@ -649,10 +649,10 @@ Specify a comma separated list of two letter country codes (uppercase ISO 3166-1
 Console label: *Configuration Preset*
 
 - **Default:** `standard`
-- **Allowed values:** `standard`, `internal-meetings-notify`, `regulated-consent-required`, `none`
+- **Allowed values:** `standard`, `internal-meetings-notify`, `regulated-consent-required`, `regulated-notify`, `none`
 - **Kind:** Resource. Decides what the configuration seeder writes as the deployment's default configuration, which is re-written when it changes.
 
-The configuration preset the deployment's default configuration is built from, which sets consent, retention and privacy together: standard (the shipped defaults), internal-meetings-notify (participants are notified and may object; audio and the meeting chat are captured) or regulated-consent-required (participants must consent first, the transcript is deleted 15 minutes after the summary, no audio is recorded, personal information is redacted, and Amazon Bedrock runs within this Region's geography; LogLevel and the retention-day parameters are set here, not by the preset). Each preset is also offered on the Configuration page as a read-only Managed profile. none is accepted as standard, for stacks deployed with it. CustomConfigPath is applied over this when provided.
+The configuration preset the deployment's default configuration is built from, which sets consent, retention and privacy together: standard (the shipped defaults), internal-meetings-notify (participants are notified and may object; audio and the meeting chat are captured), regulated-consent-required (participants must consent first, the transcript is deleted 15 minutes after the summary, no audio is recorded, personal information is redacted, and Amazon Bedrock runs within this Region's geography; LogLevel and the retention-day parameters are set here, not by the preset) or regulated-notify (as regulated-consent-required, except that participants are notified, capture runs from the start and stops when one objects). Each preset is also offered on the Configuration page as a read-only Managed profile. none is accepted as standard, for stacks deployed with it. CustomConfigPath is applied over this when provided.
 
 ### `CustomConfigPath`
 
@@ -999,7 +999,7 @@ meetings use the engine is chosen in the Transcription Engine section of the
 Configuration page, with no stack update. The bundles, their licences and how one
 is selected are described in [On-demand ASR & Speaker Diarization](microvm-asr.md).
 
-### Voice enrollment
+### Voice enrollment (Beta)
 
 > [!IMPORTANT]
 > Off by default, and turning it on means storing biometric data about people.

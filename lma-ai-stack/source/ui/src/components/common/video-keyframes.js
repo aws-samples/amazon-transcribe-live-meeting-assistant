@@ -18,6 +18,36 @@
 export const showsSharedContent = (frame) => frame?.ContentKind !== 'CAMERA';
 
 /**
+ * Whether a frame shows the same screen as an earlier one: DuplicateOf names
+ * that frame, set when the frame's text is read. The strip hides such frames
+ * unless asked to show all, and the deck leaves them out.
+ */
+export const isRepeatedFrame = (frame) => Boolean(frame?.DuplicateOf);
+
+/** The frames shown by default: shared content, not repeated. */
+export const isDistinctFrame = (frame) => showsSharedContent(frame) && !isRepeatedFrame(frame);
+
+/** How many of the newest frames are read again with new ones, while their text is not read yet. */
+export const REREAD_UNREAD_FRAMES = 5;
+
+/**
+ * Where to fetch new frames from during a live meeting: after the last frame,
+ * or, when some of the newest frames were loaded before their text was read,
+ * after the frame before the first of them (looking back REREAD_UNREAD_FRAMES),
+ * so they come back with their text, kind and DuplicateOf. '' with no frame
+ * before: fetch from the start.
+ */
+export const newFramesCursor = (frames, lookBack = REREAD_UNREAD_FRAMES) => {
+  const list = frames || [];
+  let first = list.length;
+  for (let i = list.length - 1; i >= Math.max(0, list.length - lookBack); i -= 1) {
+    if (typeof list[i]?.SlideText !== 'string') first = i;
+  }
+  if (first === list.length) return list[list.length - 1]?.FrameId || '';
+  return list[first - 1]?.FrameId || '';
+};
+
+/**
  * A frame's label on the strip and in the deck: its own Title when the model
  * gave one, else the titles of the chapters it begins (chapterTitlesByFrame),
  * else ''.

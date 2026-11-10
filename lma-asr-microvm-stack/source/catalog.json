@@ -294,15 +294,28 @@
       "id": "parakeet-tdt-0.6b-v3-int8",
       "name": "NVIDIA Parakeet TDT 0.6B v3 offline (int8, CC-BY-4.0)",
       "engine": "accurate",
-      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
-      "sha256": "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf",
-      "archive": "tar.bz2",
-      "stripComponents": 1,
+      "archive": "files",
       "files": {
-        "encoder": "encoder.int8.onnx",
-        "decoder": "decoder.int8.onnx",
-        "joiner": "joiner.int8.onnx",
-        "tokens": "tokens.txt"
+        "encoder": {
+          "path": "encoder.int8.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/encoder.int8.onnx",
+          "sha256": "acfc2b4456377e15d04f0243af540b7fe7c992f8d898d751cf134c3a55fd2247"
+        },
+        "decoder": {
+          "path": "decoder.int8.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/decoder.int8.onnx",
+          "sha256": "179e50c43d1a9de79c8a24149a2f9bac6eb5981823f2a2ed88d655b24248db4e"
+        },
+        "joiner": {
+          "path": "joiner.int8.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/joiner.int8.onnx",
+          "sha256": "3164c13fc2821009440d20fcb5fdc78bff28b4db2f8d0f0b329101719c0948b3"
+        },
+        "tokens": {
+          "path": "tokens.txt",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/tokens.txt",
+          "sha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"
+        }
       },
       "sampleRate": 16000,
       "languages": [
@@ -312,24 +325,41 @@
       "licenseUrl": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3",
       "sherpaOnnx": "1.13.4",
       "onnxruntime": "1.27.0",
-      "approxDownloadMb": 487,
-      "provenanceVerified": "2026-09-21",
+      "approxDownloadMb": 670,
+      "provenanceVerified": "2026-11-07",
       "requiresVad": true,
-      "note": "OFFLINE, not streaming: it is driven by the accurate engine, which segments audio with Silero VAD and decodes each closed utterance. That trades latency for accuracy - there is no interim text DURING an utterance, only when it ends - so it suits accuracy-first use more than a live meeting view. Chosen over Whisper (also permissive) because TDT is a transducer and reports token timestamps: turn splitting and live cutting both need word timings, and sherpa's Whisper export provides none, which would silently reduce diarization to one speaker per VAD segment."
+      "note": "OFFLINE, not streaming: it is driven by the accurate engine, which segments audio with Silero VAD and decodes each closed utterance. That trades latency for accuracy - there is no interim text DURING an utterance, only when it ends - so it suits accuracy-first use more than a live meeting view. Chosen over Whisper (also permissive) because TDT is a transducer and reports token timestamps: turn splitting and live cutting both need word timings, and sherpa's Whisper export provides none, which would silently reduce diarization to one speaker per VAD segment. The int8 export is fetched file by file from the sherpa-onnx maintainer's Hugging Face repository pinned to commit 2bda32e (2025-08-16), so each checksum names a fixed revision. No warm-up WAV: the export's sample clips are not 16 kHz, so the image warms with a synthetic tone."
     },
     {
       "id": "parakeet-tdt-0.6b-v2-int8",
       "name": "NVIDIA Parakeet TDT 0.6B v2 (offline, int8, CC-BY-4.0)",
       "engine": "accurate",
-      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2",
-      "sha256": "157c157bc51155e03e37d2466522a3a737dd9c72bb25f36eb18912964161e1ad",
-      "archive": "tar.bz2",
-      "stripComponents": 1,
+      "archive": "files",
       "files": {
-        "encoder": "encoder.int8.onnx",
-        "decoder": "decoder.int8.onnx",
-        "joiner": "joiner.int8.onnx",
-        "tokens": "tokens.txt"
+        "encoder": {
+          "path": "encoder.int8.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/1ab9323565ddb038682214b292f588070a538ce2/encoder.int8.onnx",
+          "sha256": "a32b12d17bbbc309d0686fbbcc2987b5e9b8333a7da83fa6b089f0a2acd651ab"
+        },
+        "decoder": {
+          "path": "decoder.int8.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/1ab9323565ddb038682214b292f588070a538ce2/decoder.int8.onnx",
+          "sha256": "b6bb64963457237b900e496ee9994b59294526439fbcc1fecf705b31a15c6b4e"
+        },
+        "joiner": {
+          "path": "joiner.int8.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/1ab9323565ddb038682214b292f588070a538ce2/joiner.int8.onnx",
+          "sha256": "7946164367946e7f9f29a122407c3252b680dbae9a51343eb2488d057c3c43d2"
+        },
+        "tokens": {
+          "path": "tokens.txt",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/1ab9323565ddb038682214b292f588070a538ce2/tokens.txt",
+          "sha256": "ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d"
+        }
+      },
+      "warmWav": {
+        "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/1ab9323565ddb038682214b292f588070a538ce2/test_wavs/0.wav",
+        "sha256": "5fceacff0315d49cb59fcc505bcecf1ed5f2f35c2897b1e65a59f30e5d922150"
       },
       "sampleRate": 16000,
       "languages": [
@@ -339,10 +369,10 @@
       "licenseUrl": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2",
       "sherpaOnnx": "1.13.4",
       "onnxruntime": "1.27.0",
-      "approxDownloadMb": 482,
-      "provenanceVerified": "2026-09-21",
+      "approxDownloadMb": 661,
+      "provenanceVerified": "2026-11-07",
       "requiresVad": true,
-      "note": "English-only predecessor of v3; same offline (VAD-segmented) engine."
+      "note": "English-only predecessor of v3; same offline (VAD-segmented) engine. The int8 export is fetched file by file from the sherpa-onnx maintainer's Hugging Face repository pinned to commit 1ab9323 (2025-08-16), so each checksum names a fixed revision; warmWav is the export's 16 kHz sample clip, used for the image's warm decode."
     },
     {
       "id": "qwen3-asr-0.6b-int8",

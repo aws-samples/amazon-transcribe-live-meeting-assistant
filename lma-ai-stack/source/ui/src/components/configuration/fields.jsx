@@ -150,7 +150,7 @@ const NUMBER_TEXT = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/;
 // A number typed as text. The text is kept while it is being typed, so "0.0"
 // on the way to "0.05" is not rewritten to "0"; a value that is not a number
 // is kept as text, which the validator reports.
-const NumberInput = ({ value = undefined, onChange, ariaLabel, disabled = false }) => {
+export const NumberInput = ({ value = undefined, onChange, ariaLabel, disabled = false }) => {
   const [draft, setDraft] = useState(value === undefined ? '' : `${value}`);
   useEffect(() => {
     setDraft((current) => (Number(current) === value && current.trim() !== '' ? current : `${value ?? ''}`));

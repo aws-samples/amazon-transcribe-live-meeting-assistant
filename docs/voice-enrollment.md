@@ -7,6 +7,10 @@ title: "Voice Enrollment (Speaker Recognition)"
 
 # Voice Enrollment (Speaker Recognition)
 
+> **Status: Beta.** The **Enroll My Voice** page and its navigation entry are
+> marked Beta in the web UI. Enrolling and matching both require the on-demand
+> [ASR MicroVM speech engine](microvm-asr.md), which is itself experimental.
+
 > **Off by default, and off unless you deliberately turn it on.** A voiceprint is
 > biometric data about a person. `EnableVoiceEnrollment` defaults to `false`, and
 > while it is false the enrollment table, the consent log, the portal route and
@@ -61,7 +65,7 @@ their behalf would make the consent record worthless.
 So consent is **first-party and self-service**. Nobody can enroll anybody else,
 and there is no administrative action that creates a voiceprint:
 
-1. An LMA user opens **Enroll My Voice** in the navigation (or goes straight to
+1. An LMA user opens **Enroll My Voice** (marked Beta) in the navigation (or goes straight to
    **`/#/voice-enrollment`**) and is shown the consent terms in full, including
    what is stored, what it is used for, how long it is kept and how to withdraw.
 2. They consent by an explicit affirmative action — a checkbox they must tick

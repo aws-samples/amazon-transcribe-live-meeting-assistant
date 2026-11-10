@@ -13,7 +13,7 @@ import json
 import os
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 import logging
 from datetime import datetime
 from bedrock_compat import (
@@ -53,6 +53,19 @@ try:
     from lma_channels import STORED_SPEECH_CHANNELS  # AI stack's configuration layer
 except ImportError:  # deployed on its own, without the layer; kept equal to it
     STORED_SPEECH_CHANNELS = ("REMOTE", "LOCAL", "CALLER", "AGENT")
+
+# The channel of the messages typed in the meeting chat (the Virtual
+# Participant adds them to the transcript); lma_channels.MEETING_CHAT.
+try:
+    from lma_channels import MEETING_CHAT as MEETING_CHAT_CHANNEL
+except ImportError:  # deployed on its own, without the layer; kept equal to it
+    MEETING_CHAT_CHANNEL = "MEETING_CHAT"
+
+# How a meeting chat message is marked in the transcript the assistant reads,
+# as FetchTranscript marks it for the summary.
+CHAT_LINE_MARK = "[chat]"
+# The longest chat message kept on its line; the rest is cut.
+MAX_CHAT_LINE_CHARS = 2000
 
 # Who spoke each line, named as the meeting page names them: the meeting's speaker
 # identity map and speaker modes (AI stack's configuration layer).
@@ -1035,10 +1048,16 @@ def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: st
     
     @tool
     def current_meeting_transcript(lines: int = 20, mode: str = "recent", with_timestamps: bool = False) -> str:
-        """Get transcript from the current meeting.
-        
+        """Get transcript from the current meeting, including its meeting chat.
+
+        The transcript holds what was said, each line under its speaker, and
+        the messages typed in the meeting chat, each on one line starting
+        "[chat]" followed by its sender, in time order with the speech. What
+        was shown on the shared screen (each slide, page or view, its title
+        and its text) is read with get_meeting_frames instead.
+
         Use this when:
-        - User asks about what was said in THIS meeting
+        - User asks about what was said or typed in the chat in THIS meeting
         - Need to reference recent statements or discussions
         - Summarizing, extracting action items, or analyzing current meeting
         - User asks about topics, decisions, or questions from current meeting
@@ -1057,7 +1076,8 @@ def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: st
                 agenda progress check.
 
         Returns:
-            Meeting transcript text formatted with speaker names
+            Meeting transcript text formatted with speaker names, and chat
+            messages as "[chat] <sender>: <message>"
         """
         if not dynamodb_table_name:
             return "Current meeting transcript not available - no DynamoDB table configured"
@@ -1757,7 +1777,8 @@ def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id:
     def get_meeting_frames(last: int = 1, start_time: str = "", end_time: str = "", at_time: str = "",
                            look_at_pictures: bool = False) -> dict:
         """Get key frames of the meeting's shared screen: the slides, documents and other content
-        that were on screen, each with the text on it and what was said while it was shown.
+        that were on screen, each with its title, the text on it, when it was on screen and what
+        was said while it was shown.
 
         Use this when someone asks about what was shown rather than said:
         - "What's on this slide?", "Summarize that slide", "Translate the last slide into French"
@@ -1774,7 +1795,7 @@ def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id:
                 picture itself (a chart, a diagram, a layout, an image); the text is usually enough.
 
         Returns:
-            Each frame's times, text and transcript, with pictures where needed.
+            Each frame's times, title, text and transcript, with pictures where needed.
         """
         if call_id and message_id and APPSYNC_GRAPHQL_URL:
             send_thinking_step_to_appsync(call_id, message_id, {
@@ -1849,11 +1870,14 @@ def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id:
     return get_meeting_frames
 
 
-def query_transcript_items(call_id: str, dynamodb_table_name: str) -> List[Dict[str, Any]]:
+def query_transcript_items(
+    call_id: str, dynamodb_table_name: str, include_chat: bool = False
+) -> List[Dict[str, Any]]:
     """The meeting's final transcript segments (speaker, assistant and caller lines), unsorted.
 
-    Raises on a read failure; fetch_meeting_transcript turns that into an empty
-    transcript.
+    With ``include_chat``, the messages typed in the meeting chat
+    (MEETING_CHAT_CHANNEL) too. Raises on a read failure;
+    fetch_meeting_transcript turns that into an empty transcript.
     """
     table = dynamodb.Table(dynamodb_table_name)
     pk = f'trs#{call_id}'
@@ -1869,7 +1893,11 @@ def query_transcript_items(call_id: str, dynamodb_table_name: str) -> List[Dict[
     query_args = {
         'KeyConditionExpression': Key('PK').eq(pk),
         'FilterExpression': (
-            Attr('Channel').is_in([*STORED_SPEECH_CHANNELS, 'AGENT_ASSISTANT'])
+            Attr('Channel').is_in([
+                *STORED_SPEECH_CHANNELS,
+                'AGENT_ASSISTANT',
+                *([MEETING_CHAT_CHANNEL] if include_chat else []),
+            ])
             & Attr('IsPartial').eq(False)
         ),
     }
@@ -1928,6 +1956,15 @@ def meeting_speaker_namer(call_id: str, dynamodb_table_name: str, items: List[Di
     return lambda item: name(item) or 'Unknown'
 
 
+def chat_line_text(text: Any) -> str:
+    """A meeting chat message or sender on one line, cut to MAX_CHAT_LINE_CHARS."""
+    one_line = ' / '.join(part.strip() for part in str(text or '').splitlines() if part.strip())
+    one_line = ' '.join(one_line.split())
+    if len(one_line) > MAX_CHAT_LINE_CHARS:
+        one_line = one_line[:MAX_CHAT_LINE_CHARS].rstrip() + ' [...]'
+    return one_line
+
+
 def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str, with_timestamps: bool = False) -> str:
     """
     Fetch the meeting transcript from DynamoDB.
@@ -1936,28 +1973,38 @@ def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str, with_timest
     the meeting, as [MM:SS], which is what lets an answer say when something was
     discussed. Off by default: the transcript handed to the agent as context
     stays as it was.
+
+    The messages typed in the meeting chat are among the lines, in time order,
+    each as "[chat] <sender>: <message>" on one line, so the assistant can tell
+    what was typed from what was said.
     """
     try:
-        items = query_transcript_items(call_id, dynamodb_table_name)
+        items = query_transcript_items(call_id, dynamodb_table_name, include_chat=True)
 
         # Sort by EndTime and format transcript
         # By end time as before; by start time when lines carry their start
         # times, so the times read in order where two channels overlap.
         items = sorted(items, key=lambda x: x.get('StartTime' if with_timestamps else 'EndTime', 0))
 
-        name_speaker = meeting_speaker_namer(call_id, dynamodb_table_name, items)
+        # Voices are named from the speech alone; a chat line names its sender.
+        speech = [item for item in items if item.get('Channel') != MEETING_CHAT_CHANNEL]
+        name_speaker = meeting_speaker_namer(call_id, dynamodb_table_name, speech)
         transcript_parts = []
         for item in items:
-            speaker = name_speaker(item)
             transcript = item.get('Transcript', '')
             channel = item.get('Channel', '')
             prefix = f"{meeting_agenda.format_elapsed(item.get('StartTime'))} " if with_timestamps else ''
 
             # Format based on channel
-            if channel == 'AGENT_ASSISTANT':
+            if channel == MEETING_CHAT_CHANNEL:
+                sender = chat_line_text(item.get('Speaker')) or 'Unknown sender'
+                transcript_parts.append(
+                    f"{prefix}{CHAT_LINE_MARK} {sender}: {chat_line_text(transcript)}"
+                )
+            elif channel == 'AGENT_ASSISTANT':
                 transcript_parts.append(f"{prefix}MeetingAssistant: {transcript}")
             else:
-                transcript_parts.append(f"{prefix}{speaker}: {transcript}")
+                transcript_parts.append(f"{prefix}{name_speaker(item)}: {transcript}")
         
         full_transcript = '\n'.join(transcript_parts)
         logger.info(
@@ -2034,30 +2081,104 @@ def query_knowledge_base(user_input: str, call_id: str) -> str:
         return ""
 
 
-MEETING_CHAT_SCOPE_NOTE = (
+# In-meeting requests: a request made in the meeting by whoever is in it rather
+# than by the signed-in LMA user on the meeting page. Each caller names its own
+# toolScope: the Virtual Participant's meeting chat (`LMA ask`) and voice
+# assistant lookups, and the wake phrase spoken in the transcript
+# (async_agent_assist_orchestrator). The meeting page's own chat sends none.
+IN_MEETING_TOOL_SCOPES = ('meeting_chat', 'voice_assistant', 'wake_phrase')
+
+# What an in-meeting request may be answered with: the Meeting Assistant
+# section's inMeetingRequestTools setting. The values, and the one used when
+# the setting cannot be read or holds anything else; the same value as the
+# setting's shipped default in setting_defaults.json.
+IN_MEETING_TOOLS_CURRENT_MEETING_ONLY = 'current_meeting_only'
+IN_MEETING_TOOLS_UNRESTRICTED = 'unrestricted'
+IN_MEETING_TOOLS_VALUES = (IN_MEETING_TOOLS_CURRENT_MEETING_ONLY, IN_MEETING_TOOLS_UNRESTRICTED)
+DEFAULT_IN_MEETING_TOOLS = IN_MEETING_TOOLS_CURRENT_MEETING_ONLY
+
+
+def configured_in_meeting_request_tools() -> str:
+    """What an in-meeting request may be answered with.
+
+    The Meeting Assistant section's In-meeting requests setting on the
+    Configuration page, else the shipped default (the current meeting only).
+    Read per answer, like the model. A value that is not one of
+    IN_MEETING_TOOLS_VALUES is treated as the default.
+    """
+    value = read_setting(
+        'meeting_assist', 'inMeetingRequestTools', default=DEFAULT_IN_MEETING_TOOLS
+    )
+    if value in IN_MEETING_TOOLS_VALUES:
+        return value
+    logger.warning("Unrecognised inMeetingRequestTools value; using the current meeting only")
+    return DEFAULT_IN_MEETING_TOOLS
+
+
+# Appended to the system prompt of every question typed in the meeting chat.
+MEETING_CHAT_NOTE = (
     "\n\nThis question was typed in the meeting chat, and your answer is posted there for "
-    "everyone in the meeting to read. Only the current meeting's transcript, its agenda, "
-    "the pictures of its shared screen and web search are available for it: do not try any other "
-    "tool named above, and do not refer to past meetings or documents. Answer briefly in plain "
-    "sentences."
+    "everyone in the meeting to read. Answer briefly in plain sentences."
+)
+
+# Appended to the system prompt of an in-meeting request answered from the
+# current meeting only.
+CURRENT_MEETING_SCOPE_NOTE = (
+    "\n\nThis request was made in the meeting by one of its participants. Only the current "
+    "meeting is available for it: its transcript (current_meeting_transcript, which also "
+    "holds the messages typed in the meeting chat, as lines starting [chat] with their "
+    "sender), its agenda (get_meeting_agenda) and its shared screen (get_meeting_frames: "
+    "each slide, page or view shown, with its title, its text and when it was on screen). "
+    "Do not try any other tool named above, do not search the web, and do not refer to past "
+    "meetings or documents."
 )
 
 
-def meeting_chat_tool_scope(event: Dict[str, Any]) -> Tuple[bool, str]:
-    """Whether the event is a meeting-chat question, and the user email to use.
+class InMeetingScope(NamedTuple):
+    """How one request is answered, as decided by ``in_meeting_scope``.
 
-    toolScope 'meeting_chat' is a question typed in the meeting chat (the
-    Virtual Participant's `LMA ask`), whose answer everyone in the meeting
-    reads. It is answered from the current meeting's transcript, its agenda and
-    web search only: the document knowledge base, the MCP servers and the VNC and browser
-    controls are not offered, and the user email is cleared here, whatever the
-    event carries, so the meeting-history tools that are scoped to it are not
-    offered either.
+    ``tool_scope``: the in-meeting caller ('meeting_chat', 'voice_assistant',
+    'wake_phrase'), or '' for a request from the meeting page's own chat.
+    ``current_meeting_only``: only the current meeting's transcript (with its
+    chat), agenda and shared screen are offered.
+    ``user_email``: the user the user-scoped tools (meeting history) act for,
+    or '' for none.
+    """
+
+    tool_scope: str
+    current_meeting_only: bool
+    user_email: str
+
+    @property
+    def from_meeting_chat(self) -> bool:
+        """The question was typed in the meeting chat, where everyone reads the answer."""
+        return self.tool_scope == 'meeting_chat'
+
+
+def in_meeting_scope(event: Dict[str, Any]) -> InMeetingScope:
+    """Which tools a request is offered, and the user email to use.
+
+    An event whose toolScope is one of IN_MEETING_TOOL_SCOPES is a request
+    made in the meeting by whoever is in it: a question typed in the meeting
+    chat, a request spoken to the voice assistant, or the wake phrase. What it
+    is answered with is the inMeetingRequestTools setting:
+
+    - current_meeting_only (the default): the current meeting's transcript
+      (with its chat), agenda and shared screen only, and no user email,
+      whatever the event carries.
+    - unrestricted: every configured tool, as the meeting page offers them,
+      acting for the user the event names.
+
+    Every other request (the meeting page's chat) is offered every configured
+    tool.
     """
     user_email = event.get('userEmail', '') or event.get('user_email', '')
-    if event.get('toolScope') == 'meeting_chat':
-        return True, ''
-    return False, user_email
+    scope = event.get('toolScope')
+    if scope not in IN_MEETING_TOOL_SCOPES:
+        return InMeetingScope('', False, user_email)
+    if configured_in_meeting_request_tools() == IN_MEETING_TOOLS_UNRESTRICTED:
+        return InMeetingScope(scope, False, user_email)
+    return InMeetingScope(scope, True, '')
 
 
 def handler(event, context):
@@ -2127,9 +2248,16 @@ def handler(event, context):
         call_id = event.get('callId', '') or event.get('call_id', '')
         conversation_history = event.get('conversation_history', [])
         dynamodb_table_name = event.get('dynamodb_table_name', '')
-        meeting_chat_scope, user_email = meeting_chat_tool_scope(event)
-        if meeting_chat_scope:
-            logger.info("Tool scope: meeting_chat")
+        request_scope = in_meeting_scope(event)
+        user_email = request_scope.user_email
+        # Only the current meeting's tools: everything else below is left out.
+        current_meeting_only = request_scope.current_meeting_only
+        if request_scope.tool_scope:
+            logger.info(
+                "Tool scope: %s (%s)",
+                request_scope.tool_scope,
+                'current meeting only' if current_meeting_only else 'unrestricted',
+            )
         
         if not user_input:
             return {
@@ -2171,7 +2299,7 @@ def handler(event, context):
         # Load installed MCP servers (account-level) - returns MCPClient objects
         # Uses module-level caching: on warm Lambda starts with unchanged config,
         # cached clients are returned almost instantly (no DynamoDB query, no subprocess spawn)
-        if MCP_LOADER_AVAILABLE and not meeting_chat_scope:
+        if MCP_LOADER_AVAILABLE and not current_meeting_only:
             try:
                 logger.info("Loading installed MCP servers...")
                 mcp_clients, from_cache = load_account_mcp_servers()
@@ -2206,8 +2334,9 @@ def handler(event, context):
                         'timestamp': datetime.utcnow().isoformat()
                     }, 0)
         
-        # Add web search tool if an API key is configured (auto-enable)
-        if web_search_configured:
+        # Add web search tool if an API key is configured (auto-enable). Not
+        # for a chat question answered from the current meeting only.
+        if web_search_configured and not current_meeting_only:
             try:
                 from tavily import TavilyClient
                 from strands import tool
@@ -2314,7 +2443,7 @@ def handler(event, context):
         # Add document retrieval tool if KB configured. The factory returns None
         # when the knowledge-base model cannot generate an answer, in which case
         # the agent is offered no such tool rather than one that cannot answer.
-        if kb_id and not meeting_chat_scope:
+        if kb_id and not current_meeting_only:
             document_search_tool = create_document_search_tool(
                 kb_id=kb_id,
                 kb_region=kb_region,
@@ -2328,7 +2457,7 @@ def handler(event, context):
                 logger.info(f"Document retrieval tool enabled (KB model: {kb_model_id})")
         
         # Add recent meetings list tool if DynamoDB table and transcript KB configured
-        if dynamodb_table_name and transcript_kb_id and user_email:
+        if dynamodb_table_name and transcript_kb_id and user_email and not current_meeting_only:
             tools.append(create_recent_meetings_tool(
                 dynamodb_table_name=dynamodb_table_name,
                 user_email=user_email,
@@ -2339,7 +2468,7 @@ def handler(event, context):
         
         # Add meeting history tool if transcript KB configured. As above, the
         # factory returns None when the knowledge-base model cannot generate.
-        if transcript_kb_id and user_email:
+        if transcript_kb_id and user_email and not current_meeting_only:
             meeting_history_tool = create_meeting_history_tool(
                 transcript_kb_id=transcript_kb_id,
                 kb_region=kb_region,
@@ -2383,13 +2512,13 @@ def handler(event, context):
                 call_id=call_id,
                 dynamodb_table_name=dynamodb_table_name,
                 model_id=model_id,
-                show_inline=bool(transcript_segment_args.get('MessageId')) and not meeting_chat_scope,
+                show_inline=bool(transcript_segment_args.get('MessageId')) and not request_scope.from_meeting_chat,
                 message_id=message_id
             ))
             logger.info("Meeting frames tool enabled")
 
         # Add VNC preview control tool (available to all users)
-        if APPSYNC_GRAPHQL_URL and not meeting_chat_scope:
+        if APPSYNC_GRAPHQL_URL and not current_meeting_only:
             tools.append(create_vnc_preview_control_tool(
                 call_id=call_id,
                 appsync_url=APPSYNC_GRAPHQL_URL,
@@ -2398,7 +2527,7 @@ def handler(event, context):
             logger.info("VNC preview control tool enabled")
         
         # Add VP browser control tool (available to all users)
-        if EVENT_API_HTTP_URL and not meeting_chat_scope:
+        if EVENT_API_HTTP_URL and not current_meeting_only:
             tools.append(create_vp_browser_control_tool(
                 call_id=call_id,
                 event_api_http_url=EVENT_API_HTTP_URL,
@@ -2453,7 +2582,8 @@ def handler(event, context):
             cache_config_kwargs, system_prompt = prompt_cache_plan(
                 model_id,
                 (get_meeting_assistant_prompt_with_tools() if tools else get_meeting_assistant_prompt())
-                + (MEETING_CHAT_SCOPE_NOTE if meeting_chat_scope else ''),
+                + (MEETING_CHAT_NOTE if request_scope.from_meeting_chat else '')
+                + (CURRENT_MEETING_SCOPE_NOTE if current_meeting_only else ''),
                 enabled=prompt_caching_enabled(),
             )
             if cache_config_kwargs is not None:

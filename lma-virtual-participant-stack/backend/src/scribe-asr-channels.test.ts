@@ -108,6 +108,6 @@ test('stop waits, with a bound, for the engine run to release its MicroVM, and a
     assert.match(stop, /const run = this\.microvmRun/);
     assert.match(stop, /ASR_STOP_RELEASE_TIMEOUT_MS/);
     const once = methodBody('private async runMicrovmTranscriptionOnce');
-    assert.match(once, /const lease = await acquireLease\(callId\);[\s\S]*if \(!this\.isTranscribing\) \{\s*if \(lease\.microvmId\)/);
+    assert.match(once, /const acquired = pending \?\? \(await acquireLease\(callId\)\) \?\? null;[\s\S]*if \(!this\.isTranscribing\) \{\s*this\.microvmLease = null;\s*if \(lease\.microvmId\)/);
     assert.match(once, /if \(!meetingReady && !this\.isTranscribing\)/);
 });

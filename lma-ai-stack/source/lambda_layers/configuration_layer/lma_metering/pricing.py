@@ -6,19 +6,25 @@
 """Turning a meeting's metering records into an itemised cost estimate.
 
 The price table is the ``call_pricing`` section of the configuration store,
-seeded from ``configuration_seeder/defaults/CallPricing.json``. Its shape:
+seeded at deploy time from ``configuration_seeder/defaults/CallPricing.json``.
+Its shape:
 
 .. code-block:: json
 
     {
       "currency": "USD",
-      "pricesAsOf": "2026-10-28",
-      "source": "...",
+      "pricesAsOf": "2026-11-09",
       "baseRegion": "us-east-1",
-      "pricedRegions": ["us-east-1", "us-west-2"],
+      "pricedRegions": ["us-east-1", "us-west-2", "eu-west-1", ...],
       "regions": {
         "default":   {"transcribe/streaming": {"seconds": 0.0001667}, ...},
-        "us-west-2": {"bedrock/amazon.nova-2-sonic-v1:0": {"textInputTokens": 3.19e-7}}
+        "eu-west-1": {"bedrock/eu.amazon.nova-lite-v1:0": {"inputTokens": 7.8e-8}}
+      },
+      "sources": {
+        "default":   {"transcribe/streaming": {"basis": "price-list-api",
+                      "offer": "transcribe", "usageType": "USE1-StreamingAudio",
+                      "retrieved": "2026-11-09", "url": "https://..."}},
+        "eu-west-1": {...}
       },
       "nonChargeableUnits": ["requests", "sessions", ...],
       "notes": {"ec2/virtual-participant-host": "..."},
@@ -27,7 +33,14 @@ seeded from ``configuration_seeder/defaults/CallPricing.json``. Its shape:
 
 Prices are US dollars per single unit -- per token, per second, per vCPU-second.
 A region's prices are ``regions.default`` with ``regions.<region>`` merged over
-it, so a region entry lists only what differs from the base.
+it, and its sources are ``sources.default`` with ``sources.<region>`` merged the
+same way, so a source always sits beside the price it documents.
+
+Every line of an estimate says where its price came from. A price equal to the
+one the release ships is reported with that price's source. A price that differs
+from it -- one an administrator set in the active configuration profile -- is
+reported as the profile's, with the shipped price beside it, so a reader can tell
+a negotiated rate from a list price and see both.
 
 The lookup rule is the IDP Accelerator's, deliberately strict: a record's
 ``Service`` must match a price entry **exactly** and each unit must be named in
@@ -37,14 +50,11 @@ price is worse than a visible gap. A unit with no price is reported as
 with the result so a reader of the estimate can tell the total is incomplete.
 
 One exception, for Amazon Bedrock models only, and always named on the line it
-applies to: the price table lists the ``global.``, ``us.`` and plain ids of each
-model, while the Model inference geography setting can also produce the same
-model's ``eu.``, ``apac.``, ``jp.``, ``au.``, ``ca.`` or ``in.`` profile, or its plain
-in-region id. Such an id is priced as the same model under another id (see
-:func:`lma_config.inference_geography.price_stand_ins`) and its line's note says
-which. It is the same model, so the price is of the right order; the table's
-``us.`` profiles are listed at 10% above its ``global.`` ones, so an estimate for
-another geography's profile priced this way is likely low by about that much.
+applies to: an id the table does not list for the record's region -- a geography
+profile or plain id the Model inference geography setting produced -- is priced
+as the same model under another id (see
+:func:`lma_config.inference_geography.price_stand_ins`), and its line's note
+says which. It is never priced as a different model.
 """
 
 from __future__ import annotations
@@ -69,6 +79,18 @@ _DESERIALIZER = TypeDeserializer()
 #: billed as the model's input tokens, which the same answer's record carries.
 DEFAULT_NON_CHARGEABLE_UNITS = ("requests", "sessions", "audioSeconds", "runtimeSeconds", "images")
 
+#: Where a line's unit price came from, as its ``PriceOrigin`` says.
+ORIGIN_SHIPPED = "shipped"
+ORIGIN_CUSTOM = "custom"
+ORIGIN_NONE = "none"
+
+#: The values a source's ``basis`` may take, and how a line introduces each.
+SOURCE_BASES = {
+    "price-list-api": "AWS Price List API",
+    "pricing-page": "AWS pricing page",
+    "estimate": "Estimate",
+}
+
 
 def prices_for_region(pricing: Mapping[str, Any], region: str) -> Tuple[Dict[str, Any], bool]:
     """The price entries in force for ``region``, and whether they are its own.
@@ -84,18 +106,74 @@ def prices_for_region(pricing: Mapping[str, Any], region: str) -> Tuple[Dict[str
     return deep_merge(base, regions.get(region) or {}), own
 
 
-def _price_entry(prices: Mapping[str, Any], service: str) -> Tuple[Any, Optional[str]]:
-    """The price entry of ``service``, and a note when it is another id's."""
+def sources_for_region(pricing: Mapping[str, Any], region: str) -> Dict[str, Any]:
+    """The source of each price in force for ``region``, by service.
+
+    ``sources.default`` with ``sources.<region>`` merged over it: the overlay
+    :func:`prices_for_region` applies to the prices. Read defensively, because a
+    source is there to explain a number: an unreadable one costs the line its
+    source and nothing else.
+    """
+    sources = pricing.get("sources")
+    if not isinstance(sources, Mapping):
+        return {}
+    base = sources.get("default")
+    own = sources.get(region)
+    return deep_merge(
+        base if isinstance(base, Mapping) else {},
+        own if isinstance(own, Mapping) else {},
+    )
+
+
+def source_text(source: Any) -> Optional[str]:
+    """One sentence naming where a shipped price came from, or ``None``."""
+    if not isinstance(source, Mapping):
+        return None
+    basis = SOURCE_BASES.get(str(source.get("basis") or ""), "Source")
+    parts = []
+    if source.get("offer"):
+        version = f" version {source['offerVersion']}" if source.get("offerVersion") else ""
+        parts.append(f"offer {source['offer']}{version}")
+    if source.get("usageType"):
+        parts.append(f"usage type {source['usageType']}")
+    if source.get("retrieved"):
+        parts.append(f"read {source['retrieved']}")
+    text = basis + (" (" + ", ".join(parts) + ")" if parts else "")
+    if source.get("detail"):
+        text = f"{text}. {source['detail']}"
+    return text
+
+
+def _price_entry(prices: Mapping[str, Any], service: str) -> Tuple[Any, Optional[str], str]:
+    """The price entry of ``service``, a note when it is another id's, and its key."""
     entry = prices.get(service)
     if entry is not None:
-        return entry, None
+        return entry, None, service
     for stand_in in price_stand_ins(service):
         if isinstance(prices.get(stand_in), Mapping):
-            return prices[stand_in], (
-                f"Priced at the listed price of {stand_in.partition('/')[2]}, the same model: "
-                "the price table does not list this id, whose own price may be higher."
+            return (
+                prices[stand_in],
+                (
+                    f"Priced at the listed price of {stand_in.partition('/')[2]}, the same model: "
+                    "the price table does not list this id, whose own price may be higher."
+                ),
+                stand_in,
             )
-    return None, None
+    return None, None, service
+
+
+def _unit_price(entry: Any, unit: str) -> Optional[float]:
+    """The price of ``unit`` in a price entry, when it is a usable number."""
+    if isinstance(entry, Mapping):
+        value = entry.get(unit)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    return None
+
+
+def _money(value: float) -> str:
+    """A unit price written into a sentence, in full and without an exponent."""
+    return "$" + (f"{value:.12f}".rstrip("0").rstrip(".") or "0")
 
 
 def _plain(value: Any) -> Any:
@@ -166,40 +244,104 @@ def _context_rank(context: str) -> Tuple[int, str]:
         return (len(CONTEXTS), context)
 
 
+class _Tables:
+    """The effective and the shipped tables of one region, read once per estimate."""
+
+    def __init__(self, pricing: Mapping[str, Any], shipped: Mapping[str, Any]) -> None:
+        self._pricing = pricing
+        self._shipped = shipped
+        self._cache: Dict[str, Tuple[Dict[str, Any], bool, Dict[str, Any], Dict[str, Any]]] = {}
+
+    def region(self, region: str) -> Tuple[Dict[str, Any], bool, Dict[str, Any], Dict[str, Any]]:
+        """Effective prices, whether they are the region's own, shipped prices, sources."""
+        if region not in self._cache:
+            prices, own = prices_for_region(self._pricing, region)
+            shipped, _ = prices_for_region(self._shipped, region)
+            self._cache[region] = (
+                prices,
+                own,
+                shipped,
+                sources_for_region(self._shipped, region),
+            )
+        return self._cache[region]
+
+
+def _priced_line(
+    line: Dict[str, Any],
+    *,
+    price: float,
+    quantity: float,
+    shipped_price: Optional[float],
+    source: Any,
+    profile: Optional[str],
+) -> float:
+    """Fill in a priced line: its cost, and where its price came from."""
+    cost = quantity * price
+    line.update(UnitPrice=price, Cost=round(cost, 8), Priced=True, ShippedUnitPrice=shipped_price)
+    shipped_text = source_text(source)
+    if shipped_price is not None and price == shipped_price:
+        line["PriceOrigin"] = ORIGIN_SHIPPED
+        line["PriceSource"] = shipped_text or "The price table LMA ships"
+        line["PriceSourceUrl"] = (source or {}).get("url") if isinstance(source, Mapping) else None
+        return cost
+    where = f"the {profile} configuration profile" if profile else "this deployment's configuration"
+    if shipped_price is None:
+        text = f"Set in {where}. LMA ships no price for this unit."
+    else:
+        text = f"Set in {where}. The shipped price is {_money(shipped_price)}"
+        text += f", from {shipped_text}." if shipped_text else "."
+    line.update(PriceOrigin=ORIGIN_CUSTOM, PriceSource=text, PriceSourceUrl=None)
+    return cost
+
+
 def estimate_call_cost(
     call_id: str,
     records: Iterable[Mapping[str, Any]],
     pricing: Mapping[str, Any],
     deployment_region: str,
     *,
+    shipped: Optional[Mapping[str, Any]] = None,
+    profile: Optional[str] = None,
     now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    """The itemised estimate for one meeting, in the ``CallCost`` GraphQL shape."""
+    """The itemised estimate for one meeting, in the ``CallCost`` GraphQL shape.
+
+    Args:
+        pricing: The price table in force: the baseline's with the active
+            profile's merged over it.
+        shipped: The baseline's table alone. A price that differs from it is
+            reported as the profile's own, with the shipped price beside it.
+            Defaults to ``pricing``, in which case every price is reported as
+            shipped.
+        profile: The name of the active configuration profile, for the line
+            that reports a price it set.
+    """
     records = list(records)
+    shipped_table: Mapping[str, Any] = shipped if shipped is not None else pricing
     non_chargeable = set(pricing.get("nonChargeableUnits") or DEFAULT_NON_CHARGEABLE_UNITS)
     # Read defensively: a hand-repaired record could hold anything here, and an
     # unreadable note must cost the line its note rather than the whole estimate.
     notes_raw = pricing.get("notes")
     notes: Mapping[str, str] = notes_raw if isinstance(notes_raw, Mapping) else {}
-    price_cache: Dict[str, Tuple[Dict[str, Any], bool]] = {}
+    tables = _Tables(pricing, shipped_table)
     fallback_regions: set = set()
 
     items: List[Dict[str, Any]] = []
     context_totals: Dict[str, float] = {}
     total = 0.0
     unpriced = 0
+    custom = 0
 
     grouped = aggregate(records, deployment_region)
     for context, service, region in sorted(
         grouped, key=lambda key: (_context_rank(key[0]), key[1], key[2])
     ):
         bucket = grouped[(context, service, region)]
-        if region not in price_cache:
-            price_cache[region] = prices_for_region(pricing, region)
-        prices, own = price_cache[region]
+        prices, own, shipped_prices, sources = tables.region(region)
         if not own:
             fallback_regions.add(region)
-        entry, stand_in_note = _price_entry(prices, service)
+        entry, stand_in_note, priced_as = _price_entry(prices, service)
+        shipped_entry = shipped_prices.get(priced_as)
         details = ", ".join(f"{k}: {v}" for k, v in sorted(bucket["details"].items()))
         for unit in sorted(bucket["usage"]):
             quantity = bucket["usage"][unit]
@@ -215,21 +357,38 @@ def estimate_call_cost(
                 "Priced": False,
                 "Note": " ".join(n for n in (notes.get(service), stand_in_note) if n) or None,
                 "Details": details or None,
+                "PriceOrigin": None,
+                "PriceSource": None,
+                "PriceSourceUrl": None,
+                "ShippedUnitPrice": None,
             }
+            price = _unit_price(entry, unit)
             if unit in non_chargeable:
-                line["Priced"] = True
-                line["UnitPrice"] = 0.0
-                line["Cost"] = 0.0
-            elif isinstance(entry, Mapping) and isinstance(entry.get(unit), (int, float)):
-                price = float(entry[unit])
-                cost = quantity * price
-                line.update(UnitPrice=price, Cost=round(cost, 8), Priced=True)
+                line.update(Priced=True, UnitPrice=0.0, Cost=0.0)
+            elif price is not None:
+                cost = _priced_line(
+                    line,
+                    price=price,
+                    quantity=quantity,
+                    shipped_price=_unit_price(shipped_entry, unit),
+                    source=sources.get(priced_as),
+                    profile=profile,
+                )
+                if line["PriceOrigin"] == ORIGIN_CUSTOM:
+                    custom += 1
                 total += cost
                 context_totals[context] = context_totals.get(context, 0.0) + cost
             elif quantity == 0:
                 line.update(UnitPrice=0.0, Cost=0.0, Priced=True)
             else:
                 unpriced += 1
+                line.update(
+                    PriceOrigin=ORIGIN_NONE,
+                    PriceSource=(
+                        f"The price table has no price for {unit} of {service} in {region}, so "
+                        "this line is left out of the total."
+                    ),
+                )
             items.append(line)
 
     moment = now or datetime.now(timezone.utc)
@@ -243,9 +402,11 @@ def estimate_call_cost(
         ],
         "Items": items,
         "UnpricedCount": unpriced,
+        "CustomPriceCount": custom,
+        "PriceProfile": profile,
         "RecordCount": len(records),
-        "PricesAsOf": pricing.get("pricesAsOf"),
-        "PriceSource": pricing.get("source"),
+        "PricesAsOf": shipped_table.get("pricesAsOf"),
+        "PriceSource": shipped_table.get("source"),
         "Region": deployment_region,
         "BaseRegion": pricing.get("baseRegion"),
         "RegionsWithoutListedPrices": sorted(fallback_regions),

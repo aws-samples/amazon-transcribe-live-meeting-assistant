@@ -60,6 +60,7 @@ from .keys import (
     profile_key,
     validate_profile_name,
 )
+from .knowledge_base import knowledge_base_prompt_templates
 from .parameters import (
     ParameterDefault,
     apply_parameter_defaults,
@@ -206,6 +207,7 @@ __all__ = [
     "deletion_delay_minutes",
     "diff_bodies",
     "is_profile_key",
+    "knowledge_base_prompt_templates",
     "parameter_defaults",
     "profile_key",
     "read_setting",

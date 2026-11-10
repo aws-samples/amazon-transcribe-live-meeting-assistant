@@ -13,6 +13,7 @@ from botocore.config import Config
 # pylint: disable=import-error
 from lma_config import (  # configuration layer
     LANGUAGE_MODELS,
+    knowledge_base_prompt_templates,
     read_setting,
     resolve_model_id,
 )
@@ -62,6 +63,7 @@ def get_kb_response(query, userId, isAdminUser, sessionId):
             "knowledgeBaseConfiguration": {
                 "knowledgeBaseId": KB_ID,
                 "modelArn": model_arn(),
+                **knowledge_base_prompt_templates(),
                 "retrievalConfiguration": {
                     "vectorSearchConfiguration": {
                         "filter": {"equals": {"key": "Owner", "value": userId}}
