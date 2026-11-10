@@ -414,6 +414,8 @@ def lambda_handler(event, context):  # noqa: ARG001
             logger.exception("Could not promote media file: %s", err)
 
     if recording_s3_url:
+        # No UpdatedAt, as in _emit_end_event: the END below can be applied first,
+        # and a stamp from here would then be refused on every redelivery.
         _put_kinesis(
             call_id,
             {
@@ -421,7 +423,6 @@ def lambda_handler(event, context):  # noqa: ARG001
                 "CallId": call_id,
                 "RecordingUrl": recording_s3_url,
                 "CreatedAt": _now_iso(),
-                "UpdatedAt": _now_iso(),
             },
         )
 
