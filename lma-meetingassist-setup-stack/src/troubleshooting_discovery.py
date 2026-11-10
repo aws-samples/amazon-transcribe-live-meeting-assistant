@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.12
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """Find LMA's CloudWatch log groups, and say which component owns each one.

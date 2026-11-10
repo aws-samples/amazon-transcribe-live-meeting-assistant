@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Refresh the catalogue of Amazon Bedrock model ids the inference geography resolves to.
 

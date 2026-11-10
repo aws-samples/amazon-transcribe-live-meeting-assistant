@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Core publish operations — build and upload LMA artifacts to S3.
 
 This is a Python port of the original publish.sh bash script, providing

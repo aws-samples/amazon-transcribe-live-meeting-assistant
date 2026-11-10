@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """AppSync GraphQL operations with SigV4 signing.
 
 This namespace lets LMA SDK callers invoke any GraphQL operation on the LMA
