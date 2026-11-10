@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -53,11 +53,13 @@ export interface AsrRuntimeConfig {
 
 // ASR_ENGINE_DEFAULT is a development escape hatch for a transcriber running with
 // no config table (ASR_DIRECT_ENDPOINT against a local engine); deployed stacks do
-// not set it, so the table is the only place the default lives.
+// not set it, so the table is the only place the default lives. Voice separation
+// is on here as in the shipped baseline (AsrEngine.json in the configuration
+// seeder); it is the Virtual Participant's switch, carried for completeness.
 const envDefaults = (): AsrRuntimeConfig => ({
     streamingEngineMicrovm: (process.env['ASR_ENGINE_DEFAULT'] || 'transcribe').toLowerCase() === 'microvm',
     virtualParticipantEngineMicrovm: false,
-    diarizeVirtualParticipant: false,
+    diarizeVirtualParticipant: true,
 });
 
 // Read when called rather than at import, so a test can name either table.

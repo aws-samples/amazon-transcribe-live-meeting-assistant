@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """LMA end-to-end integration tests against a live deployed stack.
 
 Run with ``make integ-tests STACK=<name>`` (see the ``integ-tests`` skill).

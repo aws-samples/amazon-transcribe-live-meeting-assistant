@@ -20,7 +20,7 @@ between -- another administrator saving, from this dialog or another
 configuration page, since every page's settings share the one profile.
 
 Copyright (c) 2025 Amazon.com
-This file is licensed under the MIT License.
+This file is licensed under the MIT-0 License.
 """
 
 import json

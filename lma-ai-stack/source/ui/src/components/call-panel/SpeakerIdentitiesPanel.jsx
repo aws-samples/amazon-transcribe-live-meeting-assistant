@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 /**
@@ -274,9 +274,12 @@ const SpeakerIdentitiesPanel = ({
   active = true,
 }) => {
   const identities = useMemo(() => parseSpeakerIdentities(item.speakerIdentities), [item.speakerIdentities]);
+  // How the meeting was captured, from its record: a Virtual Participant's names
+  // are roster names, never a channel's own label (speaker-identities.js).
+  const { captureSource } = item;
   const roster = useMemo(
-    () => buildSpeakerRoster(segments, identities, item.remoteParticipantName),
-    [segments, identities, item.remoteParticipantName],
+    () => buildSpeakerRoster(segments, identities, item.remoteParticipantName, { captureSource }),
+    [segments, identities, item.remoteParticipantName, captureSource],
   );
   // Each platform name's voices shown as one person or several, over the whole
   // transcript, and each row as the transcript shows it.
@@ -329,7 +332,10 @@ const SpeakerIdentitiesPanel = ({
   // holding an unconfirmed SUGGESTION is still open, so a later
   // self-introduction can upgrade a guess; a roster name with a voice label is
   // not, because no pass will ever work on it.
-  const unnamedCount = useMemo(() => nameableVoiceKeys(segments, identities).length, [segments, identities]);
+  const unnamedCount = useMemo(
+    () => nameableVoiceKeys(segments, identities, { captureSource }).length,
+    [segments, identities, captureSource],
+  );
 
   // Automatic passes stop for good when the resolver says nothing is left to
   // name (until a new voice appears) or that the meeting is over, and pause
@@ -423,7 +429,7 @@ const SpeakerIdentitiesPanel = ({
   // Starts open only on a channel separation actually split; once the user opens
   // or closes it themselves, their choice wins for the rest of the session.
   const [expandedOverride, setExpandedOverride] = useState(undefined);
-  const expanded = expandedOverride ?? hasMultipleVoicesOnAChannel(roster);
+  const expanded = expandedOverride ?? hasMultipleVoicesOnAChannel(roster, { captureSource, groups });
 
   // A speaker chosen in the meeting header: the panel opens, and that voice's
   // row is scrolled to, outlined for a moment and its name field focused.

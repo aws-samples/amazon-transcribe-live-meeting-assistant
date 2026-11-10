@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Shared fixtures for LMA integration tests.
 
 Unlike the unit tests in ``lib/lma_sdk/tests`` (which mock boto3), these run

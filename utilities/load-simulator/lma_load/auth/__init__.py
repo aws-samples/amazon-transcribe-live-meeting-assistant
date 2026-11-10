@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Cognito user-provisioning and JWT token caching for load tests."""
 
 from lma_load.auth.cognito import (  # noqa: F401

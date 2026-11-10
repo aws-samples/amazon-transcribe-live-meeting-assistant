@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Infer who each separated voice belongs to, from what people say.
 
@@ -369,13 +369,17 @@ def resolve(call_id, identity=None, force=False, final=False):
     # limit, because both sides of the comparison saturated at it.
     total_turns = len(all_turns)
     turns = pure.select_turns(all_turns, MAX_TURNS)
+    # How the meeting was captured, from the meeting record (absent on a meeting
+    # recorded before the field existed). A Virtual Participant's names are
+    # roster names, so none of them is a channel label waiting for names.
+    capture_source = meeting.get("CaptureSource")
 
     # Checked before the cost gates, because it is free and its answer is the
     # most useful one: on a Virtual Participant meeting every voice already
     # carries the platform's name for it, and what is left to tidy is how those
     # voices are grouped (the Transcript tab's One person / Several people),
     # which no naming pass can do.
-    if not pure.unresolved_voices(turns, identities, all_turns):
+    if not pure.unresolved_voices(turns, identities, all_turns, capture_source):
         LOGGER.info("Nothing to name for %s: every voice has a name", call_id)
         return _result(True, REASON_ALREADY_NAMED, "every voice already has a name")
 
@@ -405,16 +409,22 @@ def resolve(call_id, identity=None, force=False, final=False):
     # is exactly the over-rejection this module has been bitten by five times:
     # an introduction with no phrase a regex can spot -- "Sarah Lee, platform
     # engineering" -- would never be found at all.
-    if not pure.worth_a_model_call(turns, identities, force=force or final, all_turns=all_turns):
+    if not pure.worth_a_model_call(
+        turns,
+        identities,
+        force=force or final,
+        all_turns=all_turns,
+        capture_source=capture_source,
+    ):
         LOGGER.info("Nothing to name for %s (turns=%d, forced=%s)", call_id, len(turns), force)
         return _result(True, REASON_NO_EVIDENCE, "nothing to name")
 
-    labels = pure.unresolved_voices(turns, identities, all_turns)
+    labels = pure.unresolved_voices(turns, identities, all_turns, capture_source)
     prompt = pure.build_prompt(turns, labels, identities.get("candidates") or [])
     raw = call_bedrock(prompt, call_id)
     proposals = pure.parse_model_response(raw)
     updated, applied = pure.apply_proposals(
-        identities, proposals, turns, now_iso, all_turns=all_turns
+        identities, proposals, turns, now_iso, all_turns=all_turns, capture_source=capture_source
     )
 
     # The gap between proposed and applied is how much the verification

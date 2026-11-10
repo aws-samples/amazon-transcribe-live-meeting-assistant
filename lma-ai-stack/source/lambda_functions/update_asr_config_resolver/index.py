@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """AppSync Lambda resolver for the ASR runtime switches: the read and the write.
 
@@ -11,7 +11,8 @@ read at the start of each meeting so a change needs no stack update:
 * virtualParticipantEngineMicrovm - Virtual Participants use the on-demand engine.
 * diarizeVirtualParticipant - a Virtual Participant, on either engine, asks for
   per-voice labels, so several people behind one attendee tile come out as
-  "Name (spk_0)", "Name (spk_1)" instead of one name.
+  "Name (spk_0)", "Name (spk_1)" instead of one name, and each voice corrects
+  the roster name once it is proven. On in the shipped baseline.
 
 There are deliberately no tuning fields. The diarization operating point (the
 similarity threshold and the minimum utterance length) is measured for the model

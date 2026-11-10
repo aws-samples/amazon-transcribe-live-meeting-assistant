@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -59,9 +59,15 @@ export interface AsrRuntimeSwitches {
     diarizeVirtualParticipant: boolean;
 }
 
+/**
+ * What a VP uses when the switches cannot be read, or a field is absent: Amazon
+ * Transcribe, which every deployment has, and voice separation on, the shipped
+ * default (AsrEngine.json in the configuration seeder), which works on either
+ * engine. A saved `false` is read as such and wins.
+ */
 export const DEFAULT_SWITCHES: AsrRuntimeSwitches = {
     virtualParticipantEngineMicrovm: false,
-    diarizeVirtualParticipant: false,
+    diarizeVirtualParticipant: true,
 };
 
 export interface AsrLease {
@@ -225,7 +231,10 @@ export async function fetchAsrRuntimeSwitches(
         const record = body.data?.getAsrConfig;
         return {
             virtualParticipantEngineMicrovm: record?.virtualParticipantEngineMicrovm === true,
-            diarizeVirtualParticipant: record?.diarizeVirtualParticipant === true,
+            diarizeVirtualParticipant:
+                typeof record?.diarizeVirtualParticipant === 'boolean'
+                    ? record.diarizeVirtualParticipant
+                    : DEFAULT_SWITCHES.diarizeVirtualParticipant,
         };
     } catch (error: any) {
         log.warn(`[ASR] could not read the ASR config; using defaults: ${error?.message || error}`);

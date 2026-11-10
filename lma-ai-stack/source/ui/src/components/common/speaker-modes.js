@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 /**
@@ -23,9 +23,10 @@
  *
  * A user's choice is stored in the meeting's speaker identity map, under
  * `speakerModes`; without one the mode is computed from the transcript: several
- * people when the name reads as a room or a room device, when two or more
- * voices each carry a real share of the name's speech, or when its voices were
- * given different names; one person otherwise. The rules are in
+ * people when the name reads as a room or a room device, or when its voices were
+ * given different names; one person otherwise. How many voices a name has, and
+ * how long each spoke, do not decide it: speaker separation routinely splits one
+ * person into two or three voices that each speak at length. The rules are in
  * speaker-mode-rules.json, a byte-identical copy of the Python layer's.
  *
  * Names that stand for nobody in particular -- 'Unknown', the 'Other
@@ -46,13 +47,11 @@ const MODES = [ONE_PERSON, SEVERAL_PEOPLE];
 
 /** Why a group has the mode it has when nobody chose one. */
 export const REASON_ROOM_NAME = 'room-name';
-export const REASON_SEVERAL_VOICES = 'several-voices';
 export const REASON_NAMED_VOICES = 'named-voices';
 export const REASON_DEFAULT = 'one-person';
 
 const UNKNOWN_NAMES = new Set(RULES.unknownNames.map((name) => name.toLowerCase()));
 const ROOM_NAME_PATTERNS = RULES.roomNamePatterns.map(({ pattern }) => new RegExp(pattern, 'i'));
-const { minVoices: MIN_VOICES, minShareOfName: MIN_SHARE_OF_NAME, minSeconds: MIN_VOICE_SECONDS } = RULES.severalVoices;
 
 /** How an unnamed voice of a name shown as several people reads. */
 export const voiceLabel = (name, ordinal) => `${name} · Voice ${ordinal}`;
@@ -76,8 +75,9 @@ const voiceNumber = (id) => Number(id.split('_')[1]);
 /**
  * The meeting's names that carry voice labels, each with its voices and mode.
  *
- * Built from the final speech segments of the WHOLE transcript: a voice's share
- * of a name's speech is a property of the meeting. Returns an object keyed by
+ * Built from the final speech segments of the WHOLE transcript: a name's voices,
+ * their Voice 1, 2... order and the names they were given are properties of the
+ * meeting. Returns an object keyed by
  * group key; each group has `base` (the platform name), `channel`, `voices`
  * ({ id, key, seconds, first, ordinal } in Voice 1, 2... order), `members` (the
  * stored speaker keys), `defaultMode` and `reason`, `override` (the stored
@@ -135,15 +135,11 @@ export const speakerGroups = (segments, identities) => {
       if (name && !given.has(name)) given.set(name, entry);
     });
 
-    const substantial = g.voices.filter(
-      (v) => v.seconds >= MIN_VOICE_SECONDS && g.seconds > 0 && v.seconds / g.seconds >= MIN_SHARE_OF_NAME,
-    );
+    // Neither the number of voices nor their share of the speech is a rule:
+    // both are what a diarizer splitting one person produces.
     if (looksLikeRoom(g.base)) {
       g.defaultMode = SEVERAL_PEOPLE;
       g.reason = REASON_ROOM_NAME;
-    } else if (substantial.length >= MIN_VOICES) {
-      g.defaultMode = SEVERAL_PEOPLE;
-      g.reason = REASON_SEVERAL_VOICES;
     } else if (given.size >= 2) {
       g.defaultMode = SEVERAL_PEOPLE;
       g.reason = REASON_NAMED_VOICES;
@@ -281,12 +277,10 @@ export const describeSpeakerMode = (group) => {
   switch (group.reason) {
     case REASON_ROOM_NAME:
       return `"${group.base}" reads as a room, so its voices are shown separately.`;
-    case REASON_SEVERAL_VOICES:
-      return 'Two or more voices each spoke for a real share of this name, so they are shown separately.';
     case REASON_NAMED_VOICES:
       return 'Its voices were given different names, so they are shown separately.';
     default:
-      return 'Shown as one person: the other voices heard under this name spoke too little to be someone else.';
+      return 'Shown as one person unless the name reads as a room: speaker separation often splits one voice in two.';
   }
 };
 

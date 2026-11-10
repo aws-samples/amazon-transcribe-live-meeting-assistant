@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Unit tests for Stage 1 of the meeting-upload pipeline (``createUploadMeeting``).
 
@@ -30,6 +30,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from botocore.exceptions import ClientError
@@ -286,6 +287,155 @@ def test_a_long_filename_is_truncated_but_keeps_its_extension(env) -> None:
     name = result["uploadKey"].rsplit("/", 1)[-1]
     assert len(name) == 128
     assert name.endswith(".mp4")
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("会议记录.m4a", "recording.m4a"),
+        ("회의 녹음.m4a", "recording.m4a"),
+        ("Встреча 2025-01-02.mp3", "2025-01-02.mp3"),
+        ("συνάντηση.τελική.wav", "recording.wav"),
+        ("Réunion équipe.mp4", "R_union_quipe.mp4"),
+    ],
+    ids=[
+        "non-latin-only",
+        "non-latin-hangul",
+        "non-latin-and-ascii",
+        "non-latin-with-dots",
+        "accented-latin",
+    ],
+)
+def test_a_name_outside_the_character_set_still_keeps_its_extension(
+    env, filename, expected
+) -> None:
+    """The format decides the key's extension, which Stage 3 names the promoted
+    recording after, and the MediaFormat Stage 2 hands Transcribe, so a name made
+    of characters the key cannot carry must lose the name, never the format."""
+    result = invoke(callId="call-abc", filename=filename)
+    assert result["uploadKey"] == f"lma-uploads-pending/call-abc/{expected}"
+
+
+@pytest.mark.parametrize(
+    ("filename", "content_type", "expected_name", "expected_format"),
+    [
+        ("Meeting.M4A", "audio/x-m4a", "Meeting.m4a", "m4a"),
+        (".m4a", "audio/x-m4a", "recording.m4a", "m4a"),
+        ("talk.mp4 ", "video/mp4", "talk.mp4", "mp4"),
+        ("Weekly 1.5 sync", "audio/x-m4a", "Weekly_1.5_sync.m4a", "m4a"),
+        ("notes.txt", "audio/mpeg", "notes.txt.mp3", "mp3"),
+        ("clip", "audio/webm;codecs=opus", "clip.webm", "webm"),
+        ("clip.mp3", "audio/mp4", "clip.mp3", "mp3"),
+        ("clip.mov", "video/quicktime", "clip.mov", None),
+        ("clip", "audio/aac", "clip", None),
+    ],
+    ids=[
+        "extension-in-upper-case",
+        "extension-only-name",
+        "trailing-space",
+        "dotted-name-without-extension",
+        "unsupported-extension-uses-content-type",
+        "content-type-with-parameters",
+        "name-extension-wins-over-content-type",
+        "unsupported-name-and-type",
+        "no-extension-unsupported-type",
+    ],
+)
+def test_the_extension_is_a_supported_media_format_or_absent(
+    env, filename, content_type, expected_name, expected_format
+) -> None:
+    """The extension is taken only from a format Transcribe accepts, from the
+    name first and the content type second; whatever else follows a dot stays
+    part of the name. The same format is stored on the row for Stage 2."""
+    table, _ = env
+    result = invoke(callId="call-abc", filename=filename, contentType=content_type)
+    assert result["uploadKey"] == f"lma-uploads-pending/call-abc/{expected_name}"
+    assert table.item.get("MediaFormat") == expected_format
+    if expected_format is None:
+        assert "MediaFormat" not in table.item
+
+
+@pytest.mark.parametrize(
+    ("content_type", "expected_format"),
+    sorted(index.CONTENT_TYPE_MEDIA_FORMATS.items()),
+)
+def test_every_mapped_content_type_names_a_format_transcribe_accepts(
+    content_type, expected_format
+) -> None:
+    """A mapping to a value Transcribe rejects would turn a valid upload into a
+    failed job, so every target must be one of its MediaFormat values."""
+    assert expected_format in index.SUPPORTED_MEDIA_FORMATS
+    assert index._media_format("recording", content_type) == expected_format
+
+
+def _isolated_aws_env(region: str) -> dict[str, str]:
+    """The process environment with every ``AWS_*`` variable replaced: dummy keys,
+    the region under test, and no config or credentials file, so neither the
+    environment nor ``~/.aws`` of whoever runs the tests (a profile, a session
+    token, an endpoint override, FIPS or dual-stack) changes the URL."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("AWS_")}
+    env.update(
+        {
+            "AWS_REGION": region,
+            "AWS_DEFAULT_REGION": region,
+            "AWS_ACCESS_KEY_ID": "AKIDEXAMPLE",
+            "AWS_SECRET_ACCESS_KEY": "not-a-real-secret",  # pragma: allowlist secret
+            "AWS_CONFIG_FILE": os.devnull,
+            "AWS_SHARED_CREDENTIALS_FILE": os.devnull,
+        }
+    )
+    return env
+
+
+def test_the_s3_client_leaves_the_host_to_botocore() -> None:
+    """Without an addressing style botocore presigns on the global endpoint, which
+    S3 redirects (307) for a bucket outside us-east-1 until its DNS settles, and a
+    browser does not follow a redirect on a CORS request, so the upload fails as a
+    network error. No endpoint_url: a fixed one would give every partition the
+    commercial DNS suffix."""
+    with (
+        mock.patch("boto3.client") as client,
+        mock.patch("boto3.resource"),
+        mock.patch.dict(os.environ, {"AWS_REGION": "eu-west-1"}),
+    ):
+        _load_by_path("upload_meeting_initiator_index_client", HERE / "index.py")
+    kwargs = client.call_args.kwargs
+    assert kwargs["region_name"] == "eu-west-1"
+    assert "endpoint_url" not in kwargs
+    assert kwargs["config"].s3 == {
+        "addressing_style": "virtual",
+        "us_east_1_regional_endpoint": "regional",
+    }
+    assert kwargs["config"].signature_version == "s3v4"
+
+
+@pytest.mark.parametrize(
+    ("region", "host_suffix"),
+    [
+        ("eu-west-1", "s3.eu-west-1.amazonaws.com"),
+        ("us-east-1", "s3.us-east-1.amazonaws.com"),
+        ("us-gov-west-1", "s3.us-gov-west-1.amazonaws.com"),
+        ("cn-north-1", "s3.cn-north-1.amazonaws.com.cn"),
+    ],
+)
+def test_the_presigned_url_names_the_bucket_on_the_regional_endpoint(region, host_suffix) -> None:
+    """Signed by the real botocore client (locally, with no AWS call): the browser
+    PUTs to the bucket on its Region's own endpoint, signed for the same Region,
+    in us-east-1 as well as elsewhere, and with the partition's DNS suffix."""
+    with (
+        mock.patch("boto3.resource"),
+        mock.patch.dict(os.environ, _isolated_aws_env(region), clear=True),
+    ):
+        module = _load_by_path(f"upload_meeting_initiator_index_signed_{region}", HERE / "index.py")
+        url = module._generate_presigned_put_url("lma-uploads-pending/call-abc/a.mp3", "audio/mpeg")
+    parsed = urlparse(url)
+    assert parsed.scheme == "https"
+    assert parsed.netloc == f"{BUCKET}.{host_suffix}"
+    assert parsed.path == "/lma-uploads-pending/call-abc/a.mp3"
+    query = parse_qs(parsed.query)
+    assert query["X-Amz-Algorithm"] == ["AWS4-HMAC-SHA256"]
+    assert f"/{region}/s3/aws4_request" in query["X-Amz-Credential"][0]
+    assert "content-type" in query["X-Amz-SignedHeaders"][0].split(";")
 
 
 # ---------------------------------------------------------------------------

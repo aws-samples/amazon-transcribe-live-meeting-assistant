@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """
@@ -68,6 +68,11 @@ OUTPUT_ENCRYPTION_KMS_KEY_ID = os.environ.get("OUTPUT_ENCRYPTION_KMS_KEY_ID", ""
 
 # Transcribe job name == callId. Must be 1-200 chars, alphanumeric + ._-
 TRANSCRIBE_JOB_NAME_RE = re.compile(r"^[a-zA-Z0-9._-]{1,200}$")
+
+# StartTranscriptionJob's MediaFormat values. Stage 1 stores one of these on the
+# row as MediaFormat; anything else (or none, on a row written before Stage 1
+# stored it) leaves the parameter out for Transcribe to detect the format.
+SUPPORTED_MEDIA_FORMATS = frozenset({"mp3", "mp4", "wav", "flac", "ogg", "amr", "webm", "m4a"})
 
 # ---------------------------------------------------------------------------
 # Logging / clients
@@ -216,6 +221,9 @@ def _start_transcription_job(job: dict) -> str:
         params["Settings"] = settings
     if OUTPUT_ENCRYPTION_KMS_KEY_ID:
         params["OutputEncryptionKMSKeyId"] = OUTPUT_ENCRYPTION_KMS_KEY_ID
+    media_format = str(job.get("MediaFormat") or "").lower()
+    if media_format in SUPPORTED_MEDIA_FORMATS:
+        params["MediaFormat"] = media_format
 
     logger.info("StartTranscriptionJob: %s", json.dumps(params, default=str))
     try:

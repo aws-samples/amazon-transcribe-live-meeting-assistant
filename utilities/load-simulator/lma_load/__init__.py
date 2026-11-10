@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """LMA Load Simulator.
 
 A pluggable, tag-driven tool for stress-testing a deployed Amazon Transcribe

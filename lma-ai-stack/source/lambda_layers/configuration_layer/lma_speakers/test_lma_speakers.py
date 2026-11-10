@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Who each transcript line is shown as: the default speaker mode and the identity map."""
 
@@ -120,18 +120,21 @@ def test_times_stored_as_decimals_are_read() -> None:
         {
             "Channel": "REMOTE",
             "Speaker": "Jo (spk_0)",
-            "StartTime": Decimal("0"),
-            "EndTime": Decimal("90"),
+            "StartTime": Decimal("90"),
+            "EndTime": Decimal("200"),
         },
         {
             "Channel": "REMOTE",
             "Speaker": "Jo (spk_1)",
-            "StartTime": Decimal("90"),
-            "EndTime": Decimal("200"),
+            "StartTime": Decimal("0"),
+            "EndTime": Decimal("90"),
         },
     ]
     groups = speakers.speaker_groups(rows, speakers.parse_speaker_identities(None))
-    assert groups["REMOTE#Jo"]["mode"] == speakers.SEVERAL_PEOPLE
+    voices = groups["REMOTE#Jo"]["voices"]
+    # Voices are numbered by when they were first heard, read from the Decimals.
+    assert [voice["id"] for voice in voices] == ["spk_1", "spk_0"]
+    assert [voice["seconds"] for voice in voices] == [90.0, 110.0]
 
 
 def test_other_channels_form_no_group() -> None:

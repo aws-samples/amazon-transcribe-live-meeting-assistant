@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -246,20 +246,21 @@ test('the per-VP override beats the Virtual Participant engine setting, and both
     );
 });
 
-test('the runtime switches are read from getAsrConfig and default off on any failure', async () => {
-    const okFetch = (async () =>
-        new Response(
-            JSON.stringify({ data: { getAsrConfig: { virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: true } } }),
-        )) as unknown as typeof fetch;
-    assert.deepEqual(await fetchAsrRuntimeSwitches('https://example/graphql', okFetch), {
-        virtualParticipantEngineMicrovm: true,
-        diarizeVirtualParticipant: true,
-    });
+const answering = (record: unknown) =>
+    (async () => new Response(JSON.stringify({ data: { getAsrConfig: record } }))) as unknown as typeof fetch;
 
-    const noRecord = (async () => new Response(JSON.stringify({ data: { getAsrConfig: null } }))) as unknown as typeof fetch;
-    assert.deepEqual(await fetchAsrRuntimeSwitches('https://example/graphql', noRecord), {
+test('the runtime switches are read from getAsrConfig; any failure means Amazon Transcribe with voice separation', async () => {
+    assert.deepEqual(
+        await fetchAsrRuntimeSwitches(
+            'https://example/graphql',
+            answering({ virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: true }),
+        ),
+        { virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: true },
+    );
+
+    assert.deepEqual(await fetchAsrRuntimeSwitches('https://example/graphql', answering(null)), {
         virtualParticipantEngineMicrovm: false,
-        diarizeVirtualParticipant: false,
+        diarizeVirtualParticipant: true,
     });
 
     const failing = (async () => {
@@ -267,13 +268,28 @@ test('the runtime switches are read from getAsrConfig and default off on any fai
     }) as unknown as typeof fetch;
     assert.deepEqual(await fetchAsrRuntimeSwitches('https://example/graphql', failing), {
         virtualParticipantEngineMicrovm: false,
-        diarizeVirtualParticipant: false,
+        diarizeVirtualParticipant: true,
     });
 
     assert.deepEqual(await fetchAsrRuntimeSwitches(''), {
         virtualParticipantEngineMicrovm: false,
-        diarizeVirtualParticipant: false,
+        diarizeVirtualParticipant: true,
     });
+});
+
+test('a saved choice of no voice separation wins over the default', async () => {
+    assert.deepEqual(
+        await fetchAsrRuntimeSwitches(
+            'https://example/graphql',
+            answering({ virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: false }),
+        ),
+        { virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: false },
+    );
+    // A record without the field takes the default.
+    assert.deepEqual(
+        await fetchAsrRuntimeSwitches('https://example/graphql', answering({ virtualParticipantEngineMicrovm: true })),
+        { virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: true },
+    );
 });
 
 test('speaker names are the roster name plus the voice id in the shared label format', () => {

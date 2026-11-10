@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Who spoke each transcript line: the meeting's speaker identity map, applied on read.
 
@@ -23,9 +23,11 @@ and, keyed by ``<channel>#<name without its voice label>`` (a *group*):
   line shows the name alone) or SEVERAL PEOPLE (each voice is shown, and can be
   named, on its own: ``ConfRm_1 · Voice 1``). With no entry, the mode is
   decided from the transcript (``speaker_groups``): several people when the name
-  reads as a room or a device, when two or more voices each carry a real share
-  of the name's speech, or when its voices have been given different names; one
-  person otherwise. The rules are in ``speaker_mode_rules.json``.
+  reads as a room or a device, or when its voices have been given different
+  names; one person otherwise. How many voices a name has, and how long each
+  spoke, do not decide it: speaker separation routinely splits one person into
+  two or three voices that each speak at length. The rules are in
+  ``speaker_mode_rules.json``.
 
 Names that stand for nobody in particular -- ``Unknown``, the ``Other
 Participant`` placeholder -- form no group and keep their voice labels, because
@@ -52,7 +54,6 @@ MODES = (ONE_PERSON, SEVERAL_PEOPLE)
 
 #: Why a group has the mode it has, when nobody chose one.
 REASON_ROOM_NAME = "room-name"
-REASON_SEVERAL_VOICES = "several-voices"
 REASON_NAMED_VOICES = "named-voices"
 REASON_DEFAULT = "one-person"
 
@@ -73,9 +74,6 @@ UNKNOWN_NAMES = frozenset(name.casefold() for name in RULES["unknownNames"])
 ROOM_NAME_PATTERNS = tuple(
     re.compile(entry["pattern"], re.IGNORECASE) for entry in RULES["roomNamePatterns"]
 )
-MIN_VOICES = int(RULES["severalVoices"]["minVoices"])
-MIN_SHARE_OF_NAME = float(RULES["severalVoices"]["minShareOfName"])
-MIN_VOICE_SECONDS = float(RULES["severalVoices"]["minSeconds"])
 
 
 # ── the stored map ──────────────────────────────────────────────────────────
@@ -249,18 +247,10 @@ def speaker_groups(
             ):
                 given.setdefault(entry["name"].strip(), entry)
 
-        total = group["seconds"]
-        substantial = [
-            v
-            for v in voices
-            if v["seconds"] >= MIN_VOICE_SECONDS
-            and total > 0
-            and v["seconds"] / total >= MIN_SHARE_OF_NAME
-        ]
+        # Neither the number of voices nor their share of the speech is a rule:
+        # both are what a diarizer splitting one person produces.
         if looks_like_room(group["base"]):
             default, reason = SEVERAL_PEOPLE, REASON_ROOM_NAME
-        elif len(substantial) >= MIN_VOICES:
-            default, reason = SEVERAL_PEOPLE, REASON_SEVERAL_VOICES
         elif len(given) >= 2:
             default, reason = SEVERAL_PEOPLE, REASON_NAMED_VOICES
         else:
@@ -395,8 +385,9 @@ def speaker_namer(
     """A function naming each of a meeting's segments, from its stored map.
 
     The groups are built from ``segments``, so pass the whole transcript even
-    when only part of it is named: a voice's share of a name's speech is a
-    property of the meeting, not of the excerpt.
+    when only part of it is named: a name's voices, their Voice 1, Voice 2...
+    order and the names they were given are properties of the meeting, not of
+    the excerpt.
     """
     rows = list(segments or [])
     identities = parse_speaker_identities(raw_identities)
