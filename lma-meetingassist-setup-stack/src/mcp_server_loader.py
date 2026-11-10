@@ -404,6 +404,8 @@ def streamable_http_transport(server_url: str, headers: Optional[Dict[str, str]]
     """
     headers = headers or {}
     try:
+        # create_mcp_http_client is defined elsewhere in mcp and re-exported by this
+        # module; the installed-mcp test fails if a release drops the re-export.
         from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
     except ImportError:
         from mcp.client.streamable_http import streamablehttp_client

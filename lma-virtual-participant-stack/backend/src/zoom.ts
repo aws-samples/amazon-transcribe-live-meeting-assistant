@@ -1942,6 +1942,9 @@ export default class Zoom {
                     readerLogged = true;
                     log.info('[zoom-chat] reading the meeting chat');
                 }
+                // One row at a time, in the order Zoom shows them, on purpose: a
+                // slow reply (help, the exit messages) delays the next row and
+                // the panel keeper, and keeps the replies in order.
                 for (const row of reading.rows) {
                     await onChatRow(row.label, row.id, row.links);
                 }
