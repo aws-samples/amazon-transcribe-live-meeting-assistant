@@ -292,6 +292,57 @@ export const RETENTION = declareSection({
         'How many days meeting records and transcript segments are kept, at most the stack parameters\' values.',
 });
 
+/** The Amazon Transcribe options only that engine offers; see transcribeOnlyOptions. */
+export interface TranscribeOnlyOptionSettings {
+    readonly languageCode: string;
+    /** The redaction flag as saved, whatever the language. */
+    readonly contentRedactionEnabled: boolean;
+    readonly customVocabularyName: string;
+    readonly customLanguageModelName: string;
+}
+
+/**
+ * The Amazon Transcribe options a meeting's settings use that the ASR MicroVM
+ * engine does not offer, named for a log line; empty when there are none.
+ *
+ * A meeting that uses any of them stays on Amazon Transcribe whatever the
+ * Transcription Engine section selects, so a configured option is applied rather
+ * than dropped. Redaction counts when its flag is set, whatever the language,
+ * because the flag is what an administrator chose. Here rather than in a reader
+ * because both readers choose the engine, the WebSocket transcriber and the
+ * Virtual Participant.
+ */
+export const transcribeOnlyOptions = (settings: TranscribeOnlyOptionSettings): string[] => {
+    const options: string[] = [];
+    if (settings.contentRedactionEnabled) {
+        options.push('content redaction');
+    }
+    if (settings.customVocabularyName) {
+        options.push(`custom vocabulary ${settings.customVocabularyName}`);
+    }
+    if (settings.customLanguageModelName) {
+        options.push(`custom language model ${settings.customLanguageModelName}`);
+    }
+    if (settings.languageCode === 'identify-language' || settings.languageCode === 'identify-multiple-languages') {
+        options.push(`language identification (${settings.languageCode})`);
+    } else if (!isMicrovmLanguage(settings.languageCode)) {
+        options.push(`language ${settings.languageCode}`);
+    }
+    return options;
+};
+
+/**
+ * Whether a meeting language is one the ASR MicroVM engine transcribes: English.
+ *
+ * The engine decodes the language its bundle bakes in and ignores the language a
+ * session asks for, and English is the one language every bundle in
+ * lma-asr-microvm-stack/source/catalog.json decodes (its test_catalog_languages
+ * test holds that). So any other language stays on Amazon Transcribe, even with a
+ * bundle whose model could decode it. An empty code is the readers' en-US default.
+ */
+export const isMicrovmLanguage = (languageCode: string): boolean =>
+    languageCode === '' || languageCode === 'en' || languageCode.startsWith('en-');
+
 /** The Amazon Transcribe options whose combination is checked; see transcribeOptionsProblem. */
 export interface TranscribeOptionCombination {
     readonly languageCode: string;

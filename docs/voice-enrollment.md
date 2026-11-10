@@ -8,8 +8,10 @@ title: "Voice Enrollment (Speaker Recognition)"
 # Voice Enrollment (Speaker Recognition)
 
 > **Status: Beta.** The **Enroll My Voice** page and its navigation entry are
-> marked Beta in the web UI. Enrolling and matching both require the on-demand
-> [ASR MicroVM speech engine](microvm-asr.md), which is itself experimental.
+> marked Beta in the web UI. Enrolling and matching both require the
+> [ASR MicroVM speech engine](microvm-asr.md), LMA's default transcription engine,
+> which is deployed by default (`EnableMicrovmAsr=true`) in Regions with AWS Lambda
+> MicroVMs.
 
 > **Off by default, and off unless you deliberately turn it on.** A voiceprint is
 > biometric data about a person. `EnableVoiceEnrollment` defaults to `false`, and
@@ -180,10 +182,11 @@ returns one embedding per utterance; those are averaged into the stored centroid
 
 The session is acquired for the enrollment and released as soon as it finishes,
 including when it fails. It is the same engine and the same short-lived MicroVM
-a meeting uses, so **enrolling requires `EnableMicrovmAsr=true`**: the embedding
-model lives in that image and Amazon Transcribe exposes no speaker embedding. In
-a deployment with enrollment on but that engine absent, the portal says so rather
-than telling somebody their recordings were unusable.
+a meeting uses, so **enrolling requires the ASR MicroVM engine to be deployed**
+(`EnableMicrovmAsr=true`, the default, in a Region with AWS Lambda MicroVMs): the
+embedding model lives in that image and Amazon Transcribe exposes no speaker
+embedding. In a deployment with enrollment on but that engine absent, the portal
+says so rather than telling somebody their recordings were unusable.
 
 **The sample audio is not kept.** It is held in memory for the length of the
 request and never written to S3 or to a table. What persists is the centroid,
@@ -293,8 +296,9 @@ organisation that wants a shorter cycle can set one.
 | `VoiceEnrollmentRetentionDays` | `365` | How long a consent stands before it must be renewed. |
 | `VoiceEnrollmentTermsVersion` | `1` | Bump to require everybody to re-consent to new terms. |
 
-Both enrolling and matching need the on-demand
-[ASR MicroVM engine](microvm-asr.md) (`EnableMicrovmAsr=true`), because that is
+Both enrolling and matching need the
+[ASR MicroVM engine](microvm-asr.md) (`EnableMicrovmAsr=true`, the default, in a
+Region with AWS Lambda MicroVMs), because that is
 the engine that computes speaker embeddings — one to build a voiceprint, the
 other to compare against it. Amazon Transcribe exposes none, so with enrollment
 on and that engine off the tables, the portal and the consent log all exist and

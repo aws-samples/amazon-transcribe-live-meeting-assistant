@@ -16,6 +16,7 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { meterAsrMicrovm } from './metering.js';
 import { createLogger } from './logger.js';
+import { transcribeOnlyOptions, type TranscribeOnlyOptionSettings } from './configuration-store.js';
 import { REMOTE_CHANNEL, type SpeechChannel } from './channels.js';
 
 const log = createLogger('asr-microvm-client');
@@ -95,21 +96,65 @@ export const isMicrovmAsrConfigured = (): boolean =>
     ASR_LAUNCHER_FUNCTION_ARN.length > 0 || ASR_DIRECT_ENDPOINT.length > 0;
 
 /**
+ * This VP's Amazon Transcribe options, from its environment, which carries the
+ * Configuration page's values once stack-settings.ts has applied them. Redaction
+ * is the flag as saved (CONTENT_REDACTION_REQUESTED), or the task's combined
+ * flag when the saved one is not known. The VP has no custom language model
+ * setting, so none is ever named.
+ */
+export const vpTranscribeOnlySettings = (
+    env: Record<string, string | undefined> = process.env,
+): TranscribeOnlyOptionSettings => {
+    const flag = (name: string): boolean => (env[name] ?? '').trim().toLowerCase() === 'true';
+    return {
+        languageCode: env.TRANSCRIBE_LANGUAGE_CODE || 'en-US',
+        contentRedactionEnabled: flag('CONTENT_REDACTION_REQUESTED') || flag('ENABLE_CONTENT_REDACTION'),
+        customVocabularyName: env.CUSTOM_VOCABULARY_NAME || '',
+        customLanguageModelName: '',
+    };
+};
+
+/**
  * Per-VP ASR_ENGINE wins (local testing), then the deployment's runtime setting;
  * an engine the deployment cannot serve falls back to Amazon Transcribe.
+ *
+ * A VP whose Amazon Transcribe options use one the ASR MicroVM engine does not
+ * offer (content redaction, a custom vocabulary or language model, language
+ * identification) stays on Amazon Transcribe, so the option is applied rather
+ * than dropped. A per-VP ASR_ENGINE=microvm does not override that: the options
+ * are the deployment's, set by an administrator.
  */
 export function resolveVpAsrEngine(
     switches: AsrRuntimeSwitches,
     override: string | undefined = process.env.ASR_ENGINE,
+    transcribeOptions: TranscribeOnlyOptionSettings = vpTranscribeOnlySettings(),
 ): AsrEngineName {
-    const requested =
-        (override || '').trim().toLowerCase() ||
-        (switches.virtualParticipantEngineMicrovm ? 'microvm' : 'transcribe');
+    const explicit = (override || '').trim().toLowerCase();
+    const requested = explicit || (switches.virtualParticipantEngineMicrovm ? 'microvm' : 'transcribe');
     if (requested !== 'microvm') {
         return 'transcribe';
     }
+    // Info for a VP that took the deployment's default; a per-VP ASR_ENGINE
+    // override is told louder.
+    const report = (message: string): void => {
+        if (explicit) {
+            log.warn(message);
+        } else {
+            log.info(message);
+        }
+    };
     if (!isMicrovmAsrConfigured()) {
-        log.warn('[ASR] MicroVM ASR requested but this deployment has no ASR launcher configured; using Amazon Transcribe.');
+        // The shipped default selects the MicroVM engine, so on a deployment
+        // without it every VP arrives here: the expected fallback.
+        report('[ASR] MicroVM ASR requested but this deployment has no ASR launcher configured; using Amazon Transcribe.');
+        return 'transcribe';
+    }
+    const transcribeOnly = transcribeOnlyOptions(transcribeOptions);
+    if (transcribeOnly.length > 0) {
+        report(
+            `[ASR] MicroVM ASR requested, but this VP's Amazon Transcribe options use ${transcribeOnly.join(', ')}, ` +
+                'which the MicroVM engine does not offer; using Amazon Transcribe.',
+        );
         return 'transcribe';
     }
     return 'microvm';

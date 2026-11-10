@@ -443,7 +443,7 @@ deployment with a data-residency requirement can check each one.
 
 LMA's own resources all run in the AWS Region the stack is deployed to: the
 WebSocket transcriber, the Virtual Participant tasks, the Lambda functions, the
-optional on-demand speech engine (see [MicroVM ASR](microvm-asr.md)), and the
+ASR MicroVM speech engine where it is deployed (see [MicroVM ASR](microvm-asr.md)), and the
 DynamoDB tables, S3 buckets, Kinesis stream and AppSync API that store and carry
 meeting content. The web UI is served through CloudFront, whose edge locations
 cache the UI's static files only; meeting content reaches the browser from the

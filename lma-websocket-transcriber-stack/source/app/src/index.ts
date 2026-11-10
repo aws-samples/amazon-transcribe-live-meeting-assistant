@@ -445,7 +445,10 @@ const startTranscription = async (
     // Runtime config decides the deployment default, so the engine can be switched
     // from the Transcription Engine section of the Configuration page without redeploying the task.
     const runtime = await getAsrRuntimeConfig(server_);
-    if (resolveAsrEngine(socketData.callMetadata, server_, runtime) === 'microvm') {
+    // The meeting's Amazon Transcribe options, resolved once at its start: one
+    // that only Amazon Transcribe offers keeps the meeting on it.
+    const { transcription } = socketData.sessionSettings ?? (await getSessionSettings(server_.log));
+    if (resolveAsrEngine(socketData.callMetadata, server_, runtime, transcription) === 'microvm') {
         if (await startMicrovmAsr(socketData, server_)) {
             noteTranscriptionEngine(socketData, 'microvm', server_);
             // startTranscribe is the ONLY consumer of audioInputStream, and it is not
@@ -699,7 +702,7 @@ const onTextMessage = async (
         const captureContext: CaptureContext = {
             CaptureSource: captureSourceFor(callMetaData.clientType),
             ...transcriptionContextFor(
-                resolveAsrEngine(callMetaData, undefined, asrRuntime),
+                resolveAsrEngine(callMetaData, undefined, asrRuntime, sessionSettings.transcription),
                 diarizationSettingsFor(callMetaData, sessionSettings.transcription.showSpeakerLabel),
                 sessionSettings.transcription
             ),

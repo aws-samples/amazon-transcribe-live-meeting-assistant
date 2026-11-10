@@ -24,7 +24,7 @@ title: "LMA Documentation"
 ### Core Features
 
 - [Transcription & Translation](transcription-and-translation.md) — Real-time transcription, speaker attribution, multi-language support, live translation, PII redaction, custom vocabulary, audio recording
-- [On-demand ASR & Speaker Diarization (MicroVM)](microvm-asr.md) — Experimental alternative to Amazon Transcribe streaming: per-voice speaker labels from an ASR + diarization engine on AWS Lambda MicroVMs, with a swappable model
+- [On-demand ASR & Speaker Diarization (MicroVM)](microvm-asr.md) — The default transcription engine, with Amazon Transcribe as the alternative and fallback: per-voice speaker labels from an ASR + diarization engine on AWS Lambda MicroVMs, with a swappable model
 - [Voice Enrollment (Speaker Recognition)](voice-enrollment.md) — Beta, optional and off by default: people enroll their own voice, with first-party consent and an append-only consent log, so they are labelled by name from their first word
 - [Meeting Assistant](meeting-assistant.md) — Strands agent chat interface, built-in tools, Knowledge Base, Guardrails, model selection, wake phrase, custom prompts
 - [Transcript Summarization](transcript-summarization.md) — Automatic and on-demand summaries, regenerating and editing a stored summary, custom prompt templates, Lambda-based summarization

@@ -455,7 +455,7 @@ the parameter says. The resources that do not follow these rules are listed in
   AppSync creates and the stack does not own. The log groups go on expiring their
   entries under their retention periods.
 - Kept only with `true`: the MicroVM log groups of the Virtual Participant and of
-  the on-demand speech engine.
+  the ASR MicroVM speech engine.
 - A deployment upgraded from a version before 0.4.0 may also have older log groups
   that the stack does not own.
 
