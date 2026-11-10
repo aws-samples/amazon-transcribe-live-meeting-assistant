@@ -150,6 +150,21 @@ def posixify_filename(filename: str) -> str:
     return re.sub(r"_+$", "", name)
 
 
+def key_in_folder(key: Any, folder: str) -> bool:
+    """True when ``key`` names an object inside ``folder``, a prefix ending in "/".
+
+    The rule is applied to the key's "/"-separated segments: every segment must
+    be non-empty and neither "." nor "..". A meeting's folder name is its CallId
+    made safe as a file name, which keeps dots, so a run of dots inside a
+    segment is part of a name and is accepted. The same helper is copied into
+    each function that checks such a key; lma-ai-stack/test/
+    test_key_in_folder_copies_agree.py keeps the copies identical.
+    """
+    if not isinstance(key, str) or not folder.endswith("/") or not key.startswith(folder):
+        return False
+    return all(segment not in ("", ".", "..") for segment in key.split("/"))
+
+
 def evidence_folder(call_id: str) -> str:
     return f"{EVIDENCE_PREFIX}{posixify_filename(call_id)}/"
 
@@ -341,7 +356,7 @@ def sign(key: Any, call_id: str) -> Optional[str]:
     """A link to an evidence image, only for one in the meeting's own folder."""
     if not isinstance(key, str) or not RECORDINGS_BUCKET:
         return None
-    if not key.startswith(evidence_folder(call_id)) or ".." in key:
+    if not key_in_folder(key, evidence_folder(call_id)):
         return None
     return S3.generate_presigned_url(
         "get_object",
@@ -756,7 +771,7 @@ def add_meeting_consent_evidence(caller: Mapping[str, Any], data: Mapping[str, A
     if not caller["is_backend"]:
         raise refuse(caller, call_id, "add evidence")
     key = required_text(data.get("S3Key"), "S3Key", MAX_KEY_LENGTH)
-    if not key.startswith(evidence_folder(call_id)) or ".." in key:
+    if not key_in_folder(key, evidence_folder(call_id)):
         raise BadRequestError(f"S3Key must be under {evidence_folder(call_id)}")
     kind = one_of(data.get("Kind"), EVIDENCE_KINDS, "Kind", default="screenshot")
 
@@ -847,7 +862,7 @@ def verify_meeting_consent_evidence(caller: Mapping[str, Any], data: Mapping[str
     key = entry.get("S3Key")
     if settings["keepEvidenceScreenshots"]:
         return answer
-    if not isinstance(key, str) or not key.startswith(evidence_folder(call_id)) or ".." in key:
+    if not key_in_folder(key, evidence_folder(call_id)):
         LOGGER.error(
             "evidence %s of %s is not in the meeting's folder; not deleted", evidence_id, call_id
         )

@@ -215,6 +215,15 @@ export const withSpeakerMode = (identities, key, mode, now = new Date().toISOStr
 };
 
 /**
+ * Whether a group's voices can be shown either way, so it is offered the
+ * One person / Several people choice: it has two or more voices, or it is shown
+ * as several people. The chips above the transcript and the Speakers panel
+ * apply the same test.
+ */
+export const offersModeChoice = (group) =>
+  Boolean(group) && (group.voices.length >= 2 || group.mode === SEVERAL_PEOPLE);
+
+/**
  * The Transcript tab's speaker chips, grouped by platform name.
  *
  * `segments` are the transcript's speech lines as resolved for display, in
@@ -224,7 +233,9 @@ export const withSpeakerMode = (identities, key, mode, now = new Date().toISOStr
  *
  *  - `{ type: 'group', key, base, mode, group, chips }` for a name whose voices
  *    can be shown either way -- one with two or more voices, or one shown as
- *    several people -- with one chip per name shown under it (`{ name, keys }`);
+ *    several people -- with one chip per name shown under it (`{ name, keys,
+ *    unnamed }`, `unnamed` when the name is the 'Voice N' placeholder rather
+ *    than one somebody gave, from the segment's `speakerUnnamed`);
  *  - `{ type: 'name', name, keys }` for every other speaker.
  */
 export const speakerChipLayout = (segments, groups) => {
@@ -237,7 +248,7 @@ export const speakerChipLayout = (segments, groups) => {
   (segments ?? []).forEach((segment) => {
     const name = `${segment.speaker ?? ''}`.trim();
     const group = segment.speakerGroup ? own(groups, segment.speakerGroup) : undefined;
-    if (group && (group.voices.length >= 2 || group.mode === SEVERAL_PEOPLE)) {
+    if (offersModeChoice(group)) {
       let entry = byGroup.get(group.key);
       if (!entry) {
         entry = { type: 'group', key: group.key, base: group.base, mode: group.mode, group, chips: [] };
@@ -246,7 +257,7 @@ export const speakerChipLayout = (segments, groups) => {
       }
       let chip = entry.chips.find((c) => c.name === name);
       if (!chip) {
-        chip = { name, keys: [] };
+        chip = { name, keys: [], unnamed: segment.speakerUnnamed === true };
         entry.chips.push(chip);
       }
       addKey(chip, segment.speakerKey);
@@ -263,7 +274,7 @@ export const speakerChipLayout = (segments, groups) => {
   return entries;
 };
 
-/** Why a group is shown as it is, for the toggle's tooltip. */
+/** Why a group is shown as it is, for the One person / Several people menu's tooltip. */
 export const describeSpeakerMode = (group) => {
   if (!group) return '';
   if (group.override) return 'Chosen for this meeting.';

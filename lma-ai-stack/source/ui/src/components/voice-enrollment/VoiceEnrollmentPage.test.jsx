@@ -82,6 +82,19 @@ const renderWith = (initial, ...rest) => {
   render(<VoiceEnrollmentPage />);
 };
 
+describe('the page header', () => {
+  it('marks the Enroll My Voice page Beta', async () => {
+    renderWith(state());
+    await waitFor(() => expect(screen.getByText('Your voice')).toBeTruthy());
+    expect(screen.getByText('Beta')).toBeTruthy();
+  });
+
+  it('says enrollment needs the on-demand speech engine', async () => {
+    renderWith(state());
+    await waitFor(() => expect(screen.getByText(/on-demand \(MicroVM\) speech engine/)).toBeTruthy());
+  });
+});
+
 describe('before anybody has agreed', () => {
   it('shows the terms in full, as given', async () => {
     // Rendered as supplied rather than summarised: a summary is not what the

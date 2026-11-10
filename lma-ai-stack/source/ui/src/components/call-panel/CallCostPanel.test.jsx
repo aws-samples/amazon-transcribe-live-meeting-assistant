@@ -77,6 +77,60 @@ describe('CallCostPanel', () => {
     expect(screen.getByText('Total: $0.2468')).toBeTruthy();
   });
 
+  it('shows units, unit price and cost per line, and where the price came from', async () => {
+    const sourced = {
+      ...ESTIMATE,
+      Items: [
+        {
+          ...ESTIMATE.Items[0],
+          PriceOrigin: 'shipped',
+          ShippedUnitPrice: 0.0001667,
+          PriceSource: 'AWS Price List API (offer transcribe, usage type USE1-StreamingAudio, read 2026-11-09)',
+          PriceSourceUrl: 'https://aws.amazon.com/transcribe/pricing/',
+        },
+        ESTIMATE.Items[1],
+      ],
+    };
+    render(<CallCostPanel callId="Meeting-1" loadCost={vi.fn().mockResolvedValue(sourced)} />);
+    await waitFor(() => expect(screen.getByText('$0.2468 estimated')).toBeTruthy());
+    await open();
+    expect(screen.getByText('Usage')).toBeTruthy();
+    expect(screen.getByText('× Unit price')).toBeTruthy();
+    expect(screen.getByText('= Estimated cost')).toBeTruthy();
+    expect(screen.getByText('1,480 seconds')).toBeTruthy();
+    expect(screen.getByText('$0.0001667')).toBeTruthy();
+    expect(screen.getByTitle('1,480 seconds × $0.0001667 = $0.2468')).toBeTruthy();
+    fireEvent.click(screen.getByText('AWS Price List API'));
+    expect(await screen.findByText(/usage type USE1-StreamingAudio, read 2026-11-09/)).toBeTruthy();
+    expect(screen.getByText('Pricing page').closest('a').getAttribute('href')).toBe(
+      'https://aws.amazon.com/transcribe/pricing/',
+    );
+  });
+
+  it("shows a price set in the configuration as the administrator's, beside the shipped one", async () => {
+    const custom = {
+      ...ESTIMATE,
+      CustomPriceCount: 1,
+      PriceProfile: 'negotiated',
+      Items: [
+        {
+          ...ESTIMATE.Items[0],
+          UnitPrice: 0.0001,
+          Cost: 0.148,
+          PriceOrigin: 'custom',
+          ShippedUnitPrice: 0.0001667,
+          PriceSource: 'Set in the negotiated configuration profile. The shipped price is $0.0001667.',
+        },
+      ],
+    };
+    render(<CallCostPanel callId="Meeting-1" loadCost={vi.fn().mockResolvedValue(custom)} />);
+    await waitFor(() => expect(screen.getByText('$0.2468 estimated')).toBeTruthy());
+    await open();
+    expect(screen.getByText('Your price')).toBeTruthy();
+    expect(screen.getByText('shipped $0.0001667')).toBeTruthy();
+    expect(screen.getByText(/1 line is priced at a price set in the negotiated configuration profile/)).toBeTruthy();
+  });
+
   it('says the total is incomplete when a line has no price', async () => {
     const loadCost = vi.fn().mockResolvedValue({
       ...ESTIMATE,

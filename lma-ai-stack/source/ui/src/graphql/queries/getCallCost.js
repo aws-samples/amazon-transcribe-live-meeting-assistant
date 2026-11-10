@@ -31,8 +31,14 @@ export default /* GraphQL */ `
         Priced
         Note
         Details
+        PriceOrigin
+        PriceSource
+        PriceSourceUrl
+        ShippedUnitPrice
       }
       UnpricedCount
+      CustomPriceCount
+      PriceProfile
       RecordCount
       PricesAsOf
       PriceSource

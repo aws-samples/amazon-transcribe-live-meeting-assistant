@@ -9,20 +9,22 @@ Serves three fields, dispatching on the field name AppSync reports:
 
 ``Query.getCallCost(CallId)``
     The itemised estimate for one meeting, computed on every read from the
-    meeting's metering records and the price table in force. Answered for the
-    same callers ``getCall`` answers: an Admin, the meeting's owner, somebody it
-    is shared with, or a backend role signing with IAM.
+    meeting's metering records and the price table in force. Each line names
+    where its unit price came from: the shipped table's source, or the active
+    profile with the shipped price beside it. Answered for the same callers
+    ``getCall`` answers: an Admin, the meeting's owner, somebody it is shared
+    with, or a backend role signing with IAM.
 
 ``Query.getCallPricing``
-    The price table for the calling Admin: the shipped baseline, the Admin's
-    changes over it, the merged result, and the version to send back on save.
-    Admin only.
+    The price table for the calling Admin: the shipped baseline, what the
+    active profile stores, the merged result, and the version to send back on
+    save. Admin only.
 
 ``Mutation.updateCallPricing(input)``
-    Store the administrator's changes as the ``call_pricing`` section of the
-    ``custom`` profile. The section is a delta over the shipped table, so a
-    release that updates a price still reaches every price nobody changed.
-    Admin only, and conditional on the `Version` getCallPricing returned.
+    Store the administrator's prices as the ``call_pricing`` section of the
+    active profile, as the Configuration page's Meeting Cost Prices section
+    does. Admin only, refused while the default or a Managed profile is active,
+    and conditional on the `Version` getCallPricing returned.
 
 Why on read rather than at meeting end: the usage of a meeting keeps arriving
 after it ends -- the summary is generated after the END event, the Virtual
@@ -46,6 +48,7 @@ from lma_config import (  # from the configuration layer
     CALL_PRICING,
     ConcurrentModification,
     ConfigurationStore,
+    ProfileReadOnly,
     deep_merge,
 )
 from lma_metering import estimate_call_cost, read_records
@@ -172,23 +175,43 @@ def _require_admin(caller: Mapping[str, Any]) -> None:
 def get_call_cost(call_id: str) -> Dict[str, Any]:
     """The estimate for one meeting, in the ``CallCost`` GraphQL shape."""
     records = read_records(DYNAMODB, EVENT_SOURCING_TABLE, call_id)
-    pricing = CONFIG_STORE.get_section(CALL_PRICING.name).values
-    result = estimate_call_cost(call_id, records, pricing, DEPLOYMENT_REGION)
+    section = CONFIG_STORE.get_section(CALL_PRICING.name)
+    # The shipped table beside the one in force, so each line can say whether its
+    # price is the release's (with that price's source) or the active profile's.
+    result = estimate_call_cost(
+        call_id,
+        records,
+        section.values,
+        DEPLOYMENT_REGION,
+        shipped=section.baseline_values or section.values,
+        profile=section.active_profile,
+    )
     LOGGER.info(
-        "estimated %s: %d record(s), %d line(s), %d unpriced, total %s",
+        "estimated %s: %d record(s), %d line(s), %d unpriced, %d at a profile's price, total %s",
         call_id,
         result["RecordCount"],
         len(result["Items"]),
         result["UnpricedCount"],
+        result["CustomPriceCount"],
         result["TotalCost"],
     )
     return result
 
 
+def _active_profile_name() -> str:
+    """The profile estimates read now: the active one, else ``custom``.
+
+    ``custom`` is what a deployment that has never chosen a profile reads and
+    writes, as it did before profiles could be named.
+    """
+    return CONFIG_STORE.active_profile_name(consistent_read=True) or OPERATOR_PROFILE
+
+
 def get_call_pricing() -> Dict[str, Any]:
     """The table for an Admin. Read from the stored records, never the cache."""
     baseline = CONFIG_STORE.read_profile("default", consistent_read=True)
-    profile = CONFIG_STORE.read_profile(OPERATOR_PROFILE, consistent_read=True)
+    name = _active_profile_name()
+    profile = CONFIG_STORE.read_profile(name, consistent_read=True)
     default_section = baseline.body.get(CALL_PRICING.name) or {}
     custom_section = profile.body.get(CALL_PRICING.name) or {}
     # The merge the store applies on every read, so "effective" is what an
@@ -198,6 +221,7 @@ def get_call_pricing() -> Dict[str, Any]:
         "Custom": custom_section,
         "Effective": deep_merge(default_section, custom_section),
         "Version": profile.version,
+        "Profile": name,
         "UpdatedBy": profile.updated_by or None,
         "UpdatedAt": profile.updated_at or None,
         "Region": DEPLOYMENT_REGION,
@@ -226,8 +250,10 @@ def update_call_pricing(input_data: Mapping[str, Any], caller: Mapping[str, Any]
     expected = input_data.get("ExpectedVersion")
     if expected is None:
         raise ValueError("ExpectedVersion is required: send the Version getCallPricing returned")
+    # Into the active profile, as the other single-section saves do; refused
+    # (ProfileReadOnly) while the default or a Managed profile is active.
     version = CONFIG_STORE.write_section(
-        OPERATOR_PROFILE,
+        CONFIG_STORE.editable_active_profile(),
         CALL_PRICING.name,
         delta,
         updated_by=str(caller["actor"] or caller["subject"] or "unknown"),
@@ -266,3 +292,5 @@ def handler(event: Dict[str, Any], context: Any) -> Optional[Dict[str, Any]]:
         return update_call_pricing(arguments.get("input") or {}, caller)
     except ConcurrentModification as error:
         raise Exception(f"Conflict: {error}") from error  # pylint: disable=broad-exception-raised
+    except ProfileReadOnly as error:
+        raise Exception(f"Refused: {error}") from error  # pylint: disable=broad-exception-raised

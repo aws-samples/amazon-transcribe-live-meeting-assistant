@@ -49,6 +49,7 @@ import { DONE_STATUS } from '../common/get-recording-status';
 import DiagnoseButton from '../troubleshooting/DiagnoseButton';
 import { formatDuration, formatMeetingStart, meetingTitle } from '../common/meeting-header';
 import { consentSummary } from '../common/meeting-context';
+import { parseSummaryState, summaryStatusText } from '../common/summary-state';
 import { CallCostBreakdown, costSummaryText } from './CallCostPanel';
 import { ASSISTANT_PANEL_ID } from './MeetingAssistantPanel';
 import {
@@ -134,6 +135,7 @@ const MeetingHeader = ({
   getCallDetailsFromCallIds = undefined,
   setToolsOpen = undefined,
   onShowSpeakers = undefined,
+  onSelectSpeaker = undefined,
   assistant = undefined,
 }) => {
   const { calls } = useCallsContext();
@@ -145,6 +147,8 @@ const MeetingHeader = ({
   const title = meetingTitle(item.callId);
   const started = formatMeetingStart(item.initiationTimeStamp);
   const hasSummary = Boolean(item.callSummaryText);
+  const summaryUnavailableReason =
+    summaryStatusText(parseSummaryState(item.callSummaryState)) || 'This meeting has no summary yet.';
   // As before the move: a transcript is offered for download once the meeting
   // has ended, and not after the Retention section has deleted it.
   const canDownloadTranscript = item.recordingStatusLabel === DONE_STATUS && !item.transcriptDeletedAt;
@@ -160,7 +164,7 @@ const MeetingHeader = ({
         id: `summary:${entry.id}`,
         ariaLabel: `Summary: ${entry.text}`,
         disabled: !hasSummary,
-        disabledReason: hasSummary ? undefined : 'This meeting has no summary yet.',
+        disabledReason: hasSummary ? undefined : summaryUnavailableReason,
       })),
     },
     {
@@ -315,11 +319,26 @@ const MeetingHeader = ({
             <Box variant="span" color="text-body-secondary" fontSize="body-s">
               Speakers
             </Box>
-            {shownSpeakers.map((speaker) => (
-              <Badge key={speaker.key} color="grey">
-                {speaker.label}
-              </Badge>
-            ))}
+            {shownSpeakers.map((speaker) =>
+              // A speaker's chip opens that speaker in the Speakers panel on
+              // the Details tab, where its voices are named.
+              onSelectSpeaker ? (
+                <button
+                  key={speaker.key}
+                  type="button"
+                  className="meeting-speaker-chip"
+                  aria-label={`${speaker.label}: show in the Speakers panel`}
+                  title="Show in the Speakers panel"
+                  onClick={() => onSelectSpeaker(speaker.key)}
+                >
+                  <Badge color="grey">{speaker.label}</Badge>
+                </button>
+              ) : (
+                <Badge key={speaker.key} color="grey">
+                  {speaker.label}
+                </Badge>
+              ),
+            )}
             {hiddenSpeakers > 0 && (
               <Box variant="span" color="text-body-secondary" fontSize="body-s">
                 {`+${hiddenSpeakers} more`}
@@ -342,6 +361,7 @@ MeetingHeader.propTypes = {
   item: PropTypes.object.isRequired,
   durationMillis: PropTypes.number.isRequired,
   platform: PropTypes.string,
+  /** One per name the transcript shows (headerSpeakers): `key` is the voice the Speakers panel opens at. */
   speakers: PropTypes.arrayOf(PropTypes.shape({ key: PropTypes.string, label: PropTypes.string })),
   cost: COST_SHAPE.isRequired,
   // What useMeetingConsent returns: the consent record, for the header's
@@ -354,6 +374,8 @@ MeetingHeader.propTypes = {
   getCallDetailsFromCallIds: PropTypes.func,
   setToolsOpen: PropTypes.func,
   onShowSpeakers: PropTypes.func,
+  /** Opens one speaker in the Speakers panel, by its `key`; the chips are plain badges without it. */
+  onSelectSpeaker: PropTypes.func,
   /** The Assistant button: absent when the meeting assistant is not enabled. */
   assistant: PropTypes.shape({
     open: PropTypes.bool.isRequired,

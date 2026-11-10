@@ -269,6 +269,11 @@ def full_body(body: Mapping[str, Any], baseline: Mapping[str, Any]) -> Dict[str,
     }
 
 
+def _section_object(value: Any) -> Dict[str, Any]:
+    """A section's values when they are an object, else an empty one."""
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
 def _refuse_managed(name: str, current: "ConfigurationRecord") -> None:
     if current.exists and current.metadata.get("Managed"):
         raise ProfileReadOnly(
@@ -381,6 +386,10 @@ class ResolvedDocument:
     #: does not cache such a document: caching it would hold the empty answer
     #: for the whole of a tier's TTL after seeding had finished.
     baseline_exists: bool = True
+    #: The baseline's body alone, for a reader that has to tell a shipped value
+    #: from one a profile sets -- the cost estimate, which names a price an
+    #: administrator set as theirs rather than as the release's.
+    baseline_body: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -393,6 +402,10 @@ class ResolvedSection:
     cache_tier: CacheTier
     served_from_cache: bool
     active_profile: Optional[str]
+    #: The section as the baseline ships it, before the active profile is merged
+    #: over it. ``values`` is what readers use; this is for a reader that also
+    #: says which of those values the release supplied.
+    baseline_values: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -530,6 +543,7 @@ class ConfigurationStore:
             cache_tier=spec.cache_tier,
             served_from_cache=from_cache,
             active_profile=document.active_profile,
+            baseline_values=_section_object(document.baseline_body.get(spec.name)),
         )
 
     def get_document(self, *, consistent_read: bool = False) -> ResolvedDocument:
@@ -1849,6 +1863,7 @@ class ConfigurationStore:
             default_version=default.version,
             profile_version=profile.version,
             baseline_exists=default.exists,
+            baseline_body=default.body,
         )
 
     def _item(

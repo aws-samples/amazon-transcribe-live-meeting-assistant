@@ -25,17 +25,20 @@
  *    starts the meeting's consent, posts the notice in the chat and records
  *    that it was posted.
  * 3. It keeps the participant list current (consent-roster.ts), reads each
- *    chat reply that is consent or an objection (consent-matcher.ts) and
- *    records it, and every few seconds reads the record again, which is how an
- *    attestation or an objection entered on the meeting page reaches it.
+ *    chat reply and each spoken reply that is consent or an objection
+ *    (consent-matcher.ts) and records it, and every few seconds reads the
+ *    record again, which is how an attestation or an objection entered on the
+ *    meeting page reaches it. Spoken replies come from the transcription
+ *    service while the meeting is captured, and from the consent listener
+ *    (consent-listener.ts), which the flow runs while it withholds capture.
  * 4. It gates capture on `CaptureAllowed` in every answer, with the same switch
  *    the "LMA pause" and "LMA start" chat commands use (`details.start`), so
  *    starting later is the same path as resuming from a pause.
  * 5. When consent is granted, and on every objection, it keeps screenshots of
  *    the chat and the participant list as evidence and asks for their check.
  *
- * An objection read in the chat stops capture at once, before anything is
- * written; a reply is otherwise only acted on through the record's answer, so
+ * An objection read in the chat or heard stops capture at once, before
+ * anything is written; a reply is otherwise only acted on through the record's answer, so
  * the VP and the record never disagree about whether the meeting is captured
  * for longer than one round trip.
  */
@@ -46,6 +49,7 @@ import {
     ConsentRule,
     atLeastAsStrict,
     classifyChatReply,
+    classifySpokenReply,
     isConsentMode,
     isConsentRule,
     noticeChatMessages,
@@ -56,10 +60,11 @@ import {
     strictness,
 } from './consent-matcher.js';
 import { ConsentRoster, UNIDENTIFIED_PARTICIPANT, onParticipantSeen } from './consent-roster.js';
-import type { ConsentApi, ConsentRecord, RecordEventInput } from './consent-api.js';
+import type { ConsentApi, ConsentRecord, RecordEventInput, ReplySource } from './consent-api.js';
 import { ConsentApiError } from './consent-api.js';
 import { consentEvidenceKey, EvidenceShot } from './consent-evidence.js';
-import { CONSENT_HELP_LINE, setConsentHelpActive } from './consent-help.js';
+import { CONSENT_HELP_LINE, CONSENT_HELP_SPOKEN_LINE, setConsentHelpActive } from './consent-help.js';
+import { onSpokenUtterance } from './spoken-replies.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('meeting-consent');
@@ -75,6 +80,8 @@ export interface ConsentSettings {
     objectionPhrases: string[];
     allowPerMeetingOverride: boolean;
     leaveOnObjection: boolean;
+    /** Whether replies said aloud are read too (docs/meeting-consent.md, "Spoken replies"). */
+    readSpokenReplies: boolean;
 }
 
 /**
@@ -104,6 +111,7 @@ export const DEFAULT_CONSENT_SETTINGS: ConsentSettings = {
     ],
     allowPerMeetingOverride: true,
     leaveOnObjection: false,
+    readSpokenReplies: true,
 };
 
 /**
@@ -129,6 +137,8 @@ export function effectiveConsentSettings(values: Record<string, unknown> | null 
         allowPerMeetingOverride:
             typeof v.allowPerMeetingOverride === 'boolean' ? v.allowPerMeetingOverride : DEFAULT_CONSENT_SETTINGS.allowPerMeetingOverride,
         leaveOnObjection: typeof v.leaveOnObjection === 'boolean' ? v.leaveOnObjection : DEFAULT_CONSENT_SETTINGS.leaveOnObjection,
+        readSpokenReplies:
+            typeof v.readSpokenReplies === 'boolean' ? v.readSpokenReplies : DEFAULT_CONSENT_SETTINGS.readSpokenReplies,
     };
 }
 
@@ -201,6 +211,11 @@ export interface CaptureControl {
     startVideo(): Promise<void>;
     /** Stops the screen recording for the rest of the meeting, keeping what it recorded. */
     stopVideo(): Promise<void>;
+    /**
+     * Starts (true) or stops (false) listening for spoken replies while capture
+     * is withheld (consent-listener.ts). Stopped before capture is released.
+     */
+    listen?(on: boolean): void;
 }
 
 /** What a platform handler gives the flow once it is in the meeting. */
@@ -213,7 +228,10 @@ export interface ConsentMeetingIo {
     readRoster?(): Promise<string[] | null>;
     /** Leaves the meeting after an objection, when the deployment says to. */
     leave(objector: string): void;
-    /** The platform shows no chat sender (the Teams browser join), so no consent can be attributed. */
+    /**
+     * The platform shows no chat sender (the Teams browser join), so a consent
+     * typed in the chat cannot be attributed; one said aloud can.
+     */
     sendersHidden?: boolean;
 }
 
@@ -244,8 +262,15 @@ export interface ConsentFlowDeps {
     noticeRepostMs?: number;
 }
 
-/** Posted after every notice: what happens to an objection made out loud. */
-export const SPOKEN_OBJECTION_LINE = (lmaUser: string): string =>
+/**
+ * Posted after every notice: where replies are read. Spoken replies count only
+ * when addressed to LMA, so the line says how to address it.
+ */
+export const REPLY_CHANNELS_LINE = (consentPhrase: string, objectionPhrase: string): string =>
+    `Replies may be typed in this chat, or said aloud starting with "LMA": say "LMA, ${consentPhrase}" or "LMA, ${objectionPhrase}".`;
+
+/** Posted after every notice where spoken replies are not read. */
+export const CHAT_ONLY_REPLIES_LINE = (lmaUser: string): string =>
     `Live Meeting Assistant reads replies in this chat; an objection made out loud takes effect when ${lmaUser} records it in LMA.`;
 
 /** Images kept per meeting by this flow; the record keeps 30. */
@@ -262,6 +287,13 @@ const MAX_CONSENT_RECORD_ATTEMPTS = 20;
 
 /** A reply repeated by the same sender within this long is one reply. */
 const DUPLICATE_REPLY_MS = 5000;
+
+/**
+ * An objection that arrives by the other route (said aloud and typed in the
+ * chat) within this long of one already acted on, while capture is still
+ * stopped by it, is the same objection.
+ */
+const CROSS_SOURCE_OBJECTION_MS = 30_000;
 
 /** How a reply's sender is recorded when the platform did not say. */
 export const UNKNOWN_SENDER = 'Unidentified participant';
@@ -321,6 +353,12 @@ export class MeetingConsentFlow {
 
     private readonly recentReplies = new Map<string, number>();
 
+    /** The objections acted on lately, by participant and route; see CROSS_SOURCE_OBJECTION_MS. */
+    private recentObjections: Array<{ key: string; source: ReplySource; at: number }> = [];
+
+    /** Whether the flow has asked for spoken replies to be listened for. */
+    private listening = false;
+
     private evidenceUsed = 0;
 
     private lastParticipants: string | null = null;
@@ -375,6 +413,15 @@ export class MeetingConsentFlow {
      */
     private offChoicePending = false;
 
+    /**
+     * Whether replies said aloud are read: only when the Meeting Consent
+     * section was read and says so. A section that could not be read is not
+     * taken to allow sending the meeting audio anywhere before consent.
+     */
+    get readsSpokenReplies(): boolean {
+        return this.settingsRead?.readSpokenReplies === true;
+    }
+
     private get eachParticipant(): boolean {
         return this.plan.mode === 'opt_in' && this.plan.rule === 'each_participant';
     }
@@ -424,6 +471,7 @@ export class MeetingConsentFlow {
             this.deps.capture.hold();
         }
         this.stopTimers.push(onParticipantSeen((name) => this.noteSpeaker(name)));
+        this.stopTimers.push(onSpokenUtterance((heard) => void this.handleSpeech(heard.speaker, heard.text)));
         return { holdCapture: hold, deferVideo: hold };
     }
 
@@ -431,7 +479,7 @@ export class MeetingConsentFlow {
     attach(io: ConsentMeetingIo): void {
         if (!this.active || this.io) return;
         this.io = io;
-        if (!this.offChoicePending) setConsentHelpActive(true);
+        if (!this.offChoicePending) setConsentHelpActive(true, this.readsSpokenReplies);
         this.begun = this.begin().catch((error) => log.error('[consent] the consent flow failed to start:', error));
         if (this.deps.every) {
             this.stopTimers.push(this.deps.every(() => void this.pollOnce(), this.deps.pollMs ?? 10_000));
@@ -441,6 +489,7 @@ export class MeetingConsentFlow {
     /** The meeting is over. */
     stop(): void {
         this.stopped = true;
+        this.syncListening();
         setConsentHelpActive(false);
         for (const stopTimer of this.stopTimers) stopTimer();
         this.stopTimers = [];
@@ -460,6 +509,8 @@ export class MeetingConsentFlow {
             }
             await this.writeDetail('Waiting for consent…');
         }
+        // In the meeting now, so a reply said aloud can be heard.
+        this.syncListening();
         if (this.held) {
             // The meeting record has to exist before its consent can start, and
             // a withheld meeting has not started transcription, which is what
@@ -562,7 +613,7 @@ export class MeetingConsentFlow {
                 return;
             }
             // Refused, or the record was already in another mode: run that.
-            setConsentHelpActive(true);
+            setConsentHelpActive(true, this.readsSpokenReplies);
         }
         let record = started;
         try {
@@ -604,6 +655,7 @@ export class MeetingConsentFlow {
         const wasHeld = this.held;
         this.plan = { mode: 'off', rule: null, requested: {} };
         this.held = false;
+        this.syncListening();
         if (wasHeld && !this.userPaused) {
             this.deps.capture.release();
             await this.say(this.deps.startMessages());
@@ -630,10 +682,14 @@ export class MeetingConsentFlow {
         if (this.plan.mode === 'opt_in' && this.plan.rule === 'owner_attests') {
             messages.push(`Recording starts when ${this.deps.lmaUser} confirms in LMA that everyone has agreed.`);
         }
-        // The notice texts are shared with every capture method, and may invite
-        // a spoken objection; this VP reads the chat only, so it says how one
-        // made out loud is acted on.
-        messages.push(SPOKEN_OBJECTION_LINE(this.deps.lmaUser));
+        // The notice texts are shared with every capture method, which read
+        // replies in different places; this VP reads the chat, and listens
+        // where the deployment says to.
+        messages.push(
+            this.readsSpokenReplies
+                ? REPLY_CHANNELS_LINE(this.settings.consentPhrases[0] || 'I consent', this.settings.objectionPhrases[0] || 'I object')
+                : CHAT_ONLY_REPLIES_LINE(this.deps.lmaUser),
+        );
         if (this.held && this.noticePosted && this.eachParticipant) {
             messages.push('Recording and transcription are paused until everyone present has consented.');
         }
@@ -659,7 +715,11 @@ export class MeetingConsentFlow {
     /** Whether `text` is something this flow posted (for handlers that see their own messages). */
     isOwnMessage(text: string): boolean {
         const normalized = normalizeReplyText(text || '');
-        return this.posted.has(normalized) || normalized === normalizeReplyText(CONSENT_HELP_LINE);
+        return (
+            this.posted.has(normalized) ||
+            normalized === normalizeReplyText(CONSENT_HELP_LINE) ||
+            normalized === normalizeReplyText(CONSENT_HELP_SPOKEN_LINE)
+        );
     }
 
     /** Runs one API call after the ones before it, and applies the record it answers with. */
@@ -731,6 +791,7 @@ export class MeetingConsentFlow {
                 if (this.deps.capture.isOn()) this.deps.capture.hold();
                 log.always(`[consent] capture withheld: ${latestReason(record)}`);
             }
+            this.syncListening();
             await this.stopVideo();
             await this.writeDetail(
                 this.objectionAwaitingRecord ? 'Not recording: a participant objected to recording.' : this.detailFor(record),
@@ -739,6 +800,9 @@ export class MeetingConsentFlow {
         }
         if (this.held) {
             this.held = false;
+            // Closed before capture starts, so nothing heard while consent was
+            // awaited reaches the transcript.
+            this.syncListening();
             log.always(`[consent] capture allowed: ${latestReason(record)}`);
             const lines = [this.grantLine(record)];
             if (this.userPaused) {
@@ -769,17 +833,19 @@ export class MeetingConsentFlow {
         if (this.plan.mode === 'opt_in' && this.plan.rule === 'owner_attests') {
             return 'Waiting for consent: the meeting owner has not yet confirmed in LMA that everyone agreed.';
         }
-        if (this.io?.sendersHidden) {
-            return 'Waiting for consent: this meeting platform does not show LMA who sent a chat message, so each participant\'s consent cannot be confirmed. Choose the owner-attests rule for meetings on it.';
-        }
         // Only once the handler has had time to report a count: until its
         // first reading every platform looks like one that gives none.
         if (this.roster.seats === null && !this.roster.rosterIsComplete && this.clock() - this.attachedAt >= COUNT_GRACE_MS) {
             return 'Waiting for consent: this meeting platform does not show LMA how many people are present, so each participant\'s consent cannot be confirmed.';
         }
+        if (this.io?.sendersHidden && !this.readsSpokenReplies) {
+            return 'Waiting for consent: this meeting platform does not show LMA who sent a chat message, so each participant\'s consent cannot be confirmed. Choose the owner-attests rule for meetings on it, or turn on reading spoken replies.';
+        }
         const waiting = waitingFor(record);
-        if (waiting.length === 0) return 'Waiting for consent: no participants are listed yet.';
-        return `Waiting for consent: ${waiting.length} of ${(record.Participants ?? []).length} participants present have not consented yet.`;
+        // Where the chat shows no sender, consent can only be given aloud.
+        const aloud = this.io?.sendersHidden ? ' On this meeting platform consent is given aloud ("LMA, I consent"), not in the chat.' : '';
+        if (waiting.length === 0) return `Waiting for consent: no participants are listed yet.${aloud}`;
+        return `Waiting for consent: ${waiting.length} of ${(record.Participants ?? []).length} participants present have not consented yet.${aloud}`;
     }
 
     private async writeDetail(detail: string | null): Promise<void> {
@@ -859,34 +925,104 @@ export class MeetingConsentFlow {
         }
         const decision = classifyChatReply(text, this.settings.consentPhrases, this.settings.objectionPhrases);
         if (!decision) return false;
+        await this.onDecision(sender, decision, text, 'chat');
+        return true;
+    }
+
+    /**
+     * One final utterance heard in the meeting, from the transcription service
+     * while the meeting is captured or from the consent listener while consent
+     * is awaited, attributed to the participant the VP showed speaking (null
+     * when it cannot name one). Read as a chat message is, the whole utterance
+     * being the reply (classifySpokenReply). Answers the decision read in it,
+     * or null for ordinary speech, which is dropped here: not kept, not logged.
+     *
+     * An objection stops capture before this returns, so the caller can rely
+     * on nothing after it being captured.
+     */
+    handleSpeech(speaker: string | null, text: string | null): ConsentDecision | null {
+        if (!this.active || this.offChoicePending || !this.readsSpokenReplies || !text || !text.trim()) return null;
+        // The VP's own voice (its voice assistant) is never a reply.
+        if (this.roster.isOwnIdentity(speaker)) return null;
+        if (speaker && this.roster.isOwn(speaker)) speaker = null;
+        // A named speaker is somebody present, as one shown speaking is.
+        if (speaker && this.roster.noteSeen(speaker)) this.scheduleRosterSync();
+        const decision = classifySpokenReply(text, this.settings.consentPhrases, this.settings.objectionPhrases);
+        if (!decision) return null;
+        this.onDecision(speaker, decision, text, 'voice').catch((error) =>
+            log.error('[consent] a spoken reply could not be handled:', error),
+        );
+        return decision;
+    }
+
+    /**
+     * A reply read in the chat or heard. Nothing in it awaits before an
+     * objection has stopped capture.
+     */
+    private async onDecision(sender: string | null, decision: ConsentDecision, text: string, source: ReplySource): Promise<void> {
         // Some chat observers report one message twice; the second is dropped.
-        const duplicateKey = `${normalizeParticipantName(sender)}|${normalizeReplyText(text)}`;
+        const duplicateKey = `${source}|${normalizeParticipantName(sender)}|${normalizeReplyText(text)}`;
         const seenAt = this.recentReplies.get(duplicateKey);
         for (const [key, at] of this.recentReplies) {
             if (this.clock() - at >= DUPLICATE_REPLY_MS) this.recentReplies.delete(key);
         }
         this.recentReplies.set(duplicateKey, this.clock());
-        if (seenAt !== undefined && this.clock() - seenAt < DUPLICATE_REPLY_MS) return true;
+        if (seenAt !== undefined && this.clock() - seenAt < DUPLICATE_REPLY_MS) return;
         const named = sender && sender.trim() ? sender.trim() : null;
         if (decision === 'consent' && !named) {
             // Consent counts for a person, and this platform did not say who
-            // sent it. An objection without a sender still stops capture. Said
-            // only where a participant's consent is awaited: elsewhere a bare
-            // "I agree" is as likely to be conversation.
-            log.info('[consent] a consent reply with no sender was not recorded');
-            if (this.eachParticipant) {
-                await this.say(['Live Meeting Assistant could not tell who sent that reply, so it was not recorded as consent.']);
-            }
-            return true;
+            // sent it, or the VP could not tell who said it. An objection
+            // without a name still stops capture. Said only where a
+            // participant's consent is awaited: elsewhere a bare "I agree" is
+            // as likely to be conversation.
+            log.info(`[consent] a consent reply with no ${source === 'voice' ? 'speaker' : 'sender'} was not recorded`);
+            if (this.eachParticipant) await this.say([this.unattributedConsentLine(source)]);
+            return;
         }
         if (named && isPlaceholderName(named)) {
             // A display name that reads as one of the list's placeholders is
             // not a participant this flow can tell apart from the seat it
             // stands for; it is neither counted nor recorded as consent.
-            if (decision === 'consent') return true;
+            if (decision === 'consent') return;
         }
-        await this.onReply(named ?? UNKNOWN_SENDER, decision, text);
-        return true;
+        await this.onReply(named ?? UNKNOWN_SENDER, decision, text, source);
+    }
+
+    private unattributedConsentLine(source: ReplySource): string {
+        if (source === 'voice') {
+            return 'Live Meeting Assistant heard consent said aloud but could not tell who said it, so it was not recorded.';
+        }
+        const phrase = this.settings.consentPhrases[0] || 'I consent';
+        return (
+            'Live Meeting Assistant could not tell who sent that reply, so it was not recorded as consent.' +
+            (this.io?.sendersHidden && this.readsSpokenReplies ? ` Say "LMA, ${phrase}" aloud instead.` : '')
+        );
+    }
+
+    /**
+     * Whether an objection is one already acted on that arrived by the other
+     * route: said aloud and typed in the chat by the same participant, or with
+     * either unnamed, while capture is still stopped by the first.
+     */
+    private isEchoedObjection(key: string, source: ReplySource): boolean {
+        const now = this.clock();
+        this.recentObjections = this.recentObjections.filter((o) => now - o.at < CROSS_SOURCE_OBJECTION_MS);
+        if (!this.held) return false;
+        const unknown = normalizeParticipantName(UNKNOWN_SENDER);
+        return this.recentObjections.some((o) => o.source !== source && (o.key === key || o.key === unknown || key === unknown));
+    }
+
+    /** Asks for spoken replies to be listened for exactly while capture is withheld in the meeting. */
+    private syncListening(): void {
+        const want =
+            this.readsSpokenReplies && this.held && !!this.io && !this.stopped && !this.leaving && this.plan.mode !== 'off';
+        if (want === this.listening) return;
+        this.listening = want;
+        try {
+            this.deps.capture.listen?.(want);
+        } catch (error) {
+            log.warn(`[consent] could not ${want ? 'start' : 'stop'} listening for spoken replies: ${String(error)}`);
+        }
     }
 
     private startRefusal(): string {
@@ -896,17 +1032,29 @@ export class MeetingConsentFlow {
         return 'Live Meeting Assistant cannot start until consent is given.';
     }
 
-    private async onReply(name: string, decision: ConsentDecision, text: string): Promise<void> {
+    private async onReply(name: string, decision: ConsentDecision, text: string, source: ReplySource): Promise<void> {
         const key = normalizeParticipantName(name);
         const occurredAt = new Date(this.clock()).toISOString();
-        const event: RecordEventInput = { ParticipantName: name.slice(0, 100), Decision: decision, Text: text.slice(0, 500), OccurredAt: occurredAt };
+        const event: RecordEventInput = {
+            ParticipantName: name.slice(0, 100),
+            Decision: decision,
+            Text: text.slice(0, 500),
+            OccurredAt: occurredAt,
+            Source: source,
+        };
         if (decision === 'objection') {
+            if (this.isEchoedObjection(key, source)) {
+                log.info(`[consent] an objection ${source === 'voice' ? 'heard' : 'in the chat'} repeats one already acted on; not acted on again`);
+                return;
+            }
+            this.recentObjections.push({ key, source, at: this.clock() });
             await this.onObjection(name, key, event);
             return;
         }
+        // Once per participant, whichever route it came by.
         if (this.localDecisions.get(key) === 'consent') return;
         this.localDecisions.set(key, 'consent');
-        log.always(`[consent] consent from ${JSON.stringify(name)}`);
+        log.always(`[consent] consent from ${JSON.stringify(name)} (${source})`);
         const record = await this.recordEvent(event);
         if (record && !this.held) return;
         if (record && this.eachParticipant) {
@@ -918,15 +1066,20 @@ export class MeetingConsentFlow {
     private async onObjection(name: string, key: string, event: RecordEventInput): Promise<void> {
         this.objectionsInFlight.add(event);
         this.localDecisions.set(key, 'objection');
-        log.always(`[consent] objection from ${JSON.stringify(name)}: capture stops`);
+        log.always(`[consent] objection from ${JSON.stringify(name)} (${event.Source ?? 'chat'}): capture stops`);
         // At once: nothing waits on the API.
         if (!this.held) {
             this.held = true;
             if (this.deps.capture.isOn()) this.deps.capture.hold();
         }
+        const leave = this.settings.leaveOnObjection;
+        // Decided now, so a VP about to leave never starts listening for
+        // replies it would not stay for.
+        const leaveNow = leave && !this.leaving && !!this.io;
+        if (leaveNow) this.leaving = true;
+        this.syncListening();
         await this.stopVideo();
         await this.writeDetail('Not recording: a participant objected to recording.');
-        const leave = this.settings.leaveOnObjection;
         const consentPhrase = this.settings.consentPhrases[0] || 'I consent';
         // A sender the platform did not show cannot withdraw by replying (a
         // consent needs a sender), so no such way is offered to them.
@@ -937,8 +1090,7 @@ export class MeetingConsentFlow {
         ]);
         await this.recordEvent(event, true);
         const evidence = this.queueEvidence(`when ${name} objected`);
-        if (leave && !this.leaving && this.io) {
-            this.leaving = true;
+        if (leaveNow && this.io) {
             await Promise.race([evidence, this.sleep(30_000)]);
             await this.say(this.deps.exitMessages());
             this.io.leave(name);
