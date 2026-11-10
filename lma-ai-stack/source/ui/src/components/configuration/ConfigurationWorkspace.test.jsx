@@ -105,7 +105,24 @@ const DEFAULTS = {
   call_pricing: {
     currency: 'USD',
     baseRegion: 'us-east-1',
-    regions: { default: { 'transcribe/streaming': { seconds: 0.0001667 } } },
+    regions: {
+      default: {
+        'transcribe/streaming': { seconds: 0.0001667 },
+        'bedrock/global.anthropic.claude-haiku-5-5': { inputTokens: 1e-7, outputTokens: 5e-7 },
+      },
+    },
+    sources: {
+      default: {
+        'transcribe/streaming': {
+          basis: 'price-list-api',
+          offer: 'transcribe',
+          offerVersion: '20260911124646',
+          usageType: 'USE1-StreamingAudio',
+          retrieved: '2026-11-09',
+          url: 'https://aws.amazon.com/transcribe/pricing/',
+        },
+      },
+    },
     pricedRegions: ['us-east-1'],
   },
   // What the seeder writes from the stack parameters that are these defaults.
@@ -460,14 +477,92 @@ describe('the editor', () => {
     graphqlMock.mockResolvedValueOnce(answer());
     renderEditor({ route: '/configuration/settings?section=call_pricing' });
     const prices = section(await screen.findByText('Meeting Cost Prices'));
-    // The deep link opened this section: its nested entries are listed.
-    fireEvent.click(within(prices).getByText('default'));
-    fireEvent.click(within(prices).getByText('transcribe/streaming'));
-    fireEvent.change(within(prices).getByLabelText('seconds'), { target: { value: '-1' } });
+    fireEvent.change(within(prices).getByLabelText('Price of seconds of transcribe/streaming'), {
+      target: { value: '-1' },
+    });
 
     expect(await within(prices).findAllByText(/must be at least 0; got -1/)).not.toHaveLength(0);
     expect(screen.getByText(/1 setting needs correcting/)).toBeTruthy();
     expect(pageButton('Save changes').disabled).toBe(true);
+  });
+
+  it('shows every shipped price with where it came from and its price as listed', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    renderEditor({ route: '/configuration/settings?section=call_pricing' });
+    const prices = section(await screen.findByText('Meeting Cost Prices'));
+    expect(within(prices).getByText('Amazon Transcribe prices')).toBeTruthy();
+    expect(within(prices).getByText('Amazon Bedrock prices')).toBeTruthy();
+    expect(within(prices).getByLabelText('Price of seconds of transcribe/streaming').value).toBe('0.0001667');
+    expect(within(prices).getByText('$0.010002 per minute')).toBeTruthy();
+    expect(within(prices).getByText('AWS Price List API, 2026-11-09')).toBeTruthy();
+    expect(within(prices).getByText('$0.10 per million input tokens')).toBeTruthy();
+    // A shipped price without a recorded source says so rather than implying one.
+    expect(within(prices).getAllByText('No source recorded').length).toBe(2);
+    expect(within(prices).getByText('Every price in this region is the shipped one.')).toBeTruthy();
+  });
+
+  it('marks an edited price as yours beside the shipped one, and saves only that price', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    renderEditor({ route: '/configuration/settings?section=call_pricing' });
+    const prices = section(await screen.findByText('Meeting Cost Prices'));
+    fireEvent.change(within(prices).getByLabelText('Price of seconds of transcribe/streaming'), {
+      target: { value: '0.0001' },
+    });
+    expect(within(prices).getByText('Your price')).toBeTruthy();
+    expect(within(prices).getByText('Shipped: $0.0001667')).toBeTruthy();
+    expect(within(prices).getByText('1 price differs from the shipped ones in this region.')).toBeTruthy();
+
+    fireEvent.click(pageButton('Save changes'));
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
+    graphqlMock.mockResolvedValueOnce(saved()).mockResolvedValueOnce(answer({ version: 5 }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await screen.findByText(/Saved as revision/);
+    expect(JSON.parse(callsOf('UpdateConfiguration')[0][0].variables.input.Sections)).toEqual({
+      call_pricing: { regions: { default: { 'transcribe/streaming': { seconds: 0.0001 } } } },
+    });
+  });
+
+  it('reset restores the shipped price of one line', async () => {
+    graphqlMock.mockResolvedValueOnce(
+      answer({ custom: { call_pricing: { regions: { default: { 'transcribe/streaming': { seconds: 0.0001 } } } } } }),
+    );
+    renderEditor({ route: '/configuration/settings?section=call_pricing' });
+    const prices = section(await screen.findByText('Meeting Cost Prices'));
+    expect(within(prices).getByLabelText('Price of seconds of transcribe/streaming').value).toBe('0.0001');
+    fireEvent.click(
+      within(prices).getByRole('button', { name: 'Reset the price of seconds of transcribe/streaming to the default' }),
+    );
+    expect(within(prices).getByLabelText('Price of seconds of transcribe/streaming').value).toBe('0.0001667');
+    expect(within(prices).queryByText('Your price')).toBeNull();
+  });
+
+  it('reset section to defaults restores the shipped prices, and saves an empty section', async () => {
+    graphqlMock.mockResolvedValueOnce(
+      answer({
+        custom: {
+          call_pricing: {
+            regions: {
+              default: {
+                'transcribe/streaming': { seconds: 0.0001 },
+                'bedrock/global.anthropic.claude-haiku-5-5': { inputTokens: 2e-7 },
+              },
+            },
+          },
+        },
+      }),
+    );
+    renderEditor({ route: '/configuration/settings?section=call_pricing' });
+    const prices = section(await screen.findByText('Meeting Cost Prices'));
+    expect(within(prices).getByText('2 prices differ from the shipped ones in this region.')).toBeTruthy();
+    fireEvent.click(within(prices).getByRole('button', { name: 'Reset section to defaults' }));
+    expect(within(prices).getByText('Every price in this region is the shipped one.')).toBeTruthy();
+
+    fireEvent.click(pageButton('Save changes'));
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
+    graphqlMock.mockResolvedValueOnce(saved()).mockResolvedValueOnce(answer({ version: 5 }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await screen.findByText(/Saved as revision/);
+    expect(JSON.parse(callsOf('UpdateConfiguration')[0][0].variables.input.Sections)).toEqual({ call_pricing: {} });
   });
 
   it('turns a shipped summary section off, and back on, without touching the others', async () => {
@@ -540,25 +635,22 @@ describe('the editor', () => {
     await waitFor(() => expect(screen.getByText(/The configuration was refused: .*voiceId: bad/)).toBeTruthy());
   });
 
-  it('adds a price for a region the shipped table does not list, and refuses a malformed region name', async () => {
+  it('adds a price the shipped table does not have, and refuses a malformed service name', async () => {
     graphqlMock.mockResolvedValueOnce(answer());
     renderEditor({ route: '/configuration/settings?section=call_pricing' });
     const prices = section(await screen.findByText('Meeting Cost Prices'));
-    const addRegion = (name) => {
-      fireEvent.change(within(prices).getByLabelText('New region name'), { target: { value: name } });
-      fireEvent.click(within(prices).getByRole('button', { name: 'Add the new region' }));
+    fireEvent.click(within(prices).getByRole('button', { name: 'Add a price' }));
+    const add = (service, unit, price) => {
+      fireEvent.change(within(prices).getByLabelText('Service'), { target: { value: service } });
+      fireEvent.change(within(prices).getByLabelText('Unit'), { target: { value: unit } });
+      fireEvent.change(within(prices).getByLabelText('Price'), { target: { value: price } });
+      fireEvent.click(within(prices).getByRole('button', { name: 'Add' }));
     };
-    addRegion('Mars');
-    expect(within(prices).getByText(/A region name must match/)).toBeTruthy();
-    addRegion('eu-west-1');
-    fireEvent.click(within(prices).getByText('eu-west-1'));
-    const region = within(within(prices).getByText('eu-west-1').closest('.lma-config-field'));
-    fireEvent.change(region.getByLabelText('New service name'), { target: { value: 'transcribe/streaming' } });
-    fireEvent.click(region.getByRole('button', { name: 'Add the new service' }));
-    fireEvent.click(region.getByText('transcribe/streaming'));
-    fireEvent.change(region.getByLabelText('New unit name'), { target: { value: 'seconds' } });
-    fireEvent.click(region.getByRole('button', { name: 'Add the new unit' }));
-    fireEvent.change(region.getByLabelText('seconds'), { target: { value: '0.0002' } });
+    add('Mars', 'seconds', '0.0002');
+    expect(within(prices).getByText(/A service is written <service>\/<api-or-model>/)).toBeTruthy();
+    add('transcribe/batch', 'seconds', '0.0002');
+    expect(within(prices).getByLabelText('Price of seconds of transcribe/batch').value).toBe('0.0002');
+    expect(within(prices).getByText('Added')).toBeTruthy();
 
     fireEvent.click(pageButton('Save changes'));
     const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
@@ -566,7 +658,7 @@ describe('the editor', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     await screen.findByText(/Saved as revision/);
     expect(JSON.parse(callsOf('UpdateConfiguration')[0][0].variables.input.Sections)).toEqual({
-      call_pricing: { regions: { 'eu-west-1': { 'transcribe/streaming': { seconds: 0.0002 } } } },
+      call_pricing: { regions: { default: { 'transcribe/batch': { seconds: 0.0002 } } } },
     });
   });
 

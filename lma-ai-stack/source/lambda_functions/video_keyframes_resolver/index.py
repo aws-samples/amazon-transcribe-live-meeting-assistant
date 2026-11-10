@@ -97,6 +97,21 @@ def posixify_filename(filename: str) -> str:
     return re.sub(r"_+$", "", name)
 
 
+def key_in_folder(key: Any, folder: str) -> bool:
+    """True when ``key`` names an object inside ``folder``, a prefix ending in "/".
+
+    The rule is applied to the key's "/"-separated segments: every segment must
+    be non-empty and neither "." nor "..". A meeting's folder name is its CallId
+    made safe as a file name, which keeps dots, so a run of dots inside a
+    segment is part of a name and is accepted. The same helper is copied into
+    each function that checks such a key; lma-ai-stack/test/
+    test_key_in_folder_copies_agree.py keeps the copies identical.
+    """
+    if not isinstance(key, str) or not folder.endswith("/") or not key.startswith(folder):
+        return False
+    return all(segment not in ("", ".", "..") for segment in key.split("/"))
+
+
 def caller_of(event: Mapping[str, Any]) -> Dict[str, Any]:
     """Who is asking, from the AppSync ``identity`` block only.
 
@@ -189,7 +204,7 @@ def object_key(url: Any, call_id: str) -> Optional[str]:
         return None
     key = unquote(parsed.path.lstrip("/"))
     folder = f"{KEYFRAMES_PREFIX}{posixify_filename(call_id)}/"
-    if not key.startswith(folder) or ".." in key:
+    if not key_in_folder(key, folder):
         return None
     return key
 
@@ -242,6 +257,7 @@ FIELDS = (
     "SlideText",
     "ContentKind",
     "Title",
+    "DuplicateOf",
     "Owner",
     "SharedWith",
 )

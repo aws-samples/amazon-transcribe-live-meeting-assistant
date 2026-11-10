@@ -124,6 +124,8 @@ def execute(
     if filters:
         retrieval_config["vectorSearchConfiguration"]["filter"] = {"andAll": filters}
 
+    from lma_config import knowledge_base_prompt_templates
+
     # Query Bedrock Knowledge Base
     try:
         response = kb_client.retrieve_and_generate(
@@ -133,6 +135,7 @@ def execute(
                 "knowledgeBaseConfiguration": {
                     "knowledgeBaseId": kb_id,
                     "modelArn": model_arn,
+                    **knowledge_base_prompt_templates(),
                     "retrievalConfiguration": retrieval_config,
                 },
             },

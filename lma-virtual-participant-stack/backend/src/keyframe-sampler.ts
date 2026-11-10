@@ -52,12 +52,33 @@ export const GRID_WIDTH = Math.floor(numberEnv('KEYFRAME_GRID_WIDTH', 64, 1));
 export const GRID_HEIGHT = Math.floor(numberEnv('KEYFRAME_GRID_HEIGHT', 36, 1));
 export const SAMPLE_BYTES = GRID_WIDTH * GRID_HEIGHT;
 
+/** A comma-separated list of non-negative numbers, or the fallback when any is not one. */
+const numberListEnv = (name: string, fallback: number[]): number[] => {
+    const raw = process.env[name];
+    if (raw === undefined || raw.trim() === '') return fallback;
+    const parsed = raw.split(',').map((v) => Number(v.trim()));
+    return parsed.every((v) => Number.isFinite(v) && v >= 0) ? parsed : fallback;
+};
+
 /*
  * Defaults calibrated on a recorded synthetic meeting (docs/meeting-video.md):
  * consecutive slides built on one template differ in only 4-7% of the grid,
  * so the change fraction has to sit below that; a gallery of moving cameras
  * produced no frames at either setting, because the motion mask leaves the
  * tiles out.
+ *
+ * A shared application whose content keeps updating (a live web page)
+ * differed from the last frame by 3-9% every few seconds on a measured
+ * meeting, as template slides do, so raising the change fraction to separate
+ * them would also drop slides. What separates them is time: a slide holds
+ * still and unchanged until the next one, an application does not. The
+ * interval between frames therefore backs off while the screen keeps changing
+ * (KEYFRAME_MIN_INTERVAL_MS, then KEYFRAME_BACKOFF_STEPS_MS from the third
+ * frame in a row) and steps back down one for every KEYFRAME_QUIET_STEP_MS
+ * the screen is quiet, so a deck whose slides each stay up longer than that
+ * plus the settle is kept slide by slide. A picture differing by 10% or more
+ * from the one settled before it (KEYFRAME_MAJOR_CHANGE_FRACTION, above the
+ * 4-7% of template slides) is a different screen and skips the backoff.
  */
 
 /** Thresholds while the platform shows a screen share. */
@@ -66,6 +87,7 @@ export const SHARE_THRESHOLDS: KeyframeThresholds = {
     stableFraction: numberEnv('KEYFRAME_STABLE_FRACTION', 0.02),
     settleSamples: numberEnv('KEYFRAME_SETTLE_SAMPLES', 2),
     maxMovingFraction: numberEnv('KEYFRAME_MAX_MOVING_FRACTION', 0.5),
+    majorChangeFraction: numberEnv('KEYFRAME_MAJOR_CHANGE_FRACTION', 0.1),
 };
 
 /**
@@ -78,11 +100,18 @@ export const STRICT_THRESHOLDS: KeyframeThresholds = {
     stableFraction: numberEnv('KEYFRAME_STRICT_STABLE_FRACTION', 0.01),
     settleSamples: numberEnv('KEYFRAME_STRICT_SETTLE_SAMPLES', 3),
     maxMovingFraction: numberEnv('KEYFRAME_STRICT_MAX_MOVING_FRACTION', 0.25),
+    majorChangeFraction: numberEnv('KEYFRAME_STRICT_MAJOR_CHANGE_FRACTION', 0.1),
 };
 
 const SAMPLE_FPS = numberEnv('KEYFRAME_SAMPLE_FPS', 1, 0.1);
 const PIXEL_DELTA = numberEnv('KEYFRAME_PIXEL_DELTA', 12);
 const MIN_INTERVAL_MS = numberEnv('KEYFRAME_MIN_INTERVAL_MS', 4000);
+/** The intervals the minimum backs off to while the screen keeps changing. */
+export const BACKOFF_STEPS_MS = numberListEnv('KEYFRAME_BACKOFF_STEPS_MS', [30_000, 60_000]);
+/** Each spell of this long with the screen quiet steps the interval back down one. */
+export const QUIET_STEP_MS = numberEnv('KEYFRAME_QUIET_STEP_MS', 10_000);
+/** Two frames are never stamped closer together than this on the transcript's clock. */
+const MIN_TIMESTAMP_GAP_SECONDS = 1;
 const MAX_PER_MEETING = numberEnv('KEYFRAME_MAX_PER_MEETING', 1000);
 const SHARE_POLL_MS = numberEnv('KEYFRAME_SHARE_POLL_MS', 2000);
 const IMAGE_WIDTH = numberEnv('KEYFRAME_IMAGE_WIDTH', 1568);
@@ -198,7 +227,16 @@ export class KeyframeSampler {
     private options: KeyframeSamplerOptions | null = null;
     private ffmpeg: ChildProcess | null = null;
     private sharePoll: ReturnType<typeof setInterval> | null = null;
-    private detector = new KeyframeDetector({ sampleBytes: SAMPLE_BYTES, pixelDelta: PIXEL_DELTA, minIntervalMs: MIN_INTERVAL_MS });
+    private detector = new KeyframeDetector({
+        sampleBytes: SAMPLE_BYTES,
+        pixelDelta: PIXEL_DELTA,
+        minIntervalMs: MIN_INTERVAL_MS,
+        backoffStepsMs: BACKOFF_STEPS_MS,
+        quietStepMs: QUIET_STEP_MS,
+    });
+    /** Transcript time of the last frame announced or being captured. */
+    private lastTimestamp: number | null = null;
+    private skippedAsTooClose = 0;
     private pending: Buffer = Buffer.alloc(0);
     private shareOnScreen: boolean | null = null;
     private sampling = false;
@@ -223,6 +261,7 @@ export class KeyframeSampler {
         this.stopped = false;
         this.count = 0;
         this.restarts = 0;
+        this.lastTimestamp = null;
         const mode = options.shareActive ? 'while a screen share is on screen' : 'all the time, with the stricter thresholds';
         log.info(`[Keyframes] Sampling ${DISPLAY} at ${SAMPLE_FPS}/s ${mode}`);
         if (options.shareActive) {
@@ -250,7 +289,8 @@ export class KeyframeSampler {
         if (this.capturing) await this.capturing.catch(() => undefined);
         log.info(
             `[Keyframes] Stopped after ${this.count} key frame(s)` +
-                (this.skippedWhileCapturing ? `; ${this.skippedWhileCapturing} sample(s) skipped during captures` : ''),
+                (this.skippedWhileCapturing ? `; ${this.skippedWhileCapturing} sample(s) skipped during captures` : '') +
+                (this.skippedAsTooClose ? `; ${this.skippedAsTooClose} within a second of the one before` : ''),
         );
     }
 
@@ -320,6 +360,18 @@ export class KeyframeSampler {
         // The frame is stamped with when its picture first appeared, on both clocks.
         const sinceSeen = Math.max(0, nowMs - decision.firstSeenMs) / 1000;
         const timestamp = Math.max(0, options.timelineSeconds() - sinceSeen);
+        if (this.lastTimestamp !== null && timestamp - this.lastTimestamp < MIN_TIMESTAMP_GAP_SECONDS) {
+            // The detector keeps its frames at least a second apart on its own
+            // clock; the transcript's clock, which does not run while
+            // transcription reconnects, can still bring two together. The frame is
+            // left as the detector's reference -- the picture is the one just
+            // captured, give or take a second -- rather than given back, which
+            // would have it kept and refused again at every settle.
+            this.skippedAsTooClose++;
+            return;
+        }
+        const previousTimestamp = this.lastTimestamp;
+        this.lastTimestamp = timestamp;
         const recordingStart = options.recordingStartedAtMs();
         const videoOffset = recordingStart === null ? null : Math.max(0, (decision.firstSeenMs - recordingStart) / 1000);
         const shareDetected = options.shareActive ? true : null;
@@ -329,6 +381,7 @@ export class KeyframeSampler {
                 // Not saved, so not the reference either: a slide still on
                 // screen is captured on the next settle rather than lost.
                 if (kept) this.detector.forget(kept);
+                if (this.lastTimestamp === timestamp) this.lastTimestamp = previousTimestamp;
                 log.error(`[Keyframes] Key frame not saved: ${err?.message || err}`);
             })
             .finally(() => {

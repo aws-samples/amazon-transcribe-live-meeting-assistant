@@ -239,3 +239,130 @@ def test_the_standalone_fallback_channel_names_match_the_layer():
         and any(getattr(t, "id", None) == "STORED_SPEECH_CHANNELS" for t in node.targets)
     ]
     assert fallbacks == [STORED_SPEECH_CHANNELS]
+
+
+# ── the meeting chat and the shared screen ─────────────────────────────────
+
+
+def _chat(sender: str, text: str, at: float) -> dict:
+    return {
+        "Speaker": sender,
+        "Transcript": text,
+        "Channel": "MEETING_CHAT",
+        "StartTime": at,
+        "EndTime": at,
+        "IsPartial": False,
+    }
+
+
+def test_the_current_meeting_tool_includes_chat_messages(strands_module, monkeypatch):
+    """A chat message is a line of its own, marked, under its sender, in time order."""
+    _table_returning(
+        strands_module,
+        monkeypatch,
+        [
+            {
+                "Items": [
+                    {**_segment("Alice", "Shall we look at the budget?", 10.0), "StartTime": 8.0},
+                    _chat("Bob", "Here it is: https://example.com/budget", 12.0),
+                    {**_segment("Alice", "Thanks.", 20.0), "StartTime": 18.0},
+                ]
+            }
+        ],
+    )
+    assert strands_module.fetch_meeting_transcript(CALL_ID, TABLE).split("\n") == [
+        "Alice: Shall we look at the budget?",
+        "[chat] Bob: Here it is: https://example.com/budget",
+        "Alice: Thanks.",
+    ]
+
+
+def test_a_chat_message_carries_its_time_when_the_transcript_is_timed(strands_module, monkeypatch):
+    _table_returning(strands_module, monkeypatch, [{"Items": [_chat("Bob", "Agreed.", 75.0)]}])
+    assert (
+        strands_module.fetch_meeting_transcript(CALL_ID, TABLE, with_timestamps=True)
+        == "[01:15] [chat] Bob: Agreed."
+    )
+
+
+def test_a_chat_message_is_one_line_however_it_was_typed(strands_module, monkeypatch):
+    _table_returning(
+        strands_module,
+        monkeypatch,
+        [{"Items": [_chat("", "Agenda:\n- budget\r\n- hiring\n", 5.0), _chat("Eve", "x" * 3000, 6.0)]}],
+    )
+    first, second = strands_module.fetch_meeting_transcript(CALL_ID, TABLE).split("\n")
+    assert first == "[chat] Unknown sender: Agenda: / - budget / - hiring"
+    assert second.endswith(" [...]")
+    assert len(second) < 2100
+
+
+def test_the_current_meeting_read_selects_the_meeting_chat(strands_module, monkeypatch):
+    """The transcript tool reads the chat; the frames tool's transcript stays speech only."""
+    from boto3.dynamodb.conditions import Attr
+
+    table = _table_returning(strands_module, monkeypatch, [{"Items": []}, {"Items": []}])
+    strands_module.fetch_meeting_transcript(CALL_ID, TABLE)
+    assert table.query.call_args.kwargs["FilterExpression"] == (
+        Attr("Channel").is_in(
+            ["REMOTE", "LOCAL", "CALLER", "AGENT", "AGENT_ASSISTANT", "MEETING_CHAT"]
+        )
+        & Attr("IsPartial").eq(False)
+    )
+    strands_module.query_transcript_items(CALL_ID, TABLE)
+    assert "MEETING_CHAT" not in str(table.query.call_args.kwargs["FilterExpression"].get_expression())
+
+
+def test_chat_senders_do_not_change_how_voices_are_named(strands_module, monkeypatch):
+    """Voices are named from the speech alone, so a chat sender is never folded into one."""
+    seen = []
+
+    def namer(_call_id, _table, items):
+        seen.extend(item["Channel"] for item in items)
+        return lambda item: item["Speaker"]
+
+    monkeypatch.setattr(strands_module, "meeting_speaker_namer", namer)
+    _table_returning(
+        strands_module,
+        monkeypatch,
+        [{"Items": [_segment("Alice", "Hi.", 1.0), _chat("Alice", "Hi from the chat.", 2.0)]}],
+    )
+    strands_module.fetch_meeting_transcript(CALL_ID, TABLE)
+    assert seen == ["REMOTE"]
+
+
+def test_the_standalone_fallback_chat_channel_name_matches_the_layer(strands_module):
+    sys.path.insert(0, str(CONFIGURATION_LAYER))
+    from lma_channels import MEETING_CHAT
+
+    assert strands_module.MEETING_CHAT_CHANNEL == MEETING_CHAT
+    import ast
+
+    tree = ast.parse((FUNCTION_SRC / "strands_meeting_assist_function.py").read_text())
+    fallbacks = [
+        ast.literal_eval(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(getattr(t, "id", None) == "MEETING_CHAT_CHANNEL" for t in node.targets)
+    ]
+    assert fallbacks == [MEETING_CHAT]
+
+
+def test_the_current_meeting_tool_includes_screen_share_text(strands_module):
+    """The shared-screen tool, offered with the transcript, gives each frame's title and text."""
+    import meeting_frames
+
+    frame = {
+        "FrameId": "f1",
+        "Timestamp": 30.0,
+        "Title": "Q3 budget",
+        "SlideText": "Revenue 12M\nCosts 9M",
+        "ContentKind": "SCREEN",
+    }
+    result = meeting_frames.build_tool_result(
+        [(frame, 90.0)], [], {}, total_frames=1, send_images=False, show_inline=False
+    )
+    text = "\n".join(block["text"] for block in result["content"])
+    assert "Shows: Q3 budget" in text
+    assert "Revenue 12M\nCosts 9M" in text
+    assert "on screen from 00:30 to 01:30" in text

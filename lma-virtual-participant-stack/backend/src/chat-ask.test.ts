@@ -19,6 +19,7 @@ import {
     ANSWER_PREFIX,
     CHAT_MESSAGE_LIMITS,
     MAX_ANSWER_MESSAGES,
+    chatQuestionPayload,
     createChatAnswerer,
     isOwnChatSender,
     parseChatQuestion,
@@ -327,4 +328,19 @@ test("respond says which replies are the assistant's answer and which are the VP
     assert.deepEqual(reply.messages, ['Live Meeting Assistant: I have no answer to that.']);
     const none = createChatAnswerer(async () => 'unused', { available: () => false });
     assert.equal((await none.respond(Q('q', true), 'Alice', 'zoom')).answered, false);
+});
+
+// ---------------------------------------------------------------------------
+// What a chat question is sent as
+// ---------------------------------------------------------------------------
+
+const ENV = { VP_CALL_ID: 'call-1', LMA_USER: 'owner@example.com', DYNAMODB_TABLE_NAME: 'EventSourcingTable' };
+
+test('a chat question is sent as an in-meeting request from the meeting chat, for this meeting', () => {
+    const payload = chatQuestionPayload('what was decided?', ENV);
+    assert.equal(payload.toolScope, 'meeting_chat');
+    assert.equal(payload.text, 'what was decided?');
+    assert.equal(payload.call_id, 'call-1');
+    assert.equal(payload.dynamodb_pk, 'c#call-1');
+    assert.equal(payload.dynamodb_table_name, 'EventSourcingTable');
 });

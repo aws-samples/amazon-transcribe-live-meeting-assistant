@@ -20,6 +20,9 @@ import {
   formatQuantity,
   formatUnitPrice,
   groupLines,
+  lineCalculation,
+  priceSourceLabel,
+  readablePrice,
   serviceLabel,
   tableRows,
 } from './call-cost';
@@ -131,5 +134,48 @@ describe('estimateCaveats', () => {
 
   it('is empty for a complete estimate', () => {
     expect(estimateCaveats({ UnpricedCount: 0, RegionsWithoutListedPrices: [] })).toEqual([]);
+  });
+});
+
+describe('readablePrice', () => {
+  it('quotes a unit price at the scale the AWS pricing pages use', () => {
+    expect(readablePrice('inputTokens', 3e-6)).toBe('$3.00 per million input tokens');
+    expect(readablePrice('cacheReadInputTokens', 1e-8)).toBe('$0.01 per million cache read tokens');
+    expect(readablePrice('seconds', 0.0001667)).toBe('$0.010002 per minute');
+    expect(readablePrice('vcpuSeconds', 0.04048 / 3600)).toBe('$0.04048 per vCPU-hour');
+    expect(readablePrice('units', 0.0001)).toBe('$0.0001 per 100-character unit');
+  });
+
+  it('says nothing for a unit with no usual scale, or no price', () => {
+    expect(readablePrice('requests', 0.1)).toBe('');
+    expect(readablePrice('seconds', null)).toBe('');
+  });
+});
+
+describe('lineCalculation', () => {
+  const line = { Chargeable: true, Priced: true, Quantity: 1480, Unit: 'seconds', UnitPrice: 0.0001667, Cost: 0.2467 };
+
+  it('writes a priced line as usage times unit price equals cost', () => {
+    expect(lineCalculation(line)).toBe('1,480 seconds × $0.0001667 = $0.2467');
+  });
+
+  it('writes nothing for a line that is not billed or has no price', () => {
+    expect(lineCalculation({ ...line, Chargeable: false })).toBe('');
+    expect(lineCalculation({ ...line, Priced: false, UnitPrice: null })).toBe('');
+  });
+});
+
+describe('priceSourceLabel', () => {
+  it('names where the price came from in a few words', () => {
+    const shipped = { Chargeable: true, Priced: true, PriceOrigin: 'shipped' };
+    expect(
+      priceSourceLabel({ ...shipped, PriceSource: 'AWS Price List API (offer transcribe, read 2026-11-09)' }),
+    ).toBe('AWS Price List API');
+    expect(priceSourceLabel({ ...shipped, PriceSource: 'Estimate (read 2026-11-09). Not listed.' })).toBe('Estimate');
+    expect(priceSourceLabel({ ...shipped, PriceOrigin: 'custom' })).toBe('Your price');
+    expect(priceSourceLabel({ ...shipped, Priced: false, PriceOrigin: 'none' })).toBe('No price');
+    // An estimate read before lines carried a source.
+    expect(priceSourceLabel({ Chargeable: true, Priced: true })).toBe('Shipped price');
+    expect(priceSourceLabel({ Chargeable: false })).toBe('');
   });
 });

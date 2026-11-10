@@ -111,6 +111,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     # Read by the Virtual Participant only: whether it leaves the meeting after
     # a participant objects, rather than staying in it without capturing.
     "leaveOnObjection": False,
+    # Read by the Virtual Participant only: whether it also reads consent
+    # replies and objections said aloud and addressed to LMA, listening on the
+    # meeting's transcription engine while consent is awaited.
+    "readSpokenReplies": True,
 }
 
 # Bounds on each part of one meeting's record. They bound each list; the record

@@ -14,6 +14,9 @@ import {
   matchSnippet,
   mergeKeyframes,
   frameIdSeconds,
+  isDistinctFrame,
+  isRepeatedFrame,
+  newFramesCursor,
   scrollTranscriptToTime,
   segmentIndexForTime,
 } from './video-keyframes';
@@ -22,6 +25,27 @@ const frame = (ms, extra = {}) => ({
   FrameId: `${String(ms).padStart(10, '0')}-ab12cd`,
   Timestamp: ms / 1000,
   ...extra,
+});
+
+describe('repeated frames', () => {
+  it('a frame naming an earlier one it repeats is not distinct; one without is', () => {
+    expect(isRepeatedFrame(frame(1000, { DuplicateOf: '0000000500-ab12cd' }))).toBe(true);
+    expect(isRepeatedFrame(frame(1000))).toBe(false);
+    expect(isDistinctFrame(frame(1000))).toBe(true);
+    expect(isDistinctFrame(frame(1000, { DuplicateOf: 'x' }))).toBe(false);
+    expect(isDistinctFrame(frame(1000, { ContentKind: 'CAMERA' }))).toBe(false);
+  });
+
+  it('new frames are fetched from before the newest frames whose text is not read yet', () => {
+    const read = (ms) => frame(ms, { SlideText: '' });
+    expect(newFramesCursor([])).toBe('');
+    expect(newFramesCursor([read(1000), read(2000)])).toBe('0000002000-ab12cd');
+    expect(newFramesCursor([read(1000), frame(2000), read(3000)])).toBe('0000001000-ab12cd');
+    expect(newFramesCursor([frame(1000)])).toBe('');
+    // Only the newest few are looked back over: an old frame whose text was never read is left.
+    const many = [frame(1000), ...[2, 3, 4, 5, 6, 7].map((s) => read(s * 1000))];
+    expect(newFramesCursor(many)).toBe('0000007000-ab12cd');
+  });
 });
 
 describe('mergeKeyframes', () => {

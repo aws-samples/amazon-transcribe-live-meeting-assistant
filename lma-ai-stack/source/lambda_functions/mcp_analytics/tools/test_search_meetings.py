@@ -115,6 +115,28 @@ class TestExecuteResolvesArn(unittest.TestCase):
                 "modelArn"
             ]
 
+    def test_generation_and_orchestration_prompts_are_sent(self):
+        """Claude 5.5 models are refused by RetrieveAndGenerate without both prompts."""
+        env = {**self.ENV}
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch.object(
+                search_meetings,
+                "_configured_model_id",
+                return_value="global.anthropic.claude-sonnet-5-5",
+            ),
+            patch.object(search_meetings, "boto3") as mock_boto3,
+        ):
+            mock_kb = MagicMock()
+            mock_kb.retrieve_and_generate.return_value = {"output": {"text": "ok"}, "citations": []}
+            mock_boto3.client.return_value = mock_kb
+            search_meetings.execute(query="q", max_results=5, user_id="u1", is_admin=True)
+            kb = mock_kb.retrieve_and_generate.call_args[1]["retrieveAndGenerateConfiguration"][
+                "knowledgeBaseConfiguration"
+            ]
+        self.assertIn("generationConfiguration", kb)
+        self.assertIn("orchestrationConfiguration", kb)
+
     def test_inference_profile_model_resolves_correctly(self):
         """A global.* model produces an inference-profile ARN."""
         model_arn = self._run("global.anthropic.claude-haiku-4-5-20251001-v1:0")

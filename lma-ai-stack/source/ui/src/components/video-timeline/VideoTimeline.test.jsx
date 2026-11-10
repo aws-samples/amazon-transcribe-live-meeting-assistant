@@ -78,7 +78,7 @@ describe('VideoTimeline', () => {
     expect(onPlayFrom).toHaveBeenCalledWith(expect.objectContaining({ FrameId: '0000030000-ab12cd' }));
   });
 
-  it('takes a new frame while the meeting runs, fetching only what came after the last one', async () => {
+  it('takes a new frame while the meeting runs, fetching only what came after the last one read', async () => {
     let push;
     const subscribe = vi.fn((callId, onFrame) => {
       push = onFrame;
@@ -86,7 +86,7 @@ describe('VideoTimeline', () => {
     });
     const loadFrames = vi
       .fn()
-      .mockResolvedValueOnce({ VideoKeyframes: [frame(30000)], nextToken: null })
+      .mockResolvedValueOnce({ VideoKeyframes: [frame(30000, { SlideText: 'Agenda' })], nextToken: null })
       .mockResolvedValueOnce({ VideoKeyframes: [frame(90000)], nextToken: null });
     render(<VideoTimeline callId="m-1" isLive loadFrames={loadFrames} subscribe={subscribe} />);
     await screen.findByTitle('Key frame at 0:30');
@@ -120,6 +120,73 @@ describe('VideoTimeline', () => {
     release();
     await screen.findByTitle('Key frame at 1:30');
     expect(loadFrames).toHaveBeenCalledTimes(2);
+  });
+
+  it('reads the newest frames again with a new one while their text is not read yet', async () => {
+    let push;
+    const subscribe = (callId, onFrame) => {
+      push = onFrame;
+      return () => undefined;
+    };
+    const loadFrames = vi
+      .fn()
+      .mockResolvedValueOnce({
+        VideoKeyframes: [frame(30000, { SlideText: 'Dashboard' }), frame(60000)],
+        nextToken: null,
+      })
+      // The 1:00 frame, read since, repeats the 0:30 one.
+      .mockResolvedValueOnce({
+        VideoKeyframes: [
+          frame(60000, { SlideText: 'Dashboard', DuplicateOf: '0000030000-ab12cd' }),
+          frame(90000, { SlideText: 'Roadmap' }),
+        ],
+        nextToken: null,
+      });
+    render(<VideoTimeline callId="m-1" isLive loadFrames={loadFrames} subscribe={subscribe} />);
+    await screen.findByTitle('Key frame at 1:00');
+    push({ CallId: 'm-1', FrameId: '0000090000-ab12cd' });
+    await screen.findByTitle('Key frame at 1:30');
+    expect(loadFrames).toHaveBeenLastCalledWith(expect.objectContaining({ afterFrameId: '0000030000-ab12cd' }));
+    expect(screen.queryByTitle('Key frame at 1:00')).toBeNull();
+  });
+
+  it('hides frames that repeat an earlier one, and shows all of them when asked', async () => {
+    const onFramesChange = vi.fn();
+    const loadFrames = vi.fn().mockResolvedValue({
+      VideoKeyframes: [
+        frame(30000, { SlideText: 'Dashboard' }),
+        frame(60000, { SlideText: 'Dashboard', DuplicateOf: '0000030000-ab12cd' }),
+        frame(75000, { SlideText: 'Dashboard', DuplicateOf: '0000030000-ab12cd' }),
+        frame(90000, { SlideText: 'Roadmap' }),
+      ],
+      nextToken: null,
+    });
+    render(
+      <VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} onFramesChange={onFramesChange} />,
+    );
+    await screen.findByTitle('Key frame at 0:30');
+    const shownTimes = () => screen.getAllByRole('img').map((i) => i.getAttribute('alt'));
+    expect(shownTimes()).toEqual(['Shared screen at 0:30', 'Shared screen at 1:30']);
+    expect(screen.getByText('(2)')).toBeTruthy();
+    expect(screen.getByText('2 frames repeat the screen before them and are hidden.')).toBeTruthy();
+    await waitFor(() => expect(onFramesChange).toHaveBeenLastCalledWith({ count: 2, more: false, loaded: true }));
+
+    fireEvent.click(screen.getByText('Show all 4 frames'));
+    expect(shownTimes()).toEqual([
+      'Shared screen at 0:30',
+      'Shared screen at 1:00',
+      'Shared screen at 1:15',
+      'Shared screen at 1:30',
+    ]);
+    fireEvent.click(screen.getByText('Hide repeated frames'));
+    expect(shownTimes()).toHaveLength(2);
+  });
+
+  it('offers no toggle when no frame repeats another', async () => {
+    const loadFrames = vi.fn().mockResolvedValue({ VideoKeyframes: [frame(30000), frame(60000)], nextToken: null });
+    render(<VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} />);
+    await screen.findByTitle('Key frame at 0:30');
+    expect(screen.queryByText(/Show all/)).toBeNull();
   });
 
   it('does not subscribe after the meeting', async () => {

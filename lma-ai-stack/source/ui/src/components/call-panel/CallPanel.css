@@ -283,7 +283,7 @@ mark.transcript-search-match {
 }
 
 /* The chips of one platform name's voices, with its One person / Several people
-   toggle, kept together and set apart from the other speakers. */
+   menu, kept together and set apart from the other speakers. */
 .transcript-speaker-group {
   display: inline-flex;
   flex-wrap: wrap;
@@ -302,4 +302,39 @@ mark.transcript-search-match {
 .transcript-speaker-chip-editing {
   gap: 4px;
   min-width: 12rem;
+}
+
+/* A speaker named in the meeting header: a badge that opens the speaker in the Speakers panel. */
+.meeting-speaker-chip {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.meeting-speaker-chip:hover {
+  text-decoration: underline;
+}
+
+.meeting-speaker-chip:focus-visible {
+  outline: 2px solid #0972d3;
+  outline-offset: 2px;
+}
+
+/* A voice's row in the Speakers panel, for a moment after the header opened it. */
+.speaker-row-focused {
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px #0972d3;
+}
+
+/* A platform name's voices in the Speakers panel, under the name and its One person / Several people menu. */
+.speaker-group-rows {
+  padding-left: 12px;
+  border-left: 2px solid #e9ebed;
+}
+
+.awsui-dark-mode .speaker-group-rows {
+  border-color: #414d5c;
 }

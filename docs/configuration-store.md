@@ -378,13 +378,13 @@ so a release cannot ship a default its own save would refuse.
 | `language_models` | The Model inference geography (`global`, `geography` or `in_region`) and the four model ids, each one of the models its setting offers, nothing else |
 | `transcription` | The nine Amazon Transcribe options: language, preferred language and redaction type from their stack parameters' lists; language options as comma-separated codes from that list; entity types as comma-separated capitalised names; vocabulary and language model names in Amazon Transcribe's character set, empty for none; the two switches `true` or `false` |
 | `recording` | `recordAudio`, `true` or `false`, nothing else |
-| `meeting_assist` | `wakePhraseRegex`, text of 1 to 256 characters; `promptCachingEnabled`, `true` or `false`; `assistantReasoningEffort`, `low`, `medium` or `high` |
+| `meeting_assist` | `wakePhraseRegex`, text of 1 to 256 characters; `promptCachingEnabled`, `true` or `false`; `assistantReasoningEffort`, `low`, `medium` or `high`; `inMeetingRequestTools`, `current_meeting_only` or `unrestricted` |
 | `meeting_processing` | `transcriptHookNonPartialOnly`, `true` or `false`; `inactiveMeetingLookbackDays`, a whole number from 1 to 90, and `inactiveMeetingTimeoutMinutes`, a whole number from 0 to 10080, their parameters' ranges |
 | `meeting_agenda` | `autoDeriveAfterSeconds`, a whole number from 0 to 3600, the parameter's range |
 | `retention` | `meetingRecordExpirationInDays` and `transcriptionExpirationInDays`, numbers of days of at least 0.1, each at most the baseline's value (`maximumIsDefault`, below); `transcriptDeletionAfterSummary`, one of `off`, `immediately`, `after_15_minutes`, `after_30_minutes` and `after_60_minutes` (see [Transcript Deletion After the Summary](transcript-deletion.md)) |
-| `meeting_consent` | `mode` and `consentRule` from their fixed lists; the two notice texts of 1 to 2,000 characters; the two phrase lists of 1 to 1,000 characters; `allowPerMeetingOverride`, `keepEvidenceScreenshots` and `leaveOnObjection`, `true` or `false`; `verifierModelId`, one of the image-capable models the Key frame text setting offers; `clientsWithoutConsent`, `accept_with_warning` or `reject`; nothing else |
+| `meeting_consent` | `mode` and `consentRule` from their fixed lists; the two notice texts of 1 to 2,000 characters; the two phrase lists of 1 to 1,000 characters; `allowPerMeetingOverride`, `keepEvidenceScreenshots`, `leaveOnObjection` and `readSpokenReplies`, `true` or `false`; `verifierModelId`, one of the image-capable models the Key frame text setting offers; `clientsWithoutConsent`, `accept_with_warning` or `reject`; nothing else |
 | `virtual_participant` | The provider from its parameter's list; wake phrases as text; the activation duration, poll interval and poll counts as whole numbers in their parameters' ranges; the ElevenLabs agent and Simli face ids in the characters their services use, empty for none |
-| `call_pricing` | Prices that are finite and not negative, under `regions › <region or default> › <service>/<api-or-model> › <unit>`; region codes in the form `us-east-1`; the lists and notes as lists and objects of text; `currency` `USD`; no keys the estimator does not read |
+| `call_pricing` | Prices that are finite and not negative, under `regions › <region or default> › <service>/<api-or-model> › <unit>`; region codes in the form `us-east-1`; each price's source under `sources`, laid out the same way, with a `basis` of `price-list-api`, `pricing-page` or `estimate`, a `retrieved` date written `YYYY-MM-DD`, an `https://` `url` and text fields of bounded length; the lists and notes as lists and objects of text; `currency` `USD`; no keys the estimator does not read |
 
 ### The validator
 
@@ -1203,14 +1203,16 @@ new table's name to the seeder, which then records the (empty) section.
 ### The meeting cost price table
 
 The unit prices the [meeting cost estimate](meeting-cost-estimate.md) is computed
-with are the `call_pricing` section. `Config#default` holds the shipped table, from
-`configuration_seeder/defaults/CallPricing.json`, so a release that updates a price
-reaches every deployment on its next stack update. An Admin's price changes are a
-delta in `Config#custom`, written through `updateCallPricing` and read back, with
-the shipped table and the merge of the two, through `getCallPricing`. There was no
-earlier store for prices, so nothing is adopted on upgrade, and the shared-profile
-version check above applies to an `updateCallPricing` save as it does to the
-configuration pages' saves.
+with, and the source of each, are the `call_pricing` section. `Config#default`
+holds the shipped table, from `configuration_seeder/defaults/CallPricing.json`, so
+a release that updates a price reaches the baseline on its next stack update. An
+Admin changes prices in the section's price table on the Configuration page, or
+through `updateCallPricing`; both save into the active profile, with the same
+version check. `getCallPricing` reads the shipped table, what the active profile
+stores and the merge of the two. The estimate reads the section's baseline values
+beside its merged ones (`ResolvedSection.baseline_values`), which is how each line
+says whether its price is the release's or the profile's. There was no earlier
+store for prices, so nothing is adopted on upgrade.
 
 ## Settings that were stack parameters until 0.4.0
 

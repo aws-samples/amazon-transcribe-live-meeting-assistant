@@ -21,11 +21,11 @@ const EACH_PARTICIPANT = 'opt_in:each_participant';
 
 // What the Virtual Participant can see on each platform decides whether the
 // each-participant rule can be met there (docs/meeting-consent.md, "What each
-// platform supports"). Webex shows no attendee count, so it never can, and on
-// Google Meet the VP reads consent replies without a sender. The
-// Teams browser join shows no chat sender; the Teams join through Azure
-// Communication Services does, and which one a VP uses is decided by the
-// deployment, so the option stays available for Teams with a note.
+// platform supports"). Webex shows no attendee count, so it never can. The
+// Teams browser join shows no chat sender, so there consent is given aloud;
+// the Teams join through Azure Communication Services reads it in the chat
+// too, and which one a VP uses is decided by the deployment, so the option
+// stays available for Teams with a note.
 export const meetingConsentOptionsFor = (platform) =>
   MEETING_CONSENT_OPTIONS.map((option) => {
     if (option.value !== EACH_PARTICIPANT) return option;
@@ -38,20 +38,12 @@ export const meetingConsentOptionsFor = (platform) =>
           'Use "Opt-in: wait until I confirm that everyone agreed".',
       };
     }
-    if (platform === 'GOOGLE_MEET') {
-      return {
-        ...option,
-        disabled: true,
-        description:
-          'Not yet available on Google Meet, where LMA does not use the chat sender to record consent. ' +
-          'Use "Opt-in: wait until I confirm that everyone agreed".',
-      };
-    }
     if (platform === 'TEAMS') {
       return {
         ...option,
         description:
-          'Needs the Teams join through Azure Communication Services; the Teams browser join cannot meet it.',
+          'On the Teams browser join, which does not show who sent a chat message, ' +
+          'participants consent aloud ("LMA, I consent"); needs Read spoken replies on.',
       };
     }
     return option;

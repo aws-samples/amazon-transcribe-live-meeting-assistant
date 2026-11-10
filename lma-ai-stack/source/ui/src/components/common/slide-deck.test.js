@@ -26,6 +26,22 @@ const frames = [
 const freshDocument = () => document.implementation.createHTMLDocument('');
 
 describe('buildDeck', () => {
+  it('leaves out frames that repeat an earlier one, and camera frames', () => {
+    const doc = freshDocument();
+    buildDeck(doc, {
+      title: 'Weekly sync',
+      frames: [
+        { FrameId: 'a', Timestamp: 5, SlideText: 'Dashboard' },
+        { FrameId: 'b', Timestamp: 65, SlideText: 'Dashboard', DuplicateOf: 'a' },
+        { FrameId: 'c', Timestamp: 95, ContentKind: 'CAMERA' },
+        { FrameId: 'd', Timestamp: 125, SlideText: 'Roadmap' },
+      ],
+    });
+    const texts = [...doc.querySelectorAll('section.deck-slide .deck-text')].map((p) => p.textContent);
+    expect(texts).toEqual(['Dashboard', 'Roadmap']);
+    expect(doc.querySelector('header .deck-time').textContent).toBe('2 frames of the shared screen');
+  });
+
   it('lays out one section per frame, in time order, with its chapter, time and text', () => {
     const doc = freshDocument();
     const images = buildDeck(doc, { title: 'Weekly sync', frames, chapters: [{ seconds: 148, title: 'Budget' }] });
