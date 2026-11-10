@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
+import pytest
 from test_delete_metering_records import index
 
 STAMP = "2026-10-30T14-05-09-123Z"
@@ -142,11 +143,12 @@ def test_a_meeting_without_video_deletes_nothing(monkeypatch) -> None:
     assert s3.deleted == []
 
 
-def test_a_recording_s3_did_not_delete_is_logged_and_not_counted(monkeypatch, caplog) -> None:
+def test_a_recording_s3_did_not_delete_is_logged_and_raises(monkeypatch, caplog) -> None:
     key = f"lma-video-recordings/call_m1_{STAMP}.mp4"
     s3 = FakeS3([key], errors=[{"Key": key, "Code": "AccessDenied"}])
     monkeypatch.setattr(index, "s3_client", s3)
-    assert index.delete_video_recordings("m1", _url(key)) == 0
+    with pytest.raises(RuntimeError, match="video recording of m1"):
+        index.delete_video_recordings("m1", _url(key))
     assert "AccessDenied" in caplog.text and key in caplog.text
 
 

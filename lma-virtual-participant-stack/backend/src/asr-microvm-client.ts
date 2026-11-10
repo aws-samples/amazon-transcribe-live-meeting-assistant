@@ -120,7 +120,7 @@ export const vpTranscribeOnlySettings = (
  *
  * A VP whose Amazon Transcribe options use one the ASR MicroVM engine does not
  * offer (content redaction, a custom vocabulary or language model, language
- * identification) stays on Amazon Transcribe, so the option is applied rather
+ * identification, a language other than English) stays on Amazon Transcribe, so the option is applied rather
  * than dropped. A per-VP ASR_ENGINE=microvm does not override that: the options
  * are the deployment's, set by an administrator.
  */

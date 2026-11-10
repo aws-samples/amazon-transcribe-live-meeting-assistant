@@ -77,3 +77,39 @@ def test_a_recording_with_no_version_left_counts_as_none_deleted(monkeypatch) ->
     monkeypatch.setattr(index, "s3_client", s3)
     assert index.delete_audio_recording("m1", _url(AUDIO)) == 0
     assert s3.deleted == []
+
+
+def test_a_version_of_the_recording_on_the_record_s3_did_not_delete_raises(monkeypatch) -> None:
+    s3 = FakeS3([], versions={AUDIO: ["v1", "v0"]}, errors=[{"Key": AUDIO, "Code": "AccessDenied"}])
+    monkeypatch.setattr(index, "s3_client", s3)
+    with pytest.raises(RuntimeError, match="audio recording of m1"):
+        index.delete_audio_recording("m1", _url(AUDIO))
+    assert AUDIO in s3.versions
+
+
+def test_the_meeting_record_is_kept_when_its_recording_is_not_deleted(monkeypatch) -> None:
+    """delete_meeting stops before deleteCall, so the record still names the file."""
+    s3 = FakeS3([], versions={AUDIO: ["v0"]}, errors=[{"Key": AUDIO, "Code": "AccessDenied"}])
+    monkeypatch.setattr(index, "s3_client", s3)
+    monkeypatch.setattr(index, "cleanup_virtual_participants", lambda callid: None)
+    monkeypatch.setattr(index, "delete_transcript_items", lambda callid: 0)
+    monkeypatch.setattr(
+        index,
+        "get_call_details",
+        lambda *a: {"getCall": {"SharedWith": None, "RecordingUrl": _url(AUDIO)}},
+    )
+    monkeypatch.setattr(index, "delete_recordings_transcripts", lambda callid: None)
+    monkeypatch.setattr(index, "delete_metering_records", lambda callid: 0)
+    monkeypatch.setattr(index, "delete_keyframes", lambda callid: 0)
+    monkeypatch.setattr(index, "delete_consent_evidence", lambda callid: 0)
+    monkeypatch.setattr(index, "delete_video_recordings", lambda callid, url: 0)
+    executed = []
+
+    class _Session:
+        def execute(self, query):
+            executed.append(query)
+            return {}
+
+    with pytest.raises(RuntimeError, match="audio recording of m1"):
+        index.delete_meeting(_Session(), None, "m1", "cls#x", "x", "owner@example.com")
+    assert executed == []

@@ -61,24 +61,74 @@ const statusOf = (text) => {
   return COVERED;
 };
 
-// The status one coverage line gives its item, or null for a line that gives
-// none. The item's name comes first, and may itself contain a colon or a
-// status word, so the status is read after the name: after its bold, when it
-// is bold, and otherwise after a colon.
-const lineStatus = (raw) => {
+// An item number at the start of a coverage line or of its bold name: "1.",
+// "1)", "Item 1:" -- the summary prompt numbers the agenda it is given.
+const ITEM_NUMBER = /^\s*(?:item\s+)?(\d{1,3})(?:[.)]\s+|:\s*)/i;
+
+const itemNumberOf = (text) => {
+  const match = ITEM_NUMBER.exec(text);
+  return match ? Number(match[1]) : null;
+};
+
+// An item name as it is compared: without a leading number, bold, case,
+// runs of whitespace or the punctuation that ends it.
+const normalizeName = (text) =>
+  String(text)
+    .replace(/\*\*/g, '')
+    .replace(ITEM_NUMBER, '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s.:;,–—-]+|[\s.:;,–—-]+$/g, '')
+    .toLowerCase();
+
+// What one coverage line says about its item: the status, and the item's name
+// and number where the line gives them; null for a line that gives no status.
+// The item's name comes first, and may itself contain a colon or a status
+// word, so the status is read after the name: after its bold, when it is bold,
+// and otherwise after a colon, or from the start of a line with no name.
+const parseCoverageLine = (raw) => {
+  const markNumber = itemNumberOf(raw);
   const line = raw.replace(LIST_MARK, '').trim();
   const bold = /^\*\*(.+?)\*\*/.exec(line);
   if (bold) {
     const inner = bold[1];
-    return statusOf(line.slice(bold[0].length)) ?? statusOf(inner.slice(inner.lastIndexOf(':') + 1));
+    const after = statusOf(line.slice(bold[0].length));
+    const colon = inner.lastIndexOf(':');
+    const status = after ?? (colon >= 0 ? statusOf(inner.slice(colon + 1)) : statusOf(inner));
+    if (!status) return null;
+    let name = inner;
+    if (!after) name = colon >= 0 ? inner.slice(0, colon) : '';
+    return { status, name: normalizeName(name) || null, number: markNumber ?? itemNumberOf(name) };
   }
   const plain = line.replace(/\*\*/g, '');
   const parts = plain.split(':');
-  for (let i = 0; i < parts.length; i += 1) {
+  // The status after a name and a colon first, then at the very start.
+  for (let k = 1; k <= parts.length; k += 1) {
+    const i = k % parts.length;
     const status = statusOf(parts.slice(i).join(':'));
-    if (status) return status;
+    if (status) {
+      const name = parts.slice(0, i).join(':');
+      return { status, name: normalizeName(name) || null, number: markNumber ?? itemNumberOf(name) };
+    }
   }
   return null;
+};
+
+// Which agenda item (by index) a coverage line is about, or null when it cannot
+// be told. A line that names its item is matched by that name, and a name that
+// matches no item -- the agenda was edited or derived again after the summary
+// was written -- or several items other than the one at its position settles
+// nothing. A line without a name is matched by its item number, and a line with
+// neither by its position.
+const itemIndexOf = (entry, position, names) => {
+  if (entry.name) {
+    const matches = names.flatMap((name, i) => (name === entry.name ? [i] : []));
+    if (matches.length === 1) return matches[0];
+    return matches.includes(position) ? position : null;
+  }
+  if (entry.number != null) {
+    return entry.number >= 1 && entry.number <= names.length ? entry.number - 1 : null;
+  }
+  return position;
 };
 
 /**
@@ -86,13 +136,24 @@ const lineStatus = (raw) => {
  * COVERAGE section: one line per item, "- **[Agenda item]**: Covered |
  * Partly covered | Not covered - [a few words]", as the shipped prompt asks.
  *
- * The section is model output, and a person can edit it, so it is read
- * leniently -- list marks, bold, with or without the item's name -- and only
- * trusted whole: unless there is exactly one status line per item there is
- * nothing to pair them by, and null is returned rather than a guess.
+ * `items` are the agenda's items as `parseAgendaItems` returns them. The
+ * section is model output, and a person can edit it, so it is read leniently
+ * -- list marks, bold, with or without the item's name or number -- and only
+ * trusted whole: each line is paired with an item by its name, else its
+ * number, else its position, and unless every item gets exactly one line null
+ * is returned rather than a guess. That includes an agenda changed after the
+ * summary was written, whose item names no longer match the section's.
  */
-export const agendaCoverageStatuses = (coverage, itemCount) => {
-  if (typeof coverage !== 'string' || !itemCount) return null;
-  const statuses = coverage.split(/\r?\n/).map(lineStatus).filter(Boolean);
-  return statuses.length === itemCount ? statuses : null;
+export const agendaCoverageStatuses = (coverage, items) => {
+  if (typeof coverage !== 'string' || !Array.isArray(items) || !items.length) return null;
+  const entries = coverage.split(/\r?\n/).map(parseCoverageLine).filter(Boolean);
+  if (entries.length !== items.length) return null;
+  const names = items.map(normalizeName);
+  const statuses = new Array(items.length).fill(null);
+  for (let position = 0; position < entries.length; position += 1) {
+    const index = itemIndexOf(entries[position], position, names);
+    if (index == null || statuses[index]) return null;
+    statuses[index] = entries[position].status;
+  }
+  return statuses;
 };
