@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """End-to-end WebSocket audio streaming probe (the transcriber front door).
 
 Connects to the live transcriber WebSocket exactly like the browser Stream Audio
