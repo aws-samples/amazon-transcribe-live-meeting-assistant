@@ -2729,6 +2729,17 @@ Resources:
                 Action:
                   - dynamodb:GetItem
                 Resource: !GetAtt ConfigurationTable.Arn
+              # Read-only, and only the meeting records (c#): how far a
+              # meeting's transcript has reached, where an answer from the
+              # meeting page's chat is placed on the transcript timeline.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "c#*"
               - Effect: Allow
                 Action:
                   - kms:Decrypt
