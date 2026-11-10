@@ -538,6 +538,14 @@ Parameters:
       Transcribe. When set, a VP still uses Amazon Transcribe unless the Transcription Engine
       page's deployment default says otherwise; it reads that switch at meeting start.
 
+  AsrModelLanguages:
+    Type: String
+    Default: ""
+    Description: >-
+      Comma-separated base language codes (such as "en,es,fr") the deployed ASR
+      bundle transcribes. A Virtual Participant whose language is another stays on
+      Amazon Transcribe; empty means English only.
+
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 14
@@ -2770,6 +2778,8 @@ Resources:
               Value: !Ref CustomVocabularyName
             - Name: ASR_LAUNCHER_FUNCTION_ARN
               Value: !Ref AsrLauncherFunctionArn
+            - Name: ASR_MODEL_LANGUAGES
+              Value: !Ref AsrModelLanguages
             # The container's own diagnostics, including the per-result
             # separation log, were gated on a DEBUG variable nothing set -- so
             # the one tool for working out why a room separated badly could not

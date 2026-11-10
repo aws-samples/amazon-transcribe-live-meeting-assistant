@@ -44,6 +44,9 @@ const mapCallsAttributes = (calls) => {
       TranscriptionEngine: transcriptionEngine,
       TranscriptionLanguage: transcriptionLanguage,
       SpeakerSeparation: speakerSeparation,
+      // The languages the speech engine identified, in the order first heard;
+      // absent when it named none (detected-languages.js).
+      DetectedLanguages: detectedLanguages,
       TotalConversationDurationMillis: totalConversationDurationMillis = 0,
       Sentiment: storedSentiment = {},
       Owner: owner,
@@ -95,6 +98,7 @@ const mapCallsAttributes = (calls) => {
       transcriptionEngine,
       transcriptionLanguage,
       speakerSeparation,
+      detectedLanguages: Array.isArray(detectedLanguages) ? detectedLanguages.filter(Boolean) : [],
       totalConversationDurationMillis,
       conversationDurationTimeStamp: new Date(totalConversationDurationMillis).toISOString().substr(11, 8),
       sentiment,

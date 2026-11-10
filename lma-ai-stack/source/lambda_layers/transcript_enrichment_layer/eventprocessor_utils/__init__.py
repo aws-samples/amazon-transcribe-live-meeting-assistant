@@ -7,11 +7,13 @@ from .eventprocessor import (
     get_owner_from_jwt,
     get_transcription_ttl,
     normalize_transcript_segments,
+    segment_language_code,
     transform_segment_to_add_sentiment,
 )
 
 __all__ = [
     "normalize_transcript_segments",
+    "segment_language_code",
     "get_meeting_ttl",
     "get_transcription_ttl",
     "transform_segment_to_add_sentiment",

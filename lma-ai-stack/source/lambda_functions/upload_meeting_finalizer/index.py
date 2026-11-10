@@ -200,6 +200,7 @@ def _build_segments(
             }
         ]
 
+    items_by_id = _items_by_id(results)
     segments = []
     for i, seg in enumerate(audio_segments):
         transcript = (seg.get("transcript") or "").strip()
@@ -214,16 +215,55 @@ def _build_segments(
         except (TypeError, ValueError):
             end = 0.0
         speaker_label = seg.get("speaker_label") or "spk_0"
-        segments.append(
-            {
-                "SegmentId": f"seg-{i:05d}",
-                "Transcript": transcript,
-                "StartTime": start,
-                "EndTime": end,
-                "Speaker": speaker_label,
-            }
-        )
+        segment = {
+            "SegmentId": f"seg-{i:05d}",
+            "Transcript": transcript,
+            "StartTime": start,
+            "EndTime": end,
+            "Speaker": speaker_label,
+        }
+        language_code = _segment_language(seg, items_by_id)
+        if language_code:
+            segment["LanguageCode"] = language_code
+        segments.append(segment)
     return segments
+
+
+def _language(value) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _items_by_id(results: dict) -> dict:
+    """The transcript's words keyed by id, for the ones that name a language."""
+    return {
+        item.get("id"): code
+        for item in results.get("items") or []
+        if isinstance(item, dict) and (code := _language(item.get("language_code")))
+    }
+
+
+def _segment_language(seg: dict, items_by_id: dict) -> str | None:
+    """The language Transcribe identified for one utterance, or None.
+
+    Only a job run with multiple-language identification names a language per
+    word (``results.items[].language_code``); an utterance (``audio_segments``)
+    lists the ids of its words, and takes the language most of them are in. A
+    ``language_code`` on the utterance itself is used first. A job run in one
+    fixed language -- which is how Upload Audio starts its jobs today -- names
+    none, and the segment then carries no language.
+    """
+    own = _language(seg.get("language_code"))
+    if own:
+        return own
+    counts: dict[str, int] = {}
+    for item_id in seg.get("items") or []:
+        code = items_by_id.get(item_id)
+        if code:
+            counts[code] = counts.get(code, 0) + 1
+    if not counts:
+        return None
+    # The most frequent; ties go to the language heard first in the utterance.
+    return max(counts, key=lambda code: counts[code])
 
 
 def _promote_media_file(bucket: str, pending_key: str, call_id: str) -> tuple[str, str]:
@@ -361,6 +401,8 @@ def lambda_handler(event, context):  # noqa: ARG001
             "CreatedAt": now,
             "UpdatedAt": now,
         }
+        if seg.get("LanguageCode"):
+            event_record["LanguageCode"] = seg["LanguageCode"]
         _put_kinesis(call_id, event_record)
 
     # Promote media from pending → audio-recordings and emit the URL.

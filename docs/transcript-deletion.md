@@ -19,6 +19,10 @@ DynamoDB removes expired items in the background, typically within a few days
 of their expiry rather than at it. Deletion after the summary does not rely on
 that: it deletes the transcript at the minute it is due.
 
+See also [Privacy and Data Handling Controls](privacy-and-data-handling.md),
+which brings together the consent options, what LMA stores and for how long,
+and the deletion controls.
+
 - [Turning it on](#turning-it-on)
 - [When the transcript is deleted](#when-the-transcript-is-deleted)
 - [What is deleted and what is kept](#what-is-deleted-and-what-is-kept)
@@ -156,9 +160,7 @@ an asynchronous invocation, and by EventBridge Scheduler for a schedule, for up
 to 24 hours. A deletion that still has not completed is kept on a dead-letter
 queue, and the `transcript-deletion-dead-letter-queue-depth` alarm notifies the
 operational alerts topic (see [Monitoring & Alerting](monitoring.md)). The
-alarm's description says how to run the deletion again. The usual cause is a
-recordings bucket the stack did not create, with S3 Object Lock or a bucket
-policy that does not allow the deletion.
+alarm's description says how to run the deletion again.
 
 As a backstop, while deletion is on each transcript segment and meeting
 assistant answer is also written with a DynamoDB time to live of at most two
@@ -187,8 +189,3 @@ through these places, each with its own lifetime:
   schedule within the minute it is set for.
 - A meeting that ended before the setting was turned on keeps its transcript
   for **Days to keep transcript segments**.
-- With a recordings bucket the stack did not create, the transcript files are
-  only deleted if the bucket allows it.
-- A transcript knowledge base the stack did not create is asked to remove the
-  files' entries. If it does not ingest from the recordings bucket, there is
-  nothing to remove.

@@ -19,6 +19,7 @@ import {
   playerShortcut,
   recordingSecondsForFrame,
   sameAnchors,
+  screenShareMarkers,
   toRecordingSeconds,
   toTranscriptSeconds,
 } from './playback-sync';
@@ -212,6 +213,33 @@ describe('chapterMarkers', () => {
     expect(chapterAt(markers, 10).title).toBe('Welcome');
     expect(chapterAt(markers, 300).title).toBe('Budget');
     expect(chapterAt([], 10)).toBeNull();
+  });
+});
+
+describe('screenShareMarkers', () => {
+  const frames = [
+    { FrameId: '0000030000-a', Timestamp: 30, VideoOffset: 50, Title: ' Q3 budget ' },
+    { FrameId: '0000300000-b', Timestamp: 300, VideoOffset: 330, Title: null },
+    { FrameId: '0001200000-c', Timestamp: 1200, VideoOffset: 1230, Title: 'Past the end' },
+  ];
+
+  it("places each frame at its own place in the video recording, named by the frame's title", () => {
+    const markers = screenShareMarkers(frames, 600, { kind: 'video' });
+    expect(markers.map((m) => [m.frameId, m.title, m.label, m.recordingSeconds, Math.round(m.percent)])).toEqual([
+      ['0000030000-a', 'Q3 budget', '0:30', 50, 8],
+      ['0000300000-b', '', '5:00', 330, 55],
+    ]);
+  });
+
+  it('places each frame by its transcript time on the audio recording', () => {
+    const markers = screenShareMarkers(frames, 600, { kind: 'audio' });
+    expect(markers.map((m) => m.recordingSeconds)).toEqual([30, 300]);
+  });
+
+  it('has no marks before the recording length is known, or without frames', () => {
+    expect(screenShareMarkers(frames, 0)).toEqual([]);
+    expect(screenShareMarkers([], 600)).toEqual([]);
+    expect(screenShareMarkers(undefined, 600)).toEqual([]);
   });
 });
 

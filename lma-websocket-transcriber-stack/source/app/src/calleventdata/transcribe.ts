@@ -38,12 +38,14 @@ import {
 import { transcriptChannelFor } from './channels';
 import type { CaptureContext, TranscriptionContext } from './capture-context';
 import { DEFAULT_REMOTE_SPEAKER_NAME, DEFAULT_SYSTEM_LABEL } from './speaker-fields';
+import { pageSpeakersFor } from './speaker-fusion';
 
 import {
     DEFAULT_MAX_SEGMENT_SECONDS,
     DEFAULT_MIN_RUN_SECONDS,
     DEFAULT_MIN_RUN_WORDS,
     RunThresholds,
+    SpeakerRun,
     anyChannelDiarized,
     appendSpeakerLabel,
     buildSpeakerRuns,
@@ -829,6 +831,21 @@ function buildDiarizedSegments(
     const selection = selectEmittableWindows(windows, isPartial, progress.settledEmitted);
     progress.settledEmitted = selection.settledEmitted;
     const segments: Record<string, Segment> = {};
+    // The meeting audio is named after who the page showed during each turn, or
+    // the attendee its voice has been proven to (speaker-fusion.ts). Labels
+    // restart with each Transcribe session, and each has its own offset.
+    const pageSpeakers = channelId === CHANNEL_SYSTEM ? pageSpeakersFor(callMetadata) : undefined;
+    const speakerOf = (run: SpeakerRun): string =>
+        pageSpeakers === undefined
+            ? appendSpeakerLabel(speakerName, run.label)
+            : pageSpeakers.nameRow({
+                session: `transcribe-${timeOffsetSeconds}`,
+                label: run.label,
+                startTime: run.startTime + timeOffsetSeconds,
+                endTime: run.endTime + timeOffsetSeconds,
+                isPartial,
+                fallbackName: speakerName,
+            }).speaker;
     for (const window of selection.emit) {
         window.runs.forEach((run, runIndex) => {
             // Window and run index both derive from item timestamps, so a given
@@ -836,7 +853,7 @@ function buildDiarizedSegments(
             const segmentId = `${resultId}-${channelId}-w${window.index}-r${runIndex}`;
             segments[segmentId] = {
                 SegmentId: segmentId,
-                Speaker: appendSpeakerLabel(speakerName, run.label),
+                Speaker: speakerOf(run),
                 StartTime: run.startTime + timeOffsetSeconds,
                 EndTime: run.endTime + timeOffsetSeconds,
                 Transcript: runTranscript(run),
@@ -976,7 +993,20 @@ export interface TranscriptSegmentRecord {
     Transcript: string;
     IsPartial: boolean;
     Speaker: string;
+    /** The identified language of the result the segment came from; see AddTranscriptSegmentEvent. */
+    LanguageCode?: string;
 }
+
+/**
+ * The language Amazon Transcribe identified for a result, or undefined when it
+ * names none. A result carries `LanguageCode` only when the stream asked for
+ * language identification (identify-language or identify-multiple-languages);
+ * with a fixed language it is absent, and so is the field on the segment.
+ */
+export const resultLanguageCode = (result: Pick<Result, 'LanguageCode'>): string | undefined => {
+    const code = typeof result.LanguageCode === 'string' ? result.LanguageCode.trim() : '';
+    return code || undefined;
+};
 
 // Shared by every transcription engine (Amazon Transcribe and the MicroVM ASR),
 // so both produce identical ADD_TRANSCRIPT_SEGMENT records downstream.
@@ -1000,6 +1030,9 @@ export const writeSegmentToKds = async (
         Sentiment: undefined,
         TranscriptEvent: undefined,
         Speaker: segment.Speaker,
+        // Left out rather than null when unknown, so a record from a meeting
+        // with a fixed language is the same as before.
+        ...(segment.LanguageCode ? { LanguageCode: segment.LanguageCode } : {}),
         AccessToken: callMetadata.accessToken,
         IdToken: callMetadata.idToken,
         RefreshToken: callMetadata.refreshToken,
@@ -1173,6 +1206,7 @@ export const writeTranscriptionSegment = async function (
                 result.ChannelId === CHANNEL_SYSTEM
                     ? callMetadata.activeSpeaker
                     : callMetadata?.agentId ?? 'n/a';
+            const languageCode = resultLanguageCode(result);
             const segments = processTranscriptionResults(
                 speakerName,
                 result,
@@ -1199,6 +1233,8 @@ export const writeTranscriptionSegment = async function (
                         // Already carries any `(spk_N)` suffix — see
                         // buildDiarizedSegments.
                         Speaker: segment.Speaker,
+                        // Every segment of a result is in the result's language.
+                        LanguageCode: languageCode,
                     },
                     callMetadata,
                     server

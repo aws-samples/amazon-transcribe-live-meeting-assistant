@@ -91,13 +91,6 @@ export const DESKTOP_THRESHOLDS: KeyframeThresholds = {
 };
 const PIXEL_DELTA = numberEnv('KEYFRAME_PIXEL_DELTA', 12);
 const MIN_INTERVAL_MS = numberEnv('KEYFRAME_MIN_INTERVAL_MS', 4000);
-/*
- * As the Virtual Participant (keyframe-sampler.ts): while the picture keeps
- * changing a little (an application whose content keeps updating), frames
- * back off to one every 30 s and then 60 s, stepping back down one for every
- * 10 s it is quiet. A desktop capture is often a whole display, where
- * that is common.
- */
 const numberListEnv = (name: string, fallback: number[]): number[] => {
     const raw = process.env[name];
     if (raw === undefined || raw.trim() === '') {
@@ -106,6 +99,13 @@ const numberListEnv = (name: string, fallback: number[]): number[] => {
     const parsed = raw.split(',').map((v) => Number(v.trim()));
     return parsed.every((v) => Number.isFinite(v) && v >= 0) ? parsed : fallback;
 };
+/*
+ * As the Virtual Participant (keyframe-sampler.ts): while the picture keeps
+ * changing a little (an application whose content keeps updating), frames
+ * back off to one every 30 s and then 60 s, stepping back down one for every
+ * 10 s it is quiet. A desktop capture is often a whole display, where
+ * that is common.
+ */
 const BACKOFF_STEPS_MS = numberListEnv('KEYFRAME_BACKOFF_STEPS_MS', [30_000, 60_000]);
 const QUIET_STEP_MS = numberEnv('KEYFRAME_QUIET_STEP_MS', 10_000);
 const MAX_PER_STREAM = numberEnv('KEYFRAME_MAX_PER_MEETING', 1000);

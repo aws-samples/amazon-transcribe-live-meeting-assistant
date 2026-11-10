@@ -64,8 +64,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # variable, which is why the old pin never tripped over it. Verified by docker
 # build; do not rename this back.
 ARG CLOAKBROWSER_PIP_VERSION=0.6.5
-# cloakbrowser declares playwright>=1.53 without an upper bound, so pin the
-# playwright release this cloakbrowser version is built and tested against.
+# cloakbrowser declares playwright>=1.53 without an upper bound, and playwright
+# 1.65.0 dropped a module cloakbrowser 0.6.5 imports, so pin playwright to the
+# release of the npm `playwright-core` in package-lock.json. Move the two
+# together: bumping playwright-core in package.json does not update this pin.
 ARG PLAYWRIGHT_PIP_VERSION=1.64.1
 RUN pip install --no-cache-dir "cloakbrowser[geoip]==${CLOAKBROWSER_PIP_VERSION}" "playwright==${PLAYWRIGHT_PIP_VERSION}" \
     && python -m cloakbrowser install \

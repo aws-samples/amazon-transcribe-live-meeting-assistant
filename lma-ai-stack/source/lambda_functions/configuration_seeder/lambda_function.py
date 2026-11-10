@@ -162,10 +162,12 @@ CHAT_BUTTONS_DEFAULTS_FILE = "ChatButtonConfig.json"
 #: The price table for the per-meeting cost estimate. See
 #: docs/meeting-cost-estimate.md for where each price came from.
 CALL_PRICING_FILE = "CallPricing.json"
-#: The on-demand ASR engine's switches as a new deployment ships them: all off,
-#: so every meeting is transcribed by Amazon Transcribe until an administrator
-#: chooses otherwise. The previous table had no seeder and read an absent record
-#: as exactly this, so there is no second copy to keep in step.
+#: The ASR engine's switches as the release ships them: streaming meetings and
+#: Virtual Participants on the ASR MicroVM engine, voice separation off. They are
+#: the baseline, so they reach every deployment whose administrator has not saved
+#: the Transcription Engine section; a saved choice lives in the profile and keeps
+#: winning. A deployment without the engine still transcribes with Amazon
+#: Transcribe, because the readers fall back when no ASR launcher is configured.
 ASR_ENGINE_DEFAULTS_FILE = "AsrEngine.json"
 #: Meeting consent as a new deployment ships it: off, with the shipped notice
 #: texts and phrases ready for an administrator who turns it on. The same values

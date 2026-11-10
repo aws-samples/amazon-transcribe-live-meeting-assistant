@@ -553,8 +553,8 @@ Parameters:
       are yours -- biometric data is separately regulated in many jurisdictions
       and typically requires informed consent before collection, a published
       retention schedule and deletion on request. See docs/voice-enrollment.md.
-      Matching also needs EnableMicrovmAsr=true, since Amazon Transcribe exposes
-      no speaker embedding.
+      Matching also needs the ASR MicroVM engine (EnableMicrovmAsr), since
+      Amazon Transcribe exposes no speaker embedding.
     AllowedValues:
       - "true"
       - "false"
@@ -2453,6 +2453,9 @@ Resources:
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           S3_BUCKET_NAME: !Ref S3BucketName
           S3_PREFIX: !Ref TranscriptFilePrefix
+          # The summary file in S3_PREFIX is written for the transcript
+          # knowledge base only, so it is not written when there is none.
+          TRANSCRIPT_KB_ID: !Ref BedrockKnowledgeBaseID
           # Token usage per summary section, for the meeting cost estimate.
           METERING_TABLE_NAME: !Ref EventSourcingTable
           METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
@@ -3913,6 +3916,8 @@ Resources:
                   - "s3:DeleteObject"
                   - "s3:DeleteObjectVersion"
                   - "s3:ListBucket"
+                  # Deleting a meeting deletes every version of its files.
+                  - "s3:ListBucketVersions"
                 Resource:
                   - !Sub "arn:aws:s3:::${S3BucketName}"
                   - !Sub "arn:aws:s3:::${S3BucketName}/*"
@@ -7448,6 +7453,17 @@ Resources:
       RequestMappingTemplateS3Location: ../source/appsync/updateCall.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
 
+  AddCallDetectedLanguageAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Mutation
+      FieldName: addCallDetectedLanguage
+      RequestMappingTemplateS3Location: ../source/appsync/addCallDetectedLanguage.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
   UpdateAgentAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -8855,6 +8871,14 @@ Resources:
         SSEEnabled: true
         SSEType: KMS
         KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+      # createVirtualParticipant writes ExpiresAfter on every new row:
+      # MeetingRecordExpirationInDays after the later of its creation and its
+      # scheduled time, so a Virtual Participant record is kept as long as the
+      # meeting record it leads to. A row written before this attribute existed
+      # has none and is kept until it is deleted.
+      TimeToLiveSpecification:
+        AttributeName: ExpiresAfter
+        Enabled: true
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
   # MCP Servers Table - Account-level MCP server configurations
@@ -9467,7 +9491,9 @@ Resources:
       TypeName: Mutation
       FieldName: createVirtualParticipant
       DataSourceName: !GetAtt VirtualParticipantDataSource.Name
-      RequestMappingTemplate: |
+      # !Sub for ${MeetingRecordExpirationInDays} only: the template writes
+      # every VTL reference without braces, so nothing else is substituted.
+      RequestMappingTemplate: !Sub |
         #set($id = $util.autoId())
         #set($now = $util.time.nowISO8601())
 
@@ -9582,6 +9608,19 @@ Resources:
         #if(!$util.isNull($ctx.args.input.useStoredZoomAccount))
           $util.qr($input.put("useStoredZoomAccount", $ctx.args.input.useStoredZoomAccount))
         #end
+
+        ## The row's expiry (the table's time to live attribute): the meeting
+        ## record's retention, MeetingRecordExpirationInDays, counted from the
+        ## later of now and the scheduled time, so a Virtual Participant
+        ## scheduled far ahead is kept until it has run. The days may be a
+        ## fraction, so the seconds are made whole before they are added.
+        #set($expiresFrom = $util.time.nowEpochSeconds())
+        #if($ctx.args.input.meetingTime && $ctx.args.input.meetingTime > $expiresFrom)
+          #set($expiresFrom = $ctx.args.input.meetingTime)
+        #end
+        #set($retentionSeconds = ${MeetingRecordExpirationInDays} * 86400)
+        #set($expiresAfter = $expiresFrom + $retentionSeconds.longValue())
+        $util.qr($input.put("ExpiresAfter", $expiresAfter))
 
         {
           "version": "2018-05-29",

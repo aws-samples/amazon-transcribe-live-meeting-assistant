@@ -136,6 +136,9 @@ def test_the_regulated_presets_name_the_controls_set_at_deploy_time(preset_id):
 
 def test_regulated_notify_differs_from_regulated_only_in_the_consent_mode():
     """The two Regulated presets keep the same posture apart from when capture starts."""
+    # PRESET_VALUES stands for the shipped JSON files only because
+    # test_the_presets_are_standard_internal_regulated_and_regulated_notify_in_that_order
+    # holds each file to it; keep the two tests together.
     regulated = json.loads(json.dumps(PRESET_VALUES["regulated-consent-required"]))
     regulated["meeting_consent"]["mode"] = "notify"
     assert PRESET_VALUES["regulated-notify"] == regulated

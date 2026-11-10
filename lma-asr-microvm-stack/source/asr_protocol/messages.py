@@ -174,11 +174,18 @@ class Embedding(BaseModel):
 
 
 class Termination(BaseModel):
-    """End-of-session summary sent just before close (R6.3)."""
+    """End-of-session summary sent just before close (R6.3).
+
+    ``audio_seconds`` is the audio the engine processed. ``dropped_seconds`` is
+    audio that was received but dropped because the engine fell behind; row times
+    already include it (they track the audio received), so ``audio_seconds +
+    dropped_seconds`` is the audio received. Clients that predate the field ignore it.
+    """
 
     type: Literal["termination"] = "termination"
     audio_seconds: float
     segments: int
+    dropped_seconds: float = 0.0
 
 
 class Error(BaseModel):

@@ -25,26 +25,57 @@ To delete the LMA stack:
 3. Choose **Delete**.
 4. Confirm the deletion.
 
-Stack deletion removes most resources automatically. However, certain resources are intentionally retained to prevent accidental data loss.
+Stack deletion removes most resources automatically. What it leaves behind is
+decided by the `EnableDataRetentionOnDelete` stack parameter, `true` by default,
+and by a few resources that are kept whatever the parameter says.
 
 ## Retained Resources
 
-The following resources are **not** deleted when the stack is removed:
+**Data stores follow `EnableDataRetentionOnDelete`.** With `true`, the stack's
+DynamoDB tables (meetings, configuration, Virtual Participants and the others), its
+S3 buckets (recordings, server access logging, configuration history and Virtual
+Participant browser profiles), the transcript knowledge base's vector bucket and
+index, and the customer-managed AWS KMS key are kept, with their contents. With
+`false`, the S3 buckets are emptied of every object version and deleted, and the
+tables, the vector bucket and index, and the key are deleted with the stack; AWS
+KMS deletes a key only after its waiting period. The web UI's bucket is emptied and
+deleted either way.
 
-- **S3 buckets** (recordings, build artifacts)
-- **DynamoDB tables** (meeting data, configuration)
-- **CloudWatch Log groups**
-- **KMS keys** (if `EnableDataRetentionOnDelete` was set to true)
+**Most CloudWatch log groups are deleted with the stack.** The log groups of the
+Lambda functions, the CodeBuild projects, the VPC flow logs and the other
+declared groups belong to the stack and are deleted with it, whatever
+`EnableDataRetentionOnDelete` says.
 
-These resources are retained as a safety measure to prevent irreversible loss of meeting data and recordings.
+**Kept whatever `EnableDataRetentionOnDelete` says.** These hold meeting-time
+output or audit records, and are kept on every stack deletion. In the names,
+`<stack-name>` is the name of the nested stack that owns the resource, which
+begins with the name of the main stack:
+
+| Resource | Name | Kept until |
+|---|---|---|
+| The WebSocket transcriber's container log group | `/<stack-name>/fargate/TranscriberWebsocket` | Its entries expire under `CloudWatchLogsExpirationInDays`; the group stays until you delete it |
+| The Virtual Participant's container log group | `/<stack-name>/fargate/VirtualParticipant` | As above |
+| The scheduled Virtual Participant state machine's log group | `/aws/vendedlogs/states/<stack-name>` | Entries expire under `VPSchedulerStateMachineLogsExpirationInDays` |
+| The GraphQL API's log group | `/aws/appsync/apis/<api id>` | Created by AppSync, not owned by the stack. Entries expire under `CloudWatchLogsExpirationInDays` |
+| The voice enrollment table and the voice consent log (only with `EnableVoiceEnrollment=true`) | DynamoDB tables whose names begin with `<stack-name>-` | Until you delete them. The voice consent log is the audit trail of consent given and withdrawn |
+
+**Kept only when `EnableDataRetentionOnDelete` is `true`.** The MicroVM log
+groups, `/aws/lambda-microvms/<stack-name>-vp-logs` (Virtual Participants on
+Lambda MicroVMs) and `/aws/lambda-microvms/<stack-name>-asr-logs` (the on-demand
+speech engine), are kept with `true` and deleted with `false`.
+
+A deployment that has ever been upgraded to v0.4.0 or later from an earlier
+version may also have log groups that the stack does not own at all; step 3 below
+lists them. See [Privacy and Data Handling Controls](privacy-and-data-handling.md#deleting-a-stack)
+for what each kept resource holds.
 
 ## Manual Cleanup
 
 To fully remove all LMA resources after stack deletion, complete the following steps:
 
-1. **Delete S3 buckets**: Find buckets with "lma" in the name. You must empty each bucket before deleting it.
-2. **Delete DynamoDB tables**: Remove any DynamoDB tables associated with the LMA deployment.
-3. **Delete CloudWatch Log groups**: Remove log groups with the `/<stack-name>/`, `/aws/lambda/LMA-`, `/ecs/LMA-`, `/aws/lambda-microvms/<stack-name>-` or `/aws/vendedlogs/states/<stack-name>` prefixes.
+1. **Delete S3 buckets** (if `EnableDataRetentionOnDelete` was `true`): find buckets with the stack's name in their name. The buckets are versioned, so empty each one of every object version and delete marker (the console's **Empty** action does this) before deleting it. Delete the transcript knowledge base's vector bucket as well.
+2. **Delete DynamoDB tables**: remove the DynamoDB tables whose names begin with the stack's name, including the voice enrollment tables if voice enrollment was deployed.
+3. **Delete CloudWatch Log groups**: remove log groups with the `/<stack-name>/`, `/aws/lambda/LMA-`, `/ecs/LMA-`, `/aws/lambda-microvms/<stack-name>-`, `/aws/vendedlogs/states/<stack-name>` or `/aws/appsync/apis/<api id>` prefixes.
 
    Three of these outlive the stack whether or not you set `EnableDataRetentionOnDelete`, so they need sweeping on every deployment that has ever been upgraded to v0.4.0 or later:
 

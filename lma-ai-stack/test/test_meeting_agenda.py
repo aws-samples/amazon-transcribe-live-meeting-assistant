@@ -221,7 +221,9 @@ def test_the_vp_row_declares_its_agenda(schema_sdl: str) -> None:
 
 
 def _create_vp_template(resources: dict) -> str:
-    return resources["CreateVirtualParticipantResolver"]["Properties"]["RequestMappingTemplate"]
+    # An !Sub, for the record's expiry (MeetingRecordExpirationInDays).
+    request = resources["CreateVirtualParticipantResolver"]["Properties"]["RequestMappingTemplate"]
+    return request["Fn::Sub"] if isinstance(request, dict) else request
 
 
 def test_the_vp_row_records_where_its_agenda_came_from(resources: dict) -> None:

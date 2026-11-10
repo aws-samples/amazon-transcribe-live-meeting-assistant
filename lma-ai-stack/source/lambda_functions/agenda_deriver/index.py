@@ -82,6 +82,7 @@ _CALL_FIELDS = """
       AgentId
       CallSummaryText
       CallSummaryState
+      DetectedLanguages
       SpeakerIdentities
       Agenda
       AgendaSource

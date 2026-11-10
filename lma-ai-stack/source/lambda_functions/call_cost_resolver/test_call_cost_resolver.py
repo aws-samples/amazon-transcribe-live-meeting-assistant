@@ -253,6 +253,66 @@ def test_the_editor_reads_the_active_profile(tables) -> None:
     assert payload["Version"] == 3
 
 
+CUSTOM_DELTA = {"regions": {"default": {"bedrock/m": {"inputTokens": 0.000002}}}}
+
+
+def _point_at(config: FakeConfigurationTable, name: str | None) -> None:
+    """Set the active-profile pointer to ``name``, or remove it for ``None``."""
+    if name is None:
+        config.items.pop(ACTIVE_POINTER_KEY, None)
+    else:
+        _activate(config, name)
+
+
+@pytest.mark.parametrize(
+    "pointer",
+    [None, "default", "missing"],
+    ids=["pointer-unset", "pointer-default", "pointer-names-unstored-profile"],
+)
+def test_the_editor_reports_the_baseline_alone_while_no_profile_is_in_force(
+    tables, pointer
+) -> None:
+    config, _ = tables
+    # A custom profile that holds prices, which the store does not merge in this state.
+    config.seed("Config#custom", {"call_pricing": CUSTOM_DELTA}, version=4)
+    config.seed(DEFAULT_KEY, {"call_pricing": PRICING}, version=7)
+    _point_at(config, pointer)
+    payload = json.loads(invoke("getCallPricing", ADMIN)["Pricing"])
+    assert payload["Profile"] == "default"
+    assert payload["Custom"] == {}
+    assert payload["Effective"] == PRICING
+    assert payload["Version"] == 7
+    # What the editor reports as effective is what the estimate reads.
+    section = index.CONFIG_STORE.get_section("call_pricing")
+    assert payload["Effective"] == section.values
+
+
+@pytest.mark.parametrize("pointer", ["custom", "negotiated"])
+def test_the_editor_reports_the_profile_the_pointer_names(tables, pointer) -> None:
+    config, _ = tables
+    config.seed(f"Config#{pointer}", {"call_pricing": CUSTOM_DELTA}, version=5)
+    _activate(config, pointer)
+    payload = json.loads(invoke("getCallPricing", ADMIN)["Pricing"])
+    assert payload["Profile"] == pointer
+    assert payload["Custom"] == CUSTOM_DELTA
+    assert payload["Effective"]["regions"]["default"]["bedrock/m"] == {
+        "inputTokens": 0.000002,
+        "outputTokens": 0.000005,
+    }
+    assert payload["Version"] == 5
+    section = index.CONFIG_STORE.get_section("call_pricing")
+    assert payload["Effective"] == section.values
+
+
+@pytest.mark.parametrize("pointer", [None, "default"], ids=["pointer-unset", "pointer-default"])
+def test_a_price_save_is_refused_while_no_profile_is_in_force(tables, pointer) -> None:
+    config, _ = tables
+    _point_at(config, pointer)
+    with pytest.raises(Exception, match="^Refused: "):
+        invoke("updateCallPricing", ADMIN, input={"Pricing": "{}", "ExpectedVersion": 1})
+    assert codec.decode_body(config.items["Config#custom"]["Body"]["B"]) == {}
+
+
 def test_a_saved_price_goes_into_the_active_profile(tables) -> None:
     config, _ = tables
     config.seed("Config#negotiated", {}, version=3)

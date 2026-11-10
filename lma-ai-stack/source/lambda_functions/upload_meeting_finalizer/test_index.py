@@ -440,6 +440,45 @@ def test_a_segment_event_matches_what_the_live_transcriber_emits(h) -> None:
     }
 
 
+def test_a_segment_from_a_fixed_language_job_carries_no_language(h) -> None:
+    """Upload Audio runs its jobs in one fixed language, whose output names no
+    language per word, so no segment claims one was identified."""
+    h.run()
+    assert all("LanguageCode" not in seg for seg in h.kinesis.of_type("ADD_TRANSCRIPT_SEGMENT"))
+
+
+def test_a_segment_takes_the_language_most_of_its_words_were_identified_in(h) -> None:
+    """With multiple-language identification Transcribe names a language per word;
+    an utterance lists its words' ids and takes their majority language."""
+    h.s3.transcript = {
+        "results": {
+            "items": [
+                {"id": 0, "language_code": "en-US"},
+                {"id": 1, "language_code": "en-US"},
+                {"id": 2, "language_code": "es-US"},
+                {"id": 3, "language_code": "es-US"},
+                {"id": 4, "language_code": "es-US"},
+                {"id": 5},
+            ],
+            "audio_segments": [
+                {"transcript": "good morning", "start_time": 0, "end_time": 1, "items": [0, 1]},
+                {"transcript": "buenos dias", "start_time": 1, "end_time": 2, "items": [2, 3, 4]},
+                {"transcript": "ok", "start_time": 2, "end_time": 3, "items": [5]},
+                {
+                    "transcript": "hola",
+                    "start_time": 3,
+                    "end_time": 4,
+                    "language_code": "es-MX",
+                    "items": [0],
+                },
+            ],
+        }
+    }
+    h.run()
+    segments = h.kinesis.of_type("ADD_TRANSCRIPT_SEGMENT")
+    assert [seg.get("LanguageCode") for seg in segments] == ["en-US", "es-US", None, "es-MX"]
+
+
 def test_the_batch_job_is_metered_to_the_last_transcribed_word(h, monkeypatch) -> None:
     stored = []
 

@@ -55,9 +55,9 @@ export const isRequestTimeout = (error) =>
  * deletion fields and the capture context are selected only by getCall.
  *
  * CallSummaryState is kept for a different reason: the Kinesis pipeline's Call
- * mutations are published to onUpdateCall too, and they select their own fixed
- * field list, so a status or aggregation update arriving during a live meeting
- * would otherwise blank it -- making a hand-edited summary read as generated and
+ * mutations are published to onUpdateCall too, and they select it only when the
+ * deployed schema declares it, so a status or aggregation update arriving
+ * without it during a live meeting would otherwise blank it -- making a hand-edited summary read as generated and
  * hiding a regeneration in flight.
  *
  * The agenda is kept for the same reason, as one unit keyed on AgendaUpdatedAt:
@@ -84,6 +84,11 @@ export const mergeCallUpdate = (existing, call) => ({
   TranscriptionEngine: call.TranscriptionEngine || existing?.TranscriptionEngine,
   TranscriptionLanguage: call.TranscriptionLanguage ?? existing?.TranscriptionLanguage,
   SpeakerSeparation: call.SpeakerSeparation || existing?.SpeakerSeparation,
+  // Selected by getCall, onUpdateCall and the writes it follows: the Kinesis
+  // pipeline's, the agenda, speaker-name and summary Lambdas', and the page's
+  // own (updateCallAgenda, updateCallSummaryText, updateSpeakerIdentities).
+  // Not by the list query, so an update without it keeps the stored list.
+  DetectedLanguages: call.DetectedLanguages ?? existing?.DetectedLanguages,
   ...(call.AgendaUpdatedAt
     ? {}
     : {
@@ -129,6 +134,7 @@ export const mapTranscriptSegmentValue = (transcriptSegmentValue) => {
     Sentiment: sentiment,
     SentimentScore: sentimentScore,
     SentimentWeighted: sentimentWeighted,
+    LanguageCode: languageCode,
   } = transcriptSegmentValue;
 
   return {
@@ -146,6 +152,9 @@ export const mapTranscriptSegmentValue = (transcriptSegmentValue) => {
     sentiment,
     sentimentScore,
     sentimentWeighted,
+    // The language the speech engine identified, when it named one (see
+    // common/detected-languages.js); absent otherwise.
+    ...(languageCode ? { languageCode } : {}),
   };
 };
 
