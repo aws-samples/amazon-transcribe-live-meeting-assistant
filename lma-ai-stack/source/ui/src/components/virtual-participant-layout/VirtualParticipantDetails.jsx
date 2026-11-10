@@ -31,6 +31,7 @@ import LaunchSettings from './LaunchSettings';
 import EditScheduledVirtualParticipant from './EditScheduledVirtualParticipant';
 import { canEditScheduled, editWindowOpen } from './scheduled-edit';
 import { canManageVirtualParticipant } from './vp-access';
+import { mergeVpUpdate, vpOwner } from './vp-details';
 
 const client = generateClient();
 // VNC WebSocket URL is published by the backend in the vncEndpoint field
@@ -407,7 +408,7 @@ export const ConnectionDetails = ({ vpDetails }) => {
         <Box color="text-label" fontWeight="bold">
           Owner
         </Box>
-        <div>{vpDetails.owner || 'N/A'}</div>
+        <div>{vpOwner(vpDetails) || 'N/A'}</div>
       </SpaceBetween>
 
       <SpaceBetween size="xs">
@@ -428,6 +429,7 @@ ConnectionDetails.propTypes = {
     meetingPlatform: PropTypes.string,
     meetingId: PropTypes.string,
     owner: PropTypes.string,
+    Owner: PropTypes.string,
   }).isRequired,
 };
 
@@ -700,25 +702,10 @@ const VirtualParticipantDetails = () => {
     let retryTimer = null;
     let retryAttempt = 0;
 
-    const pickNew = (next, prev) => (next != null ? next : prev);
+    // A partial update keeps what it does not carry (vp-details.js).
     const applyUpdate = (updated) => {
       if (!updated || updated.id !== vpId) return;
-      setVpDetails((prev) => ({
-        ...prev,
-        ...updated,
-        // pickNew so a partial update with status=null doesn't blank it
-        status: pickNew(updated.status, prev?.status),
-        updatedAt: pickNew(updated.updatedAt, prev?.updatedAt),
-        CallId: pickNew(updated.CallId, prev?.CallId),
-        vncEndpoint: pickNew(updated.vncEndpoint, prev?.vncEndpoint),
-        vncPort: pickNew(updated.vncPort, prev?.vncPort),
-        // Latch vncReady=true so a later partial update can't unset it.
-        vncReady: prev?.vncReady === true ? true : pickNew(updated.vncReady, prev?.vncReady),
-        manualActionType: pickNew(updated.manualActionType, prev?.manualActionType),
-        manualActionMessage: pickNew(updated.manualActionMessage, prev?.manualActionMessage),
-        manualActionTimeoutSeconds: pickNew(updated.manualActionTimeoutSeconds, prev?.manualActionTimeoutSeconds),
-        manualActionStartTime: pickNew(updated.manualActionStartTime, prev?.manualActionStartTime),
-      }));
+      setVpDetails((prev) => mergeVpUpdate(prev, updated));
     };
 
     // Quiet poll fallback: only runs while we genuinely need it (status

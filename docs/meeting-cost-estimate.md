@@ -47,6 +47,10 @@ columns read as the calculation each line is:
 | = Estimated cost | Usage times unit price. Below $0.0001 is written "< $0.0001", never rounded to zero. Units shown for reference only read "not billed separately". Pointing at a cost shows the whole calculation, for example "1,480 seconds × $0.0001667 = $0.2467". |
 | Price source | Where the unit price came from. A shipped price shows its basis ("AWS Price List API", or "Estimate" where no list price exists); select it to read the offer, its version, the usage type, the date it was read, and a link to the service's pricing page. A price set in the configuration shows **Your price** with the shipped price beside it ("shipped $0.0001667"); selecting it names the profile it was set in. |
 
+The estimate the header's cost chip opens lays the same table out in four columns
+to fit its narrower space: the price source sits under the unit price it explains,
+and the cost column is headed **= Cost**.
+
 Above the table the panel says that this is an estimate, the date of the shipped
 prices, how many lines use a price set in the configuration, and any line it could
 not price or region it priced at another region's prices. Below it are what the

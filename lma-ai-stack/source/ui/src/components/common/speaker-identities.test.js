@@ -654,4 +654,69 @@ describe('headerSpeakers', () => {
   it('substitutes the Stream Audio participant name for the remote placeholder, as the transcript does', () => {
     expect(header(undefined, 'Sam Ortiz').map((s) => s.label)).toContain('Sam Ortiz (spk_0)');
   });
+
+  describe('lists each name once', () => {
+    const ROOM = [
+      line('Conference Room 4 (spk_0)', 0, 10),
+      line('Conference Room 4 (spk_1)', 10, 20),
+      line('Conference Room 4 (spk_2)', 20, 30),
+      line('Conference Room 4 (spk_1)', 30, 40),
+      line('Other Participant (spk_3)', 40, 41),
+    ];
+    const NAMED = {
+      'REMOTE#Conference Room 4 (spk_0)': { name: 'Priya Shah', status: 'confirmed' },
+      'REMOTE#Conference Room 4 (spk_2)': { name: 'Marcus Lee', status: 'confirmed' },
+    };
+    const roomHeader = (identities) =>
+      headerSpeakers(
+        speakerDisplayRows(buildSpeakerRoster(ROOM, identities), identities, speakerGroups(ROOM, identities)),
+      );
+
+    it('after a voice is merged into a named speaker', () => {
+      const merged = withMerge(
+        parseSpeakerIdentities({ identities: NAMED }),
+        'REMOTE#Conference Room 4 (spk_1)',
+        'REMOTE#Conference Room 4 (spk_2)',
+      );
+      const speakers = roomHeader(merged);
+      expect(speakers.map((s) => s.label)).toEqual(['Priya Shah', 'Marcus Lee', 'Other Participant (spk_3)']);
+      expect(speakers[1].key).toBe('REMOTE#Conference Room 4 (spk_2)');
+    });
+
+    it('after a voice from another name is merged into a named speaker', () => {
+      const merged = withMerge(
+        parseSpeakerIdentities({ identities: NAMED }),
+        'REMOTE#Other Participant (spk_3)',
+        'REMOTE#Conference Room 4 (spk_2)',
+      );
+      expect(roomHeader(merged).map((s) => s.label)).toEqual([
+        'Priya Shah',
+        'Conference Room 4 · Voice 2',
+        'Marcus Lee',
+      ]);
+    });
+
+    it('when two voices shown as several people are given the same name', () => {
+      const identities = parseSpeakerIdentities({
+        identities: { ...NAMED, 'REMOTE#Conference Room 4 (spk_1)': { name: 'Marcus Lee', status: 'confirmed' } },
+        speakerModes: { 'REMOTE#Conference Room 4': { mode: 'several' } },
+      });
+      const speakers = roomHeader(identities);
+      expect(speakers.map((s) => s.label)).toEqual(['Priya Shah', 'Marcus Lee', 'Other Participant (spk_3)']);
+      expect(speakers[1].keys).toEqual(['REMOTE#Conference Room 4 (spk_1)', 'REMOTE#Conference Room 4 (spk_2)']);
+    });
+
+    it('when the same name differs only in case or spacing, showing the first spelling heard', () => {
+      const identities = parseSpeakerIdentities({
+        identities: {
+          ...NAMED,
+          'REMOTE#Conference Room 4 (spk_1)': { name: 'marcus  lee ', status: 'confirmed' },
+        },
+        speakerModes: { 'REMOTE#Conference Room 4': { mode: 'several' } },
+      });
+      const speakers = roomHeader(identities);
+      expect(speakers.map((s) => s.label)).toEqual(['Priya Shah', 'marcus lee', 'Other Participant (spk_3)']);
+      expect(speakers[1].keys).toHaveLength(2);
+    });
+  });
 });
