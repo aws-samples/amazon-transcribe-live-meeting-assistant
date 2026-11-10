@@ -565,6 +565,17 @@ validate the pairing on a live multi-speaker meeting before marking it `vetted`.
   in `/aws/lambda-microvms/<stack>-asr-logs`. The size is billed whatever the load, so
   this line is what tells you whether a bundle would fit a smaller size.
   `ASR_LOAD_LOG_INTERVAL_S` changes the interval; `0` turns it off.
+- When the engine falls behind the incoming audio, it holds a bounded backlog
+  (`ASR_MAX_QUEUE` frames, default 64) and waits up to `ASR_MAX_WAIT_MS` (default
+  2000) for room before dropping a frame, so memory stays fixed. Dropped audio is
+  never transcribed, but it still counts on the transcript's timeline: rows after a
+  drop carry the time their audio arrived, so they stay aligned with the client's
+  clock and with the meeting's active-speaker changes. Each drop is logged as
+  `engine behind, dropped 0.128s of audio at ... cumulative dropped ...`, the
+  session's end-of-session line reports `dropped=` and `dropped_seconds=`, and the
+  `termination` message carries `dropped_seconds`. A nonzero total means the engine
+  could not keep up at some point in that meeting, whether from load or from a
+  single slow step (look for `sortformer step ... took` nearby).
 - `MaxMeetingSeconds` in the `AsrDefaults` mapping (default 4 h, service maximum 8 h)
   bounds what a single
   MicroVM can cost. The transcriber terminates the MicroVM on meeting end and on
