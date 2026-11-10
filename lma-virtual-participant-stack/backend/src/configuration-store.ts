@@ -325,9 +325,23 @@ export const transcribeOnlyOptions = (settings: TranscribeOnlyOptionSettings): s
     }
     if (settings.languageCode === 'identify-language' || settings.languageCode === 'identify-multiple-languages') {
         options.push(`language identification (${settings.languageCode})`);
+    } else if (!isMicrovmLanguage(settings.languageCode)) {
+        options.push(`language ${settings.languageCode}`);
     }
     return options;
 };
+
+/**
+ * Whether a meeting language is one the ASR MicroVM engine transcribes: English.
+ *
+ * The engine decodes the language its bundle bakes in and ignores the language a
+ * session asks for, and English is the one language every bundle in
+ * lma-asr-microvm-stack/source/catalog.json decodes (its test_catalog_languages
+ * test holds that). So any other language stays on Amazon Transcribe, even with a
+ * bundle whose model could decode it. An empty code is the readers' en-US default.
+ */
+export const isMicrovmLanguage = (languageCode: string): boolean =>
+    languageCode === '' || languageCode === 'en' || languageCode.startsWith('en-');
 
 /** The Amazon Transcribe options whose combination is checked; see transcribeOptionsProblem. */
 export interface TranscribeOptionCombination {

@@ -42,7 +42,23 @@ const TRANSCRIBE_ONLY: Array<[string, Partial<typeof PLAIN>]> = [
     ['a custom language model', { customLanguageModelName: 'clm-1' }],
     ['language identification', { languageCode: 'identify-language' }],
     ['multi-language identification', { languageCode: 'identify-multiple-languages' }],
+    ['a language other than English (de-DE)', { languageCode: 'de-DE' }],
+    ['a language other than English (es-US)', { languageCode: 'es-US' }],
+    ['a language other than English (ja-JP)', { languageCode: 'ja-JP' }],
 ];
+
+for (const languageCode of ['en-US', 'en-GB', 'en-AU']) {
+    test(`a VP in English (${languageCode}) uses the MicroVM engine`, () => {
+        assert.equal(resolveVpAsrEngine(SHIPPED_DEFAULT, undefined, { ...PLAIN, languageCode }), 'microvm');
+    });
+}
+
+test("a VP whose environment names a language other than English stays on Amazon Transcribe", () => {
+    assert.equal(
+        resolveVpAsrEngine(SHIPPED_DEFAULT, undefined, vpTranscribeOnlySettings({ TRANSCRIBE_LANGUAGE_CODE: 'fr-FR' })),
+        'transcribe',
+    );
+});
 
 for (const [name, options] of TRANSCRIBE_ONLY) {
     test(`a VP using ${name} stays on Amazon Transcribe`, () => {

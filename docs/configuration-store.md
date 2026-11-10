@@ -1183,9 +1183,13 @@ Participant asks for per-voice labels — are the `asr_engine` section.
   ASR launcher configured and use Amazon Transcribe whatever the switches say.
   The previous table had no seeder, and its readers took an absent record as
   every switch off; that reading now applies only to a rolled-back stack.
-- The active profile holds the switches an administrator saved, which win over
-  the baseline, so a release that changes the shipped switches reaches only the
-  deployments whose administrator has not saved them.
+- A Custom profile, when one is active, holds its own full copy of the switches,
+  which wins over the baseline; a release that changes the shipped switches
+  reaches only deployments running on the default profile. On an upgrade from
+  0.3.x the seeder converts a `custom` profile that holds settings into a full
+  copy, filling every switch nobody saved from this release's baseline, and
+  removes one that holds none, so the deployment runs on the default profile
+  (see [Named profiles](#named-profiles)).
 - The WebSocket transcriber reads the section on the `short` tier. It falls back
   to the previous `AsrConfigTable` only when the configuration table cannot be
   read or holds no shipped switches, and a fallback answer is reused for the same

@@ -119,7 +119,7 @@ dependency-specific gaps.
 | `lma-chat-button-config-stack/` | Chat UI button configuration | CloudFormation |
 | `lma-nova-sonic-config-stack/` | Nova Sonic voice assistant config | CloudFormation |
 
-**Data flow:** Browser audio -> WebSocket server (Fargate) -> Amazon Transcribe -> Kinesis Data Stream -> Call Event Processor Lambda (Strands Agents SDK) -> DynamoDB + AppSync (real-time GraphQL subscriptions) -> React UI.
+**Data flow:** Browser audio -> WebSocket server (Fargate) -> speech engine (ASR MicroVM by default, or Amazon Transcribe) -> Kinesis Data Stream -> Call Event Processor Lambda (Strands Agents SDK) -> DynamoDB + AppSync (real-time GraphQL subscriptions) -> React UI.
 
 The speech engine is pluggable. By default meetings are transcribed by an ASR MicroVM (one per meeting, one WebSocket session per audio channel), which returns text and speaker labels together: `EnableMicrovmAsr` defaults to `true`, the ASR stack is deployed in Regions with AWS Lambda MicroVMs, and the Transcription Engine section of the Configuration page ships with every meeting source on it. Amazon Transcribe is the alternative an admin can choose per meeting source, and the fallback where the ASR stack is not deployed or a MicroVM cannot start. Both engines emit identical `ADD_TRANSCRIPT_SEGMENT` events, so nothing downstream of Kinesis is engine-aware. See `docs/microvm-asr.md`.
 

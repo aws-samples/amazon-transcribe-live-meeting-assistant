@@ -61,6 +61,14 @@ test('a meeting with no Amazon Transcribe-only option uses the MicroVM engine', 
     assert.equal(lines.length, 0);
 });
 
+for (const languageCode of ['en-US', 'en-GB', 'en-AU', '']) {
+    test(`a meeting in English (${languageCode || 'unset'}) uses the MicroVM engine`, () => {
+        const { server, lines } = recordingServer();
+        assert.equal(resolveAsrEngine(meeting(), server, SHIPPED_DEFAULT, { ...PLAIN, languageCode }), 'microvm');
+        assert.equal(lines.length, 0);
+    });
+}
+
 const TRANSCRIBE_ONLY: Array<[string, Partial<TranscriptionSettings>, RegExp]> = [
     ['content redaction', { contentRedactionEnabled: true }, /content redaction/],
     // The flag is what counts, even where Amazon Transcribe would not redact the language.
@@ -68,6 +76,9 @@ const TRANSCRIBE_ONLY: Array<[string, Partial<TranscriptionSettings>, RegExp]> =
     ['a custom vocabulary', { customVocabularyName: 'product-names' }, /custom vocabulary product-names/],
     ['a custom language model', { customLanguageModelName: 'clm-1' }, /custom language model clm-1/],
     ['language identification', { languageCode: 'identify-language', languageOptions: 'en-US,es-US' }, /language identification \(identify-language\)/],
+    ['a language other than English (de-DE)', { languageCode: 'de-DE' }, /language de-DE/],
+    ['a language other than English (es-US)', { languageCode: 'es-US' }, /language es-US/],
+    ['a language other than English (ja-JP)', { languageCode: 'ja-JP' }, /language ja-JP/],
     [
         'multi-language identification',
         { languageCode: 'identify-multiple-languages', languageOptions: 'en-US,es-US' },

@@ -25,8 +25,15 @@ describe('transcribeOnlyOptions', () => {
     [{ customLanguageModelName: 'clm-1' }, 'a custom language model'],
     [{ languageCode: 'identify-language' }, 'language identification'],
     [{ languageCode: 'identify-multiple-languages' }, 'language identification'],
+    [{ languageCode: 'de-DE' }, 'the language de-DE'],
+    [{ languageCode: 'es-US' }, 'the language es-US'],
+    [{ languageCode: 'ja-JP' }, 'the language ja-JP'],
   ])('names %o as %s', (transcription, name) => {
     expect(transcribeOnlyOptions(transcription)).toEqual([name]);
+  });
+
+  it.each(['en-US', 'en-GB', 'en-AU', undefined])('names nothing for the English language %s', (languageCode) => {
+    expect(transcribeOnlyOptions({ languageCode })).toEqual([]);
   });
 });
 
@@ -47,6 +54,31 @@ describe('the Transcription Engine notice', () => {
     );
     expect(screen.getByText(KEEPS_ON_TRANSCRIBE)).toBeTruthy();
     expect(screen.getByText(/uses content redaction, a custom vocabulary, so every streaming meeting/)).toBeTruthy();
+  });
+
+  it('warns about a language other than English', () => {
+    render(
+      <SectionNotice
+        section="asr_engine"
+        settings={WITH_ENGINE}
+        configuration={{ transcription: { languageCode: 'fr-FR' } }}
+      />,
+    );
+    expect(
+      screen.getByText(/uses the language fr-FR, so every streaming meeting and Virtual Participant is/),
+    ).toBeTruthy();
+  });
+
+  it('names only streaming meetings when a custom language model is the only such option', () => {
+    render(
+      <SectionNotice
+        section="asr_engine"
+        settings={WITH_ENGINE}
+        configuration={{ transcription: { languageCode: 'en-US', customLanguageModelName: 'clm-1' } }}
+      />,
+    );
+    expect(screen.getByText(/uses a custom language model, so every streaming meeting is transcribed/)).toBeTruthy();
+    expect(screen.queryByText(/Virtual Participant is transcribed/)).toBeNull();
   });
 
   it('does not warn on a deployment without the engine', () => {

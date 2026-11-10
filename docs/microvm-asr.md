@@ -13,14 +13,25 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 > Transcribe in the Transcription Engine section of the Configuration page. Amazon
 > Transcribe is the alternative, and the fallback: it is used for every meeting where
 > the engine is not deployed (`EnableMicrovmAsr=false`, or a Region without AWS Lambda
-> MicroVMs, GovCloud included), and for any meeting whose MicroVM cannot start.
-> [Voice enrollment](voice-enrollment.md) depends on this engine. A meeting whose
-> Amazon Transcribe options use content redaction, a custom vocabulary, a custom
-> language model or language identification, which this engine does not offer, stays
-> on Amazon Transcribe whichever engine is selected (see
-> [Feature trade-offs](#feature-trade-offs-versus-amazon-transcribe)). Accuracy (WER)
-> and diarization error rate have not yet been benchmarked — see
-> [What is not yet measured](#what-is-not-yet-measured).
+> MicroVMs, GovCloud included), and for any meeting whose MicroVM cannot start. A
+> meeting whose Amazon Transcribe options use content redaction, a custom vocabulary,
+> a custom language model, language identification or a language other than English,
+> which this engine does not offer, stays on Amazon Transcribe whichever engine is
+> selected (see [Feature trade-offs](#feature-trade-offs-versus-amazon-transcribe)).
+>
+> **Why it is the default, and what that does not mean.** It is the default because
+> two features need it: [voice enrollment](voice-enrollment.md), whose speaker
+> embeddings only this engine computes, and separating the several voices on one
+> microphone or one attendee tile, which it does better than Amazon Transcribe in the
+> measurement in [Virtual Participant](virtual-participant.md). It is not the default
+> because its transcripts are better. Transcript quality here is below Amazon
+> Transcribe's, its word error rate (WER) and diarization error rate have not been
+> benchmarked against Amazon Transcribe (see
+> [What is not yet measured](#what-is-not-yet-measured)), and its defaults may change
+> between releases. Measure it in a dev stack before relying on it for production
+> meetings. **To keep Amazon Transcribe**, set `EnableMicrovmAsr` to `false`, or
+> choose Amazon Transcribe for each meeting source in the Transcription Engine
+> section (see [Choosing the engine](#choosing-the-engine)).
 >
 > Nothing about it is tunable at deploy time: `EnableMicrovmAsr` is the only
 > CloudFormation question, the model bundle ships with its diarization operating
@@ -90,15 +101,25 @@ these Transcribe features are not available on it:
 | Custom vocabulary | Not available |
 | Custom language model | Not available |
 | Language identification / multi-language | Not available |
-| Languages | The default model is **English only** |
+| Languages | Treated as **English only** (see below) |
+| Speaker labels | Per voice, per channel (the reason to use it) |
 
 **These options keep a meeting on Amazon Transcribe.** When the effective
 **Amazon Transcribe** section of the Configuration page turns on content redaction
 (the Regulated presets do), names a custom vocabulary or a custom language model,
-or sets the language to identify-language or identify-multiple-languages, a meeting
-that would otherwise use this engine is transcribed by Amazon Transcribe instead, so
-the option is applied rather than silently dropped. Redaction counts when its switch
-is on, whatever the language. The rule is applied each time a meeting starts, by the
+sets the language to identify-language or identify-multiple-languages, or sets any
+language other than English (anything not `en-*`, such as `de-DE` or `es-US`), a
+meeting that would otherwise use this engine is transcribed by Amazon Transcribe
+instead, so the option is applied rather than silently dropped. Redaction counts
+when its switch is on, whatever the language.
+
+**Why only English.** The engine decodes the language its model bundle was built
+with and ignores the `language` a session asks for. English is the one language every
+bundle in `catalog.json` decodes: its models record `en` or `multilingual`, and the one
+that bakes a single decode language bakes `en`
+(`lma-asr-microvm-stack/source/tests/test_catalog_languages.py` holds the catalog to
+that). The readers do not know which bundle is deployed, so they put only English
+meetings on the engine, even with a bundle whose model could decode another language. The rule is applied each time a meeting starts, by the
 WebSocket transcriber for Stream Audio, Chrome extension and Desktop Capture meetings
 and by the Virtual Participant for its own, and each logs the reason at info level
 (`[ASR] ... Amazon Transcribe options use content redaction, ...`). It also wins over
@@ -108,8 +129,7 @@ warning: those options are the deployment's, and a client's engine request does 
 switch them off. The Transcription Engine section of the Configuration page says
 when the saved Amazon Transcribe options do this. To put meetings on this engine,
 clear those options. The Virtual Participant has no custom language model setting,
-so for it only the other three apply.
-| Speaker labels | Per voice, per channel (the reason to use it) |
+so for it only the other options apply.
 
 The two engines coexist in one deployment, and which one a meeting uses is chosen
 per meeting source (see [Choosing the engine](#choosing-the-engine)).
@@ -321,9 +341,14 @@ stored in the active configuration profile, and one saved on the Transcription
 Engine page of a release before v0.4.0 is carried into that profile by the upgrade.
 A deployment upgraded from such a release on which nobody saved that page moves onto
 the ASR MicroVM engine wherever the engine is deployed; choose Amazon Transcribe in
-the section to keep it. A Custom profile is a full copy of the configuration, so one
-created before this release holds the engine values the baseline had when it was
-copied.
+the section to keep it. That happens in one of two ways on an upgrade from 0.3.x. If
+the deployment's `custom` profile holds no settings at all, it is removed and the
+deployment runs on the default profile, so it follows the shipped switches of this
+and every later release. If it holds settings, it is converted into a full-copy
+Custom profile, and every switch nobody saved is filled in from this release's
+baseline, which puts those sources on the ASR MicroVM engine. From then on that
+profile keeps its own copy of the switches, so a later release that changes the
+shipped switches does not change it.
 
 On a deployment without the engine (`EnableMicrovmAsr=false`, or a Region without
 AWS Lambda MicroVMs) the settings are not shown and have no effect: the transcriber
@@ -696,7 +721,9 @@ Honest state of validation, so nobody deploys this expecting known numbers:
   refuses anything else up front rather than letting the stack fail minutes later at
   `AWS::Lambda::MicrovmImage`.
 
-Every number needed to measure these on your own meetings is in the MicroVM log group: per-session summaries carry audio seconds,
+Measure these in a dev stack before relying on the engine for production meetings,
+and keep Amazon Transcribe until you have (see [Choosing the engine](#choosing-the-engine)).
+Every number needed is in the MicroVM log group: per-session summaries carry audio seconds,
 segment counts and resident memory.
 
 ## Speaker names

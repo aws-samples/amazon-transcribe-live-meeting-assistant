@@ -16,7 +16,8 @@ Audio reaches LMA by one of two routes and leaves as transcript segments:
   Transcribe (used when that stack is absent, when an admin has moved the
   source onto it in the Transcription Engine section of the Configuration
   page, when the meeting's Amazon Transcribe options use content redaction,
-  a custom vocabulary or language model, or language identification, or when
+  a custom vocabulary or language model, language identification, or a
+  language other than English, or when
   a MicroVM could not start for a meeting). The [ASR] log line says which.
 - Both engines emit identical ADD_TRANSCRIPT_SEGMENT events onto a Kinesis Data
   Stream, so nothing downstream of Kinesis is engine-aware.

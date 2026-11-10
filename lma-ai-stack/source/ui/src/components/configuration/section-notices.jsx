@@ -44,22 +44,35 @@ const NovaSonicNotice = ({ configuration = {} }) => {
 
 NovaSonicNotice.propTypes = { configuration: PropTypes.shape({}) };
 
+/** Whether a meeting language is one the ASR MicroVM engine transcribes: English, as isMicrovmLanguage. */
+const isMicrovmLanguage = (languageCode) =>
+  !languageCode || languageCode === 'en' || `${languageCode}`.startsWith('en-');
+
 /**
  * The Amazon Transcribe options a saved transcription section uses that the
- * ASR MicroVM engine does not offer, as the page names them. A meeting using any
- * of them stays on Amazon Transcribe: the same rule as transcribeOnlyOptions in
- * the transcriber's and the Virtual Participant's configuration-store.ts.
+ * ASR MicroVM engine does not offer, as the page names them, each with whether
+ * it also concerns Virtual Participants (which have no custom language model
+ * setting). A meeting using any of them stays on Amazon Transcribe: the same rule
+ * as transcribeOnlyOptions in the transcriber's and the Virtual Participant's
+ * configuration-store.ts.
  */
-export const transcribeOnlyOptions = (transcription = {}) => {
+export const transcribeOnlyOptionsInUse = (transcription = {}) => {
   const options = [];
-  if (transcription?.contentRedactionEnabled === true) options.push('content redaction');
-  if (transcription?.customVocabularyName) options.push('a custom vocabulary');
-  if (transcription?.customLanguageModelName) options.push('a custom language model');
-  if (['identify-language', 'identify-multiple-languages'].includes(transcription?.languageCode)) {
-    options.push('language identification');
+  if (transcription?.contentRedactionEnabled === true) options.push({ name: 'content redaction', vp: true });
+  if (transcription?.customVocabularyName) options.push({ name: 'a custom vocabulary', vp: true });
+  if (transcription?.customLanguageModelName) options.push({ name: 'a custom language model', vp: false });
+  const languageCode = transcription?.languageCode;
+  if (['identify-language', 'identify-multiple-languages'].includes(languageCode)) {
+    options.push({ name: 'language identification', vp: true });
+  } else if (!isMicrovmLanguage(languageCode)) {
+    options.push({ name: `the language ${languageCode}`, vp: true });
   }
   return options;
 };
+
+/** The names alone; see transcribeOnlyOptionsInUse. */
+export const transcribeOnlyOptions = (transcription = {}) =>
+  transcribeOnlyOptionsInUse(transcription).map((option) => option.name);
 
 // Without the ASR MicroVM engine every meeting is transcribed by Amazon
 // Transcribe, so the section shows only the voice separation switch, which
@@ -75,19 +88,22 @@ const AsrEngineNotice = ({ settings = {}, configuration = {} }) => {
     );
   }
   const diarization = `${settings?.AsrDiarizationAvailable}` === 'true';
-  const inUse = transcribeOnlyOptions(configuration?.transcription);
+  const inUse = transcribeOnlyOptionsInUse(configuration?.transcription);
+  const affected = inUse.some((option) => option.vp)
+    ? 'every streaming meeting and Virtual Participant is'
+    : 'every streaming meeting is';
   return (
     <>
       <Alert type="info" header="The ASR MicroVM engine is the default">
-        The ASR MicroVM engine does not offer Amazon Transcribe&apos;s content redaction, custom vocabulary, custom
-        language model or language identification, so while the Amazon Transcribe section uses any of them, meetings
-        stay on Amazon Transcribe whichever engine is selected here. A meeting whose MicroVM cannot start also falls
-        back to Amazon Transcribe.
+        The ASR MicroVM engine transcribes English only, and does not offer Amazon Transcribe&apos;s content redaction,
+        custom vocabulary, custom language model or language identification. While the Amazon Transcribe section sets
+        another language or uses any of those, meetings stay on Amazon Transcribe whichever engine is selected here. A
+        meeting whose MicroVM cannot start also falls back to Amazon Transcribe.
       </Alert>
       {inUse.length > 0 && (
         <Alert type="warning" header="These settings keep meetings on Amazon Transcribe">
-          The Amazon Transcribe section uses {inUse.join(', ')}, so every streaming meeting and Virtual Participant is
-          transcribed by Amazon Transcribe, even where the ASR MicroVM engine is selected below.
+          The Amazon Transcribe section uses {inUse.map((option) => option.name).join(', ')}, so {affected} transcribed
+          by Amazon Transcribe, even where the ASR MicroVM engine is selected below.
         </Alert>
       )}
       <KeyValuePairs
