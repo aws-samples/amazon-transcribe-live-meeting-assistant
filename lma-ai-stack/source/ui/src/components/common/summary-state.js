@@ -17,9 +17,16 @@
  * and room to record more about a run later without another schema change.
  *
  * Every reader goes through parseSummaryState, so a meeting with no state at all
- * -- which is every meeting summarised before this existed, and every summary
- * the Kinesis pipeline writes -- reads as a generated summary with nothing
- * running rather than as an error.
+ * -- which is every meeting summarised before this existed, and every meeting
+ * in a deployment with summaries switched off -- reads as a generated summary
+ * with nothing running rather than as an error.
+ *
+ * Two kinds of run write it. A regeneration, started from the Regenerate
+ * button, writes no `trigger`. The end-of-meeting summary, which the Kinesis
+ * pipeline queues when a meeting ends, writes `trigger: 'meeting-end'`: the
+ * ENDED status write marks it running, and the summary write marks it idle or
+ * failed. The meeting page words the two differently -- "Summary in progress"
+ * against "Regenerating" -- and waits a shorter time for the second.
  */
 
 export const SOURCE_GENERATED = 'generated';
@@ -27,6 +34,20 @@ export const SOURCE_MANUAL = 'manual';
 export const STATUS_RUNNING = 'running';
 export const STATUS_FAILED = 'failed';
 export const STATUS_IDLE = 'idle';
+export const TRIGGER_MEETING_END = 'meeting-end';
+
+/**
+ * How long the end-of-meeting summary is waited for before the page stops
+ * saying it is on its way and offers Regenerate instead.
+ *
+ * The summary of a long meeting takes a few minutes; this is comfortably past
+ * that, and catches the run whose outcome was never written -- a summary
+ * function killed mid-run, or an event lost on the way -- which would otherwise
+ * leave the meeting showing "Summary in progress" for good. Must match
+ * MEETING_END_PATIENCE_SECONDS in the regenerator Lambda, which accepts a
+ * regeneration in place of the run once this has passed.
+ */
+export const MEETING_END_PATIENCE_MS = 600 * 1000;
 
 /**
  * How long a run may be marked as in flight before the mark is ignored.
@@ -75,19 +96,78 @@ export const serializeSummaryState = (state) => JSON.stringify(state || {});
  * unreadable stamp as finished, do the same for a stamp this cannot ever read
  * its way out of.
  */
-export const isRegenerating = (state, now = Date.now()) => {
+/** True when the state belongs to the end-of-meeting summary rather than a regeneration. */
+export const isMeetingEndRun = (state) => state?.trigger === TRIGGER_MEETING_END;
+
+/**
+ * When a running mark was stamped, or null when it is not a mark this can
+ * believe.
+ *
+ * `updateCallSummaryText` stores whatever state string it is given, so the
+ * shape of this field is not something a reader can take for granted: a mark
+ * with no usable stamp, or one dated further ahead than two clocks disagree by,
+ * reads as finished rather than holding this meeting's controls with nothing
+ * able to clear it.
+ */
+const runningSince = (state, now) => {
   if (state?.status !== STATUS_RUNNING) {
-    return false;
+    return null;
   }
-  // `updateCallSummaryText` stores whatever state string it is given, so the
-  // shape of this field is not something a reader can take for granted: a mark
-  // with no usable stamp reads as finished rather than disabling the controls on
-  // this meeting with nothing able to clear it.
   const started = new Date(state.startedAt ?? '').getTime();
   if (Number.isNaN(started) || started > now + CLOCK_SKEW_ALLOWANCE_MS) {
+    return null;
+  }
+  return started;
+};
+
+export const isRegenerating = (state, now = Date.now()) => {
+  if (isMeetingEndRun(state)) {
     return false;
   }
-  return started > now - STALE_RUN_MS;
+  const started = runningSince(state, now);
+  return started !== null && started > now - STALE_RUN_MS;
+};
+
+/**
+ * True while the end-of-meeting summary is on its way: queued when the meeting
+ * ended, not yet written, and not yet waited for longer than
+ * MEETING_END_PATIENCE_MS.
+ *
+ * Only ever true for a meeting the pipeline marked. With summaries switched off
+ * nothing marks it, so such a meeting goes straight to "Not available" rather
+ * than promising a summary that is not coming.
+ */
+export const isSummaryInProgress = (state, now = Date.now()) => {
+  if (!isMeetingEndRun(state)) {
+    return false;
+  }
+  const started = runningSince(state, now);
+  return started !== null && started > now - MEETING_END_PATIENCE_MS;
+};
+
+/**
+ * True when the end-of-meeting summary was queued but has been waited for
+ * longer than MEETING_END_PATIENCE_MS with no outcome: the page stops showing
+ * progress and offers Regenerate.
+ */
+export const isSummaryOverdue = (state, now = Date.now()) => {
+  if (!isMeetingEndRun(state)) {
+    return false;
+  }
+  const started = runningSince(state, now);
+  return started !== null && started <= now - MEETING_END_PATIENCE_MS;
+};
+
+/**
+ * How long until an end-of-meeting summary in progress becomes overdue, or
+ * null when it is not in progress. What the page sets its timer by, so the
+ * fallback appears without anything else having to change on the meeting.
+ */
+export const msUntilSummaryOverdue = (state, now = Date.now()) => {
+  if (!isSummaryInProgress(state, now)) {
+    return null;
+  }
+  return runningSince(state, now) + MEETING_END_PATIENCE_MS - now;
 };
 
 /** True when the stored text is something a person wrote rather than generated. */
@@ -106,16 +186,43 @@ export const isHandEdited = (state) => state?.source === SOURCE_MANUAL;
  * over the same window a run may be in flight for, measured from the `updatedAt`
  * the Lambda writes beside it, and a failure that cannot be dated is not shown:
  * an undateable one would never age out, which is the case being fixed.
+ *
+ * A failed end-of-meeting summary is the exception, and is shown for as long
+ * as it is the meeting's state. It is not a press somebody made a moment ago
+ * but the reason the meeting has no summary, and it stays true until a
+ * regeneration replaces it.
  */
 export const regenerationFailure = (state, now = Date.now()) => {
   if (isRegenerating(state, now) || state?.status !== STATUS_FAILED) {
     return null;
+  }
+  if (isMeetingEndRun(state)) {
+    return state.message || 'the summary could not be generated';
   }
   const at = new Date(state.updatedAt ?? '').getTime();
   if (Number.isNaN(at) || at < now - STALE_RUN_MS || at > now + CLOCK_SKEW_ALLOWANCE_MS) {
     return null;
   }
   return state.message || 'could not regenerate the summary';
+};
+
+export const SUMMARY_IN_PROGRESS_TEXT = 'Summary in progress…';
+export const SUMMARY_FAILED_TEXT = 'The summary could not be generated.';
+export const SUMMARY_OVERDUE_TEXT = 'The summary is taking longer than expected.';
+
+/**
+ * What to say in place of a meeting's summary when it has none to show, or
+ * null to say whatever the reader says for no summary ("Not available").
+ *
+ * For the readers that show the summary without its controls -- the meetings
+ * list, the embedded summary panel, the disabled download menu -- so each says
+ * the same thing the meeting page does.
+ */
+export const summaryStatusText = (state, now = Date.now()) => {
+  if (isSummaryInProgress(state, now)) return SUMMARY_IN_PROGRESS_TEXT;
+  if (isSummaryOverdue(state, now)) return SUMMARY_OVERDUE_TEXT;
+  if (isMeetingEndRun(state) && state?.status === STATUS_FAILED) return SUMMARY_FAILED_TEXT;
+  return null;
 };
 
 export default parseSummaryState;

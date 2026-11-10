@@ -213,6 +213,18 @@ the other fails at commit time rather than 20 minutes into a deploy. The memory
 duplication cannot be removed — `MinimumMemoryInMiB` needs a CloudFormation-typed
 number and a Mapping cannot be keyed on a value a custom resource resolved.
 
+A model entry pins its weights in one of two forms. Most name one archive (`url`,
+`sha256`, `archive: "tar.bz2"`) and list the file names inside it under `files`. A model
+whose files are served individually at a fixed revision can instead set
+`archive: "files"` and give each `files` entry as `{"path", "url", "sha256"}`, the way the
+diarizer's model and data files are given, with an optional `warmWav` (`url`, `sha256`)
+for the clip the image's warm-up decodes. Use a URL that names a commit (Hugging Face's
+`/resolve/<40-character commit>/<file>`), never a branch, so the bytes behind each
+checksum cannot change. Both forms produce the same files under the same names in the
+image, so the runtime does not know which was used. The Parakeet TDT v3 and v2 entries use
+the per-file form, pinned to the sherpa-onnx maintainer's Hugging Face repositories. A
+Qwen3-ASR model needs its tokenizer directory and so must come from an archive.
+
 The runtime also carries an offline (`accurate`) engine — VAD-segmented, one decode
 per closed utterance, for transducer models that cannot stream — which the
 Parakeet, Qwen3-ASR and Cohere Transcribe bundles use. It produces no interim text while somebody is speaking: a row
@@ -565,7 +577,8 @@ The transcriber can talk to an ASR server running on your machine, with no AWS
 involved:
 
 ```bash
-# 1. Run the ASR server on the bundle's weights. The catalog entry names the archive;
+# 1. Run the ASR server on the bundle's weights. The catalog entry names the archive
+#    (or, for a model pinned file by file, one URL per file: download each into models/);
 #    the k2-fsa export ships int8 files, so point the server at them explicitly.
 cd lma-asr-microvm-stack/source
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
@@ -703,9 +716,9 @@ aws cloudformation delete-stack --stack-name <the nested ASR stack>
 ```
 
 **The image build fails.** Check `/aws/lambda-microvms/<stack>-asr-logs`. A `SHA256
-mismatch` means the pinned checksum does not match the download; `model file ... is
-not in the archive` means the file names in the catalog entry are wrong; `HTTP 404`
-means the URL is wrong.
+mismatch` means the pinned checksum does not match the download (for a model pinned
+file by file, the label names the file); `model file ... is not in the archive` means
+the file names in the catalog entry are wrong; `HTTP 404` means the URL is wrong.
 
 A transient failure from the model host (`503`, `429`, a cut connection) is retried
 five times with backoff before the build gives up — the log line reads
@@ -770,7 +783,7 @@ complying with their licences.**
 | NVIDIA TitaNet-small (speaker embedding) | CC-BY-4.0 |
 | pyannote segmentation 3.0 (turn detection) | MIT |
 
-Each model's licence file is copied into the image alongside its weights, and the
+Where a model's download ships a licence file, it is copied into the image alongside its weights, and the
 resolved licences are reported in the ASR stack's `AsrModelLicense`, `AsrLicenceSummary`
 and `AsrRedistributable` outputs. `AsrRedistributable` is `false` only for
 `nemotron-titanet-small`. CC-BY-4.0 requires attribution, which

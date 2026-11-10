@@ -24,6 +24,7 @@ import { generateClient } from 'aws-amplify/api';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Badge,
   Box,
   Button,
   Checkbox,
@@ -295,9 +296,17 @@ const VoiceEnrollmentPage = () => {
       header={
         <Header
           variant="h1"
-          description="Let meetings label what you say with your name, instead of “Other Participant”."
+          description={
+            <SpaceBetween direction="vertical" size="xxs">
+              <span>Let meetings label what you say with your name, instead of “Other Participant”.</span>
+              <span>Requires the on-demand (MicroVM) speech engine.</span>
+            </SpaceBetween>
+          }
         >
-          Your voice
+          <SpaceBetween direction="horizontal" size="xs" alignItems="center">
+            <span>Your voice</span>
+            <Badge color="blue">Beta</Badge>
+          </SpaceBetween>
         </Header>
       }
     >

@@ -19,12 +19,13 @@ title: "LMA Documentation"
 - [Prerequisites & Deployment](prerequisites-and-deployment.md) — AWS account setup, Bedrock model access, CloudFormation deployment, initial login
 - [Quick Start Guide](quick-start-guide.md) — Your first meeting in 5 minutes using Stream Audio or Virtual Participant
 - [Demo Videos](demo-videos.md) — Recorded walkthroughs of LMA features, and how to record and publish a new one
+- [LMA in Action](lma-in-action.md) — An illustrated one-page tour of what LMA does and what sets it apart
 
 ### Core Features
 
 - [Transcription & Translation](transcription-and-translation.md) — Real-time transcription, speaker attribution, multi-language support, live translation, PII redaction, custom vocabulary, audio recording
 - [On-demand ASR & Speaker Diarization (MicroVM)](microvm-asr.md) — Experimental alternative to Amazon Transcribe streaming: per-voice speaker labels from an ASR + diarization engine on AWS Lambda MicroVMs, with a swappable model
-- [Voice Enrollment (Speaker Recognition)](voice-enrollment.md) — Optional and off by default: people enroll their own voice, with first-party consent and an append-only consent log, so they are labelled by name from their first word
+- [Voice Enrollment (Speaker Recognition)](voice-enrollment.md) — Beta, optional and off by default: people enroll their own voice, with first-party consent and an append-only consent log, so they are labelled by name from their first word
 - [Meeting Assistant](meeting-assistant.md) — Strands agent chat interface, built-in tools, Knowledge Base, Guardrails, model selection, wake phrase, custom prompts
 - [Transcript Summarization](transcript-summarization.md) — Automatic and on-demand summaries, regenerating and editing a stored summary, custom prompt templates, Lambda-based summarization
 - [Meeting Agenda](meeting-agenda.md) — An agenda on each meeting: given when a Virtual Participant is started or scheduled (on the form or by an MCP client), the Agenda panel on the meeting page, who can change it, deriving one from the transcript, the summary's agenda coverage section, and asking the assistant how the meeting is going against it

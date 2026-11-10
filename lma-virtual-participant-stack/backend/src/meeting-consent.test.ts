@@ -27,6 +27,10 @@ import {
 } from './meeting-consent.js';
 import { normalizeParticipantName } from './consent-matcher.js';
 import { noteParticipantSeen, UNIDENTIFIED_PARTICIPANT } from './consent-roster.js';
+import { ConsentListener, HeardResult, ListenerEngines } from './consent-listener.js';
+import { kinesisStreamManager } from './kinesis-stream.js';
+import { setLogLevel, setLogSink } from './logger.js';
+import { consentHelpLine } from './consent-help.js';
 
 // ─── A fake API with the resolver's rules ───────────────────────────────────
 
@@ -117,10 +121,13 @@ class FakeApi implements ConsentApi {
         });
     }
 
+    events: RecordEventInput[] = [];
+
     async recordEvent(input: RecordEventInput): Promise<ConsentRecord | null> {
         this.calls.push(`recordEvent:${input.ParticipantName}:${input.Decision}`);
+        this.events.push(input);
         return this.write((record) => {
-            record.Events = [...(record.Events ?? []), { EventId: `e${++this.id}`, ParticipantName: input.ParticipantName, Decision: input.Decision, Source: 'chat', Text: input.Text }];
+            record.Events = [...(record.Events ?? []), { EventId: `e${++this.id}`, ParticipantName: input.ParticipantName, Decision: input.Decision, Source: input.Source ?? 'chat', Text: input.Text }];
         });
     }
 
@@ -159,7 +166,7 @@ interface Harness {
     details: string[];
     uploads: string[];
     log: string[];
-    capture: { on: boolean; releases: number; holds: number; video: string[] };
+    capture: { on: boolean; releases: number; holds: number; video: string[]; listening: boolean };
     left: string[];
     settle: () => Promise<void>;
     /** Moves the flow's clock on. */
@@ -176,6 +183,10 @@ async function harness(options: {
     chat?: string[];
     readRoster?: () => Promise<string[] | null>;
     sendersHidden?: boolean;
+    /** Called when the flow starts or stops listening for spoken replies. */
+    listen?: (on: boolean) => void;
+    /** The Meeting Consent section cannot be read before joining. */
+    sectionUnreadable?: boolean;
 } = {}): Promise<Harness> {
     const deployment = effectiveConsentSettings(options.deployment ?? { mode: 'notify' });
     const api = options.api ?? new FakeApi({ mode: deployment.mode, rule: deployment.rule });
@@ -184,7 +195,7 @@ async function harness(options: {
     const uploads: string[] = [];
     const log: string[] = [];
     const left: string[] = [];
-    const capture = { on: true, releases: 0, holds: 0, video: [] as string[] };
+    const capture = { on: true, releases: 0, holds: 0, video: [] as string[], listening: false };
     let now = Date.parse('2026-11-02T10:00:00.000Z');
     const deps: ConsentFlowDeps = {
         clock: () => now,
@@ -209,6 +220,11 @@ async function harness(options: {
             stopVideo: async () => {
                 capture.video.push('stop');
                 await options.stopVideo?.();
+            },
+            listen: (on) => {
+                capture.listening = on;
+                log.push(on ? 'listen:on' : 'listen:off');
+                options.listen?.(on);
             },
         },
         api: () => api,
@@ -236,7 +252,10 @@ async function harness(options: {
     const flow = new MeetingConsentFlow(deps);
     await flow.prepare(
         async () => options.choice ?? null,
-        async () => options.deployment ?? { mode: 'notify' },
+        async () => {
+            if (options.sectionUnreadable) throw new Error('the section cannot be read');
+            return options.deployment ?? { mode: 'notify' };
+        },
     );
     capture.on = !flow.held;
     flow.attach({
@@ -570,7 +589,7 @@ test('opt-in: capture is withheld before joining and the meeting record is creat
     const h = await harness({ deployment: OPT_IN_EACH });
     assert.equal(h.flow.held, true);
     assert.equal(h.capture.on, false);
-    assert.deepEqual(h.log.slice(0, 3), ['hold', 'markJoined', 'createMeeting']);
+    assert.deepEqual(h.log.slice(0, 4), ['hold', 'markJoined', 'listen:on', 'createMeeting']);
     assert.equal(h.details[0], 'Waiting for consent…');
     assert.ok(h.chat.some((m) => m.includes('Reply "I consent"')));
     assert.deepEqual(h.uploads, [], 'nothing is granted yet');
@@ -688,15 +707,19 @@ test('an objection that could not be recorded keeps capture withheld until it is
     assert.equal(h.capture.on, false);
 });
 
-test('where the platform shows no chat sender, the status line says why each-participant consent cannot be met', async () => {
+test('where the platform shows no chat sender, a typed consent is not recorded and consent aloud is asked for', async () => {
     const h = await harness({ deployment: OPT_IN_EACH, sendersHidden: true });
     h.flow.noteAttendeeCount(3);
     await h.flow.handleChat(null, 'I consent');
-    assert.ok(h.chat.some((m) => m.includes('could not tell who sent that reply')), 'said where consent is awaited');
+    assert.ok(
+        h.chat.some((m) => m.includes('could not tell who sent that reply') && m.includes('Say "LMA, I consent" aloud instead.')),
+        'said where consent is awaited, with the way that works here',
+    );
     await h.flow.syncRoster();
     await h.settle();
     assert.equal(h.capture.on, false);
-    assert.match(h.details[h.details.length - 1], /does not show LMA who sent a chat message/);
+    assert.ok(!h.api.calls.some((c) => c.startsWith('recordEvent')), 'nothing recorded');
+    assert.match(h.details[h.details.length - 1], /have not consented yet\. On this meeting platform consent is given aloud/);
 });
 
 test("a platform's own participant list is used where it accounts for everybody", async () => {
@@ -911,6 +934,318 @@ test('evidence stops at the per-meeting budget', async () => {
     }
     await h.settle();
     assert.equal(h.uploads.length, MAX_EVIDENCE_IMAGES);
+});
+
+// ─── Spoken replies ─────────────────────────────────────────────────────────
+
+test('a spoken consent from a named speaker is recorded with source voice', async () => {
+    const h = await harness({ deployment: OPT_IN_EACH });
+    h.flow.noteAttendeeCount(2); // the VP and Bo
+    assert.equal(h.flow.handleSpeech('Bo Chen', 'LMA, I consent.'), 'consent');
+    await h.flow.syncRoster();
+    await h.settle();
+    const event = h.api.events[h.api.events.length - 1];
+    assert.equal(event.ParticipantName, 'Bo Chen');
+    assert.equal(event.Decision, 'consent');
+    assert.equal(event.Source, 'voice');
+    assert.equal(h.capture.on, true, 'the only participant present consented aloud');
+    h.flow.stop();
+});
+
+test('a named speaker counts as present, so the each-participant rule can be met by speaking', async () => {
+    const h = await harness({ deployment: OPT_IN_EACH, sendersHidden: true });
+    h.flow.noteAttendeeCount(3);
+    await h.flow.syncRoster();
+    assert.deepEqual(h.api.record?.Participants, [`${UNIDENTIFIED_PARTICIPANT} 1`, `${UNIDENTIFIED_PARTICIPANT} 2`]);
+    h.flow.handleSpeech('Bo Chen', 'I agree, LMA');
+    h.flow.handleSpeech('Cy Diaz', 'LMA consent');
+    await h.settle();
+    await h.flow.syncRoster();
+    await h.settle();
+    assert.deepEqual(h.api.record?.Participants, ['Bo Chen', 'Cy Diaz']);
+    assert.equal(h.capture.on, true);
+    h.flow.stop();
+});
+
+test('a spoken consent whose speaker cannot be named is not recorded, and the chat says so', async () => {
+    const h = await harness({ deployment: OPT_IN_EACH });
+    h.flow.noteAttendeeCount(2);
+    assert.equal(h.flow.handleSpeech(null, 'LMA consent'), 'consent');
+    assert.equal(h.flow.handleSpeech('Unknown', 'LMA, I agree'), 'consent', 'a placeholder speaker is nobody');
+    await h.settle();
+    assert.deepEqual(h.api.events, []);
+    assert.equal(
+        h.chat.filter((m) => m === 'Live Meeting Assistant heard consent said aloud but could not tell who said it, so it was not recorded.').length,
+        2,
+    );
+    assert.equal(h.capture.on, false);
+    h.flow.stop();
+});
+
+test('a spoken objection stops capture before handleSpeech returns and is recorded with source voice', async () => {
+    const h = await harness({ deployment: { mode: 'notify' } });
+    assert.equal(h.capture.on, true);
+    assert.equal(h.flow.handleSpeech('Bo Chen', 'LMA, stop recording!'), 'objection');
+    assert.equal(h.capture.on, false, 'held synchronously, before any result after it is written');
+    await h.settle();
+    const event = h.api.events[h.api.events.length - 1];
+    assert.deepEqual([event.ParticipantName, event.Decision, event.Source], ['Bo Chen', 'objection', 'voice']);
+    assert.ok(h.chat.some((m) => m.startsWith('Bo Chen objected. Live Meeting Assistant has stopped recording')));
+    assert.equal(h.capture.listening, true, 'listens for the objector to consent again');
+
+    h.flow.handleSpeech('Bo Chen', 'LMA, I consent');
+    await h.settle();
+    assert.equal(h.capture.on, true, 'the objector consented aloud, so capture resumes');
+    assert.equal(h.capture.listening, false);
+    h.flow.stop();
+});
+
+test('a spoken objection whose speaker cannot be named still stops capture, recorded for Unidentified participant', async () => {
+    const h = await harness({ deployment: { mode: 'notify' } });
+    h.flow.handleSpeech(null, 'LMA, please stop recording now');
+    assert.equal(h.capture.on, false);
+    await h.settle();
+    const event = h.api.events[h.api.events.length - 1];
+    assert.deepEqual([event.ParticipantName, event.Decision, event.Source], ['Unidentified participant', 'objection', 'voice']);
+    h.flow.stop();
+});
+
+test('the same objection said aloud and typed in the chat is acted on once', async () => {
+    const h = await harness({ deployment: { mode: 'notify' } });
+    h.flow.handleSpeech('Bo Chen', 'LMA, I object');
+    await h.settle();
+    assert.equal(await h.flow.handleChat('Bo Chen', 'I object.'), true, 'still read as a reply, not as chat');
+    // On the Teams browser join the chat shows no sender.
+    assert.equal(await h.flow.handleChat(null, 'I object'), true);
+    await h.settle();
+    assert.equal(h.api.events.filter((e) => e.Decision === 'objection').length, 1);
+    assert.equal(h.chat.filter((m) => m.includes('objected. Live Meeting Assistant has stopped')).length, 1);
+
+    // Somebody else's objection is their own.
+    await h.flow.handleChat('Cy Diaz', 'I object');
+    await h.settle();
+    assert.equal(h.api.events.filter((e) => e.Decision === 'objection').length, 2);
+    h.flow.stop();
+});
+
+test("ordinary speech is not a reply, and the VP's own voice never is", async () => {
+    const h = await harness({ deployment: { mode: 'notify' } });
+    const calls = h.api.calls.length;
+    assert.equal(h.flow.handleSpeech('Bo Chen', "I don't agree with the roadmap"), null);
+    assert.equal(h.flow.handleSpeech('Bo Chen', 'Let us record the demo twice.'), null);
+    assert.equal(h.flow.handleSpeech('LMA', 'LMA, I object'), null, 'the VP identity');
+    await h.settle();
+    assert.equal(h.capture.on, true);
+    assert.equal(h.api.calls.length, calls);
+    h.flow.stop();
+});
+
+test('spoken replies are listened for exactly while capture is withheld, and listening stops before capture starts', async () => {
+    const h = await harness({ deployment: OPT_IN_EACH });
+    assert.equal(h.capture.listening, true, 'from when the VP is in the meeting');
+    h.flow.noteAttendeeCount(2);
+    h.flow.handleSpeech('Bo Chen', 'LMA consent');
+    await h.flow.syncRoster();
+    await h.settle();
+    assert.equal(h.capture.listening, false);
+    const off = h.log.lastIndexOf('listen:off');
+    assert.ok(off !== -1 && off < h.log.lastIndexOf('release'), 'closed before capture is released');
+    h.flow.stop();
+    assert.equal(h.capture.listening, false);
+});
+
+test('a VP that leaves after an objection does not start listening', async () => {
+    const h = await harness({ deployment: { mode: 'notify', leaveOnObjection: true } });
+    h.flow.handleSpeech('Bo Chen', 'LMA, I object');
+    await h.settle();
+    // Leaving follows the goodbye, a few turns after the objection is written.
+    for (let i = 0; i < 20 && h.left.length === 0; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(h.left, ['Bo Chen']);
+    assert.ok(!h.log.includes('listen:on'));
+    h.flow.stop();
+});
+
+test('every notice says replies may be typed in the chat or said aloud', async () => {
+    const h = await harness({ deployment: { mode: 'notify' } });
+    assert.ok(h.chat.includes('Replies may be typed in this chat, or said aloud starting with "LMA": say "LMA, I consent" or "LMA, I object".'));
+    assert.ok(!h.chat.some((m) => /takes effect when .* records it in LMA/.test(m)));
+    h.flow.stop();
+});
+
+for (const engine of ['transcribe', 'microvm'] as const) {
+    test(`text heard while consent is awaited is not forwarded: nothing reaches the Kinesis writer before consent is granted (${engine})`, async () => {
+        const writes: string[] = [];
+        const manager = kinesisStreamManager as unknown as { sendRecord: (record: { EventType: string }) => Promise<void> };
+        const sendRecord = manager.sendRecord;
+        manager.sendRecord = async (record) => {
+            writes.push(record.EventType);
+        };
+        const lines: string[] = [];
+        setLogLevel('debug');
+        setLogSink((line) => lines.push(line));
+        try {
+            const state = {
+                onFinal: null as ((result: HeardResult) => void) | null,
+                feed: null as ((pcm: Buffer) => void) | null,
+                opened: [] as string[],
+                closed: 0,
+            };
+            const open = (kind: string) => async (onFinal: (result: HeardResult) => void) => {
+                state.opened.push(kind);
+                state.onFinal = onFinal;
+                return { push: () => undefined, close: async () => void (state.closed += 1) };
+            };
+            const engines: ListenerEngines = {
+                resolveEngine: async () => engine,
+                openTranscribe: open('transcribe'),
+                openMicrovm: open('microvm'),
+                captureMeetingAudio: (onPcm) => {
+                    state.feed = onPcm;
+                    return () => {
+                        state.feed = null;
+                    };
+                },
+            };
+            const holder: { flow?: MeetingConsentFlow } = {};
+            const listener = new ConsentListener({
+                engines,
+                ownIdentities: ['LMA'],
+                lagSeconds: () => 0,
+                onHeard: (heard) => holder.flow?.handleSpeech(heard.speaker, heard.text),
+                sleep: async () => undefined,
+            });
+            const h = await harness({
+                deployment: OPT_IN_EACH,
+                listen: (on) => (on ? listener.start() : void listener.stop()),
+            });
+            holder.flow = h.flow;
+            for (let i = 0; i < 100 && !state.feed; i += 1) await new Promise((resolve) => setImmediate(resolve));
+            assert.deepEqual(state.opened, [engine]);
+            h.flow.noteAttendeeCount(2);
+            state.feed!(Buffer.alloc(64000));
+            noteParticipantSeen('Bo Chen');
+            state.feed!(Buffer.alloc(64000));
+            const heardBefore = state.onFinal!;
+            heardBefore({ text: 'The acquisition closes on Friday.', startSec: 2.1, endSec: 3.4 });
+            heardBefore({ text: 'LMA, I consent.', startSec: 3.5, endSec: 3.9 });
+            await h.flow.syncRoster();
+            await h.settle();
+            await listener.stop();
+
+            assert.equal(h.capture.on, true, 'consent was granted');
+            assert.equal(state.closed, 1, 'the listening session was closed');
+            assert.equal(state.feed, null, 'and its capture of the meeting audio stopped');
+            assert.deepEqual(writes, [], 'nothing heard while consent was awaited reached the Kinesis writer');
+            assert.deepEqual(
+                h.api.events.map((e) => [e.ParticipantName, e.Decision, e.Source, e.Text]),
+                [['Bo Chen', 'consent', 'voice', 'LMA, I consent.']],
+                'only the reply was kept',
+            );
+            // A result the closed session still delivers is dropped.
+            heardBefore({ text: 'LMA object', startSec: 4, endSec: 4.5 });
+            await h.settle();
+            assert.equal(h.capture.on, true);
+            assert.deepEqual(writes, []);
+            for (const where of [lines.join('\n'), h.chat.join('\n'), JSON.stringify(h.api.calls)]) {
+                assert.ok(!where.includes('acquisition'), 'what was heard is not logged, posted or sent anywhere');
+            }
+            h.flow.stop();
+        } finally {
+            manager.sendRecord = sendRecord;
+            setLogSink(null);
+            setLogLevel(undefined);
+        }
+    });
+}
+
+test('a spoken objection phrase not addressed to LMA does not stop capture', async () => {
+    const h = await harness({ deployment: { mode: 'notify' } });
+    const calls = h.api.calls.length;
+    for (const said of ['I object.', 'Stop recording!', "I don't agree.", 'I do not consent']) {
+        assert.equal(h.flow.handleSpeech('Bo Chen', said), null, said);
+    }
+    await h.settle();
+    assert.equal(h.capture.on, true);
+    assert.equal(h.api.calls.length, calls);
+    h.flow.stop();
+});
+
+test('a spoken consent phrase not addressed to LMA is not recorded', async () => {
+    const h = await harness({ deployment: OPT_IN_EACH });
+    h.flow.noteAttendeeCount(2);
+    assert.equal(h.flow.handleSpeech('Bo Chen', 'I consent.'), null);
+    assert.equal(h.flow.handleSpeech('Bo Chen', 'I agree'), null);
+    await h.settle();
+    assert.deepEqual(h.api.events, []);
+    assert.equal(h.capture.on, false);
+    h.flow.stop();
+});
+
+test('a bare phrase typed in the chat is still a reply', async () => {
+    const h = await harness({ deployment: { mode: 'notify' } });
+    assert.equal(await h.flow.handleChat('Bo Chen', 'I object'), true);
+    await h.settle();
+    assert.equal(h.capture.on, false);
+    assert.equal(h.api.events[0].Source, 'chat');
+    h.flow.stop();
+});
+
+test('with Read spoken replies off, no listener is started and no audio is sent', async () => {
+    const opened: string[] = [];
+    let captured = 0;
+    const engines: ListenerEngines = {
+        resolveEngine: async () => 'transcribe',
+        openTranscribe: async () => {
+            opened.push('transcribe');
+            return { push: () => undefined, close: async () => undefined };
+        },
+        openMicrovm: async () => null,
+        captureMeetingAudio: () => {
+            captured += 1;
+            return () => undefined;
+        },
+    };
+    const listener = new ConsentListener({ engines, ownIdentities: [], lagSeconds: () => 0, sleep: async () => undefined });
+    const h = await harness({
+        deployment: { ...OPT_IN_EACH, readSpokenReplies: false },
+        listen: (on) => (on ? listener.start() : void listener.stop()),
+    });
+    h.flow.noteAttendeeCount(2);
+    h.flow.handleSpeech('Bo Chen', 'LMA, I object');
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(h.flow.readsSpokenReplies, false);
+    assert.ok(!h.log.includes('listen:on'), 'never asked to listen');
+    assert.deepEqual(opened, []);
+    assert.equal(captured, 0, 'no meeting audio captured for listening');
+    assert.deepEqual(h.api.events, [], 'a spoken objection is not read');
+    assert.ok(h.chat.includes('Live Meeting Assistant reads replies in this chat; an objection made out loud takes effect when Ana Silva records it in LMA.'));
+    assert.ok(!h.chat.some((m) => m.includes('said aloud')));
+    assert.ok(!consentHelpLine().includes('said aloud'), 'LMA help names the chat only');
+    h.flow.stop();
+});
+
+test('with Read spoken replies off, spoken objections are not read from live results', async () => {
+    const h = await harness({ deployment: { mode: 'notify', readSpokenReplies: false } });
+    assert.equal(h.flow.handleSpeech('Bo Chen', 'LMA, stop recording'), null);
+    await h.settle();
+    assert.equal(h.capture.on, true);
+    h.flow.stop();
+});
+
+test('with Read spoken replies on, the flow listens while consent is awaited and LMA help names speaking', async () => {
+    const h = await harness({ deployment: { ...OPT_IN_EACH, readSpokenReplies: true } });
+    assert.equal(h.flow.readsSpokenReplies, true);
+    assert.equal(h.capture.listening, true);
+    assert.ok(consentHelpLine().includes('typed here or said aloud'));
+    h.flow.stop();
+});
+
+test('when the Meeting Consent section cannot be read, spoken replies are not read', async () => {
+    const h = await harness({ deployment: OPT_IN_EACH, sectionUnreadable: true });
+    assert.equal(h.flow.held, true, 'capture is withheld, as for an unknown mode');
+    assert.equal(h.flow.readsSpokenReplies, false);
+    assert.ok(!h.log.includes('listen:on'));
+    h.flow.stop();
 });
 
 test('describeWaiting names people and counts unidentified seats', () => {

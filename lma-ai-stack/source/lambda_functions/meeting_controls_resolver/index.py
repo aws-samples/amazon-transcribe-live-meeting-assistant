@@ -122,13 +122,13 @@ def delete_recordings_transcripts(callid):
                 raise
 
 
-def _video_key_from_url(url):
-    """The recordings-bucket key a stored VideoRecordingUrl points at, or None.
+def _recording_key_from_url(url, prefix):
+    """The recordings-bucket key a stored recording URL points at, or None.
 
     The producers store ``https://<bucket>.s3.<region>.<suffix>/<key>``, with the
     key URL-encoded by the Virtual Participant and as-is by the transcriber. Only
-    a key in this deployment's bucket and directly under the video prefix is
-    returned, so the deletion stays inside the video recordings.
+    a key in this deployment's bucket and directly under ``prefix`` is returned,
+    so a deletion stays inside that kind of recording.
     """
     if not url or not isinstance(url, str):
         return None
@@ -136,10 +136,52 @@ def _video_key_from_url(url):
     if not (parsed.hostname or "").startswith(f"{S3_BUCKET_NAME}.s3."):
         return None
     key = unquote(parsed.path.lstrip("/"))
-    name = key[len(S3_VIDEO_RECORDINGS_PREFIX) :]
-    if not key.startswith(S3_VIDEO_RECORDINGS_PREFIX) or not name or "/" in name:
+    name = key[len(prefix) :]
+    if not key.startswith(prefix) or not name or "/" in name:
         return None
     return key
+
+
+def _video_key_from_url(url):
+    """The key a stored VideoRecordingUrl points at, under the video prefix."""
+    return _recording_key_from_url(url, S3_VIDEO_RECORDINGS_PREFIX)
+
+
+def _delete_stored_recording(key, callid, kind):
+    """Delete one recording file by key; 1 if S3 reported no error, else 0."""
+    response = s3_client.delete_objects(
+        Bucket=S3_BUCKET_NAME, Delete={"Objects": [{"Key": key}], "Quiet": True}
+    )
+    errors = response.get("Errors") or []
+    for error in errors:
+        logger.error(
+            "Could not delete %s recording %s of %s: %s",
+            kind,
+            error.get("Key"),
+            callid,
+            error.get("Code"),
+        )
+    return 0 if errors else 1
+
+
+def delete_audio_recording(callid, audio_url=None):
+    """Delete the audio recording file the meeting record's RecordingUrl names.
+
+    delete_recordings_transcripts removes the files whose names begin with the
+    meeting's CallId, which is how the transcriber names its recordings. The
+    Virtual Participant names its file from the meeting name and the time the
+    recording was written, so that file is found only through the URL stored on
+    the meeting. Returns the number of files deleted (0 or 1).
+    """
+    if not callid:
+        return 0
+    stored = _recording_key_from_url(audio_url, S3_RECORDINGS_PREFIX)
+    if not stored:
+        return 0
+    deleted = _delete_stored_recording(stored, callid, "audio")
+    if deleted:
+        logger.info("Deleted audio recording %s for %s", stored, callid)
+    return deleted
 
 
 def delete_video_recordings(callid, video_url=None):
@@ -159,18 +201,7 @@ def delete_video_recordings(callid, video_url=None):
     deleted = 0
     stored = _video_key_from_url(video_url)
     if stored:
-        response = s3_client.delete_objects(
-            Bucket=S3_BUCKET_NAME, Delete={"Objects": [{"Key": stored}], "Quiet": True}
-        )
-        errors = response.get("Errors") or []
-        for error in errors:
-            logger.error(
-                "Could not delete video recording %s of %s: %s",
-                error.get("Key"),
-                callid,
-                error.get("Code"),
-            )
-        deleted = 0 if errors else 1
+        deleted = _delete_stored_recording(stored, callid, "video")
     segments = _batch_delete_prefix(S3_BUCKET_NAME, f"{S3_VIDEO_CHUNKS_PREFIX}{callid}/")
     if deleted or segments:
         logger.info(
@@ -631,7 +662,9 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
         call_details = (details_result or {}).get("getCall") or {}
         shared_with = call_details.get("SharedWith")
 
-        # After the details, because the stored VideoRecordingUrl names the file.
+        # After the details, because the stored RecordingUrl and VideoRecordingUrl
+        # name the files.
+        delete_audio_recording(callid, call_details.get("RecordingUrl"))
         delete_video_recordings(callid, call_details.get("VideoRecordingUrl"))
 
         input = {

@@ -948,3 +948,70 @@ def test_a_meeting_whose_transcript_was_deleted_is_not_regenerated(
     assert "transcript was deleted" in result["Message"]
     assert starter.calls == []
     assert written == []
+
+
+# ── the end-of-meeting summary's own state ──────────────────────────────────
+
+
+def _end_of_meeting_run(seconds_ago: int) -> dict:
+    started = datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)
+    return {
+        "source": index.SOURCE_GENERATED,
+        "status": index.STATUS_RUNNING,
+        "trigger": index.TRIGGER_MEETING_END,
+        "startedAt": started.isoformat(),
+    }
+
+
+def test_an_end_of_meeting_summary_in_flight_declines_a_regeneration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, starter, written = install(monkeypatch, meeting=row_with_state(_end_of_meeting_run(30)))
+    result = index.handler(start_event({"username": OWNER}), FakeContext())
+    assert result["Success"] is False
+    assert result["Message"] == "the meeting's summary is still being generated"
+    assert starter.calls == []
+    assert written == []
+
+
+def test_an_overdue_end_of_meeting_summary_accepts_a_regeneration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The meeting page offers Regenerate once it has waited this long, so the
+    run it offers has to be accepted -- well before a regeneration's own mark
+    would go stale."""
+    overdue = index.MEETING_END_PATIENCE_SECONDS + 30
+    assert overdue < index.STALE_RUN_SECONDS
+    _, _, starter, _ = install(monkeypatch, meeting=row_with_state(_end_of_meeting_run(overdue)))
+    assert index.handler(start_event({"username": OWNER}), FakeContext())["Success"] is True
+    assert starter.calls
+
+
+@pytest.mark.parametrize("summary", [NEW_SUMMARY, "An error occurred."])
+def test_a_run_the_meeting_outlived_leaves_the_end_of_meeting_state_alone(
+    monkeypatch: pytest.MonkeyPatch, summary: str
+) -> None:
+    """Whatever the outcome, a regeneration started during the meeting writes
+    nothing once the end-of-meeting summary has marked the meeting as its own:
+    an "idle" or "failed" over that mark would hide a summary on its way."""
+    live = {**MEETING_ROW, "Status": {"S": "STARTED"}}
+    ended = row_with_state(_end_of_meeting_run(5), Status={"S": "ENDED"})
+    _, _, _, written = install(monkeypatch, meeting=live, then=ended, summary=summary)
+    assert index.handler(RUN_EVENT, FakeContext()) == {"ok": False, "reason": "superseded"}
+    assert written == []
+
+
+def test_the_end_of_meeting_patience_matches_the_meeting_page() -> None:
+    """The page offers Regenerate after MEETING_END_PATIENCE_MS; a backend that
+    waited longer would refuse what the page offers."""
+    ui_state = (
+        Path(__file__).resolve().parents[2]
+        / "ui"
+        / "src"
+        / "components"
+        / "common"
+        / "summary-state.js"
+    ).read_text(encoding="utf-8")
+    match = re.search(r"MEETING_END_PATIENCE_MS = (\d+) \* 1000", ui_state)
+    assert match, "MEETING_END_PATIENCE_MS is gone from summary-state.js"
+    assert int(match.group(1)) == index.MEETING_END_PATIENCE_SECONDS

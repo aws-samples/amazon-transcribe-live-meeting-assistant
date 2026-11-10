@@ -165,8 +165,11 @@ The same question can be asked three ways:
   agenda?"* The Nova Sonic voice assistant hands information requests to the
   same meeting assistant, which uses the agenda tool.
 - **The meeting chat** — `LMA ask what's left on the agenda?` A question typed
-  in the meeting chat is answered from the current meeting's transcript, its
-  agenda and web search only, and the answer is posted in the chat for
+  in the meeting chat is answered from the current meeting's transcript and
+  chat, its agenda and its shared screen only (unless **Meeting Assistant ›
+  In-meeting requests** on the Configuration page is Unrestricted; see
+  [In-meeting requests](meeting-assistant.md#in-meeting-requests)),
+  and the answer is posted in the chat for
   everyone. **Guests may read the agenda of the meeting they are in** this way,
   just as they can ask about its transcript.
 

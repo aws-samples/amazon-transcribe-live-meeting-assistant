@@ -221,6 +221,15 @@ def test_what_a_frame_shows_and_its_title_are_returned_and_camera_frames_are_kep
     assert [f.get("Title") for f in frames] == [None, "Q3 roadmap", None]
 
 
+def test_a_repeated_frame_is_returned_naming_the_frame_it_repeats(fakes):
+    # The page hides repeats by default but can show every frame, so they are
+    # returned like any other.
+    repeat = {**item(2000), "DuplicateOf": {"S": "0000001000-ab12cd"}}
+    fakes([item(1000), repeat])
+    frames = call(OWNER)["VideoKeyframes"]
+    assert [f.get("DuplicateOf") for f in frames] == [None, "0000001000-ab12cd"]
+
+
 @pytest.mark.parametrize(
     "image",
     [
@@ -241,6 +250,38 @@ def test_a_link_is_signed_only_inside_the_meetings_own_folder(fakes, image):
     assert frame["ImageSignedUrl"] is None
     assert frame["ThumbnailSignedUrl"] is not None
     assert s3.signed == [f"{FOLDER}0000001000-ab12cd_thumb.jpg"]
+
+
+# A meeting name with a run of dots: its folder name keeps them.
+DOTTED_CALL = (
+    "Review all the LMA new features and UI changes.. prep to release-2026-11-09-15-58-36-076"
+)
+DOTTED_FOLDER = (
+    "lma-video-keyframes/"
+    "Review_all_the_LMA_new_features_and_UI_changes.._prep_to_release_2026_11_09_15_58_36_076/"
+)
+
+
+def test_a_meeting_name_with_dots_has_its_own_images_accepted():
+    for name in ("0000001000-ab12cd.jpg", "0000001000-ab12cd_thumb.jpg"):
+        key = f"{DOTTED_FOLDER}{name}"
+        assert index.object_key(url(key), DOTTED_CALL) == key
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        f"{DOTTED_FOLDER}../Another_meeting/f.jpg",
+        f"{DOTTED_FOLDER}a/../../lma-audio-recordings/x.wav",
+        f"{DOTTED_FOLDER}./f.jpg",
+        f"{DOTTED_FOLDER}a//f.jpg",
+        DOTTED_FOLDER,
+        "lma-video-keyframes/Another_meeting/f.jpg",
+        DOTTED_FOLDER.rstrip("/") + ".jpg",
+    ],
+)
+def test_a_meeting_name_with_dots_still_has_only_keys_inside_its_folder_accepted(key):
+    assert index.object_key(url(key), DOTTED_CALL) is None
 
 
 def test_pages_follow_in_time_order_and_new_frames_come_after_a_given_one(fakes):

@@ -10,6 +10,7 @@ import { Alert, Badge, Button, ExpandableSection, SpaceBetween } from '@cloudsca
 
 import { appliesText, changedCount, clone, deepEqual } from './config-model';
 import { SchemaNode, SectionProvider } from './fields';
+import PriceTable from './PriceTable';
 import SectionNotice from './section-notices';
 import { formatPath } from './schema-validation';
 
@@ -82,7 +83,8 @@ const ConfigurationSection = ({
             readOnly={readOnly}
             onChange={onChange}
           >
-            <SchemaNode schema={schema} path={[]} />
+            {/* A section can name a control of its own; the prices are a table. */}
+            {schema.widget === 'priceTable' ? <PriceTable schema={schema} /> : <SchemaNode schema={schema} path={[]} />}
           </SectionProvider>
         </SpaceBetween>
       </ExpandableSection>
@@ -98,6 +100,7 @@ ConfigurationSection.propTypes = {
       description: PropTypes.string,
       sectionLabel: PropTypes.string,
       title: PropTypes.string,
+      widget: PropTypes.string,
     }).isRequired,
   }).isRequired,
   values: PropTypes.shape({}).isRequired,

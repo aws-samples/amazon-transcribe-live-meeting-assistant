@@ -18,7 +18,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 
 import SpeakerIdentitiesPanel from './SpeakerIdentitiesPanel';
 
@@ -66,10 +66,11 @@ const renderPanel = ({
   readOnly = false,
   identifyResult = { Success: true, NamesApplied: 2 },
   isLive = false,
+  focusRequest = null,
 } = {}) => {
   onSave = vi.fn().mockResolvedValue(true);
   onIdentify = vi.fn().mockResolvedValue(identifyResult);
-  render(
+  return render(
     <SpeakerIdentitiesPanel
       item={item}
       segments={segments}
@@ -78,6 +79,7 @@ const renderPanel = ({
       onIdentify={onIdentify}
       readOnly={readOnly}
       isLive={isLive}
+      focusRequest={focusRequest}
     />,
   );
 };
@@ -530,5 +532,105 @@ describe('a suggested name', () => {
     const map = savedMap();
     expect(map.identities['REMOTE#Other Participant (spk_0)']).toBeUndefined();
     expect(map.rejected['REMOTE#Other Participant (spk_0)']).toEqual(['Bob Strahan']);
+  });
+});
+
+describe("a platform name's voices, shown as one person or several", () => {
+  // A Virtual Participant meeting: Jeremy's voice split in two, and a room with two people in it.
+  const line = (id, speaker, startTime, endTime) => ({
+    channel: 'REMOTE',
+    speaker,
+    startTime,
+    endTime,
+    isPartial: false,
+    segmentId: id,
+    transcript: 'Words.',
+  });
+  const VOICES = [
+    line('j1', 'Jeremy Feldman (spk_0)', 0, 100),
+    line('j2', 'Jeremy Feldman (spk_1)', 100, 102),
+    line('r1', 'ConfRm_1 (spk_0)', 102, 110),
+    line('r2', 'ConfRm_1 (spk_1)', 110, 120),
+  ];
+  const withMap = (map) => ({ ...ITEM, speakerIdentities: JSON.stringify(map) });
+  const groupOf = (base) => screen.getByRole('group', { name: `Voices of ${base}` });
+
+  it("lists a name's voices together under its One person / Several people menu, as Voice N", () => {
+    renderPanel({ segments: VOICES });
+    const jeremy = groupOf('Jeremy Feldman');
+    expect(within(jeremy).getByText('Voice 1')).toBeTruthy();
+    expect(within(jeremy).getByText('Voice 2')).toBeTruthy();
+    expect(
+      within(jeremy).getByRole('button', { name: 'How the voices under Jeremy Feldman are shown: One person' }),
+    ).toBeTruthy();
+    expect(
+      within(groupOf('ConfRm_1')).getByRole('button', {
+        name: 'How the voices under ConfRm_1 are shown: Several people',
+      }),
+    ).toBeTruthy();
+  });
+
+  it('shows each voice of a name shown as several people by the label its lines carry', () => {
+    renderPanel({ segments: VOICES });
+    const room = groupOf('ConfRm_1');
+    const [first, second] = within(room).getAllByRole('textbox');
+    expect(first.getAttribute('placeholder')).toBe('ConfRm_1 · Voice 1');
+    expect(second.getAttribute('placeholder')).toBe('ConfRm_1 · Voice 2');
+  });
+
+  it('stores the mode chosen in the panel', async () => {
+    renderPanel({ segments: VOICES });
+    fireEvent.click(
+      within(groupOf('Jeremy Feldman')).getByRole('button', { name: /^How the voices under Jeremy Feldman/ }),
+    );
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Several people' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(savedMap().speakerModes['REMOTE#Jeremy Feldman']).toMatchObject({ mode: 'several', source: 'manual' });
+  });
+
+  it('naming one voice of a name shown as one person names all its voices', async () => {
+    renderPanel({ segments: VOICES });
+    const [first] = within(groupOf('Jeremy Feldman')).getAllByRole('textbox');
+    fireEvent.change(first, { target: { value: 'Jeremy F.' } });
+    fireEvent.blur(first);
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    const { identities } = savedMap();
+    expect(identities['REMOTE#Jeremy Feldman (spk_0)']).toMatchObject({ name: 'Jeremy F.', source: 'manual' });
+    expect(identities['REMOTE#Jeremy Feldman (spk_1)']).toMatchObject({ name: 'Jeremy F.', source: 'manual' });
+  });
+
+  it('naming a voice of a name shown as several people names that voice alone', async () => {
+    renderPanel({ segments: VOICES });
+    const [, second] = within(groupOf('ConfRm_1')).getAllByRole('textbox');
+    fireEvent.change(second, { target: { value: 'Priya' } });
+    fireEvent.keyDown(second, { key: 'Enter', keyCode: 13 });
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const { identities } = savedMap();
+    expect(identities['REMOTE#ConfRm_1 (spk_1)']).toMatchObject({ name: 'Priya' });
+    expect(identities['REMOTE#ConfRm_1 (spk_0)']).toBeUndefined();
+  });
+
+  it('a renamed voice keeps its row under the name, holding the new name', () => {
+    renderPanel({
+      segments: VOICES,
+      item: withMap({ identities: { 'REMOTE#ConfRm_1 (spk_1)': { name: 'Priya', status: 'confirmed' } } }),
+    });
+    const [, second] = within(groupOf('ConfRm_1')).getAllByRole('textbox');
+    expect(second.value).toBe('Priya');
+  });
+
+  it('opens at the voice the meeting header asked for', () => {
+    // Collapsed to begin with: no channel has two unnamed voices under one placeholder.
+    renderPanel({ segments: VOICES, focusRequest: { key: 'REMOTE#ConfRm_1 (spk_1)', at: 1 } });
+    const row = document.querySelector('[data-speaker-key="REMOTE#ConfRm_1 (spk_1)"]');
+    expect(row.className).toBe('speaker-row-focused');
+    expect(row.contains(document.activeElement)).toBe(true);
+  });
+
+  it('offers the menu disabled to a reader who may not name speakers', () => {
+    renderPanel({ segments: VOICES, readOnly: true });
+    expect(within(groupOf('ConfRm_1')).getByRole('button', { name: /^How the voices under ConfRm_1/ }).disabled).toBe(
+      true,
+    );
   });
 });

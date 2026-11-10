@@ -87,9 +87,27 @@ export const DESKTOP_THRESHOLDS: KeyframeThresholds = {
     stableFraction: numberEnv('KEYFRAME_DESKTOP_STABLE_FRACTION', 0.01),
     settleSamples: numberEnv('KEYFRAME_DESKTOP_SETTLE_SAMPLES', 2),
     maxMovingFraction: numberEnv('KEYFRAME_DESKTOP_MAX_MOVING_FRACTION', 0.25),
+    majorChangeFraction: numberEnv('KEYFRAME_DESKTOP_MAJOR_CHANGE_FRACTION', 0.1),
 };
 const PIXEL_DELTA = numberEnv('KEYFRAME_PIXEL_DELTA', 12);
 const MIN_INTERVAL_MS = numberEnv('KEYFRAME_MIN_INTERVAL_MS', 4000);
+/*
+ * As the Virtual Participant (keyframe-sampler.ts): while the picture keeps
+ * changing a little (an application whose content keeps updating), frames
+ * back off to one every 30 s and then 60 s, stepping back down one for every
+ * 10 s it is quiet. A desktop capture is often a whole display, where
+ * that is common.
+ */
+const numberListEnv = (name: string, fallback: number[]): number[] => {
+    const raw = process.env[name];
+    if (raw === undefined || raw.trim() === '') {
+        return fallback;
+    }
+    const parsed = raw.split(',').map((v) => Number(v.trim()));
+    return parsed.every((v) => Number.isFinite(v) && v >= 0) ? parsed : fallback;
+};
+const BACKOFF_STEPS_MS = numberListEnv('KEYFRAME_BACKOFF_STEPS_MS', [30_000, 60_000]);
+const QUIET_STEP_MS = numberEnv('KEYFRAME_QUIET_STEP_MS', 10_000);
 const MAX_PER_STREAM = numberEnv('KEYFRAME_MAX_PER_MEETING', 1000);
 // Undecoded bytes allowed to queue on FFmpeg's stdin before the key frames of
 // this stream are given up, so a stalled decoder cannot grow the heap.
@@ -189,6 +207,8 @@ export class KeyframeLane {
         sampleBytes: SAMPLE_BYTES,
         pixelDelta: PIXEL_DELTA,
         minIntervalMs: MIN_INTERVAL_MS,
+        backoffStepsMs: BACKOFF_STEPS_MS,
+        quietStepMs: QUIET_STEP_MS,
     });
     private proc: ChildProcess | null = null;
     private stdoutPending: Buffer = Buffer.alloc(0);

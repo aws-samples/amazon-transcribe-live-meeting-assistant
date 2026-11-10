@@ -1780,7 +1780,9 @@ def test_every_shipped_section_that_reads_the_transcript_says_what_a_chat_line_i
         ), title
 
 
-def test_the_knowledge_base_transcript_leaves_the_chat_out(monkeypatch) -> None:
+def test_the_knowledge_base_transcript_includes_the_meeting_chat(monkeypatch) -> None:
+    # The document the meeting-history knowledge base indexes and the MCP
+    # get_meeting_transcript tool reads: chat lines in place, under their sender.
     client = FakeLambdaClient(
         transcript="\nBob: we ship\n[chat] Alice: https://example.com/x\nAlice: ok"
     )
@@ -1792,7 +1794,19 @@ def test_the_knowledge_base_transcript_leaves_the_chat_out(monkeypatch) -> None:
     )
     index.handler({"CallId": CALL_ID}, None)
     body = s3.objects[f"{PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt"]["Body"]
-    assert body == "\nBob: we ship\nAlice: ok"
+    assert body == "\nBob: we ship\n[chat] Alice: https://example.com/x\nAlice: ok"
+
+
+def test_the_knowledge_base_transcript_includes_the_chat_and_the_shared_screen(
+    monkeypatch,
+) -> None:
+    _, s3 = install(monkeypatch)
+    transcript = "\nBob: we ship\n[chat] Alice: see the deck"
+    index.write_to_s3(CALL_ID, METADATA, transcript, '{"SUMMARY": "x"}', KEYFRAMES)
+    body = s3.objects[f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt"]["Body"]
+    assert body.startswith(transcript)
+    assert "[chat] Alice: see the deck" in body
+    assert "[00:30] Agenda item 1: Budget" in body
 
 
 # ── no section of a meeting with chat carries a link ────────────────────────
