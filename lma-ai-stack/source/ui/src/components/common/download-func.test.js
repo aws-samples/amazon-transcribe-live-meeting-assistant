@@ -59,6 +59,21 @@ describe('transcriptDownloadRows', () => {
     ]);
   });
 
+  it('labels an answer from every assistant channel as the meeting assistant', () => {
+    const answers = {
+      [CALL_ID]: {
+        AGENT_ASSISTANT: { segments: [segment('a1', 'AGENT_ASSISTANT', 'Other Participant', 'Friday.', 5)] },
+        CHAT_ASSISTANT: { segments: [segment('a2', 'CHAT_ASSISTANT', 'Other Participant', 'Monday.', 6)] },
+        MEETING_ASSISTANT: { segments: [segment('a3', 'MEETING_ASSISTANT', '', 'Noon.', 7)] },
+      },
+    };
+    expect(transcriptDownloadRows(answers, MEETING).map((r) => r.speaker)).toEqual([
+      'MEETING ASSISTANT',
+      'MEETING ASSISTANT',
+      'MEETING ASSISTANT',
+    ]);
+  });
+
   it('gives a chat line its time', () => {
     const alice = transcriptDownloadRows(TRANSCRIPT, MEETING).find((r) => r.speaker === 'Alice (chat)');
     expect(alice.startTimestamp).toBe('00:10.0');

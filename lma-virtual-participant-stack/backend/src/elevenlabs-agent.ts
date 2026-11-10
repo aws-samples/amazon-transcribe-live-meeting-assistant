@@ -23,6 +23,7 @@ import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { ActivationWindow } from './voice-activation-window.js';
 import { spokenStrandsAnswer } from './spoken-text.js';
 import { createLogger } from './logger.js';
+import { inMeetingRequestPayload } from './meeting-assist-request.js';
 
 const log = createLogger('elevenlabs-agent');
 
@@ -465,18 +466,13 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     log.info(`Query for Strands agent: ${String(query ?? '').length} characters`);
     log.debug(`Query for Strands agent: ${query}`);
 
-    // Build payload for Strands agent invocation
-    const callId = process.env.VP_CALL_ID || process.env.MEETING_NAME || 'elevenlabs-voice-agent';
-    const username = process.env.LMA_USER || 'ElevenLabsAgent';
-    
-    const payload = {
-      text: query,
-      call_id: callId,
-      conversation_history: [],
-      userEmail: username,
-      dynamodb_table_name: process.env.DYNAMODB_TABLE_NAME || '',
-      dynamodb_pk: `c#${callId}`,
-    };
+    // A request spoken to the voice assistant in the meeting: answered as the
+    // Meeting Assistant section's In-meeting requests setting allows
+    // (meeting-assist-request.ts).
+    const payload = inMeetingRequestPayload(query, 'voice_assistant', {
+      fallbackCallId: 'elevenlabs-voice-agent',
+      fallbackUser: 'ElevenLabsAgent',
+    });
 
     log.info('Strands agent payload:', JSON.stringify(payload));
 

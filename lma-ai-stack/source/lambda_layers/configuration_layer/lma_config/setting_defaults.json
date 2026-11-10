@@ -85,6 +85,10 @@
     "assistantReasoningEffort": {
       "type": "string",
       "default": "low"
+    },
+    "inMeetingRequestTools": {
+      "type": "string",
+      "default": "current_meeting_only"
     }
   },
   "meeting_processing": {

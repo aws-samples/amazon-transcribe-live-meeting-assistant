@@ -767,22 +767,15 @@ def shared_screen_section(keyframes):
     )
 
 
-# How FetchTranscript marks a line typed in the meeting chat.
-CHAT_LINE_MARK = "[chat] "
-
-
-def speech_only(transcript):
-    """The transcript without its chat lines.
-
-    The knowledge base's copy of a meeting's transcript holds what was said; the
-    chat stays out of meeting-history search until that search is designed for
-    it. Every line of the transcript is "\n<line>", a chat line "\n[chat] ...".
-    """
-    lines = (transcript or "").split("\n")
-    return "\n".join(line for line in lines if not line.startswith(CHAT_LINE_MARK))
-
-
 def write_to_s3(callId, metadata, transcript, summary, keyframes=None):
+    """Write the meeting's summary and transcript documents for the knowledge base.
+
+    The transcript document is the transcript as FetchTranscript returns it,
+    the meeting chat included as lines starting "[chat] <sender>:", followed by
+    the text of the shared screen. It is what the meeting-history knowledge
+    base indexes and what the MCP get_meeting_transcript tool reads, so a past
+    meeting is found, and read, by what was said, typed and shown.
+    """
     s3 = boto3.client("s3")
     filename = posixify_filename(f"{callId}")
     summary_file_key = f"{S3_PREFIX}{filename}-SUMMARY.txt"
@@ -798,7 +791,7 @@ def write_to_s3(callId, metadata, transcript, summary, keyframes=None):
     s3.put_object(
         Bucket=S3_BUCKET_NAME,
         Key=transcript_file_key,
-        Body=speech_only(transcript) + shared_screen_section(keyframes),
+        Body=(transcript or "") + shared_screen_section(keyframes),
     )
     print(f"Wrote transcript to S3: s3://{S3_BUCKET_NAME}/{transcript_file_key}")
     s3.put_object(
