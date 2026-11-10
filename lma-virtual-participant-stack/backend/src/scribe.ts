@@ -506,6 +506,9 @@ export class TranscriptionService {
         // Transcribe rows are named from the same roster timeline as the
         // engine's, by each word's span on the meeting timeline.
         kinesisStreamManager.setRosterLookup((start, end) => this.rosterNameFor(start, end));
+        // And their voice labels' evidence from what the platform actually
+        // showed, exactly as the engine's rows count it.
+        kinesisStreamManager.setRosterCoverage((start, end) => this.rosterCoverageFor(start, end));
         if (switches.diarizeVirtualParticipant) {
             log.info('[DIARIZATION] VP voice separation is on for this meeting');
         }
@@ -1804,6 +1807,15 @@ export class TranscriptionService {
         return this.rosterTimeline.isEmpty
             ? undefined
             : this.rosterTimeline.speakerFor(startSec, endSec, rosterLagSeconds());
+    }
+
+    /**
+     * Seconds of a span of the meeting timeline the platform showed each
+     * participant for, with the same lag as rosterNameFor. Time before the
+     * first report belongs to nobody, so it is never evidence for a voice.
+     */
+    rosterCoverageFor(startSec: number, endSec: number): Map<string, number> {
+        return this.rosterTimeline.coverage(startSec, endSec, rosterLagSeconds());
     }
 
     /**

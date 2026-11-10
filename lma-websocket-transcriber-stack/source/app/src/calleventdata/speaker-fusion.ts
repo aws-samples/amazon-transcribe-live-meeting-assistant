@@ -196,6 +196,24 @@ export class SpeakerFusion {
         return attribution;
     }
 
+    /**
+     * The row's speaker as the page names it, whether or not its label is
+     * proven. Records no evidence. For the pieces of a row that `attribute`
+     * gave to the page -- a row its proven label does not name, such as one
+     * the page strongly contradicts -- so that cutting the row by the page does
+     * not hand each piece back to the label's proven name.
+     */
+    attributeByPage(rawLabel: string | null | undefined, pageName: string): Attribution {
+        const label = normaliseLabel(rawLabel);
+        if (label === undefined) {
+            return { speaker: pageName, name: pageName, source: 'page' };
+        }
+        if (!isVoiceId(label)) {
+            return { speaker: label, name: label, source: 'enrolled' };
+        }
+        return this.byPage(label, pageName);
+    }
+
     /** The name a label is proven to, if any. */
     ownerOf(label: string): string | undefined {
         return this.labels.get(label)?.owner;

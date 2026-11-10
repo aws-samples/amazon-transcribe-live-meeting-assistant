@@ -230,6 +230,16 @@ describe('falling back to the page', () => {
         assert.equal(fusion.ownerOf('spk_2'), SAM);
         assert.equal(fusion.attribute(row('2', [[ANA, 1]])).speaker, 'Sam Lee (spk_2)');
     });
+
+    it('names a piece by the page even when its voice is proven, keeping the id only with the proven name', () => {
+        const fusion = new SpeakerFusion();
+        prove(fusion, 'spk_0', SAM);
+        assert.deepEqual(fusion.attributeByPage('spk_0', ANA), { speaker: ANA, name: ANA, source: 'page' });
+        assert.equal(fusion.attributeByPage('0', SAM).speaker, 'Sam Lee (spk_0)');
+        assert.equal(fusion.attributeByPage(undefined, ANA).speaker, ANA);
+        // It records nothing: the voice is still proven to Sam.
+        assert.equal(fusion.ownerOf('spk_0'), SAM);
+    });
 });
 
 describe('enrolled names', () => {

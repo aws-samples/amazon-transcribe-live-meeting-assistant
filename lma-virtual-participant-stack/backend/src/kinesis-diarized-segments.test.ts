@@ -60,6 +60,7 @@ const manager = kinesisStreamManager as unknown as {
     sendRecord: (record: Record_) => Promise<void>;
     setDiarization: (on: boolean) => void;
     setRosterLookup: (lookup: ((start: number, end: number) => string | undefined) | null) => void;
+    setRosterCoverage: (coverage: ((start: number, end: number) => Iterable<[string, number]>) | null) => void;
     sendTranscriptSegment: (speaker: string, result: unknown, offset?: number) => Promise<number>;
 };
 
@@ -76,6 +77,7 @@ const rosterOf = (changes: Array<[number, string]>, lagSeconds = 0): RosterTimel
     manager.setRosterLookup((start, end) =>
         timeline.isEmpty ? undefined : timeline.speakerFor(start, end, lagSeconds),
     );
+    manager.setRosterCoverage((start, end) => timeline.coverage(start, end, lagSeconds));
     return timeline;
 };
 
@@ -91,6 +93,7 @@ beforeEach(() => {
     };
     manager.setDiarization(false);
     manager.setRosterLookup(null);
+    manager.setRosterCoverage(null);
 });
 
 describe('with voice separation off', () => {

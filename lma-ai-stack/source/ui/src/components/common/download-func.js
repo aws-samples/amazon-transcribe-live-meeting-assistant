@@ -315,18 +315,26 @@ export const downloadTranscriptAsDocx = async (callTranscriptPerCallId, meeting)
 // name reads as typed.
 const escapeMarkdown = (text) => String(text ?? '').replace(/([\\`*_[\]<>#|])/g, '\\$1');
 
-/** The lines naming the meeting at the top of a Markdown download. */
-const markdownMeetingFacts = (meeting) =>
-  [
+/**
+ * The lines naming the meeting at the top of a Markdown download. The detected
+ * languages are listed only for a meeting in more than one, the same test that
+ * marks each line with its language, so a meeting in one language downloads as
+ * before. `segments` are the transcript's, when the download has them: their
+ * languages are counted with the record's, as the per-line marks count them.
+ */
+const markdownMeetingFacts = (meeting, segments = []) => {
+  const languages = meetingLanguages(meeting.detectedLanguages, segments);
+  return [
     `- **Meeting ID:** ${escapeMarkdown(meeting.callId)}`,
     meeting.initiationTimeStamp ? `- **Date:** ${meeting.initiationTimeStamp}` : null,
     meeting.conversationDurationTimeStamp ? `- **Duration:** ${meeting.conversationDurationTimeStamp}` : null,
-    meeting.detectedLanguages?.length
-      ? `- **Detected languages:** ${escapeMarkdown(detectedLanguagesText(meeting.detectedLanguages))}`
+    showsLanguageMarks(languages)
+      ? `- **Detected languages:** ${escapeMarkdown(detectedLanguagesText(languages))}`
       : null,
   ]
     .filter(Boolean)
     .join('\n');
+};
 
 /** The consent record (consentAsText) as a Markdown section. */
 export const consentAsMarkdown = (consent) => {
@@ -371,10 +379,17 @@ export const summaryDownloadMarkdown = (meeting, consent = null) => {
  * speaker names as the other transcript downloads (transcriptDownloadRows).
  */
 export const transcriptDownloadMarkdown = (callTranscriptPerCallId, meeting) => {
-  const lines = transcriptDownloadRows(callTranscriptPerCallId, meeting).map(
+  const rows = transcriptDownloadRows(callTranscriptPerCallId, meeting);
+  const lines = rows.map(
     (row) => `**${escapeMarkdown(row.speaker)}** [${rowStamp(row)}]: ${String(row.transcript ?? '').trim()}`,
   );
-  const head = [`# Transcript: ${escapeMarkdown(meetingTitle(meeting.callId))}`, markdownMeetingFacts(meeting)];
+  const head = [
+    `# Transcript: ${escapeMarkdown(meetingTitle(meeting.callId))}`,
+    markdownMeetingFacts(
+      meeting,
+      rows.map((row) => ({ languageCode: row.language })),
+    ),
+  ];
   return `${[...head, ...lines].join('\n\n')}\n`;
 };
 

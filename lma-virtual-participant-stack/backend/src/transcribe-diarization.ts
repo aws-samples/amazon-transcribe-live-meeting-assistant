@@ -269,12 +269,17 @@ export const buildDiarizedSegments = (
          */
         useLabels?: boolean;
         /**
-         * Called once per labelled run of a final, with the seconds of the run
-         * the platform showed each participant for. Returns the speaker string
-         * for the WHOLE run when its voice label names it, or undefined to cut
-         * the run by participant and name each piece with `nameFor`.
+         * Called once per labelled run of a final, with the run's absolute span
+         * on the meeting timeline. Returns the speaker string for the WHOLE run
+         * when its voice label names it, or undefined to cut the run by
+         * participant and name each piece with `nameFor`.
+         *
+         * The caller builds the label's evidence from who the platform actually
+         * showed over that span, not from the pieces: a piece's participant is
+         * a display name, which falls back to a guess where the platform has
+         * shown nobody yet, and a guess must not count as evidence.
          */
-        voiceName?: (label: string, evidence: [string, number][]) => string | undefined;
+        voiceName?: (label: string, absoluteStart: number, absoluteEnd: number) => string | undefined;
     },
 ): Record<string, DiarizedSegment> => {
     const useLabels = options.useLabels ?? true;
@@ -333,16 +338,18 @@ export const buildDiarizedSegments = (
         // The exception is a label proven to one participant (speaker-fusion.ts):
         // its voice is then the better boundary, and the page's lag or flicker
         // under it is exactly what would cut a turn in the wrong place. The
-        // pieces are still what the label's vote is built from.
+        // label's vote is built from the platform's reports over the run's span.
         const pieces = splitRunByRoster(run, options.timeOffsetSeconds, options.rosterNameFor);
-        const voiced = run.label !== undefined ? options.voiceName?.(run.label, rosterEvidence(pieces)) : undefined;
+        const runStart = pieces[0].startTime;
+        const runEnd = Math.max(...pieces.map((piece) => piece.endTime));
+        const voiced = run.label !== undefined ? options.voiceName?.(run.label, runStart, runEnd) : undefined;
         if (voiced !== undefined) {
             const segmentId = `${options.resultId}-r${pieceIndex}`;
             segments[segmentId] = {
                 SegmentId: segmentId,
                 Speaker: voiced,
-                StartTime: pieces[0].startTime,
-                EndTime: Math.max(...pieces.map((piece) => piece.endTime)),
+                StartTime: runStart,
+                EndTime: runEnd,
                 Transcript: runTranscript(run),
             };
             pieceIndex += 1;
@@ -448,23 +455,4 @@ const firstSpokenTime = (
         }
     }
     return fallback + timeOffsetSeconds;
-};
-
-/**
- * Seconds of a run the platform showed each participant for, from its pieces:
- * the evidence a voice label's name vote is built from.
- *
- * Which rows carry Amazon Transcribe's voice label, and when a label rather
- * than the platform names a row, is decided by speaker-fusion.ts, shared with
- * the on-demand engine. On a three-person Zoom standup one Transcribe label
- * coincided with all three participants, so a Transcribe label often never
- * reaches the share that lets it name a row, and its rows are then named by
- * the platform exactly as before.
- */
-const rosterEvidence = (pieces: RosterPiece[]): [string, number][] => {
-    const seconds = new Map<string, number>();
-    for (const piece of pieces) {
-        seconds.set(piece.roster, (seconds.get(piece.roster) ?? 0) + Math.max(piece.endTime - piece.startTime, 0));
-    }
-    return [...seconds.entries()];
 };
