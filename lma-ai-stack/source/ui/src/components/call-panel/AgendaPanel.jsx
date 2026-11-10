@@ -218,7 +218,7 @@ const AgendaPanel = ({
   }
 
   // Beside each item on the Transcript tab, how far the meeting got with it.
-  const statuses = collapsible && !editing ? agendaCoverageStatuses(coverage, items.length) : null;
+  const statuses = collapsible && !editing ? agendaCoverageStatuses(coverage, items) : null;
 
   const body = (
     <SpaceBetween size="s">

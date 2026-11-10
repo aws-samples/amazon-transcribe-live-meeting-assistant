@@ -264,7 +264,7 @@ export const resolveMaxSpeakers = (
  *
  * A meeting whose Amazon Transcribe options use one the ASR MicroVM engine does
  * not offer (content redaction, a custom vocabulary or language model, language
- * identification) stays on Amazon Transcribe, so the option is applied rather
+ * identification, a language other than English) stays on Amazon Transcribe, so the option is applied rather
  * than dropped. That holds for a client that named the MicroVM engine too: those
  * options are the deployment's, set by an administrator, and a client's engine
  * request does not override them.

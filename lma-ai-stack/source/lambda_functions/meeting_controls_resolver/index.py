@@ -176,9 +176,11 @@ def _video_key_from_url(url):
 def _delete_stored_recording(key, callid, kind):
     """Delete every version of one recording file.
 
-    1 if the file had a version and S3 deleted them all, else 0 (a transcriber
-    recording named by RecordingUrl has usually been removed already by the
-    CallId-prefix scan, so 0 is common). A version S3 does not delete is logged.
+    1 if the file had a version and S3 deleted them all, 0 if it had none left
+    (a transcriber recording named by RecordingUrl has usually been removed
+    already by the CallId-prefix scan, so 0 is common). A version S3 does not
+    delete is logged and raises, as it does for the prefix scan, so the meeting
+    record that names the file is kept and the deletion can be run again.
     """
     versions = []
     paginator = s3_client.get_paginator("list_object_versions")
@@ -201,7 +203,11 @@ def _delete_stored_recording(key, callid, kind):
             callid,
             error.get("Code"),
         )
-    return 0 if errors else 1
+    if errors:
+        raise RuntimeError(
+            f"could not delete {len(errors)} version(s) of the {kind} recording of {callid}"
+        )
+    return 1
 
 
 def delete_audio_recording(callid, audio_url=None):
@@ -211,7 +217,8 @@ def delete_audio_recording(callid, audio_url=None):
     meeting's CallId, which is how the transcriber names its recordings. The
     Virtual Participant names its file from the meeting name and the time the
     recording was written, so that file is found only through the URL stored on
-    the meeting. Returns 1 when the file is gone afterwards and 0 otherwise (see
+    the meeting. Returns 1 when a file was deleted and 0 when there was none;
+    raises when S3 does not delete one of its versions (see
     _delete_stored_recording).
     """
     if not callid:
@@ -235,7 +242,8 @@ def delete_video_recordings(callid, video_url=None):
     id merely begins the same way). The video file names themselves are not
     searched: both producers turn the CallId into a file name by replacing
     characters, so two meetings can share one, and a name is no proof of whose
-    file it is. Returns the number of recording files deleted (0 or 1).
+    file it is. Returns the number of recording files deleted (0 or 1); raises
+    when S3 does not delete one of their versions.
     """
     if not callid:
         return 0

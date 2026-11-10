@@ -84,11 +84,16 @@ panel; a change made in either place shows in both.
   including when the meeting ends; choosing **Edit** opens it.
 - **Coverage**: once the summary has been written, each item is marked
   **Covered**, **Partly covered** or **Not covered**, read from the summary's
-  [AGENDA COVERAGE](#agenda-coverage-in-the-summary) section. The marks are
-  shown only when that section has exactly one line with a status for each
-  item, which is what the shipped prompt asks for; when it does not (an edited
-  summary, say), the items are shown without marks rather than paired with the
-  wrong lines, and the section's full text is still on the Summary tab. There is
+  [AGENDA COVERAGE](#agenda-coverage-in-the-summary) section. Each line of
+  that section is matched to the agenda item it names (ignoring case, the
+  item's number and closing punctuation), or, for a line that gives no name, to
+  the item whose number it gives, or else to the item in its position. The
+  marks are shown only when every item is matched by exactly one line, which is
+  what the shipped prompt produces; when it is not (an edited summary, or an
+  agenda edited or derived again after the summary was written, whose items no
+  longer match the names the summary used), the items are shown without marks
+  rather than paired with the wrong lines, and the section's full text is still
+  on the Summary tab. There is
   no item-by-item status during a live meeting: the coverage is written with the
   summary, when the meeting ends. The **AGENDA CHECK** button on the Meeting
   Assist panel asks the assistant how the meeting is going against the agenda
