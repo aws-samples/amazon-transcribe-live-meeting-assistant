@@ -64,8 +64,16 @@ _LIMITS: Dict[str, Tuple[int, int]] = {
     # headroom is for a follow-up query after a first one returns nothing.
     "max_iterations": (8, 20),
     # Output tokens per model turn. Diagnoses are short by contract (the
-    # prompt's output section caps them), so this is generous already.
-    "max_output_tokens": (4096, 16384),
+    # prompt's output section caps them), but the reasoning-capable Claude
+    # generations (5 and later) reason before they answer, and those reasoning
+    # tokens are billed against this same ceiling. After eight tool calls the
+    # answer turn reasons over every result at once: Claude Haiku 5.5 was
+    # observed needing more than 4,096 for that turn alone. 16,384 leaves room
+    # for the reasoning and the answer. It costs nothing on a run that needs
+    # less, because the ceiling is not a reservation: a turn is billed for the
+    # tokens it produces. Models other than Claude keep a lower ceiling; see
+    # ``output_token_ceiling`` in troubleshooting_agent_function.
+    "max_output_tokens": (16384, 32768),
     # Cumulative input + output tokens for the whole run, counted from the
     # usage figures Bedrock returns. The system prompt is large and resent on
     # every turn, which is what makes a per-turn cap insufficient.
