@@ -6,9 +6,11 @@
 import json
 import logging
 import re
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from os import environ
+from typing import Any
 from urllib.parse import unquote, urlparse
 
 import boto3
@@ -75,28 +77,52 @@ def posixify_filename(filename: str) -> str:
     return posix_filename
 
 
-def _batch_delete_prefix(bucket: str, prefix: str) -> int:
-    """List every key under ``prefix`` and delete them in ``DeleteObjects``
-    batches of up to 1000 keys.  Returns the number of keys deleted.
+def _delete_versions(bucket: str, entries: list[dict]) -> None:
+    """Delete the listed object versions; raise if S3 reports any not deleted."""
+    response = s3_client.delete_objects(Bucket=bucket, Delete={"Objects": entries, "Quiet": True})
+    errors = response.get("Errors") or []
+    if errors:
+        raise RuntimeError(
+            f"could not delete {len(errors)} object version(s) in {bucket}: "
+            + "; ".join(f"{e.get('Key')} {e.get('Code')}" for e in errors[:3])
+        )
 
-    This is ~1 round-trip per 1000 keys versus the old 1 request per key,
-    so a meeting with dozens of recording chunks / transcript files goes
-    from dozens of round-trips to one.
+
+def _version_entries(page: Mapping[str, Any], key: str | None = None) -> list[dict]:
+    """The Key and VersionId of every version and delete marker on a listing page.
+
+    With ``key``, only the entries of exactly that key: a listing by prefix also
+    answers keys that merely begin with it.
     """
-    deleted = 0
-    paginator = s3_client.get_paginator("list_objects_v2")
+    return [
+        {"Key": entry["Key"], "VersionId": entry["VersionId"]}
+        for entry in (page.get("Versions") or []) + (page.get("DeleteMarkers") or [])
+        if key is None or entry.get("Key") == key
+    ]
+
+
+def _batch_delete_prefix(bucket: str, prefix: str) -> int:
+    """Delete every version of every object under ``prefix``; the number of keys.
+
+    The recordings bucket is versioned, so deleting only the current version
+    would leave the earlier ones behind as noncurrent versions. Every version
+    and delete marker is listed and deleted in ``DeleteObjects`` batches of up
+    to 1000, as transcript_deletion deletes a transcript's files. A version S3
+    does not delete raises, so the meeting's deletion reports the failure.
+    """
+    keys: set[str] = set()
+    paginator = s3_client.get_paginator("list_object_versions")
     batch: list[dict] = []
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-        for obj in page.get("Contents", []) or []:
-            batch.append({"Key": obj["Key"]})
+        for entry in _version_entries(page):
+            keys.add(entry["Key"])
+            batch.append(entry)
             if len(batch) >= S3_BATCH_DELETE_LIMIT:
-                s3_client.delete_objects(Bucket=bucket, Delete={"Objects": batch, "Quiet": True})
-                deleted += len(batch)
+                _delete_versions(bucket, batch)
                 batch = []
     if batch:
-        s3_client.delete_objects(Bucket=bucket, Delete={"Objects": batch, "Quiet": True})
-        deleted += len(batch)
-    return deleted
+        _delete_versions(bucket, batch)
+    return len(keys)
 
 
 def delete_recordings_transcripts(callid):
@@ -148,11 +174,25 @@ def _video_key_from_url(url):
 
 
 def _delete_stored_recording(key, callid, kind):
-    """Delete one recording file by key; 1 if S3 reported no error, else 0."""
-    response = s3_client.delete_objects(
-        Bucket=S3_BUCKET_NAME, Delete={"Objects": [{"Key": key}], "Quiet": True}
-    )
-    errors = response.get("Errors") or []
+    """Delete every version of one recording file.
+
+    1 if the file had a version and S3 deleted them all, else 0 (a transcriber
+    recording named by RecordingUrl has usually been removed already by the
+    CallId-prefix scan, so 0 is common). A version S3 does not delete is logged.
+    """
+    versions = []
+    paginator = s3_client.get_paginator("list_object_versions")
+    for page in paginator.paginate(Bucket=S3_BUCKET_NAME, Prefix=key):
+        versions.extend(_version_entries(page, key))
+    if not versions:
+        return 0
+    errors = []
+    for start in range(0, len(versions), S3_BATCH_DELETE_LIMIT):
+        response = s3_client.delete_objects(
+            Bucket=S3_BUCKET_NAME,
+            Delete={"Objects": versions[start : start + S3_BATCH_DELETE_LIMIT], "Quiet": True},
+        )
+        errors.extend(response.get("Errors") or [])
     for error in errors:
         logger.error(
             "Could not delete %s recording %s of %s: %s",
@@ -171,7 +211,8 @@ def delete_audio_recording(callid, audio_url=None):
     meeting's CallId, which is how the transcriber names its recordings. The
     Virtual Participant names its file from the meeting name and the time the
     recording was written, so that file is found only through the URL stored on
-    the meeting. Returns the number of files deleted (0 or 1).
+    the meeting. Returns 1 when the file is gone afterwards and 0 otherwise (see
+    _delete_stored_recording).
     """
     if not callid:
         return 0
@@ -633,7 +674,7 @@ def delete_meetings(calls, owner):
 def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
     try:
         # Run the independent preparation steps in parallel:
-        #  1. Virtual Participant cleanup (scan + ECS/DDB writes)
+        #  1. Virtual Participant cleanup (paginated scan + ECS/DDB writes)
         #  2. Deletion of every item of the meeting's transcript (PK trs#<CallId>)
         #  3. Fetch call details (needed to preserve SharedWith on deleteCall)
         #  4. S3 prefix deletion
@@ -776,44 +817,65 @@ def delete_transcript_items(callid):
     return len(keys)
 
 
+def _virtual_participants_of(vp_table, callid):
+    """Every Virtual Participant record whose CallId is the meeting's.
+
+    The table is keyed by the Virtual Participant's id alone, with no index on
+    CallId, so it is scanned, page after page until DynamoDB returns no
+    LastEvaluatedKey: a filtered page can hold none of the matches, or only some.
+    """
+    kwargs = {"FilterExpression": Attr("CallId").eq(callid)}
+    while True:
+        response = vp_table.scan(**kwargs)
+        yield from response.get("Items", [])
+        last = response.get("LastEvaluatedKey")
+        if not last:
+            return
+        kwargs["ExclusiveStartKey"] = last
+
+
 def cleanup_virtual_participants(callid):
-    """Clean up Virtual Participants associated with the meeting being deleted"""
+    """End and delete every Virtual Participant record of the meeting being deleted.
+
+    For each record, a Virtual Participant still in the meeting is sent an END
+    event and its task is stopped (both best effort: one that has already left
+    has nothing to stop), then the record and its task registry entry are
+    deleted. Reading the table or deleting a record that fails raises, after
+    every record has been tried, so the meeting's deletion reports it as it
+    reports any other step's failure, and the meeting record is kept for the
+    deletion to be run again. Returns the number of records deleted.
+    """
     if not VP_TABLE_NAME:
         logger.info("VP_TABLE_NAME not configured, skipping VP cleanup")
-        return
+        return 0
 
-    try:
-        vp_table = ddb.Table(VP_TABLE_NAME)
+    vp_table = ddb.Table(VP_TABLE_NAME)
+    deleted = 0
+    failures = []
+    for vp in _virtual_participants_of(vp_table, callid):
+        vp_id = vp.get("id")
+        if not vp_id:
+            continue
 
-        # Scan for VPs with matching CallId
-        response = vp_table.scan(FilterExpression=Attr("CallId").eq(callid))
-
-        vps_to_cleanup = response.get("Items", [])
-
-        for vp in vps_to_cleanup:
-            vp_id = vp.get("id")
-            if not vp_id:
-                continue
-
-            logger.info(f"Cleaning up VP {vp_id} for meeting {callid}")
-
-            # Send END event to Kinesis
-            send_vp_end_event(callid, vp)
-
-            # Stop ECS task if running
-            stop_vp_ecs_task(vp_id)
-
-            # Delete VP record
+        logger.info("Cleaning up VP %s for meeting %s", vp_id, callid)
+        send_vp_end_event(callid, vp)
+        stop_vp_ecs_task(vp_id)
+        try:
             vp_table.delete_item(Key={"id": vp_id})
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Error deleting VP %s of meeting %s: %s", vp_id, callid, exc)
+            failures.append(vp_id)
+            continue
+        delete_vp_registry_entry(vp_id)
+        deleted += 1
 
-            # Delete registry entry
-            delete_vp_registry_entry(vp_id)
-
-        if vps_to_cleanup:
-            logger.info(f"Cleaned up {len(vps_to_cleanup)} VPs for meeting {callid}")
-
-    except Exception as e:
-        logger.error(f"Error cleaning up VPs for meeting {callid}: {e}")
+    if deleted:
+        logger.info("Cleaned up %d VPs for meeting %s", deleted, callid)
+    if failures:
+        raise RuntimeError(
+            f"could not delete {len(failures)} Virtual Participant record(s) of meeting {callid}"
+        )
+    return deleted
 
 
 def send_vp_end_event(callid, vp):

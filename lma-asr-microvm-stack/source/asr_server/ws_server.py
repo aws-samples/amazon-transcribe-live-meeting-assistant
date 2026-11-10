@@ -24,6 +24,12 @@ Runs **inside the MicroVM**. Speaks the wire protocol in ``design.md`` §5:
   ``max_wait_ms`` (stops reading the socket → TCP backpressure); if the consumer
   is still wedged, the frame is *dropped* rather than buffered without bound, so
   a fast sender against a fixed-memory MicroVM can never OOM the process.
+* **Timeline after a drop:** the engines time everything by the samples they were
+  fed, so a dropped frame would pull every later row earlier than the audio the
+  client sent. :class:`ReceivedAudioTimeline` records where each drop fell and
+  how long it was, and every outgoing ``partial``/``final`` is moved back onto the
+  received-audio timeline, so row times equal the position in the audio received
+  since the session started.
 
 Testability
 -----------
@@ -41,6 +47,7 @@ real loopback socket.
 from __future__ import annotations
 
 import asyncio
+import bisect
 import contextlib
 import json
 import logging
@@ -98,6 +105,7 @@ __all__ = [
     "WebSocketConnection",
     "EngineFactory",
     "AsrSession",
+    "ReceivedAudioTimeline",
     "serve_asr",
     "main",
 ]
@@ -319,6 +327,96 @@ def _build_config(query: dict[str, str], frame: dict[str, object] | None) -> Con
         raise _ConfigError(_CODE_BAD_CONFIG, f"invalid config: {exc}") from exc
 
 
+# --- Received-audio timeline ------------------------------------------------
+
+# Engine times are float sums of per-chunk durations while drop points are computed
+# from byte counts, so the two can differ by rounding at a drop boundary.
+_TIMELINE_EPSILON_S = 1e-6
+
+
+class ReceivedAudioTimeline:
+    """Maps engine time onto the timeline of audio the session received.
+
+    Every engine clocks itself by the samples it was fed, and the engines layered
+    over one another (recogniser, preview, embedding diarizer, Sortformer) slice
+    audio back out of their buffers by those same times. Dropping a frame therefore
+    leaves the engine internally consistent but behind the sender: every later
+    time is early by the dropped duration, and the client places rows (and looks up
+    who was speaking) on its own clock of audio sent.
+
+    The correction is applied here, at the wire, rather than inside the engines:
+
+    * Advancing the engines' clocks would have to be done in step across every
+      layer, or the diarizer's sample slices would no longer match the text.
+    * Feeding silence in place of the dropped audio would keep every clock aligned
+      without touching them, but it hands more work to a consumer that is already
+      behind (the reason the frame was dropped), and a stretch of silence can
+      close an utterance or move the voice-activity detector mid-sentence.
+
+    A drop at engine time ``p`` lasting ``d`` seconds moves every time after ``p``
+    later by ``d``, and drops accumulate. At the boundary itself, a *start* at ``p``
+    belongs to the audio after the gap (shifted) and an *end* at ``p`` to the audio
+    before it (not shifted), so a row that ends where the drop fell does not grow
+    by the dropped duration.
+    """
+
+    def __init__(self) -> None:
+        # Parallel, non-decreasing lists: engine time of each drop point, and the
+        # cumulative dropped seconds in effect after it. Consecutive drops at the
+        # same point (a burst while the consumer is stalled) share one entry.
+        self._points: list[float] = []
+        self._totals: list[float] = []
+
+    @property
+    def dropped_seconds(self) -> float:
+        """Total audio dropped so far, in seconds."""
+        return self._totals[-1] if self._totals else 0.0
+
+    def record_drop(self, at_engine_s: float, seconds: float) -> float:
+        """Record ``seconds`` of audio dropped at engine time ``at_engine_s``.
+
+        Returns the cumulative dropped seconds. Drop points arrive in order (the
+        queue is FIFO), so the lists stay sorted.
+        """
+        if seconds <= 0:
+            return self.dropped_seconds
+        total = self.dropped_seconds + seconds
+        if self._points and abs(self._points[-1] - at_engine_s) <= _TIMELINE_EPSILON_S:
+            self._totals[-1] = total
+        else:
+            self._points.append(at_engine_s)
+            self._totals.append(total)
+        return total
+
+    def start(self, engine_s: float) -> float:
+        """Received-audio time of a start (or word start) at ``engine_s``."""
+        index = bisect.bisect_right(self._points, engine_s + _TIMELINE_EPSILON_S)
+        return engine_s + (self._totals[index - 1] if index else 0.0)
+
+    def end(self, engine_s: float) -> float:
+        """Received-audio time of an end (or word end) at ``engine_s``."""
+        index = bisect.bisect_left(self._points, engine_s - _TIMELINE_EPSILON_S)
+        return engine_s + (self._totals[index - 1] if index else 0.0)
+
+    def apply(self, message: WireMessage) -> WireMessage:
+        """Return ``message`` with its times on the received-audio timeline."""
+        if not self._points:
+            return message
+        start = self.start(message.start)
+        if isinstance(message, Partial):
+            end = None if message.end is None else max(self.end(message.end), start)
+            return message.model_copy(update={"start": start, "end": end})
+        words = []
+        for word in message.words:
+            word_start = self.start(word.s)
+            words.append(
+                word.model_copy(update={"s": word_start, "e": max(self.end(word.e), word_start)})
+            )
+        return message.model_copy(
+            update={"start": start, "end": max(self.end(message.end), start), "words": words}
+        )
+
+
 # --- Session ----------------------------------------------------------------
 
 
@@ -372,6 +470,11 @@ class AsrSession:
         self._audio_bytes = 0
         self.backpressure_events = 0
         self.frames_dropped = 0
+        # Bytes handed to the queue (not dropped). The queue is FIFO and drained by
+        # one consumer, so this is exactly where on the engine's clock a frame
+        # dropped next would have landed.
+        self._bytes_queued = 0
+        self._timeline = ReceivedAudioTimeline()
 
         # Diagnostic counters (logging only — no behaviour change). These localise a
         # "connects but no transcription" failure across the four suspect stages:
@@ -405,6 +508,11 @@ class AsrSession:
     def audio_seconds(self) -> float:
         """Audio seconds actually processed (feeds ``termination.audio_seconds``)."""
         return self._audio_bytes / _BYTES_PER_SAMPLE / self._sample_rate
+
+    @property
+    def dropped_seconds(self) -> float:
+        """Audio seconds received but dropped, and so never fed to the engine."""
+        return self._timeline.dropped_seconds
 
     @property
     def segments(self) -> int:
@@ -733,7 +841,9 @@ class AsrSession:
         Fast path is a non-blocking put. On a full queue we block up to
         ``max_wait_ms`` (stops reading the socket, so TCP backpressure slows the
         sender); if the consumer is still behind after that, the frame is dropped
-        rather than buffered without bound — memory stays fixed, no OOM.
+        rather than buffered without bound — memory stays fixed, no OOM. A dropped
+        frame is recorded on the session's :class:`ReceivedAudioTimeline` so later
+        rows still carry the time the client sent their audio.
         """
         # Diagnostic (logging only): count every binary frame that ARRIVES here, so a
         # run can distinguish "mic sent no audio" (b) from "audio never reached the
@@ -760,7 +870,28 @@ class AsrSession:
                 )
             except TimeoutError:
                 self.frames_dropped += 1
+                self._record_drop(pcm)
+                self._log_diagnostic_tick()
+                return
+        self._bytes_queued += len(pcm)
         self._log_diagnostic_tick()
+
+    def _record_drop(self, pcm: bytes) -> None:
+        """Put a dropped frame on the timeline and log it at INFO."""
+        bytes_per_second = _BYTES_PER_SAMPLE * self._sample_rate
+        at_engine_s = self._bytes_queued / bytes_per_second
+        seconds = (len(pcm) // _BYTES_PER_SAMPLE) / self._sample_rate
+        total = self._timeline.record_drop(at_engine_s, seconds)
+        _LOG.info(
+            "session %s: engine behind, dropped %.3fs of audio at %.3fs received "
+            "(%.3fs engine); cumulative dropped %.3fs, later row times shifted by %.3fs",
+            self._session_id,
+            seconds,
+            at_engine_s + total - seconds,
+            at_engine_s,
+            total,
+            total,
+        )
 
     def _log_diagnostic_tick(self) -> None:
         """Emit a DEBUG heartbeat at most every ``_DIAGNOSTIC_LOG_INTERVAL_S``.
@@ -800,8 +931,8 @@ class AsrSession:
         _LOG.info(
             "session %s end (%s): frames_in=%d bytes_in=%d (~%.1fs audio) "
             "recognizer_events=%d messages_emitted=%d segments=%d "
-            "backpressure=%d dropped=%d interim_results=%s peer_gone=%s "
-            "rss_current=%.1fMB rss_peak=%.1fMB",
+            "backpressure=%d dropped=%d dropped_seconds=%.3f interim_results=%s "
+            "peer_gone=%s rss_current=%.1fMB rss_peak=%.1fMB",
             self._session_id,
             ending,
             self._bin_frames_in,
@@ -812,6 +943,7 @@ class AsrSession:
             self.segments,
             self.backpressure_events,
             self.frames_dropped,
+            self.dropped_seconds,
             self._interim_results,
             self._peer_gone,
             rss.current_mb,
@@ -866,7 +998,11 @@ class AsrSession:
         """Flush the recogniser, emit finals, send ``termination``, then close (R6.3)."""
         await self._finalize_stream()
         await self._send(
-            Termination(audio_seconds=self.audio_seconds, segments=self.segments)
+            Termination(
+                audio_seconds=self.audio_seconds,
+                segments=self.segments,
+                dropped_seconds=self.dropped_seconds,
+            )
         )
         await self._safe_close()
 
@@ -911,6 +1047,9 @@ class AsrSession:
         full event stream; this seam merely drops interim ``partial`` frames from
         the wire when the client negotiated ``interim_results=false`` (``final``s,
         which carry the committed transcript, always go out).
+
+        Times are moved onto the received-audio timeline here, the last step before
+        the wire, so every engine variant gets the same correction after a drop.
         """
         for message in messages:
             if not self._interim_results and isinstance(message, Partial):
@@ -920,7 +1059,7 @@ class AsrSession:
             # this still localises emit-vs-transport issues without synchronous
             # per-message writes on the event loop hot path.
             self._messages_emitted += 1
-            await self._send(message)
+            await self._send(self._timeline.apply(message))
         if messages:
             self._log_diagnostic_tick()
 

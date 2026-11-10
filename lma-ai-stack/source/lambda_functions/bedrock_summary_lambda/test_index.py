@@ -43,6 +43,8 @@ os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("FETCH_TRANSCRIPT_LAMBDA_ARN", FETCH_ARN)
 os.environ.setdefault("S3_BUCKET_NAME", BUCKET)
 os.environ.setdefault("S3_PREFIX", PREFIX)
+# The stack's default deploys the transcript knowledge base.
+os.environ.setdefault("TRANSCRIPT_KB_ID", "KB12345678")
 os.environ.setdefault("CONFIGURATION_TABLE_NAME", TABLE_NAME)
 # PROCESS_TRANSCRIPT is deliberately left unset: its default
 # are asserted below.
@@ -1284,6 +1286,30 @@ def test_a_meeting_without_key_frames_keeps_its_transcript_document_as_it_was(mo
     assert s3.objects[f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt"]["Body"] == TRANSCRIPT
 
 
+def test_the_summary_file_is_written_for_the_transcript_knowledge_base(monkeypatch):
+    _, s3 = install(monkeypatch)
+    monkeypatch.setattr(index, "TRANSCRIPT_KB_ID", "KB12345678")
+    index.write_to_s3(CALL_ID, METADATA, TRANSCRIPT, '{"SUMMARY": "x"}')
+    assert sorted(s3.objects) == [
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-SUMMARY.txt",
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-SUMMARY.txt.metadata.json",
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt",
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt.metadata.json",
+    ]
+
+
+def test_without_a_transcript_knowledge_base_only_the_transcript_file_is_written(monkeypatch):
+    """The summary stays on the meeting record only; the transcript file is still
+    written, for the MCP server's transcript tool."""
+    _, s3 = install(monkeypatch)
+    monkeypatch.setattr(index, "TRANSCRIPT_KB_ID", "")
+    index.write_to_s3(CALL_ID, METADATA, TRANSCRIPT, '{"SUMMARY": "x"}')
+    assert sorted(s3.objects) == [
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt",
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt.metadata.json",
+    ]
+
+
 # --------------------------------------------------------------------------
 # The screen share summary section
 # --------------------------------------------------------------------------
@@ -1461,6 +1487,7 @@ def test_text_inserted_for_the_slides_is_not_read_as_another_placeholder(
 
 def test_the_knowledge_base_summary_names_its_pictures_in_words(monkeypatch):
     _, s3 = install(monkeypatch)
+    monkeypatch.setattr(index, "TRANSCRIPT_KB_ID", "KB12345678")
     summary = json.dumps(
         {
             "SCREEN SHARE SUMMARY": "**[00:30] Budget**\n\n![Slide at 00:30](keyframe:0000030000-ab12cd)"
@@ -1780,7 +1807,9 @@ def test_every_shipped_section_that_reads_the_transcript_says_what_a_chat_line_i
         ), title
 
 
-def test_the_knowledge_base_transcript_leaves_the_chat_out(monkeypatch) -> None:
+def test_the_knowledge_base_transcript_includes_the_meeting_chat(monkeypatch) -> None:
+    # The document the meeting-history knowledge base indexes and the MCP
+    # get_meeting_transcript tool reads: chat lines in place, under their sender.
     client = FakeLambdaClient(
         transcript="\nBob: we ship\n[chat] Alice: https://example.com/x\nAlice: ok"
     )
@@ -1792,7 +1821,19 @@ def test_the_knowledge_base_transcript_leaves_the_chat_out(monkeypatch) -> None:
     )
     index.handler({"CallId": CALL_ID}, None)
     body = s3.objects[f"{PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt"]["Body"]
-    assert body == "\nBob: we ship\nAlice: ok"
+    assert body == "\nBob: we ship\n[chat] Alice: https://example.com/x\nAlice: ok"
+
+
+def test_the_knowledge_base_transcript_includes_the_chat_and_the_shared_screen(
+    monkeypatch,
+) -> None:
+    _, s3 = install(monkeypatch)
+    transcript = "\nBob: we ship\n[chat] Alice: see the deck"
+    index.write_to_s3(CALL_ID, METADATA, transcript, '{"SUMMARY": "x"}', KEYFRAMES)
+    body = s3.objects[f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt"]["Body"]
+    assert body.startswith(transcript)
+    assert "[chat] Alice: see the deck" in body
+    assert "[00:30] Agenda item 1: Budget" in body
 
 
 # ── no section of a meeting with chat carries a link ────────────────────────

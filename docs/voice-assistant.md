@@ -7,6 +7,7 @@ title: "Voice Assistant"
 ## Table of Contents
 
 - [Overview](#overview)
+- [What the Voice Assistant Can Look Up](#what-the-voice-assistant-can-look-up)
 - [Provider Comparison](#provider-comparison)
 - [Activation Modes](#activation-modes)
   - [always_active](#always_active)
@@ -38,7 +39,14 @@ title: "Voice Assistant"
 
 ## Overview
 
-LMA can optionally add a voice assistant to the Virtual Participant, allowing it to respond verbally during meetings. The voice assistant uses the meeting transcript as context and has access to the same tools as the chat-based meeting assistant, including knowledge base lookups, action item tracking, and other configured capabilities.
+LMA can optionally add a voice assistant to the Virtual Participant, allowing it to respond verbally during meetings. The voice assistant uses the meeting transcript as context and looks things up through the meeting assistant; what a lookup may use is described in [What the Voice Assistant Can Look Up](#what-the-voice-assistant-can-look-up).
+
+## What the Voice Assistant Can Look Up
+
+A request spoken to the voice assistant that needs a lookup (Nova Sonic's `strands_agent` tool, or the ElevenLabs agent's `strands_agent` client tool) is sent to the meeting assistant as an [in-meeting request](meeting-assistant.md#in-meeting-requests): anyone in the meeting can speak to the assistant, and everyone hears the answer. **Meeting Assistant › In-meeting requests** on the Configuration page (`meeting_assist.inMeetingRequestTools`) decides what it is answered with, and a change applies within about five minutes, including in meetings already running:
+
+- **Current meeting only** (`current_meeting_only`, the default): the current meeting's transcript, the messages typed in its chat, its agenda and what was shown on its shared screen, and no other tool.
+- **Unrestricted** (`unrestricted`): every tool the meeting page's assistant has — web search, the document knowledge base, the past meetings of the Virtual Participant's LMA user, MCP servers and the browser controls. This is how lookups behaved before the setting existed.
 
 ## Provider Comparison
 

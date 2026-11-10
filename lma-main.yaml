@@ -2472,6 +2472,20 @@ Resources:
             Status: Enabled
             Prefix: "lma-uploads-pending/"
             ExpirationInDays: 7
+          # The bucket is versioned, so an expiry above or a deletion by LMA
+          # turns the current version into a noncurrent one (or adds a delete
+          # marker). Noncurrent versions of every object are removed one day
+          # after they stop being current, and a delete marker with no version
+          # left behind it is removed too, so the retention periods above are
+          # how long content is kept, plus at most about a day. One day, not
+          # the configuration bucket's 35: nothing in LMA restores an earlier
+          # version of a recording or transcript file, and these files are
+          # meeting content whose retention is the point of the rules above.
+          - Id: ExpireNoncurrentVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 1
+            ExpiredObjectDeleteMarker: true
       CorsConfiguration:
         CorsRules:
           - Id: LmaUploadsPendingPutFromBrowser

@@ -42,3 +42,57 @@ export const describeAgendaSource = (source) => SOURCE_LABELS[source] || null;
 
 /** The longest agenda the backend stores; enforced again in the resolver. */
 export const MAX_AGENDA_CHARS = 10000;
+
+/** How far an agenda item got, as the summary's AGENDA COVERAGE section says. */
+export const COVERED = 'covered';
+export const PARTLY_COVERED = 'partly';
+export const NOT_COVERED = 'not';
+
+// A status word at the start of the text after an item's name.
+const STATUS_WORDS = /^(partly covered|partially covered|not covered|covered)\b/i;
+const SEPARATORS = /^[\s:–—-]+/;
+
+const statusOf = (text) => {
+  const match = STATUS_WORDS.exec(String(text).replace(SEPARATORS, ''));
+  if (!match) return null;
+  const word = match[1].toLowerCase();
+  if (word.startsWith('not')) return NOT_COVERED;
+  if (word.startsWith('part')) return PARTLY_COVERED;
+  return COVERED;
+};
+
+// The status one coverage line gives its item, or null for a line that gives
+// none. The item's name comes first, and may itself contain a colon or a
+// status word, so the status is read after the name: after its bold, when it
+// is bold, and otherwise after a colon.
+const lineStatus = (raw) => {
+  const line = raw.replace(LIST_MARK, '').trim();
+  const bold = /^\*\*(.+?)\*\*/.exec(line);
+  if (bold) {
+    const inner = bold[1];
+    return statusOf(line.slice(bold[0].length)) ?? statusOf(inner.slice(inner.lastIndexOf(':') + 1));
+  }
+  const plain = line.replace(/\*\*/g, '');
+  const parts = plain.split(':');
+  for (let i = 0; i < parts.length; i += 1) {
+    const status = statusOf(parts.slice(i).join(':'));
+    if (status) return status;
+  }
+  return null;
+};
+
+/**
+ * The status of each agenda item, in agenda order, from the summary's AGENDA
+ * COVERAGE section: one line per item, "- **[Agenda item]**: Covered |
+ * Partly covered | Not covered - [a few words]", as the shipped prompt asks.
+ *
+ * The section is model output, and a person can edit it, so it is read
+ * leniently -- list marks, bold, with or without the item's name -- and only
+ * trusted whole: unless there is exactly one status line per item there is
+ * nothing to pair them by, and null is returned rather than a guess.
+ */
+export const agendaCoverageStatuses = (coverage, itemCount) => {
+  if (typeof coverage !== 'string' || !itemCount) return null;
+  const statuses = coverage.split(/\r?\n/).map(lineStatus).filter(Boolean);
+  return statuses.length === itemCount ? statuses : null;
+};

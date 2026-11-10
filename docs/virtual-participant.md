@@ -76,9 +76,9 @@ shown as **one person** — `Bob Strahan` for every line, however many voice ids
 separation gave him — unless it reads as a room (`Conference Room`, `ConfRm_1`,
 a room device) or two of its voices each spoke at length, in which case it is
 shown as **several people**: `Conference Room · Voice 1`, `Voice 2`. The
-**One person | Several people** menu beside the name's chips on the
+one-person / several-people icon beside the name's chips on the
 **Transcript** tab (and beside the name in the Speakers panel) corrects either
-guess, and in **Several people**
+guess with one click, and in **Several people**
 each voice can be named in place; see
 [One person or several people](transcription-and-translation.md#one-person-or-several-people).
 
@@ -741,7 +741,11 @@ The introduction message and the help reply say which name to add. A VP knows an
 `LMA ask <question>` (also `@LMA ask <question>`, `LMA, ask: <question>`) sends the question to the deployment's Strands meeting assistant — the same agent the LMA meeting page's assistant and the voice assistant's lookups use — with the meeting's transcript as context, and posts the answer in the meeting chat. `@LMA <question>` works too when the text after `@LMA` is not one of the other commands, so `@LMA help` is still help and `@LMA translate` still changes mode. A message that starts with `LMA` and is not one of the other commands is a question too when it reads as one: it ends with a question mark, or its first word is one of *what*, *whats* (*what's*), *who*, *whos* (*who's*), *whom*, *whose*, *when*, *where*, *why*, *how*, *which*, *summarize*, *summarise*, *recap*, *explain*, *list* or *tell*. That is the whole list: a message starting with any other word needs the question mark (or `LMA ask`). So *"LMA what was just discussed?"* is answered like *"LMA ask what was just discussed?"*, while *"LMA is great"* is ordinary chat and *"LMA help?"* is still help.
 
 - **Availability.** It needs a Strands meeting assistant (**MeetingAssistService** set to one of the `STRANDS_BEDROCK` options); it does not need a voice assistant. `LMA help` lists `LMA ask` only when one is configured. Without one, an explicit `LMA ask` is answered with a note saying so, and `@LMA` and `LMA <question>?` messages are ignored. **For operators:** on a Strands deployment any participant, including a guest, can ask, and each question is a meeting-assistant (Bedrock) request billed like any other. There is no separate switch to turn chat questions off; open an issue if your deployment needs one.
-- **What the agent can use.** A chat sender is known to the VP only by the display name the meeting shows, so a chat question is treated as any participant's question. Because the answer is read by everyone in the meeting, it is answered from the current meeting's transcript, its [agenda](meeting-agenda.md) and web search (where configured) only. Anyone in the meeting, including a guest, can therefore ask about the agenda of the meeting they are in (`LMA ask what's left on the agenda?`). The document knowledge base, the owner's past meetings, MCP servers, and the VNC and browser-control tools are not offered for chat questions; ask through the LMA meeting page for answers that use them. **For operators:** an answer can draw on anything in the meeting's transcript so far — including what was said before the person asking joined — and is posted where everyone in the meeting can read it.
+- **What the agent can use.** A chat question is an [in-meeting request](meeting-assistant.md#in-meeting-requests), answered as **Meeting Assistant › In-meeting requests** on the Configuration page (`meeting_assist.inMeetingRequestTools`) allows; a change applies within about five minutes to questions asked after that.
+  - **Current meeting only** (`current_meeting_only`, the default). The answer comes from the current meeting alone: its transcript, the messages typed in its chat, its [agenda](meeting-agenda.md) and what was shown on its [shared screen](meeting-video.md) (each frame's title and text). No other tool is offered — no web search, document knowledge base, past meetings, MCP servers, or VNC and browser controls. Anyone in the meeting, including a guest, can therefore ask about the agenda of the meeting they are in (`LMA ask what's left on the agenda?`); ask through the LMA meeting page for answers that use the other tools.
+  - **Unrestricted** (`unrestricted`). Every chat question is offered every tool the meeting page's assistant has — web search (where configured), the document knowledge base, the owner's past meetings, MCP servers and the VNC and browser controls — acting for the VP's LMA user, whoever asked. A chat sender is known to the VP only by the display name the meeting shows, so every sender is treated alike. Choose it only where everyone who can join the meeting may read what those tools return, since the answer is posted for the whole meeting.
+
+  The same setting applies to requests spoken to the [voice assistant](voice-assistant.md#what-the-voice-assistant-can-look-up) and with the wake phrase; the meeting page's own assistant is always unrestricted. **For operators:** whatever the choice, an answer can draw on anything in the meeting's transcript and chat so far — including what was said before the person asking joined — and is posted where everyone in the meeting can read it.
 - **How answers are posted.** The answer is reduced to plain text on a single line, starting `Live Meeting Assistant:`. Markdown is removed; a link is shown as its text followed by its full address in parentheses, and a bare address is left whole, so it can be followed from the chat. Long answers are split at sentence ends into at most three messages, numbered `(1/3)`, `(2/3)`, ..., and the rest is cut with an ellipsis. LMA keeps each message to 1,000 characters on Zoom and Teams, 500 on Webex and Chime, which post by typing, and 500 on Google Meet; these are LMA's own conservative limits, not the platforms' maximums.
 - **Limits.** Each participant may ask once every 20 seconds (told once if they ask sooner), questions over 500 characters are declined, and one question is answered at a time. On the Teams web client the sender is not visible, so everyone there shares one 20-second limit. Answers usually take a few seconds and can take longer when the agent searches; other commands are not held up meanwhile. If no answer arrives within 90 seconds the VP says so and takes the next question. While `LMA pause` is in effect questions are not sent to the meeting assistant; an explicit `LMA ask` is told to wait for `LMA start`. An answer that becomes ready while the VP is posting another message (a help or mode reply, say) can interleave with it on any platform; it is most likely on Webex and Chime, which post by typing.
 - **The VP never answers itself.** Its answers begin `Live Meeting Assistant`, which cannot be read as a question; its configured introduction, recording-start, recording-stop and exit messages are recognised and ignored; and messages from the VP's own display name are ignored.
@@ -818,11 +822,13 @@ the links participants shared, listed from the messages themselves rather
 than written by the model. See
 [Chat and Shared Links](transcript-summarization.md#chat-and-shared-links).
 The summary is kept when the transcript is deleted, so the links it lists
-outlive the chat lines they came from. The copy of the transcript written for
-the knowledge base's meeting-history search leaves the chat lines out, though
-its copy of the summary includes the chat section. Chat lines are not used, in
-this release, by the meeting assistant, sentiment, speaker naming or the wake
-phrase: those read what was said.
+outlive the chat lines they came from. The meeting assistant reads them too:
+its `current_meeting_transcript` tool returns each message among the speech as
+a line `[chat] <sender>: <message>`, with its time when the transcript is asked
+for with times. The copy of the transcript written for the knowledge base's
+meeting-history search, which the MCP `get_meeting_transcript` tool also
+returns, keeps the chat lines in the same form. Chat lines are not used by
+sentiment, speaker naming or the wake phrase: those read what was said.
 
 How well each platform's chat can be read differs, and none of this has been
 measured in a live meeting yet:

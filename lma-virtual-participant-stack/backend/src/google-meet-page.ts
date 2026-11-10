@@ -187,8 +187,9 @@ export const MEET_IN_PAGE_SELECTORS = {
      * or only the time on the reader's own messages) is plain text two levels
      * above each `data-message-id`, beside the element holding the run of
      * messages. So the group is found by walking up from the message to the
-     * first ancestor with text outside every message (readMeetChatInPage); this
-     * selector is kept for a page that does mark its groups.
+     * first ancestor with text outside every message (readMeetChatInPage). This
+     * selector has not been seen to match live; it is kept in case Meet adds
+     * such a mark.
      */
     chatGroup: '[data-sender-id]',
     /**
@@ -496,7 +497,8 @@ export function timeFromMeetGroupHeader(header: string | null | undefined): stri
  * Is this name the VP's own?
  *
  * Meet labels the VP's own tile with its display name, and may label it "You".
- * Its own chat messages carry a time-only header, so they have no sender at all. Matched whole, case-insensitively, so a participant whose name merely
+ * Its own chat messages carry a time-only header, so they have no sender at
+ * all. Matched whole, case-insensitively, so a participant whose name merely
  * contains "LMA" or starts with "You" is not mistaken for the VP.
  */
 export function isOwnMeetName(name: string | null | undefined, identities: readonly string[]): boolean {

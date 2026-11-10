@@ -378,7 +378,7 @@ so a release cannot ship a default its own save would refuse.
 | `language_models` | The Model inference geography (`global`, `geography` or `in_region`) and the four model ids, each one of the models its setting offers, nothing else |
 | `transcription` | The nine Amazon Transcribe options: language, preferred language and redaction type from their stack parameters' lists; language options as comma-separated codes from that list; entity types as comma-separated capitalised names; vocabulary and language model names in Amazon Transcribe's character set, empty for none; the two switches `true` or `false` |
 | `recording` | `recordAudio`, `true` or `false`, nothing else |
-| `meeting_assist` | `wakePhraseRegex`, text of 1 to 256 characters; `promptCachingEnabled`, `true` or `false`; `assistantReasoningEffort`, `low`, `medium` or `high` |
+| `meeting_assist` | `wakePhraseRegex`, text of 1 to 256 characters; `promptCachingEnabled`, `true` or `false`; `assistantReasoningEffort`, `low`, `medium` or `high`; `inMeetingRequestTools`, `current_meeting_only` or `unrestricted` |
 | `meeting_processing` | `transcriptHookNonPartialOnly`, `true` or `false`; `inactiveMeetingLookbackDays`, a whole number from 1 to 90, and `inactiveMeetingTimeoutMinutes`, a whole number from 0 to 10080, their parameters' ranges |
 | `meeting_agenda` | `autoDeriveAfterSeconds`, a whole number from 0 to 3600, the parameter's range |
 | `retention` | `meetingRecordExpirationInDays` and `transcriptionExpirationInDays`, numbers of days of at least 0.1, each at most the baseline's value (`maximumIsDefault`, below); `transcriptDeletionAfterSummary`, one of `off`, `immediately`, `after_15_minutes`, `after_30_minutes` and `after_60_minutes` (see [Transcript Deletion After the Summary](transcript-deletion.md)) |
@@ -1215,7 +1215,8 @@ a release that updates a price reaches the baseline on its next stack update. An
 Admin changes prices in the section's price table on the Configuration page, or
 through `updateCallPricing`; both save into the active profile, with the same
 version check. `getCallPricing` reads the shipped table, what the active profile
-stores and the merge of the two. The estimate reads the section's baseline values
+stores and the merge of the two; while the baseline is active it reports
+`default` and the baseline alone, as the store reads it. The estimate reads the section's baseline values
 beside its merged ones (`ResolvedSection.baseline_values`), which is how each line
 says whether its price is the release's or the profile's. There was no earlier
 store for prices, so nothing is adopted on upgrade.

@@ -236,14 +236,20 @@ PUT_CONDITION_FAILURE_MESSAGES = frozenset(
 # it is module state that ends up in the batch's results.
 CALL_ALREADY_CREATED: Mapping[str, Any] = MappingProxyType({"ok": True, "AlreadyExists": True})
 
+# Stands in for an addCallSummaryText result when the resolver rejected the
+# write, so the ADD_SUMMARY branch can drop the event without reporting the
+# summary as stored. Read-only for the same reason as CALL_ALREADY_CREATED.
+SUMMARY_NOT_STORED: Mapping[str, Any] = MappingProxyType({"ok": True, "SummaryNotStored": True})
+
 
 def is_put_condition_failure(error: Any) -> bool:
     """Whether a write was rejected by its resolver's own condition.
 
     Passed to ``execute_gql_query_with_retries`` as its
     ``should_ignore_exception_fn``. What a rejection means is per resolver, and on
-    each of the three live call sites it means the row already holds a version of
-    this write that should not be replaced, so retrying buys nothing
+    each of the four live call sites retrying buys nothing: on the first three
+    the row already holds a version of this write that should not be replaced,
+    and on the fourth there is no row to write to
     (``execute_update_call_aggregation_mutation`` passes it too but has no
     callers):
 
@@ -263,6 +269,12 @@ def is_put_condition_failure(error: Any) -> bool:
       different reason -- ``get_call_details`` reads the meeting earlier in the
       same record and has already failed it on a null ``getCall``, so the
       aggregation write is not reached.
+    * ``addCallSummaryText`` writes through the same template, with no
+      ``UpdatedAt`` of its own, so the template stamps it with the resolver's
+      clock and a rejection is, in practice, a meeting deleted before its summary
+      arrived. ``execute_add_call_summary_text_mutation`` answers with
+      :data:`SUMMARY_NOT_STORED`, and the ADD_SUMMARY branch logs which half of
+      the condition failed and drops the event.
 
     The messages are read off whatever the transport raised -- gql keeps them in
     an ``errors`` attribute on the exception, and a bare error mapping is
@@ -1154,16 +1166,72 @@ async def execute_add_call_summary_text_mutation(
         )
     )
 
+    # A rejected condition is answered with SUMMARY_NOT_STORED rather than
+    # retried: retrying cannot make a meeting row appear, and the record would
+    # otherwise be failed and redelivered, holding up every record behind it on
+    # the shard. The ADD_SUMMARY branch says which of the two cases it was.
     result = await execute_gql_query_with_retries(
         query,
         client_session=appsync_session,
         logger=LOGGER,
+        should_ignore_exception_fn=is_put_condition_failure,
+        ignored_exception_response=SUMMARY_NOT_STORED,
     )
 
     query_string = print_ast(query)
     LOGGER.debug("query result", extra=dict(query=query_string, result=result))
 
     return result
+
+
+def was_summary_not_stored(add_call_summary_text_result: Any) -> bool:
+    """Whether an addCallSummaryText result is the resolver having rejected the write.
+
+    True only for :data:`SUMMARY_NOT_STORED`, which
+    :func:`execute_add_call_summary_text_mutation` returns in place of a result
+    when ``updateCall.request.vtl``'s condition was not met.
+    """
+    return bool(
+        isinstance(add_call_summary_text_result, Mapping)
+        and add_call_summary_text_result.get("SummaryNotStored")
+    )
+
+
+async def log_summary_not_stored(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> None:
+    """Record why a summary was dropped, telling a removed meeting from a stale write.
+
+    ``updateCall.request.vtl`` conditions the write on
+    ``attribute_exists(#PK) AND #UpdatedAt < :UpdatedAt``. The summary event
+    carries no ``UpdatedAt``, so the template stamps the write with the
+    resolver's own clock, and the first half is the one expected to fail: the
+    meeting was deleted between its end and its summary arriving, by a user or
+    by an integration test that removes its own meeting when it has checked it.
+    Nothing is left to attach the summary to, so that is logged at info. The
+    read that tells the two apart is fail-open and logs its own error when it
+    fails, so an unreadable status is reported the same way as a missing row.
+
+    A meeting that is still stored means the second half failed: the row holds
+    an ``UpdatedAt`` at or after the resolver's clock. Nothing in the pipeline
+    is meant to write one, so that is logged as a warning, naming the meeting;
+    its summary state stays as it was.
+    """
+    call_id = message.get("CallId")
+    status = await get_call_status(message=message, appsync_session=appsync_session)
+    if status is None:
+        LOGGER.info(
+            "ADD_SUMMARY: the meeting is not stored (or its status could not be read), "
+            "so there is nothing to attach the summary to; dropping the event",
+            extra=dict(call_id=call_id),
+        )
+    else:
+        LOGGER.warning(
+            "ADD_SUMMARY: the meeting's record was updated at or after the summary's "
+            "write time, so the summary was not stored; dropping the event",
+            extra=dict(call_id=call_id, status=status),
+        )
 
 
 async def execute_add_agent_assist_mutation(
@@ -1587,6 +1655,15 @@ async def execute_process_event_api_mutation(
         response = await execute_add_call_summary_text_mutation(
             message=message, appsync_session=appsync_session
         )
+
+        if was_summary_not_stored(response):
+            # Dropped, not failed: redelivery would be rejected the same way, and
+            # a failed record holds up everything behind it on its shard. Nothing
+            # was stored, so neither the transcript deletion nor the post-call
+            # summary hook below is told about it.
+            await log_summary_not_stored(message=message, appsync_session=appsync_session)
+            return_value["successes"].append(response)
+            return return_value
 
         if isinstance(response, Exception):
             return_value["errors"].append(response)

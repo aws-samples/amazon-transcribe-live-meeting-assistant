@@ -43,7 +43,7 @@ see [Retention: settings the stack limits](#retention-settings-the-stack-limits)
 | Amazon Bedrock Models | The Amazon Bedrock model used for summaries and meeting insights, for the meeting assistant and the troubleshooting agent, for the meeting assistant's knowledge bases, and for reading the text of key frames, and the **Model inference geography**: whether those models, the consent evidence check model and the Virtual Participant's page-automation model may run in any commercial AWS Region, only within this deployment's geography, or only in its Region (see [Where meeting content is processed](infrastructure-and-security.md#where-meeting-content-is-processed)) | To each summary, answer or key frame started about five minutes after the save or later |
 | Amazon Transcribe | The Amazon Transcribe options of meetings streamed from the Stream Audio page, the browser extension and the desktop app, and of Virtual Participants: language or language identification, redaction, custom vocabulary and language model, and the default for identifying speakers within a channel | To streaming meetings that start after the save, and to the next Virtual Participant to start |
 | Meeting Recording | Whether those meetings' audio is recorded when the client does not say | To streaming meetings that start after the save, and to the next Virtual Participant to start |
-| Meeting Assistant | The regular expression that wakes the meeting assistant in a transcript, and whether its answers use Amazon Bedrock [prompt caching](meeting-assistant.md#prompt-caching) | To transcript segments processed, and answers started, about five minutes after the save or later |
+| Meeting Assistant | The regular expression that wakes the meeting assistant in a transcript, whether its answers use Amazon Bedrock [prompt caching](meeting-assistant.md#prompt-caching), its reasoning effort, and what a request made in the meeting (the meeting chat, the voice assistant, the wake phrase) is answered from ([In-meeting requests](meeting-assistant.md#in-meeting-requests)) | To transcript segments processed, and answers started, about five minutes after the save or later |
 | Meeting Processing | Whether a transcript Lambda hook is sent partial segments, how long a meeting may go without speech before the inactive-meeting reaper ends it, and how far back the reaper looks | Within about five minutes of the save |
 | Virtual Participant | The Virtual Participant's voice assistant provider, activation mode, wake phrases and activation duration, the ElevenLabs agent and Simli face, how a Teams Virtual Participant decides its meeting has ended, and whether the meeting chat is added to the transcript (see [Meeting Chat in the Transcript](virtual-participant.md#meeting-chat-in-the-transcript)) | To the next Virtual Participant to start |
 | Retention | How many days meeting records and transcript segments are kept, up to the limit the stack sets | To records written about five minutes after the save or later; a record already written keeps its expiry |
@@ -175,7 +175,10 @@ for more:
   key-frame images after `TranscriptionExpirationInDays` days and recordings
   after `AudioRecordingExpirationInDays` days, follow the stack parameters only.
   Shortening transcript retention on the page does not delete those files
-  sooner.
+  sooner. Nor does shortening meeting-record retention shorten the expiry of
+  Virtual Participant records, which follows
+  `MeetingRecordExpirationInDays` only. See
+  [What LMA stores, and for how long](privacy-and-data-handling.md#what-lma-stores-and-for-how-long).
 
 ## Configuration profiles
 
@@ -386,7 +389,8 @@ change it.
 | Amazon Transcribe › Redact personal information | Off | Off | On | On |
 | Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment | Same geography as this deployment |
 
-Under the Regulated preset nothing is recorded or kept until each participant
+Under the Regulated – consent required preset (`regulated-consent-required`)
+nothing is recorded or kept until each participant
 consents. While it waits, a Virtual Participant listens for consent said aloud:
 the meeting audio is processed by the meeting's transcription engine, and only
 the reply events are kept on the consent record. Turn **Meeting Consent › Read

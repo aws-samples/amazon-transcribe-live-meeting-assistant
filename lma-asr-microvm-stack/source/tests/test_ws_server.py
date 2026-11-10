@@ -28,17 +28,19 @@ from collections.abc import Sequence
 from typing import Any
 
 import pytest
-from asr_protocol import parse_server_message
+from asr_protocol import Final, Word, parse_server_message
 from asr_server.recognizer import (
     Event,
     Recognizer,
     RecognizerEngine,
     SessionConfig,
     SessionConfigError,
+    WordTiming,
 )
 from asr_server.ws_server import (
     DEFAULT_PORT,
     AsrSession,
+    ReceivedAudioTimeline,
     ServerConfig,
     _read_rss_mb,
     serve_asr,
@@ -660,6 +662,231 @@ async def test_no_drops_when_consumer_keeps_up() -> None:
     await session.run()
     assert rec.chunks_seen == 3
     assert session.frames_dropped == 0
+
+
+# --- Row times after dropped audio ------------------------------------------
+
+# 128 ms frames, the size the Virtual Participant sends.
+_FRAME_SAMPLES = 2048
+_FRAME_S = _FRAME_SAMPLES / 16000
+
+
+def _numbered_frame(index: int) -> bytes:
+    """A PCM frame whose first sample carries ``index``, so a fake engine can tell
+    which received frame it is decoding."""
+    return index.to_bytes(2, "little") + b"\x00\x00" * (_FRAME_SAMPLES - 1)
+
+
+class _ClockedRecognizer(Recognizer):
+    """Times each frame by the samples it was fed, as the real engines do.
+
+    Emits a partial and a final (with one word) per frame, timed on its own clock,
+    and labels them with the received frame number read out of the PCM. A frame
+    that was dropped never reaches it, so its clock falls behind the sender's by
+    exactly the dropped audio.
+    """
+
+    def __init__(self) -> None:
+        self.elapsed = 0.0
+        self.indices: list[int] = []
+        self.segment = 0
+
+    def accept_pcm(self, pcm: bytes) -> list[Event]:
+        index = int.from_bytes(pcm[:2], "little")
+        self.indices.append(index)
+        start = self.elapsed
+        self.elapsed += (len(pcm) // 2) / 16000
+        segment = self.segment
+        self.segment += 1
+        return [
+            Event(
+                kind="partial",
+                segment=segment,
+                text=f"frame {index}",
+                start=start,
+                end=self.elapsed,
+            ),
+            Event(
+                kind="final",
+                segment=segment,
+                text=f"frame {index}",
+                start=start,
+                end=self.elapsed,
+                words=[WordTiming(w=str(index), s=start, e=self.elapsed)],
+            ),
+        ]
+
+    def flush(self) -> list[Event]:
+        return []
+
+
+class _StallingConnection(FakeConnection):
+    """Sends numbered frames and stalls the consumer over chosen frame ranges.
+
+    Outside a stall each frame is held back until the queue has drained, so the
+    engine keeps up and nothing is dropped. Inside a stall the consumer is gated
+    shut, so with a one-slot queue and no wait the frames overflow and are dropped.
+    """
+
+    def __init__(self, count: int, stalls: Sequence[range]) -> None:
+        super().__init__([*(_numbered_frame(i) for i in range(count)), '{"type":"eos"}'])
+        self._stalled = {i for stall in stalls for i in stall}
+        self._next = 0
+        self.gate = asyncio.Event()
+        self.gate.set()
+        self.session: AsrSession | None = None
+
+    async def recv(self) -> str | bytes:
+        index = self._next
+        self._next += 1
+        assert self.session is not None
+        queue = self.session._queue
+        if index in self._stalled:
+            self.gate.clear()
+        else:
+            self.gate.set()
+            for _ in range(1000):
+                if queue.empty():
+                    break
+                await asyncio.sleep(0.001)
+        return await super().recv()
+
+
+async def _run_with_stalls(
+    count: int, stalls: Sequence[range]
+) -> tuple[AsrSession, _StallingConnection, _ClockedRecognizer]:
+    rec = _ClockedRecognizer()
+    conn = _StallingConnection(count, stalls)
+    session = AsrSession(
+        conn,
+        engine=ScriptedEngine(rec),
+        server_config=ServerConfig(max_queue_size=1, max_wait_ms=0),
+    )
+    conn.session = session
+    original_get = session._queue.get
+
+    async def _gated_get() -> bytes | None:
+        await conn.gate.wait()
+        return await original_get()
+
+    session._queue.get = _gated_get  # type: ignore[method-assign]
+    await asyncio.wait_for(session.run(), timeout=10)
+    return session, conn, rec
+
+
+def _assert_rows_on_received_timeline(conn: FakeConnection, rec: _ClockedRecognizer) -> None:
+    """Every row's times equal its frame's position in the audio received."""
+    rows = [m for m in conn.messages() if m["type"] in ("partial", "final")]
+    assert len(rows) == 2 * len(rec.indices)
+    for row in rows:
+        index = int(row["text"].split()[1])
+        assert row["start"] == pytest.approx(index * _FRAME_S)
+        assert row["end"] == pytest.approx((index + 1) * _FRAME_S)
+        for word in row.get("words", []):
+            assert word["s"] == pytest.approx(index * _FRAME_S)
+            assert word["e"] == pytest.approx((index + 1) * _FRAME_S)
+
+
+async def test_rows_after_dropped_audio_carry_received_audio_times() -> None:
+    """Frames dropped mid-stream do not pull later rows earlier.
+
+    The engine never sees the dropped frames, so on its own clock every later frame
+    sits early by the dropped audio. The rows on the wire must instead carry the
+    position of their audio in what the client sent.
+    """
+    session, conn, rec = await _run_with_stalls(20, [range(6, 12)])
+
+    dropped = [i for i in range(20) if i not in rec.indices]
+    assert dropped, "the stall must drop frames for this test to mean anything"
+    assert session.frames_dropped == len(dropped)
+    assert min(dropped) > 0 and max(dropped) < 19  # mid-stream, rows on both sides
+    _assert_rows_on_received_timeline(conn, rec)
+    term = conn.messages()[-1]
+    assert term["type"] == "termination"
+    assert term["dropped_seconds"] == pytest.approx(len(dropped) * _FRAME_S)
+    assert term["audio_seconds"] == pytest.approx(len(rec.indices) * _FRAME_S)
+
+
+async def test_multiple_drops_accumulate() -> None:
+    """Two separate stalls shift rows after the second by both drops together."""
+    session, conn, rec = await _run_with_stalls(30, [range(5, 10), range(18, 23)])
+
+    first = [i for i in range(14) if i not in rec.indices]
+    second = [i for i in range(14, 30) if i not in rec.indices]
+    assert first and second, "each stall must drop at least one frame"
+    _assert_rows_on_received_timeline(conn, rec)
+    # Rows after the second stall sit later than the engine's own clock by both.
+    last = next(m for m in reversed(conn.messages()) if m["type"] == "final")
+    engine_start = (len(rec.indices) - 1) * _FRAME_S
+    assert last["start"] - engine_start == pytest.approx((len(first) + len(second)) * _FRAME_S)
+    assert session.dropped_seconds == pytest.approx((len(first) + len(second)) * _FRAME_S)
+
+
+async def test_rows_keep_engine_times_when_nothing_is_dropped() -> None:
+    """With no drops the rows carry exactly the engine's times."""
+    session, conn, rec = await _run_with_stalls(12, [])
+
+    assert rec.indices == list(range(12))
+    assert session.frames_dropped == 0
+    _assert_rows_on_received_timeline(conn, rec)
+    assert conn.messages()[-1]["dropped_seconds"] == 0.0
+
+
+async def test_dropped_audio_is_logged_with_cumulative_total(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Each drop is logged at INFO with its length and the running total."""
+    with caplog.at_level(logging.INFO, logger="asr_server.ws_server"):
+        session, _conn, _rec = await _run_with_stalls(20, [range(6, 12)])
+    lines = [
+        record.getMessage()
+        for record in caplog.records
+        if "cumulative dropped" in record.getMessage()
+    ]
+    assert len(lines) == session.frames_dropped
+    assert f"cumulative dropped {session.dropped_seconds:.3f}s" in lines[-1]
+
+
+def test_timeline_boundary_start_shifts_end_does_not() -> None:
+    """At the drop point a start belongs after the gap and an end before it."""
+    timeline = ReceivedAudioTimeline()
+    timeline.record_drop(10.0, 1.5)
+    assert timeline.start(9.0) == 9.0 and timeline.end(9.0) == 9.0
+    assert timeline.start(10.0) == 11.5
+    assert timeline.end(10.0) == 10.0
+    assert timeline.start(12.0) == 13.5 and timeline.end(12.0) == 13.5
+
+
+def test_timeline_merges_a_burst_and_accumulates_later_drops() -> None:
+    """Consecutive drops at one point add up; a later drop adds on top."""
+    timeline = ReceivedAudioTimeline()
+    for _ in range(13):
+        timeline.record_drop(1270.0, 0.128)
+    assert timeline.dropped_seconds == pytest.approx(1.664)
+    assert timeline.start(1300.0) == pytest.approx(1301.664)
+    timeline.record_drop(2000.0, 0.5)
+    assert timeline.start(1999.0) == pytest.approx(2000.664)
+    assert timeline.start(2001.0) == pytest.approx(2003.164)
+    assert timeline.start(5.0) == 5.0
+
+
+def test_timeline_keeps_a_row_spanning_the_drop_well_formed() -> None:
+    """A row that straddles the drop keeps its start and ends after the gap."""
+    timeline = ReceivedAudioTimeline()
+    timeline.record_drop(10.0, 2.0)
+    row = Final(
+        segment=0,
+        text="across the gap",
+        start=9.0,
+        end=11.0,
+        words=[Word(w="across", s=9.0, e=10.0), Word(w="gap", s=10.0, e=11.0)],
+    )
+    moved = timeline.apply(row)
+    assert (moved.start, moved.end) == (9.0, 13.0)
+    assert [(w.s, w.e) for w in moved.words] == [(9.0, 10.0), (12.0, 13.0)]
+    # A zero-length word at the drop point does not end before it starts.
+    blip = timeline.apply(Final(segment=1, text="x", start=10.0, end=10.0))
+    assert blip.end >= blip.start
 
 
 # --- Event-loop responsiveness under slow inference (R6.1 keepalive) --------
