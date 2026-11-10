@@ -168,7 +168,9 @@ rather than generated empty.
 
 On the meeting page the section is shown under the agenda on the **Summary**
 tab rather than in the summary; the summary's downloads and copies still
-include it.
+include it. A summary edited by hand keeps showing it there for as long as the
+edited text has its **AGENDA COVERAGE** heading (as a bold line or a Markdown
+heading), which the editor starts with.
 
 The section is one of the shipped summary prompts, so deployments that have not
 removed it get it, after an upgrade too. Its prompt names the agenda with the

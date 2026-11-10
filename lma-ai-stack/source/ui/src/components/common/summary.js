@@ -60,24 +60,6 @@ const sectionName = (name) =>
     .toUpperCase();
 
 /**
- * One section of a summary produced from several prompt templates (stored as a
- * JSON object keyed by template name), or null: absent, or a summary written by
- * hand, which is a single Markdown document.
- */
-export const getSummarySection = (callSummaryText, name) => {
-  if (!callSummaryText) return null;
-  let sections;
-  try {
-    sections = JSON.parse(callSummaryText);
-  } catch (e) {
-    return null;
-  }
-  if (!sections || typeof sections !== 'object') return null;
-  const key = Object.keys(sections).find((k) => sectionName(k) === sectionName(name));
-  return key === undefined ? null : String(sections[key] ?? '');
-};
-
-/**
  * The summary as Markdown, as getMarkdownSummary renders it, without the
  * sections named in `omit` -- for the meeting page, which shows some sections
  * in their own place (the chapters as a list, the agenda coverage beside the
@@ -131,6 +113,30 @@ const markdownSections = (text) => {
   const [preamble, ...headed] = sections.map(({ title, lines }) => ({ title, markdown: lines.join('\n').trim() }));
   // Text before the first heading, or a document with no heading at all, is a section called Summary.
   return preamble.markdown || !headed.length ? [{ ...preamble, title: 'Summary' }, ...headed] : headed;
+};
+
+/**
+ * One section of a summary by name (compared as section names are: case and
+ * spacing aside), or null when the summary has no such section. A summary
+ * produced from several prompt templates is stored as a JSON object keyed by
+ * template name; one written or edited by hand is a single Markdown document,
+ * read at its headings as summarySections reads it -- so a section the editor
+ * was seeded with (`**AGENDA COVERAGE**`) is still found after a hand edit.
+ */
+export const getSummarySection = (callSummaryText, name) => {
+  if (!callSummaryText || typeof callSummaryText !== 'string') return null;
+  let sections;
+  try {
+    sections = JSON.parse(callSummaryText);
+  } catch (e) {
+    sections = null;
+  }
+  if (!sections || typeof sections !== 'object' || Array.isArray(sections)) {
+    const found = markdownSections(callSummaryText).find((section) => sectionName(section.title) === sectionName(name));
+    return found ? found.markdown : null;
+  }
+  const key = Object.keys(sections).find((k) => sectionName(k) === sectionName(name));
+  return key === undefined ? null : String(sections[key] ?? '');
 };
 
 /**

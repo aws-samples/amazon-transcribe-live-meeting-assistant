@@ -125,6 +125,22 @@ describe('the sections the meeting page shows in their own place', () => {
     expect(getSummarySection('A hand-written summary.', 'CHAPTERS')).toBeNull();
   });
 
+  it('reads a section of a summary edited by hand, as the editor seeded it', () => {
+    // What Save stores after an edit: the generated summary as Markdown.
+    const edited = getMarkdownSummary(FULL).replace('We met.', 'We met and agreed the budget.');
+    expect(getSummarySection(edited, 'AGENDA COVERAGE')).toBe('- **Budget**: Covered');
+    expect(getSummarySection(edited, 'Summary')).toBe('We met and agreed the budget.');
+    expect(getSummarySection('## Agenda coverage\n- Hiring: Not covered\n\n## Notes\nOk', 'AGENDA COVERAGE')).toBe(
+      '- Hiring: Not covered',
+    );
+    expect(getSummarySection(edited, 'ACTIONS')).toBeNull();
+    // The page shows it beside the agenda, so the summary leaves it out.
+    expect(summarySections(edited, ['AGENDA COVERAGE']).map((section) => section.title)).toEqual([
+      'SUMMARY',
+      'CHAPTERS',
+    ]);
+  });
+
   it('renders the summary without the sections named', () => {
     const shown = getMarkdownSummaryWithout(FULL, ['CHAPTERS', 'AGENDA COVERAGE']);
     expect(shown).toBe('**SUMMARY**\n\nWe met.\n\n');

@@ -27,7 +27,7 @@ import {
 import useSettingsContext from '../../contexts/settings';
 import { CallsContext } from '../../contexts/calls';
 import useCallsGraphQlApi from '../../hooks/use-calls-graphql-api';
-import mapCallsAttributes from '../common/map-call-attributes';
+import mapCallsAttributes, { adoptMeetingCopy, agendaChanged } from '../common/map-call-attributes';
 import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 import { CallPanel } from '../call-panel/CallPanel';
 
@@ -304,8 +304,10 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
       call.recordingStatusLabel !== callDetails?.recordingStatusLabel &&
       // ...unless this copy is older than the one on screen.
       !(callDetails?.updatedAt && call.updatedAt && callDetails.updatedAt < call.updatedAt);
-    if (timestampAdvanced || speakerNamesChanged || summaryChanged || statusChanged) {
-      setCall(callDetails);
+    const changed = timestampAdvanced || speakerNamesChanged || summaryChanged || statusChanged;
+    if (changed || agendaChanged(call, callDetails)) {
+      // Keeping the fields only getCall reads, as CallDetails.js does.
+      setCall(adoptMeetingCopy(call, callDetails));
       if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
         setLiveTranscriptCallId(effectiveCallId);
       }
