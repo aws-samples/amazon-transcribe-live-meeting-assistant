@@ -1,0 +1,35 @@
+## Appends one language code to the meeting's DetectedLanguages list, keeping
+## the order in which the languages were first heard. The condition makes the
+## write a no-op for a language the list already holds (and for a meeting with
+## no record): it fails as "item put condition failure", which the call event
+## processor treats as done. UpdatedAt is left alone so that this write never
+## reorders the meeting's other updates, which are conditional on it.
+#set( $PK = "c#${ctx.args.input.CallId}" )
+{
+  "version" : "2018-05-29",
+  "operation" : "UpdateItem",
+  "key": {
+    "PK": $util.dynamodb.toDynamoDBJson($PK),
+    "SK": $util.dynamodb.toDynamoDBJson($PK),
+  },
+  "update" : {
+    "expression": "SET #DetectedLanguages = list_append(if_not_exists(#DetectedLanguages, :empty), :languages)",
+    "expressionNames": {
+      "#DetectedLanguages": "DetectedLanguages"
+    },
+    "expressionValues": {
+      ":empty": $util.dynamodb.toDynamoDBJson([]),
+      ":languages": $util.dynamodb.toDynamoDBJson([$ctx.args.input.LanguageCode])
+    }
+  },
+  "condition": {
+    "expression": "attribute_exists(#PK) AND (attribute_not_exists(#DetectedLanguages) OR NOT contains(#DetectedLanguages, :language))",
+    "expressionNames": {
+      "#PK": "PK",
+      "#DetectedLanguages": "DetectedLanguages"
+    },
+    "expressionValues": {
+      ":language": $util.dynamodb.toDynamoDBJson($ctx.args.input.LanguageCode)
+    }
+  }
+}

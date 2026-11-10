@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """
@@ -124,6 +124,8 @@ def execute(
     if filters:
         retrieval_config["vectorSearchConfiguration"]["filter"] = {"andAll": filters}
 
+    # In the function for the reason given in _configured_model_id's docstring.
+    # pylint: disable-next=import-error,import-outside-toplevel
     from lma_config import knowledge_base_prompt_templates
 
     # Query Bedrock Knowledge Base

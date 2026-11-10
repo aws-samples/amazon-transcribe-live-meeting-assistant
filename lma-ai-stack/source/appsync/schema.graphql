@@ -13,6 +13,8 @@ input AddTranscriptSegmentInput {
 	Sentiment: Sentiment
 	SentimentScore: SentimentScoreInput
 	SentimentWeighted: Float
+	# See TranscriptSegment.LanguageCode.
+	LanguageCode: String
 	Owner: String
 	SharedWith: String
 }
@@ -119,6 +121,12 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# Which channels speaker separation (diarization) was asked for: BOTH,
 	# REMOTE (the meeting audio), LOCAL (the microphone) or NONE.
 	SpeakerSeparation: String
+	# The languages the speech engine identified in the meeting, as language
+	# codes (e.g. en-US, es-US), in the order each was first heard. Added to by
+	# addCallDetectedLanguage when a segment arrives in a language the meeting
+	# does not list yet. Absent when no segment named a language: a fixed
+	# language setting, or the ASR MicroVM engine.
+	DetectedLanguages: [String]
 	Owner: String
 	SharedWith: String
 }
@@ -281,6 +289,11 @@ type Mutation @aws_iam {
 	# when the engine that transcribes it is not the one its START named, as
 	# when the MicroVM could not start and Amazon Transcribe took over.
 	updateCaptureContext(input: UpdateCaptureContextInput!): Call
+	# Appends one language to Call.DetectedLanguages when the meeting does not
+	# list it yet; written by the call event processor for the first segment it
+	# sees in that language. A language already listed fails the write's
+	# condition, which the processor treats as done.
+	addCallDetectedLanguage(input: AddCallDetectedLanguageInput!): Call
 	updateAgent(input: UpdateAgentInput!): Call
 	updateSpeakerIdentities(input: UpdateSpeakerIdentitiesInput!): Call @aws_cognito_user_pools @aws_iam
 	resolveSpeakerNames(input: ResolveSpeakerNamesInput!): ResolveSpeakerNamesOutput @aws_cognito_user_pools @aws_iam
@@ -777,7 +790,7 @@ type Subscription {
 	onCreateCall: CreateCallOutput
 		@aws_subscribe(mutations: ["createCall"])
 	onUpdateCall(CallId: ID): Call
-		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updateAgent", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "addCallSummaryText"])
+		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updateAgent", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "addCallSummaryText", "addCallDetectedLanguage"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
 	onAddVideoKeyframe(CallId: ID): VideoKeyframe
@@ -822,6 +835,10 @@ type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
 	Sentiment: Sentiment
 	SentimentScore: SentimentScore
 	SentimentWeighted: Float
+	# The language the speech engine identified for the segment, as a language
+	# code (e.g. es-US). Set by Amazon Transcribe with language identification on;
+	# absent with a fixed language and on the ASR MicroVM engine.
+	LanguageCode: String
 	Owner: String
 	SharedWith: String
 }
@@ -988,6 +1005,11 @@ input UpdateVideoRecordingUrlInput {
 	UpdatedAt: AWSDateTime
 	Owner: String
 	SharedWith: String
+}
+
+input AddCallDetectedLanguageInput {
+	CallId: ID!
+	LanguageCode: String!
 }
 
 # A field left out (or null) keeps its stored value.
@@ -1932,16 +1954,19 @@ type CallCostLineItem @aws_cognito_user_pools @aws_iam {
 	ShippedUnitPrice: Float
 }
 
-# A JSON string: {"Default", "Custom", "Effective", "Version", "UpdatedBy",
-# "UpdatedAt", "Region"}. Default is the table this release ships, Custom the
-# Admin's changes over it, Effective the merge every estimate uses.
+# A JSON string: {"Default", "Custom", "Effective", "Version", "Profile",
+# "UpdatedBy", "UpdatedAt", "Region"}. Default is the table this release ships,
+# Custom what the active profile stores for the section (empty while the
+# default is active), Effective the merge every estimate uses, Profile the name
+# of the profile in force ("default" when none is).
 type CallPricing @aws_cognito_user_pools {
 	Pricing: String
 }
 
 input UpdateCallPricingInput {
-	# A JSON object holding the changes over the shipped table -- the same shape,
-	# naming only what differs. "{}" returns every price to the shipped value.
+	# A JSON object in the shape of the shipped table, stored as the active
+	# profile's call_pricing section; whatever it leaves out takes the shipped
+	# value, so "{}" returns every price to the shipped value.
 	Pricing: String!
 	# The Version getCallPricing returned; a save against a newer record is refused.
 	ExpectedVersion: Int!

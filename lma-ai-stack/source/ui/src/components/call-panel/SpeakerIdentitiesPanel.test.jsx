@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -399,7 +399,7 @@ describe('what the resolver answered, and when automatic passes stop', () => {
     await waitFor(() =>
       expect(screen.getByText(/Every voice already has a name from the meeting platform/)).toBeTruthy(),
     );
-    expect(screen.getByText(/One person \/ Several people/)).toBeTruthy();
+    expect(screen.getByText(/one-person \/ several-people icon/)).toBeTruthy();
     expect(screen.queryByText(/Nothing in the transcript names them yet/)).toBeNull();
   });
 
@@ -555,19 +555,14 @@ describe("a platform name's voices, shown as one person or several", () => {
   const withMap = (map) => ({ ...ITEM, speakerIdentities: JSON.stringify(map) });
   const groupOf = (base) => screen.getByRole('group', { name: `Voices of ${base}` });
 
-  it("lists a name's voices together under its One person / Several people menu, as Voice N", () => {
+  it("lists a name's voices together under its one-person / several-people toggle, as Voice N", () => {
     renderPanel({ segments: VOICES });
     const jeremy = groupOf('Jeremy Feldman');
     expect(within(jeremy).getByText('Voice 1')).toBeTruthy();
     expect(within(jeremy).getByText('Voice 2')).toBeTruthy();
-    expect(
-      within(jeremy).getByRole('button', { name: 'How the voices under Jeremy Feldman are shown: One person' }),
-    ).toBeTruthy();
-    expect(
-      within(groupOf('ConfRm_1')).getByRole('button', {
-        name: 'How the voices under ConfRm_1 are shown: Several people',
-      }),
-    ).toBeTruthy();
+    const toggleOf = (base) => within(groupOf(base)).getByRole('button', { name: `Show ${base} as several people` });
+    expect(toggleOf('Jeremy Feldman').getAttribute('aria-pressed')).toBe('false');
+    expect(toggleOf('ConfRm_1').getAttribute('aria-pressed')).toBe('true');
   });
 
   it('shows each voice of a name shown as several people by the label its lines carry', () => {
@@ -581,9 +576,8 @@ describe("a platform name's voices, shown as one person or several", () => {
   it('stores the mode chosen in the panel', async () => {
     renderPanel({ segments: VOICES });
     fireEvent.click(
-      within(groupOf('Jeremy Feldman')).getByRole('button', { name: /^How the voices under Jeremy Feldman/ }),
+      within(groupOf('Jeremy Feldman')).getByRole('button', { name: 'Show Jeremy Feldman as several people' }),
     );
-    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Several people' }));
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(savedMap().speakerModes['REMOTE#Jeremy Feldman']).toMatchObject({ mode: 'several', source: 'manual' });
   });
@@ -627,9 +621,9 @@ describe("a platform name's voices, shown as one person or several", () => {
     expect(row.contains(document.activeElement)).toBe(true);
   });
 
-  it('offers the menu disabled to a reader who may not name speakers', () => {
+  it('offers the toggle disabled to a reader who may not name speakers', () => {
     renderPanel({ segments: VOICES, readOnly: true });
-    expect(within(groupOf('ConfRm_1')).getByRole('button', { name: /^How the voices under ConfRm_1/ }).disabled).toBe(
+    expect(within(groupOf('ConfRm_1')).getByRole('button', { name: 'Show ConfRm_1 as several people' }).disabled).toBe(
       true,
     );
   });

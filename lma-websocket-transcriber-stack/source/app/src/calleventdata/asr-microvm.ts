@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -21,9 +21,11 @@ import WebSocket from 'ws';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 
 import { AsrRuntimeConfig } from './asr-config';
-import { CallMetaData, SocketCallData } from './eventtypes';
+import { CHANNEL_SYSTEM, CallMetaData, SocketCallData } from './eventtypes';
+import { pageSpeakersFor } from './speaker-fusion';
 import { TranscriptSegmentRecord, diarizationSettingsFor, writeSegmentToKds } from './transcribe';
-import { getSessionSettings } from './session-settings';
+import { TranscriptionSettings, getSessionSettings } from './session-settings';
+import { parseBundleLanguages, transcribeOnlyOptions } from '../config/configuration-store';
 import { diarizationEnabledFor } from './diarization';
 // Type-only in the other direction, so this is not a runtime cycle.
 import { fetchEnrolledVoices } from './voice-enrollment';
@@ -260,11 +262,21 @@ export const resolveMaxSpeakers = (
  *
  * The engine is the deployment's choice (the Configuration page's Transcription Engine section) and diarization the client's;
  * a client may still name an engine (--asr-engine). Unservable requests fall back.
+ *
+ * A meeting whose Amazon Transcribe options use one the ASR MicroVM engine does
+ * not offer (content redaction, a custom vocabulary or language model, language
+ * identification, a language the deployed bundle does not transcribe) stays on Amazon Transcribe, so the
+ * option is applied rather than dropped. The bundle's languages are ASR_MODEL_LANGUAGES, the ASR stack's
+ * AsrModelLanguages output; without it only English is taken. That holds for a client that named the MicroVM engine too: those
+ * options are the deployment's, set by an administrator, and a client's engine
+ * request does not override them.
  */
 export const resolveAsrEngine = (
     callMetaData: CallMetaData,
     server?: FastifyInstance,
-    runtime?: AsrRuntimeConfig
+    runtime?: AsrRuntimeConfig,
+    transcription?: TranscriptionSettings,
+    bundleLanguages: readonly string[] = parseBundleLanguages(process.env['ASR_MODEL_LANGUAGES'])
 ): AsrEngineName => {
     const deploymentDefault = runtime
         ? (runtime.streamingEngineMicrovm ? 'microvm' : 'transcribe')
@@ -273,9 +285,29 @@ export const resolveAsrEngine = (
     if (requested !== 'microvm') {
         return 'transcribe';
     }
+    // Info for a meeting that took the deployment's default; a client that
+    // named the engine itself is told louder.
+    const report = (message: string): void => {
+        if (callMetaData.asrEngine) {
+            server?.log.warn(message);
+        } else {
+            server?.log.info(message);
+        }
+    };
     if (!isMicrovmAsrConfigured()) {
-        server?.log.warn(
+        // The shipped default selects the MicroVM engine, so on a deployment
+        // without it (EnableMicrovmAsr=false, or a Region without Lambda
+        // MicroVMs) every meeting arrives here: that is the expected fallback.
+        report(
             `[ASR]: [${callMetaData.callId}] - MicroVM ASR was requested but this deployment has no ASR launcher configured; using Amazon Transcribe.`
+        );
+        return 'transcribe';
+    }
+    const transcribeOnly = transcription ? transcribeOnlyOptions(transcription, bundleLanguages) : [];
+    if (transcribeOnly.length > 0) {
+        report(
+            `[ASR]: [${callMetaData.callId}] - MicroVM ASR was requested, but this meeting's Amazon Transcribe options use ` +
+                `${transcribeOnly.join(', ')}, which the MicroVM engine does not offer; using Amazon Transcribe.`
         );
         return 'transcribe';
     }
@@ -807,11 +839,21 @@ export class AsrChannelSession {
         // SegmentId deliberately excludes the speaker: a partial's provisional
         // speaker can be corrected by its final, and both must land on one row.
         const segmentId = `${this.channelId}-${this.runTag}-g${this.generation}-s${message.segment ?? 0}`;
-        const speaker = this.registry.nameFor(
-            this.channelId,
-            message.speaker,
-            this.channelName()
-        );
+        // The meeting audio is named after who the page showed during the row,
+        // or the attendee its voice has been proven to (speaker-fusion.ts); the
+        // microphone is the user's own, and the page says nothing about it.
+        const speaker =
+            this.channelId === CHANNEL_SYSTEM
+                ? pageSpeakersFor(this.socketData.callMetadata).nameRow({
+                    session: `${this.runTag}-g${this.generation}`,
+                    label: message.speaker,
+                    startTime: start,
+                    endTime: end,
+                    isPartial,
+                    fallbackName: this.channelName(),
+                    rowId: segmentId,
+                }).speaker
+                : this.registry.nameFor(this.channelId, message.speaker, this.channelName());
 
         this.writes = this.writes
             .then(async () => {

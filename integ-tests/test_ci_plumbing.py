@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Unit tests for the scheduled pipeline's own machinery. No AWS, no stack.
 
@@ -1271,3 +1271,84 @@ def test_an_override_on_a_deployment_running_on_its_default_uses_a_temporary_pro
     override.apply(mode="opt_in")
     override.restore()
     assert calls[-2:] == [("activate", "default"), ("delete", "integ-tests")]
+
+
+def _profiles_store(active: str, profiles: dict) -> tuple:
+    """A fake store holding named profiles, recording activations and deletions.
+
+    ``profiles`` maps a name to its metadata; a profile the override creates is
+    added with the origin create_profile gives a copy.
+    """
+    from types import SimpleNamespace
+
+    store = _FakeConfigurationStore({}, active=active)
+    stored = {name: dict(metadata) for name, metadata in profiles.items()}
+    calls: list = []
+
+    def read_profile(name, consistent_read=False):
+        exists = name in stored
+        return SimpleNamespace(
+            exists=exists, body={}, version=1 if exists else 0, metadata=stored.get(name, {})
+        )
+
+    def create_profile(name, *, copy_from=None, **_):
+        calls.append(("create", name))
+        stored[name] = {"ProfileOrigin": f"copied-from-{copy_from or 'default'}"}
+
+    def activate_profile(name):
+        calls.append(("activate", name))
+        store.active = name
+
+    def delete_profile(name):
+        calls.append(("delete", name))
+        stored.pop(name, None)
+
+    store.read_profile = read_profile
+    store.create_profile = create_profile
+    store.activate_profile = activate_profile
+    store.delete_profile = delete_profile
+    return store, calls
+
+
+@pytest.mark.parametrize(
+    ("origin", "reactivated"),
+    [
+        ("copied-from-standard", "standard"),
+        ("copied-from-default", "default"),
+        # A profile it cannot trace back is replaced by the deployment's baseline.
+        (None, "default"),
+        ("copied-from-gone", "default"),
+    ],
+)
+def test_a_temporary_profile_an_interrupted_run_left_active_is_put_back_first(
+    origin, reactivated
+) -> None:
+    """The next run reactivates what it replaced, then works in a fresh copy of that."""
+    import meeting_consent_probe
+
+    left_over = {"ProfileOrigin": origin} if origin else {}
+    store, calls = _profiles_store(
+        "integ-tests",
+        {"integ-tests": left_over, "standard": {"Managed": True}, "default": {"Managed": True}},
+    )
+    override = meeting_consent_probe.ConsentSettingsOverride(store=store, section="retention")
+    override.save()
+    assert calls == [
+        ("activate", reactivated),
+        ("delete", "integ-tests"),
+        ("create", "integ-tests"),
+        ("activate", "integ-tests"),
+    ]
+    override.apply(transcriptDeletionAfterSummary="immediately")
+    override.restore()
+    assert calls[-2:] == [("activate", reactivated), ("delete", "integ-tests")]
+    assert store.active == reactivated
+
+
+def test_an_operators_custom_profile_is_edited_in_place_not_replaced() -> None:
+    """Only the override's own profile name is taken for a left-over one."""
+    store, calls = _profiles_store("custom", {"custom": {"ProfileOrigin": "copied-from-default"}})
+    override = _override(store)
+    override.save()
+    assert calls == []
+    assert override.profile == "custom"

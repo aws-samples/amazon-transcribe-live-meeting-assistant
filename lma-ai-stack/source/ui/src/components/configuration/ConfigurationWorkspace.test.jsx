@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -258,7 +258,7 @@ describe('the editor', () => {
     profilesMock.mockResolvedValue(PROFILES);
   });
 
-  it('renders one section per schema, with engine choices only where the on-demand engine is deployed', async () => {
+  it('renders one section per schema, with engine choices only where the ASR MicroVM engine is deployed', async () => {
     graphqlMock.mockResolvedValue(answer());
     const { unmount } = renderEditor();
     await screen.findByText('Transcript Summary');
@@ -273,7 +273,7 @@ describe('the editor', () => {
     expect(within(transcribeOnly).queryByText('Virtual Participants')).toBeNull();
     expect(within(transcribeOnly).queryByText('Stream Audio, Chrome extension and Desktop Capture')).toBeNull();
     expect(within(transcribeOnly).getByText('Every meeting is transcribed by Amazon Transcribe')).toBeTruthy();
-    expect(within(transcribeOnly).queryByText(/Experimental/)).toBeNull();
+    expect(within(transcribeOnly).queryByText('The ASR MicroVM engine is the default')).toBeNull();
     unmount();
 
     renderEditor({ settings: { AsrEngineAvailable: 'true' } });
@@ -282,7 +282,7 @@ describe('the editor', () => {
     expect(within(withEngine).getByText('Virtual Participants')).toBeTruthy();
     expect(within(withEngine).getByText('Stream Audio, Chrome extension and Desktop Capture')).toBeTruthy();
     expect(within(withEngine).getByText('Virtual Participant voice separation')).toBeTruthy();
-    expect(within(withEngine).getByText(/Experimental/)).toBeTruthy();
+    expect(within(withEngine).getByText('The ASR MicroVM engine is the default')).toBeTruthy();
     expect(within(withEngine).queryByText('Every meeting is transcribed by Amazon Transcribe')).toBeNull();
   });
 

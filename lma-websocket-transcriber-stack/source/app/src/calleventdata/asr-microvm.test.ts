@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -31,6 +31,7 @@ import {
     stopMicrovmAsr,
 } from './asr-microvm';
 import { SpeakerNameRegistry } from './asr-audio';
+import { pageSpeakersFor } from './speaker-fusion';
 import { TranscriptSegmentRecord } from './transcribe';
 import { CallMetaData, SocketCallData } from './eventtypes';
 
@@ -522,4 +523,45 @@ test('a call that ends during MicroVM acquisition releases the acquired MicroVM'
     } finally {
         LambdaClient.prototype.send = originalSend;
     }
+});
+
+test('meeting-audio rows are named from the page speakers the client reported, and by a proven voice', async () => {
+    // Ana speaks for 30 s as spk_0, Sam for 25 s as spk_1, then Ana replies
+    // for 1.5 s while the page still shows Sam, as Zoom's speaker view does.
+    const finals = [
+        ...[0, 6, 12, 18, 24].map((t) => ({ start: t, end: t + 5, speaker: 'spk_0' })),
+        { start: 30, end: 55, speaker: 'spk_1' },
+        { start: 55.3, end: 56.8, speaker: 'spk_0' },
+    ];
+    const asr = await startFakeAsr((socket) => {
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (isBinary || (JSON.parse(data.toString()) as { type: string }).type !== 'config') {
+                return;
+            }
+            send(socket, ready(true));
+            finals.forEach((row, segment) => send(socket, { type: 'final', segment, text: 'words', ...row }));
+        });
+    });
+
+    // The client's active speaker is whoever the page shows NOW; the rows are
+    // written after it has moved on.
+    const socketData = makeSocketData({ activeSpeaker: 'Sam Lee' });
+    const page = pageSpeakersFor(socketData.callMetadata);
+    page.record(0, 'Ana Ruiz');
+    page.record(30, 'Sam Lee');
+    const rows: TranscriptSegmentRecord[] = [];
+    const session = newSession(asr, rows, 'ch_0', socketData);
+    await session.start();
+    await waitFor(() => rows.length === finals.length);
+    await session.finish();
+    await asr.close();
+
+    assert.deepEqual(
+        rows.map((row) => row.Speaker),
+        [
+            ...Array(5).fill('Ana Ruiz (spk_0)'),
+            'Sam Lee (spk_1)',
+            'Ana Ruiz (spk_0)',
+        ]
+    );
 });

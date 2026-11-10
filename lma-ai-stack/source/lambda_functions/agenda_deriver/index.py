@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Derive a meeting's agenda from its transcript, when one was stated.
 
@@ -82,6 +82,7 @@ _CALL_FIELDS = """
       AgentId
       CallSummaryText
       CallSummaryState
+      DetectedLanguages
       SpeakerIdentities
       Agenda
       AgendaSource

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -131,6 +131,41 @@ describe('transcriptDownloadMarkdown', () => {
       speakerIdentities: JSON.stringify({ identities: { 'REMOTE#Sarah Lee': { name: 'Sarah L.' } } }),
     };
     expect(transcriptDownloadMarkdown(TRANSCRIPT, named)).toContain('**Sarah L.** [00:01.0]: Welcome.');
+  });
+});
+
+describe('the detected languages in the Markdown facts', () => {
+  const spoken = (id, text, startTime, languageCode) => ({
+    segmentId: id,
+    channel: 'REMOTE',
+    speaker: 'Ana',
+    transcript: text,
+    startTime,
+    endTime: startTime + 1,
+    isPartial: false,
+    ...(languageCode ? { languageCode } : {}),
+  });
+  const lines = (...segments) => ({ [CALL_ID]: { REMOTE: { segments } } });
+
+  it('are left out of a meeting in one language, which downloads as before', () => {
+    const oneLanguage = { ...MEETING, detectedLanguages: ['es-US'] };
+    const transcript = lines(spoken('s1', 'Hola.', 1, 'es-US'), spoken('s2', 'Adiós.', 5, 'es-US'));
+    expect(summaryDownloadMarkdown(oneLanguage)).toBe(summaryDownloadMarkdown(MEETING));
+    expect(transcriptDownloadMarkdown(transcript, oneLanguage)).toBe(transcriptDownloadMarkdown(transcript, MEETING));
+    expect(transcriptDownloadMarkdown(transcript, oneLanguage)).not.toContain('Detected languages');
+  });
+
+  it('are listed for a meeting in more than one', () => {
+    const twoLanguages = { ...MEETING, detectedLanguages: ['en-US', 'es-US'] };
+    expect(summaryDownloadMarkdown(twoLanguages)).toContain('- **Detected languages:** English (US), Spanish (US)');
+  });
+
+  it("list the languages the transcript's lines are marked with, including any the record does not list yet", () => {
+    const recordBehind = { ...MEETING, detectedLanguages: ['en-US'] };
+    const transcript = lines(spoken('s1', 'Good morning.', 1, 'en-US'), spoken('s2', 'Hola.', 5, 'es-US'));
+    const md = transcriptDownloadMarkdown(transcript, recordBehind);
+    expect(md).toContain('- **Detected languages:** English (US), Spanish (US)');
+    expect(md).toContain('**Ana** [00:05.0, es-US]: Hola.');
   });
 });
 

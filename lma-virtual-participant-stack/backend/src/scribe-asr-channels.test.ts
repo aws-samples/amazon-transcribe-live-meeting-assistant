@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -57,7 +57,8 @@ test('a dead meeting session hands the rest of the meeting to Amazon Transcribe'
 
 test('meeting rows are attributed by start time and drive wake phrases; assistant rows are the VP and do not', () => {
     const meeting = methodBody('private handleMeetingAsrSegment');
-    assert.match(meeting, /rosterTimeline\.speakerFor\(segment\.startSec, segment\.endSec, rosterLagSeconds\(\)\)/);
+    assert.match(meeting, /const lag = rosterLagSeconds\(\)/);
+    assert.match(meeting, /rosterTimeline\.speakerFor\(segment\.startSec, segment\.endSec, lag\)/);
     assert.match(meeting, /processTranscriptResult\(/);
     const agent = methodBody('private handleAgentAsrSegment');
     assert.match(agent, /channel: LOCAL_CHANNEL/);

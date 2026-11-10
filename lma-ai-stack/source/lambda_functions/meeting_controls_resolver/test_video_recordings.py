@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Deleting a meeting deletes its video recording and any leftover segments.
 
@@ -12,34 +12,58 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
+import pytest
 from test_delete_metering_records import index
 
 STAMP = "2026-10-30T14-05-09-123Z"
 
 
 class FakePaginator:
-    def __init__(self, keys):
-        self.keys = keys
+    def __init__(self, s3):
+        self.s3 = s3
 
     def paginate(self, Bucket, Prefix):  # noqa: N803
         assert Bucket == "bucket"
-        yield {"Contents": [{"Key": k} for k in sorted(self.keys) if k.startswith(Prefix)]}
+        versions, markers = [], []
+        for key in sorted(self.s3.versions):
+            if key.startswith(Prefix):
+                for version in self.s3.versions[key]:
+                    entry = {"Key": key, "VersionId": version}
+                    (markers if version.startswith("dm") else versions).append(entry)
+        yield {"Versions": versions, "DeleteMarkers": markers}
 
 
 class FakeS3:
-    def __init__(self, keys, errors=None):
-        self.keys = set(keys)
+    """A versioned bucket: each key holds its version ids, "dm..." for a delete marker.
+
+    ``deleted`` lists the key of every version deleted, ``deleted_versions``
+    the (key, version id) pairs.
+    """
+
+    def __init__(self, keys, errors=None, versions=None):
+        self.versions = {key: ["v0"] for key in keys}
+        self.versions.update(versions or {})
         self.deleted = []
+        self.deleted_versions = []
         self.errors = errors or []
 
     def get_paginator(self, name):
-        assert name == "list_objects_v2"
-        return FakePaginator(self.keys)
+        assert name == "list_object_versions"
+        return FakePaginator(self)
 
     def delete_objects(self, Bucket, Delete):  # noqa: N803
         assert Bucket == "bucket"
-        self.deleted.extend(o["Key"] for o in Delete["Objects"])
-        return {"Errors": self.errors} if self.errors else {}
+        if self.errors:
+            return {"Errors": self.errors}
+        for entry in Delete["Objects"]:
+            self.deleted.append(entry["Key"])
+            self.deleted_versions.append((entry["Key"], entry["VersionId"]))
+            remaining = self.versions.get(entry["Key"], [])
+            if entry["VersionId"] in remaining:
+                remaining.remove(entry["VersionId"])
+            if not remaining:
+                self.versions.pop(entry["Key"], None)
+        return {}
 
 
 def _url(key, encode=True):
@@ -119,11 +143,12 @@ def test_a_meeting_without_video_deletes_nothing(monkeypatch) -> None:
     assert s3.deleted == []
 
 
-def test_a_recording_s3_did_not_delete_is_logged_and_not_counted(monkeypatch, caplog) -> None:
+def test_a_recording_s3_did_not_delete_is_logged_and_raises(monkeypatch, caplog) -> None:
     key = f"lma-video-recordings/call_m1_{STAMP}.mp4"
     s3 = FakeS3([key], errors=[{"Key": key, "Code": "AccessDenied"}])
     monkeypatch.setattr(index, "s3_client", s3)
-    assert index.delete_video_recordings("m1", _url(key)) == 0
+    with pytest.raises(RuntimeError, match="video recording of m1"):
+        index.delete_video_recordings("m1", _url(key))
     assert "AccessDenied" in caplog.text and key in caplog.text
 
 

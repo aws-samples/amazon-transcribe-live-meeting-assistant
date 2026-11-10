@@ -118,7 +118,11 @@ Notes:
 - Labels are numbers, not names -- Transcribe distinguishes voices but does not
   identify who they belong to. If you need real names for meeting participants,
   use the [Chrome Extension](browser-extension.md) or a
-  [Virtual Participant](virtual-participant.md), which read them from the meeting.
+  [Virtual Participant](virtual-participant.md), which read them from the meeting
+  and, with speaker identification on, use the voices to correct the meeting
+  page's speaker names (see
+  [How meeting speakers are named](browser-extension.md#how-meeting-speakers-are-named)).
+  Stream Audio has no meeting page to read, so its labels are unchanged.
 - There is no additional Amazon Transcribe charge for speaker identification.
 
 ## If the Connection Drops
@@ -156,9 +160,10 @@ Because attribution is per channel, several people sharing one microphone appear
 as a single speaker unless you tick the **Speaker identification** boxes above.
 Your speaker-identification choices are sent once, in the session's opening
 message, and the server enables speaker partitioning for the channels you chose.
-Which engine does the partitioning depends on the deployment: Amazon Transcribe
-by default, or the [on-demand ASR & diarization engine](microvm-asr.md) when that
-is deployed. See [WebSocket Streaming API](websocket-streaming-api.md#speaker-identification-diarization)
+Which engine does the partitioning depends on the deployment: the
+[ASR MicroVM engine](microvm-asr.md) by default where it is deployed, or Amazon
+Transcribe where it is not or where an admin has chosen Amazon Transcribe for these
+meetings. See [WebSocket Streaming API](websocket-streaming-api.md#speaker-identification-diarization)
 for the protocol details.
 
 ## Important Notice

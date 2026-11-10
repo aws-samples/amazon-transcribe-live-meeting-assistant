@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import { TranscriptEvent } from '@aws-sdk/client-transcribe-streaming';
@@ -100,6 +100,12 @@ export type AddTranscriptSegmentEvent = CallEventBase<'ADD_TRANSCRIPT_SEGMENT'> 
     Sentiment?: string,
     TranscriptEvent?: TranscriptEvent,
     Speaker: string,
+    /**
+     * The language Amazon Transcribe identified for the result the segment came
+     * from (e.g. `es-US`), when language identification is on. Absent with a
+     * fixed language and on the MicroVM engine, which reports none.
+     */
+    LanguageCode?: string,
     AccessToken?: string,
     IdToken?: string,
     RefreshToken?: string,

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 /**
@@ -487,7 +487,9 @@ export const speakerDisplayRows = (roster, identities, groups, fallbackName) =>
  * shows, in the order first heard, so the header lists exactly the speakers the
  * transcript's lines carry. Takes speakerDisplayRows' rows; each entry is
  * `{ key, label, keys }`, `key` being the first voice under the name (the row
- * the Speakers panel opens at) and `keys` every voice under it.
+ * the Speakers panel opens at) and `keys` every voice under it. Rows are merged
+ * by the label alone, deliberately: two different voices given the same name
+ * read as one speaker in the transcript, so they are one entry here too.
  */
 export const headerSpeakers = (displayRows) => {
   const byLabel = new Map();

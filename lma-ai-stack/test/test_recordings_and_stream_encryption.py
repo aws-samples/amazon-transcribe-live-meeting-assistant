@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """The recordings bucket and the call data stream use the stack's customer-managed key.
 
@@ -15,7 +15,9 @@ Checked statically (no AWS):
   tasks and the MicroVM), the web UI's Cognito role and the knowledge base
   service role can use the key through Amazon S3 (and Kinesis, for the
   producers);
-- batch Amazon Transcribe jobs name the key for their output.
+- batch Amazon Transcribe jobs name the key for their output;
+- every custom resource whose function role is attached to one of the key
+  policies `DependsOn` that policy.
 
 Run via `make test-ai-stack` or pytest directly.
 """
@@ -298,7 +300,13 @@ def test_only_the_upload_processor_uses_the_key_through_transcribe():
 
 
 def _custom_resource_roles(resources: dict) -> dict[str, str]:
-    """Custom resource name -> the role of the function that serves it."""
+    """Custom resource name -> the role of the function that serves it.
+
+    Only functions that name a role with ``Role: !GetAtt <Role>.Arn`` are
+    resolved. A SAM function with a generated role (the configuration seeder,
+    the backfill trigger) is skipped on purpose: such a role carries its key
+    grant inline, so it has no separate key policy to wait for.
+    """
     found: dict[str, str] = {}
     for name, res in resources.items():
         if not str(res.get("Type", "")).startswith("Custom::"):

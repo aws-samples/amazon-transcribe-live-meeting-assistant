@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Tests for transcript-segment normalisation and the DynamoDB TTL it stamps.
 
@@ -456,3 +456,37 @@ def test_a_record_that_is_not_deleted_with_the_transcript_keeps_the_full_period(
         _RetentionStore({"transcriptDeletionAfterSummary": "immediately"}),
     )
     assert abs(_days_ahead(ep.get_transcription_ttl(limited_by_deletion=False)) - 90) < 0.01
+
+
+# ── the identified language ─────────────────────────────────────────────────
+
+
+def test_custom_producer_keeps_the_identified_language():
+    segment = normalize_one({**CUSTOM_BASE, "LanguageCode": " es-US "})
+    assert segment["LanguageCode"] == "es-US"
+
+
+@pytest.mark.parametrize("value", [None, "", "   ", 3])
+def test_a_segment_with_no_identified_language_carries_no_language_field(value):
+    message = dict(CUSTOM_BASE)
+    if value is not None:
+        message["LanguageCode"] = value
+    assert "LanguageCode" not in normalize_one(message)
+
+
+def test_transcribe_streaming_event_keeps_the_identified_language():
+    segment = normalize_one(
+        {
+            "CallId": "call-1",
+            "TranscriptEvent": {
+                "Channel": "REMOTE",
+                "ResultId": "r1",
+                "StartTime": 0.0,
+                "EndTime": 1.0,
+                "Transcript": "bonjour",
+                "IsPartial": False,
+                "LanguageCode": "fr-FR",
+            },
+        }
+    )
+    assert segment["LanguageCode"] == "fr-FR"

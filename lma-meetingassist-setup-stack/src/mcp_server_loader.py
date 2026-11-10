@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.12
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """
@@ -404,6 +404,8 @@ def streamable_http_transport(server_url: str, headers: Optional[Dict[str, str]]
     """
     headers = headers or {}
     try:
+        # create_mcp_http_client is defined elsewhere in mcp and re-exported by this
+        # module; the installed-mcp test fails if a release drops the re-export.
         from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
     except ImportError:
         from mcp.client.streamable_http import streamablehttp_client

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -26,6 +26,7 @@
  */
 import type { TranscriptSegment } from './kinesis-stream.js';
 import { LOCAL_CHANNEL } from './channels.js';
+import { resultLanguageCode } from './transcribe-language.js';
 
 /** Transcribe's id for the participants' channel (left). */
 export const MEETING_CHANNEL_ID = 'ch_0';
@@ -68,6 +69,12 @@ export function isOwnIdentity(name: string, ownIdentities: string[]): boolean {
     return ownIdentities.some((own) => (own || '').trim() === trimmed);
 }
 
+/** The row's languageCode field: the result's identified language, or nothing. */
+const languageOf = (result: any): { languageCode?: string } => {
+    const languageCode = resultLanguageCode(result);
+    return languageCode ? { languageCode } : {};
+};
+
 /**
  * The LOCAL row for one result on the assistant's channel, or null if it has
  * no text.
@@ -100,6 +107,7 @@ export function assistantSegmentFromResult(
         transcript,
         isPartial: Boolean(result?.IsPartial),
         speaker,
+        ...languageOf(result),
     };
 }
 

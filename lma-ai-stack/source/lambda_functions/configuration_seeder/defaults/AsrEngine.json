@@ -1,5 +1,5 @@
 {
-  "streamingEngineMicrovm": false,
-  "virtualParticipantEngineMicrovm": false,
+  "streamingEngineMicrovm": true,
+  "virtualParticipantEngineMicrovm": true,
   "diarizeVirtualParticipant": false
 }

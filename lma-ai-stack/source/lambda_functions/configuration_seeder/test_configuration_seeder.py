@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.12
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Tests for the deploy-time configuration seeder.
 
@@ -740,11 +740,15 @@ class LegacyAsrConfigTable:
 ASR_TABLES = {"asr_engine": "old-asr-table"}
 
 
-def test_the_shipped_asr_switches_are_all_off(seeder) -> None:
-    """Every meeting is transcribed by Amazon Transcribe until an admin chooses otherwise."""
+def test_the_shipped_asr_switches_choose_the_microvm_engine(seeder) -> None:
+    """Both meeting kinds default to the ASR MicroVM engine; voice separation is off.
+
+    A deployment without the engine still transcribes with Amazon Transcribe: its
+    readers fall back when no launcher is configured.
+    """
     assert seeder.shipped_default_body("default")["asr_engine"] == {
-        "streamingEngineMicrovm": False,
-        "virtualParticipantEngineMicrovm": False,
+        "streamingEngineMicrovm": True,
+        "virtualParticipantEngineMicrovm": True,
         "diarizeVirtualParticipant": False,
     }
 
@@ -760,7 +764,8 @@ def test_an_upgrade_carries_the_asr_switches_across(seeder) -> None:
         legacy_client=LegacyAsrConfigTable(
             {
                 "AsrConfigId": {"S": "CustomAsrConfig"},
-                "streamingEngineMicrovm": {"BOOL": True},
+                # An administrator's saved choice of Amazon Transcribe.
+                "streamingEngineMicrovm": {"BOOL": False},
                 "diarizeVirtualParticipant": {"BOOL": True},
                 # Retired by an earlier release; nothing reads it.
                 "speakerThreshold": {"S": "0.35"},
@@ -771,11 +776,14 @@ def test_an_upgrade_carries_the_asr_switches_across(seeder) -> None:
 
     assert adoption(outcome)["asr_engine"] == "adopted-from-previous-table"
     assert dynamo.body("Config#custom")["asr_engine"] == {
-        "streamingEngineMicrovm": True,
+        "streamingEngineMicrovm": False,
         "diarizeVirtualParticipant": True,
     }
     resolved = store.get_section("asr_engine").values
-    assert resolved["virtualParticipantEngineMicrovm"] is False  # from the baseline
+    # The saved choice wins over the shipped default of the MicroVM engine...
+    assert resolved["streamingEngineMicrovm"] is False
+    # ...and a switch never saved takes the shipped default.
+    assert resolved["virtualParticipantEngineMicrovm"] is True
 
 
 def test_an_asr_table_that_was_never_written_records_an_empty_section(seeder) -> None:

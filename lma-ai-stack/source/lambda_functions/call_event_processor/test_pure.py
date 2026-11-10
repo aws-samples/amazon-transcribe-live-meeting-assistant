@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Tests for the computation extracted out of call_event_processor.
 
@@ -45,7 +45,9 @@ from pure import (  # noqa: E402
     agenda_derivation_due,
     capture_context_fields,
     convert_keys_to_uppercamelcase,
+    forget_language,
     get_sentiment_per_quarter,
+    language_to_record,
     matches_wake_phrase,
     merge_dicts,
     segment_analyses,
@@ -424,3 +426,43 @@ def test_capture_context_keeps_only_the_fields_an_event_sets():
 
 def test_capture_context_of_an_event_without_one_is_empty():
     assert capture_context_fields({"EventType": "START", "CallId": "c1"}) == {}
+
+
+# ── language_to_record: when a segment adds to DetectedLanguages ────────────
+
+
+def test_a_new_language_is_recorded_once_per_meeting():
+    noted: dict = {}
+    assert language_to_record("c1", "es-US", None, noted) == "es-US"
+    assert language_to_record("c1", "es-US", None, noted) is None
+    assert language_to_record("c1", "en-US", None, noted) == "en-US"
+    assert language_to_record("c2", "es-US", None, noted) == "es-US"
+
+
+def test_a_language_the_record_lists_is_not_recorded():
+    assert language_to_record("c1", "es-US", ["en-US", "es-US"], {}) is None
+
+
+@pytest.mark.parametrize("code", [None, "", "  ", 7])
+def test_a_segment_without_a_language_records_none(code):
+    noted: dict = {}
+    assert language_to_record("c1", code, None, noted) is None
+    assert noted == {}
+
+
+def test_a_forgotten_language_is_recorded_again():
+    noted: dict = {}
+    assert language_to_record("c1", "fr-FR", None, noted) == "fr-FR"
+    forget_language("c1", "fr-FR", noted)
+    assert language_to_record("c1", "fr-FR", None, noted) == "fr-FR"
+
+
+def test_the_memory_of_languages_is_bounded(monkeypatch):
+    import pure
+
+    monkeypatch.setattr(pure, "DETECTED_LANGUAGES_MEMORY", 2)
+    noted: dict = {}
+    language_to_record("c1", "en-US", None, noted)
+    language_to_record("c2", "en-US", None, noted)
+    language_to_record("c3", "en-US", None, noted)
+    assert set(noted) == {"c3"}

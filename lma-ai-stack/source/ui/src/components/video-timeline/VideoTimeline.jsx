@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -40,6 +40,8 @@
  * page has not been loaded yet. "Show in transcript" passes `{ reveal: true }`
  * to onShowInTranscript, asking for the transcript to be shown; selecting a
  * frame does not, so browsing the strip leaves the page where it is.
+ * `onScreenShares` is given the frames the strip counts (shared content, not
+ * repeats) as they load, for the player to mark on its seek bar.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
@@ -100,6 +102,7 @@ const VideoTimeline = ({
   chapters = [],
   onClockAnchors = undefined,
   onFramesChange = undefined,
+  onScreenShares = undefined,
   selectRequest = null,
   title = '',
   loadFrames = defaultLoadFrames,
@@ -313,7 +316,8 @@ const VideoTimeline = ({
   // The frames of shared content, and of those the ones that do not repeat an
   // earlier frame: what the strip shows and counts by default.
   const sharedFrames = useMemo(() => frames.filter(showsSharedContent), [frames]);
-  const distinctCount = useMemo(() => sharedFrames.filter((f) => !isRepeatedFrame(f)).length, [sharedFrames]);
+  const distinctFrames = useMemo(() => sharedFrames.filter((f) => !isRepeatedFrame(f)), [sharedFrames]);
+  const distinctCount = distinctFrames.length;
   const repeatCount = sharedFrames.length - distinctCount;
 
   // How many frames are shown, whether there are more, and whether the first
@@ -321,6 +325,20 @@ const VideoTimeline = ({
   useEffect(() => {
     if (onFramesChange) onFramesChange({ count: distinctCount, more: Boolean(nextToken), loaded });
   }, [distinctCount, nextToken, loaded, onFramesChange]);
+
+  // The frames counted, for the page's player to mark as screen shares.
+  useEffect(() => {
+    if (onScreenShares) {
+      onScreenShares(
+        distinctFrames.map(({ FrameId, Timestamp, VideoOffset, Title }) => ({
+          FrameId,
+          Timestamp,
+          VideoOffset,
+          Title,
+        })),
+      );
+    }
+  }, [distinctFrames, onScreenShares]);
 
   // A frame selected from elsewhere: shown large, and its thumbnail brought into
   // view. Read by id when it is on a page not loaded yet.
@@ -590,6 +608,7 @@ VideoTimeline.propTypes = {
   chapters: PropTypes.arrayOf(PropTypes.shape({ seconds: PropTypes.number, title: PropTypes.string })),
   onClockAnchors: PropTypes.func,
   onFramesChange: PropTypes.func,
+  onScreenShares: PropTypes.func,
   selectRequest: PropTypes.shape({ frameId: PropTypes.string, at: PropTypes.number }),
   title: PropTypes.string,
   loadFrames: PropTypes.func,

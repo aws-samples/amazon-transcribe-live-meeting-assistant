@@ -125,6 +125,10 @@ export default defineConfig({
               slug: "infrastructure-and-security",
             },
             {
+              label: "Privacy and Data Handling Controls",
+              slug: "privacy-and-data-handling",
+            },
+            {
               label: "Security Scanning (SRT)",
               slug: "security-scanning",
             },

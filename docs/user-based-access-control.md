@@ -154,7 +154,19 @@ Meeting owners can permanently delete their meetings.
 
 - Deleted meetings are **automatically removed** from shared users' meeting lists
 - Shared users do **not** receive a notification when a meeting they can access is deleted
-- Deletion is **permanent** and cannot be undone
+- Deletion cannot be undone from LMA. It deletes the meeting record, its
+  transcript, summary, consent record, key frames and usage records, every
+  version of its recordings and files in the recordings bucket, and every
+  Virtual Participant record that names it. The full list is in
+  [Deleting a meeting](privacy-and-data-handling.md#deleting-a-meeting)
+- The deleted items remain restorable for 35 days from the DynamoDB tables'
+  point-in-time recovery, by someone with access to the AWS account; the
+  recordings and files are not, because every version is deleted. Records that
+  already passed through the Kinesis and DynamoDB streams (24 hours), CloudWatch
+  logs, and anything already downloaded are not affected; see
+  [Copies that follow their own lifetime](privacy-and-data-handling.md#copies-that-follow-their-own-lifetime)
+- If any step fails, the meeting is not deleted and stays in the list; deleting
+  it again repeats every step
 
 ## Upgrading from v0.1.9 or Earlier
 

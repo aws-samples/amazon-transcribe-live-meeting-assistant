@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -686,6 +686,17 @@ describe('the player kept in step with the transcript', () => {
     ]);
   });
 
+  it("marks the Screen share tab's frames on the seek bar as screen shares, beside the chapters", async () => {
+    responses.frames = [keyframe(60, 90), keyframe(300, 330), { ...keyframe(400, 430), DuplicateOf: 'x' }];
+    await openRecording();
+    await waitFor(() => expect(screen.getAllByTestId('meeting-player-share-marker')).toHaveLength(2));
+    expect(screen.getAllByTestId('meeting-player-share-marker').map((m) => m.getAttribute('aria-label'))).toEqual([
+      'Screen share at 1:00',
+      'Screen share at 5:00',
+    ]);
+    expect(screen.getByTestId('meeting-player-legend').textContent).toBe('2 chapters2 screen shares');
+  });
+
   it('opens the Transcript tab and plays from a chapter selected on the Summary tab', async () => {
     await openRecording({ url: '/calls/m?tab=summary' });
     fireEvent.click(screen.getByRole('button', { name: 'Budget review' }));
@@ -1152,11 +1163,7 @@ describe('naming a speaker from the Transcript tab', () => {
     );
     const groupOf = (base) => screen.getByRole('group', { name: `Voices under ${base}` });
     const transcriptText = () => screen.getByTestId('transcript-scroll').textContent;
-    const modeMenu = (base) => within(groupOf(base)).getByRole('button', { name: /^How the voices under / });
-    const chooseMode = (base, text) => {
-      fireEvent.click(modeMenu(base));
-      fireEvent.click(screen.getByRole('menuitemcheckbox', { name: text }));
-    };
+    const modeToggle = (base) => within(groupOf(base)).getByRole('button', { name: `Show ${base} as several people` });
     // The speakers named in the page header, each a button opening the Speakers panel.
     const headerChips = () =>
       screen
@@ -1177,10 +1184,8 @@ describe('naming a speaker from the Transcript tab', () => {
       const sendUpdateSpeakerIdentities = vi.fn().mockResolvedValue(true);
       callsContext.value = { calls: [], sendUpdateSpeakerIdentities };
       const { rerender } = render(page());
-      expect(modeMenu('Bob Strahan').getAttribute('aria-label')).toBe(
-        'How the voices under Bob Strahan are shown: One person',
-      );
-      chooseMode('Bob Strahan', 'Several people');
+      expect(modeToggle('Bob Strahan').getAttribute('aria-pressed')).toBe('false');
+      fireEvent.click(modeToggle('Bob Strahan'));
       await waitFor(() => expect(sendUpdateSpeakerIdentities).toHaveBeenCalledTimes(1));
       const [, serialized] = sendUpdateSpeakerIdentities.mock.calls[0];
       expect(JSON.parse(serialized).speakerModes['REMOTE#Bob Strahan']).toMatchObject({
@@ -1215,7 +1220,7 @@ describe('naming a speaker from the Transcript tab', () => {
     it('offers the toggle and the renames only to those who may name speakers', () => {
       callsContext.value = { calls: [], sendUpdateSpeakerIdentities: vi.fn() };
       render(page({ ...ITEM, owner: 'someone-else' }));
-      expect(modeMenu('Bob Strahan').disabled).toBe(true);
+      expect(modeToggle('Bob Strahan').disabled).toBe(true);
       expect(screen.queryByRole('button', { name: /^Rename / })).toBeNull();
     });
 
@@ -1361,5 +1366,105 @@ describe('the consent that applied to the meeting', () => {
     unmount();
     renderPage();
     expect(screen.queryByText('Transcription is paused until consent is recorded')).toBeNull();
+  });
+});
+
+describe('the agenda on the Transcript tab', () => {
+  const LIVE = { ...ITEM, recordingStatusLabel: IN_PROGRESS_STATUS, recordingStatusIcon: 'in-progress' };
+  const AGENDA = { agenda: 'Introductions\nBudget\nHiring', agendaSource: 'ui' };
+  const transcriptPanel = () => screen.getByTestId('transcript-scroll').closest('[role="tabpanel"]');
+  const agendaToggle = () =>
+    within(transcriptPanel()).getByTestId('agenda-collapsible').querySelector('[aria-expanded]');
+
+  it('is open, with its items, beside the transcript of a live meeting', () => {
+    renderPage({ item: { ...LIVE, ...AGENDA } });
+    expect(selectedTab().textContent).toBe('Transcript');
+    expect(agendaToggle().getAttribute('aria-expanded')).toBe('true');
+    const items = [...within(transcriptPanel()).getByTestId('agenda-collapsible').querySelectorAll('ol li')];
+    expect(items.map((li) => li.textContent)).toEqual(['Introductions', 'Budget', 'Hiring']);
+  });
+
+  it('is still there, closed, once the meeting has ended', () => {
+    renderPage({ item: { ...ITEM, ...AGENDA } });
+    expect(agendaToggle().getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('offers Add agenda during a live meeting that has none, to a viewer who can change it', () => {
+    callsContext.value = { calls: [], sendUpdateCallAgenda: vi.fn() };
+    renderPage({ item: LIVE });
+    expect(within(transcriptPanel()).getByTestId('agenda-compact')).toBeTruthy();
+    expect(within(transcriptPanel()).getByRole('button', { name: /Add agenda/ })).toBeTruthy();
+  });
+
+  it('is left out of the Transcript tab for an ended meeting without one', () => {
+    callsContext.value = { calls: [], sendUpdateCallAgenda: vi.fn() };
+    renderPage();
+    expect(within(transcriptPanel()).queryByTestId('agenda-compact')).toBeNull();
+    expect(within(transcriptPanel()).queryByTestId('agenda-collapsible')).toBeNull();
+  });
+});
+
+describe('the language of each line', () => {
+  const line = (id, transcript, startTime, languageCode) => ({
+    segmentId: id,
+    createdAt: `2026-11-03T14:05:${String(startTime).padStart(2, '0')}.000Z`,
+    channel: 'REMOTE',
+    speaker: 'Ana',
+    transcript,
+    startTime,
+    endTime: startTime + 2,
+    isPartial: false,
+    ...(languageCode ? { languageCode } : {}),
+  });
+  const transcriptOf = (...segments) => ({ [ITEM.callId]: { REMOTE: { segments } } });
+  const marks = () => [...document.querySelectorAll('.transcript-language-mark')].map((m) => m.textContent);
+
+  it('marks no line of a meeting in one language', () => {
+    renderPage({
+      item: { ...ITEM, detectedLanguages: ['es-US'] },
+      transcript: transcriptOf(line('s1', 'Hola a todos.', 0, 'es-US'), line('s2', 'Empecemos.', 10, 'es-US')),
+    });
+    expect(screen.getByText('Hola a todos.')).toBeTruthy();
+    expect(marks()).toEqual([]);
+  });
+
+  it('marks each line of a meeting in two languages, naming the language in its tooltip and label', () => {
+    renderPage({
+      transcript: transcriptOf(line('s1', 'Good morning.', 0, 'en-US'), line('s2', 'Buenos días.', 10, 'es-US')),
+    });
+    expect(marks()).toEqual(['EN', 'ES']);
+    const spanish = screen.getByRole('img', { name: 'Language: Spanish (United States)' });
+    expect(spanish.getAttribute('title')).toBe('Spanish (United States)');
+  });
+
+  it('marks the lines once the meeting record lists a second language, and not a line with none', () => {
+    renderPage({
+      item: { ...ITEM, detectedLanguages: ['en-US', 'fr-FR'] },
+      transcript: transcriptOf(line('s1', 'Good morning.', 0, 'en-US'), line('s2', 'No language.', 10)),
+    });
+    expect(marks()).toEqual(['EN']);
+  });
+
+  it("does not run one speaker's lines in two languages together", () => {
+    renderPage({
+      transcript: transcriptOf(
+        line('s1', 'Good morning.', 0, 'en-US'),
+        line('s2', 'Buenos días.', 2.5, 'es-US'),
+        line('s3', 'Bienvenidos.', 4.6, 'es-US'),
+      ),
+    });
+    expect(document.querySelectorAll('[data-row-id]').length).toBe(2);
+    expect(marks()).toEqual(['EN', 'ES']);
+  });
+
+  it('names the detected languages on the Details tab, beside the language setting', () => {
+    renderPage({
+      url: '/calls/m?tab=details',
+      item: { ...ITEM, transcriptionLanguage: 'identify-multiple-languages', detectedLanguages: ['en-US'] },
+      transcript: transcriptOf(line('s1', 'Buenos días.', 0, 'es-US')),
+    });
+    expect(screen.getByText('Identified by Amazon Transcribe (several languages)')).toBeTruthy();
+    expect(screen.getByText('Detected languages')).toBeTruthy();
+    expect(screen.getByText('English (US), Spanish (US)')).toBeTruthy();
   });
 });

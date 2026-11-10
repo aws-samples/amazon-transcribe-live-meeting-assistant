@@ -79,16 +79,18 @@ For headless/CLI use, the same options are `--diarize-system` / `--diarize-mic`
 
 Which engine a desktop meeting uses is the deployment's **Stream Audio, Chrome extension and Desktop Capture** setting
 in the **Transcription Engine** section of **Configuration ▸ Configuration**, the same setting that covers Stream Audio and the
-Chrome extension. When the deployment runs the
-[on-demand ASR & diarization engine](microvm-asr.md), `--asr-engine microvm` or
+Chrome extension; it ships on the [ASR MicroVM engine](microvm-asr.md) wherever that
+engine is deployed. When the deployment runs that engine, `--asr-engine microvm` or
 `--asr-engine transcribe` (`LMA_ASR_ENGINE`, or `asrEngine` in `lma-config.json`)
 overrides that setting for one run in either direction; omit it and the deployment
 setting applies.
 
 Both engines produce speaker labels, so the two flags above do **not** pick an engine.
 The on-demand engine separates voices sharing a single microphone more reliably, but it
-is English only and does not support content redaction, custom vocabularies, custom
-language models or language identification. A meeting whose MicroVM cannot start falls
+transcribes only the languages its deployed model bundle supports (see [Languages](microvm-asr.md#languages)) and does not support content redaction, custom vocabularies, custom
+language models or language identification. While the deployment's Amazon Transcribe
+settings set a language that bundle does not support or use any of those, meetings stay on Amazon Transcribe, and
+`--asr-engine microvm` does not change that. A meeting whose MicroVM cannot start falls
 back to Amazon Transcribe on its own.
 
 ## Optional: record screen video

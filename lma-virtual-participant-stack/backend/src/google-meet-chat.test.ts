@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT-0 License.
+ * See the LICENSE file in the project root for full license information.
+ */
+
 /**
  * Google Meet chat senders, read from the page as Meet draws it.
  *
@@ -164,7 +170,7 @@ test('a message is read once however often the list is read', () => {
     }
 });
 
-test('a page that marks its groups is still read through the mark', () => {
+test('a group marked with data-sender-id (not seen live) is read through the mark', () => {
     const marked = div([div(['Dana', ' 8:15 AM']), div([message('m1', 'marked')])], { 'data-sender-id': 'u1' });
     const [m] = read(div([marked]));
     assert.equal(m.sender, 'Dana');

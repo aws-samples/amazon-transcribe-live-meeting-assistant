@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -25,7 +25,10 @@ const EACH_PARTICIPANT = 'opt_in:each_participant';
 // Teams browser join shows no chat sender, so there consent is given aloud;
 // the Teams join through Azure Communication Services reads it in the chat
 // too, and which one a VP uses is decided by the deployment, so the option
-// stays available for Teams with a note.
+// stays available for Teams with a note. On Google Meet the sender of a chat
+// reply and the speaker of a spoken one are read from the page, and neither
+// reading has been confirmed in a live meeting, so the option carries that
+// caution.
 export const meetingConsentOptionsFor = (platform) =>
   MEETING_CONSENT_OPTIONS.map((option) => {
     if (option.value !== EACH_PARTICIPANT) return option;
@@ -44,6 +47,15 @@ export const meetingConsentOptionsFor = (platform) =>
         description:
           'On the Teams browser join, which does not show who sent a chat message, ' +
           'participants consent aloud ("LMA, I consent"); needs Read spoken replies on.',
+      };
+    }
+    if (platform === 'GOOGLE_MEET') {
+      return {
+        ...option,
+        description:
+          'Who sent or said each reply is read from the Google Meet page and has not been ' +
+          'confirmed in a live meeting. Where that matters, use "Opt-in: wait until I confirm ' +
+          'that everyone agreed".',
       };
     }
     return option;

@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Static contract tests for the AppSync API (no AWS).
 
@@ -219,6 +219,7 @@ OTHER_FIELDS = [
     ("Mutation", "updateRecordingUrl"),
     ("Mutation", "updateVideoRecordingUrl"),
     ("Mutation", "updateCaptureContext"),
+    ("Mutation", "addCallDetectedLanguage"),
     ("Mutation", "updateAgent"),
     ("Mutation", "addCallSummaryText"),
     ("Mutation", "addTranscriptSegment"),

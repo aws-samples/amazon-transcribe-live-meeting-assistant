@@ -16,6 +16,7 @@ title: "Transcription & Translation"
   - [Automatic Single Language Identification](#automatic-single-language-identification)
   - [Automatic Multi-Language Identification](#automatic-multi-language-identification)
   - [Setting the Language](#setting-the-language)
+  - [Detected languages](#detected-languages)
 - [Live Translation](#live-translation)
 - [Content Redaction (PII)](#content-redaction-pii)
 - [Custom Vocabulary](#custom-vocabulary)
@@ -116,7 +117,7 @@ on the row is how many segments a rename will move.
 The voices of a name that can be shown as
 [one person or several people](#one-person-or-several-people) are listed
 together under that name, as **Voice 1**, **Voice 2** in the order they were
-first heard, with the name's **One person | Several people** menu beside it.
+first heard, with the name's one-person / several-people icon toggle beside it.
 Each unnamed voice's field shows what its lines read as (`ConfRm_1 · Voice 2`).
 Under a name shown as one person, naming any of its voices names all of them
 (except a locked one), because the transcript shows one name for every line
@@ -176,11 +177,16 @@ Names that stand for nobody in particular — `Unknown`, `none`, the default
 grouped: their voice labels are kept, because they are the only way to tell the
 people behind them apart, and those voices are named as described above.
 
-Correcting the default takes two clicks: on the **Transcript** tab, the speaker chips
+Correcting the default takes one click: on the **Transcript** tab, the speaker chips
 are grouped by name, and each name with two or more voices (or shown as several
-people) has a small **One person | Several people** menu (a person or a group
-icon); in **Several people** each voice's chip has a pencil to name it in place.
-The same menu is beside the name in the Speakers panel, and the speakers named in
+people) has a small icon toggle beside it — a person icon while the name is shown
+as **one person**, a group icon while it is shown as **several people**. Clicking
+it switches to the other mode. Its tooltip, shown on hover and on keyboard focus,
+says which mode the name is in, why, and what a click does (for example *Click if
+several people share this name*); a screen reader hears the same text, and reads
+the button as pressed while the name is shown as several people. In **Several
+people** each voice's chip has a pencil to name it in place.
+The same toggle is beside the name in the Speakers panel, and the speakers named in
 the page header follow the choice. See
 [Transcript tab](web-ui-guide.md#transcript-tab). The choice is stored with the
 meeting's speaker names, so like them it reaches the transcript download, the
@@ -208,7 +214,7 @@ The automatic passes stop as soon as there is nothing for them to do. When every
 voice already has a name — on a Virtual Participant meeting every voice carries
 the name the meeting platform showed — the panel says *Every voice already has a
 name from the meeting platform* and stops; what is left to tidy there is how a
-name's voices are grouped, which is the **One person | Several people** menu
+name's voices are grouped, which is the one-person / several-people toggle
 above. They also stop once the meeting has ended (the end-of-meeting pass covers
 it), and after a pass that found nothing they wait until somebody speaks again.
 **Identify speakers** always answers when pressed. *Nothing in the transcript
@@ -338,6 +344,37 @@ Select this option when participants may switch between languages during a singl
 
 Configure the language mode using the **Language for Transcription** CloudFormation parameter when deploying or updating the LMA stack.
 
+### Detected languages
+
+With either identification mode, Amazon Transcribe names the language of each
+result it returns, and LMA keeps it with the transcript:
+
+- Each transcript segment stores the language it was identified in as
+  `LanguageCode` (for example `es-US`). The WebSocket transcriber (Stream Audio,
+  the browser extension and the desktop apps) and the Virtual Participant both
+  pass it on, on the meeting channel and on the voice assistant's channel; it is
+  part of the `ADD_TRANSCRIPT_SEGMENT` event, the `TranscriptSegment` type of
+  the GraphQL API and the `onAddTranscriptSegment` subscription.
+- The meeting record lists the languages heard as `DetectedLanguages`, in the
+  order each was first heard. The call event processor adds a language the first
+  time a segment arrives in it, with one conditional write per language rather
+  than per segment.
+- The meeting page names the detected languages on the **Details** tab, beside
+  the language setting, and, when there is more than one, marks each line of the
+  transcript with a short language code whose tooltip names the language (see
+  [Transcript tab](web-ui-guide.md#transcript-tab)). The transcript downloads
+  carry the same codes.
+
+A meeting transcribed in one fixed language has no detected languages: Amazon
+Transcribe names a language only when it identifies one, and the configured
+language is already shown as **Transcription language**. The ASR MicroVM engine
+reports no language either (see [MicroVM ASR](microvm-asr.md)). Upload Audio
+runs its Amazon Transcribe batch jobs in one fixed language, so an uploaded
+recording has none today; a batch transcript that names a language per word, as
+one from multiple-language identification does, gives each segment the language
+most of its words were identified in. Segments stored before this was recorded
+carry no language.
+
 ## Live Translation
 
 LMA supports live translation of transcripts into 75+ languages via Amazon Translate. Users select their preferred target language directly in the LMA web UI. Translation is performed client-side, translating the transcribed text as it appears in the interface. This allows each user to independently choose their own target language without affecting other participants.
@@ -348,7 +385,9 @@ Amazon Translate takes one line per request, so a long meeting is translated a l
 
 LMA can automatically redact personally identifiable information (PII) from transcripts using Amazon Transcribe's built-in content redaction.
 
-**Enabling redaction:** Set the **Enable Content Redaction for Transcripts** CloudFormation parameter to `true`.
+**Enabling redaction:** Since v0.4.0 redaction is a setting, not a stack parameter. An Admin turns on **Amazon Transcribe › Redact personal information** on the [Configuration page](configuration-guide.md) and chooses the types in **Entity types to redact**; the change applies to meetings that start after it is saved, with no stack update (see [Configuration Parameters](#configuration-parameters) below). The two regulated [configuration presets](configuration-guide.md#configuration-presets) turn it on.
+
+Redaction applies to meetings transcribed by Amazon Transcribe. It does not apply to meetings that use language identification, or to meetings on the on-demand MicroVM engine, which has no redaction. It redacts the transcript text only: the audio recording, the meeting video, key frames and their text, and the meeting chat are not redacted.
 
 **Supported languages:** Content redaction is supported for the following languages only:
 
@@ -394,7 +433,7 @@ LMA can optionally record meeting audio as stereo WAV files stored in Amazon S3.
 
 - **Format:** Stereo WAV files preserving the two-channel audio (microphone and incoming).
 - **Storage:** Recordings are stored in the S3 bucket created by the LMA stack.
-- **Retention:** Configurable via the **Record Expiration In Days** CloudFormation parameter. The default retention period is 90 days, after which recordings are automatically deleted by an S3 lifecycle policy.
+- **Retention:** Set by the `AudioRecordingExpirationInDays` stack parameter (console label *Audio Recording Expiration In Days*). The default is 90 days, after which an S3 lifecycle rule expires the recording; the earlier version that S3 keeps in the versioned bucket is removed about a day later. See [Privacy and Data Handling Controls](privacy-and-data-handling.md#what-lma-stores-and-for-how-long).
 - **Playback:** Recordings are accessible via the audio player in the meeting details view of the LMA UI.
 
 ## Partial vs Non-Partial Transcripts

@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Deleting a meeting deletes the audio recording its RecordingUrl names.
 
@@ -10,6 +10,7 @@ records what it is asked to delete. The test environment's audio prefix is
 
 from __future__ import annotations
 
+import pytest
 from test_delete_metering_records import index
 from test_video_recordings import FakeS3, _url
 
@@ -51,12 +52,11 @@ def test_a_stored_url_outside_the_audio_recordings_is_not_followed(monkeypatch) 
     assert s3.deleted == []
 
 
-def test_an_audio_recording_s3_did_not_delete_is_logged_and_not_counted(
-    monkeypatch, caplog
-) -> None:
+def test_an_audio_recording_s3_did_not_delete_is_logged_and_raises(monkeypatch, caplog) -> None:
     s3 = FakeS3([VP_FILE], errors=[{"Key": VP_FILE, "Code": "AccessDenied"}])
     monkeypatch.setattr(index, "s3_client", s3)
-    assert index.delete_audio_recording("m1", _url(VP_FILE)) == 0
+    with pytest.raises(RuntimeError, match="audio recording of m1"):
+        index.delete_audio_recording("m1", _url(VP_FILE))
     assert "AccessDenied" in caplog.text and VP_FILE in caplog.text
 
 

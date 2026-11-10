@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Generate the parameter reference in `docs/cloudformation-parameters.md`.
 
@@ -238,9 +238,10 @@ CLASSIFICATION: Dict[str, Classification] = {
         RUNTIME,
         "Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts.",
     ),
-    # On-demand speech engine
+    # ASR MicroVM speech engine
     "EnableMicrovmAsr": _c(
-        RESOURCE, "Decides whether the on-demand speech engine's nested stack exists."
+        RESOURCE,
+        "Decides whether the ASR MicroVM engine's nested stack exists, in a Region with AWS Lambda MicroVMs.",
     ),
     # Voice enrollment
     "EnableVoiceEnrollment": _c(
