@@ -367,7 +367,20 @@ def settled_keys(identities):
     return settled
 
 
-def channel_label_bases(turns):
+#: The meeting record's CaptureSource for a meeting the Virtual Participant
+#: captured. Its base names are meeting-roster names, never a channel label.
+VIRTUAL_PARTICIPANT_SOURCE = "VIRTUAL_PARTICIPANT"
+
+
+def is_virtual_participant_capture(capture_source):
+    """Whether the meeting record says the Virtual Participant captured it."""
+    return (
+        isinstance(capture_source, str)
+        and capture_source.strip().upper() == VIRTUAL_PARTICIPANT_SOURCE
+    )
+
+
+def channel_label_bases(turns, capture_source=None):
     """Base names that label a whole channel rather than one person.
 
     The participant name on the Stream Audio form and the desktop app's labels
@@ -379,12 +392,20 @@ def channel_label_bases(turns):
     The structural test does not depend on the wording: when every turn on a
     channel carries ONE base name, and that name appears with two or more
     voice ids, it is a label the client gave the channel and the engine has
-    split it into several people. A Virtual Participant meeting is untouched,
-    because its REMOTE channel carries a different roster name per attendee.
-    The UI's `channelLabelBases` applies the same test, and the two must agree.
+    split it into several people.
+
+    A meeting whose record says the Virtual Participant captured it
+    (``capture_source``, the meeting's CaptureSource) has none: its names come
+    from the meeting roster, so one attendee whose voice separation split in
+    two is still one named attendee, even when nobody else spoke. A meeting
+    with no CaptureSource (one recorded before the field existed) keeps the
+    structural test. The UI's `channelLabelBases` applies the same rules, and
+    the two must agree.
 
     Returns a set of `(channel, base)` pairs.
     """
+    if is_virtual_participant_capture(capture_source):
+        return set()
     bases = {}
     voice_ids = {}
     for turn in turns:
@@ -399,12 +420,13 @@ def channel_label_bases(turns):
     return out
 
 
-def unresolved_voices(turns, identities, all_turns=None):
+def unresolved_voices(turns, identities, all_turns=None, capture_source=None):
     """Voices with no name yet that a pass could usefully work on.
 
     A voice whose stored base name already reads as a person -- a meeting roster
     name from a Virtual Participant, or a channel name the client supplied -- is
-    not unresolved, even though it carries a voice id.
+    not unresolved, even though it carries a voice id. ``capture_source`` is the
+    meeting record's CaptureSource; see `channel_label_bases`.
     """
     # A *proposed* name is not resolved: nobody has confirmed it, and the
     # person may yet introduce themselves, which would upgrade it. Only a
@@ -423,7 +445,7 @@ def unresolved_voices(turns, identities, all_turns=None):
     # trimmed list the model reads: a second voice heard only in the trimmed
     # middle still makes the label a channel's, and the Speakers panel, which
     # sees every segment, has to reach the same answer.
-    labels = channel_label_bases(turns if all_turns is None else all_turns)
+    labels = channel_label_bases(turns if all_turns is None else all_turns, capture_source)
     out = []
     for key in voices_in(turns):
         if merges.get(key):
@@ -494,7 +516,7 @@ def _parse_iso(value):
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
-def worth_a_model_call(turns, identities, force=False, all_turns=None):
+def worth_a_model_call(turns, identities, force=False, all_turns=None, capture_source=None):
     """Is there anything in this transcript that could name an unnamed voice?
 
     Skips the model when no turn contains so much as an introduction or a thanks.
@@ -506,7 +528,7 @@ def worth_a_model_call(turns, identities, force=False, all_turns=None):
     the shortcut declines to judge and the pass runs -- otherwise naming is
     silently unavailable for whole languages, which is what happened before.
     """
-    if not unresolved_voices(turns, identities, all_turns):
+    if not unresolved_voices(turns, identities, all_turns, capture_source):
         return False
     if force:
         return True
@@ -836,7 +858,7 @@ def merge_applied_onto(latest, applied_entries):
     return merged, changed
 
 
-def apply_proposals(identities, proposals, turns, now_iso, all_turns=None):
+def apply_proposals(identities, proposals, turns, now_iso, all_turns=None, capture_source=None):
     """Fold verified proposals into the stored map.
 
     Returns `(updated_map, applied)` where `applied` describes what changed, for
@@ -862,7 +884,7 @@ def apply_proposals(identities, proposals, turns, now_iso, all_turns=None):
     if isinstance(identities.get("lastPass"), dict):
         updated["lastPass"] = dict(identities["lastPass"])
     turns_by_number = {t["turn"]: t for t in turns}
-    nameable = set(unresolved_voices(turns, identities, all_turns))
+    nameable = set(unresolved_voices(turns, identities, all_turns, capture_source))
     protected = settled_keys(identities)
     applied = []
 

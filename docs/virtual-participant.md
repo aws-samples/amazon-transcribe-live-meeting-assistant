@@ -213,6 +213,18 @@ assistant's channel is never diarized. What has been measured, and what has not:
 - Whether diarization delays when a row reaches the transcript has not been
   measured.
 
+**Amazon Bedrock.** Speaker naming (**Identify speakers**, which calls Amazon
+Bedrock) works only on voices under a placeholder name such as `Unknown`, or under
+a channel's own label. A meeting the Virtual Participant captured carries that in
+its record (its capture source), and its roster names are never treated as a
+channel label. So voice separation splitting an attendee into two voices, even
+the only attendee who spoke, starts no automatic naming passes and adds no call to
+the end-of-meeting pass; only voices under a placeholder name can cost a Bedrock
+call. A meeting recorded before LMA stored the capture source has none, and there
+a single roster name split into several voices is still treated as a channel label
+and named (see
+[Finding the names automatically](transcription-and-translation.md#finding-the-names-automatically)).
+
 ## How Speaker Names Are Assigned
 
 A participant row is named after **the attendee the meeting platform showed as

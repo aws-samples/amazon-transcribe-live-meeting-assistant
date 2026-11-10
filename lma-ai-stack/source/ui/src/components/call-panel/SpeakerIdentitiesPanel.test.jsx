@@ -420,6 +420,40 @@ describe('what the resolver answered, and when automatic passes stop', () => {
     }
   });
 
+  describe("one attendee split into two voices, by the meeting record's CaptureSource", () => {
+    const ONE_ATTENDEE = ROSTER.slice(0, 2);
+    const expandedOf = (container) =>
+      container.querySelector('[aria-expanded]')?.getAttribute('aria-expanded') === 'true';
+
+    it('on a Virtual Participant meeting: no automatic pass, and the panel starts closed', () => {
+      vi.useFakeTimers();
+      try {
+        const { container } = renderPanel({
+          isLive: true,
+          segments: ONE_ATTENDEE,
+          item: { ...ITEM, captureSource: 'VIRTUAL_PARTICIPANT' },
+        });
+        expect(expandedOf(container)).toBe(false);
+        vi.advanceTimersByTime(300000);
+        expect(onIdentify).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('with no CaptureSource: read as the channel label, as before', async () => {
+      vi.useFakeTimers();
+      try {
+        const { container } = renderPanel({ isLive: true, segments: ONE_ATTENDEE });
+        expect(expandedOf(container)).toBe(true);
+        await vi.advanceTimersByTimeAsync(46000);
+        expect(onIdentify).toHaveBeenCalledWith({ force: false });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it('stops for good when the resolver says nothing is left to name', async () => {
     vi.useFakeTimers();
     try {

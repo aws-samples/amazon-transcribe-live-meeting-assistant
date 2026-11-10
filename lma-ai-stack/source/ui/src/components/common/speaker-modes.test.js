@@ -79,7 +79,9 @@ describe('speaker modes, by the shared table', () => {
 describe('voices waiting for a name, by the table the resolver is tested against', () => {
   NAMEABLE.cases.forEach((c) => {
     it(c.name, () => {
-      expect([...nameableVoiceKeys(segmentsOf(c), identitiesOf(c))].sort()).toEqual(c.keys);
+      expect([...nameableVoiceKeys(segmentsOf(c), identitiesOf(c), { captureSource: c.captureSource })].sort()).toEqual(
+        c.keys,
+      );
     });
   });
 });

@@ -1234,8 +1234,12 @@ const CallInProgressTranscript = ({
   // The meeting's voices as the Speakers panel lists them, read when the modal opens.
   const roster = useMemo(
     () =>
-      editingSpeaker === null ? [] : buildSpeakerRoster(getSegments(), speakerIdentities, item.remoteParticipantName),
-    [editingSpeaker, callTranscriptPerCallId, speakerIdentities, item.remoteParticipantName],
+      editingSpeaker === null
+        ? []
+        : buildSpeakerRoster(getSegments(), speakerIdentities, item.remoteParticipantName, {
+            captureSource: item.captureSource,
+          }),
+    [editingSpeaker, callTranscriptPerCallId, speakerIdentities, item.remoteParticipantName, item.captureSource],
   );
   const editingKeys = editingSpeaker === null ? null : voiceKeysByName.get(editingSpeaker);
   const editingRows = editingKeys ? roster.filter((row) => editingKeys.has(row.key)) : [];
@@ -2283,7 +2287,9 @@ export const CallPanel = ({
     [item, durationMillis],
   );
   const platform = platformLabel(meetingVp?.meetingPlatform);
-  const roster = buildSpeakerRoster(transcriptSegmentsForCall, speakerIdentities, item.remoteParticipantName);
+  const roster = buildSpeakerRoster(transcriptSegmentsForCall, speakerIdentities, item.remoteParticipantName, {
+    captureSource: item.captureSource,
+  });
   // The header names the speakers the transcript's lines carry: through the
   // meeting's speaker modes, so a name shown as one person is one speaker
   // however many voices it has, and a name shown as several people is one per

@@ -417,6 +417,57 @@ describe('hasMultipleVoicesOnAChannel', () => {
     expect(hasMultipleVoicesOnAChannel(roster([seg('Alice (spk_0)', 0), seg('Bob (spk_0)', 5)]))).toBe(false);
   });
 
+  describe('by the meeting record CaptureSource', () => {
+    const split = [seg('Bob Strahan (spk_0)', 0), seg('Bob Strahan (spk_1)', 5)];
+    const vpRoster = (segments) =>
+      buildSpeakerRoster(segments, emptyIdentities(), 'Room 3', { captureSource: 'VIRTUAL_PARTICIPANT' });
+    const groupsOf = (segments) => speakerGroups(segments, emptyIdentities());
+
+    it("is false for a Virtual Participant meeting's one attendee split into two voices", () => {
+      const rows = vpRoster(split);
+      expect(hasMultipleVoicesOnAChannel(rows, { captureSource: 'VIRTUAL_PARTICIPANT', groups: groupsOf(split) })).toBe(
+        false,
+      );
+    });
+
+    it("is true for a Virtual Participant meeting's room, whose voices are shown as several people", () => {
+      const room = [seg('Conference Room B (spk_0)', 0), seg('Conference Room B (spk_1)', 5)];
+      expect(
+        hasMultipleVoicesOnAChannel(vpRoster(room), { captureSource: 'VIRTUAL_PARTICIPANT', groups: groupsOf(room) }),
+      ).toBe(true);
+    });
+
+    it('is true for a Virtual Participant meeting whose placeholder voices need names', () => {
+      const unknown = [seg('Unknown (spk_0)', 0), seg('Unknown (spk_1)', 5)];
+      expect(
+        hasMultipleVoicesOnAChannel(vpRoster(unknown), {
+          captureSource: 'VIRTUAL_PARTICIPANT',
+          groups: groupsOf(unknown),
+        }),
+      ).toBe(true);
+    });
+
+    it("is still true for a Stream Audio channel's typed label split into two voices", () => {
+      const typed = [seg('alex@example.com (spk_0)', 0), seg('alex@example.com (spk_1)', 5)];
+      const rows = buildSpeakerRoster(typed, emptyIdentities(), 'Room 3', { captureSource: 'STREAM_AUDIO' });
+      expect(hasMultipleVoicesOnAChannel(rows, { captureSource: 'STREAM_AUDIO', groups: groupsOf(typed) })).toBe(true);
+    });
+
+    it('keeps the structural rule for a meeting with no CaptureSource', () => {
+      const rows = roster(split);
+      expect(hasMultipleVoicesOnAChannel(rows, { groups: groupsOf(split) })).toBe(true);
+    });
+
+    it("marks the split name's voices as waiting for a name only where it can be a channel label", () => {
+      const spoken = split.map((s) => ({ ...s, transcript: 'words' }));
+      const placeholders = (options) =>
+        buildSpeakerRoster(spoken, emptyIdentities(), 'Room 3', options).map((row) => row.isPlaceholder);
+      expect(placeholders({ captureSource: 'VIRTUAL_PARTICIPANT' })).toEqual([false, false]);
+      expect(placeholders({ captureSource: 'STREAM_AUDIO' })).toEqual([true, true]);
+      expect(placeholders(undefined)).toEqual([true, true]);
+    });
+  });
+
   it('is false for a single voice and for no voices at all', () => {
     expect(hasMultipleVoicesOnAChannel(roster([seg('Other Participant (spk_0)', 0)]))).toBe(false);
     expect(hasMultipleVoicesOnAChannel([])).toBe(false);

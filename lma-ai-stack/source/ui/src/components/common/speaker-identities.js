@@ -37,8 +37,8 @@
  */
 import { canonicalChannel, canonicalKeyed, isSpeechChannel, REMOTE_CHANNEL } from './channels';
 import { DEFAULT_DESKTOP_SYSTEM_LABEL, DEFAULT_LOCAL_SPEAKER_NAME, DEFAULT_OTHER_SPEAKER_NAME } from './constants';
-import { own, resolveMergeTarget, speakerKey } from './speaker-keys';
-import { resolveInGroup, speakerGroups } from './speaker-modes';
+import { groupKey, own, resolveMergeTarget, speakerKey } from './speaker-keys';
+import { resolveInGroup, SEVERAL_PEOPLE, speakerGroups } from './speaker-modes';
 import { splitDiarizationLabel } from './utilities';
 
 export { resolveMergeTarget, speakerKey, speakerGroups };
@@ -194,6 +194,13 @@ const isNameable = (segment) => isSpeechChannel(segment.channel);
  */
 const PLACEHOLDER_BASES = [DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, DEFAULT_DESKTOP_SYSTEM_LABEL, ''];
 
+/** The meeting record's CaptureSource for a meeting the Virtual Participant captured. */
+const VIRTUAL_PARTICIPANT_SOURCE = 'VIRTUAL_PARTICIPANT';
+
+/** Whether the meeting record says the Virtual Participant captured the meeting. */
+export const isVirtualParticipantCapture = (captureSource) =>
+  typeof captureSource === 'string' && captureSource.trim().toUpperCase() === VIRTUAL_PARTICIPANT_SOURCE;
+
 /**
  * Channel-wide labels the engine has split into several voices.
  *
@@ -201,11 +208,17 @@ const PLACEHOLDER_BASES = [DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAM
  * be called anything -- 'Others', or the user's address on the microphone. When
  * every segment on a channel carries ONE base name and that name appears with
  * two or more voice ids, it labels the channel rather than a person, and those
- * voices need naming like any placeholder. A Virtual Participant channel carries
- * a different roster name per attendee, so it never matches. The resolver's
- * channel_label_bases applies the same test.
+ * voices need naming like any placeholder.
+ *
+ * A meeting whose record says the Virtual Participant captured it
+ * (`captureSource`, the meeting's CaptureSource) has none: its names are
+ * meeting-roster names, so one attendee whose voice separation split in two is
+ * still one named attendee, even when nobody else spoke. A meeting with no
+ * CaptureSource (recorded before the field existed) keeps the structural test.
+ * The resolver's channel_label_bases applies the same rules.
  */
-const channelLabelBases = (segments) => {
+const channelLabelBases = (segments, captureSource) => {
+  if (isVirtualParticipantCapture(captureSource)) return new Set();
   const bases = {};
   const voiceIds = {};
   (segments ?? []).forEach((segment) => {
@@ -243,14 +256,15 @@ const channelLabelBases = (segments) => {
  * resolver declines: a roster name with a voice label is already named, and only
  * placeholders and a channel's own label split into voices are open. A voice
  * holding an unconfirmed suggestion is still open; one a person settled (named
- * by hand, or locked) or merged into another is not.
+ * by hand, or locked) or merged into another is not. `captureSource` is the
+ * meeting record's CaptureSource (see channelLabelBases).
  */
-export const nameableVoiceKeys = (segments, identities) => {
+export const nameableVoiceKeys = (segments, identities, { captureSource } = {}) => {
   const map = identities ?? emptyIdentities();
   const spoken = (segments ?? []).filter(
     (segment) => !segment.isPartial && isNameable(segment) && `${segment.transcript ?? ''}`.trim(),
   );
-  const labels = channelLabelBases(spoken);
+  const labels = channelLabelBases(spoken, captureSource);
   const keys = [];
   [...spoken]
     .sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0))
@@ -277,8 +291,9 @@ export const nameableVoiceKeys = (segments, identities) => {
  *
  * Partials are skipped: a partial has no voice id yet (labels arrive only on
  * finals), so counting them would invent a nameless row that disappears.
+ * `captureSource` is the meeting record's CaptureSource (see channelLabelBases).
  */
-export const buildSpeakerRoster = (segments, identities, fallbackName) => {
+export const buildSpeakerRoster = (segments, identities, fallbackName, { captureSource } = {}) => {
   const map = identities ?? emptyIdentities();
   const rows = new Map();
   // The participant name from the Stream Audio form is the REMOTE side's, so it
@@ -287,7 +302,7 @@ export const buildSpeakerRoster = (segments, identities, fallbackName) => {
   // placeholder for a local-channel voice would disagree with the transcript
   // beside it.
   const fallbackFor = (channel) => (canonicalChannel(channel) === REMOTE_CHANNEL ? fallbackName : undefined);
-  const labels = channelLabelBases(segments);
+  const labels = channelLabelBases(segments, captureSource);
   // Whether a voice is waiting for a name -- what the panel's automatic passes
   // and unnamed count act on. Distinct from `generic` below, which only decides
   // whether the Stream Audio participant name substitutes in the display.
@@ -434,8 +449,21 @@ export const parseAttendeeList = (text) => {
  * panel that is always expanded pushes the transcript down the page for the
  * majority of meetings that have one voice per channel and nothing to
  * disambiguate. It starts open only where it has work to do.
+ *
+ * On a meeting the Virtual Participant captured (`captureSource`), a name's
+ * voices count only while the name is shown as several people (`groups`, from
+ * speakerGroups) or forms no group (a placeholder such as `Unknown`): a roster
+ * name shown as one person is one attendee whose voice separation split, and the
+ * transcript already shows them under one name. Without `groups` every VP name
+ * counts, as on any other meeting.
  */
-export const hasMultipleVoicesOnAChannel = (roster) => {
+export const hasMultipleVoicesOnAChannel = (roster, { captureSource, groups } = {}) => {
+  const vp = isVirtualParticipantCapture(captureSource) && Boolean(groups);
+  const shownAsOne = (row) => {
+    if (!vp) return false;
+    const group = own(groups, groupKey(row.channel, row.baseName));
+    return Boolean(group) && group.mode !== SEVERAL_PEOPLE;
+  };
   // The diagnostic signal is two UNNAMED voices that share a channel AND a base
   // name, differing only by the engine's voice id -- that is one audio source
   // the engine has split into several people, which is exactly what the panel
@@ -448,14 +476,14 @@ export const hasMultipleVoicesOnAChannel = (roster) => {
   // goes too far the other way: a client that supplies its own channel name --
   // an address, say -- produces 'alex@example.com (spk_0)' and '(spk_1)', which
   // is two real people behind one tab and does need naming.
-  const groups = {};
+  const counts = {};
   (roster ?? [])
-    .filter((row) => !row.name && row.voiceId)
+    .filter((row) => !row.name && row.voiceId && !shownAsOne(row))
     .forEach((row) => {
-      const group = `${row.channel}#${row.baseName}`;
-      groups[group] = (groups[group] || 0) + 1;
+      const base = `${row.channel}#${row.baseName}`;
+      counts[base] = (counts[base] || 0) + 1;
     });
-  return Object.values(groups).some((count) => count > 1);
+  return Object.values(counts).some((count) => count > 1);
 };
 
 /** How a roster row is labelled: its name, or the placeholder with the voice id that tells it apart. */
