@@ -65,6 +65,7 @@ PYTHON_LINT_PATHS := \
 	$(CURDIR)/$(LAMBDA_FUNCTIONS_DIR) \
 	$(CURDIR)/$(LAMBDA_LAYERS_DIR) \
 	$(CURDIR)/scripts/pr_review \
+	$(CURDIR)/scripts/ci \
 	$(CURDIR)/scripts/cloudformation_parameters_doc.py \
 	$(CURDIR)/scripts/bedrock_inference_catalog.py \
 	$(CURDIR)/scripts/ux_recorder.py \
@@ -379,7 +380,7 @@ build-vp: ## Build Virtual Participant (TypeScript)
 	@echo -e "$(GREEN)✅ Virtual Participant build complete!$(NC)"
 
 ##@ Testing
-test: test-ui test-sdk test-cli test-lambdas test-ai-stack test-integ-plumbing test-asr test-pr-review test-ux-recorder ## Run all tests (no AWS required)
+test: test-ui test-sdk test-cli test-lambdas test-ai-stack test-integ-plumbing test-asr test-pr-review test-ux-recorder test-ci-tooling ## Run all tests (no AWS required)
 
 test-sdk: ## Run LMA SDK unit tests
 	@echo "Running LMA SDK tests..."
@@ -492,6 +493,14 @@ test-pr-review: ## Unit tests for the advisory AI review harness (no AWS, no mod
 	@echo "Running advisory AI review tests..."
 	$(PYTHON) -m pytest scripts/pr_review/test_ai_pr_review.py -q
 	@echo -e "$(GREEN)✅ Advisory AI review tests passed!$(NC)"
+
+# The CI step selection (scripts/ci/changed_areas.py): which steps of the "Lint and
+# unit tests" job a pull request's changed files need, plus the check that every
+# gated step in code-checks.yml and .gitlab-ci.yml names a real selection key.
+test-ci-tooling: ## Unit tests for the CI step selection (scripts/ci; no AWS)
+	@echo "Running CI step-selection tests..."
+	$(PYTHON) -m pytest scripts/ci -q
+	@echo -e "$(GREEN)✅ CI step-selection tests passed!$(NC)"
 
 # The demo recorder (scripts/ux_recorder*.py), the stack-session helper and the
 # product-demo skill's storyboard file. Needs no AWS, Chrome or network; the

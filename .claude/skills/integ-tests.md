@@ -7,6 +7,37 @@ stack**, unlike the mocked unit tests in `lib/lma_sdk/tests`.
 
 The suite lives in `integ-tests/`.
 
+## When an integration deploy is needed
+
+A deploy-and-test run takes 20–40 minutes and a stack update, so run one only
+when the change alters what a stack deploys or runs: Lambda, layer, AppSync,
+UI, transcriber, Virtual Participant, ASR or browser-extension code, a
+CloudFormation/SAM template, a Dockerfile or build context, a dependency or
+lockfile of deployed code, `publish.sh`, or the SDK/CLI code that `lma deploy`
+uses. It is **not** needed for:
+
+- documentation, `CHANGELOG.md`, READMEs, images or the docs site;
+- changes only to unit tests (`test_*.py`, `*.test.ts`/`.js`/`.jsx`,
+  `lma-ai-stack/test/`, `lma-virtual-participant-stack/test/`) — CI runs those;
+- `integ-tests/` plumbing alone (probes, conftest, JUnit summary): run the
+  affected tests against the existing stack with `make integ-tests` if they
+  need a live check, without redeploying;
+- CI configuration, `.claude/` skills, `CLAUDE.md`, the review harness
+  (`scripts/pr_review/`) or the demo recorder.
+
+How to tell: list the change's files (`git diff --name-only origin/develop...HEAD`,
+or `gh pr view <n> --json files`) and drop the categories above; if nothing is
+left, there is nothing to deploy. `python3 scripts/ci/changed_areas.py
+--files-from <list>` prints the areas, which is a quick first pass: only `docs`,
+`agent_instructions`, `pr_review`, `demo_recorder`, `integ_plumbing`,
+`ai_stack_tests` or `no_ci_coverage` means no deploy is needed, while a code area
+such as `ui` or `vp` needs one unless every file it lists is a unit test.
+(`no_ci_coverage` includes the desktop capture app's code, which is deployable but
+not exercised by this suite either.) Re-deploying for a
+CHANGELOG conflict resolution or a docs fix after an earlier head already
+passed its integration run repeats that run for nothing; the nightly run
+(`nightly_integ_tests`) re-tests `develop` after the merge anyway.
+
 ## How to run it (the main flow)
 
 **One-shot: deploy-or-update a stack, then test.** This is the default entry
