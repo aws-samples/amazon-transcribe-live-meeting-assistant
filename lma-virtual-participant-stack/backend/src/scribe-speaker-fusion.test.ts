@@ -132,3 +132,95 @@ describe('on-demand engine rows with voice separation on', () => {
         assert.equal(await final(40, 42, 'spk_0'), `${SAM} (spk_0)`);
     });
 });
+
+/** A final for a given row id. */
+const finalOf = async (rowId: string, startSec: number, endSec: number, speaker: string): Promise<string> => {
+    service.handleMeetingAsrSegment({
+        segmentId: rowId,
+        startSec,
+        endSec,
+        text: 'words',
+        isPartial: false,
+        speaker,
+        session: 'r0-g0',
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    return sent[sent.length - 1]?.Speaker ?? '';
+};
+
+describe('live (partial) rows with voice separation on', () => {
+    /** One partial of row `rowId`, and the speaker the writer was given for it. */
+    const partial = async (rowId: string, startSec: number, endSec: number, speaker: string | undefined) => {
+        service.handleMeetingAsrSegment({
+            segmentId: rowId,
+            startSec,
+            endSec,
+            text: 'words so far',
+            isPartial: true,
+            speaker,
+            session: 'r0-g0',
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+        const row = sent[sent.length - 1];
+        assert.equal(row?.IsPartial, true);
+        return row?.Speaker ?? '';
+    };
+
+    /** Ana as spk_0 and Sam as spk_1, both proven; the page shows Sam from 60 s. */
+    const proveBoth = async () => {
+        service.rosterTimeline.record(0, ANA);
+        for (let t = 0; t < 30; t += 6) {
+            await final(t, t + 5, 'spk_0');
+        }
+        await samTurn(30, 55);
+        service.rosterTimeline.record(60, SAM);
+    };
+
+    it('are named by an established voice label while the page shows someone else', async () => {
+        await proveBoth();
+        // Ana speaks at 60 s, but the page still shows Sam (its hold).
+        assert.equal(service.rosterTimeline.speakerFor(60, 62, 0), SAM);
+        assert.equal(await partial('live-1', 60, 61, 'spk_0'), `${ANA} (spk_0)`);
+        assert.equal(await partial('live-1', 60, 62, 'spk_0'), `${ANA} (spk_0)`);
+    });
+
+    it('are named by the page before the label is established', async () => {
+        service.rosterTimeline.record(0, ANA);
+        // spk_0 has only 5 s of evidence: not proven, so the page names the row.
+        await final(0, 5, 'spk_0');
+        service.rosterTimeline.record(6, SAM);
+        assert.equal(await partial('live-2', 6, 8, 'spk_0'), SAM);
+        // An unlabelled partial is named by the page too.
+        assert.equal(await partial('live-3', 6, 8, undefined), SAM);
+    });
+
+    it('do not flip-flop within one row when the provisional label blips', async () => {
+        await proveBoth();
+        const shown: string[] = [];
+        for (const [end, label] of [
+            [61, 'spk_0'],
+            [61.5, 'spk_1'],
+            [62, 'spk_0'],
+            [62.5, 'spk_1'],
+            [63, 'spk_0'],
+        ] as const) {
+            shown.push(await partial('live-4', 60, end, label));
+        }
+        assert.deepEqual(shown, Array(5).fill(`${ANA} (spk_0)`));
+    });
+
+    it('move to the next voice once it holds, and leave the final to the fusion', async () => {
+        await proveBoth();
+        const shown: string[] = [];
+        for (const [end, label] of [
+            [61, 'spk_0'],
+            [62, 'spk_1'],
+            [63, 'spk_1'],
+        ] as const) {
+            shown.push(await partial('live-5', 60, end, label));
+        }
+        assert.deepEqual(shown, [`${ANA} (spk_0)`, `${ANA} (spk_0)`, `${SAM} (spk_1)`]);
+        // The engine's final keeps the first voice's words on this row.
+        assert.equal(await finalOf('live-5', 60, 61, 'spk_0'), `${ANA} (spk_0)`);
+    });
+});
