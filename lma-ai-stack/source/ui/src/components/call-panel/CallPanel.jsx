@@ -1231,15 +1231,28 @@ const CallInProgressTranscript = ({
     onSaveSpeakerIdentities(
       serializeSpeakerIdentities(keys.reduce((map, key) => withSpeakerName(map, key, name), speakerIdentities)),
     );
-  // The meeting's voices as the Speakers panel lists them, read when the modal opens.
+  // The meeting's voices as the Speakers panel lists them, each with the name
+  // its lines carry, read when the modal opens.
   const roster = useMemo(
     () =>
       editingSpeaker === null
         ? []
-        : buildSpeakerRoster(getSegments(), speakerIdentities, item.remoteParticipantName, {
-            captureSource: item.captureSource,
-          }),
-    [editingSpeaker, callTranscriptPerCallId, speakerIdentities, item.remoteParticipantName, item.captureSource],
+        : speakerDisplayRows(
+            buildSpeakerRoster(getSegments(), speakerIdentities, item.remoteParticipantName, {
+              captureSource: item.captureSource,
+            }),
+            speakerIdentities,
+            groups,
+            item.remoteParticipantName,
+          ),
+    [
+      editingSpeaker,
+      callTranscriptPerCallId,
+      speakerIdentities,
+      groups,
+      item.remoteParticipantName,
+      item.captureSource,
+    ],
   );
   const editingKeys = editingSpeaker === null ? null : voiceKeysByName.get(editingSpeaker);
   const editingRows = editingKeys ? roster.filter((row) => editingKeys.has(row.key)) : [];
@@ -1479,6 +1492,7 @@ const CallInProgressTranscript = ({
           rows={editingRows}
           roster={roster}
           identities={speakerIdentities}
+          groups={groups}
           onSave={onSaveSpeakerIdentities}
           onDismiss={() => setEditingSpeaker(null)}
           readOnly={readOnly}

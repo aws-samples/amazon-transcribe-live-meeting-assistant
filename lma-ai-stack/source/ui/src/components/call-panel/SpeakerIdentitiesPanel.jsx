@@ -26,7 +26,9 @@
  * one-person / several-people icon toggle, and each row reads as its lines do: 'Voice 2' and the
  * placeholder 'ConfRm_1 · Voice 2' while unnamed. Under a name shown as one
  * person, naming one of its voices names them all, because the transcript shows
- * that one name for every line under it.
+ * that one name for every line under it. That name's lines that carry no voice
+ * label (isUnlabelledLinesOfName) are counted with its first voice rather than
+ * listed as a voice of their own.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -52,13 +54,14 @@ import {
   buildSpeakerRoster,
   formatTalkTime,
   hasMultipleVoicesOnAChannel,
+  isUnlabelledLinesOfName,
+  mergeTargetOptions,
   nameableVoiceKeys,
   parseAttendeeList,
   parseSpeakerIdentities,
   serializeSpeakerIdentities,
   speakerDisplayRows,
   speakerGroups,
-  speakerRowLabel,
   withMerge,
   withoutMerges,
   withSpeakerName,
@@ -136,7 +139,7 @@ const SpeakerRow = ({
   row,
   ordinal = null,
   candidates,
-  rosterRows,
+  mergeTargets,
   onRename,
   onMerge,
   onToggleLock,
@@ -159,14 +162,7 @@ const SpeakerRow = ({
     }
   };
 
-  const mergeOptions = [
-    MERGE_PLACEHOLDER,
-    ...rosterRows
-      // Same channel only: the two channels are separate audio sources, and
-      // folding the local microphone into a remote voice is never meant.
-      .filter((other) => other.key !== row.key && other.channel === row.channel)
-      .map((other) => ({ label: speakerRowLabel(other), value: other.key })),
-  ];
+  const mergeOptions = [MERGE_PLACEHOLDER, ...mergeTargets];
 
   const nameField = candidates.length ? (
     <Autosuggest
@@ -290,6 +286,10 @@ const SpeakerIdentitiesPanel = ({
   );
   // The rows in the order first heard, the voices of a name offered the One
   // person / Several people choice gathered under it where its first voice is.
+  // Under a name shown as one person, its lines without a voice label are
+  // counted with its first voice that has one (`foldedKeys`), not listed as a
+  // voice: they are that one person's lines too, and a rename of the voice
+  // renames them with it.
   const sections = useMemo(() => {
     const out = [];
     const byGroup = new Map();
@@ -300,14 +300,35 @@ const SpeakerIdentitiesPanel = ({
         return;
       }
       if (!byGroup.has(group.key)) {
-        const section = { group, rows: [] };
+        const section = { group, rows: [], unlabelled: [] };
         byGroup.set(group.key, section);
         out.push(section);
       }
-      byGroup.get(group.key).rows.push(row);
+      const section = byGroup.get(group.key);
+      if (group.mode === ONE_PERSON && isUnlabelledLinesOfName(row, groups)) section.unlabelled.push(row);
+      else section.rows.push(row);
     });
-    return out;
+    return out.map((section) => {
+      if (!section.group) return section;
+      const { unlabelled, ...rest } = section;
+      const into = rest.rows.findIndex((row) => row.voiceId);
+      if (!unlabelled.length || into < 0) return { ...rest, rows: [...rest.rows, ...unlabelled] };
+      const rows = [...rest.rows];
+      const voice = rows[into];
+      rows[into] = {
+        ...voice,
+        turns: unlabelled.reduce((total, row) => total + row.turns, voice.turns),
+        talkTimeSeconds: unlabelled.reduce((total, row) => total + row.talkTimeSeconds, voice.talkTimeSeconds),
+        foldedKeys: unlabelled.map((row) => row.key),
+      };
+      return { ...rest, rows };
+    });
   }, [displayRows, groups]);
+  // The rows the panel lists, for its count of named speakers.
+  const listedRows = useMemo(
+    () => sections.flatMap((section) => (section.group ? section.rows : [section.row])),
+    [sections],
+  );
 
   const [saving, setSaving] = useState(false);
   const [pasted, setPasted] = useState('');
@@ -424,7 +445,7 @@ const SpeakerIdentitiesPanel = ({
     // nothing new to read. Both are reached through refs instead.
   }, [isLive, readOnly, unnamedCount, autoStopped]);
 
-  const namedCount = roster.filter((row) => row.name).length;
+  const namedCount = listedRows.filter((row) => row.name).length;
 
   // Starts open only on a channel separation actually split; once the user opens
   // or closes it themselves, their choice wins for the rest of the session.
@@ -448,13 +469,16 @@ const SpeakerIdentitiesPanel = ({
     }
     if (!active) return;
     appliedFocusRef.current = focusRequest.at;
+    // A name's unlabelled lines are shown in the row of its first voice.
     const rowElement = [...(rowsRef.current?.querySelectorAll('[data-speaker-key]') ?? [])].find(
-      (element) => element.dataset.speakerKey === focusRequest.key,
+      (element) =>
+        element.dataset.speakerKey === focusRequest.key ||
+        (element.dataset.foldedKeys ?? '').split('\n').includes(focusRequest.key),
     );
     if (!rowElement) return;
     rowElement.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
     rowElement.querySelector('input:not([disabled])')?.focus({ preventScroll: true });
-    setFocusedKey(focusRequest.key);
+    setFocusedKey(rowElement.dataset.speakerKey);
     clearTimeout(focusTimerRef.current);
     focusTimerRef.current = setTimeout(() => setFocusedKey(null), FOCUS_OUTLINE_MS);
   }, [focusRequest, expanded, active]);
@@ -484,7 +508,9 @@ const SpeakerIdentitiesPanel = ({
 
   const handleSetMode = (key, mode) => write(withSpeakerMode(identities, key, mode));
 
-  const handleMerge = (row, targetKey) => write(withMerge(identities, row.key, targetKey));
+  // A row's folded unlabelled lines go with it, as they are shown with it.
+  const handleMerge = (row, targetKey) =>
+    write([row.key, ...(row.foldedKeys ?? [])].reduce((map, key) => withMerge(map, key, targetKey), identities));
 
   const handleUnmergeAll = (row) => write(withoutMerges(identities, row.mergedKeys));
 
@@ -556,6 +582,7 @@ const SpeakerIdentitiesPanel = ({
     <div
       key={row.key}
       data-speaker-key={row.key}
+      data-folded-keys={row.foldedKeys?.length ? row.foldedKeys.join('\n') : undefined}
       className={focusedKey === row.key ? 'speaker-row-focused' : undefined}
     >
       <SpaceBetween direction="vertical" size="xxs">
@@ -563,7 +590,12 @@ const SpeakerIdentitiesPanel = ({
           row={row}
           ordinal={ordinal}
           candidates={identities.candidates}
-          rosterRows={roster}
+          // Same channel only: the two channels are separate audio sources, and
+          // folding the local microphone into a remote voice is never meant.
+          mergeTargets={mergeTargetOptions(displayRows, groups, {
+            exclude: [row.key, ...(row.foldedKeys ?? [])],
+            channels: [row.channel],
+          })}
           onRename={handleRename}
           onMerge={handleMerge}
           onToggleLock={handleToggleLock}
@@ -590,7 +622,7 @@ const SpeakerIdentitiesPanel = ({
       expanded={expanded}
       onChange={({ detail }) => setExpandedOverride(detail.expanded)}
       headerText="Speakers"
-      headerCounter={roster.length ? `(${namedCount}/${roster.length})` : undefined}
+      headerCounter={listedRows.length ? `(${namedCount}/${listedRows.length})` : undefined}
       headerDescription="Name each voice once and the whole transcript updates, past segments included."
       headerInfo={<InfoLink onFollow={() => setToolsOpen(true)} />}
       headerActions={

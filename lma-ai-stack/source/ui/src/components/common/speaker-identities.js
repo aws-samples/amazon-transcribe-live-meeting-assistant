@@ -37,8 +37,8 @@
  */
 import { canonicalChannel, canonicalKeyed, isSpeechChannel, REMOTE_CHANNEL } from './channels';
 import { DEFAULT_DESKTOP_SYSTEM_LABEL, DEFAULT_LOCAL_SPEAKER_NAME, DEFAULT_OTHER_SPEAKER_NAME } from './constants';
-import { groupKey, own, resolveMergeTarget, speakerKey } from './speaker-keys';
-import { resolveInGroup, SEVERAL_PEOPLE, speakerGroups } from './speaker-modes';
+import { groupKey, groupOfKey, own, resolveMergeTarget, speakerKey } from './speaker-keys';
+import { ONE_PERSON, resolveInGroup, SEVERAL_PEOPLE, speakerGroups } from './speaker-modes';
 import { splitDiarizationLabel } from './utilities';
 
 export { resolveMergeTarget, speakerKey, speakerGroups };
@@ -509,6 +509,93 @@ export const speakerDisplayRows = (roster, identities, groups, fallbackName) =>
     );
     return { ...row, shownAs: resolved.name, shownUnnamed: resolved.status === 'unnamed', group: resolved.group };
   });
+
+/**
+ * Whether a roster row holds lines of a name that carry no voice label, under a
+ * name speaker separation did label: 'Bob Strahan' beside 'Bob Strahan (spk_2)'.
+ *
+ * The Virtual Participant writes the voice label only on lines its label is
+ * attributed to the name shown (see virtual-participant.md); a line the meeting
+ * page named before that -- often the first few -- carries the bare name. Those
+ * lines are the same person's, not a voice of their own, so they are never
+ * counted or listed as one. `groups` is speakerGroups over the same segments.
+ */
+export const isUnlabelledLinesOfName = (row, groups) =>
+  Boolean(row) && !row.voiceId && (own(groups, groupKey(row.channel, row.baseName))?.voices.length ?? 0) > 0;
+
+/**
+ * The separate speakers among roster rows, as the transcript shows them: one
+ * array of rows per speaker, in the rows' order.
+ *
+ * Rows of a name shown as one person are one speaker however many voice labels
+ * they carry, and that name's unlabelled lines are part of it, because every
+ * one of those lines already reads as that one name; offering to combine them
+ * would offer what is already done. Any other row is a speaker of its own.
+ */
+export const separateSpeakers = (rows, groups) => {
+  const bySpeaker = new Map();
+  (rows ?? []).forEach((row) => {
+    const key = groupOfKey(row.key);
+    const speaker = own(groups, key)?.mode === ONE_PERSON ? key : row.key;
+    if (!bySpeaker.has(speaker)) bySpeaker.set(speaker, []);
+    bySpeaker.get(speaker).push(row);
+  });
+  return [...bySpeaker.values()];
+};
+
+/**
+ * The speakers a voice can be said to be the same person as, labelled as the
+ * transcript shows them: `{ label, value }`, value being the voice key merged
+ * into.
+ *
+ * `displayRows` are speakerDisplayRows' rows. A name shown as one person is one
+ * option, 'Bob Strahan', merged into its first-heard voice with a label;
+ * anything else is one option per row, under the name its lines carry ('ConfRm_1
+ * · Voice 2', or the name somebody gave). Only where two options would read the
+ * same does the voice label follow the name, because there it is what tells them
+ * apart. Rows in `exclude` -- and the whole of a name shown as one person that
+ * one of them belongs to -- are left out, as are rows on channels outside
+ * `channels`.
+ */
+export const mergeTargetOptions = (displayRows, groups, { exclude = [], channels = undefined } = {}) => {
+  const rows = (displayRows ?? []).filter((row) => !channels || channels.includes(row.channel));
+  const oneGroupOf = (row) => {
+    const key = groupOfKey(row.key);
+    return own(groups, key)?.mode === ONE_PERSON ? key : null;
+  };
+  const excludedGroups = new Set(
+    (displayRows ?? [])
+      .filter((row) => exclude.includes(row.key))
+      .map(oneGroupOf)
+      .filter(Boolean),
+  );
+  const options = [];
+  const byGroup = new Map();
+  rows.forEach((row) => {
+    if (exclude.includes(row.key)) return;
+    const group = oneGroupOf(row);
+    if (group && excludedGroups.has(group)) return;
+    const label = `${row.shownAs ?? ''}`.trim() || speakerRowLabel(row);
+    if (group) {
+      const existing = byGroup.get(group);
+      if (existing) {
+        // Merge into a voice with a label rather than the name's unlabelled lines.
+        if (!existing.row.voiceId && row.voiceId) Object.assign(existing, { row, value: row.key });
+        return;
+      }
+      const option = { label, value: row.key, row };
+      byGroup.set(group, option);
+      options.push(option);
+      return;
+    }
+    options.push({ label, value: row.key, row });
+  });
+  const counts = options.reduce((map, { label }) => map.set(label, (map.get(label) ?? 0) + 1), new Map());
+  return options.map(({ label, value, row }) => ({
+    label: counts.get(label) > 1 && row.voiceId ? `${label} ${row.voiceId}` : label,
+    value,
+  }));
+};
 
 /**
  * The speakers named in the meeting page's header: one per name the transcript

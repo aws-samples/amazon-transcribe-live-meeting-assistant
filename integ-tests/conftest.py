@@ -111,9 +111,12 @@ def _is_deselected_by_marker(item: pytest.Item) -> bool:
         stack's cost and deploy time, not something a new test should force.
 
     ``external_meeting``
-        Joins a real Google Meet meeting. It skips when no meeting link is
-        configured, and when Google Meet turns the scripted guest away after
-        its retries, which is the platform's decision and not an LMA failure.
+        Joins a real meeting. It skips when no meeting is configured
+        (``LMA_TEST_MEET_URL`` for the scripted-guest test,
+        ``LMA_TEST_VP_LIVE_MEETING`` for the guest-free one), and when Google
+        Meet turns the scripted guest away after its retries, which is the
+        platform's decision and not an LMA failure. Once configured, the
+        guest-free test does not skip: a missing secret fails it.
     """
     return any(
         item.get_closest_marker(name) is not None

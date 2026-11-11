@@ -12,11 +12,14 @@ import {
   hasMultipleVoicesOnAChannel,
   headerSpeakers,
   identityKeyFor,
+  isUnlabelledLinesOfName,
+  mergeTargetOptions,
   parseAttendeeList,
   parseSpeakerIdentities,
   resolveMergeTarget,
   resolveSpeaker,
   resolveSpeakerName,
+  separateSpeakers,
   serializeSpeakerIdentities,
   speakerDisplayRows,
   speakerGroups,
@@ -718,5 +721,137 @@ describe('headerSpeakers', () => {
       expect(speakers.map((s) => s.label)).toEqual(['Priya Shah', 'marcus lee', 'Other Participant (spk_3)']);
       expect(speakers[1].keys).toHaveLength(2);
     });
+  });
+});
+
+describe("a Virtual Participant meeting's speakers, one voice label each", () => {
+  // The shape of a Zoom stand-up captured by the Virtual Participant with voice
+  // separation on: each attendee's lines carry the platform name plus one voice
+  // label, except a line the meeting page named before Bob's label was
+  // attributed to him, which carries his bare name.
+  const line = (segmentId, channel, speaker, startTime, endTime) => ({
+    segmentId,
+    channel,
+    speaker,
+    startTime,
+    endTime,
+    isPartial: false,
+    transcript: 'Words.',
+  });
+  const STANDUP = [
+    line('s0', 'REMOTE', 'Chris Lott (spk_0)', 1.2, 2.0),
+    line('s1', 'REMOTE', 'Jeremy [C] Feldman (spk_1)', 4.9, 10.7),
+    line('s2', 'REMOTE', 'Bob Strahan (spk_2)', 11.0, 18.7),
+    line('s9', 'REMOTE', 'Bob Strahan', 81.5, 82.3),
+    line('s10', 'REMOTE', 'Bob Strahan (spk_2)', 83.0, 90.0),
+    line('c1', 'MEETING_CHAT', 'Bob Strahan', 1032.6, 1032.6),
+    line('l0', 'LOCAL', 'LMA (lma@example.com)', 1156.0, 1158.3),
+  ];
+  const BOB = 'REMOTE#Bob Strahan (spk_2)';
+  const BOB_UNLABELLED = 'REMOTE#Bob Strahan';
+  const several = (key) => ({ ...emptyIdentities(), speakerModes: { [key]: { mode: 'several', source: 'manual' } } });
+  const rowsFor = (identities = emptyIdentities()) => {
+    const groups = speakerGroups(STANDUP, identities);
+    const roster = buildSpeakerRoster(STANDUP, identities, 'Virtual Participant', {
+      captureSource: 'VIRTUAL_PARTICIPANT',
+    });
+    return { groups, rows: speakerDisplayRows(roster, identities, groups, 'Virtual Participant') };
+  };
+
+  it("names every line without its voice label, the name's unlabelled line included", () => {
+    const identities = emptyIdentities();
+    const groups = speakerGroups(STANDUP, identities);
+    expect(STANDUP.map((s) => resolveSpeakerName(s, identities, undefined, groups))).toEqual([
+      'Chris Lott',
+      'Jeremy [C] Feldman',
+      'Bob Strahan',
+      'Bob Strahan',
+      'Bob Strahan',
+      'Bob Strahan',
+      'LMA (lma@example.com)',
+    ]);
+  });
+
+  it("counts a name's unlabelled lines as that name's, not as a voice of their own", () => {
+    const { rows, groups } = rowsFor();
+    const bob = rows.filter((row) => row.shownAs === 'Bob Strahan');
+    expect(bob.map((row) => row.key).sort()).toEqual([BOB_UNLABELLED, BOB]);
+    expect(
+      isUnlabelledLinesOfName(
+        bob.find((row) => row.key === BOB_UNLABELLED),
+        groups,
+      ),
+    ).toBe(true);
+    expect(
+      isUnlabelledLinesOfName(
+        bob.find((row) => row.key === BOB),
+        groups,
+      ),
+    ).toBe(false);
+    // A name nobody labelled has no unlabelled lines to fold: it is all there is.
+    const lma = rows.find((row) => row.channel === 'LOCAL');
+    expect(isUnlabelledLinesOfName(lma, groups)).toBe(false);
+    expect(separateSpeakers(bob, groups)).toHaveLength(1);
+  });
+
+  it('counts the voices of a name shown as one person as one speaker, however many labels they carry', () => {
+    const segments = [...STANDUP, line('s11', 'REMOTE', 'Bob Strahan (spk_3)', 95, 99)];
+    const identities = emptyIdentities();
+    const groups = speakerGroups(segments, identities);
+    const roster = buildSpeakerRoster(segments, identities, undefined, { captureSource: 'VIRTUAL_PARTICIPANT' });
+    const bob = roster.filter((row) => row.baseName === 'Bob Strahan');
+    expect(bob).toHaveLength(3);
+    expect(separateSpeakers(bob, groups)).toHaveLength(1);
+  });
+
+  it('counts each voice of a name shown as several people as a speaker of its own', () => {
+    const identities = several('REMOTE#Bob Strahan');
+    const groups = speakerGroups(STANDUP, identities);
+    const roster = buildSpeakerRoster(STANDUP, identities, undefined, { captureSource: 'VIRTUAL_PARTICIPANT' });
+    expect(
+      separateSpeakers(
+        roster.filter((row) => row.baseName === 'Bob Strahan'),
+        groups,
+      ),
+    ).toHaveLength(2);
+  });
+
+  it('offers each speaker once to merge into, by the name the transcript shows', () => {
+    const { rows, groups } = rowsFor();
+    const options = mergeTargetOptions(rows, groups, { exclude: ['REMOTE#Chris Lott (spk_0)'], channels: ['REMOTE'] });
+    expect(options).toEqual([
+      { label: 'Jeremy [C] Feldman', value: 'REMOTE#Jeremy [C] Feldman (spk_1)' },
+      // Into the voice with a label, not the name's unlabelled lines.
+      { label: 'Bob Strahan', value: BOB },
+    ]);
+  });
+
+  it('leaves out the whole of a name shown as one person when one of its rows is being edited', () => {
+    const { rows, groups } = rowsFor();
+    const labels = mergeTargetOptions(rows, groups, { exclude: [BOB_UNLABELLED], channels: ['REMOTE'] }).map(
+      (option) => option.label,
+    );
+    expect(labels).toEqual(['Chris Lott', 'Jeremy [C] Feldman']);
+  });
+
+  it('adds the voice label only where two speakers would otherwise read the same', () => {
+    const identities = {
+      ...several('REMOTE#ConfRm_1'),
+      identities: {
+        'REMOTE#ConfRm_1 (spk_0)': { name: 'Priya', status: 'confirmed' },
+        'REMOTE#ConfRm_1 (spk_1)': { name: 'Priya', status: 'confirmed' },
+      },
+    };
+    const segments = [
+      line('r0', 'REMOTE', 'ConfRm_1 (spk_0)', 0, 5),
+      line('r1', 'REMOTE', 'ConfRm_1 (spk_1)', 5, 9),
+      line('r2', 'REMOTE', 'Dana (spk_2)', 9, 12),
+    ];
+    const groups = speakerGroups(segments, identities);
+    const rows = speakerDisplayRows(buildSpeakerRoster(segments, identities), identities, groups);
+    expect(mergeTargetOptions(rows, groups, { exclude: ['REMOTE#Dana (spk_2)'] }).map((o) => o.label)).toEqual([
+      'Priya (spk_0)',
+      'Priya (spk_1)',
+    ]);
   });
 });

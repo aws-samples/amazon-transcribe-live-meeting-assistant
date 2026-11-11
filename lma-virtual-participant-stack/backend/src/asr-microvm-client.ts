@@ -597,6 +597,10 @@ export class MicrovmAsrSession {
                 interim_results: true,
                 word_timestamps: false,
                 diarize: this.options.diarize,
+                // A voice label on partials too, read from the open row's own
+                // latest audio, so a live row can be named by its voice before
+                // its final (engines without it send none).
+                partial_speakers: this.options.diarize,
                 max_speakers: 0,
                 // Nothing else: the threshold, utterance floor and turn-cut
                 // behaviour are the bundle's operating point baked into the image.
