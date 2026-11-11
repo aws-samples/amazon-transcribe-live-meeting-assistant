@@ -135,7 +135,11 @@ def test_a_layer_change_runs_every_lambda_suite_and_the_static_tests() -> None:
 
 def test_the_sdk_and_cli_run_their_dependants() -> None:
     steps = ran(["lib/lma_sdk/lma_sdk/client.py"])
-    assert {"sdk_cli", "ai_stack", "vp_template", "integ_plumbing"} <= steps
+    assert {"sdk_cli", "ai_stack", "vp_template", "integ_plumbing", "load_simulator"} <= steps
+
+
+def test_a_load_simulator_change_runs_only_its_own_tests() -> None:
+    assert ran(["utilities/load-simulator/lma_load/cli.py"]) == {"load_simulator"}
 
 
 def test_a_template_change_runs_cfn_lint_and_the_template_readers() -> None:
@@ -150,7 +154,7 @@ def test_the_browser_extension_runs_alone() -> None:
 
 def test_files_no_step_covers_run_nothing() -> None:
     assert (
-        ran(["lma-desktop-capture-app-stack/source/main.js", "utilities/load-simulator/x.py"])
+        ran(["lma-desktop-capture-app-stack/source/main.js", "utilities/custom-vocab/x.py"])
         == set()
     )
 
@@ -227,6 +231,8 @@ def test_docs_only_is_decided_by_the_primary_area() -> None:
         ("lma-ai-stack/source/appsync/schema.graphql", "vp_template"),
         # The ASR Lambdas read the runtime catalogue; the bundle check reads lma-main.
         ("lma-asr-microvm-stack/source/catalog.json", "lambdas"),
+        # The load simulator's ASR benchmark checks bundle ids against the catalogue.
+        ("lma-asr-microvm-stack/source/catalog.json", "load_simulator"),
         ("lma-main.yaml", "asr"),
         # Shared fixtures: the UI and the Python suites both read them.
         ("test-fixtures/speaker-modes.json", "ui"),

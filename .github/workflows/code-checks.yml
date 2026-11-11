@@ -210,6 +210,11 @@ jobs:
         if: steps.areas.outputs.asr != 'false'
         run: make test-asr
 
+      # Load simulator unit tests, including the ASR model benchmark (no AWS).
+      - name: Load simulator tests
+        if: steps.areas.outputs.load_simulator != 'false'
+        run: make test-load-simulator
+
       # The advisory AI review's own machinery: the disclosure guard that decides
       # whether a model-written comment reaches this public repository, and the
       # four properties of ai-pr-review.yml most likely to be deleted by accident.

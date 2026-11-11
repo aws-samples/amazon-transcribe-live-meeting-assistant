@@ -75,6 +75,7 @@ AREAS: dict[str, str] = {
     "transcriber": "WebSocket transcriber stack",
     "browser_extension": "browser extension",
     "websocket_client": "utilities/websocket-client sample client",
+    "load_simulator": "load simulator and its ASR benchmark (utilities/load-simulator)",
     "sdk_cli": "LMA SDK and CLI (lib/)",
     "templates": "CloudFormation templates",
     "config_stacks": "LLM template, chat button and Nova Sonic configuration stacks",
@@ -215,6 +216,7 @@ PRIMARY_RULES: tuple[Rule, ...] = _rules(
     ("lma-browser-extension-stack/template.yaml", ("browser_extension", "templates")),
     ("lma-browser-extension-stack/**", "browser_extension"),
     ("utilities/websocket-client/**", "websocket_client"),
+    ("utilities/load-simulator/**", "load_simulator"),
     # --- templates and configuration stacks ----------------------------------
     ("lma-main.yaml", "templates"),
     ("lma-vpc-stack/**", "templates"),
@@ -247,7 +249,7 @@ PRIMARY_RULES: tuple[Rule, ...] = _rules(
     ("scripts/bedrock_inference_catalog.py", "python_tooling"),
     # --- tracked, but built or tested by nothing in this job -----------------
     # Each of these is a deliberate "nothing to run" rather than an unknown. The
-    # desktop capture app, the load simulator and the placeholder packages have no
+    # desktop capture app, the other utilities and the placeholder packages have no
     # suite here; the SRT files feed the separate security-review job; the rest are
     # developer scripts.
     ("lma-desktop-capture-app-stack/**", "no_ci_coverage"),
@@ -293,6 +295,8 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # The ASR Lambdas' tests read the runtime's catalogue.
     (f"{ASR}/source/catalog.json", "lambdas"),
     (f"{ASR}/template.yaml", "lambdas"),
+    # The load simulator's ASR benchmark checks bundle ids against the same catalogue.
+    (f"{ASR}/source/catalog.json", "load_simulator"),
     # The VP static tests read these Lambdas, the schema and the Launch Stack table.
     (f"{FUNCTIONS}/microvm_vnc_token/**", "vp_template"),
     (f"{FUNCTIONS}/vnc_edge_token/**", "vp_template"),
@@ -369,6 +373,8 @@ STEPS: dict[str, Step] = {
     ),
     "integ_plumbing": _step("Integration-test plumbing tests", "integ_plumbing", "sdk_cli"),
     "asr": _step("ASR MicroVM runtime tests", "asr"),
+    # Installs lib/lma_sdk alongside the simulator.
+    "load_simulator": _step("Load simulator tests", "load_simulator", "sdk_cli"),
     # Its false-positive test reads every docs page, so documentation runs it.
     # Both read CLAUDE.md and the skill files; the review harness's false-positive
     # test also reads every docs page, and the demo recorder checks its storyboard

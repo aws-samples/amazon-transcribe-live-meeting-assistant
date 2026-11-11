@@ -78,7 +78,7 @@ push to `develop` and `main`; the push runs are the authoritative full run. The
 workflow file is the source of truth for what it covers; today that is cfn-lint,
 ruff (over the Lambda functions, the Lambda layers, `scripts/pr_review`,
 `scripts/ci`, the demo recorder and the ASR runtime), the UI lint and vitest,
-`tsc`/eslint, and the SDK, CLI, Lambda, VP, VP-template, AI-stack, ASR,
+`tsc`/eslint, and the SDK, CLI, Lambda, VP, VP-template, AI-stack, ASR, load-simulator,
 integ-plumbing, advisory-review, demo-recorder, CI step-selection, transcriber and
 browser-extension suites.
 
@@ -267,6 +267,7 @@ patterns.
 | `.claude/skills/dependabot-prs.md` | Triaging, verifying and merging Dependabot dependency PRs |
 | `.claude/skills/prepare-changelog.md` | Writing or updating CHANGELOG entries for a release |
 | `.claude/skills/integ-tests.md` | Running end-to-end integration tests against a live deployed stack (`make integ-tests`) |
+| `.claude/skills/asr-benchmark.md` | Comparing ASR model bundles and Amazon Transcribe on a dev stack for cost and transcript quality (`make asr-benchmark`) |
 | `.claude/skills/product-demo.md` | Recording a narrated product demo video of the web UI against a deployed stack (`scripts/ux_recorder.py`, `make ux-record-deps`) |
 
 When asked to `review <PR/MR URL>`, follow `.claude/skills/pr-review.md` and
