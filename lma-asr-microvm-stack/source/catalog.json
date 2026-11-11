@@ -210,6 +210,22 @@
       "previewModelId": "nemotron-3.5-asr-streaming-0.6b-560ms-int8",
       "licenceSummary": "CC-BY-4.0 (ASR) + OpenMDW-1.1 (preview ASR) + OpenMDW-1.1 (diarization) + MIT (VAD)",
       "notes": "Default. Two-pass with a punctuated Nemotron 3.5 preview; Parakeet's finals labelled per word by the diarizer. Heaviest bundle: watch CPU with two sessions. Ran live on 2026-09-28 and 2026-09-30 with two sessions and kept up."
+    },
+    {
+      "id": "parakeet-tdt-v3-live-kroko-sortformer",
+      "name": "Parakeet TDT 0.6B v3 offline with a Kroko live preview + Nemotron 3 Diarization (CC-BY-4.0 + CC-BY-SA + OpenMDW-1.1)",
+      "status": "experimental",
+      "modelId": "parakeet-tdt-0.6b-v3",
+      "vadModelId": "silero-vad-v5",
+      "speakerModelId": "none",
+      "segmentationModelId": "none",
+      "diarizerModelId": "nemotron-3-diarization-int8",
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": false,
+      "previewModelId": "kroko-streaming-en-2025-08-06",
+      "licenceSummary": "CC-BY-4.0 (ASR) + CC-BY-SA, version not stated by the publisher (preview ASR) + OpenMDW-1.1 (diarization) + MIT (VAD)",
+      "notes": "English only, because the Kroko preview is. The default bundle with a lighter live preview: on clean English headset audio the preview's word error rate was about a half to a third of the default's Nemotron 3.5 preview, at about a sixth of its CPU per session, while finals still come from Parakeet v3. That lowers the bill only when the default would run above the 4-vCPU baseline; at or below it the MicroVM costs the same. Not the default: its preview carries a share-alike licence, and the weights are downloaded at image build, not shipped in this repository."
     }
   ],
   "models": [
@@ -291,6 +307,45 @@
       "approxDownloadMb": 475,
       "provenanceVerified": "2026-09-21",
       "note": "Emits punctuation and casing; multilingual. Live runs on 2026-09-22 showed eight or nine merged or dropped words per two minutes and a real-time factor of 0.6-0.9 for one session on a 4-core host. Open ASR Leaderboard average WER 8.72 (rank 46, 2026-09), the weakest ASR model in this catalog. Languages are the base languages of the 32 locales NVIDIA's model card lists as transcription-ready or broad-coverage (2026-11-10; nb is the card's nb-NO); its adaptation-ready locales need fine-tuning and are not listed. As a preview in the default bundle on 2026-11-10 it worked without a configured language in es-ES, es-US, fr-FR, de-DE, it-IT, pt-BR and nl-NL, at 12-31% word error rate against 16% for English; forcing a language on it lowered accuracy on mixed-language speech, so none is set."
+    },
+    {
+      "id": "kroko-streaming-en-2025-08-06",
+      "name": "Kroko ASR streaming zipformer, English (2025-08-06, CC-BY-SA)",
+      "engine": "streaming",
+      "archive": "files",
+      "files": {
+        "encoder": {
+          "path": "encoder.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/resolve/572aaf4e2e0c603c3fc2a574d096e755a178faa1/encoder.onnx",
+          "sha256": "d4881c57449d581e0770fd53fa66c2fdc6cd167d92ece7c715e603defc96d9d4"
+        },
+        "decoder": {
+          "path": "decoder.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/resolve/572aaf4e2e0c603c3fc2a574d096e755a178faa1/decoder.onnx",
+          "sha256": "455ba38466fce8d5a57e7db68a323b684079ca4d9e1dd93a740d9b2429aae3b1"
+        },
+        "joiner": {
+          "path": "joiner.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/resolve/572aaf4e2e0c603c3fc2a574d096e755a178faa1/joiner.onnx",
+          "sha256": "d406f616736350e2a7df3e39398b78eb2fc1a2ca6973a19d3853fa3227e25b52"
+        },
+        "tokens": {
+          "path": "tokens.txt",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/resolve/572aaf4e2e0c603c3fc2a574d096e755a178faa1/tokens.txt",
+          "sha256": "396dbeb5f4858875690716084f54e90d339679d0ba3e6b5b584f3d7589254d2d"
+        }
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "en"
+      ],
+      "license": "CC-BY-SA",
+      "licenseUrl": "https://huggingface.co/Banafo/Kroko-ASR",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 71,
+      "provenanceVerified": "2026-11-11",
+      "note": "Banafo's Kroko community model for English, exported to sherpa-onnx by its maintainer and fetched file by file pinned to commit 572aaf4. The publisher describes its community models as CC-BY-SA without naming a version, and its Hugging Face metadata gives no further licence text. A streaming zipformer transducer, used here only as a live preview. On clean AMI headset meetings (IS1009b/c/d, close-talk, no crosstalk) it scored 7.9-10.9% word error rate on the microphone channel and 10.0-14.3% on the meeting channel through the streaming engine, against 20.2-33.1% for the Nemotron 3.5 preview and 16-21% for the FastConformer 480 ms preview, at a real-time factor of 0.07-0.12 on one core against 0.61-1.10 and 0.16-0.30. No warm-up WAV: the export's sample clip is 24 kHz, so the image warms with a synthetic tone."
     },
     {
       "id": "nemotron-streaming-en-0.6b-560ms-int8",
