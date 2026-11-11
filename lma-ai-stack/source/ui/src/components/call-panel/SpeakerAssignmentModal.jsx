@@ -12,8 +12,12 @@
  * tab does for one row, through the same identity map and the same write: name
  * the voice, which relabels every line it spoke; say it is the same person as
  * another voice on its channel (a merge); and separate voices merged into it
- * again. When two voices are shown under one name -- both named "Bob" without
- * being merged -- it can also combine them into one person.
+ * again. When two separate voices are shown under one name -- both named "Bob"
+ * without being merged -- it can also combine them into one person. The voices
+ * of a name shown as one person (speaker-modes.js) are not separate: every line
+ * under them already reads as that one name, so they are counted once and not
+ * offered for combining, and the name's lines that carry no voice label are part
+ * of it rather than a voice of their own.
  *
  * Nothing is written until Save, and then in one write. Who may save is
  * decided by the caller (`readOnly`), by the same rule as the Speakers panel,
@@ -37,8 +41,9 @@ import {
 import { channelLabel } from '../common/channels';
 import {
   formatTalkTime,
+  mergeTargetOptions,
+  separateSpeakers,
   serializeSpeakerIdentities,
-  speakerRowLabel,
   withMerge,
   withoutMerges,
   withSpeakerName,
@@ -76,7 +81,16 @@ export const applySpeakerAssignment = (identities, rows, { name, mergeInto, comb
   return next;
 };
 
-const SpeakerAssignmentModal = ({ speaker, rows, roster, identities, onSave, onDismiss, readOnly = false }) => {
+const SpeakerAssignmentModal = ({
+  speaker,
+  rows,
+  roster,
+  identities,
+  onSave,
+  onDismiss,
+  readOnly = false,
+  groups = undefined,
+}) => {
   const [primary] = rows;
   const [name, setName] = useState(primary?.name || '');
   const [mergeInto, setMergeInto] = useState('');
@@ -96,17 +110,14 @@ const SpeakerAssignmentModal = ({ speaker, rows, roster, identities, onSave, onD
 
   const rowKeys = rows.map((row) => row.key);
   const channels = new Set(rows.map((row) => row.channel));
+  // How many people the chip stands for, as the transcript shows them.
+  const speakerCount = separateSpeakers(rows, groups).length;
   // Voices are combined within a channel only: the two channels are separate
   // audio sources, and folding the local microphone into a remote voice is never meant.
-  const canCombine = rows.length > 1 && channels.size === 1;
+  const canCombine = speakerCount > 1 && channels.size === 1;
   const mergeOptions = useMemo(
-    () => [
-      NOT_MERGED,
-      ...roster
-        .filter((other) => !rowKeys.includes(other.key) && channels.has(other.channel))
-        .map((other) => ({ label: speakerRowLabel(other), value: other.key })),
-    ],
-    [roster, rowKeys.join('|')],
+    () => [NOT_MERGED, ...mergeTargetOptions(roster, groups, { exclude: rowKeys, channels: [...channels] })],
+    [roster, groups, rowKeys.join('|')],
   );
   const mergedKeys = rows.flatMap((row) => row.mergedKeys || []);
   const locked = rows.some((row) => row.locked);
@@ -203,8 +214,8 @@ const SpeakerAssignmentModal = ({ speaker, rows, roster, identities, onSave, onD
           </Alert>
         )}
         {failed && <Alert type="error">The speaker names could not be saved. Please try again.</Alert>}
-        {rows.length > 1 && (
-          <Alert type="info" header={`${rows.length} separate voices are shown as "${speaker}"`}>
+        {speakerCount > 1 && (
+          <Alert type="info" header={`${speakerCount} separate voices are shown as "${speaker}"`}>
             {canCombine ? (
               <Checkbox checked={combine} onChange={({ detail }) => setCombine(detail.checked)} disabled={disabled}>
                 They are one person: combine them
@@ -280,7 +291,10 @@ SpeakerAssignmentModal.propTypes = {
   speaker: PropTypes.string.isRequired,
   /** The roster rows of the voices shown under that name; usually one. */
   rows: PropTypes.arrayOf(ROW_SHAPE).isRequired,
-  /** Every voice in the meeting, for "Same person as". */
+  /**
+   * Every voice in the meeting, for "Same person as": speakerDisplayRows' rows,
+   * so each is offered under the name its lines carry.
+   */
   roster: PropTypes.arrayOf(ROW_SHAPE).isRequired,
   // eslint-disable-next-line react/forbid-prop-types
   identities: PropTypes.object.isRequired,
@@ -288,6 +302,9 @@ SpeakerAssignmentModal.propTypes = {
   onSave: PropTypes.func.isRequired,
   onDismiss: PropTypes.func.isRequired,
   readOnly: PropTypes.bool,
+  /** speakerGroups over the meeting's transcript: which names are shown as one person. */
+  // eslint-disable-next-line react/forbid-prop-types
+  groups: PropTypes.object,
 };
 
 export default SpeakerAssignmentModal;

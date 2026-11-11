@@ -309,6 +309,14 @@ platform's name plus its voice id, so one voice could appear under two names. Th
 Speakers panel then counted those rows as a second voice of the wrong person,
 which could push a one-person name towards **Several people**.
 
+So a stored speaker is either `Name (spk_N)` or the bare `Name`, and both are
+intended. Every reader shows the two the same way while the name is shown as one
+person: the transcript, its chips and the page header, the Speakers panel, the
+downloads, the summary and agenda prompts, and the Meeting Assistant all read
+`Bob Strahan` for both. The meeting page counts a name's bare-name rows as that
+name's lines, not as a voice of their own: they are not listed as a second voice
+in the Speakers panel, and the speaker dialog does not offer to combine them.
+
 **What it does on a real meeting.** The thresholds were chosen by replaying a
 58-minute, two-person Zoom meeting (web client, on-demand engine, 415 rows)
 through this code. The platform's speaker changes and the rows' times were taken

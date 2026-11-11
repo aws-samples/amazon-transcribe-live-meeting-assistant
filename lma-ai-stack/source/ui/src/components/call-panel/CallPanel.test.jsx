@@ -17,6 +17,7 @@ import React from 'react';
 import { describe, it, expect, vi, afterEach, beforeAll, beforeEach } from 'vitest';
 import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
+import createWrapper from '@cloudscape-design/components/test-utils/dom';
 
 const responses = vi.hoisted(() => ({ frames: [], cost: null, vps: [], vncToggle: null }));
 // The calls context, which a test can give the writers the page offers controls for.
@@ -1315,6 +1316,81 @@ describe('naming a speaker from the Transcript tab', () => {
       fireEvent.click(more);
       expect(screen.getByRole('dialog', { name: 'Speaker: ConfRm_1 · Voice 1' })).toBeTruthy();
       expect(sendUpdateSpeakerIdentities).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a Virtual Participant meeting whose attendees have one voice label each', () => {
+    // A Zoom stand-up with voice separation on: each attendee's lines carry one
+    // voice label, and one of Bob's lines -- named by the meeting page before his
+    // label was attributed to him -- carries his bare name.
+    const STANDUP = {
+      [ITEM.callId]: {
+        REMOTE: {
+          segments: [
+            line('s0', 'REMOTE', 'Chris Lott (spk_0)', 'Can you hear me?', 1),
+            line('s1', 'REMOTE', 'Jeremy [C] Feldman (spk_1)', 'Yes.', 5),
+            line('s2', 'REMOTE', 'Bob Strahan (spk_2)', 'Let us start.', 11),
+            line('s9', 'REMOTE', 'Bob Strahan', 'Yeah.', 21),
+            line('s10', 'REMOTE', 'Bob Strahan (spk_2)', 'Next item.', 31),
+          ],
+        },
+      },
+    };
+    const groupOf = (base) => screen.getByRole('group', { name: `Voices under ${base}` });
+    const modeToggle = (base) => within(groupOf(base)).getByRole('button', { name: `Show ${base} as several people` });
+
+    it("offers the meeting's owner the one-person / several-people toggle for each attendee", () => {
+      callsContext.value = { calls: [], sendUpdateSpeakerIdentities: vi.fn() };
+      renderPage({ transcript: STANDUP });
+      ['Chris Lott', 'Jeremy [C] Feldman', 'Bob Strahan'].forEach((name) => {
+        expect(modeToggle(name).disabled).toBe(false);
+        expect(modeToggle(name).getAttribute('aria-pressed')).toBe('false');
+      });
+      // Bob's labelled and unlabelled lines are one chip, and no line shows a label.
+      expect(within(groupOf('Bob Strahan')).getAllByRole('button', { name: 'Bob Strahan' })).toHaveLength(1);
+      expect(screen.getByTestId('transcript-scroll').textContent).not.toContain('spk_');
+    });
+
+    it('stores several people for a name with one voice label when its owner says so', async () => {
+      const sendUpdateSpeakerIdentities = vi.fn().mockResolvedValue(true);
+      callsContext.value = { calls: [], sendUpdateSpeakerIdentities };
+      renderPage({ transcript: STANDUP });
+      fireEvent.click(modeToggle('Bob Strahan'));
+      await waitFor(() => expect(sendUpdateSpeakerIdentities).toHaveBeenCalledTimes(1));
+      expect(JSON.parse(sendUpdateSpeakerIdentities.mock.calls[0][1]).speakerModes['REMOTE#Bob Strahan']).toMatchObject(
+        { mode: 'several', source: 'manual' },
+      );
+    });
+
+    it("opens one person's speaker modal with no voices to combine, and other speakers by name", () => {
+      callsContext.value = { calls: [], sendUpdateSpeakerIdentities: vi.fn().mockResolvedValue(true) };
+      renderPage({ transcript: STANDUP });
+      fireEvent.click(within(groupOf('Bob Strahan')).getByRole('button', { name: 'Name or combine Bob Strahan' }));
+      const dialog = screen.getByRole('dialog', { name: 'Speaker: Bob Strahan' });
+      expect(within(dialog).queryByText(/separate voices are shown as/)).toBeNull();
+      expect(within(dialog).queryByRole('checkbox', { name: 'They are one person: combine them' })).toBeNull();
+      const picker = createWrapper(dialog).findSelect();
+      picker.openDropdown();
+      const offered = picker
+        .findDropdown()
+        .findOptions()
+        .map((option) => option.getElement().textContent);
+      expect(offered).toEqual(['No one else (a person of their own)', 'Chris Lott', 'Jeremy [C] Feldman']);
+    });
+
+    it("names all of one person's lines, the unlabelled one included, from its modal", async () => {
+      const sendUpdateSpeakerIdentities = vi.fn().mockResolvedValue(true);
+      callsContext.value = { calls: [], sendUpdateSpeakerIdentities };
+      renderPage({ transcript: STANDUP });
+      fireEvent.click(within(groupOf('Bob Strahan')).getByRole('button', { name: 'Name or combine Bob Strahan' }));
+      const dialog = screen.getByRole('dialog', { name: 'Speaker: Bob Strahan' });
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), { target: { value: 'Robert Strahan' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(sendUpdateSpeakerIdentities).toHaveBeenCalledTimes(1));
+      const { identities, merges } = JSON.parse(sendUpdateSpeakerIdentities.mock.calls[0][1]);
+      expect(identities['REMOTE#Bob Strahan (spk_2)'].name).toBe('Robert Strahan');
+      expect(identities['REMOTE#Bob Strahan'].name).toBe('Robert Strahan');
+      expect(merges).toEqual({});
     });
   });
 });

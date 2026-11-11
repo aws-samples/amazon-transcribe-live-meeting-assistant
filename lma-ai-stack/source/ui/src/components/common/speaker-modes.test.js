@@ -10,6 +10,7 @@ import path from 'node:path';
 import {
   nameableVoiceKeys,
   parseSpeakerIdentities,
+  resolveSpeaker,
   resolveSpeakerName,
   serializeSpeakerIdentities,
 } from './speaker-identities';
@@ -17,8 +18,10 @@ import {
   describeSpeakerMode,
   isUnknownName,
   looksLikeRoom,
+  offersModeChoice,
   ONE_PERSON,
   SEVERAL_PEOPLE,
+  speakerChipLayout,
   speakerGroups,
   speakerModeTip,
   withSpeakerMode,
@@ -140,5 +143,56 @@ describe('without groups', () => {
   it('every voice label is shown, as before speaker modes', () => {
     const segment = { channel: 'REMOTE', speaker: 'Bob (spk_1)' };
     expect(resolveSpeakerName(segment, parseSpeakerIdentities(null))).toBe('Bob (spk_1)');
+  });
+});
+
+describe('which names are offered the One person / Several people choice', () => {
+  const line = (speaker, startTime, channel = 'REMOTE') => ({
+    channel,
+    speaker,
+    startTime,
+    endTime: startTime + 2,
+    isPartial: false,
+  });
+  // Each attendee with one voice label, and a line of Bob's the meeting page
+  // named before his label was attributed to him.
+  const STANDUP = [
+    line('Chris Lott (spk_0)', 1),
+    line('Bob Strahan (spk_2)', 11),
+    line('Bob Strahan', 81),
+    line('LMA (lma@example.com)', 1156, 'LOCAL'),
+  ];
+
+  it('offers it to a name with a single voice label', () => {
+    const groups = speakerGroups(STANDUP, parseSpeakerIdentities(null));
+    expect(offersModeChoice(groups['REMOTE#Bob Strahan'])).toBe(true);
+    expect(offersModeChoice(groups['REMOTE#Chris Lott'])).toBe(true);
+  });
+
+  it("does not count a name's unlabelled lines as a voice", () => {
+    const groups = speakerGroups(STANDUP, parseSpeakerIdentities(null));
+    expect(groups['REMOTE#Bob Strahan'].voices.map((v) => v.id)).toEqual(['spk_2']);
+    expect(groups['REMOTE#Bob Strahan'].mode).toBe(ONE_PERSON);
+  });
+
+  it('does not offer it to a name speaker separation never labelled', () => {
+    const groups = speakerGroups(STANDUP, parseSpeakerIdentities(null));
+    expect(offersModeChoice(groups['LOCAL#LMA (lma@example.com)'])).toBe(false);
+  });
+
+  it("shows a name's labelled and unlabelled lines as one chip beside its toggle", () => {
+    const identities = parseSpeakerIdentities(null);
+    const groups = speakerGroups(STANDUP, identities);
+    const shown = STANDUP.map((s) => {
+      const resolved = resolveSpeaker(s, identities, undefined, groups);
+      return { speaker: resolved.name, speakerKey: `${s.channel}#${s.speaker}`, speakerGroup: resolved.group };
+    });
+    const entries = speakerChipLayout(shown, groups);
+    expect(entries.map((e) => [e.type, e.type === 'group' ? e.chips.map((c) => c.name) : e.name])).toEqual([
+      ['group', ['Chris Lott']],
+      ['group', ['Bob Strahan']],
+      ['name', 'LMA (lma@example.com)'],
+    ]);
+    expect(entries[1].chips[0].keys).toEqual(['REMOTE#Bob Strahan (spk_2)', 'REMOTE#Bob Strahan']);
   });
 });
