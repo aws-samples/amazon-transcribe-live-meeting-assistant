@@ -12,33 +12,24 @@
  * identify-multiple-languages when Amazon Transcribe identifies it from the
  * Configuration page's language options. An older backend leaves it out.
  */
+import { languageName } from '../common/detected-languages';
 import { transcriptionLanguage } from '../common/meeting-context';
-
-const languageNames = (() => {
-  try {
-    return new Intl.DisplayNames(['en'], { type: 'language' });
-  } catch {
-    return null;
-  }
-})();
 
 /**
  * How the completion message names the upload's language, or null when the
- * response does not say: "Korean (ko-KR)" for a language code, the meeting
- * page's wording for an identify mode.
+ * response does not say: "Korean (South Korea), ko-KR" for a language code, named
+ * as the meeting page names detected languages, and the meeting page's wording
+ * for an identify mode.
  */
 export const uploadLanguageLabel = (code) => {
   const label = transcriptionLanguage({ transcriptionLanguage: code });
   if (!label) return null;
   const stored = code.trim();
   if (label !== stored) return label;
-  let name = null;
-  try {
-    name = languageNames?.of(stored.split('-')[0]) || null;
-  } catch {
-    name = null;
-  }
-  return name && name !== stored.split('-')[0] ? `${name} (${stored})` : stored;
+  const name = languageName(stored);
+  // A code Intl cannot name comes back as itself ("qq (QQ)" for qq-QQ).
+  const named = name && name.split(' ')[0] !== stored.split('-')[0];
+  return named ? `${name}, ${stored}` : stored;
 };
 
 /**

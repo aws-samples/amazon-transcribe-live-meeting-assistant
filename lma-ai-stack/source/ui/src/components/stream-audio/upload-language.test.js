@@ -9,12 +9,12 @@ import { uploadErrorMessage, uploadLanguageLabel } from './upload-language';
 
 describe('uploadLanguageLabel', () => {
   it.each([
-    ['de-DE', 'German (de-DE)'],
-    ['ja-JP', 'Japanese (ja-JP)'],
-    ['es-US', 'Spanish (es-US)'],
-    ['en-GB', 'English (en-GB)'],
-    [' pt-BR ', 'Portuguese (pt-BR)'],
-  ])('names the language of %s', (code, label) => {
+    ['de-DE', 'German (Germany), de-DE'],
+    ['ja-JP', 'Japanese (Japan), ja-JP'],
+    ['es-US', 'Spanish (United States), es-US'],
+    ['en-GB', 'English (United Kingdom), en-GB'],
+    [' pt-BR ', 'Portuguese (Brazil), pt-BR'],
+  ])('names the language of %s as the meeting page does', (code, label) => {
     expect(uploadLanguageLabel(code)).toBe(label);
   });
 

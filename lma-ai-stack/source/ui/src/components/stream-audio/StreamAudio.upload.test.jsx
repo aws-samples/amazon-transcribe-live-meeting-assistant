@@ -97,8 +97,8 @@ describe('StreamAudio upload language', () => {
   });
 
   it.each([
-    ['ja-JP', 'Transcription language: Japanese (ja-JP)'],
-    ['fr-CA', 'Transcription language: French (fr-CA)'],
+    ['ja-JP', 'Transcription language: Japanese (Japan), ja-JP'],
+    ['fr-CA', 'Transcription language: French (Canada), fr-CA'],
     ['identify-language', 'Transcription language: Identified by Amazon Transcribe (one language)'],
     ['identify-multiple-languages', 'Transcription language: Identified by Amazon Transcribe (several languages)'],
   ])('names the applied language %s when the upload completes', async (code, text) => {
