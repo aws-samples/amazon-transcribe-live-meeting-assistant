@@ -36,7 +36,7 @@ import { noteParticipantSeen } from './consent-roster.js';
 import { noteSpokenUtterance } from './spoken-replies.js';
 import type { HeardResult, ListenerEngines, ListeningSession } from './consent-listener.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
-import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
+import { configuredWakePhrases, foldWakeSpellings, isStopTalkingRequest } from './stop-request.js';
 import { OpenPartialTracker, assistantRowSpan, onAssistantTurn } from './translator-transcript.js';
 import {
     PcmQueue,
@@ -1681,12 +1681,14 @@ export class TranscriptionService {
     // Wake phrase detection methods
     private detectWakePhrase(text: string): boolean {
         // Remove all punctuation and normalize whitespace
-        const normalized = text.toLowerCase()
+        // "Okay Alex" is how a recogniser writes the spoken "OK Alex"
+        // (stop-request.ts foldWakeSpellings), so both sides are folded.
+        const normalized = foldWakeSpellings(text.toLowerCase()
             .replace(/[,.\?!;:]/g, ' ')  // Replace punctuation with spaces
             .replace(/\s+/g, ' ')         // Normalize multiple spaces
-            .trim();
-        
-        return this.wakePhrases.some(phrase => normalized.includes(phrase));
+            .trim());
+
+        return this.wakePhrases.some(phrase => normalized.includes(foldWakeSpellings(phrase)));
     }
 
     private async handleWakePhraseDetected(detectionTime: number): Promise<void> {
@@ -1705,6 +1707,11 @@ export class TranscriptionService {
             .join(' ');
         
         log.info(`🎤 Wake phrase detected — activating immediately with ${contextTranscript.length} characters of context`);
+        // How long the session had been warming before the question was
+        // complete: the time from the partial that first carried the wake
+        // phrase (and started preConnect) to this finalized segment. 0 means
+        // the wake phrase was first seen in the final, so nothing was warmed.
+        log.info(`[wake] action=activate preconnect_lead_ms=${Math.max(0, Date.now() - detectionTime)}`);
         log.debug('🎤 Wake phrase context:', contextTranscript);
         
         // Activate voice assistant with context (connection already pre-warmed).

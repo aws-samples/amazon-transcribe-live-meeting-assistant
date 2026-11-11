@@ -28,7 +28,7 @@ import {
     matchesChatCommand,
     matchesEndCommand,
 } from './details.js';
-import { ASSISTANT_CHAT_COMMANDS, parseAssistantChatCommand } from './assistant-toggles.js';
+import { ASSISTANT_CHAT_COMMANDS, VOICE_CONTROL_COMMANDS, parseAssistantChatCommand } from './assistant-toggles.js';
 import { allChatHelpMessages, chatHelpMessages } from './chat-help.js';
 import { parseChatQuestion } from './chat-ask.js';
 import { resolveChatAddress } from './chat-addressing.js';
@@ -169,8 +169,9 @@ test('every command the help reply lists is accepted by its matcher', () => {
         .match(/"LMA [^"]+"/g)!
         .map((quoted) => quoted.slice(1, -1)))];
     // leave, pause, start, ask and help, one canonical form per mode command,
-    // the two consent replies, and help addressed to this VP by name.
-    assert.equal(listed.length, 5 + ASSISTANT_CHAT_COMMANDS.length + 2 + 1);
+    // mute and unmute, the two consent replies, and help addressed to this VP
+    // by name.
+    assert.equal(listed.length, 5 + ASSISTANT_CHAT_COMMANDS.length + VOICE_CONTROL_COMMANDS.length + 2 + 1);
     // The addressed form, read as this VP reads it (chat-addressing.ts).
     const addressed = listed.filter((command) => resolveChatAddress(command, details.scribeIdentity, []).kind === 'self');
     assert.equal(addressed.length, 1, `not one addressed form: ${JSON.stringify(addressed)}`);
@@ -225,17 +226,35 @@ test('the help reply leaves out the mode commands when no assistant can change m
         assert.ok(text.includes('"LMA leave"'));
         assert.ok(text.includes('"LMA help"'));
     }
-    // The command list and how to address this VP by name, plus the two
-    // voice-assistant lines.
-    assert.equal(chatHelpMessages(NO_ASSISTANT).length, 2);
-    assert.equal(chatHelpMessages(NOVA_LIKE).length, 4);
+    // The command list, then the two voice-assistant lines (the modes, and
+    // muting with the spoken commands); with only the mute line for an
+    // assistant that cannot change mode.
+    assert.equal(chatHelpMessages(NO_ASSISTANT, false, false, false).length, 1);
+    assert.equal(chatHelpMessages(ELEVENLABS_LIKE, false, false, false).length, 2);
+    assert.equal(chatHelpMessages(NOVA_LIKE, false, false, false).length, 3);
+});
+
+test('the help reply explains addressing one VP by name only when another VP is here', () => {
+    // One VP is nearly every meeting, and there the line is only more chat.
+    assert.ok(!chatHelpMessages(NOVA_LIKE, false, false, false).join(' ').includes('more than one LMA'));
+    const withPeer = chatHelpMessages(NOVA_LIKE, false, false, true);
+    assert.equal(withPeer.length, 4);
+    assert.ok(withPeer[1].includes('more than one LMA'));
+});
+
+test('the help reply lists mute and unmute whenever a voice assistant is running', () => {
+    for (const assistant of [NOVA_LIKE, ELEVENLABS_LIKE]) {
+        const text = chatHelpMessages(assistant, false, false, false).join(' ');
+        assert.ok(text.includes('"LMA mute"') && text.includes('"LMA unmute"'));
+    }
+    assert.ok(!chatHelpMessages(NO_ASSISTANT, false, false, false).join(' ').includes('LMA mute'));
 });
 
 test('the help reply lists the consent replies only while the meeting runs a consent flow', () => {
-    assert.ok(!chatHelpMessages(NO_ASSISTANT, false, false).join(' ').includes('LMA consent'));
-    const withConsent = chatHelpMessages(NO_ASSISTANT, false, true);
-    assert.equal(withConsent.length, 3);
-    assert.ok(withConsent[2].includes('"LMA consent"') && withConsent[2].includes('"LMA no consent"'));
+    assert.ok(!chatHelpMessages(NO_ASSISTANT, false, false, false).join(' ').includes('LMA consent'));
+    const withConsent = chatHelpMessages(NO_ASSISTANT, false, true, false);
+    assert.equal(withConsent.length, 2);
+    assert.ok(withConsent[1].includes('"LMA consent"') && withConsent[1].includes('"LMA no consent"'));
 });
 
 test('every help message is one short line', () => {

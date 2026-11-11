@@ -11,13 +11,15 @@ import {
   MeetingMode,
   novaSonicConfigTablesFromEnv,
 } from './nova-sonic-config-loader.js';
-import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
+import { configuredWakePhrases, foldWakeSpellings, isStopTalkingRequest } from './stop-request.js';
 import { mutedLookupSkipReason, SKIPPED_LOOKUP_RESULT, skippedLookupLogLine } from './muted-lookup.js';
 import { ActivationMode } from './voice-assistant-interface.js';
 import {
   AssistantReconfigureOutcome,
   AssistantReconfigureRequest,
   formatAssistantToggleLog,
+  VoiceControlOutcome,
+  VoiceControlState,
 } from './assistant-toggles.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { ActivationWindow } from './voice-activation-window.js';
@@ -338,7 +340,9 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
         // Group-meeting wake-phrase handling for ElevenLabs (parity with Nova).
         // In translator mode we don't gate on wake phrases — every utterance
         // triggers a translation.
-        if (this.meetingMode === 'group' && userText && this.containsWakePhrase(userText)) {
+        if (this.chatMuted) {
+          // Muted from chat: only "LMA unmute" brings it back.
+        } else if (this.meetingMode === 'group' && userText && this.containsWakePhrase(userText)) {
           // "Hey Alex, stop talking" contains the wake phrase, so without this
           // guard the utterance that asked for silence would itself make the
           // agent audible again.
@@ -723,6 +727,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
   async preConnect(): Promise<void> {
     if (this.activationMode === 'always_active') return; // already connected
     if (this.isConnected) return; // already connected
+    if (this.chatMuted) return; // will not be activated (setMutedByChat)
     if (this._preConnecting) {
       if (this._preConnectPromise) await this._preConnectPromise;
       return;
@@ -749,6 +754,11 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
   async activate(duration?: number, initialContext?: string): Promise<void> {
     if (this.activationMode === 'always_active') {
       // Already always active, no need to activate
+      return;
+    }
+
+    if (this.chatMuted) {
+      log.info('[voice-control] wake phrase ignored - the voice assistant is muted from chat');
       return;
     }
 
@@ -851,12 +861,12 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
 
   private containsWakePhrase(text: string): boolean {
     const wakePhrases = configuredWakePhrases();
-    const normalized = text.toLowerCase()
+    const normalized = foldWakeSpellings(text.toLowerCase()
       .replace(/[,.\?!;:'"]/g, ' ')
       .replace(/\s+/g, ' ')
-      .trim();
+      .trim());
     return wakePhrases.some((phrase: string) => {
-      const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+      const escapedPhrase = foldWakeSpellings(phrase).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
       // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- Inputs are regex-escaped above; escaped wake-phrase cannot produce catastrophic backtracking
       const regex = new RegExp(`\\b${escapedPhrase}\\b`, 'i');
       return regex.test(normalized);
@@ -955,6 +965,35 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
 
   isMuted(): boolean {
     return this._isMuted;
+  }
+
+  /** Set by "LMA mute" in chat; only "LMA unmute" clears it (setMutedByChat). */
+  private chatMuted = false;
+
+  /**
+   * "LMA mute" / "LMA unmute" in chat (see
+   * VoiceAssistantProvider.setMutedByChat). Muted holds through wake phrases
+   * until unmuted from chat, and ends a wake-phrase activation at once.
+   */
+  setMutedByChat(muted: boolean): VoiceControlOutcome {
+    const state = (): VoiceControlState => {
+      if (this.chatMuted) return 'muted';
+      if (this.meetingMode === 'group') return 'listen-mode';
+      return this.activationMode === 'always_active' ? 'listening' : 'listening-for-wake-phrase';
+    };
+    if (muted) {
+      if (this.chatMuted) return { result: 'unchanged', state: state() };
+      this.chatMuted = true;
+      this.mute('muted from chat');
+      if (this.activationMode === 'wake_phrase' && this._isActivated) {
+        this.deactivate();
+      }
+      return { result: 'applied', state: state() };
+    }
+    if (!this.chatMuted && !this._isMuted) return { result: 'unchanged', state: state() };
+    this.chatMuted = false;
+    if (this.meetingMode !== 'group') this.unmute('unmuted from chat');
+    return { result: 'applied', state: state() };
   }
 
   /**

@@ -150,10 +150,11 @@ test('the prompt and the tool both require the stop to be addressed to the assis
     }
 });
 
-test('the fast acknowledgement for ordinary interruptions is kept', () => {
+test('the fast acknowledgement for ordinary interruptions is kept while always listening', () => {
     // Barge-in on a normal correction or a new question should still get an
-    // instant "Got it" — only the stop case changes.
-    const prompt = systemPrompt(novaAgent({ meetingMode: 'normal' }));
+    // instant "Got it" — only the stop case changes. Wake-phrase assistant mode
+    // has its own block (wake-reply-gate.test.ts).
+    const prompt = systemPrompt(novaAgent({ meetingMode: 'normal', activationMode: 'always_active' }));
     assert.match(prompt, /INTERRUPTION HANDLING:/);
     assert.match(prompt, /Keep it to 1-2 words for minimal interruption/);
     assert.match(prompt, /Otherwise, proceed with their new request/);
@@ -237,6 +238,8 @@ test('only translator mode sounds a cue when the mute tool fires', async () => {
     const translatorTones: string[] = [];
     (translator as any).playConfirmationTone = (kind: string) => translatorTones.push(kind);
     (translator as any).refreshSession = async () => {};
+    // The model's own transcript of the pause phrase, which the tool call answers.
+    (translator as any).noteTranslatorUtterance('translator mute');
     await (translator as any).handleMuteTool('tool-use-id');
     assert.deepEqual(translatorTones, ['mute'], 'the translator pause cue is audible');
     assert.equal(translator.isMuted(), true);

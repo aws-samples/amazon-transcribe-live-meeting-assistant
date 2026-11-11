@@ -822,6 +822,8 @@ test('the translator pause still cuts playback off immediately', async () => {
         const agent = novaAgent({ meetingMode: 'translator', activationMode: 'always_active' });
         (agent as any).playConfirmationTone = () => {};
         (agent as any).refreshSession = async () => {};
+        // The model's own transcript of the pause phrase, which the tool call answers.
+        (agent as any).noteTranslatorUtterance('translator mute');
         await (agent as any).handleMuteTool('tool-use-id');
         assert.deepEqual(playbackTeardowns, ['immediate']);
     } finally {
