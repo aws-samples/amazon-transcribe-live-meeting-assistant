@@ -108,9 +108,11 @@ identification.
 
 An upload is transcribed in the language set in the Amazon Transcribe section
 of the Configuration page, the same setting that streaming meetings and Virtual
-Participants use. The settings are read when the upload starts. A change saved
-later applies to the next upload, and an upload already started keeps the
-language it started with.
+Participants use. Uploads always run as Amazon Transcribe batch jobs: the ASR
+MicroVM engine (`EnableMicrovmAsr`, on by default) is not used for uploads, even
+on a deployment where it transcribes the streaming meetings. The settings are read
+when the upload starts. A change saved later applies to the next upload, and an
+upload already started keeps the language it started with.
 
 | Amazon Transcribe › Language | What the upload uses |
 | ---------------------------- | -------------------- |
@@ -132,11 +134,15 @@ preferred language. **Redact personal information**, **Custom vocabulary** and
 **Custom language model** are not applied to uploads.
 
 The **Upload complete** message names the language, for example
-*Transcription language: Japanese (ja-JP)*. The **Details** tab of the meeting
-shows the language as well. With language identification it reads
-*Identified by Amazon Transcribe* while the job runs, and then the language
-Amazon Transcribe identified; with `identify-multiple-languages`, every
-language found, the most-spoken first.
+*Transcription language: Japanese (Japan), ja-JP*. The **Details** tab of the meeting
+shows the same language setting. With language identification it reads
+*Identified by Amazon Transcribe (one language)* or *(several languages)*, and
+once the job finishes, the languages Amazon Transcribe identified are listed
+under **Detected languages**, as for a streaming meeting. With
+`identify-language` every transcript line is in the one language identified;
+with `identify-multiple-languages` each line takes the language most of its
+words were identified in, and lines are marked with a language code when more
+than one language was heard.
 
 A client of the `createUploadMeeting` GraphQL mutation can set `languageCode`
 to a language code such as `de-DE`: any language Amazon Transcribe batch
