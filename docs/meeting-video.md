@@ -575,7 +575,7 @@ finds the images. The item has:
 |---|---|
 | `FrameId` | The frame's id: its time in milliseconds, zero-padded, and a short suffix. Frames sort by it in time order. |
 | `Timestamp` | Seconds on the transcript's timeline, the same clock as a transcript segment's start time. |
-| `VideoOffset` | Seconds into the meeting's video recording, for playing the recording from that frame. |
+| `VideoOffset` | Seconds into the meeting's video recording, for playing the recording from that frame. Measured from the recording's first captured frame, which FFmpeg reports, not from when FFmpeg was launched. |
 | `ImageUrl`, `ThumbnailUrl` | Where the two images are stored. |
 | `Source` | What took the frame: `VIRTUAL_PARTICIPANT` or `DESKTOP_CAPTURE`. |
 | `ShareDetected` | `true` when the frame was taken while the platform showed a share; absent on platforms without the signal and for desktop video. |

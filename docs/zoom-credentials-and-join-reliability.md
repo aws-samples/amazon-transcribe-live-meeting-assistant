@@ -74,6 +74,7 @@ Independently of the sign-in feature, every platform handler wraps its hardcoded
 
 - Model: `us.anthropic.claude-haiku-4-5-20251001-v1:0` (override via `BEDROCK_DOM_RESOLVER_MODEL_ID`; set to empty string to disable the fallback entirely).
 - Successful resolutions are cached in the **DomSelectorCache** DynamoDB table (shared across all VP tasks, 30-day TTL on `lastUsedAt`). The first meeting after a Zoom UI change pays the Bedrock-call cost; every subsequent meeting hits the cache.
+- Zoom's own in-meeting notices that are not modal dialogs (the "Introducing My Notes" callout, the graphics/hardware-acceleration banner) are dismissed by their text for the whole meeting: every 3 s for the first two minutes after joining, then every 15 s (`zoom-overlays.ts`, log prefix `[zoom-overlays]`). To cover another notice, add a fragment of its text to `ZOOM_OVERLAY_SPEC.noticeText`.
 - Unknown popup dialogs that the existing keyword auto-dismiss handler can't classify are sent to Claude as `analyzeUnknownDialog`. CONSENT/RECORDING_NOTICE → auto-dismissed; CAPTCHA/SSO/LOGIN/BLOCKED → escalated to `MANUAL_ACTION_REQUIRED` with the live VNC viewer.
 
 ## Operational notes
