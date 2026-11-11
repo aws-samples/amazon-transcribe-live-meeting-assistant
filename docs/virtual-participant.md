@@ -12,6 +12,7 @@ title: "Virtual Participant"
   - [Cost of voice separation](#cost-of-voice-separation)
 - [How Speaker Names Are Assigned](#how-speaker-names-are-assigned)
   - [Naming rows from the voice as well](#naming-rows-from-the-voice-as-well)
+  - [Live rows](#live-rows)
 - [Supported Platforms](#supported-platforms)
   - [Google Meet](#google-meet)
 - [Joining a Meeting](#joining-a-meeting)
@@ -308,6 +309,14 @@ platform's name plus its voice id, so one voice could appear under two names. Th
 Speakers panel then counted those rows as a second voice of the wrong person,
 which could push a one-person name towards **Several people**.
 
+So a stored speaker is either `Name (spk_N)` or the bare `Name`, and both are
+intended. Every reader shows the two the same way while the name is shown as one
+person: the transcript, its chips and the page header, the Speakers panel, the
+downloads, the summary and agenda prompts, and the Meeting Assistant all read
+`Bob Strahan` for both. The meeting page counts a name's bare-name rows as that
+name's lines, not as a voice of their own: they are not listed as a second voice
+in the Speakers panel, and the speaker dialog does not offer to combine them.
+
 **What it does on a real meeting.** The thresholds were chosen by replaying a
 58-minute, two-person Zoom meeting (web client, on-demand engine, 415 rows)
 through this code. The platform's speaker changes and the rows' times were taken
@@ -351,6 +360,75 @@ Zoom standup), so on that engine fewer voices are proven and more rows keep the
 platform's name. To see how a meeting was named, compare its rows' voice ids with
 their names: a voice id that appears under one name throughout, and names that
 change at the voice changes, mean the voices were proven.
+
+### Live rows
+
+A row is shown live, as partial results, while the person is still speaking, and its
+final replaces it when the engine closes the row. On the
+[on-demand engine](microvm-asr.md) with voice separation on, the Virtual Participant asks
+the engine for a provisional voice label on each partial too. The label is read from the
+most recent second of the row's own audio (see
+[Partials name nobody](microvm-asr.md#partials-name-nobody)). Each partial is then named
+the same way as a final:
+
+- **When the partial's voice is proven,** the live row takes that voice's attendee at
+  once, whatever the platform shows at that moment. A reply that begins while Zoom still
+  shows the previous speaker is named after the person replying from its first partials,
+  rather than only when its final arrives.
+- **Before the voice is proven,** or when a partial has no label yet (the first fraction
+  of a second of a row, an engine that does not send one, or Amazon Transcribe, which
+  never labels partials), the live row is named by the platform as before.
+- **No flicker.** A live row keeps the name it shows until a different name is
+  confirmed. A proven voice's name replaces a platform name at once. Any other change
+  needs two partials in a row (about a second) to agree on it, so a single reading, such
+  as a backchannel "mm-hmm" or a diarizer blip, never renames the row, and a row cannot
+  go back and forth between two names on single readings.
+- **The final decides.** The final is named exactly as described in
+  [Naming rows from the voice as well](#naming-rows-from-the-voice-as-well), and it is
+  the row that is stored. Partials add nothing to a voice's count. When the final's name
+  differs from the name its live row last showed, the Virtual Participant logs
+  `[ASR] row … renamed at its final: <live name> (<source>) -> <final name> (<source>)`,
+  so how often it happens can be counted from the log.
+
+**What it does on a real meeting.** This was replayed on a 33-minute, three-person Zoom
+meeting (web client, on-demand engine, voice separation on), whose log records the time
+and text of every partial and every change of active speaker. The log does not record
+the name each partial was sent with. On the shipped code that name is the platform's
+majority over the row so far, which the replay recomputes. The replay compares each
+partial's name with the name of the final row that covers the words being spoken at that
+moment, which is the name the reader sees once the row is corrected. The voice labels
+the engine would have sent on the partials are not in the log either. They are estimated
+from the finals' labels, which come from the same diarizer frames, read 1 s behind the
+partial, as the engine's refresh allows, and named after each voice's proven attendee.
+Every voice in this meeting was proven early, so the estimate leaves out the platform
+fallback that would apply before a voice is proven.
+
+| Live-row naming | Time a live row showed a name other than the corrected one | Name changes on live rows | Changes back to a name already left |
+|---|---|---|---|
+| Platform indicator (before this change) | 146.8 s of 1,412.9 s | 31 | 3 |
+| Voice when proven, no hold | 58.6 s | 50 | 18 |
+| Voice when proven, with the hold described above | 66.3 s | 28 | 4 |
+
+Of the 157 live rows, 116 were spoken by one voice. On the platform indicator, 5 of those
+were still showing the wrong name when their final arrived, against none with the voice.
+The other 41 were closed by the engine as one utterance spoken by two or more voices, and
+split at the final. Those rows are corrected at their final whatever the live name was,
+because the final gives the row's own place in the transcript to the first voice and puts
+each later voice's words on a new row. A live row follows the voice currently speaking,
+so on those rows the change at the final goes the other way. That case is what was
+reported in this meeting: an attendee's reply was shown under the previous speaker's name
+until the end of the utterance. With the voice, his name would have appeared 2.1 s into
+his 4.7 s reply; the platform's majority reached him only after he had finished. The row
+would still have been split when it closed. Closing a row as
+soon as the voice changes, rather than at the end of the utterance, is what would remove
+that correction, and the on-demand engine does not do this with the Sortformer diarizer.
+
+With the engine's labels 0.4 s behind instead of 1 s, the wrong-name time is 58.3 s; at
+2 s behind it is 111.9 s, with 46 name changes, which is why the engine refreshes its
+labels for partials about once a second. All of this comes from one meeting on one
+platform, with an estimate of the partials' labels rather than the labels themselves. It
+has not run in a live meeting, and what it costs the engine has not been measured (see
+[Partials name nobody](microvm-asr.md#partials-name-nobody)).
 
 ## Supported Platforms
 

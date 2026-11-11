@@ -54,6 +54,28 @@
  * of a busy screen add up against an old frame. Two frames are never stamped
  * less than MIN_STAMP_GAP_MS apart.
  *
+ * How long a picture has to hold still also adapts. A screen that moves in
+ * bursts close together -- a page scrolled a step at a time, a list being
+ * typed into, a dialog opened and closed again -- is one view being worked
+ * on, and a frame of it taken after two still samples is usually a frame of
+ * the view mid-way. A move that starts less than `busyGapMs` after the move
+ * before it ended makes the screen busy, and while it is busy a picture has to
+ * hold still for `busySettleMs` before it is kept; a slide flipped after the
+ * slide before it held still for longer than `busyGapMs` still settles in
+ * `settleSamples`. Once `maxBusyWaitMs` have passed since the busy spell began
+ * and since the last kept frame, the plain settle count applies again, so
+ * content that never holds still that long is still captured, at the
+ * backoff's spacing. Absent `busySettleMs`, every picture settles in
+ * `settleSamples`. The frame is stamped with when its picture appeared
+ * either way; the longer settle delays only the decision.
+ *
+ * A picture that has held still for `holdMs` is a view somebody stayed on,
+ * and waits only `minIntervalMs` however far the interval has backed off, as
+ * a change of screen does. A page switch inside a shared window can change
+ * less of the grid than `majorChangeFraction` (the window's frame, the
+ * desktop and the meeting client around it stay put), and would otherwise
+ * wait out the backed-off interval or be missed.
+ *
  * Kept free of I/O so it can be tested on synthetic frames; see
  * keyframe-sampler.ts for the FFmpeg side.
  *
@@ -83,6 +105,12 @@ export interface KeyframeThresholds {
      * backoff.
      */
     majorChangeFraction?: number;
+    /**
+     * While the screen is busy (see KeyframeDetectorConfig.busyGapMs), how
+     * long a picture has to hold still before it is kept, instead of
+     * `settleSamples`. Absent: no longer settle while busy.
+     */
+    busySettleMs?: number;
 }
 
 export interface KeyframeDetectorConfig {
@@ -100,6 +128,23 @@ export interface KeyframeDetectorConfig {
     backoffStepsMs?: number[];
     /** Each time the screen stays quiet this long, the interval steps back down one. */
     quietStepMs?: number;
+    /**
+     * A move that starts less than this after the previous move ended makes
+     * the screen busy (see KeyframeThresholds.busySettleMs). Default 10 s.
+     */
+    busyGapMs?: number;
+    /**
+     * How long the screen can stay busy before the plain settle count applies
+     * again, so a view that never holds still for `busySettleMs` is still
+     * captured. Default 30 s.
+     */
+    maxBusyWaitMs?: number;
+    /**
+     * A picture that has held still this long waits only `minIntervalMs` after
+     * the last kept frame, however far the interval has backed off. Absent:
+     * only a change of screen skips the backoff.
+     */
+    holdMs?: number;
     /** Samples of history kept per cell for the motion mask (at most 8). */
     motionWindow?: number;
     /** Changes within the window at which a cell counts as moving. */
@@ -169,6 +214,15 @@ export class KeyframeDetector {
     private kept: KeptFrame[] = [];
     private stillSamples = 0;
     private stillSinceMs = 0;
+    /** The time of the last sample that was not still (the latest move's end so far). */
+    private lastMoveMs: number | null = null;
+    /** Whether the screen is busy: the current move started soon after the one before it. */
+    private busy = false;
+    /** When the current busy spell began (its first move), while busy. */
+    private busySinceMs = 0;
+    private readonly busyGapMs: number;
+    private readonly maxBusyWaitMs: number;
+    private readonly holdMs: number;
     /** The first sample of the current still run. */
     private runStart: Uint8Array | null = null;
     /** The latest sample that had held still for the settle count. */
@@ -201,6 +255,14 @@ export class KeyframeDetector {
         const steps = (config.backoffStepsMs ?? []).filter((ms) => Number.isFinite(ms) && ms > config.minIntervalMs);
         this.intervalsMs = [config.minIntervalMs, ...steps.sort((a, b) => a - b)];
         this.quietStepMs = config.quietStepMs ?? Infinity;
+        this.busyGapMs = config.busyGapMs ?? 10_000;
+        this.maxBusyWaitMs = config.maxBusyWaitMs ?? 30_000;
+        this.holdMs = config.holdMs ?? Infinity;
+    }
+
+    /** Whether the screen is busy, so pictures need the longer settle (for diagnostics). */
+    get isBusy(): boolean {
+        return this.busy;
     }
 
     /** The interval a frame now has to wait after the last kept one (for diagnostics). */
@@ -246,6 +308,15 @@ export class KeyframeDetector {
         if (still) {
             this.stillSamples++;
         } else {
+            // A sample that follows a still one starts a new move. It makes the
+            // screen busy when the previous move ended less than busyGapMs before;
+            // a move whose samples follow each other continues the move.
+            if (this.previous !== null && this.stillSamples > 0) {
+                const startsBusy = this.lastMoveMs !== null && nowMs - this.lastMoveMs < this.busyGapMs;
+                if (startsBusy && !this.busy) this.busySinceMs = this.lastMoveMs!;
+                this.busy = startsBusy;
+            }
+            if (this.previous !== null) this.lastMoveMs = nowMs;
             this.stillSamples = 0;
             this.stillSinceMs = nowMs;
             this.runStart = current;
@@ -282,12 +353,28 @@ export class KeyframeDetector {
         // last kept frame was taken: a picture kept again within the same
         // still run appeared after that frame, not with it.
         const firstSeenMs = reference ? Math.max(this.stillSinceMs, reference.atMs) : this.stillSinceMs;
-        const settled = this.stillSamples >= thresholds.settleSamples;
-        if (settled) this.settledPicture = current;
+        // While busy the picture has to hold still for longer, unless the screen
+        // has been busy too long to wait for that. Measured from the later of
+        // the busy spell's start and the last kept frame, so a screen that stays
+        // busy is captured once per maxBusyWaitMs at most by the plain settle,
+        // not at every settle once it has been busy that long.
+        const waitingSinceMs = Math.max(this.busySinceMs, reference ? reference.atMs : -Infinity);
+        const waitLonger =
+            this.busy && thresholds.busySettleMs !== undefined && nowMs - waitingSinceMs < this.maxBusyWaitMs;
+        const steady = this.stillSamples >= thresholds.settleSamples;
+        const settled = steady && (!waitLonger || nowMs - this.stillSinceMs >= (thresholds.busySettleMs ?? 0));
+        // The baseline for a change of screen is the picture that held still for
+        // the plain count, busy or not: against an older one, the small updates
+        // of a busy screen would add up to a change of screen.
+        if (steady) this.settledPicture = current;
         const major =
             this.runBaseline !== null &&
             changedFraction(current, this.runBaseline, pixelDelta, this.moving) >= (thresholds.majorChangeFraction ?? Infinity);
-        const intervalMs = major ? this.intervalsMs[0] : this.intervalsMs[this.stepFor(this.burst)];
+        // A picture that has held still for holdMs is a view somebody stayed on,
+        // not a passing state of a busy screen: like a change of screen, it waits
+        // only the minimum interval.
+        const held = nowMs - this.stillSinceMs >= this.holdMs;
+        const intervalMs = major || held ? this.intervalsMs[0] : this.intervalsMs[this.stepFor(this.burst)];
         const spaced =
             reference === null ||
             (nowMs - reference.atMs >= intervalMs && firstSeenMs - reference.firstSeenMs >= MIN_STAMP_GAP_MS);
@@ -328,11 +415,14 @@ export class KeyframeDetector {
      * have to settle again rather than continue a run from before the gap. The
      * last kept frame is kept so a share that resumes on the same slide is not
      * captured twice; the mask is kept because the camera tiles beside a share
-     * are usually where they were.
+     * are usually where they were. The screen stops counting as busy: what it
+     * did before the gap says nothing about the share that resumes.
      */
     pause(): void {
         this.previous = null;
         this.runStart = null;
         this.stillSamples = 0;
+        this.lastMoveMs = null;
+        this.busy = false;
     }
 }

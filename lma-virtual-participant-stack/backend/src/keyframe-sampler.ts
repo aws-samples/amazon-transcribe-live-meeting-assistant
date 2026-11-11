@@ -79,6 +79,22 @@ const numberListEnv = (name: string, fallback: number[]): number[] => {
  * plus the settle is kept slide by slide. A picture differing by 10% or more
  * from the one settled before it (KEYFRAME_MAJOR_CHANGE_FRACTION, above the
  * 4-7% of template slides) is a different screen and skips the backoff.
+ *
+ * A shared live view (an application being worked in, a page scrolled a step
+ * at a time, a list that keeps growing) also moves in bursts a few seconds
+ * apart. Replayed from the video of a measured meeting on which the owner
+ * shared the LMA web UI, two still samples were often a pause mid-scroll or a
+ * dialog open for under three seconds, and the frame grabbed after it showed
+ * the dialog already closed. So a move that starts less than
+ * KEYFRAME_BUSY_GAP_MS after the previous one ended makes the screen busy,
+ * and while it is busy a picture has to hold still for KEYFRAME_BUSY_SETTLE_MS
+ * before it is kept; once KEYFRAME_MAX_BUSY_WAIT_MS pass with no frame kept,
+ * the two-sample settle applies again. Slides a deck holds for longer than
+ * the busy gap are unaffected. A picture that holds still for KEYFRAME_HOLD_MS
+ * (a page somebody stays on) skips the backoff as a change of screen does:
+ * on the same meeting a page switch inside a shared window scored 7-13%, so
+ * some page switches did not reach the change-of-screen fraction and waited
+ * out a 60 s interval.
  */
 
 /** Thresholds while the platform shows a screen share. */
@@ -88,6 +104,7 @@ export const SHARE_THRESHOLDS: KeyframeThresholds = {
     settleSamples: numberEnv('KEYFRAME_SETTLE_SAMPLES', 2),
     maxMovingFraction: numberEnv('KEYFRAME_MAX_MOVING_FRACTION', 0.5),
     majorChangeFraction: numberEnv('KEYFRAME_MAJOR_CHANGE_FRACTION', 0.1),
+    busySettleMs: numberEnv('KEYFRAME_BUSY_SETTLE_MS', 6000),
 };
 
 /**
@@ -101,6 +118,7 @@ export const STRICT_THRESHOLDS: KeyframeThresholds = {
     settleSamples: numberEnv('KEYFRAME_STRICT_SETTLE_SAMPLES', 3),
     maxMovingFraction: numberEnv('KEYFRAME_STRICT_MAX_MOVING_FRACTION', 0.25),
     majorChangeFraction: numberEnv('KEYFRAME_STRICT_MAJOR_CHANGE_FRACTION', 0.1),
+    busySettleMs: numberEnv('KEYFRAME_STRICT_BUSY_SETTLE_MS', 6000),
 };
 
 const SAMPLE_FPS = numberEnv('KEYFRAME_SAMPLE_FPS', 1, 0.1);
@@ -110,6 +128,12 @@ const MIN_INTERVAL_MS = numberEnv('KEYFRAME_MIN_INTERVAL_MS', 4000);
 export const BACKOFF_STEPS_MS = numberListEnv('KEYFRAME_BACKOFF_STEPS_MS', [30_000, 60_000]);
 /** Each spell of this long with the screen quiet steps the interval back down one. */
 export const QUIET_STEP_MS = numberEnv('KEYFRAME_QUIET_STEP_MS', 10_000);
+/** A move starting less than this after the one before makes the screen busy. */
+export const BUSY_GAP_MS = numberEnv('KEYFRAME_BUSY_GAP_MS', 10_000);
+/** With no frame kept for this long, a busy screen settles in the plain sample count again. */
+export const MAX_BUSY_WAIT_MS = numberEnv('KEYFRAME_MAX_BUSY_WAIT_MS', 30_000);
+/** A picture still for this long waits only the minimum interval. */
+export const HOLD_MS = numberEnv('KEYFRAME_HOLD_MS', 15_000);
 /** Two frames are never stamped closer together than this on the transcript's clock. */
 const MIN_TIMESTAMP_GAP_SECONDS = 1;
 const MAX_PER_MEETING = numberEnv('KEYFRAME_MAX_PER_MEETING', 1000);
@@ -233,6 +257,9 @@ export class KeyframeSampler {
         minIntervalMs: MIN_INTERVAL_MS,
         backoffStepsMs: BACKOFF_STEPS_MS,
         quietStepMs: QUIET_STEP_MS,
+        busyGapMs: BUSY_GAP_MS,
+        maxBusyWaitMs: MAX_BUSY_WAIT_MS,
+        holdMs: HOLD_MS,
     });
     /** Transcript time of the last frame announced or being captured. */
     private lastTimestamp: number | null = null;

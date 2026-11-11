@@ -267,6 +267,25 @@
       }
     },
     {
+      "name": "attendees with one voice label each, and a line the page named before its label was attributed, are named without labels",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Chris Lott (spk_0)", "start": 1.2, "end": 2.0},
+        {"channel": "REMOTE", "speaker": "Jeremy [C] Feldman (spk_1)", "start": 4.9, "end": 10.7},
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_2)", "start": 11.0, "end": 18.7},
+        {"channel": "REMOTE", "speaker": "Bob Strahan", "start": 81.5, "end": 82.3},
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_2)", "start": 83.0, "end": 90.0},
+        {"channel": "MEETING_CHAT", "speaker": "Bob Strahan", "start": 1032.6, "end": 1032.6},
+        {"channel": "LOCAL", "speaker": "LMA (lma@example.com)", "start": 1156.0, "end": 1158.3}
+      ],
+      "names": ["Chris Lott", "Jeremy [C] Feldman", "Bob Strahan", "Bob Strahan", "Bob Strahan", "Bob Strahan", "LMA (lma@example.com)"],
+      "groups": {
+        "REMOTE#Chris Lott": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_0"]},
+        "REMOTE#Jeremy [C] Feldman": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_1"]},
+        "REMOTE#Bob Strahan": {"mode": "one", "default": "one", "reason": "one-person", "voices": ["spk_2"]},
+        "LOCAL#LMA (lma@example.com)": {"mode": "one", "default": "one", "reason": "one-person", "voices": []}
+      }
+    },
+    {
       "name": "a partial segment is named but does not count",
       "segments": [
         {"channel": "REMOTE", "speaker": "Bob (spk_0)", "start": 0, "end": 10},
