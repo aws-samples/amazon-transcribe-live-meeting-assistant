@@ -455,6 +455,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--audio", type=Path, help="WAV to play (default: a synthesized two-voice meeting)"
     )
     p.add_argument("--max-minutes", type=int, default=90)
+    p.add_argument(
+        "--lead-in",
+        type=float,
+        default=60.0,
+        help="seconds of silence before the synthesized meeting (default 60)",
+    )
     p = sub.add_parser("wait", help="wait until the guest is in the call")
     p.add_argument("--timeout", type=float, default=600)
     p = sub.add_parser("chat", help="send a chat message")
