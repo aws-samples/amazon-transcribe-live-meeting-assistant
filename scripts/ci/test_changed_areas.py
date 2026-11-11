@@ -61,7 +61,8 @@ def ran(paths: list[str]) -> set[str]:
         ["CHANGELOG.md"],
         ["docs/configuration-guide.md", "CHANGELOG.md"],
         ["images/diagram.png", "README.md", "lma-ai-stack/README.md"],
-        ["docs-site/astro.config.mjs", "threat-modeling/README.md"],
+        ["docs-site/src/content/docs/index.mdx", "threat-modeling/README.md"],
+        ["docs-site/src/assets/logo-dark.svg", "docs-site/public/videos/demo.mp4"],
     ],
 )
 def test_a_documentation_change_runs_only_the_suites_that_read_documentation(paths) -> None:
@@ -149,10 +150,32 @@ def test_the_browser_extension_runs_alone() -> None:
 
 
 def test_files_no_step_covers_run_nothing() -> None:
-    assert (
-        ran(["lma-desktop-capture-app-stack/source/main.js", "utilities/load-simulator/x.py"])
-        == set()
-    )
+    assert ran(["lma-desktop-capture-app-stack/source/main.js"]) == set()
+
+
+def test_utilities_run_only_the_static_tests_that_scan_them() -> None:
+    assert ran(["utilities/load-simulator/x.py"]) == {"ai_stack"}
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "docs-site/package.json",
+        "docs-site/package-lock.json",
+        "docs-site/setup.sh",
+        "docs-site/add-frontmatter.sh",
+        "docs-site/sync-sidebar.mjs",
+        "docs-site/astro.config.mjs",
+        "docs-site/plugins/remark-github-video.mjs",
+        "docs-site/src/content.config.ts",
+    ],
+)
+def test_the_docs_site_build_is_not_documentation(path: str) -> None:
+    # No step builds or tests the docs site, so its build files run every check.
+    assert ca.primary_area(path) == ("docs_site",)
+    assert not ca.docs_only([path])
+    selection = ca.select(["CHANGELOG.md", path])
+    assert selection.full and "docs_site" in selection.reason
 
 
 def test_a_rename_out_of_an_area_counts_against_both_areas() -> None:
@@ -169,6 +192,50 @@ def test_docs_only_is_decided_by_the_primary_area() -> None:
     assert not ca.docs_only(
         ["lma-llm-template-setup-stack/source/lambda_functions/TroubleshootingAgentSystemPrompt.md"]
     ), "a prompt shipped by a stack is code, whatever its extension"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "CLAUDE.md",
+        "AGENTS.md",
+        "docs/CLAUDE.md",
+        "docs-site/AGENTS.md",
+        "lma-ai-stack/source/ui/CLAUDE.md",
+        ".claude/skills/pr-review.md",
+        ".claude/skills/pr-review-ci.md",
+        ".claude/skills/x/README.md",
+        ".claude/skills/x/SKILL.md",
+        ".claude/settings.json",
+        ".claude/agents/reviewer.md",
+        "docs/.claude/skills/x.md",
+    ],
+)
+def test_an_instruction_file_is_never_documentation(path: str) -> None:
+    assert ca.is_instruction_path(path)
+    assert ca.primary_area(path) == ("agent_instructions",)
+    assert not ca.docs_only([path])
+    assert not ca.docs_only(["CHANGELOG.md", path])
+    # The suites that read the instruction files run.
+    assert {"pr_review", "demo_recorder"} <= ran([path])
+
+
+def test_the_review_harness_is_never_documentation() -> None:
+    assert ca.primary_area("scripts/pr_review/README.md") == ("pr_review",)
+    assert not ca.docs_only(["scripts/pr_review/README.md"])
+    assert "pr_review" in ran(["scripts/pr_review/README.md"])
+
+
+def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
+    # Even if a documentation rule were reordered above the instruction rules.
+    rules = ca.PRIMARY_RULES
+    try:
+        ca.PRIMARY_RULES = ca._rules(("**", "docs"))
+        assert ca.docs_only(["docs/x.md"])
+        assert not ca.docs_only(["docs/CLAUDE.md"])
+        assert not ca.docs_only([".claude/skills/x/README.md"])
+    finally:
+        ca.PRIMARY_RULES = rules
 
 
 # --- cross-suite reads and copies held in sync ----------------------------------------
@@ -239,6 +306,15 @@ def test_docs_only_is_decided_by_the_primary_area() -> None:
         ("CLAUDE.md", "demo_recorder"),
         (".claude/skills/product-demo.md", "demo_recorder"),
         ("docs/demo-videos.md", "demo_recorder"),
+        # The AI stack static tests scan utilities/ for createVirtualParticipant
+        # selections and check parameters-page anchors in every *.md.
+        ("utilities/websocket-client/src/index.ts", "ai_stack"),
+        ("utilities/load-simulator/README_x.py", "ai_stack"),
+        ("CLAUDE.md", "ai_stack"),
+        (".claude/skills/integ-tests.md", "ai_stack"),
+        ("integ-tests/README_cases.md", "ai_stack"),
+        ("integ-tests/notes.md", "ai_stack"),
+        ("scripts/pr_review/README.md", "ai_stack"),
     ],
 )
 def test_a_file_another_suite_reads_runs_that_suite(path: str, reader: str) -> None:
@@ -283,7 +359,7 @@ def test_github_outputs_and_shell_assignments_name_every_step() -> None:
     selection = ca.select(["CHANGELOG.md"])
     outputs = dict(line.split("=", 1) for line in ca.github_outputs(selection).splitlines())
     assert outputs["ui"] == "false" and outputs["pr_review"] == "true"
-    assert outputs["full"] == "false" and outputs["areas"] == "docs"
+    assert outputs["full"] == "false" and outputs["areas"] == "ai_stack_inputs,docs"
     assert ca.STEPS.keys() <= outputs.keys()
     shell = ca.shell_assignments(selection)
     assert "CI_RUN_UI=false" in shell and "CI_RUN_PR_REVIEW=true" in shell

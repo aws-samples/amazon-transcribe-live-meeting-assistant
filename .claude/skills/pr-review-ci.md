@@ -315,9 +315,12 @@ only the target branch changed — brought in by merging `develop` into the
 request — therefore do not count, while a file the request reverted does. If
 every changed file is documentation by the primary area of
 `scripts/ci/changed_areas.py` (`CHANGELOG.md`, `docs/**`, READMEs, images, the
-docs site; not `CLAUDE.md` or the skill files, and not prompts shipped inside a
-stack), or no file of the request changed at all, it posts a short comment
-instead of a review:
+docs site's Markdown, MDX and media), or no file of the request changed at all, it
+posts a short comment instead of a review. Never documentation, at any depth: a
+`CLAUDE.md` or `AGENTS.md`, anything under `.claude/`, the review harness in
+`scripts/pr_review/`, the docs site's package files, scripts and configuration, and
+prompts shipped inside a stack. `try_carry_over` also refuses any instruction path
+itself, whatever the target branch's classifier says. The comment:
 
 - it carries `<!-- ai-review: sha=<new head> rev=<n> -->`, so the idempotency
   check and any tool looking for a review of the new head find one, plus

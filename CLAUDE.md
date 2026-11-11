@@ -96,8 +96,9 @@ that changes only that file (the next `develop` push would still catch it).
 **Do not wait for, or re-run, what a change cannot affect.** When nothing a
 check covers changed since a head that passed it — the common cases are a
 CHANGELOG conflict resolution and a docs-only fix — the earlier code head's
-passing run is the evidence: merge as soon as the new head's required check
-reports (on a docs-only head it runs only the short documentation suites). Do not
+passing run is the evidence: the change is ready to merge once the new head's
+required check reports (on a docs-only head it usually runs only a few short
+suites). Do not
 re-run CI, do not ask for a fresh AI review (on a docs-only push it posts a
 carry-over comment instead of calling the model; see
 `.claude/skills/pr-review-ci.md`), and do not run an integration deploy (see
