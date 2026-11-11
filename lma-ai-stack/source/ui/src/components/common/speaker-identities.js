@@ -518,17 +518,23 @@ export const speakerDisplayRows = (roster, identities, groups, fallbackName) =>
  * the Speakers panel opens at) and `keys` every voice under it. Rows are merged
  * by the label alone, deliberately: two different voices given the same name
  * read as one speaker in the transcript, so they are one entry here too.
+ *
+ * Names are compared as a reader sees them -- regardless of case, spacing and
+ * Unicode form -- so two voices both named Marcus Lee are one entry however each
+ * name was typed or proposed, and the first spelling heard is the one shown.
  */
+const sameNameKey = (label) => label.normalize('NFKC').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+
 export const headerSpeakers = (displayRows) => {
   const byLabel = new Map();
   (displayRows ?? []).forEach((row) => {
-    const label = `${row.shownAs ?? ''}`.trim() || speakerRowLabel(row);
-    const entry = byLabel.get(label);
+    const label = `${row.shownAs ?? ''}`.replace(/\s+/g, ' ').trim() || speakerRowLabel(row);
+    const entry = byLabel.get(sameNameKey(label));
     if (entry) {
       entry.keys.push(row.key);
       return;
     }
-    byLabel.set(label, { key: row.key, label, keys: [row.key] });
+    byLabel.set(sameNameKey(label), { key: row.key, label, keys: [row.key] });
   });
   return [...byLabel.values()];
 };

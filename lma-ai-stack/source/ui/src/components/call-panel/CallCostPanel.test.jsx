@@ -15,7 +15,7 @@ import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-import CallCostPanel from './CallCostPanel';
+import CallCostPanel, { CallCostBreakdown } from './CallCostPanel';
 
 const ESTIMATE = {
   CallId: 'Meeting-1',
@@ -193,5 +193,32 @@ describe('CallCostPanel', () => {
     await waitFor(() => expect(loadCost).toHaveBeenCalledTimes(1));
     rerender(<CallCostPanel callId="Meeting-1" refreshKey="Done" loadCost={loadCost} />);
     await waitFor(() => expect(loadCost).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('CallCostBreakdown, compact', () => {
+  it('fits the calculation in four columns, with the price source under the unit price', () => {
+    const sourced = {
+      ...ESTIMATE,
+      Items: [{ ...ESTIMATE.Items[0], PriceOrigin: 'shipped', PriceSource: 'AWS Price List API (offer transcribe)' }],
+    };
+    render(<CallCostBreakdown estimate={sourced} compact />);
+    const headers = screen.getAllByRole('columnheader').map((th) => th.textContent);
+    expect(headers).toEqual(['Service', 'Usage', '× Unit price', '= Cost']);
+    expect(screen.queryByText('Price source')).toBeNull();
+    const priceCell = screen.getByText('$0.0001667').closest('td');
+    expect(priceCell.textContent).toContain('AWS Price List API');
+    expect(screen.getByTitle('1,480 seconds × $0.0001667 = $0.2468')).toBeTruthy();
+  });
+
+  it('keeps the five columns, price source included, when not compact', () => {
+    render(<CallCostBreakdown estimate={ESTIMATE} />);
+    expect(screen.getAllByRole('columnheader').map((th) => th.textContent)).toEqual([
+      'Service',
+      'Usage',
+      '× Unit price',
+      '= Estimated cost',
+      'Price source',
+    ]);
   });
 });

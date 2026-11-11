@@ -98,13 +98,13 @@ const renderService = (row) => {
 
 // Where the line's price came from -- the shipped table's source, or a price
 // set in the active configuration profile -- with the full sentence on selection.
-const renderPriceSource = (row, currency) => {
+const renderPriceSource = (row, currency, { stacked = false } = {}) => {
   if (row.kind !== 'line' || !row.Chargeable) return '';
   const label = priceSourceLabel(row);
   const shipped = row.ShippedUnitPrice;
   const trigger =
     row.PriceOrigin === 'custom' ? (
-      <SpaceBetween direction="horizontal" size="xxs">
+      <SpaceBetween direction={stacked ? 'vertical' : 'horizontal'} size="xxs">
         <Badge color="blue">{label}</Badge>
         {shipped !== null && shipped !== undefined && (
           <Box variant="small">{`shipped ${formatUnitPrice(shipped, currency)}`}</Box>
@@ -137,23 +137,50 @@ const renderPriceSource = (row, currency) => {
   );
 };
 
+const renderUnitPrice = (row, currency) =>
+  row.kind === 'line' && row.Chargeable ? formatUnitPrice(row.UnitPrice, currency) : '';
+
 // The columns read as the calculation they show: usage, times the unit price,
 // equals the cost.
-const buildColumns = (currency) => [
-  { id: 'service', header: 'Service', cell: renderService },
-  {
+//
+// `compact` is for a popover, whose width Cloudscape caps well below what five
+// columns need: the price source moves under the unit price it explains, so
+// the four columns of the calculation fit and nothing is cut off at the edge.
+const buildColumns = (currency, { compact = false } = {}) => {
+  const usage = {
     id: 'usage',
     header: 'Usage',
     cell: (row) => (row.kind === 'line' ? `${formatQuantity(row.Quantity)} ${unitLabel(row.Unit)}` : ''),
-  },
-  {
-    id: 'unitPrice',
-    header: '× Unit price',
-    cell: (row) => (row.kind === 'line' && row.Chargeable ? formatUnitPrice(row.UnitPrice, currency) : ''),
-  },
-  { id: 'cost', header: '= Estimated cost', cell: (row) => renderCost(row, currency) },
-  { id: 'source', header: 'Price source', cell: (row) => renderPriceSource(row, currency) },
-];
+  };
+  if (compact) {
+    return [
+      { id: 'service', header: 'Service', cell: renderService },
+      usage,
+      {
+        id: 'unitPrice',
+        header: '× Unit price',
+        cell: (row) => {
+          const price = renderUnitPrice(row, currency);
+          if (!price) return '';
+          return (
+            <SpaceBetween size="xxs">
+              <span>{price}</span>
+              <Box variant="small">{renderPriceSource(row, currency, { stacked: true })}</Box>
+            </SpaceBetween>
+          );
+        },
+      },
+      { id: 'cost', header: '= Cost', cell: (row) => renderCost(row, currency) },
+    ];
+  }
+  return [
+    { id: 'service', header: 'Service', cell: renderService },
+    usage,
+    { id: 'unitPrice', header: '× Unit price', cell: (row) => renderUnitPrice(row, currency) },
+    { id: 'cost', header: '= Estimated cost', cell: (row) => renderCost(row, currency) },
+    { id: 'source', header: 'Price source', cell: (row) => renderPriceSource(row, currency) },
+  ];
+};
 
 /**
  * The estimate in a few words: "$0.1234 estimated", "No metering data", and so
@@ -167,8 +194,11 @@ export const costSummaryText = ({ estimate, error }, { short = false } = {}) => 
   return `${formatCost(estimate.TotalCost, estimate.Currency || 'USD')}${short ? '' : ' estimated'}${incomplete}`;
 };
 
-/** The itemised estimate, its caveats and where its prices come from. */
-export const CallCostBreakdown = ({ estimate = null, error = null }) => {
+/**
+ * The itemised estimate, its caveats and where its prices come from. `compact`
+ * lays the table out for a popover (see buildColumns).
+ */
+export const CallCostBreakdown = ({ estimate = null, error = null, compact = false }) => {
   const currency = estimate?.Currency || 'USD';
   const unmetered = estimate && !estimate.RecordCount;
   return (
@@ -200,7 +230,7 @@ export const CallCostBreakdown = ({ estimate = null, error = null }) => {
             wrapLines
             items={tableRows(estimate)}
             trackBy="id"
-            columnDefinitions={buildColumns(currency)}
+            columnDefinitions={buildColumns(currency, { compact })}
             footer={
               <Box textAlign="right" fontWeight="bold" fontSize="heading-s">
                 {`Total: ${formatCost(estimate.TotalCost, currency)}`}
@@ -244,6 +274,7 @@ CallCostBreakdown.propTypes = {
   // eslint-disable-next-line react/forbid-prop-types
   estimate: PropTypes.object,
   error: PropTypes.string,
+  compact: PropTypes.bool,
 };
 
 /**

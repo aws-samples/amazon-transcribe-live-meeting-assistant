@@ -90,7 +90,7 @@ const COST_SHAPE = PropTypes.shape({
   refresh: PropTypes.func,
 });
 
-const CostChip = ({ cost }) => {
+export const CostChip = ({ cost }) => {
   const text = costSummaryText(cost, { short: true });
   return (
     <Box variant="span" fontSize="body-s">
@@ -109,7 +109,7 @@ const CostChip = ({ cost }) => {
                 Refresh
               </Button>
             </Box>
-            <CallCostBreakdown estimate={cost.estimate} error={cost.error} />
+            <CallCostBreakdown estimate={cost.estimate} error={cost.error} compact />
           </SpaceBetween>
         }
       >
