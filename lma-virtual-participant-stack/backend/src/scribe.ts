@@ -29,6 +29,7 @@ import {
 import { voiceAssistant } from './voice-assistant.js';
 import { meterTranscribeRequest, pcmSeconds } from './metering.js';
 import { RosterTimeline } from './roster-timeline.js';
+import { PartialNameHold } from './partial-name-hold.js';
 import { SpeakerFusion } from './speaker-fusion.js';
 import { recordedAudio } from './recorded-audio.js';
 import { noteParticipantSeen } from './consent-roster.js';
@@ -281,6 +282,8 @@ export class TranscriptionService {
     // ids are renumbered by every session, so a new one starts a new vote.
     private speakerFusion = new SpeakerFusion();
     private speakerFusionSession: string | undefined;
+    // The name each open live row shows, held against flicker (partial-name-hold.ts).
+    private partialNames = new PartialNameHold();
     private isTranscribing = false;
     private mockTranscriptionInterval: NodeJS.Timeout | null = null;
     
@@ -1012,15 +1015,18 @@ export class TranscriptionService {
     /**
      * A meeting row: the attendee the platform showed for most of the row, or
      * with per-voice labels on, the attendee its voice id has been proven to
-     * (speaker-fusion.ts), plus the voice id.
+     * (speaker-fusion.ts), plus the voice id. A partial is named the same way
+     * from the engine's provisional label, held against flicker within its row
+     * (partial-name-hold.ts).
      */
     private handleMeetingAsrSegment(segment: AsrSegment): void {
         const lag = rosterLagSeconds();
         if (segment.session !== this.speakerFusionSession) {
             this.speakerFusion = new SpeakerFusion();
             this.speakerFusionSession = segment.session;
+            this.partialNames = new PartialNameHold();
         }
-        const attribution = this.speakerFusion.attribute({
+        const fused = this.speakerFusion.attribute({
             label: segment.speaker,
             pageName: this.rosterTimeline.speakerFor(segment.startSec, segment.endSec, lag),
             coverage: segment.isPartial
@@ -1029,6 +1035,19 @@ export class TranscriptionService {
             isPartial: segment.isPartial,
             rowId: segment.segmentId,
         });
+        let attribution = fused;
+        if (segment.isPartial) {
+            attribution = this.partialNames.hold(segment.segmentId, fused);
+        } else {
+            // Logged so how often a live row's name is corrected at its final
+            // can be counted from the VP log alone.
+            const live = this.partialNames.close(segment.segmentId);
+            if (live !== undefined && live.name !== fused.name) {
+                log.info(
+                    `[ASR] row ${segment.segmentId} renamed at its final: ${live.name} (${live.source}) -> ${fused.name} (${fused.source})`,
+                );
+            }
+        }
         const speaker = attribution.speaker;
         if (!segment.isPartial) {
             // A spoken consent reply or objection, attributed to the attendee

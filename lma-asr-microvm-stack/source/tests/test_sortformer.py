@@ -353,3 +353,82 @@ def test_a_final_ending_inside_the_lookahead_is_labelled_without_waiting() -> No
     assert held_back < 1.8
     assert session.labelled_until >= 1.9
     assert session.speaker_between(1.7, 1.9) == 0
+
+
+class LaggingDiarizer(ScriptedDiarizer):
+    """Labels audio only up to ``labelled_until``; a step brings it to ``available``."""
+
+    def __init__(self, turns: list[tuple[float, float, int]], labelled_until: float) -> None:
+        super().__init__(turns)
+        self.labelled_until = labelled_until
+        self.available = labelled_until
+
+    def process_available(self) -> None:
+        super().process_available()
+        self.labelled_until = self.available
+
+
+def _partial(segment: int, start: float, end: float) -> Event:
+    return Event(kind="partial", segment=segment, text="so what", start=start, end=end)
+
+
+def test_a_partial_is_labelled_by_the_voice_under_its_latest_audio_when_asked() -> None:
+    inner = ScriptedRecognizer([[_partial(0, 0.0, 3.0)], [_partial(0, 0.0, 5.0)]])
+    diarizer = LaggingDiarizer([(0.0, 3.2, 0), (3.2, 6.0, 1)], labelled_until=3.0)
+    rec = SortformerRecognizer(inner, diarizer, partial_speakers=True)
+    silence = _pcm(np.zeros(160, dtype=np.float32))
+
+    first = rec.accept_pcm(silence)
+    diarizer.available = 4.8
+    second = rec.accept_pcm(silence)
+
+    # The second partial's most recent labelled second (3.8-4.8 s) is the second
+    # voice, although the first voice has more of the segment so far.
+    assert [(r.kind, r.speaker) for r in first + second] == [
+        ("partial", "spk_0"),
+        ("partial", "spk_1"),
+    ]
+
+
+def test_a_partial_is_unlabelled_until_enough_of_its_own_segment_is_labelled() -> None:
+    inner = ScriptedRecognizer([[_partial(1, 4.0, 4.6)]])
+    # The previous speaker's audio, before the segment, is labelled; the
+    # segment's own audio only from 4.0 to 4.1 s.
+    diarizer = LaggingDiarizer([(0.0, 4.0, 0), (4.0, 6.0, 1)], labelled_until=4.1)
+    rec = SortformerRecognizer(inner, diarizer, partial_speakers=True)
+
+    rows = rec.accept_pcm(_pcm(np.zeros(160, dtype=np.float32)))
+
+    assert [(r.kind, r.speaker) for r in rows] == [("partial", None)]
+    assert diarizer.processed == 0
+
+
+def test_the_diarizer_is_stepped_for_partials_only_when_its_labels_fall_behind() -> None:
+    inner = ScriptedRecognizer(
+        [[_partial(0, 0.0, 2.0)], [_partial(0, 0.0, 2.5)], [_partial(0, 0.0, 3.6)]]
+    )
+    diarizer = LaggingDiarizer([(0.0, 6.0, 0)], labelled_until=1.8)
+    rec = SortformerRecognizer(
+        inner, diarizer, partial_speakers=True, partial_refresh_seconds=1.0
+    )
+    silence = _pcm(np.zeros(160, dtype=np.float32))
+
+    rec.accept_pcm(silence)  # 0.2 s behind: no step
+    rec.accept_pcm(silence)  # 0.7 s behind: no step
+    diarizer.available = 3.3
+    rows = rec.accept_pcm(silence)  # 1.8 s behind: one step
+
+    assert diarizer.processed == 1
+    assert [r.speaker for r in rows] == ["spk_0"]
+
+
+def test_partials_stay_unlabelled_unless_the_session_asks() -> None:
+    inner_session = ScriptedRecognizer()
+    engine = SortformerEngine(ScriptedEngine(inner_session), EnergyBackend())
+
+    plain = engine.new_session(SessionConfig(sample_rate=RATE, diarize=True))
+    asked = engine.new_session(SessionConfig(sample_rate=RATE, diarize=True, partial_speakers=True))
+
+    assert isinstance(plain, SortformerRecognizer) and isinstance(asked, SortformerRecognizer)
+    assert plain._partial_speakers is False
+    assert asked._partial_speakers is True
