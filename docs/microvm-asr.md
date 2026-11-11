@@ -497,6 +497,15 @@ The voice activity detector counts a 32 ms frame as speech at a Silero probabili
 replies were discarded as noise: on clean AMI headset audio about 2% of the microphone
 channel's words were lost that way.
 
+Some speech never reaches that threshold: a quiet aside, a word said under the breath.
+Between utterances the engine therefore also tracks each 20 ms frame's level against the
+channel's own noise floor. A stretch of 120 ms to 4 s that stands at least 15 dB above
+the floor (and above -55 dBFS) and that no utterance covers is decoded like one. Text it
+yields becomes an ordinary row; an empty decode adds nothing, so steady background noise
+at the floor costs nothing. On a clean AMI headset meeting held out from tuning this cut
+the microphone channel's word error rate from 7.1% to 5.9%. Set `ASR_VAD_RESCUE=0` in the
+image's environment to turn it off.
+
 **Two-pass bundles.** `parakeet-tdt-v3-live-titanet-small` and
 `parakeet-tdt-v3-live-nemotron35-titanet-small` pair Parakeet with a streaming model that
 previews the open utterance: the live row shows the streaming text as it is spoken, and
