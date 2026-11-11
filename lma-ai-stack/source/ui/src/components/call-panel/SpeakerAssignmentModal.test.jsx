@@ -18,7 +18,13 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import createWrapper from '@cloudscape-design/components/test-utils/dom';
 
 import SpeakerAssignmentModal, { applySpeakerAssignment } from './SpeakerAssignmentModal';
-import { buildSpeakerRoster, emptyIdentities, parseSpeakerIdentities } from '../common/speaker-identities';
+import {
+  buildSpeakerRoster,
+  emptyIdentities,
+  parseSpeakerIdentities,
+  speakerDisplayRows,
+  speakerGroups,
+} from '../common/speaker-identities';
 
 const A = 'REMOTE#Other Participant (spk_0)';
 const B = 'REMOTE#Other Participant (spk_1)';
@@ -150,6 +156,43 @@ describe('SpeakerAssignmentModal', () => {
     save();
     expect(await screen.findByText('The speaker names could not be saved. Please try again.')).toBeTruthy();
     expect(onDismiss).not.toHaveBeenCalled();
+  });
+});
+
+describe('SpeakerAssignmentModal, for a name shown as one person', () => {
+  // Two voice labels and a line without one, all under one attendee's name.
+  const BOB = [
+    seg('Bob Strahan (spk_0)', 0),
+    seg('Bob Strahan', 4),
+    seg('Bob Strahan (spk_1)', 8),
+    seg('Chris Lott (spk_2)', 12),
+  ];
+  const open = (identities = emptyIdentities()) => {
+    const groups = speakerGroups(BOB, identities);
+    const roster = speakerDisplayRows(buildSpeakerRoster(BOB, identities), identities, groups);
+    render(
+      <SpeakerAssignmentModal
+        speaker="Bob Strahan"
+        rows={roster.filter((row) => row.baseName === 'Bob Strahan')}
+        roster={roster}
+        identities={identities}
+        groups={groups}
+        onSave={vi.fn()}
+        onDismiss={vi.fn()}
+      />,
+    );
+  };
+
+  it('does not offer to combine voices that are already shown as one person', () => {
+    open();
+    expect(screen.queryByText(/separate voices are shown as/)).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: 'They are one person: combine them' })).toBeNull();
+    expect(screen.getByText(/3 turns/)).toBeTruthy();
+  });
+
+  it('offers to combine the voices once the name is shown as several people', () => {
+    open({ ...emptyIdentities(), speakerModes: { 'REMOTE#Bob Strahan': { mode: 'several', source: 'manual' } } });
+    expect(screen.getByText('3 separate voices are shown as "Bob Strahan"')).toBeTruthy();
   });
 });
 

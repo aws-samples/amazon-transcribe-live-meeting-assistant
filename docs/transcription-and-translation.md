@@ -122,8 +122,14 @@ first heard, with the name's one-person / several-people icon toggle beside it.
 Each unnamed voice's field shows what its lines read as (`ConfRm_1 · Voice 2`).
 Under a name shown as one person, naming any of its voices names all of them
 (except a locked one), because the transcript shows one name for every line
-under it. Selecting a speaker in the meeting page header opens the panel at
-that speaker's voice.
+under it. In that mode, the name's lines that carry no voice label are counted in the turns of
+the name's first voice rather than listed as a voice of their own, and naming or
+merging that voice takes them with it. On a Virtual Participant meeting these are
+the lines the meeting page named before a voice label was attributed to the name;
+see
+[Naming rows from the voice as well](virtual-participant.md#naming-rows-from-the-voice-as-well).
+Selecting a speaker in the meeting page header opens the panel at that speaker's
+voice.
 
 Names are stored as a map on the meeting and applied wherever the transcript is
 read, so a rename is immediate and reversible, and it reaches the meeting
@@ -186,14 +192,19 @@ grouped: their voice labels are kept, because they are the only way to tell the
 people behind them apart, and those voices are named as described above.
 
 Correcting the default takes one click: on the **Transcript** tab, the speaker chips
-are grouped by name, and each name with two or more voices (or shown as several
-people) has a small icon toggle beside it — a person icon while the name is shown
+are grouped by name, and each name that speaker separation gave a voice label to
+(or that is shown as several people) has a small icon toggle beside it — a person icon while the name is shown
 as **one person**, a group icon while it is shown as **several people**. Clicking
 it switches to the other mode. Its tooltip, shown on hover and on keyboard focus,
 says which mode the name is in, why, and what a click does (for example *Click if
 several people share this name*); a screen reader hears the same text, and reads
 the button as pressed while the name is shown as several people. In **Several
 people** each voice's chip has a pencil to name it in place.
+One voice label is enough for the toggle: a name with one label so far can gain a
+second at any moment of a live meeting, and several people behind one name may be
+heard as one voice until separation tells them apart. Lines of the name that carry
+no voice label are not counted as a voice. A name no voice label was ever given
+to (a meeting without speaker separation) has no toggle.
 The same toggle is beside the name in the Speakers panel, and the speakers named in
 the page header follow the choice. See
 [Transcript tab](web-ui-guide.md#transcript-tab). The choice is stored with the

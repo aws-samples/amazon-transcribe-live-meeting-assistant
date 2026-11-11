@@ -211,13 +211,21 @@ export const withSpeakerMode = (identities, key, mode, now = new Date().toISOStr
 };
 
 /**
- * Whether a group's voices can be shown either way, so it is offered the
- * One person / Several people choice: it has two or more voices, or it is shown
- * as several people. The chips above the transcript and the Speakers panel
- * apply the same test.
+ * Whether a group is offered the One person / Several people choice: speaker
+ * separation gave its name at least one voice label, or it is shown as several
+ * people. The chips above the transcript and the Speakers panel apply the same
+ * test.
+ *
+ * One voice label is enough. A name with one label so far can gain a second at
+ * any moment of a live meeting, and several people behind one name (a shared
+ * laptop, a room named after a person) may be heard as one voice until
+ * separation tells them apart; the reader must be able to say so without
+ * waiting for it. Lines of the name that carry no label -- the meeting page
+ * named them before a label was attributed to the name -- are not a voice and
+ * are not counted (`voices` holds labels only).
  */
 export const offersModeChoice = (group) =>
-  Boolean(group) && (group.voices.length >= 2 || group.mode === SEVERAL_PEOPLE);
+  Boolean(group) && (group.voices.length >= 1 || group.mode === SEVERAL_PEOPLE);
 
 /**
  * The Transcript tab's speaker chips, grouped by platform name.
@@ -227,8 +235,8 @@ export const offersModeChoice = (group) =>
  * name is stored under) and `speakerGroup` (the group key resolveSpeaker
  * returned). Returns, in order of first appearance:
  *
- *  - `{ type: 'group', key, base, mode, group, chips }` for a name whose voices
- *    can be shown either way -- one with two or more voices, or one shown as
+ *  - `{ type: 'group', key, base, mode, group, chips }` for a name offered the
+ *    choice (offersModeChoice) -- one with a voice label, or one shown as
  *    several people -- with one chip per name shown under it (`{ name, keys,
  *    unnamed }`, `unnamed` when the name is the 'Voice N' placeholder rather
  *    than one somebody gave, from the segment's `speakerUnnamed`);

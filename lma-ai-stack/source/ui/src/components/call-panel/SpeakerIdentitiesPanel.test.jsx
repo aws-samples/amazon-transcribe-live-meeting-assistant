@@ -20,6 +20,8 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 
+import createWrapper from '@cloudscape-design/components/test-utils/dom';
+
 import SpeakerIdentitiesPanel from './SpeakerIdentitiesPanel';
 
 /* eslint-disable react/prop-types */
@@ -660,5 +662,77 @@ describe("a platform name's voices, shown as one person or several", () => {
     expect(within(groupOf('ConfRm_1')).getByRole('button', { name: 'Show ConfRm_1 as several people' }).disabled).toBe(
       true,
     );
+  });
+});
+
+describe('a Virtual Participant meeting whose attendees have one voice label each', () => {
+  // A Zoom stand-up with voice separation on; one of Bob's lines was named by the
+  // meeting page before his voice label was attributed to him, so it carries his
+  // bare name.
+  const line = (id, speaker, startTime, endTime) => ({
+    channel: 'REMOTE',
+    speaker,
+    startTime,
+    endTime,
+    isPartial: false,
+    segmentId: id,
+    transcript: 'Words.',
+  });
+  const STANDUP = [
+    line('s0', 'Chris Lott (spk_0)', 1, 2),
+    line('s1', 'Jeremy [C] Feldman (spk_1)', 5, 10),
+    line('s2', 'Bob Strahan (spk_2)', 11, 18),
+    line('s9', 'Bob Strahan', 81, 82),
+    line('s10', 'Bob Strahan (spk_2)', 83, 90),
+  ];
+  const VP_ITEM = { ...ITEM, remoteParticipantName: 'Virtual Participant', captureSource: 'VIRTUAL_PARTICIPANT' };
+  const groupOf = (base) => screen.getByRole('group', { name: `Voices of ${base}` });
+
+  it('lists each attendee with an enabled one-person / several-people toggle', () => {
+    renderPanel({ item: VP_ITEM, segments: STANDUP });
+    ['Chris Lott', 'Jeremy [C] Feldman', 'Bob Strahan'].forEach((name) => {
+      const toggle = within(groupOf(name)).getByRole('button', { name: `Show ${name} as several people` });
+      expect(toggle.disabled).toBe(false);
+      expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    });
+  });
+
+  it("lists a name's unlabelled lines with its voice, as one voice", () => {
+    renderPanel({ item: VP_ITEM, segments: STANDUP });
+    const bob = groupOf('Bob Strahan');
+    expect(within(bob).getByText('1 voice')).toBeTruthy();
+    expect(within(bob).getAllByRole('textbox')).toHaveLength(1);
+    // Three turns: both labelled lines and the unlabelled one.
+    expect(within(bob).getByText(/^3 turns/)).toBeTruthy();
+    expect(screen.getByText('(0/3)')).toBeTruthy();
+  });
+
+  it('offers each other attendee once, by name, to merge into', () => {
+    renderPanel({ item: VP_ITEM, segments: STANDUP });
+    const picker = createWrapper(groupOf('Chris Lott')).findSelect();
+    picker.openDropdown();
+    const offered = picker
+      .findDropdown()
+      .findOptions()
+      .map((option) => option.getElement().textContent);
+    expect(offered).toEqual(['Same person as…', 'Jeremy [C] Feldman', 'Bob Strahan']);
+  });
+
+  it("merges a name's unlabelled lines along with its voice", async () => {
+    renderPanel({ item: VP_ITEM, segments: STANDUP });
+    const picker = createWrapper(groupOf('Bob Strahan')).findSelect();
+    picker.openDropdown();
+    picker.selectOptionByValue('REMOTE#Chris Lott (spk_0)');
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(savedMap().merges).toEqual({
+      'REMOTE#Bob Strahan (spk_2)': 'REMOTE#Chris Lott (spk_0)',
+      'REMOTE#Bob Strahan': 'REMOTE#Chris Lott (spk_0)',
+    });
+  });
+
+  it('opens at the voice holding the unlabelled lines the meeting header asked for', () => {
+    renderPanel({ item: VP_ITEM, segments: STANDUP, focusRequest: { key: 'REMOTE#Bob Strahan', at: 1 } });
+    const row = document.querySelector('[data-speaker-key="REMOTE#Bob Strahan (spk_2)"]');
+    expect(row.className).toBe('speaker-row-focused');
   });
 });

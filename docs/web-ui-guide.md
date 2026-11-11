@@ -384,8 +384,8 @@ pass over chat messages, since they were typed rather than heard.
   assistant's answers); choosing **All** shows everything again. The search
   works within the speakers chosen.
 - **One person or several people** — the chips are grouped by the name the
-  meeting platform showed, and a name that speaker separation heard several
-  voices under has a small icon toggle beside it: a person icon while the name is
+  meeting platform showed, and a name that speaker separation gave a voice
+  label to (one is enough) has a small icon toggle beside it: a person icon while the name is
   shown as one person, a group icon while it is shown as several people.
   Clicking it switches to the other. Its tooltip, on hover or keyboard focus,
   says which mode the name is in, why, and what a click does. **One person** shows every line under
@@ -409,8 +409,11 @@ pass over chat messages, since they were typed rather than heard.
   beside a chip opens that speaker's dialog: give the voice a name (which
   renames every segment it spoke, earlier ones included), say it is the **Same
   person as** another voice on its channel, or **Separate** a voice combined
-  into it. When two voices are shown under one name, it can combine them into
-  one person. It writes the same names as the **Speakers** panel on the
+  into it. **Same person as** lists the other speakers by the names the
+  transcript shows, once each. When two separate voices are shown under one
+  name (two voices both named *Bob* without being combined, say), it can
+  combine them into one person; the voices of a name shown as one person are
+  already one speaker, so it does not offer that for them. It writes the same names as the **Speakers** panel on the
   **Details** tab, which remains the place to paste an attendee list, confirm
   or reject a suggested name, or lock a name.
 - **Chat** — shown when the transcript holds meeting chat messages. On by
