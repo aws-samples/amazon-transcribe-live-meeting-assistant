@@ -95,6 +95,11 @@ class Config(BaseModel):
     # Close a row after this much unbroken speech even with no boundary found, so a
     # monologue does not sit as one unlabelled row. 0 disables the bound.
     max_open_segment_ms: int | None = None
+    # Label partials with the voice under the most recent audio of the open
+    # segment, where the bundle's diarizer labels audio as it arrives (Sortformer).
+    # Off by default: it runs the diarizer more often while someone is speaking.
+    # Honoured only with ``diarize``; other diarizers send partials unlabelled.
+    partial_speakers: bool = False
 
 
 class Eos(BaseModel):
@@ -117,11 +122,13 @@ class Ready(BaseModel):
 class Partial(BaseModel):
     """Evolving interim transcript for a segment (R4.1).
 
-    ``speaker`` is the **provisional** speaker for the in-progress segment (the
-    last speaker identified), so a UI can attribute interim text immediately. The
-    segment's audio is incomplete, so it is not embedded yet; the following
-    ``final`` carries the authoritative label. ``None`` when diarization is off or
-    no speaker has been identified yet.
+    ``speaker`` is ``None`` unless the client asked for ``partial_speakers`` on a
+    bundle whose diarizer labels audio as it arrives (Sortformer). Then it is the
+    **provisional** label of the voice under the most recent labelled audio of
+    this segment (about the last second), read from the same frames the final's
+    labels come from, and ``None`` until enough of the segment is labelled. It
+    never comes from an earlier segment. The following ``final`` carries the
+    authoritative label, and may split the row where the voice changes.
     """
 
     type: Literal["partial"] = "partial"

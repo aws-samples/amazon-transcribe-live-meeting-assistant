@@ -123,6 +123,46 @@ test('a partial and its final land on one row, and speaker labels follow the eng
     }
 });
 
+test('a diarized session asks for voice labels on partials too, and passes them through', async () => {
+    const configs: Record<string, unknown>[] = [];
+    const asr = await startFakeAsr((socket) => {
+        ready(socket);
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (!isBinary) {
+                const message = JSON.parse(data.toString());
+                if (message.type === 'config') configs.push(message);
+                return;
+            }
+            socket.send(
+                JSON.stringify({ type: 'partial', segment: 4, text: 'so what', start: 2.0, end: 3.1, speaker: 'spk_0' }),
+            );
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const diarized = newSession(asr, rows);
+    const plain = newSession(asr, [], { value: true }, false);
+    try {
+        assert.equal(await diarized.start(), true);
+        assert.equal(await plain.start(), true);
+        diarized.pushPcm(Buffer.alloc(3200));
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await diarized.finish();
+        await plain.finish();
+
+        assert.deepEqual(
+            configs.map((config) => [config.diarize, config.partial_speakers]),
+            [
+                [true, true],
+                [false, false],
+            ],
+        );
+        assert.equal(rows[0]?.isPartial, true);
+        assert.equal(rows[0]?.speaker, 'spk_0');
+    } finally {
+        await asr.close();
+    }
+});
+
 test('a reconnect keeps segment ids unique and the timeline monotonic', async () => {
     const asr = await startFakeAsr((socket, connection) => {
         ready(socket);
