@@ -448,6 +448,15 @@ ai_mr_review:
 #                                  it the agent refuses to run rather than
 #                                  inherit this job's administrative
 #                                  credentials. See integ-tests/failure_agent.py.
+#        LMA_TEST_VP_LIVE_MEETING  optional; `1` runs integ-tests/
+#                                  test_vp_live_meeting.py, a Virtual
+#                                  Participant in a real meeting. Absent, it
+#                                  skips (allowed under --no-skips); set, a
+#                                  missing secret fails the run. Adds ~5 min.
+#        LMA_TEST_LIVE_MEETING_SECRET_ID  optional; the Secrets Manager secret
+#                                  holding that meeting. Defaults to
+#                                  lma/integ-tests/live-meeting. The meeting
+#                                  link itself is never a CI variable.
 #   3. An IAM role in the stack's account trusting this GitLab instance's
 #      credential vendor, scoped by the group and project session tags. It
 #      deploys the stack, so it needs permissions to do that — see the doc.
