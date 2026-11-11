@@ -102,7 +102,10 @@ Four properties it is built around
    push burst is ``interruptible: true`` on the GitLab job and
    ``concurrency: cancel-in-progress`` on the GitHub one, rather than anything here.
    The marker is what additionally makes GitHub's hourly sweep affordable: a tick
-   with no new head pays nothing.
+   with no new head pays nothing. And a new head whose request differs from the last
+   fully reviewed head only in documentation (by the ``docs`` area of
+   ``scripts/ci/changed_areas.py``) is not re-reviewed either: :func:`try_carry_over`
+   posts a comment carrying the earlier verdict and the new head's marker instead.
 4. **A skip is loud.** With no token, no ``claude`` binary or no Bedrock access it
    prints ``SKIPPED:`` and why, rather than exiting 0 with a clean-looking log.
    ``--fail-on-skip`` turns that into an error, which is how to run it once it is
@@ -154,6 +157,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1041,10 +1045,21 @@ class MergeRequest:
 @dataclass
 class Outcome:
     iid: int
-    status: str  # reviewed | withheld | skipped | unchanged | failed
+    status: str  # reviewed | withheld | carried | skipped | unchanged | failed
     detail: str = ""
     cost_usd: float | None = None
     review_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class PriorReview:
+    """A comment on the request that carries an idempotency marker."""
+
+    sha: str
+    rev: int
+    body: str
+    #: Link to the comment itself, or "" when the forge did not supply one.
+    url: str = ""
 
 
 #: ``rel="next"`` out of a GitHub ``Link`` header. GitHub does not send GitLab's
@@ -1331,6 +1346,26 @@ class Github:
                 seen.add((match.group("sha"), int(match.group("rev"))))
         return seen
 
+    def prior_reviews(self, iid: int, web_url: str = "") -> list[PriorReview]:
+        """Every marker-bearing comment, oldest first.
+
+        ``web_url`` is unused here: GitHub returns each comment's own ``html_url``.
+        """
+        found: list[PriorReview] = []
+        for comment in self._paginate(self._url(f"/issues/{iid}/comments?per_page=100")):
+            body = comment.get("body") or ""
+            match = MARKER_RE.search(body)
+            if match:
+                found.append(
+                    PriorReview(
+                        match.group("sha"),
+                        int(match.group("rev")),
+                        body,
+                        comment.get("html_url") or "",
+                    )
+                )
+        return found
+
     def post_note(self, iid: int, body: str) -> None:
         self._request("POST", self._url(f"/issues/{iid}/comments"), {"body": body})
 
@@ -1447,6 +1482,30 @@ class Gitlab:
                 break
             page = int(next_page)
         return seen
+
+    def prior_reviews(self, iid: int, web_url: str = "") -> list[PriorReview]:
+        """Every marker-bearing note, oldest first, linked as ``<web_url>#note_<id>``."""
+        found: list[PriorReview] = []
+        page = 1
+        while True:
+            query = urllib.parse.urlencode(
+                {"per_page": "100", "page": str(page), "sort": "asc", "order_by": "created_at"}
+            )
+            payload, headers = self._request("GET", f"/merge_requests/{iid}/notes?{query}")
+            assert isinstance(payload, list)
+            for note in payload:
+                body = note.get("body", "")
+                match = MARKER_RE.search(body)
+                if match:
+                    url = f"{web_url}#note_{note['id']}" if web_url and "id" in note else ""
+                    found.append(
+                        PriorReview(match.group("sha"), int(match.group("rev")), body, url)
+                    )
+            next_page = headers.get("X-Next-Page", "").strip()
+            if not next_page:
+                break
+            page = int(next_page)
+        return found
 
     def post_note(self, iid: int, body: str) -> None:
         self._request("POST", f"/merge_requests/{iid}/notes", {"body": body})
@@ -2294,6 +2353,246 @@ def _write_artifact(path: Path, text: str) -> None:
         )
 
 
+# --- Carrying a review over a documentation-only push ----------------------------------
+#
+# A push that changes only documentation and changelog files does not change anything
+# the previous review read as code, and the common case is cheap to recognise and
+# expensive to re-review: resolving a CHANGELOG.md conflict, or fixing a doc page after
+# a review, used to buy a whole new paid review that said the same thing. So when the
+# only files that differ since the last full review are documentation by the CI step
+# selection's own `docs` area, no model is called: a short comment is posted that
+# carries the head's marker (so the idempotency check and anything else reading markers
+# sees the new head as reviewed), links the earlier review, quotes its verdict row, and
+# says plainly when that review had a blocking finding.
+#
+# "Changed since the review" is the difference between the request's OWN diff at the
+# two heads, not `git diff <old>..<new>`: a merge of the target branch into the request
+# brings in other people's changes, and those are not this request's. Every step that
+# cannot be computed (an unreachable old head after a force-push, a missing classifier,
+# a review with no verdict row) falls back to a full review.
+
+#: Second marker on a carried-over comment, naming the reviewed head it carries.
+CARRY_RE = re.compile(r"<!--\s*ai-review-carried-over:\s*from=(?P<sha>[0-9a-f]{7,40})\s*-->")
+
+#: The verdict row ``pr-review.md`` Step 3 defines: `| **Safe to merge?** | v | notes |`.
+_VERDICT_RE = re.compile(
+    r"^\|\s*\*\*Safe to merge\?\*\*\s*\|(?P<verdict>[^|\n]*)\|(?P<notes>[^|\n]*)\|", re.M
+)
+_BLOCKING_RE = re.compile(r"^\s*[-*]\s+🔴.*$", re.M)
+_WITHHELD_HEADING = "## PR/MR Review: withheld"
+
+#: Where the CI step selection lives on the target branch. Read from there, never from
+#: the checkout, for the same reason the harness itself is pinned to the target branch.
+CLASSIFIER_PATH = "scripts/ci/changed_areas.py"
+
+
+def source_review(prior: list[PriorReview]) -> PriorReview | None:
+    """The most recent FULL review at the current prompt revision, if it can be carried.
+
+    Carried-over comments are skipped, so the comparison is always against the head
+    that a model actually read. A withheld review or one without a verdict row returns
+    None: there is nothing to carry, so the caller runs a review.
+    """
+    for review in reversed(prior):
+        if review.rev != PROMPT_REVISION or CARRY_RE.search(review.body):
+            continue
+        if _WITHHELD_HEADING in review.body or not _VERDICT_RE.search(review.body):
+            return None
+        return review
+    return None
+
+
+def verdict_of(body: str) -> tuple[str, str]:
+    """(verdict cell, notes cell) of a review's "Safe to merge?" row."""
+    match = _VERDICT_RE.search(body)
+    if not match:
+        return "", ""
+    return match.group("verdict").strip(), match.group("notes").strip()
+
+
+def blocking_findings(body: str) -> list[str]:
+    """The first line of each 🔴 finding in a review."""
+    return [line.strip() for line in _BLOCKING_RE.findall(body)]
+
+
+def _load_target_classifier(target_branch: str):
+    """The target branch's copy of the CI step selection, as a module, or None.
+
+    Loaded from the fetched target ref with ``git show`` rather than imported from the
+    checkout: the checkout is the request under review, and this code runs in the job
+    that holds the review credentials. The target branch is the source the harness
+    itself is pinned to, so this is code of the same provenance as the harness.
+    """
+    shown = _run(
+        ["git", "show", f"refs/ai-review/target-{target_branch}:{CLASSIFIER_PATH}"],
+        cwd=REPO_ROOT,
+    )
+    if shown.returncode != 0:
+        return None
+    name = "_target_changed_areas"
+    module = types.ModuleType(name)
+    module.__file__ = f"{target_branch}:{CLASSIFIER_PATH}"
+    # dataclasses resolves string annotations through sys.modules, so register first.
+    sys.modules[name] = module
+    try:
+        exec(compile(shown.stdout, module.__file__, "exec"), module.__dict__)  # noqa: S102
+    except Exception as error:  # noqa: BLE001 - any failure means "run the review"
+        print(f"  could not load {CLASSIFIER_PATH} from {target_branch}: {error}")
+        sys.modules.pop(name, None)
+        return None
+    return module
+
+
+def _names(left: str, right: str) -> set[str] | None:
+    result = _run(["git", "diff", "--name-only", "--no-renames", left, right], cwd=REPO_ROOT)
+    if result.returncode != 0:
+        return None
+    return {line for line in result.stdout.splitlines() if line.strip()}
+
+
+def changed_since_review(
+    iid: int, target_branch: str, reviewed_sha: str, remote: str
+) -> list[str] | None:
+    """Files whose part of the request's own diff differs between two heads, or None.
+
+    For each head the request's diff is ``merge-base(target, head)..head``. A file
+    counts as changed when either diff touches it AND its content differs at the head
+    or at the merge base between the two. That excludes files only the target branch
+    changed (brought in by merging it), and includes a file the request reverted.
+    """
+    head = f"refs/ai-review/{iid}"
+    target = f"refs/ai-review/target-{target_branch}"
+    exists = ["git", "cat-file", "-e", f"{reviewed_sha}^{{commit}}"]
+    if _run(exists, cwd=REPO_ROOT).returncode != 0:
+        _run(["git", "fetch", "--quiet", remote, reviewed_sha], cwd=REPO_ROOT)
+        if _run(exists, cwd=REPO_ROOT).returncode != 0:
+            return None
+    bases = []
+    for tip in (reviewed_sha, head):
+        merge_base = _run(["git", "merge-base", target, tip], cwd=REPO_ROOT)
+        if merge_base.returncode != 0:
+            return None
+        bases.append(merge_base.stdout.strip())
+    old_diff = _names(bases[0], reviewed_sha)
+    new_diff = _names(bases[1], head)
+    head_side = _names(reviewed_sha, head)
+    base_side = _names(bases[0], bases[1])
+    if None in (old_diff, new_diff, head_side, base_side):
+        return None
+    return sorted((old_diff | new_diff) & (head_side | base_side))
+
+
+_MAX_CARRIED_FILES = 20
+
+
+def compose_carry_over(
+    merge_request: MergeRequest,
+    source: PriorReview,
+    changed: list[str],
+    unit: str,
+    ci_status: str = "",
+) -> str:
+    """The comment posted instead of a review. Its wording passes the guard by design;
+    the caller still scans it, because it quotes the earlier review's text."""
+    head8, src8 = merge_request.head_sha[:8], source.sha[:8]
+    link = f"[the review of `{src8}`]({source.url})" if source.url else f"the review of `{src8}`"
+    if changed:
+        listed = "\n".join(f"- `{path}`" for path in changed[:_MAX_CARRIED_FILES])
+        if len(changed) > _MAX_CARRIED_FILES:
+            listed += f"\n- and {len(changed) - _MAX_CARRIED_FILES} more"
+        why = (
+            f"Since that commit, this {unit}'s own changes differ only in documentation "
+            f"and changelog files, so that review still covers its code:\n\n{listed}\n"
+        )
+    else:
+        why = (
+            f"Since that commit, no file this {unit} changes is different: the new "
+            f"commits only bring in changes from `{merge_request.target_branch}`.\n"
+        )
+    verdict, notes = verdict_of(source.body)
+    verdict_line = f"**Verdict carried over (Safe to merge?):** {verdict}"
+    if notes:
+        verdict_line += f" — {notes}"
+    blocking = blocking_findings(source.body)
+    if blocking:
+        quoted = "\n".join(blocking[:10])
+        caution = (
+            f"⚠️ **That review has {len(blocking)} 🔴 Blocking finding(s). Carrying it "
+            f"over does not resolve them**; they still apply to this head unless the "
+            f"files they name are among those listed above. Their first lines, from "
+            f"that review:\n\n{quoted}\n\n"
+        )
+    elif "❌" in verdict or "block" in verdict.lower():
+        caution = (
+            "⚠️ **That review's verdict was to block this change.** Carrying it over "
+            "does not change that.\n\n"
+        )
+    else:
+        caution = ""
+    checks = f"Checks on this commit when this was posted: {ci_status}.\n\n" if ci_status else ""
+    body = (
+        f"<!-- ai-review: sha={merge_request.head_sha} rev={PROMPT_REVISION} -->\n"
+        f"<!-- ai-review-carried-over: from={source.sha} -->\n"
+        f"## PR/MR Review: carried over to `{head8}`\n\n"
+        f"No new review was run for `{head8}`; {link} still applies. {why}\n"
+        f"{verdict_line}\n\n"
+        f"{caution}"
+        "---\n"
+        f"{checks}"
+        "🤖 Carried over automatically, with no model call, because only files in the "
+        "documentation area of `scripts/ci/changed_areas.py` changed. **Advisory "
+        "only** — it approves nothing and gates nothing; the `code_checks` jobs decide "
+        "whether this can merge. The next push that changes anything else gets a full "
+        "review.\n"
+    )
+    return defuse_quick_actions(body)
+
+
+def try_carry_over(
+    forge: Forge,
+    merge_request: MergeRequest,
+    args: argparse.Namespace,
+    artifact_dir: Path,
+) -> Outcome | None:
+    """Carry the last review over a documentation-only push, or return None to review."""
+    prior = forge.prior_reviews(merge_request.iid, merge_request.web_url)
+    source = source_review(prior)
+    if source is None:
+        return None
+    classifier = _load_target_classifier(merge_request.target_branch)
+    if classifier is None or not hasattr(classifier, "docs_only"):
+        print(f"  no {CLASSIFIER_PATH} on {merge_request.target_branch}; reviewing in full")
+        return None
+    changed = changed_since_review(
+        merge_request.iid, merge_request.target_branch, source.sha, args.remote
+    )
+    if changed is None:
+        print(f"  cannot compare with the reviewed head {source.sha[:8]}; reviewing in full")
+        return None
+    if not classifier.docs_only(changed):
+        return None
+
+    status = ""
+    if isinstance(forge, Github):
+        try:
+            status = forge.check_status(merge_request.head_sha)
+        except Exception:  # noqa: BLE001 - a status line is never worth a failure here
+            status = ""
+    note = compose_carry_over(merge_request, source, changed, args.platform.unit, status)
+    tripped = scan_for_disclosure(note)
+    if tripped:
+        print(f"  the carried-over comment did not pass the guard ({', '.join(tripped)})")
+        return None
+    artifact = artifact_dir / f"review-{merge_request.iid}.md"
+    _write_artifact(artifact, note)
+    what = f"{len(changed)} documentation file(s)" if changed else "no file of its own"
+    detail = f"carried over the review of {source.sha[:8]}: {what} changed since"
+    if args.dry_run:
+        return Outcome(merge_request.iid, "carried", f"dry run — not posted; {detail}")
+    forge.post_note(merge_request.iid, note)
+    return Outcome(merge_request.iid, "carried", f"{detail}; posted to {merge_request.web_url}")
+
+
 def review_one(
     forge: Forge | None,
     merge_request: MergeRequest,
@@ -2384,6 +2683,13 @@ def review_one(
             else "no changed files against the merge base"
         )
         return Outcome(merge_request.iid, "skipped", detail)
+
+    # A push that changed only documentation since the last full review is carried
+    # over without a model call; see try_carry_over. --force always reviews.
+    if forge is not None and not args.force:
+        carried = try_carry_over(forge, merge_request, args, artifact_dir)
+        if carried is not None:
+            return carried
 
     diff, truncated = build_diff(
         merge_request.iid, merge_request.target_branch, args.max_diff_bytes
@@ -2647,7 +2953,8 @@ DISCLOSURE SAFETY
     parser.add_argument(
         "--force",
         action="store_true",
-        help="re-review even if this head SHA already has a review comment",
+        help="re-review even if this head SHA already has a review comment, and never "
+        "carry an earlier review over a documentation-only push",
     )
     parser.add_argument(
         "--redact-artifact",

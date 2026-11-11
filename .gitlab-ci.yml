@@ -79,50 +79,86 @@ code_checks:
     - make setup-python
     - make setup-cli-dev
   script:
+    # ── Step selection ──────────────────────────────────────────────────────
+    # The same selection as the GitHub workflow, from the same script: a
+    # merge-request pipeline runs the steps the MR's changed files need (diffed
+    # from CI_MERGE_REQUEST_DIFF_BASE_SHA, the MR's merge base, fetched if the
+    # clone is too shallow to hold it); any other pipeline (a push to develop or
+    # main, a branch without an MR, a manual run) runs everything. The rules, and
+    # the run-everything cases (unclassified paths, CI or build configuration, a diff
+    # that cannot be computed), are in
+    # scripts/ci/changed_areas.py. `ci_run KEY` is false only when the script
+    # wrote CI_RUN_KEY=false, so an unset variable runs the step.
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = merge_request_event ] && [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ]; then
+        python3 scripts/ci/changed_areas.py --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" \
+          --head HEAD --fetch origin --shell ci-areas.env
+      else
+        python3 scripts/ci/changed_areas.py \
+          --all "a $CI_PIPELINE_SOURCE pipeline on $CI_COMMIT_REF_NAME runs every check" \
+          --shell ci-areas.env
+      fi
+      . ./ci-areas.env
+      ci_run() {
+        ci_selected=true
+        eval "ci_selected=\${CI_RUN_$1:-true}"
+        if [ "$ci_selected" = false ]; then
+          echo "⏭  skipped: $1 (nothing it covers changed; see the selection above)"
+          return 1
+        fi
+        echo "▶  running: $1"
+      }
+    # The step selection's own tests, including the check that every block below
+    # names a real selection key. Seconds; always run.
+    - make test-ci-tooling
     # CloudFormation lint (no AWS).
-    - make lint-cfn
+    - if ci_run CFN_LINT; then make lint-cfn; fi
     # ruff check + format check over the Lambda functions, the Lambda layers,
-    # scripts/pr_review and the demo recorder (read-only; `make lint-python` is
-    # the fixing form).
-    - make lint-python-check
+    # scripts/pr_review, scripts/ci and the demo recorder (read-only; `make
+    # lint-python` is the fixing form).
+    - if ci_run PYTHON_LINT; then make lint-python-check; fi
     # Python unit suites (all mock boto3 / use dummy env — no AWS).
-    - make test-sdk
-    - make test-cli
-    - make test-lambdas
+    - if ci_run SDK_CLI; then make test-sdk test-cli; fi
+    - if ci_run LAMBDAS; then make test-lambdas; fi
     # UI: lint + tests (force = ignore the local checksum cache).
-    - make lint-ui-force
-    - make test-ui-force
+    - if ci_run UI; then make lint-ui-force test-ui-force; fi
     # TypeScript build checks (tsc/eslint): transcriber, VP, utilities/websocket-client.
-    - make lint-typescript
+    - if ci_run TYPESCRIPT; then make lint-typescript; fi
     # Virtual Participant backend unit tests (launch modes, MicroVM hooks).
-    - make test-vp
+    - if ci_run VP; then make test-vp; fi
     # VP CloudFormation template invariants (state machine renders for each
     # launch type; ECS paths unchanged by the MICROVM addition).
-    - make test-vp-template
+    - if ci_run VP_TEMPLATE; then make test-vp-template; fi
     # Static AI stack tests: the AppSync contract (every resolver attaches to a
     # field schema.graphql declares, every UI operation validates against it) and
     # the CloudFormation template's invariants (every Ref/GetAtt resolves,
     # lma-main.yaml's expected outputs are still declared).
-    - make test-ai-stack
+    - if ci_run AI_STACK; then make test-ai-stack; fi
     # Unit tests for the scheduled integration run's own machinery (credential
     # resolution, the --no-skips hook). Covered here rather than only in the
     # nightly, because it is what keeps a nightly from reporting green after
     # skipping everything.
-    - make test-integ-plumbing
+    - if ci_run INTEG_PLUMBING; then make test-integ-plumbing; fi
     # ASR MicroVM runtime unit tests + ruff (no AWS, no model weights).
-    - make test-asr
+    - if ci_run ASR; then make test-asr; fi
     # The advisory AI review's own machinery: the disclosure guard that decides
     # whether a model-written comment reaches the public repository, and the four
     # properties of the review job most likely to be deleted by accident.
-    - make test-pr-review
+    - if ci_run PR_REVIEW; then make test-pr-review; fi
     # The product demo recorder (scripts/ux_recorder*.py), its stack-session
     # helper and the demo skill's storyboard file. No AWS, Chrome or network.
-    - make test-ux-recorder
+    - if ci_run DEMO_RECORDER; then make test-ux-recorder; fi
     # WebSocket transcriber: unit tests (tsc + eslint via `npm run build`, then
     # node --test on dist) followed by the Fastify 5 websocket smoke test, which
     # boots the server and round-trips a frame — runtime coverage the unit tests
     # do not provide.
-    - cd lma-websocket-transcriber-stack/source/app && npm ci && npm test && npm run smoke
+    - |
+      if ci_run TRANSCRIBER; then
+        cd "$CI_PROJECT_DIR/lma-websocket-transcriber-stack/source/app"
+        npm ci
+        npm test
+        npm run smoke
+      fi
     # Browser extension. `npm install`, not `npm ci`: the in-stack CodeBuild
     # project builds it that way (see the BuildSpec in
     # lma-browser-extension-stack/template.yaml) and its lockfile has repeatedly
@@ -134,10 +170,12 @@ code_checks:
     # here while the CodeBuild one succeeds. Clearing those warnings would let
     # this be tightened.
     - |
-      cd "$CI_PROJECT_DIR/lma-browser-extension-stack"
-      npm install --no-audit --no-fund
-      CI=true npm test
-      CI=false npm run build
+      if ci_run BROWSER_EXTENSION; then
+        cd "$CI_PROJECT_DIR/lma-browser-extension-stack"
+        npm install --no-audit --no-fund
+        CI=true npm test
+        CI=false npm run build
+      fi
 
 # ── security_review: SRT ────────────────────────────────────────────────────
 # Runs on MRs targeting `develop` only. Review decisions are read from the
