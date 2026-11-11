@@ -689,10 +689,37 @@ whoever started, until the final corrected it a second or two later — reviewer
 the live transcript reported that the label "transforms" mid-sentence, and read it as
 the diarization being unstable when the final labels were in fact correct.
 
-Partials now carry no speaker at all, so the row shows the plain channel name until the
+Partials now carry no speaker by default, so the row shows the plain channel name until the
 label is actually known, and the `(spk_N)` suffix appears when there is something true
 to put in it. This matches the Amazon Transcribe path, which never had speaker labels on
 partials to begin with (they only arrive on final results).
+
+**Provisional labels from the partial's own audio.** A client can ask for a label on
+partials with `partial_speakers: true` in its `config`, alongside `diarize: true`. The
+Sortformer diarizer labels audio frame by frame as it arrives, so it can say whose voice
+is under the open row without waiting for the row to close. The label is the voice active
+over the most recent labelled second of **this row's own audio**. It is never the last
+speaker identified before the row, which is what made the old provisional label wrong. A
+partial carries no label until at least 0.3 s of its row has been labelled. The diarizer
+is stepped for partials only when its labels have fallen 1 s or more behind the open row,
+with its usual lookahead, so a partial's label is read from the same kind of frames as a
+final's and is at most about 1.3 s behind the audio. The final still carries the
+authoritative labels, and still splits the row where the voice changes.
+
+The bundles that use the TitaNet embedder do not support this: they cannot embed a
+segment until it closes, so their partials stay unlabelled whatever the client asks. An
+engine image from before this field ignores it, and its partials are unlabelled too.
+The Virtual Participant asks for it on its participant session whenever it asks for
+voice separation (see
+[Live rows](virtual-participant.md#live-rows)). The WebSocket transcriber (Stream Audio
+and the browser extension) does not ask for it yet.
+
+What it costs has **not been measured**. Without it the diarizer steps once each time an
+utterance closes and every 10 s through a long one. With it, it also steps about once a
+second while someone is speaking, and each step also re-reads the diarizer's cached
+context (up to about 42 s of speech features), so the diarizer's share of the CPU can be
+several times higher than without it. Watch the `engine load` line, and any
+`engine behind, dropped` lines, on the first meetings that use it.
 A channel that asks for no labels, such as Stream Audio's microphone or the Virtual
 Participant's assistant, gets none: the engine skips voice embedding for it, and its rows
 still close at 20 s.
@@ -934,9 +961,10 @@ the labels found two voices 0.34 apart, matching the labels one-for-one. A place
 that looks like a bucket gets read as one, by people and by any model summarising the
 transcript.
 
-It also degrades well: a partial has no known speaker yet, so it shows the bare channel
-name and gains the suffix when the label arrives, rather than displaying somebody else's
-name in the meantime.
+It also degrades well: a partial has no known speaker yet (unless the client asked for
+provisional labels, see [Partials name nobody](#partials-name-nobody)), so it shows the
+bare channel name and gains the suffix when the label arrives, rather than displaying
+somebody else's name in the meantime.
 
 Labels are per meeting and per channel, and they are not identities. Mapping them onto
 real names is a separate step, and it works far better when every label is distinct.
