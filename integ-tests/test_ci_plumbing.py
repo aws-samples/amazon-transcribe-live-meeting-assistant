@@ -1055,6 +1055,7 @@ def test_a_skip_from_an_off_by_default_feature_is_not_an_environment_gap() -> No
 
     assert conftest._is_deselected_by_marker(_marked("optional_feature")) is True
     assert conftest._is_deselected_by_marker(_marked("live")) is True
+    assert conftest._is_deselected_by_marker(_marked("external_meeting")) is True
     # A skip with no marker is still a gap, which is the whole point.
     assert conftest._is_deselected_by_marker(_marked(None)) is False
 
@@ -1084,6 +1085,17 @@ def test_the_voice_enrollment_test_is_marked_as_an_optional_feature() -> None:
         "optional_feature marker, or --no-skips reports its clean skip as a "
         "failure on every deployment that has not enabled the feature"
     )
+
+
+def test_the_google_meet_test_is_marked_as_an_external_meeting() -> None:
+    """It needs LMA_TEST_MEET_URL, and Google Meet may turn its guest away.
+
+    Without the marker, the scheduled run's --no-skips would turn either skip
+    into a failure.
+    """
+    source = (Path(__file__).resolve().parent / "test_meet_end_to_end.py").read_text()
+    head = source.split("def test_vp_transcribes_speech_and_chat_from_a_google_meet", 1)[0]
+    assert head.rstrip().endswith("@pytest.mark.external_meeting")
 
 
 def test_the_desktop_video_tests_are_opt_in_optional_features() -> None:

@@ -313,6 +313,20 @@ summary. Ways to make one, from simplest:
   streams Polly-narrated synthetic slides with video and leaves the meeting in
   place, so the Shared Screen panel has frames to show.
 
+- **A live meeting with a Virtual Participant**, for demos of the VP, the
+  meeting chat or the live meeting page: `scripts/meeting_guest/meeting_guest.py`
+  starts a scripted guest in a Google Meet meeting from the stack's own VP image
+  (no local browser can join Meet as a guest):
+  `meeting_guest.py start --stack <stack> --meet-url <link> --name "Conference Room 4"`,
+  `wait`, and drive it with `chat "<text>"`, `present` (synthetic slides) and
+  `shot <file>`; `leave` stops it and deletes its files. A VP leaves a meeting it
+  is alone in after about a minute, so start the guest first. Its audio plays
+  once, from the moment its microphone opens on the pre-join screen, after
+  `--lead-in` seconds of silence (default 60): set it to cover the VP's join. The
+  meeting needs open access; Meet turns a guest away now and then, and the guest
+  retries. If the host is presenting, the VP keeps key frames of their screen, so
+  ask them to stop before recording.
+
 Check two settings on the Configuration page first: **Retention › Delete the
 transcript after the summary** must be Off (the default) or the transcript is gone
 before you record, and a meeting made as the Admin is not visible to a User

@@ -71,6 +71,7 @@ PYTHON_LINT_PATHS := \
 	$(CURDIR)/scripts/ux_recorder_cdp.py \
 	$(CURDIR)/scripts/ux_recorder_render.py \
 	$(CURDIR)/scripts/ux_test_session.py \
+	$(CURDIR)/scripts/meeting_guest \
 	$(CURDIR)/scripts/tests \
 	$(CURDIR)/scripts/testing
 
@@ -495,7 +496,7 @@ test-pr-review: ## Unit tests for the advisory AI review harness (no AWS, no mod
 # The demo recorder (scripts/ux_recorder*.py), the stack-session helper and the
 # product-demo skill's storyboard file. Needs no AWS, Chrome or network; the
 # render tests skip without ffmpeg and Pillow.
-test-ux-recorder: ## Unit tests for the product demo recorder and its session helper (no AWS)
+test-ux-recorder: ## Unit tests for the product demo recorder, its session helper and the meeting guest (no AWS)
 	@echo "Running demo recorder tests..."
 	$(PYTHON) -m pytest scripts/tests -q
 	@echo -e "$(GREEN)✅ Demo recorder tests passed!$(NC)"
