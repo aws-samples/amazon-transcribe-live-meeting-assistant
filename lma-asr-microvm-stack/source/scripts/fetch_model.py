@@ -27,8 +27,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+KEEP_SOURCE_NAME = None
 CANONICAL_NAMES = {
     "ASR_MODEL_ENCODER_FILE": "encoder.onnx",
+    "ASR_MODEL_ENCODER_DATA_FILE": KEEP_SOURCE_NAME,
     "ASR_MODEL_DECODER_FILE": "decoder.onnx",
     "ASR_MODEL_JOINER_FILE": "joiner.onnx",
     "ASR_MODEL_TOKENS_FILE": "tokens.txt",
@@ -42,13 +44,13 @@ QWEN3_CANONICAL_NAMES = {
 }
 # Cohere Transcribe stores its encoder weights in an external-data file whose name is
 # recorded inside the ONNX graph, so that file keeps its archive name.
-KEEP_SOURCE_NAME = None
 COHERE_CANONICAL_NAMES = {
     "ASR_MODEL_ENCODER_FILE": "encoder.onnx",
     "ASR_MODEL_ENCODER_DATA_FILE": KEEP_SOURCE_NAME,
     "ASR_MODEL_DECODER_FILE": "decoder.onnx",
     "ASR_MODEL_TOKENS_FILE": "tokens.txt",
 }
+OPTIONAL_FILES = {"transducer": frozenset({"ASR_MODEL_ENCODER_DATA_FILE"})}
 KIND_FILES = {
     "transducer": CANONICAL_NAMES,
     "qwen3_asr": QWEN3_CANONICAL_NAMES,
@@ -73,7 +75,12 @@ def model_files_for(env: dict[str, str]) -> dict[str, str]:
         raise ModelFetchError(
             f"unknown ASR_MODEL_KIND {kind!r}; expected one of {sorted(KIND_FILES)}"
         )
-    return KIND_FILES[kind]
+    optional = OPTIONAL_FILES.get(kind, frozenset())
+    return {
+        key: canonical
+        for key, canonical in KIND_FILES[kind].items()
+        if key not in optional or env.get(key)
+    }
 
 PREVIEW_PREFIX = "ASR_PREVIEW_MODEL_"
 PREVIEW_SUBDIR = "preview"

@@ -141,6 +141,8 @@ code_checks:
     - if ci_run INTEG_PLUMBING; then make test-integ-plumbing; fi
     # ASR MicroVM runtime unit tests + ruff (no AWS, no model weights).
     - if ci_run ASR; then make test-asr; fi
+    # Load simulator unit tests, including the ASR model benchmark (no AWS).
+    - if ci_run LOAD_SIMULATOR; then make test-load-simulator; fi
     # The advisory AI review's own machinery: the disclosure guard that decides
     # whether a model-written comment reaches the public repository, and the four
     # properties of the review job most likely to be deleted by accident.
