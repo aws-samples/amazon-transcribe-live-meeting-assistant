@@ -3,8 +3,8 @@
   "version": "<VERSION_TOKEN>",
   "private": true,
   "dependencies": {
-    "@cloudscape-design/components": "^3.0.1407",
-    "@cloudscape-design/global-styles": "^1.0.71",
+    "@cloudscape-design/components": "^3.0.1410",
+    "@cloudscape-design/global-styles": "^1.0.72",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-use-websocket": "^4.13.0",
