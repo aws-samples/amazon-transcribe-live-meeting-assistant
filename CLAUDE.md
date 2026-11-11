@@ -244,6 +244,7 @@ patterns.
 | `.claude/skills/dependabot-prs.md` | Triaging, verifying and merging Dependabot dependency PRs |
 | `.claude/skills/prepare-changelog.md` | Writing or updating CHANGELOG entries for a release |
 | `.claude/skills/integ-tests.md` | Running end-to-end integration tests against a live deployed stack (`make integ-tests`) |
+| `.claude/skills/asr-benchmark.md` | Comparing ASR model bundles and Amazon Transcribe on a dev stack for cost and transcript quality (`make asr-benchmark`) |
 | `.claude/skills/product-demo.md` | Recording a narrated product demo video of the web UI against a deployed stack (`scripts/ux_recorder.py`, `make ux-record-deps`) |
 
 When asked to `review <PR/MR URL>`, follow `.claude/skills/pr-review.md` and

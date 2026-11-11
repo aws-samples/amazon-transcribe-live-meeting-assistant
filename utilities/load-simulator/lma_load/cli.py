@@ -22,6 +22,7 @@ from lma_load import cleanup as cleanup_mod
 from lma_load import stack_info as stack_info_mod
 from lma_load.observability.report import write_summary
 from lma_load.run_context import RunContext, make_run_id
+from lma_load.scenarios import asr_benchmark as asr_benchmark_mod
 from lma_load.scenarios import backfill as backfill_mod
 from lma_load.scenarios import concurrent as concurrent_mod
 from lma_load.scenarios import rbac as rbac_mod
@@ -157,6 +158,8 @@ def load_command():
       backfill    — fabricate N historical meetings spread over Y days
       rbac        — provision N synthetic users + latency sweep
       cleanup     — remove every synthetic resource from a run-id
+      asr-benchmark — play one recording through each ASR model
+                    configuration and compare cost and quality
 
     Each run is tagged with a --run-id for deterministic cleanup later.
     """
@@ -446,6 +449,80 @@ def rbac_cmd(
     )
     rbac_mod.run(ctx, stack_info, params)
     write_summary(ctx.results_dir, ctx.run_id)
+
+
+# ---------------------------------------------------------------------------
+# asr-benchmark
+# ---------------------------------------------------------------------------
+@load_command.command("asr-benchmark")
+@_common_options
+@click.option("--wav", "wav_path", default=None, type=click.Path(exists=True, dir_okay=False),
+              help="Stereo 16-bit WAV to play through every configuration (ch_0 meeting, ch_1 microphone).")
+@click.option("--dataset", default=None,
+              help="A packaged ground-truth meeting instead of --wav, e.g. ami/IS1009c: its audio is "
+              "downloaded and built on first use and its reference transcript is scored against.")
+@click.option("--cache-dir", default=None, type=click.Path(file_okay=False),
+              help="Where --dataset audio is kept (default: ~/.cache/lma-asr-benchmark).")
+@click.option("--bundles", default="",
+              help="Comma-separated ASR MicroVM bundle ids from lma-asr-microvm-stack/source/catalog.json.")
+@click.option("--transcribe/--no-transcribe", default=False,
+              help="Also run the recording through Amazon Transcribe.")
+@click.option("--reference", "reference_path", default=None, type=click.Path(exists=True, dir_okay=False),
+              help="Ground-truth transcript to score WER against: an STM file (channel 0/1 or meeting/mic, "
+              "speaker, start, end, text) for per-channel WER, or plain text for both channels together.")
+@click.option("--diarize-system/--no-diarize-system", default=True,
+              help="Separate speakers on the meeting channel (default on).")
+@click.option("--diarize-mic/--no-diarize-mic", default=False,
+              help="Separate speakers on the microphone channel (default off).")
+@click.option("--keep-bundle", is_flag=True, default=False,
+              help="Leave the stack on the last bundle instead of restoring the original.")
+@click.option("--switch-only", "switch_to", default=None, metavar="BUNDLE",
+              help="Only switch the stack to BUNDLE and exit, streaming nothing: the way to put a "
+              "stack back on its bundle after an interrupted run.")
+@click.option("--template-bucket", default=None,
+              help="S3 bucket for the switched stack template (default: the bucket the stack's nested "
+              "templates come from).")
+@click.option("--prices-file", default=None, type=click.Path(exists=True, dir_okay=False),
+              help="Price table in CallPricing.json format instead of the AWS Price List API.")
+def asr_benchmark_cmd(
+    stack, region, profile, run_id, results_dir, dry_run, force, verbose,
+    wav_path, dataset, cache_dir, bundles, transcribe, reference_path, diarize_system, diarize_mic,
+    keep_bundle, switch_to, template_bucket, prices_file,
+):
+    """Play one recording through each ASR model configuration; compare cost and quality."""
+    if switch_to:
+        ctx = _make_ctx(stack, region, profile, run_id or make_run_id("asrb"), results_dir, dry_run, force, verbose)
+        asr_benchmark_mod.switch_only(ctx, switch_to, template_bucket)
+        return
+    bundle_list = [b.strip() for b in bundles.split(",") if b.strip()]
+    if not bundle_list and not transcribe:
+        raise click.UsageError("Pass --bundles and/or --transcribe.")
+    if bool(wav_path) == bool(dataset):
+        raise click.UsageError("Pass exactly one of --wav and --dataset.")
+    if dataset:
+        from lma_load.asr_benchmark import datasets
+
+        try:
+            built, packaged = datasets.prepare(
+                dataset, Path(cache_dir) if cache_dir else datasets.DEFAULT_CACHE
+            )
+        except ValueError as err:
+            raise click.UsageError(str(err)) from err
+        wav_path, reference_path = str(built), reference_path or str(packaged)
+    ctx = _make_ctx(stack, region, profile, run_id or make_run_id("asrb"), results_dir, dry_run, force, verbose)
+    stack_info = _resolve_stack(ctx)
+    params = asr_benchmark_mod.AsrBenchmarkParams(
+        wav_path=wav_path,
+        bundles=bundle_list,
+        transcribe=transcribe,
+        reference_path=reference_path,
+        diarize_system=diarize_system,
+        diarize_mic=diarize_mic,
+        keep_bundle=keep_bundle,
+        template_bucket=template_bucket,
+        prices_file=prices_file,
+    )
+    asr_benchmark_mod.run(ctx, stack_info, params)
 
 
 # ---------------------------------------------------------------------------

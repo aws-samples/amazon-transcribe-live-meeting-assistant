@@ -737,8 +737,8 @@ validate the pairing on a live multi-speaker meeting before marking it `vetted`.
   inference threads for 4.
 - The engine logs its CPU use once a minute while a meeting is open, as
   `engine load: 5.57 of 16 cores (35%) over the last 60s, 2 session(s), rss=2340MB`,
-  in `/aws/lambda-microvms/<stack>-asr-logs`. The size is billed whatever the load, so
-  this line is what tells you whether a bundle would fit a smaller size.
+  in `/aws/lambda-microvms/<stack>-asr-logs`. It is what tells you whether a bundle
+  would fit a smaller size, and what its CPU costs (below).
   `ASR_LOAD_LOG_INTERVAL_S` changes the interval; `0` turns it off.
 - When the engine falls behind the incoming audio, it holds a bounded backlog
   (`ASR_MAX_QUEUE` frames, default 64) and waits up to `ASR_MAX_WAIT_MS` (default
@@ -751,11 +751,47 @@ validate the pairing on a live multi-speaker meeting before marking it `vetted`.
   `termination` message carries `dropped_seconds`. A nonzero total means the engine
   could not keep up at some point in that meeting, whether from load or from a
   single slow step (look for `sortformer step ... took` nearby).
+- **How a MicroVM is billed.** Memory for the whole lifetime at the configured size,
+  and vCPU-seconds at the larger of the baseline and the cores in use. The baseline is
+  one vCPU per 2 GiB, 4 vCPUs at 8 GiB, and a MicroVM can burst to four times it, which
+  is the 16 CPUs the engine sees. Measured against Cost Explorer on a dev stack in
+  October 2026: bundles that stay under 4 cores bill the baseline, while the two-pass
+  bundles ran about 11 cores on two channels and were billed for them. Amazon
+  Transcribe bills a stereo meeting once per streamed second, with a 15-second minimum
+  per request.
 - `MaxMeetingSeconds` in the `AsrDefaults` mapping (default 4 h, service maximum 8 h)
   bounds what a single
   MicroVM can cost. The transcriber terminates the MicroVM on meeting end and on
   SIGTERM (deploys, scale-in); the ceiling is the backstop if the task dies
   without doing either.
+
+### Benchmarking model configurations
+
+To compare bundles, or a bundle with Amazon Transcribe, play the same recording through
+each on a dev stack:
+
+```bash
+AWS_PROFILE=default make asr-benchmark STACK=<dev-stack> DATASET=ami/IS1009c \
+    BUNDLES=parakeet-tdt-v3-sortformer,parakeet-tdt-v3-titanet-small TRANSCRIBE=1 DRY_RUN=1
+```
+
+For each bundle the stack is updated with only the `AsrDefaults` bundle changed (the
+image rebuilds, about 20-25 minutes), the WAV is streamed once at real time over the
+transcriber WebSocket, and the run is priced from the engine's measured CPU and the
+MicroVM's lifetime. Each run's transcript is saved and, with a reference, scored for word
+error rate per channel. `DATASET=ami/IS1009c` and `ami/IS1009d` (clean audio) and `ami/ES2004a`
+(low-level, noisier headsets, for noise robustness) are meetings from the AMI
+Meeting Corpus (CC BY 4.0) whose reference transcripts ship with the tool; their audio is
+downloaded and mixed into a stereo recording on first use. Your own recording works with
+`WAV=` and an optional `REFERENCE=` STM file. The original
+bundle is restored at the end; `SWITCH_ONLY=<bundle>` puts a stack back after an
+interrupted run. The switch refuses to run when a nested stack's published template
+differs from the deployed one, so it never deploys a re-published build as a side
+effect. The packaged AMI meetings are close-talk headset audio without crosstalk, so
+every engine hears the same clean speech. See the load simulator's
+[`asr-benchmark`](../utilities/load-simulator/README.md#5-asr-benchmark--compare-model-configurations)
+scenario. This is a lab comparison; the cost of real meetings is
+[estimated per meeting](meeting-cost-estimate.md).
 
 ## Local development
 

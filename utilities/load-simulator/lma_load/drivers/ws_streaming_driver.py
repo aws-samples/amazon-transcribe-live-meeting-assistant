@@ -126,6 +126,28 @@ def _resolve_wav(override: str | None) -> _LoadedWav:
 
 
 
+async def _send_paced(
+    ws, frames: bytes, chunk_size: int, duration_s: float, play_once: bool, progress: dict
+) -> None:
+    period = CHUNK_SIZE_MS / 1000.0
+    start = time.monotonic()
+    deadline = None if play_once else start + duration_s
+    n = 0
+    while True:
+        for offset in range(0, len(frames), chunk_size):
+            if deadline is not None and time.monotonic() >= deadline:
+                return
+            chunk = frames[offset : offset + chunk_size]
+            await ws.send(chunk)
+            progress["sent"] += len(chunk)
+            n += 1
+            delay = start + n * period - time.monotonic()
+            if delay > 0:
+                await asyncio.sleep(delay)
+        if play_once or not frames:
+            return
+
+
 # ---------------------------------------------------------------------------
 # One-meeting coroutine
 # ---------------------------------------------------------------------------
@@ -138,6 +160,10 @@ async def _stream_one(
     duration_s: float,
     call_prefix: str,
     agent_label: str,
+    *,
+    call_id: str | None = None,
+    extra_metadata: dict[str, Any] | None = None,
+    play_once: bool = False,
 ) -> dict[str, Any]:
     """Open a WSS connection, stream audio for ``duration_s``, then END."""
     import websockets  # optional-dep; imported lazily
@@ -157,13 +183,16 @@ async def _stream_one(
         )
 
 
-    call_id = f"{call_prefix}-{idx:05d} - {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')}"
+    call_id = call_id or (
+        f"{call_prefix}-{idx:05d} - {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')}"
+    )
     metadata = {
         "callId": call_id,
         "remoteSpeakerName": "LoadSim-Participant",
         "localSpeakerName": agent_label,
         "samplingRate": wav.sample_rate,
         "callEvent": "START",
+        **(extra_metadata or {}),
     }
     # LMA's JWT-verifier accepts the token from either a custom header
     # *or* a query-string parameter (see lma-websocket-transcriber-stack/
@@ -192,7 +221,7 @@ async def _stream_one(
         "refresh_token": "",
     }
     t0 = time.monotonic()
-    sent_bytes = 0
+    progress = {"sent": 0}
 
     try:
         async with websockets.connect(
@@ -208,20 +237,10 @@ async def _stream_one(
             await ws.send(json.dumps(metadata))
             t_first_send = time.monotonic()
             # 2) real-time audio
-            deadline = time.monotonic() + duration_s
             chunk_size = wav.chunk_bytes
             if chunk_size <= 0:
                 chunk_size = wav.sample_rate * BYTES_PER_SAMPLE * wav.channels // 5
-            while time.monotonic() < deadline:
-                for offset in range(0, len(wav.frames), chunk_size):
-                    if time.monotonic() >= deadline:
-                        break
-                    chunk = wav.frames[offset : offset + chunk_size]
-                    await ws.send(chunk)
-                    sent_bytes += len(chunk)
-                    # Pace to real time. Small drift is fine — Transcribe streams
-                    # are forgiving up to ~30s of buffering.
-                    await asyncio.sleep(CHUNK_SIZE_MS / 1000.0)
+            await _send_paced(ws, wav.frames, chunk_size, duration_s, play_once, progress)
             # 3) END
             await ws.send(json.dumps({**metadata, "callEvent": "END"}))
     except Exception as err:  # noqa: BLE001
@@ -230,7 +249,7 @@ async def _stream_one(
             "status": "error",
             "error": str(err),
             "elapsed_ms": round((time.monotonic() - t0) * 1000, 1),
-            "bytes_sent": sent_bytes,
+            "bytes_sent": progress["sent"],
         }
 
     return {
@@ -238,7 +257,7 @@ async def _stream_one(
         "status": "ok",
         "elapsed_ms": round((time.monotonic() - t0) * 1000, 1),
         "first_send_latency_ms": round((t_first_send - t0) * 1000, 1),
-        "bytes_sent": sent_bytes,
+        "bytes_sent": progress["sent"],
     }
 
 
