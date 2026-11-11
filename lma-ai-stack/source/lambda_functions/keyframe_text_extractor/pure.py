@@ -132,6 +132,8 @@ MIN_UNIQUE_WORD_RATIO = 0.08
 _HEADER = re.compile(r"^[\s*_#>`-]*(CONTENT|TITLE)[\s*_]*[:=\-][\s*_]*(.*?)[\s*_]*$", re.IGNORECASE)
 _KIND = re.compile(r"\b(SCREEN|CAMERA|MIXED)\b", re.IGNORECASE)
 _NO_TITLE = {"", "none", "n/a", "na", "-", "no title", "(none)", "[none]"}
+#: The TITLE line's description in PROMPT, which a model sometimes returns as the title.
+_TITLE_PLACEHOLDER = "a few words naming the main shared content"
 _FENCE = re.compile(r"^```[a-z]*\n?|\n?```$")
 _WORD = re.compile(r"\w")
 
@@ -220,7 +222,7 @@ def clean_title(value: str) -> str:
     """A TITLE line's value as stored: one line, unquoted, a few words; "" for none."""
     title = " ".join(value.split()).strip("\"'`*[]()")
     title = title.strip().rstrip(".")
-    if title.lower() in _NO_TITLE:
+    if title.lower() in _NO_TITLE or title.casefold() == _TITLE_PLACEHOLDER:
         return ""
     words = title.split()
     if len(words) > MAX_TITLE_WORDS:

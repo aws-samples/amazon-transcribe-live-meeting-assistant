@@ -88,6 +88,7 @@ export const DESKTOP_THRESHOLDS: KeyframeThresholds = {
     settleSamples: numberEnv('KEYFRAME_DESKTOP_SETTLE_SAMPLES', 2),
     maxMovingFraction: numberEnv('KEYFRAME_DESKTOP_MAX_MOVING_FRACTION', 0.25),
     majorChangeFraction: numberEnv('KEYFRAME_DESKTOP_MAJOR_CHANGE_FRACTION', 0.1),
+    busySettleMs: numberEnv('KEYFRAME_DESKTOP_BUSY_SETTLE_MS', 6000),
 };
 const PIXEL_DELTA = numberEnv('KEYFRAME_PIXEL_DELTA', 12);
 const MIN_INTERVAL_MS = numberEnv('KEYFRAME_MIN_INTERVAL_MS', 4000);
@@ -108,6 +109,16 @@ const numberListEnv = (name: string, fallback: number[]): number[] => {
  */
 const BACKOFF_STEPS_MS = numberListEnv('KEYFRAME_BACKOFF_STEPS_MS', [30_000, 60_000]);
 const QUIET_STEP_MS = numberEnv('KEYFRAME_QUIET_STEP_MS', 10_000);
+/*
+ * Also as the Virtual Participant: a screen that moves again less than 10 s
+ * after it last moved (a page scrolled a step at a time, a dialog opened and
+ * closed) is busy, and a picture on it has to hold still for 6 s
+ * (KEYFRAME_DESKTOP_BUSY_SETTLE_MS) rather than two samples, unless no frame
+ * was kept for 30 s; a picture still for 15 s skips the backoff.
+ */
+const BUSY_GAP_MS = numberEnv('KEYFRAME_BUSY_GAP_MS', 10_000);
+const MAX_BUSY_WAIT_MS = numberEnv('KEYFRAME_MAX_BUSY_WAIT_MS', 30_000);
+const HOLD_MS = numberEnv('KEYFRAME_HOLD_MS', 15_000);
 const MAX_PER_STREAM = numberEnv('KEYFRAME_MAX_PER_MEETING', 1000);
 // Undecoded bytes allowed to queue on FFmpeg's stdin before the key frames of
 // this stream are given up, so a stalled decoder cannot grow the heap.
@@ -209,6 +220,9 @@ export class KeyframeLane {
         minIntervalMs: MIN_INTERVAL_MS,
         backoffStepsMs: BACKOFF_STEPS_MS,
         quietStepMs: QUIET_STEP_MS,
+        busyGapMs: BUSY_GAP_MS,
+        maxBusyWaitMs: MAX_BUSY_WAIT_MS,
+        holdMs: HOLD_MS,
     });
     private proc: ChildProcess | null = null;
     private stdoutPending: Buffer = Buffer.alloc(0);
