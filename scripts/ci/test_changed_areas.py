@@ -150,9 +150,15 @@ def test_the_browser_extension_runs_alone() -> None:
 
 def test_files_no_step_covers_run_nothing() -> None:
     assert (
-        ran(["lma-desktop-capture-app-stack/source/main.js", "utilities/load-simulator/x.py"])
+        ran(
+            ["lma-desktop-capture-app-stack/source/main.js", "utilities/websocket-server-mock/x.py"]
+        )
         == set()
     )
+
+
+def test_a_load_simulator_change_runs_only_its_own_tests() -> None:
+    assert ran(["utilities/load-simulator/lma_load/cli.py"]) == {"load_simulator"}
 
 
 def test_a_rename_out_of_an_area_counts_against_both_areas() -> None:

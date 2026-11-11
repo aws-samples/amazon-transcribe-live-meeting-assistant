@@ -565,12 +565,13 @@ class AsrSession:
             # read against. ``$ASR_ENGINE`` selects which engine's model is baked per image
             # (streaming default / accurate) — logging it disambiguates recognizer behaviour.
             _LOG.info(
-                "session %s start: sample_rate=%d interim_results=%s engine=%s "
+                "session %s start: sample_rate=%d interim_results=%s engine=%s bundle=%s "
                 "word_timestamps=%s endpointing_ms=%s diarize=%s max_speakers=%s",
                 self._session_id,
                 config.sample_rate,
                 config.interim_results,
                 os.environ.get("ASR_ENGINE", "streaming"),
+                os.environ.get("ASR_BUNDLE_ID", "unknown"),
                 config.word_timestamps,
                 config.endpointing_ms,
                 config.diarize,

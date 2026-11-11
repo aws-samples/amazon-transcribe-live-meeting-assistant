@@ -648,6 +648,7 @@ FILE_PAYLOADS = {
     "joiner.int8.onnx": b"joiner",
     "tokens.txt": b"a b c\n",
     "0.wav": b"RIFF" + b"\x00" * 40,
+    "encoder.weights": b"weights",
 }
 
 
@@ -753,3 +754,51 @@ def test_run_places_a_preview_model_pinned_file_by_file(tmp_path: Path) -> None:
     assert (dest / "preview" / "encoder.onnx").read_bytes() == b"encoder"
     assert (dest / "preview" / "tokens.txt").read_bytes() == b"a b c\n"
     assert (dest / "test_wavs" / "warm.wav").is_file()  # the authority's, from its archive
+
+
+def test_a_transducer_pinned_file_by_file_keeps_its_encoder_weights_file_name(
+    tmp_path: Path,
+) -> None:
+    env = files_env(warm=False)
+    env["ASR_MODEL_ENCODER_DATA_FILE"] = "encoder.weights"
+    env["ASR_MODEL_ENCODER_DATA_URL"] = "https://example.invalid/rev/encoder.weights"
+    env["ASR_MODEL_ENCODER_DATA_SHA256"] = hashlib.sha256(b"weights").hexdigest()
+    env_path = write_env(tmp_path / "model.env", env)
+    dest = tmp_path / "opt-models"
+
+    with mock.patch.object(fetch_model, "download", side_effect=serve_files):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(dest)]) == 0
+
+    assert (dest / "encoder.onnx").read_bytes() == b"encoder"
+    assert (dest / "encoder.weights").read_bytes() == b"weights"
+
+
+def test_a_transducer_with_an_empty_encoder_weights_entry_fetches_no_weights_file(
+    tmp_path: Path,
+) -> None:
+    env = files_env(warm=False)
+    env["ASR_MODEL_ENCODER_DATA_FILE"] = ""
+    env_path = write_env(tmp_path / "model.env", env)
+    dest = tmp_path / "opt-models"
+    urls: list[str] = []
+
+    def fake_download(url: str, target: Path) -> str:
+        urls.append(url)
+        return serve_files(url, target)
+
+    with mock.patch.object(fetch_model, "download", side_effect=fake_download):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(dest)]) == 0
+
+    assert len(urls) == 4
+    assert not (dest / "encoder.weights").exists()
+
+
+def test_a_transducer_encoder_weights_file_must_match_its_checksum(tmp_path: Path) -> None:
+    env = files_env(warm=False)
+    env["ASR_MODEL_ENCODER_DATA_FILE"] = "encoder.weights"
+    env["ASR_MODEL_ENCODER_DATA_URL"] = "https://example.invalid/rev/encoder.weights"
+    env["ASR_MODEL_ENCODER_DATA_SHA256"] = "0" * 64
+    env_path = write_env(tmp_path / "model.env", env)
+
+    with mock.patch.object(fetch_model, "download", side_effect=serve_files):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(tmp_path / "d")]) == 1

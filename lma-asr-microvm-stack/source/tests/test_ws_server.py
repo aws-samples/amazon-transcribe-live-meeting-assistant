@@ -1139,6 +1139,16 @@ async def test_stream_acquisition_is_bracketed_by_info_logs(
     assert "recognizer ready in" in text
 
 
+async def test_session_start_log_names_the_bundle(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ASR_BUNDLE_ID", "parakeet-tdt-v3-titanet-small")
+    with caplog.at_level(logging.INFO, logger="asr_server.ws_server"):
+        session, conn = _session(['{"type":"eos"}'])
+        await session.run()
+    assert "bundle=parakeet-tdt-v3-titanet-small" in caplog.text
+
+
 async def test_serve_asr_fails_closed_when_engine_build_raises() -> None:
     """A startup engine-build failure propagates out of ``serve_asr`` (fail closed).
 
