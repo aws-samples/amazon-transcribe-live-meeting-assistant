@@ -24,7 +24,7 @@ import {
   MeetingMode,
   novaSonicConfigTablesFromEnv,
 } from './nova-sonic-config-loader.js';
-import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
+import { configuredWakePhrases, foldWakeSpellings, isStopTalkingRequest } from './stop-request.js';
 import { publishAssistantTurn } from './translator-transcript.js';
 import { spokenStrandsAnswer } from './spoken-text.js';
 import { pcmMs, RecentAudio, TRANSLATOR_DRAIN_MAX_MS } from './translator-turns.js';
@@ -50,9 +50,10 @@ import {
   addressesAssistant,
   LookupSkipReason,
   mutedLookupSkipReason,
-  SKIPPED_LOOKUP_RESULT,
   skippedLookupLogLine,
+  skippedLookupResult,
 } from './muted-lookup.js';
+import { WakeReplyGate } from './wake-reply-gate.js';
 import { ActivationMode } from './voice-assistant-interface.js';
 import {
   applyAssistantChatCommand,
@@ -64,6 +65,8 @@ import {
   isMeetingMode,
   publishMeetingMode,
   requiresAlwaysListening,
+  VoiceControlOutcome,
+  VoiceControlState,
 } from './assistant-toggles.js';
 import { createLogger } from './logger.js';
 import { inMeetingRequestPayload } from './meeting-assist-request.js';
@@ -86,6 +89,32 @@ const log = createLogger('nova-agent');
 export function hasStopTalkingTool(meetingMode: MeetingMode): boolean {
     return meetingMode === 'normal' || meetingMode === 'group';
 }
+
+/** Longest a wake-phrase activation stays open after a stop request has
+ *  silenced it, so the spoken acknowledgement can finish playing. */
+export const STOP_DEACTIVATE_MAX_MS = 3000;
+
+/** How recently a translator pause phrase must have been heard, on either
+ *  transcript, for the translator's `mute` tool call to be acted on. */
+export const TRANSLATOR_PAUSE_PHRASE_WINDOW_MS = 8000;
+
+/**
+ * What the system prompt adds while the assistant is activated by wake phrase
+ * in assistant mode: who it is talking to, and that everything else is to be
+ * left alone. The reply gate (wake-reply-gate.ts) withholds an unaddressed
+ * reply whatever the model does; this keeps the model from producing one, and
+ * from looking anything up for it, in the first place.
+ */
+export const WAKE_PHRASE_MODE_PROMPT = 'WAKE PHRASE MODE:\n'
+  + 'You are a participant in a meeting with several people, and you hear everything that is said. '
+  + 'Most of it is the participants talking to each other, not to you.\n'
+  + '1. Answer only a request that is addressed to you with your wake phrase, and a follow-up '
+  + 'the same person adds straight away.\n'
+  + '2. Everything else is conversation between other people. Say nothing in reply to it - not '
+  + '"okay", not "I understand", not a summary of what they said - and do not look anything up for it.\n'
+  + '3. When you have answered, stop and stay silent. Someone will say your wake phrase again '
+  + 'when they want you.\n'
+  + '4. If someone talks over you without saying your wake phrase, stop and say nothing.\n';
 
 /**
  * How long the transcript route waits for Nova to call the `mute` tool itself
@@ -616,7 +645,21 @@ export class NovaAgent implements VoiceAssistantProvider {
    *  noteParticipantUtterance. While it has, a paused translator is resumed or
    *  left from that transcript and the model is not sent the meeting's audio. */
   private participantTranscriptSeen = false;
-  
+
+  /** Which replies the meeting hears while activated by wake phrase in
+   *  assistant mode (wake-reply-gate.ts). */
+  private replyGate = new WakeReplyGate();
+  /** Set by "LMA mute" in chat: the assistant stays silent, wake phrase or
+   *  not, until "LMA unmute" (setMutedByChat). */
+  private chatMuted = false;
+  /** Ends a wake-phrase activation once a stop request has silenced it
+   *  (endActivationAfterStop). */
+  private stopDeactivateTimer: NodeJS.Timeout | null = null;
+  /** Recent participant utterances in translator mode, from both
+   *  transcripts, for checking that a pause was actually asked for
+   *  (translatorPauseAsked). */
+  private recentTranslatorUtterances: Array<{ text: string; at: number }> = [];
+
   // Lambda client and Strands agent configuration
   private lambdaClient: LambdaClient | null = null;
   private strandsLambdaArn?: string;
@@ -1426,22 +1469,39 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     const stopToolAvailable = hasStopTalkingTool(this.meetingMode);
 
-    // Add interruption handling instructions (applies to all modes)
-    systemPromptContent += '\n\nINTERRUPTION HANDLING:\n' +
-      'When a user interrupts you mid-response (you will see { "interrupted" : true }):\n' +
-      '1. IMMEDIATELY acknowledge the interruption with a brief phrase like:\n' +
-      '   - "Got it" or "Sure" or "Okay" (if they\'re correcting you)\n' +
-      '   - "Of course" or "Absolutely" (if they\'re asking something new)\n' +
-      '   - Keep it to 1-2 words for minimal interruption\n' +
-      (stopToolAvailable
-        // An interruption that asks for silence must not be treated as the
-        // preface to a new request, or the acknowledgement is followed by a
-        // paragraph of explanation and the assistant never actually stops.
-        ? '2. If the interruption was asking you to stop, stop talking, be quiet, shut up or mute '
-          + 'yourself, follow STOP REQUESTS below instead of continuing.\n'
-          + '3. Otherwise, proceed with their new request\n'
-        : '2. THEN proceed with their new request\n') +
-      'This provides instant feedback and shows you\'re responsive.\n';
+    // Wake-phrase assistant mode gets a prompt for its own state: answer the
+    // request it was woken for, then nothing. The general interruption block
+    // below asks for an acknowledgement ("Okay") of every interruption, which
+    // in a meeting where people talk over each other was heard as the
+    // assistant saying "Okay" again and again to nobody.
+    if (this.replyGateMode()) {
+      systemPromptContent += '\n\n' + WAKE_PHRASE_MODE_PROMPT;
+      systemPromptContent += '\n\nINTERRUPTION HANDLING:\n' +
+        'When you are interrupted mid-response (you will see { "interrupted" : true }), stop. '
+        + 'Reply only if the interruption says your wake phrase or is plainly the person you were '
+        + 'answering correcting you; otherwise say nothing.\n' +
+        (stopToolAvailable
+          ? 'If the interruption asks you to stop, stop talking, be quiet, shut up or mute yourself, '
+            + 'follow STOP REQUESTS below.\n'
+          : '');
+    } else {
+      // Add interruption handling instructions (every other mode)
+      systemPromptContent += '\n\nINTERRUPTION HANDLING:\n' +
+        'When a user interrupts you mid-response (you will see { "interrupted" : true }):\n' +
+        '1. IMMEDIATELY acknowledge the interruption with a brief phrase like:\n' +
+        '   - "Got it" or "Sure" or "Okay" (if they\'re correcting you)\n' +
+        '   - "Of course" or "Absolutely" (if they\'re asking something new)\n' +
+        '   - Keep it to 1-2 words for minimal interruption\n' +
+        (stopToolAvailable
+          // An interruption that asks for silence must not be treated as the
+          // preface to a new request, or the acknowledgement is followed by a
+          // paragraph of explanation and the assistant never actually stops.
+          ? '2. If the interruption was asking you to stop, stop talking, be quiet, shut up or mute '
+            + 'yourself, follow STOP REQUESTS below instead of continuing.\n'
+            + '3. Otherwise, proceed with their new request\n'
+          : '2. THEN proceed with their new request\n') +
+        'This provides instant feedback and shows you\'re responsive.\n';
+    }
 
     // Add stop-request handling. Registered wherever the `mute` tool is, so the
     // prompt and the tool set cannot drift apart.
@@ -1703,15 +1763,72 @@ export class NovaAgent implements VoiceAssistantProvider {
     log.info(`⏱️  Conversation timeout set for ${this.defaultActivationDuration} seconds`);
   }
 
+  /** Wake-phrase activation in assistant mode: the configuration the reply
+   *  gate and its prompt are for (wake-reply-gate.ts). */
+  private replyGateMode(): boolean {
+    return this.activationMode === 'wake_phrase' && this.meetingMode === 'normal';
+  }
+
+  /**
+   * The reply gate's decision for a participant turn that has just ended on
+   * `session`. Only while activated: outside an activation the session hears
+   * nothing, and a pre-connected session has not been asked anything yet.
+   */
+  private gateUserTurn(session: SessionData, content: string): void {
+    if (!this.replyGateMode() || !this._isActivated) return;
+    // addressesAssistant rather than containsWakePhrase: the same matching,
+    // without a debug block per turn.
+    const decision = this.replyGate.noteUserTurn(addressesAssistant(content, configuredWakePhrases()));
+    if (decision.audible) return;
+    session.dropTurn = true;
+    session.dropReplyText = true;
+    log.info(`[wake-gate] action=withheld-reply reason=${decision.reason} muted=${this._isMuted}`);
+  }
+
+  /**
+   * End a wake-phrase activation that a stop request has just silenced, once
+   * the acknowledgement has finished playing (bounded by
+   * STOP_DEACTIVATE_MAX_MS). Muted, the session would go on hearing the
+   * meeting until its window lapsed, and the first mention of the wake phrase
+   * in that time made it audible again in the middle of a conversation that
+   * was not for it. Closed, the next wake phrase opens a fresh activation that
+   * starts from the request it was woken for.
+   *
+   * Only for `normal` mode on `wake_phrase`: group mode owns its own
+   * muted-until-addressed machine, and an always-listening assistant has no
+   * activation to end.
+   */
+  private endActivationAfterStop(why: string): void {
+    if (!this.replyGateMode() || !this._isActivated) return;
+    if (this.stopDeactivateTimer) clearTimeout(this.stopDeactivateTimer);
+    const delay = Math.min(Math.max(0, this.playbackEndsAt - Date.now()) + 250, STOP_DEACTIVATE_MAX_MS);
+    log.info(`[stop-request] action=ending-activation why=${why} in_ms=${delay}`);
+    this.stopDeactivateTimer = setTimeout(() => {
+      this.stopDeactivateTimer = null;
+      // Asked back in the meantime: activate() unmutes, and that activation
+      // is the one now running.
+      if (!this._isMuted || !this._isActivated || !this.replyGateMode()) return;
+      this.deactivate();
+    }, delay);
+  }
+
+  private clearStopDeactivateTimer(): void {
+    if (this.stopDeactivateTimer) {
+      clearTimeout(this.stopDeactivateTimer);
+      this.stopDeactivateTimer = null;
+    }
+  }
+
   private containsWakePhrase(text: string): boolean {
     const wakePhrases = configuredWakePhrases();
 
     // Normalize input: strip punctuation and collapse whitespace
     // This handles transcription artifacts like "hey, alex" or "ok. alex"
-    const normalized = text.toLowerCase()
+    // "Okay Alex" is folded to "ok alex" (stop-request.ts foldWakeSpellings).
+    const normalized = foldWakeSpellings(text.toLowerCase()
       .replace(/[,.\?!;:'"]/g, ' ')  // Replace punctuation with spaces
       .replace(/\s+/g, ' ')           // Collapse multiple spaces
-      .trim();
+      .trim());
     
     // DEBUG: Log the wake phrases being checked
     log.debug('🔍 containsWakePhrase():');
@@ -1720,11 +1837,11 @@ export class NovaAgent implements VoiceAssistantProvider {
     log.debug(`   Configured wake phrases: [${wakePhrases.map(p => `"${p}"`).join(', ')}]`);
     
     // Use word boundary matching to avoid false positives
-    // "okay" should NOT match "ok alex"
+    // "okay" on its own should NOT match "ok alex"; "okay alex" does, folded above
     const matchResult = wakePhrases.some((phrase: string) => {
       // Escape all regex special characters, then allow flexible whitespace between words
-      const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
-      
+      const escapedPhrase = foldWakeSpellings(phrase).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+
       // Create regex with word boundaries
       // \b ensures we match complete words, not partial matches
       // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- Inputs are regex-escaped by the preceding .replace() call; escaped wake-phrase cannot produce catastrophic backtracking
@@ -2246,8 +2363,10 @@ export class NovaAgent implements VoiceAssistantProvider {
               if (toolName === 'strands_agent') {
                 // Decided here, at the tool-use event, so that a lookup that will
                 // not be run never arms the acknowledgement either.
-                lookupSkip = this.strandsLookupSkipReason();
+                lookupSkip = this.strandsLookupSkipReason(session);
                 if (!lookupSkip) {
+                  // Its answer is owed, however much the room talks meanwhile.
+                  this.replyGate.noteLookupStarted();
                   // Also the earliest point: the acknowledgement fallback is timed
                   // from the tool-use event, not from the end of its content block.
                   this.noteStrandsToolRequested(toolUseId);
@@ -2300,6 +2419,12 @@ export class NovaAgent implements VoiceAssistantProvider {
                 this.dropCurrentAudioBlock = false;
                 // PARTIAL_TURN separates the blocks of one answer; anything else ends it.
                 if (endReason && endReason !== 'PARTIAL_TURN') {
+                  // An answer the meeting heard to the end: nothing more is
+                  // owed until somebody addresses the assistant again. Not
+                  // while a lookup runs, which makes this its preamble.
+                  if (endReason === 'END_TURN' && !session.dropTurn && !session.silenced && !this._isMuted) {
+                    this.replyGate.noteAnswerHeard(this._isProcessingTool);
+                  }
                   session.audioTurnOpen = false;
                   session.dropTurn = false;
                   if (this.heldPlayback.size > 0) {
@@ -2365,6 +2490,9 @@ export class NovaAgent implements VoiceAssistantProvider {
                   session.dropTurn = false;
                   session.dropReplyText = false;
                   this.handleUserTurnWakePhrase(currentTurn.content);
+                  // Wake-phrase assistant mode: the reply to a turn nobody
+                  // addressed to the assistant is not heard (wake-reply-gate.ts).
+                  this.gateUserTurn(session, currentTurn.content);
                 }
               }
 
@@ -2425,6 +2553,23 @@ export class NovaAgent implements VoiceAssistantProvider {
    * translator mode.
    */
   private handleUserTurnWakePhrase(content: string): void {
+    // A stop request on the model's own transcript is acted on in code, as the
+    // one on the participants' transcript is (scribe.ts), rather than left to
+    // the model. On the live meeting this was the only transcript that heard
+    // it: the participants' transcript wrote "Okay, Alex. Stop." and then
+    // "Yeah, let's stop.", and the model said "Okay, I will stop now. Let me
+    // mute myself" without calling the tool, and kept answering. Checked
+    // before the wake-phrase test, because "Alex, stop" names the assistant
+    // without a wake phrase. requestStopTalking takes a repeat of a request
+    // already in flight as that request, so the two routes do not stack.
+    if (
+      this.meetingMode !== 'translator'
+      && !this._isMuted
+      && isStopTalkingRequest(content, configuredWakePhrases())
+    ) {
+      this.requestStopTalking("stop requested in the assistant's transcript");
+    }
+
     if (!this.containsWakePhrase(content)) {
       return;
     }
@@ -2438,6 +2583,14 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
 
     const askedToStop = isStopTalkingRequest(content, configuredWakePhrases());
+
+    // Muted from chat: only "LMA unmute" brings it back (setMutedByChat).
+    if (this.chatMuted) {
+      if (this._isMuted && !askedToStop) {
+        log.info('[voice-control] wake phrase heard while muted from chat - staying muted');
+      }
+      return;
+    }
 
     // Note what this deliberately does NOT do: call off a stop request that is
     // still resolving. A wake phrase here means the assistant is wanted, and
@@ -2455,6 +2608,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // condition that already governs making it audible again. Without that, a
     // fallback or backstop still armed would silence the assistant again a
     // moment after it was asked back.
+
     if (this.groupMeetingMode) {
       if (this._isMuted && !askedToStop) {
         log.info('🔓 Wake phrase detected in user speech - proactively unmuting agent');
@@ -2488,8 +2642,13 @@ export class NovaAgent implements VoiceAssistantProvider {
    * turn it is responding to was not asked for anything, and its answer would
    * be dropped by the mute anyway.
    */
-  private strandsLookupSkipReason(): LookupSkipReason | null {
-    return mutedLookupSkipReason(this._isMuted, this.lastUserTurnText);
+  private strandsLookupSkipReason(session: SessionData | null = this.session): LookupSkipReason | null {
+    const muted = mutedLookupSkipReason(this._isMuted, this.lastUserTurnText);
+    if (muted) return muted;
+    // The reply this lookup belongs to has been withheld (wake-reply-gate.ts),
+    // so nobody would hear its answer.
+    if (this.replyGateMode() && session?.dropTurn) return 'unaddressed-turn';
+    return null;
   }
 
   /**
@@ -2503,7 +2662,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
     try {
-      await this.sendToolResult(toolUseId, SKIPPED_LOOKUP_RESULT);
+      await this.sendToolResult(toolUseId, skippedLookupResult(reason));
     } catch (err) {
       log.warn('Failed to send the skipped-lookup tool result (non-fatal):', err);
     }
@@ -2715,6 +2874,29 @@ export class NovaAgent implements VoiceAssistantProvider {
       this.handleStopTranslating(issuingSession, 'tool');
       return;
     }
+    // The translator pauses on its pause phrase and on nothing else. On the
+    // live meeting a translator called `mute` nine seconds after it started,
+    // on hearing "...I just turned on the translator mode just by typing LMA
+    // translate", which is not the phrase, and was then paused for the rest of
+    // translator mode without having translated anything. So the call is
+    // acted on only when one of the transcripts heard the phrase; a real
+    // pause request that the model heard first is still caught, because the
+    // participants' transcript pauses the translator on its own
+    // (handleTranslatorUtterance) when the phrase arrives there.
+    if (this.meetingMode === 'translator' && this._translatorState === 'UNMUTED' && !this.translatorPauseAsked()) {
+      log.info('[translator] action=mute-tool-ignored why=no-pause-phrase');
+      if (this.session && this.session.isActive && this.session === issuingSession) {
+        try {
+          await this.sendToolResult(toolUseId, {
+            status: 'ignored',
+            instruction: 'Not paused: nobody said the pause phrase. Keep translating, and say nothing about this.',
+          });
+        } catch (err) {
+          log.warn('Failed to send the ignored mute tool result (non-fatal):', err);
+        }
+      }
+      return;
+    }
     log.info('🔇 Mute tool called - muting agent');
     // Only translator mode gets an audible cue, sounded before the audio gate
     // engages so the beep itself isn't dropped. That mode replaces the base
@@ -2783,6 +2965,7 @@ export class NovaAgent implements VoiceAssistantProvider {
         + ` speaking=${this._isSpeaking} mode=${this.meetingMode}`,
       );
       this.muteDrainingPlayback('tool');
+      this.endActivationAfterStop('tool');
     } else {
       // Translator mode: the tone has flushed and the pause should be absolute.
       this.mute('tool');
@@ -2893,6 +3076,17 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
     
     if (!this._isActive || !this.session || !this.session.isActive) {
+      return;
+    }
+
+    // Not before the session's setup is queued. createSession marks the agent
+    // active and then waits before queueing sessionStart, and an
+    // always-listening assistant is sent meeting audio meanwhile: queued ahead
+    // of it, that audio became the stream's first event, which Bedrock refuses
+    // ("The first event must be a SessionStart event") — on the live meeting,
+    // the session rebuilt for translator mode failed that way and had to be
+    // refreshed before it heard anything.
+    if (!this.session.isAudioContentStartSent) {
       return;
     }
 
@@ -3286,6 +3480,7 @@ export class NovaAgent implements VoiceAssistantProvider {
   async preConnect(): Promise<void> {
     if (this.activationMode === 'always_active') return; // already connected
     if (this._isActive) return; // already has a session
+    if (this.chatMuted) return; // will not be activated (setMutedByChat)
     if (this._preConnecting) {
       if (this._preConnectPromise) await this._preConnectPromise;
       return;
@@ -3314,10 +3509,19 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
 
+    // "LMA mute" in chat holds until "LMA unmute": a wake phrase does not
+    // undo it (setMutedByChat).
+    if (this.chatMuted) {
+      log.info('[voice-control] wake phrase ignored - the voice assistant is muted from chat');
+      return;
+    }
+
     const activationDuration = duration || this.defaultActivationDuration;
     log.info(`🎤 Nova agent activated for ${activationDuration} seconds`);
     // Activation is by wake phrase.
     this.lastAddressedAt = Date.now();
+    // A stop that is about to end the previous activation is superseded.
+    this.clearStopDeactivateTimer();
     
     // A wake phrase heard while an earlier one is still opening the session
     // does not open another: the activation already running finishes the job,
@@ -3393,6 +3597,10 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (this.meetingMode === 'normal' && this._isMuted) {
       this.unmute('wake phrase activation');
     }
+
+    // The request this activation was woken for is owed an answer; what the
+    // session hears after it is gated (wake-reply-gate.ts).
+    this.replyGate.noteActivated();
 
     // Handle initial context by sending as text message
     if (initialContext) {
@@ -3513,6 +3721,8 @@ export class NovaAgent implements VoiceAssistantProvider {
     log.info('🔇 Nova agent deactivated');
     this._isActivated = false;
     this.activationWindow.stop();
+    this.replyGate.reset();
+    this.clearStopDeactivateTimer();
 
     // A closed session cannot hear a participant ask it to stop, so no
     // assistant audio is left playing after it. The window does not lapse
@@ -4040,6 +4250,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       + ` speaking=${this._isSpeaking}`,
     );
     this.mute(reason);
+    this.endActivationAfterStop('fallback');
   }
 
   /** Drop a stop request that is still resolving. */
@@ -4807,12 +5018,21 @@ export class NovaAgent implements VoiceAssistantProvider {
     route: 'nova' | 'transcript',
   ): void {
     if (this.meetingMode !== 'translator' || this.stopped) return;
+    this.noteTranslatorUtterance(text);
     if (isStopTranslatingRequest(text, this.translatorAddressees())) {
       this.leaveTranslatorRequestedAt = Date.now();
       this.handleStopTranslating(session, route);
       return;
     }
-    if (this._translatorState !== 'MUTED') return;
+    if (this._translatorState !== 'MUTED') {
+      // The pause phrase on the participants' transcript pauses the
+      // translator in code, as the resume phrase resumes it below, so a pause
+      // does not depend on the model calling its tool.
+      if (route === 'transcript' && containsTriggerPhrase(text, this.translatorMutePhrases)) {
+        this.pauseTranslator('transcript');
+      }
+      return;
+    }
     // A paused session still hearing the meeting has no participants'
     // transcript to defer to; one that is not hears nothing to act on.
     if (route === 'nova' && this.participantTranscriptSeen) return;
@@ -4828,10 +5048,50 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
   }
 
+  /** Remember a participant utterance heard in translator mode, from either
+   *  transcript, for translatorPauseAsked. */
+  private noteTranslatorUtterance(text: string): void {
+    const now = Date.now();
+    this.recentTranslatorUtterances = this.recentTranslatorUtterances
+      .filter((entry) => now - entry.at <= TRANSLATOR_PAUSE_PHRASE_WINDOW_MS)
+      .concat([{ text, at: now }]);
+  }
+
+  /** Whether a translator pause phrase was heard, on either transcript, within
+   *  TRANSLATOR_PAUSE_PHRASE_WINDOW_MS. */
+  private translatorPauseAsked(): boolean {
+    const now = Date.now();
+    return this.recentTranslatorUtterances.some(
+      (entry) => now - entry.at <= TRANSLATOR_PAUSE_PHRASE_WINDOW_MS
+        && containsTriggerPhrase(entry.text, this.translatorMutePhrases),
+    );
+  }
+
+  /**
+   * Pause the translator from code: the participants' transcript heard the
+   * pause phrase, or a participant typed "LMA mute". The same transition the
+   * `mute` tool makes: the tone, the gate, and a session on the paused prompt
+   * with only the `unmute` tool.
+   */
+  private pauseTranslator(route: 'transcript' | 'chat'): boolean {
+    if (this._reconfiguring || this.leavingTranslator || this._translatorState === 'MUTED') return false;
+    log.info(`[translator] action=pause route=${route}`);
+    this.mute(route);
+    this.playConfirmationTone('mute');
+    this._translatorState = 'MUTED';
+    if (this.participantTranscriptSeen) {
+      log.info('[translator] action=paused audio=withheld resume=transcript');
+    }
+    this.refreshSession().catch(error => {
+      log.error('Error refreshing session for translator MUTE transition:', error);
+    });
+    return true;
+  }
+
   /** Resume a paused translator from the participants' transcript, as the
    *  `unmute` tool does from the paused session. */
-  private resumeTranslator(route: 'transcript'): void {
-    if (this._reconfiguring || this.leavingTranslator) return;
+  private resumeTranslator(route: 'transcript' | 'chat'): boolean {
+    if (this._reconfiguring || this.leavingTranslator) return false;
     log.info(`[translator] action=resume route=${route}`);
     this.unmute(route);
     this.playConfirmationTone('unmute');
@@ -4839,6 +5099,65 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.refreshSession().catch(error => {
       log.error('Error refreshing session for translator UNMUTE transition:', error);
     });
+    return true;
+  }
+
+  /**
+   * "LMA mute" / "LMA unmute" typed in the meeting chat (see
+   * VoiceAssistantProvider.setMutedByChat).
+   *
+   * Applied in code, without the model: the meeting asked for silence in
+   * writing, and nothing about that needs interpreting.
+   *
+   * - Assistant and listen mode: muted cuts playback at once, calls off a
+   *   stop request or lookup acknowledgement in flight, and ends a wake-phrase
+   *   activation. Unlike a spoken stop, it holds: a wake phrase does not bring
+   *   the assistant back, only "LMA unmute" (or a mode change) does.
+   * - Translator mode: muted pauses the translator and unmuted resumes it,
+   *   the same transitions as the spoken pause and resume phrases.
+   */
+  setMutedByChat(muted: boolean): VoiceControlOutcome {
+    const state = (): VoiceControlState => {
+      if (this.meetingMode === 'translator') {
+        return this._translatorState === 'MUTED' ? 'translation-paused' : 'translating';
+      }
+      if (this.chatMuted) return 'muted';
+      if (this.meetingMode === 'group') return 'listen-mode';
+      return this.activationMode === 'always_active' ? 'listening' : 'listening-for-wake-phrase';
+    };
+
+    if (this.meetingMode === 'translator') {
+      const paused = this._translatorState === 'MUTED';
+      if (muted === paused) return { result: 'unchanged', state: state() };
+      const changed = muted ? this.pauseTranslator('chat') : this.resumeTranslator('chat');
+      if (!changed) {
+        return { result: 'declined', state: state(), detail: 'the voice assistant is changing mode; try again in a moment' };
+      }
+      return { result: 'applied', state: state() };
+    }
+
+    if (muted) {
+      if (this.chatMuted) return { result: 'unchanged', state: state() };
+      this.chatMuted = true;
+      this.silenceToolAck('chat-mute');
+      this.cancelStopRequest('chat-mute');
+      this.mute('muted from chat');
+      // A wake-phrase activation ends now, so the session stops hearing the
+      // meeting; the scribe does not activate it again while muted.
+      if (this.activationMode === 'wake_phrase' && this._isActivated) {
+        this.deactivate();
+      }
+      return { result: 'applied', state: state() };
+    }
+
+    if (!this.chatMuted && !this._isMuted) return { result: 'unchanged', state: state() };
+    this.chatMuted = false;
+    // Listen mode stays quiet until addressed: that is the mode, and its own
+    // machine unmutes it on the wake phrase.
+    if (this.meetingMode !== 'group') {
+      this.unmute('unmuted from chat');
+    }
+    return { result: 'applied', state: state() };
   }
 
   /**
@@ -4969,6 +5288,15 @@ export class NovaAgent implements VoiceAssistantProvider {
     // anyway, and letting the last of an utterance play out is better than
     // clipping it.
     this._isMuted = (mode === 'group');
+    // A mode asked for is a decision about whether the assistant is heard, so
+    // it lifts a mute from chat as it does every other mute.
+    if (this.chatMuted) {
+      log.info('[voice-control] the mode change lifts the mute from chat');
+      this.chatMuted = false;
+    }
+    this.replyGate.reset();
+    this.clearStopDeactivateTimer();
+    this.recentTranslatorUtterances = [];
 
     // A stop request still resolving was made under the mode being left, and
     // the new mode has just decided whether the assistant is audible, so the
@@ -5037,6 +5365,8 @@ export class NovaAgent implements VoiceAssistantProvider {
     // `always_active` only fails to do anything because `deactivate()` returns
     // early there, which is a reason the next reader should not have to find.
     this.activationWindow.stop();
+    this.replyGate.reset();
+    this.clearStopDeactivateTimer();
 
     log.info(`🔀 Activation mode is now ${mode}`);
   }

@@ -174,7 +174,8 @@ function nova(meetingMode: MeetingMode = 'normal', activationMode = 'always_acti
     a.writePlayback = (b: Buffer) => { played.push(b); return true; };
     a.markSpeaking = () => {};
     a.playConfirmationTone = () => {};
-    a.session = { id: 's1', isActive: true, queue: [], promptName: 'p', audioContentId: 'a', signal: null };
+    // A session whose setup has been queued, so it is sent the meeting.
+    a.session = { id: 's1', isActive: true, queue: [], promptName: 'p', audioContentId: 'a', signal: null, isAudioContentStartSent: true };
     a._isActive = true;
     a._isActivated = true;
     return { a, requests, played };
@@ -309,7 +310,7 @@ test('nova: a pause asked for after a declined "stop translating" is a pause', a
     a.MUTE_TOOL_AUDIO_FLUSH_MS = 0;
     a.refreshSession = async () => {};
     await stream(a, userTurn('stop translating'));
-    a.session = { id: 's2', isActive: true, queue: [], promptName: 'p', audioContentId: 'a', signal: null };
+    a.session = { id: 's2', isActive: true, queue: [], promptName: 'p', audioContentId: 'a', signal: null, isAudioContentStartSent: true };
     await stream(a, [...userTurn('translator mute'), ...muteTool()]);
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(a._translatorState, 'MUTED');

@@ -39,6 +39,7 @@ import type { MeetingMode } from './nova-sonic-config-loader.js';
 import { details } from './details.js';
 // So "@LMA, translate!" and "lma translate" arrive at the matcher the same.
 import { normalizeChatText as normalize } from './chat-text.js';
+import { configuredWakePhrases } from './stop-request.js';
 import {
     foldLanguageText,
     meetingLanguage,
@@ -185,6 +186,130 @@ export interface AssistantChatCommand {
     /** `LMA translate <language> to <language>`: two supported languages
      *  named. Carries no change; the answer says to name one. */
     twoLanguages?: string;
+    /** `LMA mute` / `LMA unmute`: silence the voice assistant, or bring it
+     *  back. Carries no mode change (see VOICE_CONTROL_COMMANDS). */
+    voice?: VoiceControl;
+}
+
+// ---------------------------------------------------------------------------
+// Muting the voice assistant from chat
+// ---------------------------------------------------------------------------
+
+export type VoiceControl = 'mute' | 'unmute';
+
+/** What the voice assistant is doing once a mute or unmute has settled, for
+ *  the chat reply. */
+export type VoiceControlState =
+    | 'muted'
+    | 'listening-for-wake-phrase'
+    | 'listening'
+    | 'listen-mode'
+    | 'translation-paused'
+    | 'translating';
+
+export interface VoiceControlOutcome {
+    result: AssistantToggleResult;
+    state: VoiceControlState;
+    /** Why, when `result` is `declined`. */
+    detail?: string;
+}
+
+/**
+ * The mute vocabulary, as whole-message phrases like the mode commands.
+ *
+ * `LMA stop` is not here and cannot be: it is a dismissal verb (details.ts
+ * END_COMMAND_VERBS), and removes the Virtual Participant from the meeting.
+ * `LMA stop talking` is two words and so is not that command. `LMA resume` is
+ * an unmute because that is what it was typed for on a live meeting, straight
+ * after `LMA mute`; the transcript is resumed with `LMA start`, and the reply to
+ * an unmute says so while the transcript is paused.
+ */
+export const VOICE_CONTROL_COMMANDS: ReadonlyArray<{ readonly phrases: readonly string[]; readonly voice: VoiceControl }> = [
+    { phrases: ['mute', 'quiet', 'be quiet', 'silence', 'stop talking', 'hush'], voice: 'mute' },
+    { phrases: ['unmute', 'resume', 'speak'], voice: 'unmute' },
+];
+
+const VOICE_CONTROL_INDEX: ReadonlyMap<string, VoiceControl> = new Map(
+    VOICE_CONTROL_COMMANDS.flatMap((entry) => entry.phrases.map((phrase) => [phrase, entry.voice] as const)),
+);
+
+/** The wake phrase as it would be written, for a chat reply: "Hey Alex". */
+function writtenWakePhrase(): string {
+    const configured = configuredWakePhrases()[0] || 'hey alex';
+    return configured.replace(/\b\p{L}/gu, (letter) => letter.toUpperCase());
+}
+
+/**
+ * The chat reply to `LMA mute` / `LMA unmute`: what the assistant is now doing,
+ * and how to undo it. Every command gets an answer, including one that changed
+ * nothing, so nobody is left retyping it into silence.
+ */
+export function voiceControlChatReply(
+    control: VoiceControl,
+    outcome: VoiceControlOutcome,
+    transcriptPaused: boolean = !details.start,
+): string[] {
+    const prefix = 'Live Meeting Assistant:';
+    if (outcome.result === 'declined') {
+        const detail = outcome.detail || 'no change made';
+        return [`${prefix} ${detail}${/[.!?]$/.test(detail) ? '' : '.'}`];
+    }
+    const unchanged = outcome.result === 'unchanged';
+    let line: string;
+    switch (outcome.state) {
+        case 'muted':
+            line = `${unchanged ? 'the voice assistant is already muted' : 'voice assistant muted'}. `
+                + 'It stays silent, even when addressed, until someone types "LMA unmute".';
+            break;
+        case 'translation-paused':
+            line = `${unchanged ? 'translation is already paused' : 'translation paused'}. `
+                + 'Type "LMA unmute" to resume it.';
+            break;
+        case 'translating':
+            line = unchanged ? 'the translator is not paused.' : 'translation resumed.';
+            break;
+        case 'listen-mode':
+            line = `${unchanged ? 'the voice assistant is not muted' : 'voice assistant unmuted'}. `
+                + `It is in listen mode and answers when someone says "${writtenWakePhrase()}".`;
+            break;
+        case 'listening':
+            line = `${unchanged ? 'the voice assistant is not muted' : 'voice assistant unmuted'}. It is listening.`;
+            break;
+        case 'listening-for-wake-phrase':
+            line = `${unchanged ? 'the voice assistant is not muted' : 'voice assistant unmuted'}. `
+                + `Say "${writtenWakePhrase()}" to ask it something.`;
+            break;
+        default: {
+            const unclassified: never = outcome.state;
+            line = String(unclassified);
+        }
+    }
+    const reply = `${prefix} ${line}`;
+    if (control === 'unmute' && transcriptPaused) {
+        return [`${reply} The transcript is paused; type "LMA start" to resume it.`];
+    }
+    return [reply];
+}
+
+/** The single log line for a mute or unmute from chat. */
+export function formatVoiceControlLog(
+    control: VoiceControl,
+    requestedBy: string | null | undefined,
+    outcome: VoiceControlOutcome,
+    identity: AssistantToggleIdentity = assistantToggleIdentity(),
+): string {
+    const fields = [
+        '[voice-control]',
+        `vp=${logSafe(identity.vpId)}`,
+        `call=${logSafe(identity.callId)}`,
+        'route=chat',
+        `by="${requestedBy ? logSafe(requestedBy) : '-'}"`,
+        `action=${control}`,
+        `result=${outcome.result}`,
+        `state=${outcome.state}`,
+    ];
+    if (outcome.detail) fields.push(`detail="${logSafe(outcome.detail)}"`);
+    return fields.join(' ');
 }
 
 /**
@@ -319,6 +444,8 @@ export function parseAssistantChatCommand(message: string): AssistantChatCommand
     const remainder = [...tokens.slice(0, addressee), ...tokens.slice(addressee + 1)].join(' ');
     const command = CHAT_COMMAND_INDEX.get(remainder);
     if (command) return { ...command };
+    const voice = VOICE_CONTROL_INDEX.get(remainder);
+    if (voice) return { voice };
 
     // `translate <language>`. A single unknown word of letters is answered
     // with the supported list, because "LMA translate klingon" is plainly a
@@ -582,7 +709,8 @@ const meetingActivationRestore: ActivationRestore = createActivationRestore();
  * already in flight, which the provider bounds at five seconds.
  */
 export async function applyAssistantChatCommand(
-    assistant: Pick<VoiceAssistantProvider, 'reconfigure'> & Partial<Pick<VoiceAssistantProvider, 'supportsModeChanges'>>,
+    assistant: Pick<VoiceAssistantProvider, 'reconfigure'>
+        & Partial<Pick<VoiceAssistantProvider, 'supportsModeChanges' | 'isEnabled' | 'setMutedByChat'>>,
     command: AssistantChatCommand,
     requestedBy?: string | null,
     restore: ActivationRestore = meetingActivationRestore,
@@ -591,6 +719,9 @@ export async function applyAssistantChatCommand(
     route: AssistantToggleRoute = 'chat',
 ): Promise<string[]> {
     const prefix = 'Live Meeting Assistant:';
+    if (command.voice !== undefined) {
+        return applyVoiceControl(assistant, command.voice, requestedBy);
+    }
     // The two language checks below answer without the provider, so they only
     // run for one that can change mode at all. Any other is asked as usual and
     // declines with its own reason, as it does for every mode command.
@@ -668,6 +799,26 @@ export async function applyAssistantChatCommand(
         ];
     }
     return reply;
+}
+
+/**
+ * `LMA mute` / `LMA unmute`: hand it to the provider and produce the chat
+ * reply. A meeting with no voice assistant, or one whose provider cannot be
+ * muted from chat, is told so rather than left without an answer.
+ */
+async function applyVoiceControl(
+    assistant: Partial<Pick<VoiceAssistantProvider, 'isEnabled' | 'setMutedByChat'>>,
+    control: VoiceControl,
+    requestedBy?: string | null,
+): Promise<string[]> {
+    let outcome: VoiceControlOutcome;
+    if (!assistant.isEnabled?.() || !assistant.setMutedByChat) {
+        outcome = { result: 'declined', state: 'listening', detail: 'there is no voice assistant in this meeting to mute' };
+    } else {
+        outcome = assistant.setMutedByChat(control === 'mute');
+    }
+    log.info(formatVoiceControlLog(control, requestedBy, outcome));
+    return voiceControlChatReply(control, outcome);
 }
 
 // ---------------------------------------------------------------------------

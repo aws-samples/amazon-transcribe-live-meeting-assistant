@@ -6,7 +6,11 @@
 
 // Type-only: assistant-toggles.ts imports ActivationMode back from here, and
 // erasing the import keeps the two modules out of a runtime cycle.
-import type { AssistantReconfigureRequest, AssistantReconfigureOutcome } from './assistant-toggles.js';
+import type {
+  AssistantReconfigureRequest,
+  AssistantReconfigureOutcome,
+  VoiceControlOutcome,
+} from './assistant-toggles.js';
 
 export type VoiceAssistantProviderType = 'none' | 'elevenlabs' | 'amazon_nova_sonic';
 export type ActivationMode = 'always_active' | 'wake_phrase' | 'strands_tool';
@@ -195,6 +199,18 @@ export interface VoiceAssistantProvider {
    *   stop requests from this route.
    */
   requestStopTalking(reason?: string): boolean;
+
+  /**
+   * "LMA mute" (`muted` true) or "LMA unmute" typed in the meeting chat.
+   * Optional: a provider without it is answered in chat as having no voice
+   * assistant to mute.
+   *
+   * Unlike requestStopTalking, a chat mute is applied at once and holds: the
+   * assistant stays silent, wake phrase or not, until it is unmuted from chat
+   * or the meeting mode changes. In translator mode the two pause and resume
+   * the translator instead.
+   */
+  setMutedByChat?(muted: boolean): VoiceControlOutcome;
 
   /**
    * A participant's finished utterance, from the participants' transcript

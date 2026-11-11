@@ -16,7 +16,13 @@
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { configuredWakePhrases, isStopTalkingRequest, DEFAULT_WAKE_PHRASES } from './stop-request.js';
+import {
+    assistantNameFromWakePhrases,
+    configuredWakePhrases,
+    foldWakeSpellings,
+    isStopTalkingRequest,
+    DEFAULT_WAKE_PHRASES,
+} from './stop-request.js';
 
 const WAKE_PHRASES = ['hey alex', 'ok alex', 'hi alex', 'hello alex'];
 
@@ -86,6 +92,34 @@ test('the deployment\'s own wake phrases are what count', () => {
     // must not respond to the default name.
     assert.equal(isStopTalkingRequest('hey assistant stop talking', ['hey assistant']), true);
     assert.equal(isStopTalkingRequest('hey alex stop talking', ['hey assistant']), false);
+});
+
+test('"Okay Alex, stop" is a stop request for the configured "ok alex"', () => {
+    // How the participants' transcript wrote it on a live meeting, where it was
+    // not recognised and the assistant went on talking.
+    for (const said of ['Okay, Alex. Stop.', 'okay alex stop talking', 'Okay hey Alex stop']) {
+        assert.equal(isStopTalkingRequest(said, WAKE_PHRASES), true, `not recognised: "${said}"`);
+    }
+    assert.equal(foldWakeSpellings('okay alex'), 'ok alex');
+    assert.equal(foldWakeSpellings('okayish alex'), 'okayish alex');
+});
+
+test("the assistant's name on its own addresses a stop request", () => {
+    for (const said of ['Alex, stop.', 'alex stop talking', 'Alex, be quiet please']) {
+        assert.equal(isStopTalkingRequest(said, WAKE_PHRASES), true, `not recognised: "${said}"`);
+    }
+    // Still nothing but a stop command once the name is removed.
+    for (const said of ['Alex, stop the recording', 'Bob, stop', 'Alexander stop', 'alex why did it stop']) {
+        assert.equal(isStopTalkingRequest(said, WAKE_PHRASES), false, `wrongly recognised: "${said}"`);
+    }
+});
+
+test("the assistant's name is read from the wake phrases only when they share one", () => {
+    assert.equal(assistantNameFromWakePhrases(WAKE_PHRASES), 'alex');
+    assert.equal(assistantNameFromWakePhrases(['hey alex', 'hey sam']), null);
+    assert.equal(assistantNameFromWakePhrases(['alex']), null);
+    // So a deployment whose phrases share no name keeps the strict matching.
+    assert.equal(isStopTalkingRequest('alex stop', ['hey alex', 'hey sam']), false);
 });
 
 test('configured wake phrases are read from the environment, trimmed and lowercased', () => {
