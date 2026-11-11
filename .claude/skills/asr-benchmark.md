@@ -68,7 +68,8 @@ What each run does, in order (Transcribe first, then each bundle):
 1. For a bundle: update the stack with its own template and only the `AsrDefaults`
    `ModelBundle` line changed, every parameter kept. The ASR nested stack changes
    and the MicroVM image rebuilds (~20-25 min); the transcriber stack takes the new
-   bundle id, name and languages, and the Virtual Participant stack the new languages. Skipped when the stack already runs that bundle. Before switching,
+   bundle id, name and languages, and the Virtual Participant stack the new languages.
+   Skipped when the stack already runs that bundle. Before switching,
    each nested stack's deployed template is compared with the one its `TemplateURL`
    now points to; if `publish.sh` has been re-run to that location since the last
    deploy, the switch refuses rather than deploying that build as a side effect.
