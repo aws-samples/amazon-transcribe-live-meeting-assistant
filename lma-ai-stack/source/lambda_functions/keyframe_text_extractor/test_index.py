@@ -521,6 +521,12 @@ def test_the_answer_header_is_read_leniently_and_only_as_a_header(answer, read):
     assert pure.read_answer(answer) == read
 
 
+def test_the_prompts_title_description_returned_as_the_title_is_no_title():
+    assert f"TITLE: {pure._TITLE_PLACEHOLDER}\n" in pure.PROMPT
+    answer = "CONTENT: SCREEN\nTITLE: A few words naming the main shared content.\nMeetings List"
+    assert pure.read_answer(answer) == ("SCREEN", "", "Meetings List")
+
+
 def test_a_long_title_is_cut_to_a_few_words():
     _, title, _ = pure.read_answer("CONTENT: SCREEN\nTITLE: " + " ".join(["word"] * 30) + "\nx")
     assert len(title.split()) == pure.MAX_TITLE_WORDS
