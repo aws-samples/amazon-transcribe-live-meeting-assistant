@@ -54,6 +54,12 @@ LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user \
 # Real Virtual Participant join into a live meeting:
 make integ-tests-live STACK=lma-integtest1 PLATFORM=ZOOM \
     MEETING_ID=1234567890 MEETING_PASSWORD=secret
+
+# A VP in a real meeting nobody else attends (~5 min): join, ACTIVE, meeting
+# record, then its own exit when alone and an end from LMA. The meeting comes
+# from the Secrets Manager secret lma/integ-tests/live-meeting
+# (or $LMA_TEST_LIVE_MEETING_SECRET_ID); see docs/scheduled-integration-tests.md.
+LMA_TEST_VP_LIVE_MEETING=1 AWS_PROFILE=default make integ-tests STACK=lma-integtest1
 ```
 
 Stack resolution: `STACK=` → `$LMA_STACK_NAME` → `lma-integtest1` (deploy) / `LMA` (test-only).
@@ -108,6 +114,7 @@ make docker-build-check-all    # + Virtual Participant image (heavy)
 | `test_ws_stream_transcribes_to_meeting` *(opt-in)* | stream a real WAV → meeting **+ transcript segments** | **@fastify/websocket 11 upgrade + Transcribe + gql** |
 | `test_vp_registry_lifecycle` | VP create→get→list→end (no meeting) | VP CRUD surface |
 | `test_vp_live_join` *(opt-in)* | VP joins a real meeting | `@zoom/meetingsdk` |
+| `test_vp_live_meeting.py` *(opt-in, `LMA_TEST_VP_LIVE_MEETING=1`)* | VP joins a real meeting nobody else attends, reaches `ACTIVE`, gets a meeting record; left alone it leaves as `COMPLETED`/`attendees-left`; ended from LMA it shows the end reason (`COMPLETED` required under FARGATE/EC2); the meeting record ends | the VP's join, empty-meeting exit and end path on a real platform |
 | `test_desktop_video.py` *(opt-in, `LMA_TEST_DESKTOP_VIDEO=1`)* | synthetic slideshow over the desktop app's video socket → 5 key frames at the slide times, both JPEGs in S3, assistant quotes the unspoken last slide | desktop key frames (`videokeyframes.ts`); the assistant's shared-screen tool once #891 is deployed |
 | `test_meeting_consent.py` *(opt-in, `LMA_TEST_CONSENT=1`)* | sets `meeting_consent` to opt-in / owner attests, then notify, through the `lma_config` store with IAM (the test user is not Admin), restoring it in teardown: unconfirmed opt-in START refused (`CONSENT_NOT_CONFIRMED`, no meeting, no segments); attested opt-in transcribed with attestation, notice, evidence JPEG in `lma-consent-evidence/<meeting>/` and a stored evidence check; notify objection closes the socket, stops segments, record `objected`, meeting `ENDED` | the transcriber's consent gate (`consent/` in the transcriber) and the consent resolver and verifier behind it |
 
@@ -146,6 +153,14 @@ written, and transcript segments are produced.
   the Configuration page: the test's saves are in the configuration history.
 - **`test_vp_live_join`** → VP never left `INITIALIZING`; inspect VP ECS task logs
   and the Zoom per-signal checklist in the runbook.
+- **`test_vp_live_meeting.py`** → each failure prints the statuses the VP went
+  through and its `endTrigger` / `errorMessage`, with the meeting redacted. An error
+  at setup naming the secret means the flag is on but the secret is missing or
+  malformed. "Did not join" with a `pre-join:` trigger means the meeting is not open
+  to guests without a host. "Did not start transcribing" on a stack whose Meeting
+  Consent mode is opt-in is expected, because nobody consents in an empty meeting.
+  "Still ACTIVE in a meeting with nobody else in it" means the attendee watchdog did
+  not fire, unless a person or a leftover participant is actually in the meeting.
 
 ## Cleanup
 
