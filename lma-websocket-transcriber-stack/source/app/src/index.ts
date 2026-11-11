@@ -61,6 +61,7 @@ import { jwtVerifier, getAuthenticatedCaller } from './utils/jwt-verifier';
 
 import { noteStreamingSessionStarted, noteStreamingSessionEnded } from './metrics/session';
 import { getSessionSettings } from './calleventdata/session-settings';
+import { startTranscriptionEngine } from './calleventdata/engine-start';
 import {
     applySpeakerFieldAliases,
     DEFAULT_REMOTE_SPEAKER_NAME,
@@ -414,6 +415,12 @@ const writeSessionAudio = (socketData: SocketCallData, data: Uint8Array): void =
     if (socketData.consent && !socketData.consent.gateOpen) {
         return;
     }
+    // Nor is audio that arrives after the meeting ended: its recording is being
+    // finished, and its audio stream may be ending with the audio held for an
+    // engine that was still starting.
+    if (socketData.ended) {
+        return;
+    }
 
     if (
         socketData.audioInputStream !== undefined &&
@@ -423,7 +430,7 @@ const writeSessionAudio = (socketData: SocketCallData, data: Uint8Array): void =
         socketData.audioInputStream.write(data);
         socketData.writeRecordingStream.write(data);
         socketData.recordingFileSize += data.length;
-        pushAsrAudio(socketData, data);
+        pushAsrAudio(socketData, data, server);
     } else {
         server.log.error(
             `[ON BINARY MESSAGE]: [${socketData.callMetadata.callId}] - Error: the session has no audio streams; dropping audio.`
@@ -437,45 +444,26 @@ const writeSessionAudio = (socketData: SocketCallData, data: Uint8Array): void =
  * The MicroVM ASR engine has to acquire a MicroVM before it can transcribe
  * anything, so a failure there (quota, region, image still building) falls back
  * to Amazon Transcribe rather than losing the meeting's transcript. Audio that
- * arrives during the acquisition is buffered by both engines.
+ * arrives during the acquisition is buffered by both engines, and is
+ * transcribed even if the meeting ends first (calleventdata/engine-start.ts).
  */
-const startTranscription = async (
-    socketData: SocketCallData,
-    server_: typeof server
-): Promise<void> => {
-    // Runtime config decides the deployment default, so the engine can be switched
-    // from the Transcription Engine section of the Configuration page without redeploying the task.
-    const runtime = await getAsrRuntimeConfig(server_);
-    // The meeting's Amazon Transcribe options, resolved once at its start: one
-    // that only Amazon Transcribe offers keeps the meeting on it.
-    const { transcription } = socketData.sessionSettings ?? (await getSessionSettings(server_.log));
-    if (resolveAsrEngine(socketData.callMetadata, server_, runtime, transcription) === 'microvm') {
-        if (await startMicrovmAsr(socketData, server_)) {
-            noteTranscriptionEngine(socketData, 'microvm', server_);
-            // startTranscribe is the ONLY consumer of audioInputStream, and it is not
-            // running on this path — so every frame onBinaryMessage writes would sit
-            // in the stream's buffer for the whole meeting. At the 16 kHz stereo this
-            // engine negotiates that is 64 kB/s, about 230 MB an hour, in a 1 GiB
-            // task shared by every other meeting on it. Draining discards each frame
-            // as it arrives; writes stay unconditional so the recording is untouched,
-            // and this happens only AFTER a successful start so the audio buffered
-            // during MicroVM acquisition is still there for the fallback below.
-            socketData.audioInputStream?.resume();
-            return;
-        }
-        if (!shouldFallbackToTranscribe()) {
-            server_.log.error(
-                `[TRANSCRIBING]: [${socketData.callMetadata.callId}] - MicroVM ASR could not start and fallback is disabled; this meeting will not be transcribed.`
-            );
-            return;
-        }
-        server_.log.warn(
-            `[TRANSCRIBING]: [${socketData.callMetadata.callId}] - MicroVM ASR could not start; falling back to Amazon Transcribe.`
-        );
-    }
-    noteTranscriptionEngine(socketData, 'transcribe', server_);
-    void startTranscribe(socketData, server_);
-};
+const startTranscription = (socketData: SocketCallData, server_: typeof server): Promise<void> =>
+    startTranscriptionEngine(socketData, {
+        chooseEngine: async (data) => {
+            // Runtime config decides the deployment default, so the engine can be switched
+            // from the Transcription Engine section of the Configuration page without redeploying the task.
+            const runtime = await getAsrRuntimeConfig(server_);
+            // The meeting's Amazon Transcribe options, resolved once at its start: one
+            // that only Amazon Transcribe offers keeps the meeting on it.
+            const { transcription } = data.sessionSettings ?? (await getSessionSettings(server_.log));
+            return resolveAsrEngine(data.callMetadata, server_, runtime, transcription);
+        },
+        startMicrovm: (data) => startMicrovmAsr(data, server_),
+        startTranscribe: (data, options) => startTranscribe(data, server_, options),
+        fallbackToTranscribe: shouldFallbackToTranscribe,
+        noteEngine: (data, engine) => noteTranscriptionEngine(data, engine, server_),
+        log: server_.log,
+    });
 
 /**
  * The meeting's transcription fields (capture-context.ts), from its engine and
@@ -1037,6 +1025,7 @@ const discardCaptureForConsent = async (ws: WebSocket, socketData: SocketCallDat
     server.log.warn(`[CONSENT]: [${callMetaData.callId}] - Discarding this connection's capture: ${reason}.`);
     if (!socketData.ended) {
         socketData.ended = true;
+        socketData.discarded = true;
         noteStreamingSessionEnded(callMetaData);
         socketData.writeRecordingStream?.end();
         socketData.audioInputStream?.end();

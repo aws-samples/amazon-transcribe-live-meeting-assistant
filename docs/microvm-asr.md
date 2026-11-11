@@ -527,6 +527,47 @@ A meeting that selects this engine and whose MicroVM cannot start falls back to 
 Transcribe by itself, so a failed launch costs a warning in the log rather than a
 transcript.
 
+### While the MicroVM starts
+
+A meeting's MicroVM is launched when its transcription starts: at the meeting's start,
+or, for a meeting that needs a consent record, once consent is recorded. A cold launch
+took 21 seconds on the integration stack on 2026-11-11, and the launcher allows up to
+four minutes before it gives up. There is no warm pool, so every meeting pays that
+launch. The audio the meeting sends meanwhile is kept and transcribed:
+
+- **Stream Audio, the Chrome extension and Desktop Capture.** The transcriber holds the
+  audio twice while the MicroVM launches: in each channel's engine session, which sends it
+  as its first audio when it connects, and in the meeting's audio stream, which Amazon
+  Transcribe reads if the launch fails. Rows are timed from the start of the meeting's
+  audio either way. Each copy is bounded at 60 seconds (`ASR_MAX_PENDING_BYTES`, in
+  bytes of 16 kHz mono audio). If the launch runs past that, the oldest audio is dropped
+  and the transcriber logs `taking longer than 60s to start` or `more than 60s of audio
+  is waiting for the engine`. The dropped audio stays in the recording, and the rows
+  after it keep their place on the recording's timeline.
+- **A meeting that ends while its MicroVM launches**, whether it sent a short stream or
+  its client hung up or disconnected, is not ended until the audio held for it has been
+  transcribed. The transcriber waits up to five minutes for the launch. If the launch
+  succeeds, the held audio is sent to the MicroVM and the sessions are finished at once.
+  If it fails, the held audio goes to Amazon Transcribe in one request. In both cases the
+  rows are written before the meeting's END event, so the end-of-meeting summary
+  includes them. The log line is `Call ended while the MicroVM was being acquired`, or
+  `Call ended while its transcription engine was starting` when Amazon Transcribe took
+  the audio. A task that is shutting down does not wait, because its stop timeout is
+  shorter than a launch.
+- **Virtual Participants.** The VP starts capturing the meeting, and recording it, when
+  it starts acquiring the MicroVM, not when the MicroVM is ready. The audio captured
+  meanwhile is held, up to the same 60 seconds, and sent when the engine sessions
+  connect. A meeting that ends during the launch is waited for for up to two minutes,
+  and the held audio is transcribed before the END event. If no MicroVM can be acquired,
+  Amazon Transcribe takes over and its rows start after the audio captured meanwhile.
+  That audio is in the recording, but on this path it is not transcribed; the
+  transcriber's fallback is the only one that replays it.
+
+Finishing a session that opened with held audio waits for the engine to work through it.
+The usual five-second grace (`ASR_FINISH_TIMEOUT_MS`) is extended by however much of the
+held audio's own duration has not yet passed since it was sent, because the engine
+decodes at least as fast as real time.
+
 ## Runtime switches
 
 The **Transcription Engine** section of **Configuration ▸ Configuration** (admin only)

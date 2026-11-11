@@ -104,11 +104,13 @@ test('the roster lag allowance is wider for the Zoom SDK monitor and can be over
     }
 });
 
-test('stop waits, with a bound, for the engine run to release its MicroVM, and a run stopped early releases at once', () => {
+test('stop waits, with a bound, for the engine run to release its MicroVM, and a run stopped early finishes what it captured, then releases', () => {
     const stop = methodBody('async stopTranscription');
     assert.match(stop, /const run = this\.microvmRun/);
     assert.match(stop, /ASR_STOP_RELEASE_TIMEOUT_MS/);
     const once = methodBody('private async runMicrovmTranscriptionOnce');
-    assert.match(once, /const acquired = pending \?\? \(await acquireLease\(callId\)\) \?\? null;[\s\S]*if \(!this\.isTranscribing\) \{\s*this\.microvmLease = null;\s*if \(lease\.microvmId\)/);
-    assert.match(once, /if \(!meetingReady && !this\.isTranscribing\)/);
+    assert.match(
+        once,
+        /const acquired = pending \?\? \(await acquireLease\(callId\)\) \?\? null;[\s\S]*const meetingReady = await meetingSession\.start\(\);\s*if \(!this\.isTranscribing\) \{[\s\S]*?await this\.finishMicrovmSessions\(\);\s*await this\.releaseMicrovm\(meetingSession\);\s*return true;/,
+    );
 });

@@ -40,3 +40,21 @@ test('every MicroVM release in the ASR path is preceded by finishing the session
 test('stopping transcription finishes every engine session', () => {
     assert.match(methodBody('async stopTranscription'), /finishMicrovmSessions\(\)/);
 });
+
+test('the meeting is captured from before the MicroVM is acquired, not from when it is ready', () => {
+    const body = methodBody('private async runMicrovmTranscriptionOnce');
+    const capture = body.indexOf('this.startMeetingAudioFanout(');
+    const recording = body.indexOf('this.audioStream(recordingStream)');
+    const acquire = body.indexOf('acquireLease(callId)');
+    assert.ok(capture !== -1 && recording !== -1 && acquire !== -1);
+    assert.ok(capture < acquire, 'the engine feed starts before the acquisition');
+    assert.ok(recording < acquire, 'the recording starts with it, so the two clocks agree');
+});
+
+test('a run still starting its MicroVM finishes its own sessions, and is waited for longer', () => {
+    const stop = methodBody('async stopTranscription');
+    assert.match(stop, /if \(!starting\) \{\s*await this\.finishMicrovmSessions\(\);/);
+    assert.match(stop, /starting \? ASR_STOP_STARTING_WAIT_MS : ASR_STOP_RELEASE_TIMEOUT_MS/);
+    const run = methodBody('private async runMicrovmTranscriptionOnce');
+    assert.match(run, /if \(!this\.isTranscribing\) \{[\s\S]*?finishMicrovmSessions\(\)[\s\S]*?releaseMicrovm\(meetingSession\)/);
+});

@@ -21,15 +21,20 @@ import { AddressInfo } from 'node:net';
 import { FastifyInstance } from 'fastify';
 import WebSocket, { WebSocketServer } from 'ws';
 
+import { KinesisClient } from '@aws-sdk/client-kinesis';
 import { LambdaClient } from '@aws-sdk/client-lambda';
+import BlockStream from 'block-stream2';
 
 import {
     AsrChannelSession,
     coalesceBacklog,
+    pushAsrAudio,
     resolveMaxSpeakers,
     startMicrovmAsr,
     stopMicrovmAsr,
+    trimHeldFallbackAudio,
 } from './asr-microvm';
+import { sessionSettingsFrom } from './session-settings';
 import { SpeakerNameRegistry } from './asr-audio';
 import { pageSpeakersFor } from './speaker-fusion';
 import { TranscriptSegmentRecord } from './transcribe';
@@ -68,7 +73,8 @@ interface FakeAsr {
 }
 
 const startFakeAsr = async (
-    onConnection: (socket: WebSocket, connectionIndex: number) => void
+    onConnection: (socket: WebSocket, connectionIndex: number) => void,
+    answerEos = true
 ): Promise<FakeAsr> => {
     const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' });
     const state: FakeAsr = {
@@ -87,7 +93,7 @@ const startFakeAsr = async (
             }
             // Every session ends with eos; answering it here keeps the
             // per-test handlers focused on the transcript they emit.
-            if ((JSON.parse(data.toString()) as { type: string }).type === 'eos') {
+            if (answerEos && (JSON.parse(data.toString()) as { type: string }).type === 'eos') {
                 send(socket, { type: 'termination', audio_seconds: 1, segments: 1 });
             }
         });
@@ -524,6 +530,118 @@ test('a call that ends during MicroVM acquisition releases the acquired MicroVM'
     } finally {
         LambdaClient.prototype.send = originalSend;
     }
+});
+
+test('a call that ends while its MicroVM is acquired has the audio buffered meanwhile transcribed', async (t) => {
+    // Two seconds of stereo audio per channel's engine session.
+    const perChannelBytes = 16000 * 2 * 2;
+    const asr = await startFakeAsr((socket) => {
+        let heard = 0;
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (!isBinary) {
+                if ((JSON.parse(data.toString()) as { type: string }).type === 'config') {
+                    send(socket, ready(false));
+                }
+                return;
+            }
+            heard += (data as Buffer).length;
+            if (heard === perChannelBytes) {
+                send(socket, { type: 'final', segment: 0, text: 'said before the engine was up', start: 0.5, end: 1.5 });
+            }
+        });
+    });
+    const rows: Array<{ Transcript: string; StartTime: number; Channel: string }> = [];
+    t.mock.method(KinesisClient.prototype, 'send', async (command: { input: { Data: Buffer } }) => {
+        const record = JSON.parse(command.input.Data.toString()) as { EventType: string };
+        if (record.EventType === 'ADD_TRANSCRIPT_SEGMENT') {
+            rows.push(record as unknown as { Transcript: string; StartTime: number; Channel: string });
+        }
+        return {};
+    });
+
+    const socketData = makeSocketData();
+    socketData.sessionSettings = sessionSettingsFrom({}, {});
+    let acquired: (lease: { endpointUrl: string }) => void = () => undefined;
+    const starting = startMicrovmAsr(
+        socketData,
+        fakeServer,
+        () =>
+            new Promise((resolve) => {
+                acquired = resolve;
+            })
+    );
+    // The client streams for two seconds and hangs up, all before the MicroVM is up.
+    for (let i = 0; i < 20; i += 1) {
+        pushAsrAudio(socketData, Buffer.alloc(6400, 1), fakeServer);
+    }
+    socketData.ended = true;
+    acquired({ endpointUrl: asr.url });
+
+    assert.equal(await starting, true, 'no fallback: the MicroVM transcribed it');
+    await asr.close();
+    assert.equal(Buffer.concat(asr.audio).length, perChannelBytes * 2, 'every buffered byte reached the engine');
+    assert.equal(rows.length, 2, 'one row per channel, written before startMicrovmAsr returned');
+    assert.equal(rows[0].StartTime, 0.5, 'times run from the start of the call');
+    assert.equal(socketData.asr, undefined, 'the sessions were finished and the MicroVM released at once');
+});
+
+test('finishing a session that opened with a backlog waits for the engine to work through it', async () => {
+    // The engine answers eos only after a second, twice the usual grace in this
+    // file (ASR_FINISH_TIMEOUT_MS=500), as it would while decoding a backlog.
+    const asr = await startFakeAsr((socket) => {
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (isBinary) {
+                return;
+            }
+            const type = (JSON.parse(data.toString()) as { type: string }).type;
+            if (type === 'config') {
+                send(socket, ready(false));
+            } else if (type === 'eos') {
+                setTimeout(() => {
+                    send(socket, { type: 'final', segment: 0, text: 'the tail', start: 2, end: 3 });
+                    send(socket, { type: 'termination', audio_seconds: 3, segments: 1 });
+                }, 1000);
+            }
+        });
+    }, false);
+    const rows: TranscriptSegmentRecord[] = [];
+    const session = newSession(asr, rows);
+    // Three seconds buffered before the connection opens.
+    for (let i = 0; i < 30; i += 1) {
+        session.pushPcm(Buffer.alloc(3200, 1));
+    }
+    await session.start();
+    await session.finish();
+    await asr.close();
+    assert.deepEqual(rows.map((row) => row.Transcript), ['the tail']);
+});
+
+test('the stream held for a fallback keeps only the newest audio once past its bound', async () => {
+    const warnings: string[] = [];
+    const server = {
+        log: { ...fakeServer.log, warn: (message: string) => warnings.push(message) },
+    } as unknown as FastifyInstance;
+    const socketData = makeSocketData();
+    // The meeting stream as the transcriber builds it: 100 ms blocks of 16 kHz stereo.
+    const source = new BlockStream({ size: 6400 });
+    socketData.audioInputStream = source as unknown as SocketCallData['audioInputStream'];
+    const bytesPerSecond = 16000 * 2 * 2;
+    let written = 0;
+    // Ten seconds against a two-second bound.
+    for (let i = 0; i < 100; i += 1) {
+        source.write(Buffer.alloc(6400, i));
+        written += 6400;
+        await new Promise((resolve) => setImmediate(resolve));
+        trimHeldFallbackAudio(socketData, server, 2);
+    }
+    const held = source.readableLength + source.writableLength;
+    const dropped = socketData.heldAudioDroppedBytes ?? 0;
+    assert.equal(held + dropped, written, 'every byte is either held or counted as dropped');
+    assert.ok(held <= bytesPerSecond * 2, `held ${held} bytes against a two-second bound`);
+    assert.equal(dropped % 4, 0, 'whole stereo frames are dropped');
+    assert.equal(warnings.length, 1, 'said once, not per frame');
+    const first = source.read(6400) as Buffer;
+    assert.equal(first[0], 100 - held / 6400, 'what is kept is the newest audio');
 });
 
 test('meeting-audio rows are named from the page speakers the client reported, and by a proven voice', async () => {

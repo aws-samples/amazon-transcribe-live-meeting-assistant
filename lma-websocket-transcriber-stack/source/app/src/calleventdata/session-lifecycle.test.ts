@@ -519,3 +519,57 @@ test('the end of a START changes nothing for an open connection or one whose clo
     assert.equal(sessions.heldCount, 1, 'held once, by its own close');
     assert.deepEqual(effects.ends, []);
 });
+
+test('ending a meeting whose engine is still starting waits for it before the END event', async () => {
+    const order: string[] = [];
+    const { sessions } = lifecycle({
+        writeCallEndEvent: async () => {
+            order.push('end-event');
+        },
+        stopEngine: async () => {
+            order.push('engine-stopped');
+        },
+    });
+    const ws = new FakeSocket('a');
+    const meeting = session();
+    let finishStart: () => void = () => undefined;
+    meeting.engineStarting = new Promise<void>((resolve) => {
+        finishStart = () => {
+            order.push('engine-started');
+            resolve();
+        };
+    });
+    sessions.register(ws, meeting);
+
+    const ending = sessions.end(ws, meeting);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(meeting.ended, true, 'marked ended at once, so the starting engine finishes rather than streams');
+    assert.deepEqual(order, [], 'nothing is written while the engine is starting');
+    assert.equal(meeting.audioInputStream?.destroyed, false, 'the audio held for the engine is kept');
+
+    finishStart();
+    await ending;
+    assert.deepEqual(order, ['engine-started', 'end-event', 'engine-stopped']);
+    assert.equal(meeting.audioInputStream?.destroyed, true);
+});
+
+test('the wait for a starting engine is bounded, and skipped while the task shuts down', async () => {
+    const { sessions, effects } = lifecycle({ engineStartWaitMs: 30 });
+    const ws = new FakeSocket('a');
+    const meeting = session();
+    meeting.engineStarting = new Promise<void>(() => undefined);
+    sessions.register(ws, meeting);
+    await sessions.end(ws, meeting);
+    assert.deepEqual(effects.ends, ['meeting-1']);
+    assert.ok(effects.warnings.some((line) => line.includes('had not started')));
+
+    const shutting = lifecycle({ engineStartWaitMs: 60_000 });
+    shutting.shutDown();
+    const other = session('meeting-2');
+    other.engineStarting = new Promise<void>(() => undefined);
+    shutting.sessions.register(new FakeSocket('b'), other);
+    const started = Date.now();
+    await shutting.sessions.end(undefined, other);
+    assert.ok(Date.now() - started < 1000, 'shutdown does not wait for an engine to start');
+    assert.deepEqual(shutting.effects.ends, ['meeting-2']);
+});

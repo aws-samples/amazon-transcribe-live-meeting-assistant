@@ -715,3 +715,48 @@ test('without a meeting language option a row takes the Virtual Participant lang
         else process.env.TRANSCRIBE_LANGUAGE_CODE = previous;
     }
 });
+
+test('a session created before its MicroVM exists sends what it held once it is given one, even after the meeting ended', async () => {
+    // The engine answers eos only after a second, twice the usual grace in this
+    // file (ASR_FINISH_TIMEOUT_MS=500), as it would while decoding a backlog.
+    const asr = await startFakeAsr((socket) => {
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (isBinary) return;
+            const message = JSON.parse(data.toString());
+            if (message.type === 'config') {
+                socket.send(JSON.stringify({ type: 'ready', effective_config: { diarize: false } }));
+            }
+            if (message.type === 'eos') {
+                setTimeout(() => {
+                    socket.send(JSON.stringify({ type: 'final', segment: 0, text: 'said while it launched', start: 0.2, end: 1.4 }));
+                    socket.send(JSON.stringify({ type: 'termination', audio_seconds: 1.5, segments: 1 }));
+                }, 1000);
+            }
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const live = { value: true };
+    const session = new MicrovmAsrSession({
+        callId: 'vp-test-call',
+        lease: { endpointUrl: '' },
+        diarize: false,
+        onSegment: (segment) => rows.push(segment),
+        isMeetingLive: () => live.value,
+    });
+    try {
+        // A second and a half captured while the MicroVM launches, then the meeting ends.
+        for (let i = 0; i < 15; i += 1) {
+            session.pushPcm(Buffer.alloc(3200, 1));
+        }
+        live.value = false;
+        assert.equal(session.heldSeconds, 1.5);
+        session.updateLease({ endpointUrl: asr.url, microvmId: 'm-1' });
+        assert.equal(session.microvmId, 'm-1');
+        assert.equal(await session.start(), true);
+        await session.finish();
+        assert.equal(asr.audioBytes, 3200 * 15, 'every held byte reached the engine');
+        assert.deepEqual(rows.map((row) => [row.text, row.startSec]), [['said while it launched', 0.2]]);
+    } finally {
+        await asr.close();
+    }
+});

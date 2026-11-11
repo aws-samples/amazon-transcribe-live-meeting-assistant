@@ -421,6 +421,9 @@ export class MicrovmAsrSession {
     private sentBytes = 0;
     private finishing: Promise<void> | null = null;
     private unsentDroppedBytes = 0;
+    /** The backlog the current connection was sent when it opened, and when. */
+    private backlogBytesAtOpen = 0;
+    private openedAtMs = 0;
     private lease: AsrLease;
     private readonly channel: string;
     private readonly logPrefix: string;
@@ -451,6 +454,20 @@ export class MicrovmAsrSession {
 
     get microvmId(): string | undefined {
         return this.lease.microvmId;
+    }
+
+    /**
+     * The MicroVM to connect to. A session can be created, and pushed audio,
+     * before its MicroVM is acquired: it holds that audio (up to
+     * ASR_MAX_PENDING_BYTES) and sends it when start() connects.
+     */
+    updateLease(lease: AsrLease): void {
+        this.lease = lease;
+    }
+
+    /** Seconds of audio waiting for a connection. */
+    get heldSeconds(): number {
+        return (this.pendingBytes + this.outboundBytes) / BYTES_PER_SECOND;
     }
 
     /** Connect and wait for the engine's ready handshake. */
@@ -502,6 +519,11 @@ export class MicrovmAsrSession {
         this.pendingBytes += frame.length;
         while (this.pendingBytes > ASR_MAX_PENDING_BYTES && this.pending.length > 1) {
             const oldest = this.pending.shift()!;
+            if (this.droppedBytes === 0) {
+                log.warn(
+                    `${this.logPrefix} more than ${(ASR_MAX_PENDING_BYTES / BYTES_PER_SECOND).toFixed(0)}s of audio is waiting for the engine; dropping the oldest`,
+                );
+            }
             this.pendingBytes -= oldest.length;
             this.droppedBytes += oldest.length;
             this.unsentDroppedBytes += oldest.length;
@@ -524,13 +546,21 @@ export class MicrovmAsrSession {
             const terminated = new Promise<void>((resolve) => {
                 this.terminationResolve = resolve;
             });
+            // A connection that opened with a backlog (the audio held while the
+            // MicroVM started) may still be decoding it. The engine keeps up with
+            // live audio, so it has caught up at the latest once the backlog's own
+            // duration has passed since it was sent; waiting only the usual grace
+            // would cut off the tail of a meeting that ended while its MicroVM
+            // started, which can be all of it.
+            const backlogMs = (this.backlogBytesAtOpen / BYTES_PER_SECOND) * 1000;
+            const catchUpMs = Math.max(0, backlogMs - (Date.now() - this.openedAtMs));
             try {
                 this.ws.send(JSON.stringify({ type: 'eos' }));
                 let timer: NodeJS.Timeout | undefined;
                 await Promise.race([
                     terminated,
                     new Promise<void>((resolve) => {
-                        timer = setTimeout(resolve, ASR_FINISH_TIMEOUT_MS);
+                        timer = setTimeout(resolve, ASR_FINISH_TIMEOUT_MS + catchUpMs);
                     }),
                 ]);
                 clearTimeout(timer);
@@ -608,6 +638,8 @@ export class MicrovmAsrSession {
             this.sentBytes = 0;
             this.timeOffsetSeconds += this.unsentDroppedBytes / BYTES_PER_SECOND;
             this.unsentDroppedBytes = 0;
+            this.backlogBytesAtOpen = this.pendingBytes;
+            this.openedAtMs = Date.now();
             try {
                 socket.send(JSON.stringify(config));
                 for (const frame of coalesceBacklog(this.pending)) {
