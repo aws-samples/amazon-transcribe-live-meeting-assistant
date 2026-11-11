@@ -66,7 +66,8 @@ class VadEvent:
 
     ``kind`` is ``"speech_start"`` when speech onset is detected and
     ``"speech_end"`` when trailing silence closes a segment. ``t`` is the audio
-    timestamp in seconds (padded by ``speech_pad_ms`` and clamped to ``>= 0``).
+    timestamp in seconds, padded by ``speech_pad_ms`` but kept within the audio
+    processed so far and never before the previous segment's end.
     """
 
     kind: Literal["speech_start", "speech_end"]
@@ -135,13 +136,16 @@ class VadGate:
       speech (frames at/above ``threshold``) has accumulated. A run shorter than
       ``min_speech_ms`` is a spurious blip and is **rejected outright** — no
       ``speech_start`` (and hence no ``speech_end``) is emitted for it. The event
-      timestamp is the *true onset* (padded back by ``speech_pad_ms`` and clamped
-      to ``>= 0``): it is emitted **retroactively** so downstream spans the real
-      speech, even though the event only surfaces once the run is confirmed. An
+      timestamp is the *true onset* (padded back by ``speech_pad_ms``, but not past
+      the previous segment's end or ``0``): it is emitted **retroactively** so
+      downstream spans the real speech, even though the event only surfaces once
+      the run is confirmed. An
       onset is thus detected within one chunk of sustained speech.
     * ``speech_end`` fires once the probability has stayed below the negative
       threshold (``threshold - 0.15``) for at least ``min_silence_ms`` —
-      hysteresis so momentary dips don't chop a confirmed segment.
+      hysteresis so momentary dips don't chop a confirmed segment. Its timestamp
+      is the silence onset padded by ``speech_pad_ms``, but not past the audio
+      processed when the segment closes.
 
     Silence (probabilities below threshold with no active segment) produces no
     events at all, so downstream never emits partials for it.
@@ -157,7 +161,7 @@ class VadGate:
         neg_threshold: float | None = None,
         min_silence_ms: int = 100,
         min_speech_ms: int = 250,
-        speech_pad_ms: int = 30,
+        speech_pad_ms: int = 300,
         max_speech_ms: int = 0,
         long_speech_ms: int = 0,
         long_speech_silence_ms: int = 0,
@@ -205,6 +209,10 @@ class VadGate:
         # short of the minimum is discarded and never becomes a segment.
         self._candidate_start_t: float | None = None
         self._silence_start_t: float | None = None  # onset of the pending trailing silence
+        # Reported end of the last closed segment. Padding never reaches back past it,
+        # so consecutive segments do not overlap: the recognizer has already consumed
+        # that audio, and a start before it would misplace the next segment's words.
+        self._last_end_t = 0.0
 
     @classmethod
     def from_model(cls, config: SileroVadConfig) -> VadGate:
@@ -270,6 +278,7 @@ class VadGate:
         self._seg_start_t = 0.0
         self._candidate_start_t = None
         self._silence_start_t = None
+        self._last_end_t = 0.0
         self._backend.reset()
 
     def _process_frame(self, frame: list[float]) -> list[VadEvent]:
@@ -287,6 +296,7 @@ class VadGate:
         if self._triggered:
             if self._max_speech_s and frame_end_t - self._seg_start_t >= self._max_speech_s:
                 self._seg_start_t = frame_end_t
+                self._last_end_t = frame_end_t
                 return [
                     VadEvent(kind="speech_end", t=frame_end_t),
                     VadEvent(kind="speech_start", t=frame_end_t),
@@ -301,7 +311,7 @@ class VadGate:
         if frame_end_t - self._candidate_start_t >= self._min_speech_s:
             self._triggered = True
             self._seg_start_t = self._candidate_start_t
-            start = max(0.0, self._candidate_start_t - self._speech_pad_s)
+            start = max(self._last_end_t, self._candidate_start_t - self._speech_pad_s)
             self._candidate_start_t = None
             return [VadEvent(kind="speech_start", t=start)]
         return []
@@ -318,7 +328,10 @@ class VadGate:
             if self._silence_start_t is None:
                 self._silence_start_t = frame_start_t
             if frame_end_t - self._silence_start_t >= self._required_silence_s():
-                end = self._silence_start_t + self._speech_pad_s
+                # The pad cannot extend past the audio processed so far: the
+                # segment closes now, and later audio belongs to whatever follows.
+                end = min(self._silence_start_t + self._speech_pad_s, frame_end_t)
+                self._last_end_t = end
                 self._triggered = False
                 self._silence_start_t = None
                 return [VadEvent(kind="speech_end", t=end)]
@@ -370,11 +383,11 @@ class SileroVadConfig:
     model: Path
     sample_rate: int = 16000
     frame_ms: int = 32
-    threshold: float = 0.5
+    threshold: float = 0.35
     neg_threshold: float | None = None
     min_silence_ms: int = 100
-    min_speech_ms: int = 250
-    speech_pad_ms: int = 30
+    min_speech_ms: int = 100
+    speech_pad_ms: int = 300
     max_speech_ms: int = 20000
     long_speech_ms: int = 10000
     long_speech_silence_ms: int = 300

@@ -152,6 +152,30 @@ def test_speech_end_after_trailing_silence() -> None:
     assert not gate.is_speech
 
 
+def test_speech_end_is_not_padded_past_the_audio_processed() -> None:
+    """A segment closes on the frame that meets ``min_silence_ms``; its end is that frame's end."""
+    frame_s = FRAME_MS / 1000.0
+    # Speech frames 0-3, then silence; 100 ms of silence closes on the 4th silent frame.
+    gate, _ = _gate([0.9] * 4 + [0.0] * 4, min_speech_ms=100, min_silence_ms=100, speech_pad_ms=300)
+    events: list[VadEvent] = []
+    for _ in range(8):
+        events.extend(gate.accept_pcm(_frames(1)))
+    assert [e.kind for e in events] == ["speech_start", "speech_end"]
+    assert events[1].t == pytest.approx(8 * frame_s, abs=1e-6)
+
+
+def test_speech_start_padding_stops_at_the_previous_segment_end() -> None:
+    """Two utterances closer than twice the pad do not overlap."""
+    probs = [0.9] * 4 + [0.0] * 4 + [0.9] * 4 + [0.0] * 4
+    gate, _ = _gate(probs, min_speech_ms=100, min_silence_ms=100, speech_pad_ms=300)
+    events: list[VadEvent] = []
+    for _ in range(len(probs)):
+        events.extend(gate.accept_pcm(_frames(1)))
+    segments = to_segments(events)
+    assert len(segments) == 2
+    assert segments[1].start == pytest.approx(segments[0].end, abs=1e-6)
+
+
 def test_min_silence_holds_segment_open_through_brief_dip() -> None:
     """A dip shorter than ``min_silence_ms`` must not close the segment."""
     frame_s = FRAME_MS / 1000.0

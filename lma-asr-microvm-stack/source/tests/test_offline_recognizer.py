@@ -184,6 +184,36 @@ def test_final_start_end_span_the_segment() -> None:
     assert final.end > final.start
 
 
+def test_close_utterances_report_the_audio_each_decode_was_given() -> None:
+    """With the offline VAD's 300 ms pad, a row spans exactly the samples decoded for it.
+
+    The second utterance starts 128 ms after the first closes, well inside the pad,
+    so its row must start where the first ended (the audio it was given), and its
+    segment-relative word times must be offset from there.
+    """
+    probs = [0.9] * 10 + [0.0] * 4 + [0.9] * 10 + [0.0] * 4
+    gate = _gate(probs, min_speech_ms=100, min_silence_ms=100, speech_pad_ms=300)
+    backend = ScriptedOfflineBackend(
+        [
+            OfflineResult(text="a", words=[WordTiming(w="a", s=0.0, e=0.1)]),
+            OfflineResult(text="b", words=[WordTiming(w="b", s=0.0, e=0.1)]),
+        ]
+    )
+    rec = SherpaOfflineRecognizer(gate, backend, sample_rate=SAMPLE_RATE)
+
+    events: list[Event] = []
+    for _ in range(len(probs)):
+        events.extend(rec.accept_pcm(_frames(1)))
+
+    finals = [e for e in events if e.kind == "final"]
+    assert len(finals) == 2
+    assert finals[1].start == pytest.approx(finals[0].end, abs=1e-6)
+    for final, samples in zip(finals, backend.calls, strict=True):
+        assert final.end - final.start == pytest.approx(len(samples) / SAMPLE_RATE, abs=1e-6)
+        assert final.words is not None
+        assert final.words[0].s == pytest.approx(final.start, abs=1e-6)
+
+
 def test_emit_segment_partial_false_suppresses_partial() -> None:
     """With ``emit_segment_partial=False`` only the ``final`` is emitted (still R4.4)."""
     gate = _clean_gate([0.9, 0.0])
@@ -372,6 +402,13 @@ def test_build_offline_config_num_threads_default(monkeypatch: pytest.MonkeyPatc
     assert build_offline_model_config(model_dir="/opt/models").num_threads == 1
     monkeypatch.setenv("ASR_NUM_THREADS", "4")
     assert build_offline_model_config(model_dir="/opt/models").num_threads == 4
+
+
+def test_build_offline_config_keeps_short_utterances(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_model_env(monkeypatch)
+    vad = build_offline_model_config(model_dir="/opt/models").vad
+    assert vad.threshold == 0.35
+    assert vad.min_speech_ms == 100
 
 
 def test_build_offline_config_endpointing_maps_to_vad_silence(

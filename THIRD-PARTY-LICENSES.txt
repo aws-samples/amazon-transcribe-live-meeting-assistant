@@ -576,10 +576,10 @@ Speech recognition:
     https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b
 
   * NVIDIA Parakeet TDT 0.6B v3 and v2 (offline; v2 in parakeet-tdt-v2-titanet-small, v3 in
-    every other bundle whose id starts with parakeet-tdt-v3). The int8 ONNX exports are
-    the sherpa-onnx project's, fetched at a fixed commit from
-    https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8 and
-    https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.
+    every other bundle whose id starts with parakeet-tdt-v3). The ONNX exports are the
+    sherpa-onnx project's, fetched at a fixed commit: v3 at full precision from
+    https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3 and v2 in int8
+    from https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.
     CC-BY-4.0
     https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
     https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2
