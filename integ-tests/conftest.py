@@ -109,10 +109,15 @@ def _is_deselected_by_marker(item: pytest.Item) -> bool:
         off-by-default feature turns every nightly run red until the feature
         is enabled on the nightly stack — which is a decision about that
         stack's cost and deploy time, not something a new test should force.
+
+    ``external_meeting``
+        Joins a real Google Meet meeting. It skips when no meeting link is
+        configured, and when Google Meet turns the scripted guest away after
+        its retries, which is the platform's decision and not an LMA failure.
     """
     return any(
         item.get_closest_marker(name) is not None
-        for name in ("live", "optional_feature")
+        for name in ("live", "optional_feature", "external_meeting")
     )
 
 

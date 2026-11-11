@@ -348,6 +348,33 @@ Under **Settings > CI/CD > Variables**, or on the schedule itself:
 | `SLACK_WEBHOOK_URL` | no | The webhook from step 6. **Mask it, and do not protect it** — see step 6. Absent, the Slack post is skipped. |
 | `LMA_FAILURE_AGENT` | no | `1` enables the failure-triage agent. Off by default. |
 | `LMA_FAILURE_AGENT_ROLE_ARN` | if the agent is on | The **read-only** role it runs as. **Mask it.** Without it the agent declines to run; see [Triage of a failed run](#triage-of-a-failed-run). |
+| `LMA_TEST_MEET_URL` | no | A Google Meet link for the [Google Meet end-to-end test](#optional-a-google-meet-meeting). **Mask it.** Absent, that test skips. |
+
+### Optional: a Google Meet meeting
+
+`integ-tests/test_meet_end_to_end.py` starts a scripted guest in a real Google
+Meet meeting (`scripts/meeting_guest`), sends a Virtual Participant to the same
+meeting, and has the guest play a two-voice conversation and send a chat
+message. It passes when the speech and the chat message are in the
+meeting's transcript, and takes about ten minutes.
+
+It needs a meeting that admits anonymous guests with nobody hosting it:
+
+1. In Google Calendar, create an event that recurs daily with no end date, and
+   add Google Meet video conferencing to it. A recurring event's link does not
+   expire.
+2. In the meeting's **Host controls**, set **Meeting access** to **Open**, so
+   anyone with the link joins without being admitted.
+3. Set the link as the `LMA_TEST_MEET_URL` variable (masked) in step 4.
+
+The guest runs as a one-off ECS task from the stack's own Virtual Participant
+image, with no task role; its audio, commands and screenshot move through
+presigned URLs under `meeting-guest/` in the recordings bucket, which are
+deleted when it leaves. Google Meet sometimes turns an anonymous guest away
+whatever it does. The guest retries, and when Meet still refuses it, the test
+skips rather than failing the run (it carries the `external_meeting` marker,
+which `--no-skips` leaves alone). A Virtual Participant that cannot join is a
+failure.
 
 ### 5. The schedule
 

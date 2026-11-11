@@ -207,6 +207,25 @@ AWS_PROFILE=default LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user LMA_TES
     .venv/bin/python -m pytest integ-tests/test_transcript_deletion.py --stack-name lma-integtest1 -s
 ```
 
+## A Virtual Participant in a Google Meet meeting
+
+`test_meet_end_to_end.py` starts a scripted guest in a real Google Meet meeting
+(`scripts/meeting_guest`) and sends a Virtual Participant to it; the guest then
+speaks a short two-voice conversation and sends a chat message with a marker.
+It passes when the speech and the message reach the meeting's transcript.
+About ten minutes; it calls Amazon Polly, Amazon Transcribe and Bedrock.
+
+It needs `LMA_TEST_MEET_URL`, the link of a meeting with open access that
+admits guests with nobody hosting it (see
+[Scheduled Integration Tests](../docs/scheduled-integration-tests.md#optional-a-google-meet-meeting)).
+Without it, or when Google Meet turns the guest away after its retries, the
+test skips.
+
+```bash
+AWS_PROFILE=default LMA_TEST_MEET_URL=https://meet.google.com/abc-defg-hij \
+    .venv/bin/python -m pytest integ-tests/test_meet_end_to_end.py --stack-name lma-integtest1 -s
+```
+
 ## Meeting consent on the Stream Audio path
 
 `test_meeting_consent.py` checks how the WebSocket transcriber gates a streamed
