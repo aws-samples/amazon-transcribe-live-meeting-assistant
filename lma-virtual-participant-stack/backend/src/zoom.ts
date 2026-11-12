@@ -17,6 +17,7 @@ import {
     zoomChatPanelStateInPage,
     type ZoomChatPanelState,
 } from './zoom-chat-page.js';
+import { dismissZoomOverlaysInPage, ZOOM_OVERLAY_SPEC, zoomOverlayCheckDelayMs } from './zoom-overlays.js';
 import { simliAvatar } from './simli-avatar.js';
 import {
     findElementWithFallback,
@@ -149,6 +150,8 @@ export default class Zoom {
     // run to completion.
     private endRequested: Promise<ExitInfo>;
     private requestEnd: (info: ExitInfo) => void = () => {};
+    // Stops the in-meeting notice dismisser (startOverlayDismisser).
+    private stopOverlayDismisser: () => void = () => {};
 
     constructor() {
         this.endRequested = new Promise<ExitInfo>((resolve) => {
@@ -435,6 +438,47 @@ export default class Zoom {
             // toggle video off and disrupt the meeting layout). Just wait.
             await new Promise((r) => setTimeout(r, 1000));
         }
+    }
+
+    /**
+     * Keep Zoom's own notices off the VP's screen for the whole meeting: the
+     * "Introducing My Notes" callout and the hardware-acceleration banner
+     * (zoom-overlays.ts). Every few seconds just after joining, then every 15s;
+     * best-effort, so a failed or hung check never affects the meeting.
+     */
+    private startOverlayDismisser(page: Page): void {
+        const joinedAt = Date.now();
+        let stopped = false;
+        let timer: NodeJS.Timeout | undefined;
+        const tick = async (): Promise<void> => {
+            if (stopped || page.isClosed()) return;
+            // Bounded like safeEvaluate: a CDP evaluate can hang, and the next
+            // check must still be scheduled.
+            let to: NodeJS.Timeout | undefined;
+            try {
+                const dismissed = await Promise.race([
+                    page.evaluate(dismissZoomOverlaysInPage, ZOOM_OVERLAY_SPEC),
+                    new Promise<never>((_, reject) => {
+                        to = setTimeout(() => reject(new Error('timed out after 5000ms')), 5000);
+                    }),
+                ]);
+                for (const d of dismissed) {
+                    log.info(`[zoom-overlays] dismissed a Zoom notice ("${d.notice}") with "${d.button}"`);
+                }
+            } catch (err: any) {
+                if (!page.isClosed()) log.debug(`[zoom-overlays] check failed: ${err?.message ?? err}`);
+            } finally {
+                if (to) clearTimeout(to);
+            }
+            if (!stopped && !page.isClosed()) {
+                timer = setTimeout(tick, zoomOverlayCheckDelayMs(Date.now() - joinedAt));
+            }
+        };
+        timer = setTimeout(tick, 1000);
+        this.stopOverlayDismisser = () => {
+            stopped = true;
+            if (timer) clearTimeout(timer);
+        };
     }
 
     /**
@@ -1413,6 +1457,11 @@ export default class Zoom {
         await new Promise(resolve => setTimeout(resolve, 500));
         log.info('Popup handler active, proceeding to open chat.');
 
+        // Zoom's feature callouts and advisory banners ("Introducing My Notes",
+        // the hardware-acceleration banner) are not modals, so the handler
+        // above leaves them; dismiss them for the whole meeting.
+        this.startOverlayDismisser(page);
+
         // (Note: the unknown-dialog watchdog is already running — started
         // before the waiting-room poll above so it can catch verification /
         // blocking dialogs that appear on the prejoin page. It keeps running for
@@ -2052,6 +2101,7 @@ export default class Zoom {
         } finally {
             details.start = false;
             clearInterval(chatPoll);
+            this.stopOverlayDismisser();
         }
         log.info(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
         return exitInfo;
