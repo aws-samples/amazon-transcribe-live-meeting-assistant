@@ -145,3 +145,42 @@ def test_guest_state_names_its_log_stream_after_the_task():
         log_group="/vp/fargate",
     )
     assert state.log_stream == "meeting-guest/guest/0123abcd"
+
+
+def test_the_start_command_passes_its_options_to_start_guest(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_start(session, stack, meet_url, name, audio, max_minutes, lead_in_s):
+        seen.update(
+            stack=stack, meet_url=meet_url, name=name, max_minutes=max_minutes, lead_in_s=lead_in_s
+        )
+        return mg.GuestState(
+            stack=stack,
+            region="us-west-2",
+            cluster_arn="arn:cluster",
+            task_arn="arn:aws:ecs:us-west-2:111122223333:task/cluster/abc",
+            bucket="recordings",
+            prefix="meeting-guest/x",
+            log_group="/vp/fargate",
+        )
+
+    monkeypatch.setattr(mg, "start_guest", fake_start)
+    state = tmp_path / "guest.json"
+    argv = ["--state", str(state), "--region", "us-west-2", "start", "--stack", "LMA"]
+    argv += [
+        "--meet-url",
+        "https://meet.google.com/abc-defg-hij",
+        "--lead-in",
+        "5",
+        "--max-minutes",
+        "8",
+    ]
+    assert mg.main(argv) == 0
+    assert seen == {
+        "stack": "LMA",
+        "meet_url": "https://meet.google.com/abc-defg-hij",
+        "name": "Conference Room 4",
+        "max_minutes": 8,
+        "lead_in_s": 5.0,
+    }
+    assert state.exists()
