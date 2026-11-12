@@ -961,6 +961,49 @@ def test_the_agent_refuses_to_run_without_read_only_credentials(monkeypatch):
     )
 
 
+def test_the_agent_brief_gives_the_run_window_in_epoch_milliseconds(tmp_path: Path):
+    """The agent cannot compute a timestamp: command substitution is denied."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import failure_agent  # noqa: PLC0415
+
+    report = tmp_path / "report.xml"
+    report.write_text(
+        '<testsuites><testsuite name="pytest" tests="1" time="600.0" '
+        'timestamp="2026-11-12T01:40:00+00:00"><testcase classname="a" name="b"/>'
+        "</testsuite></testsuites>"
+    )
+    brief = failure_agent.build_brief(report, tmp_path / "none.log", "stack", "us-west-2")
+    # 01:35 to 01:55 UTC: the run's 10 minutes and 5 either side.
+    assert "--start-time 1794447300000 --end-time 1794448500000" in brief
+
+
+def test_the_agent_brief_survives_a_report_without_a_timestamp(tmp_path: Path):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import failure_agent  # noqa: PLC0415
+
+    report = tmp_path / "report.xml"
+    report.write_text("<testsuites><testsuite/></testsuites>")
+    brief = failure_agent.build_brief(report, tmp_path / "none.log", "s", "us-west-2")
+    assert "Run window: unknown" in brief
+
+
+def test_the_commands_the_agent_was_denied_are_read_from_its_output():
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import failure_agent  # noqa: PLC0415
+
+    stdout = json.dumps(
+        {
+            "result": "ROOT CAUSE: not determined",
+            "permission_denials": [
+                {"tool_name": "Bash", "tool_input": {"command": "aws logs x $(date)"}},
+            ],
+        }
+    )
+    assert failure_agent._denied_commands(stdout) == ["Bash: aws logs x $(date)"]
+    assert failure_agent._denied_commands("not json") == []
+    assert failure_agent._denied_commands(json.dumps({"result": "ok"})) == []
+
+
 def test_the_agent_is_off_unless_explicitly_enabled(monkeypatch):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import failure_agent  # noqa: PLC0415

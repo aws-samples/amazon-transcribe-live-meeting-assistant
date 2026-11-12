@@ -184,6 +184,11 @@ decreasing order of how much they protect you:
   lists read-only verbs, but Bash allowlist rules are prefix globs, so
   `Bash(aws logs *)` does not stop a chained
   `aws logs … ; aws cloudformation delete-stack …`. Treat it as noise reduction.
+  With nobody to approve a prompt, the forms it does refuse are refused
+  outright: command substitution (`$(…)`, backticks) and a leading
+  `VAR=value`. So the brief gives the agent the run's window in epoch
+  milliseconds rather than leaving it to compute one, and the job log lists
+  each command the agent was denied (`failure-agent: denied: …`).
 - **The agent never decides pass/fail.** Python owns the verdict; the agent is
   advisory, and returns nothing rather than guessing. A notification that
   called a run green because an agent said so would be worse than no agent.

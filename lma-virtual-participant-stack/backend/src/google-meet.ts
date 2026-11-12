@@ -10,8 +10,10 @@
  * under the VP's display name, and runs the meeting the way the other browser
  * joins do (Webex and Teams are the closest models).
  *
- *   1. Open https://meet.google.com/<code>?hl=en. A refusal page ("You can't
- *      join this video call") or an invalid code ends the join at once.
+ *   1. Open https://meet.google.com/<code>?hl=en. An invalid code ends the
+ *      join at once; a refusal page ("You can't join this video call"), here or
+ *      just after the join click in step 3, is retried with a fresh page load
+ *      a few times (MEET_REFUSAL_RETRIES) before it ends the join.
  *   2. Fill "What's your name?", turn the microphone (unless a voice assistant
  *      needs it) and the camera (unless the Simli avatar is the camera) off, and
  *      press "Ask to join", or "Join now" where the meeting lets guests straight in.
@@ -73,7 +75,7 @@ import {
 } from './google-meet-page.js';
 import { createLogger } from './logger.js';
 
-/** Fresh page loads tried after Meet refuses the guest before the join. */
+/** Fresh page loads tried after Meet refuses the guest, before or just after the join click. */
 export const MEET_REFUSAL_RETRIES = 4;
 /** The pause before each of those retries. */
 export const MEET_REFUSAL_BACKOFF_MS = [4_000, 8_000, 15_000, 20_000];
@@ -912,7 +914,7 @@ export default class GoogleMeet {
         // Meet's guest check refuses some page loads and accepts the next one:
         // measured from this network, the same browser was refused on one load
         // of a meeting with open access and shown the name field on the next.
-        // So a refusal before the join is retried with a fresh page load, a
+        // So a refusal before or just after the join click is retried with a fresh page load, a
         // few times and with a growing pause. A Meet join always starts from a
         // fresh browser profile (acquireProfile saves none for Meet), but the
         // refused loads of this session leave Google cookies behind, so from
@@ -936,200 +938,220 @@ export default class GoogleMeet {
             await this.passConsentInterstitial(page);
             return true;
         };
-        for (let attempt = 0; attempt < 45 && !nameField; attempt++) {
-            const reading = await this.readPage(page);
-            if (isMeetRefusalRedirect(reading.url)) {
-                if (await retryAfterRefusal(`Google Meet sent the VP to ${reading.url}.`)) {
+        // A refusal can also come a moment after the join click ("You can't
+        // join this video call" in place of the waiting screen). It is the same
+        // guest check, so it gets the same retry: a fresh page load, then the
+        // name, the devices and the join click again, drawing on the one
+        // budget of MEET_REFUSAL_RETRIES for the whole join.
+        const sm = details.invite.virtualParticipantId ? createStatusManager(details.invite.virtualParticipantId) : null;
+        joinAttempt: for (;;) {
+            nameField = null;
+            for (let attempt = 0; attempt < 45 && !nameField; attempt++) {
+                const reading = await this.readPage(page);
+                if (isMeetRefusalRedirect(reading.url)) {
+                    if (await retryAfterRefusal(`Google Meet sent the VP to ${reading.url}.`)) {
+                        attempt = 0;
+                        continue;
+                    }
+                    log.warn(`Google Meet sent the VP to ${reading.url} — it refused this browser as a guest.`);
+                    return { reason: 'never-joined', trigger: 'pre-join:meet-refused' };
+                }
+                const screen = classifyMeetScreenText(reading.text);
+                const exit = meetPreJoinExit(screen?.screen ?? null);
+                if (exit?.trigger === 'pre-join:meet-refused' && (await retryAfterRefusal(`Google Meet showed "${screen?.phrase}".`))) {
                     attempt = 0;
                     continue;
                 }
-                log.warn(`Google Meet sent the VP to ${reading.url} — it refused this browser as a guest.`);
-                return { reason: 'never-joined', trigger: 'pre-join:meet-refused' };
+                if (exit) {
+                    log.warn(`Google Meet showed "${screen?.phrase}" before the join — not joining (${exit.trigger}).`);
+                    return exit;
+                }
+                for (const selector of MEET_SELECTORS.nameInput) {
+                    const handle = await page.$(selector).catch(() => null);
+                    if (handle && (await handle.isVisible().catch(() => false))) {
+                        nameField = handle;
+                        break;
+                    }
+                }
+                // Defensive fallback: a browser signed in to Google has no name
+                // field, only its join button, and the join goes on without one. A
+                // Meet join starts from a fresh guest profile, so this is not
+                // expected to happen; it is kept so that a join button shown without
+                // a name field is used rather than treated as a missing name field.
+                if (!nameField && reading.joinButtonVisible) break;
+                if (!nameField) await new Promise((r) => setTimeout(r, 1000));
             }
-            const screen = classifyMeetScreenText(reading.text);
-            const exit = meetPreJoinExit(screen?.screen ?? null);
-            if (exit?.trigger === 'pre-join:meet-refused' && (await retryAfterRefusal(`Google Meet showed "${screen?.phrase}".`))) {
-                attempt = 0;
-                continue;
+            if (!nameField) {
+                const reading = await this.readPage(page);
+                if (!reading.joinButtonVisible) {
+                    // Neither a name field nor a join button: one AI look before giving up.
+                    const found = await findElementWithFallback(
+                        page,
+                        [],
+                        {
+                            intent: 'Google Meet pre-join screen guest name input under "What\'s your name?"',
+                            platform: 'GOOGLE_MEET',
+                            step: 'meet.join.name',
+                            useScreenshot: true,
+                        },
+                        { maxRetries: 1, delayMs: 0 },
+                    );
+                    if (!found) {
+                        log.warn('Could not locate the Google Meet name field or join button — aborting the join.');
+                        return { reason: 'never-joined', trigger: 'pre-join:no-name-input' };
+                    }
+                    nameField = found.element;
+                } else {
+                    // The defensive fallback above: not expected with a fresh guest profile.
+                    log.info('No guest name field, only the join button (as for a browser signed in to Google) — joining without entering a name.');
+                }
             }
-            if (exit) {
-                log.warn(`Google Meet showed "${screen?.phrase}" before the join — not joining (${exit.trigger}).`);
-                return exit;
+            // Meet shows a "Sign in with your Google account … Got it" callout beside
+            // the guest name field. It is a tip, not a sign-in wall; dismissing it
+            // before the dialog watchdog reads the page keeps the VP from being
+            // marked as needing a sign-in.
+            await this.dismissTips(page);
+            if (nameField) {
+                // fill() replaces whatever a restored profile pre-filled, so the name
+                // is never doubled; checked, and typed once by keyboard if it did not land.
+                await nameField.fill(details.scribeIdentity).catch(() => undefined);
+                const typed = await nameField.evaluate((el: Element) => (el as HTMLInputElement).value || '').catch(() => '');
+                if (typed !== details.scribeIdentity) {
+                    log.warn(`Name field holds "${typed}" after fill — clearing and typing.`);
+                    await nameField.evaluate((el: Element) => {
+                        (el as HTMLInputElement).value = '';
+                    });
+                    await humanType(page, nameField, details.scribeIdentity);
+                }
             }
-            for (const selector of MEET_SELECTORS.nameInput) {
-                const handle = await page.$(selector).catch(() => null);
-                if (handle && (await handle.isVisible().catch(() => false))) {
-                    nameField = handle;
+
+            await substep('Setting up audio and video…');
+            await this.setPrejoinDevices(page);
+
+            log.info('Clicking join button.');
+            const joinRes = await findElementWithFallback(
+                page,
+                [...MEET_SELECTORS.joinButton],
+                {
+                    intent: 'Google Meet pre-join primary button that asks to join or joins the call ("Ask to join" or "Join now")',
+                    platform: 'GOOGLE_MEET',
+                    step: 'meet.join.joinButton',
+                },
+                { maxRetries: 10, delayMs: 500 },
+            );
+            if (!joinRes) {
+                const screen = classifyMeetScreenText((await this.readPage(page)).text);
+                const exit = meetPreJoinExit(screen?.screen ?? null);
+                if (exit) return exit;
+                log.warn('Could not locate the Google Meet join button — aborting.');
+                return { reason: 'never-joined', trigger: 'pre-join:no-join-button' };
+            }
+            const joinLabel = ((await joinRes.element.textContent().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+            log.info(`Clicking "${joinLabel || 'join'}" (${joinRes.source} selector ${joinRes.selector}).`);
+            await humanClick(page, joinRes.element);
+            let lastJoinClick = Date.now();
+            let joinClicks = 1;
+
+            // The admission wait. A fast DOM check every 1.5s, the AI join-state
+            // check every 30s as a second opinion, and the deadline extended while a
+            // manual action (a CAPTCHA) is being solved in the live view.
+            await substep('Waiting to be admitted to the meeting…');
+            const POLL_INTERVAL_MS = 1500;
+            // The deadline restarts on each join attempt: a refusal comes within
+            // seconds of the click, so a retry adds about that much to the wait.
+            const startWait = Date.now();
+            const baseDeadline = startWait + details.waitingTimeout;
+            const MANUAL_ACTION_GRACE_MS = 5 * 60 * 1000;
+            const AI_CHECK_INTERVAL_MS = 30_000;
+            let lastAiCheck = Date.now();
+            let lastProgressBump = Date.now();
+            let waitingLogged = false;
+            let admitted = false;
+            while (!admitted) {
+                if (page.isClosed()) return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
+                const reading = await this.readPage(page);
+                if (reading.inMeeting) {
+                    admitted = true;
                     break;
                 }
-            }
-            // Defensive fallback: a browser signed in to Google has no name
-            // field, only its join button, and the join goes on without one. A
-            // Meet join starts from a fresh guest profile, so this is not
-            // expected to happen; it is kept so that a join button shown without
-            // a name field is used rather than treated as a missing name field.
-            if (!nameField && reading.joinButtonVisible) break;
-            if (!nameField) await new Promise((r) => setTimeout(r, 1000));
-        }
-        if (!nameField) {
-            const reading = await this.readPage(page);
-            if (!reading.joinButtonVisible) {
-                // Neither a name field nor a join button: one AI look before giving up.
-                const found = await findElementWithFallback(
-                    page,
-                    [],
-                    {
-                        intent: 'Google Meet pre-join screen guest name input under "What\'s your name?"',
-                        platform: 'GOOGLE_MEET',
-                        step: 'meet.join.name',
-                        useScreenshot: true,
-                    },
-                    { maxRetries: 1, delayMs: 0 },
-                );
-                if (!found) {
-                    log.warn('Could not locate the Google Meet name field or join button — aborting the join.');
-                    return { reason: 'never-joined', trigger: 'pre-join:no-name-input' };
-                }
-                nameField = found.element;
-            } else {
-                // The defensive fallback above: not expected with a fresh guest profile.
-                log.info('No guest name field, only the join button (as for a browser signed in to Google) — joining without entering a name.');
-            }
-        }
-        // Meet shows a "Sign in with your Google account … Got it" callout beside
-        // the guest name field. It is a tip, not a sign-in wall; dismissing it
-        // before the dialog watchdog reads the page keeps the VP from being
-        // marked as needing a sign-in.
-        await this.dismissTips(page);
-        if (nameField) {
-            // fill() replaces whatever a restored profile pre-filled, so the name
-            // is never doubled; checked, and typed once by keyboard if it did not land.
-            await nameField.fill(details.scribeIdentity).catch(() => undefined);
-            const typed = await nameField.evaluate((el: Element) => (el as HTMLInputElement).value || '').catch(() => '');
-            if (typed !== details.scribeIdentity) {
-                log.warn(`Name field holds "${typed}" after fill — clearing and typing.`);
-                await nameField.evaluate((el: Element) => {
-                    (el as HTMLInputElement).value = '';
-                });
-                await humanType(page, nameField, details.scribeIdentity);
-            }
-        }
-
-        await substep('Setting up audio and video…');
-        await this.setPrejoinDevices(page);
-
-        log.info('Clicking join button.');
-        const joinRes = await findElementWithFallback(
-            page,
-            [...MEET_SELECTORS.joinButton],
-            {
-                intent: 'Google Meet pre-join primary button that asks to join or joins the call ("Ask to join" or "Join now")',
-                platform: 'GOOGLE_MEET',
-                step: 'meet.join.joinButton',
-            },
-            { maxRetries: 10, delayMs: 500 },
-        );
-        if (!joinRes) {
-            const screen = classifyMeetScreenText((await this.readPage(page)).text);
-            const exit = meetPreJoinExit(screen?.screen ?? null);
-            if (exit) return exit;
-            log.warn('Could not locate the Google Meet join button — aborting.');
-            return { reason: 'never-joined', trigger: 'pre-join:no-join-button' };
-        }
-        const joinLabel = ((await joinRes.element.textContent().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
-        log.info(`Clicking "${joinLabel || 'join'}" (${joinRes.source} selector ${joinRes.selector}).`);
-        await humanClick(page, joinRes.element);
-        let lastJoinClick = Date.now();
-        let joinClicks = 1;
-
-        // The admission wait. A fast DOM check every 1.5s, the AI join-state
-        // check every 30s as a second opinion, and the deadline extended while a
-        // manual action (a CAPTCHA) is being solved in the live view.
-        await substep('Waiting to be admitted to the meeting…');
-        const POLL_INTERVAL_MS = 1500;
-        const startWait = Date.now();
-        const baseDeadline = startWait + details.waitingTimeout;
-        const MANUAL_ACTION_GRACE_MS = 5 * 60 * 1000;
-        const AI_CHECK_INTERVAL_MS = 30_000;
-        let lastAiCheck = Date.now();
-        let lastProgressBump = Date.now();
-        let waitingLogged = false;
-        const sm = details.invite.virtualParticipantId ? createStatusManager(details.invite.virtualParticipantId) : null;
-        let admitted = false;
-        while (!admitted) {
-            if (page.isClosed()) return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
-            const reading = await this.readPage(page);
-            if (reading.inMeeting) {
-                admitted = true;
-                break;
-            }
-            if (isMeetRefusalRedirect(reading.url)) {
-                log.warn('Google Meet sent the VP to its product page — it refused this browser as a guest.');
-                return { reason: 'never-joined', trigger: 'pre-join:meet-refused' };
-            }
-            const screen = classifyMeetScreenText(reading.text);
-            const exit = meetPreJoinExit(screen?.screen ?? null);
-            if (exit) {
-                log.warn(`Google Meet showed "${screen?.phrase}" while asking to join (${exit.trigger}).`);
-                return exit;
-            }
-            if (screen?.screen === 'waiting' && !waitingLogged) {
-                waitingLogged = true;
-                log.info(`Asked to join; Meet shows "${screen.phrase}".`);
-                await substep('Asked to join — waiting for someone in the meeting to let the participant in…');
-            }
-            // A join click that did not register leaves the button on screen with
-            // no waiting text; it is clicked again, at most twice more.
-            if (reading.joinButtonVisible && screen?.screen !== 'waiting' && Date.now() - lastJoinClick > 15_000 && joinClicks < 3) {
-                const again = await findElementWithFallback(
-                    page,
-                    [...MEET_SELECTORS.joinButton],
-                    { intent: 'Google Meet "Ask to join" / "Join now" button', platform: 'GOOGLE_MEET', step: 'meet.join.joinButton' },
-                    { maxRetries: 2, delayMs: 300 },
-                );
-                if (again) {
-                    joinClicks += 1;
-                    lastJoinClick = Date.now();
-                    log.info(`The join button is still showing — clicking it again (${joinClicks}/3).`);
-                    await humanClick(page, again.element);
-                }
-            }
-            if (isResolverEnabled() && Date.now() - lastAiCheck > AI_CHECK_INTERVAL_MS) {
-                lastAiCheck = Date.now();
-                try {
-                    const verdict = await classifyJoinState(page, { platform: 'GOOGLE_MEET' });
-                    if (verdict) {
-                        log.info(`[meet] AI join-state check: ${verdict.state} — ${verdict.reason}`);
-                        if (verdict.state === 'in-meeting') {
-                            admitted = true;
-                            break;
-                        }
-                        if (verdict.state === 'error') {
-                            return { reason: 'never-joined', trigger: 'pre-join:ai-error-screen' };
-                        }
+                if (isMeetRefusalRedirect(reading.url)) {
+                    if (await retryAfterRefusal(`Google Meet sent the VP to ${reading.url} after the join click.`)) {
+                        continue joinAttempt;
                     }
-                } catch (e) {
-                    log.warn('[meet] AI join-state check failed (non-fatal):', e);
+                    log.warn('Google Meet sent the VP to its product page — it refused this browser as a guest.');
+                    return { reason: 'never-joined', trigger: 'pre-join:meet-refused' };
                 }
-            }
-            if (Date.now() - lastProgressBump > 20_000) {
-                lastProgressBump = Date.now();
-                const secs = Math.round((Date.now() - startWait) / 1000);
-                const current = sm ? await sm.getCurrentStatus().catch(() => null) : null;
-                if (current !== 'MANUAL_ACTION_REQUIRED') {
-                    await substep(`Waiting to be admitted to the meeting… (${secs}s — someone in the meeting may need to admit the participant)`);
+                const screen = classifyMeetScreenText(reading.text);
+                const exit = meetPreJoinExit(screen?.screen ?? null);
+                if (
+                    exit?.trigger === 'pre-join:meet-refused' &&
+                    (await retryAfterRefusal(`Google Meet showed "${screen?.phrase}" after the join click.`))
+                ) {
+                    continue joinAttempt;
                 }
+                if (exit) {
+                    log.warn(`Google Meet showed "${screen?.phrase}" while asking to join (${exit.trigger}).`);
+                    return exit;
+                }
+                if (screen?.screen === 'waiting' && !waitingLogged) {
+                    waitingLogged = true;
+                    log.info(`Asked to join; Meet shows "${screen.phrase}".`);
+                    await substep('Asked to join — waiting for someone in the meeting to let the participant in…');
+                }
+                // A join click that did not register leaves the button on screen with
+                // no waiting text; it is clicked again, at most twice more.
+                if (reading.joinButtonVisible && screen?.screen !== 'waiting' && Date.now() - lastJoinClick > 15_000 && joinClicks < 3) {
+                    const again = await findElementWithFallback(
+                        page,
+                        [...MEET_SELECTORS.joinButton],
+                        { intent: 'Google Meet "Ask to join" / "Join now" button', platform: 'GOOGLE_MEET', step: 'meet.join.joinButton' },
+                        { maxRetries: 2, delayMs: 300 },
+                    );
+                    if (again) {
+                        joinClicks += 1;
+                        lastJoinClick = Date.now();
+                        log.info(`The join button is still showing — clicking it again (${joinClicks}/3).`);
+                        await humanClick(page, again.element);
+                    }
+                }
+                if (isResolverEnabled() && Date.now() - lastAiCheck > AI_CHECK_INTERVAL_MS) {
+                    lastAiCheck = Date.now();
+                    try {
+                        const verdict = await classifyJoinState(page, { platform: 'GOOGLE_MEET' });
+                        if (verdict) {
+                            log.info(`[meet] AI join-state check: ${verdict.state} — ${verdict.reason}`);
+                            if (verdict.state === 'in-meeting') {
+                                admitted = true;
+                                break;
+                            }
+                            if (verdict.state === 'error') {
+                                return { reason: 'never-joined', trigger: 'pre-join:ai-error-screen' };
+                            }
+                        }
+                    } catch (e) {
+                        log.warn('[meet] AI join-state check failed (non-fatal):', e);
+                    }
+                }
+                if (Date.now() - lastProgressBump > 20_000) {
+                    lastProgressBump = Date.now();
+                    const secs = Math.round((Date.now() - startWait) / 1000);
+                    const current = sm ? await sm.getCurrentStatus().catch(() => null) : null;
+                    if (current !== 'MANUAL_ACTION_REQUIRED') {
+                        await substep(`Waiting to be admitted to the meeting… (${secs}s — someone in the meeting may need to admit the participant)`);
+                    }
+                }
+                let extended = false;
+                if (sm && Date.now() > baseDeadline) {
+                    const current = await sm.getCurrentStatus().catch(() => null);
+                    extended = current === 'MANUAL_ACTION_REQUIRED' && Date.now() < baseDeadline + MANUAL_ACTION_GRACE_MS;
+                }
+                if (Date.now() > baseDeadline && !extended) {
+                    log.info('Your scribe was not admitted into the meeting.');
+                    return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
+                }
+                await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
             }
-            let extended = false;
-            if (sm && Date.now() > baseDeadline) {
-                const current = await sm.getCurrentStatus().catch(() => null);
-                extended = current === 'MANUAL_ACTION_REQUIRED' && Date.now() < baseDeadline + MANUAL_ACTION_GRACE_MS;
-            }
-            if (Date.now() > baseDeadline && !extended) {
-                log.info('Your scribe was not admitted into the meeting.');
-                return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
-            }
-            await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+            break;
         }
 
         // In the meeting. JOINED first: everything after it is best effort and
