@@ -71,7 +71,7 @@ describe('ConsentPanel', () => {
     expect(screen.getByText('Withheld')).toBeInTheDocument();
     expect(screen.getByText('Ana would like to record this meeting.')).toBeInTheDocument();
     expect(screen.getByRole('img')).toHaveAttribute('src', 'https://example.com/e1.jpg');
-    expect(screen.getByText('Not checked')).toBeInTheDocument();
+    expect(screen.getByText('Image check: not run')).toBeInTheDocument();
   });
 
   it('offers a viewer who may not change the meeting no actions', () => {
@@ -128,6 +128,7 @@ describe('ConsentPanel', () => {
       ],
     };
     rerender(<ConsentPanel state={{ ...state, consent: checked }} canEdit isAdmin />);
+    expect(screen.getByText('Image check:')).toBeInTheDocument();
     expect(screen.getByText('Objection found')).toBeInTheDocument();
     expect(screen.getByText('Bo objects.')).toBeInTheDocument();
     expect(screen.getByText('Check again')).toBeInTheDocument();

@@ -219,8 +219,11 @@ export const consentAsText = (consent) => {
         ? `${VERDICT_LABELS[item.Verification.Verdict] || item.Verification.Verdict} (model ${
             item.Verification.ModelId
           }, confidence ${item.Verification.Confidence})`
-        : 'not checked';
-      lines.push(`- ${item.Kind || 'screenshot'} captured ${item.CapturedAt || 'at an unknown time'}: ${check}`);
+        : 'not run';
+      // The check reports what the image shows, which can differ from the status.
+      lines.push(
+        `- ${item.Kind || 'screenshot'} captured ${item.CapturedAt || 'at an unknown time'}. Image check: ${check}`,
+      );
     });
   }
   lines.push(

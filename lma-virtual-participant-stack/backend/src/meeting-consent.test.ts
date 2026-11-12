@@ -131,8 +131,11 @@ class FakeApi implements ConsentApi {
         });
     }
 
-    async addEvidence(input: { S3Key: string }): Promise<ConsentRecord | null> {
+    notes: string[] = [];
+
+    async addEvidence(input: { S3Key: string; Note?: string }): Promise<ConsentRecord | null> {
         this.calls.push(`addEvidence:${input.S3Key.split('-').slice(-2, -1)[0]}`);
+        this.notes.push(input.Note ?? '');
         return this.write((record) => {
             record.Evidence = [...(record.Evidence ?? []), { EvidenceId: `v${++this.id}`, S3Key: input.S3Key }];
         });
@@ -576,6 +579,43 @@ test('an objection entered on the meeting page stops capture and is acknowledged
     await h.settle();
     assert.equal(h.capture.on, false);
     assert.ok(h.chat.some((m) => m.startsWith('An objection for Cy Diaz was recorded in LMA.')));
+});
+
+test('evidence of an objection typed in the chat is checked', async () => {
+    const h = await harness({ deployment: { mode: 'notify' } });
+    const verified = h.api.verified.length;
+    await h.flow.handleChat('Bo Chen', 'I object');
+    await h.settle();
+    assert.deepEqual(h.api.notes.slice(-2), ['Meeting chat when Bo Chen objected', 'Participant list when Bo Chen objected']);
+    assert.equal(h.api.verified.length, verified + 1, 'the chat screenshot');
+});
+
+test('evidence of an objection recorded in LMA is kept but not checked automatically', async () => {
+    const h = await harness({ deployment: { mode: 'notify' } });
+    const uploads = h.uploads.length;
+    const verified = h.api.verified.length;
+    h.api.objectFromPage('Cy Diaz');
+    await h.flow.pollOnce();
+    await h.settle();
+    assert.equal(h.uploads.length, uploads + 2);
+    assert.deepEqual(h.api.notes.slice(-2), [
+        'Meeting chat after an objection for Cy Diaz was recorded in LMA',
+        'Participant list after an objection for Cy Diaz was recorded in LMA',
+    ]);
+    assert.equal(h.api.verified.length, verified, 'the chat cannot show an objection made outside it');
+});
+
+test('evidence of an objection said aloud is kept but not checked automatically', async () => {
+    const h = await harness({ deployment: { mode: 'notify' } });
+    const uploads = h.uploads.length;
+    const verified = h.api.verified.length;
+    assert.equal(h.flow.handleSpeech('Bo Chen', 'LMA, I object'), 'objection');
+    // handleSpeech does not wait for the reply's handling, which queues the
+    // screenshots only once the objection is recorded.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await h.settle();
+    assert.equal(h.uploads.length, uploads + 2);
+    assert.equal(h.api.verified.length, verified);
 });
 
 test('a consent in the chat after an objection recorded in LMA withdraws it', async () => {

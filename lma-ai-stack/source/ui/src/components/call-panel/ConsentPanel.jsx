@@ -111,6 +111,7 @@ const EvidenceItem = ({ item, onVerify, canVerify }) => {
         {verification ? (
           <SpaceBetween size="xxs">
             <SpaceBetween size="xxs" direction="horizontal" alignItems="center">
+              <Box fontSize="body-s">Image check:</Box>
               <Badge color={verdictColor(verification.Verdict)}>
                 {VERDICT_LABELS[verification.Verdict] || verification.Verdict}
               </Badge>
@@ -125,7 +126,7 @@ const EvidenceItem = ({ item, onVerify, canVerify }) => {
           </SpaceBetween>
         ) : (
           <Box fontSize="body-s" color="text-status-inactive">
-            Not checked
+            Image check: not run
           </Box>
         )}
         {canVerify && !item.ImageDeletedAt && (
@@ -379,7 +380,8 @@ const ConsentPanel = ({ state, canEdit = false, isOwner = false, isAdmin = false
               ))}
             </ColumnLayout>
             <Box fontSize="body-s" color="text-body-secondary">
-              A model&apos;s check of an image is supporting evidence only and never changes the status.
+              An image check reports what a model reads in that image alone, so it can differ from the status above. It
+              is supporting evidence only and never changes the status.
             </Box>
           </div>
         )}

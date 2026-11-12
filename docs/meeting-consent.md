@@ -195,9 +195,10 @@ on its **Details** tab. It shows:
   listed or replied, each with their latest reply (*Consented*, *Objected* or
   *No reply*);
 - the owner's **attestation**, when there is one;
-- the **evidence** images as thumbnails, each with the vision model's verdict,
-  confidence and summary when it has been checked; selecting one opens it full
-  size;
+- the **evidence** images as thumbnails, each with what it was taken for and,
+  when it has been checked, the vision model's verdict (shown as *Image check:*,
+  because it reports what that image shows, which can differ from the record's
+  status), confidence and summary; selecting one opens it full size;
 - a **timeline** of everything, oldest first: consent started, notices posted,
   replies and attestations, and each change of status with its reason. Replies
   are placed by when LMA recorded them, the order the status is decided in.
@@ -633,7 +634,14 @@ them. Each is a JPEG stored in the recordings bucket under
 (*"Meeting chat when Bo Chen objected"*). For each chat screenshot the VP then
 asks for the vision-model check (`verifyMeetingConsentEvidence`) without
 waiting for it; a participant list on its own is not checked, because the check
-reads a chat for the notice and the replies. Neither the screenshots nor the
+reads a chat for the notice and the replies. Nor are the screenshots taken for
+an objection that was not made in the chat: one recorded in LMA (**Record an
+objection**, or `recordMeetingConsentEvent` through the API) or one said aloud.
+Such an objection never appears in the chat as a participant's reply, and LMA's
+own announcement of it is not read as one, so a check of that chat could only
+report what else the chat shows, such as an earlier consent. Those images are
+kept and listed like the others, and the owner or an Admin can still check them
+with **Check with model**. Neither the screenshots nor the
 check ever hold up the meeting: a failure is logged and the meeting carries on.
 A VP keeps at most 24 images per meeting, below the record's 30, and takes no
 more after that. Before leaving after an objection it waits up to 30 seconds for
@@ -912,8 +920,12 @@ From that answer LMA draws a **verdict**, the same way whichever model answered:
 | `inconclusive` | Anything else, including an answer that could not be read. For the each-participant rule, the participants with no visible consent are listed (`MissingParticipants`). |
 
 The result is stored on the evidence entry as `Verification`, with the model's
-id, when the check ran, who ran it and the tokens it used. It is supporting
-evidence only: **it never changes the meeting's consent status**, which follows
+id, when the check ran, who ran it and the tokens it used. The verdict
+describes that one image, not the meeting: an earlier reply scrolled out of
+view, or an objection made outside the chat, is not in it, and when a
+participant's replies are both visible the verdict does not apply the record's
+rule that their latest reply counts. The meeting page and the summary download
+show it as the *image check*. It is supporting evidence only: **it never changes the meeting's consent status**, which follows
 only from the replies and attestations recorded on the meeting. A check that
 finds an objection nobody recorded is for a person to look at — the owner can
 record the objection — and a check that supports consent does not grant it.

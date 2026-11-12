@@ -775,7 +775,7 @@ export class MeetingConsentFlow {
             const name = event.ParticipantName || 'A participant';
             log.always(`[consent] objection recorded for ${JSON.stringify(name)} (source ${event.Source})`);
             await this.say([`An objection for ${name} was recorded in LMA. Live Meeting Assistant has stopped recording and transcribing.`]);
-            this.queueEvidence(`after an objection for ${name} was recorded in LMA`);
+            this.queueEvidence(`after an objection for ${name} was recorded in LMA`, false);
         }
         if (record.Status === 'granted' && previous?.Status !== 'granted' && this.noticePosted) {
             this.queueEvidence(this.plan.mode === 'notify' ? 'after the notice was posted' : 'when consent was granted');
@@ -1090,7 +1090,7 @@ export class MeetingConsentFlow {
                 (leave ? ' It will now leave the meeting.' : resume),
         ]);
         await this.recordEvent(event, true);
-        const evidence = this.queueEvidence(`when ${name} objected`);
+        const evidence = this.queueEvidence(`when ${name} objected`, event.Source !== 'voice');
         if (leaveNow && this.io) {
             await Promise.race([evidence, this.sleep(30_000)]);
             await this.say(this.deps.exitMessages());
@@ -1252,8 +1252,15 @@ export class MeetingConsentFlow {
 
     // ─── Evidence ────────────────────────────────────────────────────────────
 
-    private queueEvidence(note: string): Promise<unknown> {
-        const run = (): Promise<void> => this.captureEvidence(note);
+    /**
+     * Screenshots of the chat and the participant list, noted as taken `note`.
+     * `check` asks for the vision-model check of the chat screenshot: off for
+     * an objection that was not made in the chat (recorded in LMA, or said
+     * aloud), which the chat cannot show, so a check of it would report the
+     * chat alone. Such an image can still be checked from the meeting page.
+     */
+    private queueEvidence(note: string, check = true): Promise<unknown> {
+        const run = (): Promise<void> => this.captureEvidence(note, check);
         const next = this.evidenceChain.then(run, run);
         this.evidenceChain = next;
         return next;
@@ -1265,7 +1272,7 @@ export class MeetingConsentFlow {
         await this.apiChain;
     }
 
-    private async captureEvidence(note: string): Promise<void> {
+    private async captureEvidence(note: string, check: boolean): Promise<void> {
         if (!this.io?.screenshots || !this.started) return;
         if (this.evidenceUsed >= MAX_EVIDENCE_IMAGES) {
             log.info(`[consent] no screenshot ${note}: this meeting already has ${MAX_EVIDENCE_IMAGES}`);
@@ -1294,7 +1301,7 @@ export class MeetingConsentFlow {
             log.info(`[consent] evidence stored: ${key}${evidenceId ? ` (${evidenceId})` : ''}`);
             // The check reads a chat for the notice and the replies; a
             // participant list alone would always come back inconclusive.
-            if (evidenceId && shot.view !== 'participants' && this.api) {
+            if (check && evidenceId && shot.view !== 'participants' && this.api) {
                 void this.api.verifyEvidence(evidenceId);
             }
         }

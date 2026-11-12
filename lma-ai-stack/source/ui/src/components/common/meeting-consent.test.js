@@ -96,7 +96,10 @@ describe('meeting-consent', () => {
     expect(text).toContain('Status: Objected');
     expect(text).toContain('- Bo Chen: objection');
     expect(text).toContain('- Cy Diaz: no reply (not present at the time of this download)');
-    expect(text).toContain('Objection found (model amazon.nova-lite-v1:0, confidence 0.9)');
+    expect(text).toContain(
+      '- screenshot captured 2026-11-02T10:02:30.000Z. ' +
+        'Image check: Objection found (model amazon.nova-lite-v1:0, confidence 0.9)',
+    );
     expect(text).toContain('not a legal determination');
     expect(consentAsText(null)).toBe('');
   });
