@@ -56,6 +56,8 @@ const ASR_STOP_RELEASE_TIMEOUT_MS = 10_000;
 // acquired or started, so the audio captured meanwhile is transcribed before
 // the meeting's END event. A cold launch takes about 20 seconds.
 const ASR_STOP_STARTING_WAIT_MS = 120_000;
+// How long the END event waits for transcript rows still being sent to Kinesis.
+const SEGMENT_SEND_DRAIN_TIMEOUT_MS = 10_000;
 
 /**
  * How late the platform reports a change of active speaker, on both engines.
@@ -264,6 +266,8 @@ export class TranscriptionService {
     private engineRuns = 0;
     private engineTimeBase = 0;
     private sessionsFinishing: Promise<void> = Promise.resolve();
+    /** Transcript rows on their way to Kinesis, so the END event can be sent after them. */
+    private readonly segmentSends = new Set<Promise<void>>();
     private microvmRun: Promise<boolean> | null = null;
     // The engine run is acquiring its MicroVM or waiting for its sessions.
     private microvmStarting = false;
@@ -1104,7 +1108,7 @@ export class TranscriptionService {
             // partials opened.
             noteSpokenUtterance({ speaker: attribution.name, text: segment.text });
         }
-        sendAsrTranscriptSegment({
+        this.trackSegmentSend(sendAsrTranscriptSegment({
             channel: REMOTE_CHANNEL,
             segmentId: segment.segmentId,
             startTime: segment.startSec,
@@ -1115,7 +1119,7 @@ export class TranscriptionService {
             languageCode: segment.languageCode,
         }).catch((error) => {
             log.error('Failed to send transcript to Kinesis:', error);
-        });
+        }));
 
         // Wake-phrase detection works on the text alone; the engine sends no word
         // timings on this path, so the caption log (which needs them) is skipped.
@@ -1127,7 +1131,7 @@ export class TranscriptionService {
 
     /** The assistant's own voice from its own session: labelled as the VP, never diarized, never a wake phrase. */
     private handleAgentAsrSegment(segment: AsrSegment): void {
-        sendAsrTranscriptSegment({
+        this.trackSegmentSend(sendAsrTranscriptSegment({
             channel: LOCAL_CHANNEL,
             segmentId: segment.segmentId,
             startTime: segment.startSec,
@@ -1138,7 +1142,7 @@ export class TranscriptionService {
             languageCode: segment.languageCode,
         }).catch((error) => {
             log.error('Failed to send transcript to Kinesis:', error);
-        });
+        }));
     }
 
     private spawnPcmCapture(source: string, label: string): ChildProcess {
@@ -1451,6 +1455,10 @@ export class TranscriptionService {
             }
         }
 
+        // After the rows already on their way, the last utterance's final among
+        // them: the summary is made from the transcript when END arrives.
+        await this.awaitSegmentSends();
+
         // Send end meeting event to Kinesis
         try {
             await sendEndMeeting();
@@ -1461,6 +1469,33 @@ export class TranscriptionService {
                 log.error('Failed to send end meeting event:', error);
             }
         }
+    }
+
+    /**
+     * Keep a transcript row's send until it completes. Records for one meeting
+     * share a partition key, but two puts in flight at once can still land in
+     * either order, so a final sent just before the END event could otherwise
+     * land after it, where the end-of-meeting summary does not see it.
+     */
+    private trackSegmentSend(send: Promise<void>): void {
+        this.segmentSends.add(send);
+        void send.finally(() => this.segmentSends.delete(send));
+    }
+
+    /** Wait, bounded, for every transcript row already on its way to Kinesis. */
+    private async awaitSegmentSends(timeoutMs = SEGMENT_SEND_DRAIN_TIMEOUT_MS): Promise<void> {
+        if (this.segmentSends.size === 0) {
+            return;
+        }
+        let timer: NodeJS.Timeout | undefined;
+        await Promise.race([
+            Promise.all([...this.segmentSends]),
+            new Promise<void>((resolve) => {
+                timer = setTimeout(resolve, timeoutMs);
+                timer.unref();
+            }),
+        ]);
+        clearTimeout(timer);
     }
 
     /** The latest participant other than the VP the platform showed speaking, or "none". */
@@ -1974,7 +2009,7 @@ export class TranscriptionService {
         const speaker = this.vpName();
         log.info(`🌐 Assistant turn written to the transcript (${start.toFixed(2)}-${end.toFixed(2)}s, ${text.length} characters)`);
         log.debug(`🌐 Assistant turn text: "${text}"`);
-        sendAsrTranscriptSegment({
+        this.trackSegmentSend(sendAsrTranscriptSegment({
             channel: LOCAL_CHANNEL,
             segmentId: `assistant-${this.assistantRows}-${start.toFixed(3)}`,
             startTime: start,
@@ -1984,7 +2019,7 @@ export class TranscriptionService {
             speaker,
         }).catch((error) => {
             log.error('Failed to send assistant turn to Kinesis:', error);
-        });
+        }));
     }
 
     /** The VP's own names in the meeting roster. */
@@ -2015,9 +2050,9 @@ export class TranscriptionService {
         if (!segment) {
             return 0;
         }
-        sendAsrTranscriptSegment(segment).catch((error) => {
+        this.trackSegmentSend(sendAsrTranscriptSegment(segment).catch((error) => {
             log.error('Failed to send assistant transcript to Kinesis:', error);
-        });
+        }));
         return segment.endTime;
     }
 

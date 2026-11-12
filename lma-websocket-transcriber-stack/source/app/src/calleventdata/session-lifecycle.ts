@@ -329,12 +329,31 @@ export class SessionLifecycle<W extends SessionSocket> {
         // Inside the ran-once guard, so a second close does not count the same
         // meeting twice.
         this.deps.noteSessionEnded(session.callMetadata);
+        let engineStopped = false;
+        const stopEngine = async (): Promise<void> => {
+            engineStopped = true;
+            // Finishes each channel's session: the engine closes the utterance
+            // still open, and its final rows are written, before this returns.
+            // Then terminates the MicroVM. No-op for meetings transcribed by
+            // Amazon Transcribe.
+            try {
+                await this.deps.stopEngine(session);
+            } catch (error) {
+                this.deps.log.error(
+                    `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Error stopping the MicroVM ASR engine: ${this.deps.describeError(error)}`
+                );
+            }
+        };
         try {
             // Before the END event, so the rows of audio held for an engine that
             // was still starting are written ahead of it (the end-of-meeting
             // summary is made from the transcript when END arrives), and before
             // the audio stream below is released.
             await this.awaitEngineStart(session, callMetaData);
+            // Also before the END event, for the same reason: the last utterance
+            // of every meeting is still open when its stream ends, and its final
+            // row exists only once the engine has been finished.
+            await stopEngine();
             await this.deps.writeCallEndEvent(callMetaData);
             await this.deps.finishRecording(session, callMetaData);
         } finally {
@@ -342,14 +361,9 @@ export class SessionLifecycle<W extends SessionSocket> {
                 session.audioInputStream.end();
                 session.audioInputStream.destroy();
             }
-            // Flushes the tail utterance on each channel, then terminates the
-            // MicroVM. No-op for meetings transcribed by Amazon Transcribe.
-            try {
-                await this.deps.stopEngine(session);
-            } catch (error) {
-                this.deps.log.error(
-                    `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Error stopping the MicroVM ASR engine: ${this.deps.describeError(error)}`
-                );
+            // Reached here first only if waiting for the engine's start threw.
+            if (!engineStopped) {
+                await stopEngine();
             }
             // Only this meeting's entry: a client that reuses the connection
             // may have started its next meeting while this one finished.

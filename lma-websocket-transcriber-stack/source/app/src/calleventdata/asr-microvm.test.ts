@@ -28,6 +28,7 @@ import BlockStream from 'block-stream2';
 import {
     AsrChannelSession,
     coalesceBacklog,
+    finishWaitMs,
     pushAsrAudio,
     resolveMaxSpeakers,
     startMicrovmAsr,
@@ -614,6 +615,86 @@ test('finishing a session that opened with a backlog waits for the engine to wor
     await session.finish();
     await asr.close();
     assert.deepEqual(rows.map((row) => row.Transcript), ['the tail']);
+});
+
+test('a stream that ends mid-utterance has that utterance\'s final written before finish returns', async () => {
+    // The engine has sent only partials for the utterance in progress when the
+    // stream ends. On eos it closes the utterance, and its final takes longer
+    // than the usual grace (500 ms in this file) to arrive, as it did on the
+    // integration stack for a 20-second stream.
+    const asr = await startFakeAsr((socket) => {
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (isBinary) {
+                return;
+            }
+            const type = (JSON.parse(data.toString()) as { type: string }).type;
+            if (type === 'config') {
+                send(socket, ready(false));
+                send(socket, { type: 'partial', segment: 0, text: 'I bumped into', start: 0.5, end: 2 });
+            } else if (type === 'eos') {
+                setTimeout(() => {
+                    send(socket, { type: 'final', segment: 0, text: 'I bumped into the wall.', start: 0.5, end: 3 });
+                    send(socket, { type: 'termination', audio_seconds: 3, segments: 1 });
+                }, 1500);
+            }
+        });
+    }, false);
+    const rows: TranscriptSegmentRecord[] = [];
+    const session = newSession(asr, rows);
+    assert.equal(await session.start(), true);
+    // Three seconds of live audio, none of it finalised.
+    for (let i = 0; i < 30; i += 1) {
+        session.pushPcm(Buffer.alloc(3200, 1));
+    }
+    await waitFor(() => rows.length === 1);
+    await session.finish();
+    await asr.close();
+    assert.deepEqual(
+        rows.map((row) => [row.Transcript, row.IsPartial]),
+        [
+            ['I bumped into', true],
+            ['I bumped into the wall.', false],
+        ],
+        'the final lands on the partial\'s row before finish() resolves'
+    );
+    assert.equal(rows[0].SegmentId, rows[1].SegmentId);
+});
+
+test('finishing stops waiting when the engine closes the connection', async () => {
+    // An engine that goes away after eos sends nothing more; waiting out the
+    // whole bound would only delay the meeting's END event.
+    const asr = await startFakeAsr((socket) => {
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (isBinary) {
+                return;
+            }
+            const type = (JSON.parse(data.toString()) as { type: string }).type;
+            if (type === 'config') {
+                send(socket, ready(false));
+            } else if (type === 'eos') {
+                socket.close();
+            }
+        });
+    }, false);
+    const rows: TranscriptSegmentRecord[] = [];
+    const session = newSession(asr, rows);
+    assert.equal(await session.start(), true);
+    // Ten seconds unfinalised: a wait of several seconds were the close ignored.
+    for (let i = 0; i < 100; i += 1) {
+        session.pushPcm(Buffer.alloc(3200, 1));
+    }
+    const started = Date.now();
+    await session.finish();
+    await asr.close();
+    assert.ok(Date.now() - started < 1000, `finish took ${Date.now() - started} ms`);
+});
+
+test('the finish wait grows with the audio not yet finalised, within its bounds', () => {
+    assert.equal(finishWaitMs(0, 5000, 2000, 60000), 5000, 'nothing open: the usual grace');
+    assert.equal(finishWaitMs(17, 5000, 2000, 60000), 39000, 'a 17-second utterance still open');
+    assert.equal(finishWaitMs(3600, 5000, 2000, 60000), 60000, 'never past the ceiling');
+    assert.equal(finishWaitMs(-1, 5000, 2000, 60000), 5000);
+    assert.equal(finishWaitMs(10, 5000, 2000, 1000), 5000, 'a ceiling below the grace leaves the grace');
 });
 
 test('the stream held for a fallback keeps only the newest audio once past its bound', async () => {

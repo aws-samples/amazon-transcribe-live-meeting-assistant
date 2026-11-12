@@ -549,8 +549,34 @@ test('ending a meeting whose engine is still starting waits for it before the EN
 
     finishStart();
     await ending;
-    assert.deepEqual(order, ['engine-started', 'end-event', 'engine-stopped']);
+    assert.deepEqual(order, ['engine-started', 'engine-stopped', 'end-event']);
     assert.equal(meeting.audioInputStream?.destroyed, true);
+});
+
+test('the engine is finished, and its last rows written, before the END event', async () => {
+    // The meeting's last utterance is still open when its stream ends: its
+    // final row exists only once the engine has been finished, and the
+    // end-of-meeting summary reads the transcript when END arrives.
+    const order: string[] = [];
+    const { sessions } = lifecycle({
+        writeCallEndEvent: async () => {
+            order.push('end-event');
+        },
+        stopEngine: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            order.push('final-row-written');
+        },
+        finishRecording: async () => {
+            order.push('recording');
+        },
+    });
+    const ws = new FakeSocket('a');
+    const meeting = session();
+    sessions.register(ws, meeting);
+
+    await sessions.end(ws, meeting);
+
+    assert.deepEqual(order, ['final-row-written', 'end-event', 'recording'], 'and the engine is stopped once');
 });
 
 test('the wait for a starting engine is bounded, and skipped while the task shuts down', async () => {

@@ -28,6 +28,7 @@ import {
     startMicrovmAsr,
     pushAsrAudio,
     stopMicrovmAsr,
+    ASR_FINISH_GRACE_MS,
     shouldFallbackToTranscribe,
     getAsrRuntimeConfig,
     diarizationSettingsFor,
@@ -157,7 +158,10 @@ const sessions = new SessionLifecycle<WebSocket>({
     isShuttingDown: () => shuttingDown,
     writeCallEndEvent: (callMetaData) => writeCallEndEvent(callMetaData, server),
     finishRecording: (socketData, callMetaData) => finishRecording(socketData, callMetaData),
-    stopEngine: (socketData) => stopMicrovmAsr(socketData, server),
+    // A task that is shutting down has a stop timeout to keep within, so it
+    // gives each session only the usual grace for its last rows.
+    stopEngine: (socketData) =>
+        stopMicrovmAsr(socketData, server, shuttingDown ? { finishWaitMs: ASR_FINISH_GRACE_MS } : {}),
     startTranscription: async (socketData) => {
         noteStreamingSessionStarted(socketData.callMetadata);
         await startTranscription(socketData, server);
@@ -1031,7 +1035,8 @@ const discardCaptureForConsent = async (ws: WebSocket, socketData: SocketCallDat
         socketData.audioInputStream?.end();
         socketData.audioInputStream?.destroy();
         try {
-            await stopMicrovmAsr(socketData, server);
+            // The capture is discarded, so there are no last rows to wait for.
+            await stopMicrovmAsr(socketData, server, { finishWaitMs: ASR_FINISH_GRACE_MS });
         } catch (error) {
             server.log.error(
                 `[CONSENT]: [${callMetaData.callId}] - Error stopping the MicroVM ASR engine: ${normalizeErrorForLogging(error)}`
@@ -1312,7 +1317,7 @@ const shutdown = async (signal: string): Promise<void> => {
     for (const socketData of sessions.connectedSessions()) {
         if (socketData.asr) {
             try {
-                await stopMicrovmAsr(socketData, server);
+                await stopMicrovmAsr(socketData, server, { finishWaitMs: ASR_FINISH_GRACE_MS });
             } catch (err) {
                 server.log.error(
                     `[SHUTDOWN]: Error releasing the ASR MicroVM for ${socketData.callMetadata.callId}: ${normalizeErrorForLogging(err)}`

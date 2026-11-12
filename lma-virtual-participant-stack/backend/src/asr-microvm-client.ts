@@ -35,6 +35,10 @@ export const ASR_SAMPLE_RATE = 16000;
 const BYTES_PER_SECOND = ASR_SAMPLE_RATE * 2;
 const ASR_READY_TIMEOUT_MS = parseInt(process.env.ASR_READY_TIMEOUT_MS || '30000', 10);
 const ASR_FINISH_TIMEOUT_MS = parseInt(process.env.ASR_FINISH_TIMEOUT_MS || '5000', 10);
+// How much longer finishing waits for the engine's last finals, per second of the
+// connection's audio not yet finalised, and the ceiling on the whole wait.
+const ASR_FINISH_MS_PER_OPEN_SECOND = parseInt(process.env.ASR_FINISH_MS_PER_OPEN_SECOND || '2000', 10);
+const ASR_FINISH_MAX_WAIT_MS = parseInt(process.env.ASR_FINISH_MAX_WAIT_MS || '60000', 10);
 const ASR_HANDSHAKE_TIMEOUT_MS = parseInt(process.env.ASR_HANDSHAKE_TIMEOUT_MS || '15000', 10);
 // Audio held while the MicroVM starts or a session reconnects: 60 s of 16 kHz mono PCM.
 const ASR_MAX_PENDING_BYTES = parseInt(process.env.ASR_MAX_PENDING_BYTES || String(16000 * 2 * 60), 10);
@@ -376,6 +380,23 @@ export const coalesceBacklog = (pending: Buffer[], maxFrameBytes: number = ASR_B
     return frames;
 };
 
+/**
+ * How long finishing a session waits for the engine's termination after eos.
+ *
+ * On eos the engine decodes what it has not yet reached, then closes the
+ * utterance still open and sends its final, which is the only row that
+ * utterance gets. That takes longer the more audio is not yet finalised, and on
+ * a busy MicroVM it has taken well over five seconds, so a fixed grace cut the
+ * final off. The wait is the usual grace plus `perOpenSecondMs` per second not
+ * yet finalised, up to `maxMs`; an engine that has caught up answers at once.
+ */
+export const finishWaitMs = (
+    unfinalisedSeconds: number,
+    baseMs: number = ASR_FINISH_TIMEOUT_MS,
+    perOpenSecondMs: number = ASR_FINISH_MS_PER_OPEN_SECOND,
+    maxMs: number = ASR_FINISH_MAX_WAIT_MS,
+): number => Math.min(Math.max(baseMs, maxMs), baseMs + Math.max(0, unfinalisedSeconds) * perOpenSecondMs);
+
 // --- session ----------------------------------------------------------------
 
 export interface MicrovmAsrSessionOptions {
@@ -421,9 +442,8 @@ export class MicrovmAsrSession {
     private sentBytes = 0;
     private finishing: Promise<void> | null = null;
     private unsentDroppedBytes = 0;
-    /** The backlog the current connection was sent when it opened, and when. */
-    private backlogBytesAtOpen = 0;
-    private openedAtMs = 0;
+    /** Engine time, on the current connection's clock, up to which the engine has sent finals. */
+    private finalisedThroughSeconds = 0;
     private lease: AsrLease;
     private readonly channel: string;
     private readonly logPrefix: string;
@@ -546,24 +566,31 @@ export class MicrovmAsrSession {
             const terminated = new Promise<void>((resolve) => {
                 this.terminationResolve = resolve;
             });
-            // A connection that opened with a backlog (the audio held while the
-            // MicroVM started) may still be decoding it. The engine keeps up with
-            // live audio, so it has caught up at the latest once the backlog's own
-            // duration has passed since it was sent; waiting only the usual grace
-            // would cut off the tail of a meeting that ended while its MicroVM
-            // started, which can be all of it.
-            const backlogMs = (this.backlogBytesAtOpen / BYTES_PER_SECOND) * 1000;
-            const catchUpMs = Math.max(0, backlogMs - (Date.now() - this.openedAtMs));
+            // The engine still has to decode what it has not reached (a backlog
+            // sent when the connection opened, say) and close the open utterance;
+            // that grows with the audio not yet finalised (finishWaitMs).
+            const unfinalised = Math.max(0, this.sentBytes / BYTES_PER_SECOND - this.finalisedThroughSeconds);
+            const waitMs = finishWaitMs(unfinalised);
+            const startedAt = Date.now();
             try {
                 this.ws.send(JSON.stringify({ type: 'eos' }));
                 let timer: NodeJS.Timeout | undefined;
-                await Promise.race([
-                    terminated,
-                    new Promise<void>((resolve) => {
-                        timer = setTimeout(resolve, ASR_FINISH_TIMEOUT_MS + catchUpMs);
+                const outcome = await Promise.race([
+                    terminated.then(() => 'terminated' as const),
+                    new Promise<'timeout'>((resolve) => {
+                        timer = setTimeout(() => resolve('timeout'), waitMs);
                     }),
                 ]);
                 clearTimeout(timer);
+                if (outcome === 'timeout') {
+                    log.warn(
+                        `${this.logPrefix} the engine had not finished ${waitMs} ms after the end of the stream (${unfinalised.toFixed(1)}s of audio not yet finalised); closing without its last rows`,
+                    );
+                } else {
+                    log.info(
+                        `${this.logPrefix} engine finished ${Date.now() - startedAt} ms after the end of the stream (${unfinalised.toFixed(1)}s of audio had not been finalised)`,
+                    );
+                }
             } catch (error: any) {
                 log.warn(`${this.logPrefix} eos failed: ${error?.message || error}`);
             }
@@ -638,8 +665,7 @@ export class MicrovmAsrSession {
             this.sentBytes = 0;
             this.timeOffsetSeconds += this.unsentDroppedBytes / BYTES_PER_SECOND;
             this.unsentDroppedBytes = 0;
-            this.backlogBytesAtOpen = this.pendingBytes;
-            this.openedAtMs = Date.now();
+            this.finalisedThroughSeconds = 0;
             try {
                 socket.send(JSON.stringify(config));
                 for (const frame of coalesceBacklog(this.pending)) {
@@ -673,7 +699,13 @@ export class MicrovmAsrSession {
 
         socket.on('close', (code: number, reason: Buffer) => {
             this.open = false;
-            if (this.finished || !this.options.isMeetingLive()) {
+            if (this.finished) {
+                // Nothing more can arrive: a finish waiting for termination stops waiting.
+                this.terminationResolve?.();
+                this.terminationResolve = null;
+                return;
+            }
+            if (!this.options.isMeetingLive()) {
                 return;
             }
             log.warn(`${this.logPrefix} session closed unexpectedly (${code} ${reason?.toString() || ''}); reconnecting`);
@@ -741,8 +773,11 @@ export class MicrovmAsrSession {
                 );
                 this.settleReady(true);
                 break;
-            case 'partial':
             case 'final':
+                this.finalisedThroughSeconds = Math.max(this.finalisedThroughSeconds, message.end ?? message.start ?? 0);
+                this.emitSegment(message);
+                break;
+            case 'partial':
                 this.emitSegment(message);
                 break;
             case 'termination':

@@ -58,3 +58,17 @@ test('a run still starting its MicroVM finishes its own sessions, and is waited 
     const run = methodBody('private async runMicrovmTranscriptionOnce');
     assert.match(run, /if \(!this\.isTranscribing\) \{[\s\S]*?finishMicrovmSessions\(\)[\s\S]*?releaseMicrovm\(meetingSession\)/);
 });
+
+test('the END event is sent after the engine sessions are finished and their rows have been sent', () => {
+    const stop = methodBody('async stopTranscription');
+    const finish = stop.indexOf('await this.finishMicrovmSessions()');
+    const drain = stop.indexOf('await this.awaitSegmentSends()');
+    const end = stop.indexOf('await sendEndMeeting()');
+    assert.ok(finish !== -1 && drain !== -1 && end !== -1);
+    assert.ok(finish < drain && drain < end, 'finish the sessions, wait for their rows, then END');
+    // Every ASR row's send is tracked, so the wait above covers all of them.
+    const untracked = [...src.matchAll(/(.{0,40})sendAsrTranscriptSegment\(/g)].filter(
+        (m) => !m[1].includes('trackSegmentSend(') && !m[1].includes('import'),
+    );
+    assert.deepEqual(untracked.map((m) => m[0]), []);
+});

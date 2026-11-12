@@ -580,10 +580,35 @@ launch. The audio the meeting sends meanwhile is kept and transcribed:
   That audio is in the recording, but on this path it is not transcribed; the
   transcriber's fallback is the only one that replays it.
 
-Finishing a session that opened with held audio waits for the engine to work through it.
-The usual five-second grace (`ASR_FINISH_TIMEOUT_MS`) is extended by however much of the
-held audio's own duration has not yet passed since it was sent, because the engine
-decodes at least as fast as real time.
+### When a stream ends
+
+The last utterance of a meeting is usually still open when its stream ends, because the
+engine closes an utterance on its own only after 1.2 seconds of silence (the bundle's
+endpointing setting). Its only final
+row comes from the end of the stream, when the client sends `eos`. The engine then
+decodes whatever audio it has not yet reached, closes the open utterance and sends its
+`final`, and only then sends `termination`. Both clients, the WebSocket transcriber and
+the Virtual Participant, wait for that `termination` and write the final rows before the
+meeting's END event, because the end-of-meeting summary is made from the transcript when
+END arrives. A row that lands after END is stored but is not in the summary.
+
+How long the client waits grows with the audio the engine has not yet finalised on that
+connection: the five-second grace (`ASR_FINISH_TIMEOUT_MS`), plus two seconds
+(`ASR_FINISH_MS_PER_OPEN_SECOND`) for every second of audio sent since the engine's last
+final, up to a minute (`ASR_FINISH_MAX_WAIT_MS`). An engine that has caught up answered within
+0.6 seconds in the integration runs, so the bound only matters when it has not. The wait ends at once if
+the engine closes the connection. The transcriber logs `engine finished N ms after the
+end of the stream` when the rows arrived, and `the engine had not finished` when the wait
+ran out and the last rows were lost. The engine logs `eos:` with how much audio it had
+received and decoded at that moment. A task that is shutting down, and a capture
+discarded for consent, give each session only the five-second grace.
+
+A fixed five-second wait was not enough. On the integration stack on 2026-11-11, 20-second
+probe streams whose MicroVM had started 10 seconds in ended with their single utterance
+still open, and the engine had not sent its final 5.7 seconds after `eos`. Those meetings
+were stored with one partial row and no final rows, and their summary saw no transcript.
+Why the engine took that long there is not established: in earlier runs the same streams
+finished within half a second.
 
 ## Runtime switches
 
