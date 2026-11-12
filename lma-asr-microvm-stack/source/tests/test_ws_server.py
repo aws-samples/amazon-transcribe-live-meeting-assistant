@@ -1762,3 +1762,62 @@ def test_load_reporter_reports_cores_used_since_the_last_sample() -> None:
     assert busy is not None
     assert busy.startswith("engine load: 2.00 of 4 cores (50%) over the last 30s, 2 session(s)")
     assert idle is None
+
+
+class _SlowRecognizer(Recognizer):
+    """Delegates to ``inner``, taking ``delay_s`` per chunk: an engine behind its input."""
+
+    def __init__(self, inner: Recognizer, delay_s: float) -> None:
+        self._inner = inner
+        self._delay_s = delay_s
+        self.chunks = 0
+        self.flushed_after_chunks: int | None = None
+
+    def accept_pcm(self, pcm: bytes) -> list[Event]:
+        time.sleep(self._delay_s)  # runs off the event loop, like a real decode
+        self.chunks += 1
+        return self._inner.accept_pcm(pcm)
+
+    def flush(self) -> list[Event]:
+        self.flushed_after_chunks = self.chunks
+        return self._inner.flush()
+
+
+async def test_eos_mid_utterance_behind_a_backlog_sends_its_final_before_termination() -> None:
+    """A stream that ends mid-utterance, while the engine is still decoding what it was
+    sent, gets that utterance as a ``final`` before ``termination``.
+
+    The VAD never sees the utterance end (no trailing silence: the client simply
+    stopped), so the only final it will ever get is the one ``eos`` produces. All
+    queued audio is decoded first, so the final spans every second sent.
+    """
+    from asr_server.offline_recognizer import OfflineResult, SherpaOfflineRecognizer
+
+    from tests.test_offline_recognizer import (
+        FRAME_SAMPLES,
+        SAMPLE_RATE,
+        ScriptedOfflineBackend,
+        _frames,
+        always_speech_gate,
+    )
+
+    backend = ScriptedOfflineBackend([OfflineResult(text="I bumped into the wall")])
+    inner = SherpaOfflineRecognizer(always_speech_gate(), backend, sample_rate=SAMPLE_RATE)
+    slow = _SlowRecognizer(inner, delay_s=0.05)
+    # Five frames of about a second each, all received before the engine decodes the
+    # first, then eos: the order a backlog sent on connect arrives in.
+    frames_per_chunk = 31  # 31 x 32 ms
+    chunks = [_frames(frames_per_chunk) for _ in range(5)]
+    session, conn = _session([*chunks, '{"type":"eos"}'], recognizer=slow)
+    await session.run()
+
+    assert conn.types()[0] == "ready"
+    assert conn.types()[-2:] == ["final", "termination"]
+    final = next(m for m in conn.messages() if m["type"] == "final")
+    assert final["text"] == "I bumped into the wall"
+    assert slow.flushed_after_chunks == len(chunks), "every queued chunk decoded before the flush"
+    sent_seconds = len(chunks) * frames_per_chunk * FRAME_SAMPLES / SAMPLE_RATE
+    assert final["end"] == pytest.approx(sent_seconds, abs=1e-3)
+    termination = conn.messages()[-1]
+    assert termination["segments"] == 1
+    assert termination["audio_seconds"] == pytest.approx(sent_seconds, abs=1e-3)

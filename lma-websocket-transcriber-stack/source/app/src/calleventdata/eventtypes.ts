@@ -284,4 +284,19 @@ export type SocketCallData = {
      * named, or the last UPDATE_CAPTURE_CONTEXT written for it.
      */
     recordedTranscriptionEngine?: TranscriptionEngineName
+    /**
+     * Settles once the meeting's transcription engine has started, or has
+     * finished with the audio held for it when the meeting ended first
+     * (engine-start.ts). Ending the meeting waits for it, so audio received
+     * while an ASR MicroVM was being acquired is transcribed.
+     */
+    engineStarting?: Promise<void>
+    /**
+     * Bytes of the meeting's audio stream dropped, oldest first, while an ASR
+     * MicroVM was being acquired, to bound what the task holds. They are in the
+     * recording, so an Amazon Transcribe fallback's clock starts after them.
+     */
+    heldAudioDroppedBytes?: number
+    /** This connection's capture was discarded for consent: none of it is transcribed. */
+    discarded?: boolean
 };
