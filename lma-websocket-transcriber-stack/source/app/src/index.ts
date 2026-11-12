@@ -109,6 +109,8 @@ const WS_LOG_INTERVAL = parseInt(process.env['WS_LOG_INTERVAL'] || '120', 10);
 // 0 ends the meeting as soon as the connection closes; a value that is not a
 // number leaves the default.
 const AUDIO_RECONNECT_GRACE_MS = parseReconnectGraceMs(process.env['AUDIO_RECONNECT_GRACE_MS']);
+// How the server closes a connection whose meeting's consent stops its capture.
+const CONSENT_CLOSE = { code: 1008, reason: 'meeting consent does not allow capture' };
 // Whether a meeting is recorded when its client says nothing is the Meeting
 // Recording section's setting, read per meeting with this task's
 // SHOULD_RECORD_CALL as the fallback: see calleventdata/session-settings.ts.
@@ -867,7 +869,7 @@ const onTextMessage = async (
             server.log.warn(
                 `[START_VIDEO]: [${clientIP}][${callMetaData.callId}] - The meeting's consent does not allow capture now; refusing video stream.`
             );
-            ws.close(1008, 'meeting consent does not allow capture');
+            ws.close(CONSENT_CLOSE.code, CONSENT_CLOSE.reason);
             return;
         }
         // Where the meeting's timeline is now, by the audio received: a video
@@ -1030,6 +1032,13 @@ const discardCaptureForConsent = async (ws: WebSocket, socketData: SocketCallDat
     if (!socketData.ended) {
         socketData.ended = true;
         socketData.discarded = true;
+        // Closed at once, now the session is marked ended (so the close is not
+        // held for a reconnect); its engine and files are released after.
+        try {
+            ws.close(CONSENT_CLOSE.code, CONSENT_CLOSE.reason);
+        } catch {
+            // already closed
+        }
         noteStreamingSessionEnded(callMetaData);
         socketData.writeRecordingStream?.end();
         socketData.audioInputStream?.end();
@@ -1058,8 +1067,9 @@ const discardCaptureForConsent = async (ws: WebSocket, socketData: SocketCallDat
             await endVideoSession(callMetaData.callId, server);
         }
     }
+    // A capture already ended: its connection may still be open.
     try {
-        ws.close(1008, 'meeting consent does not allow capture');
+        ws.close(CONSENT_CLOSE.code, CONSENT_CLOSE.reason);
     } catch {
         // already closed
     }
@@ -1075,12 +1085,19 @@ const stopCaptureForConsent = async (ws: WebSocket, socketData: SocketCallData, 
     server.log.info(`[CONSENT]: [${callId}] - Ending the meeting: ${reason}.`);
     try {
         await endVideoSession(callId, server);
-        await sessions.end(ws, socketData);
+    } catch (error) {
+        server.log.error(`[CONSENT]: [${callId}] - Error ending the meeting's video: ${normalizeErrorForLogging(error)}`);
+    }
+    try {
+        // The connection is closed as soon as the session is marked ended; the
+        // rows of the audio received before then are finished, and written
+        // ahead of the END event, after it has closed.
+        await sessions.end(ws, socketData, socketData.callMetadata, { closeConnection: CONSENT_CLOSE });
     } catch (error) {
         server.log.error(`[CONSENT]: [${callId}] - Error ending the meeting: ${normalizeErrorForLogging(error)}`);
     }
     try {
-        ws.close(1008, 'meeting consent does not allow capture');
+        ws.close(CONSENT_CLOSE.code, CONSENT_CLOSE.reason);
     } catch {
         // already closed
     }

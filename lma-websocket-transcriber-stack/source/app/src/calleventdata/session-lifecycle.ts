@@ -93,6 +93,18 @@ export interface SessionLifecycleDeps {
     describeError: (error: unknown) => string;
 }
 
+/** How a meeting's session is ended (SessionLifecycle.end). */
+export interface EndOptions {
+    /**
+     * Close the client's connection as soon as the session is marked ended,
+     * before its engine is finished and its END event written: a meeting the
+     * server ends (consent) stops talking to its client at once, while the
+     * rows of the audio it received before then are still finished and
+     * written ahead of the END event.
+     */
+    closeConnection?: { code: number; reason: string };
+}
+
 /** The tokens of the connection a client reconnected with. */
 export type ResumeTokens = Pick<CallMetaData, 'accessToken' | 'idToken' | 'refreshToken'>;
 
@@ -286,7 +298,15 @@ export class SessionLifecycle<W extends SessionSocket> {
         if (!session) {
             return;
         }
-        if (!this.deps.isShuttingDown() && !session.ended && this.detached.detach(session)) {
+        if (session.ended) {
+            // Its end is under way (the client sent END, or the server ended
+            // the meeting and closed the connection): that end clears the entry.
+            this.deps.log.debug(
+                `[ON WSCLOSE]: [${session.callMetadata.callId}] - Connection closed while the meeting is ending.`
+            );
+            return;
+        }
+        if (!this.deps.isShuttingDown() && this.detached.detach(session)) {
             this.sockets.delete(ws);
             this.deps.log.info(
                 `[ON WSCLOSE]: [${session.callMetadata.callId}] - Connection closed without END; holding the meeting for ${this.deps.graceMs} ms for the client to reconnect.`
@@ -315,8 +335,14 @@ export class SessionLifecycle<W extends SessionSocket> {
      * End a meeting's session once: its END event, its recording, its engine,
      * and its connection entries. `ws` is the connection the END arrived on, if
      * it arrived on one; the session's current connection is cleared as well.
+     * See EndOptions for closing the connection first.
      */
-    async end(ws: W | undefined, session: SocketCallData, callMetaData: CallMetaData = session.callMetadata): Promise<void> {
+    async end(
+        ws: W | undefined,
+        session: SocketCallData,
+        callMetaData: CallMetaData = session.callMetadata,
+        options: EndOptions = {}
+    ): Promise<void> {
         if (session.ended) {
             this.deps.log.error(
                 `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Duplicate End call event. Already received the end call event: ${this.deps.describe(callMetaData)}`
@@ -329,6 +355,11 @@ export class SessionLifecycle<W extends SessionSocket> {
         // Inside the ran-once guard, so a second close does not count the same
         // meeting twice.
         this.deps.noteSessionEnded(session.callMetadata);
+        if (options.closeConnection) {
+            // After the session is marked ended, so the close is not taken for
+            // a dropped connection and held for a reconnect.
+            this.closeConnections(ws, session, options.closeConnection);
+        }
         let engineStopped = false;
         const stopEngine = async (): Promise<void> => {
             engineStopped = true;
@@ -374,6 +405,21 @@ export class SessionLifecycle<W extends SessionSocket> {
             const current = this.connections.get(session)?.ws;
             if (current && this.sockets.get(current) === session) {
                 this.sockets.delete(current);
+            }
+        }
+    }
+
+    /** Close the connection an END arrived on and the one the session streams on now. */
+    private closeConnections(ws: W | undefined, session: SocketCallData, close: { code: number; reason: string }): void {
+        const current = this.connections.get(session)?.ws;
+        for (const socket of new Set([ws, current])) {
+            if (!socket) {
+                continue;
+            }
+            try {
+                socket.close(close.code, close.reason);
+            } catch {
+                // already closed
             }
         }
     }

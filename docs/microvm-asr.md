@@ -603,6 +603,14 @@ ran out and the last rows were lost. The engine logs `eos:` with how much audio 
 received and decoded at that moment. A task that is shutting down, and a capture
 discarded for consent, give each session only the five-second grace.
 
+The wait does not hold the client's connection open. A client that ends a meeting sends
+END and closes its connection itself. When the server ends a meeting because its consent
+no longer allows capture (an objection, for example), it closes the client's connection
+as soon as the meeting is marked ended, and goes on finishing the engine for the audio
+received before then. Those rows are still written before the END event. A capture
+discarded for consent has its connection closed first too, and then its engine and files
+released without waiting for rows.
+
 A fixed five-second wait was not enough. On the integration stack on 2026-11-11, 20-second
 probe streams whose MicroVM had started 10 seconds in ended with their single utterance
 still open, and the engine had not sent its final 5.7 seconds after `eos`. Those meetings
