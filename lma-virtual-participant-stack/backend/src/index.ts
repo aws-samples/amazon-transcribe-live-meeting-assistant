@@ -8,6 +8,7 @@ import TeamsSdk from './teams-sdk.js';
 import Webex from './webex.js';
 import GoogleMeet from './google-meet.js';
 import { grantMeetingMediaPermissions } from './meeting-permissions.js';
+import { blankCameraInitScript } from './blank-camera.js';
 import { details, ExitInfo, formatExitMessage, didJoinMeeting, normalizeExitTrigger } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager, beginShutdown } from './status-manager.js';
@@ -520,6 +521,16 @@ const main = async (): Promise<void> => {
     // never ran on Teams at all. Read-only by design — the previous attempt at
     // this path mutated constraints and silently killed transcription (#545).
     await installAudioDiagnostics(page);
+    // A camera that produces black frames, for joins without the avatar: the
+    // VP has a microphone but no camera, so a meeting client's combined
+    // camera+microphone request fails, which Teams reads as access denied
+    // (#1094). Steps aside when the Simli override is in the document, so the
+    // avatar path is unchanged. The pre-join flows still turn the camera off.
+    // Not on Chime, whose join flow has no camera-off step.
+    if (platform !== 'CHIME') {
+        await page.addInitScript({ content: blankCameraInitScript() });
+        log.info('✓ Blank camera installed for camera requests without the avatar');
+    }
     // Node-side draining: page console.log does NOT reach CloudWatch under
     // cloakbrowser (only warnings/errors do), which is why the first version of
     // these diagnostics produced nothing across three live sessions.

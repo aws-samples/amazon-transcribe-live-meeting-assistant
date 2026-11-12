@@ -431,14 +431,35 @@ export async function installAudioDiagnostics(page: Page): Promise<void> {
         if (md && md.getUserMedia) {
             const original = md.getUserMedia.bind(md);
             md.getUserMedia = async function (constraints?: MediaStreamConstraints) {
-                if (constraints && constraints.audio) {
+                if (constraints && (constraints.audio || constraints.video)) {
                     try {
-                        push(`gUM requested audio=${JSON.stringify(constraints.audio)}`);
+                        push(
+                            `gUM requested audio=${JSON.stringify(constraints.audio ?? false)} ` +
+                                `video=${JSON.stringify(constraints.video ?? false)}`,
+                        );
                     } catch {
                         /* never affect capture */
                     }
                 }
-                const stream = await original(constraints);
+                let stream: MediaStream;
+                try {
+                    stream = await original(constraints);
+                } catch (err) {
+                    // A failed request is otherwise invisible: the meeting client
+                    // only shows its own dialog. The error name (NotFoundError,
+                    // NotAllowedError, NotReadableError, ...) says why (#1094).
+                    try {
+                        const e = err as { name?: string; message?: string };
+                        push(
+                            `gUM FAILED audio=${!!(constraints && constraints.audio)} ` +
+                                `video=${!!(constraints && constraints.video)}: ` +
+                                `${e?.name || 'Error'}${e?.message ? `: ${String(e.message).slice(0, 160)}` : ''}`,
+                        );
+                    } catch {
+                        /* never affect capture */
+                    }
+                    throw err;
+                }
                 try {
                     for (const t of stream.getAudioTracks()) {
                         // The track ID matters as much as the settings: Teams opens
