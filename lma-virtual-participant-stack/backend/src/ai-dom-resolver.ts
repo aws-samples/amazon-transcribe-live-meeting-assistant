@@ -934,39 +934,6 @@ export async function analyzePageAction(
  * scrolled to (e.g. Zoom's right-column form on a wide layout). Falls
  * back to a normal page.click if the scroll-then-click flow fails.
  */
-/**
- * Visible text of the element `selector` resolves to (label, aria-label,
- * title, value), collapsed to single spaces. Resolves the selector the same way
- * scrollIntoViewAndClick does, so it reads the element that would be clicked.
- * Null when the selector matches nothing or cannot be evaluated.
- */
-export async function readActionText(page: Page, selector: string): Promise<string | null> {
-  try {
-    const handle = (await querySelectorAllSafe(page, selector))[0];
-    if (!handle) return null;
-    return await withCdpTimeout(
-      handle.evaluate((el: Element) => {
-        const h = el as HTMLElement;
-        const parts = [
-          h.innerText,
-          h.getAttribute('aria-label'),
-          h.getAttribute('title'),
-          (h as HTMLInputElement).value,
-        ];
-        return parts
-          .filter((p) => typeof p === 'string' && p.trim())
-          .join(' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-      }),
-      2000,
-      `readActionText(${selector})`,
-    );
-  } catch {
-    return null;
-  }
-}
-
 export async function scrollIntoViewAndClick(
   page: Page,
   selector: string,
@@ -1005,6 +972,43 @@ export async function scrollIntoViewAndClick(
     }
   } catch {
     return false;
+  }
+}
+
+/**
+ * Visible text of the element `selector` resolves to (label, aria-label,
+ * title, value), collapsed to single spaces. Resolves the selector the same way
+ * scrollIntoViewAndClick does, so it reads the element that would be clicked.
+ * Null when the selector matches nothing or cannot be evaluated.
+ */
+export async function readActionText(page: Page, selector: string): Promise<string | null> {
+  try {
+    const handle = (await querySelectorAllSafe(page, selector))[0];
+    if (!handle) return null;
+    try {
+      return await withCdpTimeout(
+        handle.evaluate((el: Element) => {
+          const h = el as HTMLElement;
+          const parts = [
+            h.innerText,
+            h.getAttribute('aria-label'),
+            h.getAttribute('title'),
+            (h as HTMLInputElement).value,
+          ];
+          return parts
+            .filter((p) => typeof p === 'string' && p.trim())
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        }),
+        2000,
+        `readActionText(${selector})`,
+      );
+    } finally {
+      await handle.dispose().catch(() => {});
+    }
+  } catch {
+    return null;
   }
 }
 

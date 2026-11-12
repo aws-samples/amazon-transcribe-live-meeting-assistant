@@ -27,8 +27,11 @@ test('grants camera and microphone to every meeting origin', async () => {
 });
 
 test('covers both Teams origins', () => {
-    assert.ok(MEETING_MEDIA_ORIGINS.includes('https://teams.microsoft.com'));
-    assert.ok(MEETING_MEDIA_ORIGINS.includes('https://teams.live.com'));
+    const teams = MEETING_MEDIA_ORIGINS.filter((o) => new URL(o).hostname.startsWith('teams.'));
+    assert.deepEqual(
+        teams.map((o) => new URL(o).hostname),
+        ['teams.microsoft.com', 'teams.live.com'],
+    );
 });
 
 test('a failed grant for one origin does not stop the others', async () => {
@@ -42,6 +45,8 @@ test('a failed grant for one origin does not stop the others', async () => {
         (origin) => errors.push(origin),
     );
     assert.deepEqual(errors, ['https://zoom.us']);
-    assert.equal(granted.length, MEETING_MEDIA_ORIGINS.length - 1);
-    assert.ok(!granted.includes('https://zoom.us'));
+    assert.deepEqual(
+        granted,
+        MEETING_MEDIA_ORIGINS.filter((o) => o !== errors[0]),
+    );
 });
