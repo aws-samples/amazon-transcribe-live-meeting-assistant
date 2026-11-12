@@ -286,6 +286,28 @@ describe('the editor', () => {
     expect(within(withEngine).queryByText('Every meeting is transcribed by Amazon Transcribe')).toBeNull();
   });
 
+  it('keeps every editor action in the header that stays in view, below the top navigation', async () => {
+    const nav = document.createElement('div');
+    nav.id = 'top-navigation';
+    Object.defineProperty(nav, 'offsetHeight', { value: 56 });
+    document.body.appendChild(nav);
+    try {
+      graphqlMock.mockResolvedValueOnce(answer());
+      renderEditor();
+      await screen.findByText('Transcript Summary');
+      const header = pageButton('Save changes').closest('.lma-config-editor-header');
+      expect(header).toBeTruthy();
+      ['Revisions…', 'Actions', 'Reload', 'Discard changes'].forEach((name) =>
+        expect(within(header).getByRole('button', { name })).toBeTruthy(),
+      );
+      // The sections are outside it, so they scroll beneath it.
+      expect(header.contains(section('Transcript Summary'))).toBe(false);
+      expect(header.closest('.lma-config-editor').style.getPropertyValue('--lma-config-header-top')).toBe('56px');
+    } finally {
+      nav.remove();
+    }
+  });
+
   it('says the meeting modes are ignored while the saved activation mode is not always listening', async () => {
     graphqlMock.mockResolvedValueOnce(answer());
     const { unmount } = renderEditor();
@@ -985,6 +1007,16 @@ const answerFor = (name, custom = {}) => {
   return response;
 };
 
+// The profile list's heading, which expands and collapses it.
+const profilesToggle = () => screen.findByRole('button', { name: /Configuration Profiles/ });
+
+// Expands the profile list, which starts collapsed while a profile is open.
+const showProfiles = async () => {
+  const toggle = await profilesToggle();
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+  await waitFor(() => expect(toggle.getAttribute('aria-expanded')).toBe('true'));
+};
+
 // The checkbox that selects a profile's row in the profile list.
 const selectProfile = (name) => fireEvent.click(screen.getByRole('checkbox', { name: `Select profile ${name}` }));
 
@@ -1021,9 +1053,30 @@ describe('the profile list', () => {
     });
   });
 
+  it('starts with the profile list collapsed while a profile is open, and expands and collapses it', async () => {
+    renderEditor();
+    await screen.findByText('Transcript Summary');
+    const toggle = await profilesToggle();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle.getAttribute('aria-expanded')).toBe('true'));
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle.getAttribute('aria-expanded')).toBe('false'));
+  });
+
+  it('shows the profile list when there is no profile open in the editor', async () => {
+    profilesMock.mockReset();
+    profilesMock.mockRejectedValue(new Error('offline'));
+    renderEditor();
+    expect(await screen.findByText(/Could not load the configuration profiles/)).toBeTruthy();
+    expect((await profilesToggle()).getAttribute('aria-expanded')).toBe('true');
+    expect(screen.queryByText('Transcript Summary')).toBeNull();
+  });
+
   it('lists every profile, marks the active one and the one open, and opens the active one', async () => {
     renderEditor();
     await screen.findByText('Transcript Summary');
+    await showProfiles();
     expect(callsOf('GetConfiguration')[0][0].variables).toEqual({ Profile: 'custom' });
     const customRow = screen.getByRole('button', { name: 'Open custom' }).closest('tr');
     expect(within(customRow).getByText('Active')).toBeTruthy();
@@ -1046,6 +1099,7 @@ describe('the profile list', () => {
       </MemoryRouter>,
     );
     await screen.findByText('Transcript Summary');
+    await showProfiles();
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('?profile=custom'));
     fireEvent.click(screen.getByRole('button', { name: 'Open trial' }));
     await waitFor(() => expect(callsOf('GetConfiguration').at(-1)[0].variables).toEqual({ Profile: 'trial' }));
@@ -1057,6 +1111,7 @@ describe('the profile list', () => {
   it('asks before opening another profile over unsaved changes, and stays when told to', async () => {
     renderEditor();
     openSection(await screen.findByText('Nova Sonic Voice Assistant'));
+    await showProfiles();
     fireEvent.change(within(section('Nova Sonic Voice Assistant')).getByLabelText('Voice ID'), {
       target: { value: 'matthew' },
     });
@@ -1075,6 +1130,7 @@ describe('the profile list', () => {
   it('offers each action only for a selection it can act on', async () => {
     renderEditor();
     await screen.findByText('Transcript Summary');
+    await showProfiles();
     const compare = () => screen.getByRole('button', { name: /^Compare profiles/ });
     expect(isDisabled(compare())).toBe(true);
     expect(isDisabled(pageButton('Activate'))).toBe(true);
@@ -1104,6 +1160,7 @@ describe('the profile list', () => {
   it('activates the profile selected', async () => {
     renderEditor();
     await screen.findByText('Transcript Summary');
+    await showProfiles();
     selectProfile('trial');
     fireEvent.click(pageButton('Activate'));
     expect(await screen.findByText(/The trial profile is now active/)).toBeTruthy();
@@ -1120,6 +1177,7 @@ describe('the profile list', () => {
     });
     renderEditor();
     await screen.findByText('Transcript Summary');
+    await showProfiles();
     selectProfile('trial');
     selectProfile('old');
     fireEvent.click(pageButton('Delete'));
@@ -1136,6 +1194,7 @@ describe('the profile list', () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     renderEditor();
     await screen.findByText('Transcript Summary');
+    await showProfiles();
     selectProfile('default');
     selectProfile('custom');
     selectProfile('trial');
@@ -1177,6 +1236,7 @@ describe('the profile list', () => {
   it('says a comparison leaves out the unsaved changes to the open profile', async () => {
     renderEditor();
     openSection(await screen.findByText('Nova Sonic Voice Assistant'));
+    await showProfiles();
     fireEvent.change(within(section('Nova Sonic Voice Assistant')).getByLabelText('Voice ID'), {
       target: { value: 'matthew' },
     });
@@ -1191,6 +1251,7 @@ describe('the profile list', () => {
   it('creates a profile as a copy of the one selected, and opens it', async () => {
     renderEditor();
     await screen.findByText('Transcript Summary');
+    await showProfiles();
     selectProfile('trial');
     fireEvent.click(pageButton('Create profile'));
     const dialog = await screen.findByRole('dialog', { name: 'Create a profile' });
@@ -1209,6 +1270,7 @@ describe('the profile list', () => {
   it('refuses a new profile name already in use', async () => {
     renderEditor();
     await screen.findByText('Transcript Summary');
+    await showProfiles();
     fireEvent.click(pageButton('Create profile'));
     const dialog = await screen.findByRole('dialog', { name: 'Create a profile' });
     fireEvent.change(within(dialog).getByLabelText('Profile name'), { target: { value: 'Trial' } });
@@ -1219,6 +1281,7 @@ describe('the profile list', () => {
   it('imports an exported file as a new profile, holding what the file sets', async () => {
     renderEditor();
     await screen.findByText('Transcript Summary');
+    await showProfiles();
     const file = new File(
       [
         JSON.stringify({
@@ -1249,6 +1312,7 @@ describe('the profile list', () => {
   it('opens the revision history of the profile open in the editor', async () => {
     renderEditor({ route: '/configuration/settings?profile=trial' });
     await screen.findByText('Transcript Summary');
+    await showProfiles();
     expect(callsOf('ListConfigurationRevisions')).toHaveLength(0);
     fireEvent.click(pageButton('Revisions…'));
     expect(await screen.findByRole('dialog', { name: 'Revision history of trial' })).toBeTruthy();

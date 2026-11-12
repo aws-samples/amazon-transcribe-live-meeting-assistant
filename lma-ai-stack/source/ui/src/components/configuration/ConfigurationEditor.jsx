@@ -357,6 +357,34 @@ const ConfigurationEditor = ({
     document.getElementById(sectionElementId(focus))?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
   }, [focus, doc]);
 
+  // The header, which holds Save changes, is sticky so it stays in view down a
+  // long page: below the application's top navigation, which is sticky itself,
+  // so it is measured as it changes (its height settles once its fonts load).
+  // The header's own height is kept too, so a section brought into view is not
+  // left beneath it.
+  const editorRef = useRef(null);
+  const headerRef = useRef(null);
+  const shown = Boolean(doc) || !loading;
+  useEffect(() => {
+    const editor = editorRef.current;
+    const header = headerRef.current;
+    if (!editor || !header) return undefined;
+    const nav = document.getElementById('top-navigation');
+    const place = () => {
+      editor.style.setProperty('--lma-config-header-top', `${nav ? nav.offsetHeight : 0}px`);
+      editor.style.setProperty('--lma-config-header-height', `${header.offsetHeight}px`);
+    };
+    place();
+    window.addEventListener('resize', place);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    if (nav) observer?.observe(nav);
+    observer?.observe(header);
+    return () => {
+      window.removeEventListener('resize', place);
+      observer?.disconnect();
+    };
+  }, [shown]);
+
   const setSection = (name) => (values) => setEdits((current) => ({ ...current, [name]: values }));
 
   // Export is a download made here, of the configuration as saved: what the
@@ -594,394 +622,399 @@ const ConfigurationEditor = ({
     : '';
 
   return (
-    <SpaceBetween size="l">
-      <Header
-        variant="h2"
-        description={
-          `${doc?.description ? `${doc.description} ` : ''}A value that differs from the deployment default is ` +
-          `marked. ${provenance}`
-        }
-        actions={
-          <SpaceBetween direction="horizontal" size="xs">
-            <Button iconName="history" onClick={onOpenHistory} disabled={!doc?.exists}>
-              Revisions…
-            </Button>
-            <ButtonDropdown
-              disabled={!doc?.exists || saving}
-              items={[
-                { id: 'export', text: 'Export to a file' },
-                { id: 'import', text: 'Import from a file', disabled: readOnly, disabledReason: COPY_TO_CHANGE },
-                ...(doc?.presets?.length
-                  ? [
-                      {
-                        id: 'presets',
-                        text: 'Apply a preset…',
-                        disabled: readOnly,
-                        disabledReason: COPY_TO_CHANGE,
-                      },
-                    ]
-                  : []),
-                {
-                  id: 'save-as',
-                  text: 'Save current edits as new profile…',
-                  disabled: problemCount > 0 || Boolean(textError),
-                  disabledReason: 'Correct the settings marked first.',
-                },
-                {
-                  id: 'reset-all',
-                  text: 'Reset all sections to defaults',
-                  disabled: readOnly || allDefaults,
-                  disabledReason: readOnly ? COPY_TO_CHANGE : 'Every section already holds its defaults.',
-                },
-              ]}
-              onItemClick={({ detail }) => {
-                if (detail.id === 'export') exportConfiguration();
-                else if (detail.id === 'import') fileInput.current?.click();
-                else if (detail.id === 'save-as') openSaveAs();
-                else if (detail.id === 'reset-all') resetAll();
-                else if (detail.id === 'presets') openPresets();
-              }}
-            >
-              Actions
-            </ButtonDropdown>
-            <Button iconName="refresh" onClick={load} disabled={loading || saving} ariaLabel="Reload" />
-            <Button onClick={discard} disabled={(!dirty && !textError) || saving}>
-              Discard changes
-            </Button>
-            <Button
-              variant="primary"
-              onClick={openSave}
-              disabled={!dirty || problemCount > 0 || Boolean(textError) || saving || readOnly}
-            >
-              Save changes
-            </Button>
-          </SpaceBetween>
-        }
-      >
-        {profileText({ name: profile })}
-      </Header>
-
-      {doc && !doc.exists && (
-        <Alert type="error" header={`There is no configuration profile named ${profile}`}>
-          Open another profile from the list above.
-        </Alert>
-      )}
-
-      {doc?.exists && doc.managed && (
-        <Alert
-          type="info"
-          header={
-            profile === DEFAULT_PROFILE
-              ? 'The deployment default is read-only'
-              : `The ${profile} profile is managed by the deployment`
-          }
-          action={<Button onClick={onCopy}>Copy to a new profile</Button>}
-        >
-          {`Every stack update rewrites it${
-            profile === DEFAULT_PROFILE
-              ? ' with the release defaults and what the ConfigurationPreset and CustomConfigPath stack parameters name'
-              : ''
-          }, so it cannot be saved. Copy it to a Custom profile to change a setting, then activate the copy.`}
-        </Alert>
-      )}
-
-      {doc?.exists && !doc.managed && !active && (
-        <Alert type="info" action={<Button onClick={onActivate}>Activate</Button>}>
-          {`The ${profile} profile is not the active one, so meetings do not use it. Saving changes it; activate it to ` +
-            'have meetings use it.'}
-        </Alert>
-      )}
-
-      {unavailable && (
-        <Alert type="info" header={`${sectionLabel(unavailable)} is not available in this deployment`}>
-          {UNAVAILABLE_REASONS[unavailable.name] || 'It depends on a part of LMA this deployment does not include.'}
-        </Alert>
-      )}
-
-      {conflict && (
-        <Alert
-          type="warning"
-          header="Someone else saved the configuration after this page loaded it"
-          action={
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button onClick={keepMine}>Reload and keep my changes</Button>
-              <Button onClick={load}>Discard my changes and reload</Button>
-            </SpaceBetween>
-          }
-        >
-          Your save was not made, so nothing of theirs was replaced. Keep your changes to apply them over what they
-          saved and review the result, or discard yours to see the configuration as it is now saved.
-        </Alert>
-      )}
-
-      {status && (
-        <Alert
-          type={status.type}
-          dismissible
-          onDismiss={() => setStatus(null)}
-          action={status.revision ? <Button onClick={onOpenHistory}>Revisions…</Button> : undefined}
-        >
-          {status.text}
-        </Alert>
-      )}
-
-      {problemCount > 0 && view === 'form' && (
-        <Alert type="error">
-          {`${problemCount} ${problemCount === 1 ? 'setting needs' : 'settings need'} correcting before the ` +
-            'configuration can be saved. Each is marked in its section.'}
-        </Alert>
-      )}
-
-      <SegmentedControl
-        label="View"
-        selectedId={view}
-        options={VIEW_OPTIONS.map((option) => ({ ...option, disabled: Boolean(textError) && option.id !== view }))}
-        onChange={({ detail }) => chooseView(detail.selectedId)}
-      />
-
-      {view !== 'form' && (
-        <FormField
-          label={`The configuration as ${view.toUpperCase()}`}
+    <div ref={editorRef} className="lma-config-editor">
+      <div ref={headerRef} className="lma-config-editor-header">
+        <Header
+          variant="h2"
           description={
-            readOnly
-              ? 'Read-only: copy the profile to a Custom one to change it.'
-              : 'Every section, keyed by its name. What you type is checked as you type and saved like an edit ' +
-                'in the form; a section you leave out keeps its values.'
+            `${doc?.description ? `${doc.description} ` : ''}A value that differs from the deployment default is ` +
+            `marked. ${provenance}`
           }
-          errorText={textError || undefined}
-          stretch
+          actions={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button iconName="history" onClick={onOpenHistory} disabled={!doc?.exists}>
+                Revisions…
+              </Button>
+              <ButtonDropdown
+                disabled={!doc?.exists || saving}
+                items={[
+                  { id: 'export', text: 'Export to a file' },
+                  { id: 'import', text: 'Import from a file', disabled: readOnly, disabledReason: COPY_TO_CHANGE },
+                  ...(doc?.presets?.length
+                    ? [
+                        {
+                          id: 'presets',
+                          text: 'Apply a preset…',
+                          disabled: readOnly,
+                          disabledReason: COPY_TO_CHANGE,
+                        },
+                      ]
+                    : []),
+                  {
+                    id: 'save-as',
+                    text: 'Save current edits as new profile…',
+                    disabled: problemCount > 0 || Boolean(textError),
+                    disabledReason: 'Correct the settings marked first.',
+                  },
+                  {
+                    id: 'reset-all',
+                    text: 'Reset all sections to defaults',
+                    disabled: readOnly || allDefaults,
+                    disabledReason: readOnly ? COPY_TO_CHANGE : 'Every section already holds its defaults.',
+                  },
+                ]}
+                onItemClick={({ detail }) => {
+                  if (detail.id === 'export') exportConfiguration();
+                  else if (detail.id === 'import') fileInput.current?.click();
+                  else if (detail.id === 'save-as') openSaveAs();
+                  else if (detail.id === 'reset-all') resetAll();
+                  else if (detail.id === 'presets') openPresets();
+                }}
+              >
+                Actions
+              </ButtonDropdown>
+              <Button iconName="refresh" onClick={load} disabled={loading || saving} ariaLabel="Reload" />
+              <Button onClick={discard} disabled={(!dirty && !textError) || saving}>
+                Discard changes
+              </Button>
+              <Button
+                variant="primary"
+                onClick={openSave}
+                disabled={!dirty || problemCount > 0 || Boolean(textError) || saving || readOnly}
+              >
+                Save changes
+              </Button>
+            </SpaceBetween>
+          }
         >
-          <Textarea
-            value={configText}
-            rows={32}
-            readOnly={readOnly}
-            spellcheck={false}
-            ariaLabel={`Configuration ${view.toUpperCase()}`}
-            className="lma-config-text"
-            onChange={({ detail }) => editText(detail.value)}
-          />
-        </FormField>
-      )}
+          {profileText({ name: profile })}
+        </Header>
+      </div>
 
-      {view !== 'form' && textWithheld.length > 0 && (
-        <Alert type="warning">
-          {`Not used, because this deployment does not offer them: ${textWithheld
-            .map(([name, key]) => {
-              const section = sections.find((candidate) => candidate.name === name);
-              return `${sectionLabel(section)} › ${section.schema.properties?.[key]?.title || key}`;
-            })
-            .join(', ')}.`}
-        </Alert>
-      )}
+      <SpaceBetween size="l">
+        {doc && !doc.exists && (
+          <Alert type="error" header={`There is no configuration profile named ${profile}`}>
+            Open another profile from the list above.
+          </Alert>
+        )}
 
-      {view !== 'form' && problemCount > 0 && (
-        <Alert
-          type="error"
-          header={`${problemCount} ${problemCount === 1 ? 'setting needs' : 'settings need'} correcting`}
-        >
-          <ul>
-            {changed.flatMap((section) =>
-              (problems[section.name] || []).map((problem) => (
-                <li key={`${section.name}:${formatPath(problem.path)}:${problem.message}`}>
-                  {`${sectionLabel(section)} › ${formatPath(problem.path)}: ${problem.message}`}
-                </li>
-              )),
-            )}
-          </ul>
-        </Alert>
-      )}
+        {doc?.exists && doc.managed && (
+          <Alert
+            type="info"
+            header={
+              profile === DEFAULT_PROFILE
+                ? 'The deployment default is read-only'
+                : `The ${profile} profile is managed by the deployment`
+            }
+            action={<Button onClick={onCopy}>Copy to a new profile</Button>}
+          >
+            {`Every stack update rewrites it${
+              profile === DEFAULT_PROFILE
+                ? ' with the release defaults and what the ConfigurationPreset and CustomConfigPath ' +
+                  'stack parameters name'
+                : ''
+            }, so it cannot be saved. Copy it to a Custom profile to change a setting, then activate the copy.`}
+          </Alert>
+        )}
 
-      {view === 'form' &&
-        sections.map((section) => (
-          <ConfigurationSection
-            key={section.name}
-            section={section}
-            values={edits[section.name] || {}}
-            loaded={loaded[section.name] || {}}
-            defaults={doc.defaults[section.name] || {}}
-            problems={problems[section.name] || []}
-            settings={settings}
-            saved={loaded}
-            readOnly={readOnly}
-            expanded={focus ? focus === section.name : section.schema.defaultExpanded === true}
-            onChange={setSection(section.name)}
-          />
-        ))}
+        {doc?.exists && !doc.managed && !active && (
+          <Alert type="info" action={<Button onClick={onActivate}>Activate</Button>}>
+            {`The ${profile} profile is not the active one, so meetings do not use it. Saving changes it; activate it to ` +
+              'have meetings use it.'}
+          </Alert>
+        )}
 
-      <input
-        ref={fileInput}
-        type="file"
-        accept="application/json,.json"
-        style={{ display: 'none' }}
-        aria-label="Configuration file to import"
-        data-testid="configuration-import"
-        onChange={(event) => {
-          importConfiguration(event.target.files?.[0]);
-          // So choosing the same file again imports it again.
-          // eslint-disable-next-line no-param-reassign -- resetting the picker
-          event.target.value = '';
-        }}
-      />
+        {unavailable && (
+          <Alert type="info" header={`${sectionLabel(unavailable)} is not available in this deployment`}>
+            {UNAVAILABLE_REASONS[unavailable.name] || 'It depends on a part of LMA this deployment does not include.'}
+          </Alert>
+        )}
 
-      <Modal
-        visible={presetOpen}
-        onDismiss={() => setPresetOpen(false)}
-        header="Apply a preset"
-        size="large"
-        footer={
-          <Box float="right">
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button variant="link" onClick={() => setPresetOpen(false)}>
-                Cancel
-              </Button>
-              <Button variant="primary" onClick={applyPreset} disabled={!preset}>
-                Apply to the page
-              </Button>
-            </SpaceBetween>
-          </Box>
-        }
-      >
-        <SpaceBetween size="l">
-          <FormField label="Configuration presets" description={PRESETS_DESCRIPTION}>
-            <RadioGroup
-              ariaLabel="Configuration presets"
-              value={preset ? preset.Id : null}
-              onChange={({ detail }) => setPresetChoice(detail.value)}
-              items={orderedPresets(doc?.presets).map((entry) => {
-                const offeredHere = isPresetOffered(entry, sections, settings);
-                return {
-                  value: entry.Id,
-                  label: entry.Title,
-                  description: offeredHere
-                    ? entry.Description
-                    : `${entry.Description} Not offered here: it sets something this deployment does not include.`,
-                  disabled: !offeredHere,
-                };
-              })}
-            />
-          </FormField>
-          {preset && (
-            <SpaceBetween size="xs">
-              <Box variant="h4">{`What "${preset.Title}" changes`}</Box>
-              <ul>
-                {presetSections(preset).map(({ name, section }) => (
-                  <li key={name}>
-                    {section
-                      ? `${sectionLabel(section)}: ${Object.keys(preset.Sections[name].values || {})
-                          .map((key) => section.schema?.properties?.[key]?.title || key)
-                          .join(', ')} change, and the others stay`
-                      : `${name}: not in this deployment, so left out`}
-                  </li>
-                ))}
-              </ul>
-            </SpaceBetween>
-          )}
-          <Box>Nothing is saved until you review the changes and save them.</Box>
-        </SpaceBetween>
-      </Modal>
+        {conflict && (
+          <Alert
+            type="warning"
+            header="Someone else saved the configuration after this page loaded it"
+            action={
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button onClick={keepMine}>Reload and keep my changes</Button>
+                <Button onClick={load}>Discard my changes and reload</Button>
+              </SpaceBetween>
+            }
+          >
+            Your save was not made, so nothing of theirs was replaced. Keep your changes to apply them over what they
+            saved and review the result, or discard yours to see the configuration as it is now saved.
+          </Alert>
+        )}
 
-      <Modal
-        visible={saveAsOpen}
-        onDismiss={() => !saveAsBusy && setSaveAsOpen(false)}
-        header="Save current edits as a new profile"
-        footer={
-          <Box float="right">
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button variant="link" onClick={() => setSaveAsOpen(false)} disabled={saveAsBusy}>
-                Cancel
-              </Button>
-              <Button variant="primary" onClick={saveAs} loading={saveAsBusy} disabled={Boolean(saveAsProblem)}>
-                Save as new profile
-              </Button>
-            </SpaceBetween>
-          </Box>
-        }
-      >
-        <SpaceBetween size="m">
-          {saveAsError && <Alert type="error">{saveAsError}</Alert>}
-          <Box>
-            {`The new profile is a Custom one holding every setting as the editor shows it now${
-              dirty ? ', including your unsaved edits' : ''
-            }. ${profile} itself is left as it is saved. The new profile is not active until you activate it. To ` +
-              "copy a profile's last saved state instead, use Create profile in the list of profiles."}
-          </Box>
-          <FormField label="Name" errorText={saveAsName ? saveAsProblem : null}>
-            <Input
-              value={saveAsName}
-              ariaLabel="New profile name"
-              placeholder="e.g. trial"
-              onChange={({ detail }) => setSaveAsName(detail.value)}
-            />
-          </FormField>
-          <FormField label="Description" description="Optional.">
-            <Input
-              value={saveAsDescription}
-              ariaLabel="New profile description"
-              onChange={({ detail }) => setSaveAsDescription(detail.value.slice(0, MAX_COMMENT_LENGTH))}
-            />
-          </FormField>
-        </SpaceBetween>
-      </Modal>
+        {status && (
+          <Alert
+            type={status.type}
+            dismissible
+            onDismiss={() => setStatus(null)}
+            action={status.revision ? <Button onClick={onOpenHistory}>Revisions…</Button> : undefined}
+          >
+            {status.text}
+          </Alert>
+        )}
 
-      <Modal
-        visible={saveOpen}
-        onDismiss={() => !saving && setSaveOpen(false)}
-        header="Save the configuration?"
-        footer={
-          <Box float="right">
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button variant="link" onClick={() => setSaveOpen(false)} disabled={saving}>
-                Cancel
-              </Button>
-              <Button variant="primary" onClick={save} loading={saving}>
-                Save
-              </Button>
-            </SpaceBetween>
-          </Box>
-        }
-      >
-        <SpaceBetween size="m">
-          {saveError && <Alert type="error">{saveError}</Alert>}
-          <Box>The save is recorded as one revision in the configuration history. It changes:</Box>
-          <ul>
-            {changed.map((section) => {
-              const count = changedCount(loaded[section.name], edits[section.name]);
-              return (
-                <li key={section.name}>
-                  {`${sectionLabel(section)}: ${count} ${count === 1 ? 'setting' : 'settings'}. ${appliesText(
-                    section.tier,
-                    section.schema,
-                  )}`}
-                </li>
-              );
-            })}
-          </ul>
+        {problemCount > 0 && view === 'form' && (
+          <Alert type="error">
+            {`${problemCount} ${problemCount === 1 ? 'setting needs' : 'settings need'} correcting before the ` +
+              'configuration can be saved. Each is marked in its section.'}
+          </Alert>
+        )}
+
+        <SegmentedControl
+          label="View"
+          selectedId={view}
+          options={VIEW_OPTIONS.map((option) => ({ ...option, disabled: Boolean(textError) && option.id !== view }))}
+          onChange={({ detail }) => chooseView(detail.selectedId)}
+        />
+
+        {view !== 'form' && (
           <FormField
-            label="Comment"
-            description="Optional. Recorded with the revision, so the history says why it was saved."
-            constraintText={`${comment.length}/${MAX_COMMENT_LENGTH} characters`}
+            label={`The configuration as ${view.toUpperCase()}`}
+            description={
+              readOnly
+                ? 'Read-only: copy the profile to a Custom one to change it.'
+                : 'Every section, keyed by its name. What you type is checked as you type and saved like an edit ' +
+                  'in the form; a section you leave out keeps its values.'
+            }
+            errorText={textError || undefined}
+            stretch
           >
             <Textarea
-              value={comment}
-              rows={2}
-              ariaLabel="Comment"
-              onChange={({ detail }) => setComment(detail.value.slice(0, MAX_COMMENT_LENGTH))}
+              value={configText}
+              rows={32}
+              readOnly={readOnly}
+              spellcheck={false}
+              ariaLabel={`Configuration ${view.toUpperCase()}`}
+              className="lma-config-text"
+              onChange={({ detail }) => editText(detail.value)}
             />
           </FormField>
-          <FormField
-            label="Label"
-            description="Optional. A labelled revision is kept however many revisions follow it."
-            constraintText={`${label.length}/${MAX_LABEL_LENGTH} characters`}
+        )}
+
+        {view !== 'form' && textWithheld.length > 0 && (
+          <Alert type="warning">
+            {`Not used, because this deployment does not offer them: ${textWithheld
+              .map(([name, key]) => {
+                const section = sections.find((candidate) => candidate.name === name);
+                return `${sectionLabel(section)} › ${section.schema.properties?.[key]?.title || key}`;
+              })
+              .join(', ')}.`}
+          </Alert>
+        )}
+
+        {view !== 'form' && problemCount > 0 && (
+          <Alert
+            type="error"
+            header={`${problemCount} ${problemCount === 1 ? 'setting needs' : 'settings need'} correcting`}
           >
-            <Input
-              value={label}
-              ariaLabel="Label"
-              onChange={({ detail }) => setLabel(detail.value.slice(0, MAX_LABEL_LENGTH))}
+            <ul>
+              {changed.flatMap((section) =>
+                (problems[section.name] || []).map((problem) => (
+                  <li key={`${section.name}:${formatPath(problem.path)}:${problem.message}`}>
+                    {`${sectionLabel(section)} › ${formatPath(problem.path)}: ${problem.message}`}
+                  </li>
+                )),
+              )}
+            </ul>
+          </Alert>
+        )}
+
+        {view === 'form' &&
+          sections.map((section) => (
+            <ConfigurationSection
+              key={section.name}
+              section={section}
+              values={edits[section.name] || {}}
+              loaded={loaded[section.name] || {}}
+              defaults={doc.defaults[section.name] || {}}
+              problems={problems[section.name] || []}
+              settings={settings}
+              saved={loaded}
+              readOnly={readOnly}
+              expanded={focus ? focus === section.name : section.schema.defaultExpanded === true}
+              onChange={setSection(section.name)}
             />
-          </FormField>
-        </SpaceBetween>
-      </Modal>
-    </SpaceBetween>
+          ))}
+
+        <input
+          ref={fileInput}
+          type="file"
+          accept="application/json,.json"
+          style={{ display: 'none' }}
+          aria-label="Configuration file to import"
+          data-testid="configuration-import"
+          onChange={(event) => {
+            importConfiguration(event.target.files?.[0]);
+            // So choosing the same file again imports it again.
+            // eslint-disable-next-line no-param-reassign -- resetting the picker
+            event.target.value = '';
+          }}
+        />
+
+        <Modal
+          visible={presetOpen}
+          onDismiss={() => setPresetOpen(false)}
+          header="Apply a preset"
+          size="large"
+          footer={
+            <Box float="right">
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button variant="link" onClick={() => setPresetOpen(false)}>
+                  Cancel
+                </Button>
+                <Button variant="primary" onClick={applyPreset} disabled={!preset}>
+                  Apply to the page
+                </Button>
+              </SpaceBetween>
+            </Box>
+          }
+        >
+          <SpaceBetween size="l">
+            <FormField label="Configuration presets" description={PRESETS_DESCRIPTION}>
+              <RadioGroup
+                ariaLabel="Configuration presets"
+                value={preset ? preset.Id : null}
+                onChange={({ detail }) => setPresetChoice(detail.value)}
+                items={orderedPresets(doc?.presets).map((entry) => {
+                  const offeredHere = isPresetOffered(entry, sections, settings);
+                  return {
+                    value: entry.Id,
+                    label: entry.Title,
+                    description: offeredHere
+                      ? entry.Description
+                      : `${entry.Description} Not offered here: it sets something this deployment does not include.`,
+                    disabled: !offeredHere,
+                  };
+                })}
+              />
+            </FormField>
+            {preset && (
+              <SpaceBetween size="xs">
+                <Box variant="h4">{`What "${preset.Title}" changes`}</Box>
+                <ul>
+                  {presetSections(preset).map(({ name, section }) => (
+                    <li key={name}>
+                      {section
+                        ? `${sectionLabel(section)}: ${Object.keys(preset.Sections[name].values || {})
+                            .map((key) => section.schema?.properties?.[key]?.title || key)
+                            .join(', ')} change, and the others stay`
+                        : `${name}: not in this deployment, so left out`}
+                    </li>
+                  ))}
+                </ul>
+              </SpaceBetween>
+            )}
+            <Box>Nothing is saved until you review the changes and save them.</Box>
+          </SpaceBetween>
+        </Modal>
+
+        <Modal
+          visible={saveAsOpen}
+          onDismiss={() => !saveAsBusy && setSaveAsOpen(false)}
+          header="Save current edits as a new profile"
+          footer={
+            <Box float="right">
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button variant="link" onClick={() => setSaveAsOpen(false)} disabled={saveAsBusy}>
+                  Cancel
+                </Button>
+                <Button variant="primary" onClick={saveAs} loading={saveAsBusy} disabled={Boolean(saveAsProblem)}>
+                  Save as new profile
+                </Button>
+              </SpaceBetween>
+            </Box>
+          }
+        >
+          <SpaceBetween size="m">
+            {saveAsError && <Alert type="error">{saveAsError}</Alert>}
+            <Box>
+              {`The new profile is a Custom one holding every setting as the editor shows it now${
+                dirty ? ', including your unsaved edits' : ''
+              }. ${profile} itself is left as it is saved. The new profile is not active until you activate it. To ` +
+                "copy a profile's last saved state instead, use Create profile in the list of profiles."}
+            </Box>
+            <FormField label="Name" errorText={saveAsName ? saveAsProblem : null}>
+              <Input
+                value={saveAsName}
+                ariaLabel="New profile name"
+                placeholder="e.g. trial"
+                onChange={({ detail }) => setSaveAsName(detail.value)}
+              />
+            </FormField>
+            <FormField label="Description" description="Optional.">
+              <Input
+                value={saveAsDescription}
+                ariaLabel="New profile description"
+                onChange={({ detail }) => setSaveAsDescription(detail.value.slice(0, MAX_COMMENT_LENGTH))}
+              />
+            </FormField>
+          </SpaceBetween>
+        </Modal>
+
+        <Modal
+          visible={saveOpen}
+          onDismiss={() => !saving && setSaveOpen(false)}
+          header="Save the configuration?"
+          footer={
+            <Box float="right">
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button variant="link" onClick={() => setSaveOpen(false)} disabled={saving}>
+                  Cancel
+                </Button>
+                <Button variant="primary" onClick={save} loading={saving}>
+                  Save
+                </Button>
+              </SpaceBetween>
+            </Box>
+          }
+        >
+          <SpaceBetween size="m">
+            {saveError && <Alert type="error">{saveError}</Alert>}
+            <Box>The save is recorded as one revision in the configuration history. It changes:</Box>
+            <ul>
+              {changed.map((section) => {
+                const count = changedCount(loaded[section.name], edits[section.name]);
+                return (
+                  <li key={section.name}>
+                    {`${sectionLabel(section)}: ${count} ${count === 1 ? 'setting' : 'settings'}. ${appliesText(
+                      section.tier,
+                      section.schema,
+                    )}`}
+                  </li>
+                );
+              })}
+            </ul>
+            <FormField
+              label="Comment"
+              description="Optional. Recorded with the revision, so the history says why it was saved."
+              constraintText={`${comment.length}/${MAX_COMMENT_LENGTH} characters`}
+            >
+              <Textarea
+                value={comment}
+                rows={2}
+                ariaLabel="Comment"
+                onChange={({ detail }) => setComment(detail.value.slice(0, MAX_COMMENT_LENGTH))}
+              />
+            </FormField>
+            <FormField
+              label="Label"
+              description="Optional. A labelled revision is kept however many revisions follow it."
+              constraintText={`${label.length}/${MAX_LABEL_LENGTH} characters`}
+            >
+              <Input
+                value={label}
+                ariaLabel="Label"
+                onChange={({ detail }) => setLabel(detail.value.slice(0, MAX_LABEL_LENGTH))}
+              />
+            </FormField>
+          </SpaceBetween>
+        </Modal>
+      </SpaceBetween>
+    </div>
   );
 };
 
