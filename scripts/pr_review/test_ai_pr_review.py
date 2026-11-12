@@ -38,6 +38,7 @@ import http.client
 import importlib.util
 import re
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -1819,6 +1820,7 @@ def test_a_blocking_finding_is_stated_when_a_review_is_carried_over() -> None:
     assert "That review has 1 🔴 Blocking finding(s)" in note
     assert "- 🔴 **Blocking** — `lma-ai-stack/source/x.py:3`" in note
     assert "Nice to have" not in note
+    assert "None of the files listed above is named by one of them." in note
     assert "❌ Block" in note
     assert review.scan_for_disclosure(note) == []
 
@@ -2003,6 +2005,54 @@ def test_a_code_change_since_the_review_is_reviewed_in_full(
     args = review.parse_args(["--mr", "7", "--artifact-dir", str(tmp_path)])
     assert review.try_carry_over(forge, merge_request, args, tmp_path) is None
     assert forge.posted == []
+
+
+@pytest.mark.parametrize(
+    "instruction_file",
+    ["docs/CLAUDE.md", ".claude/skills/x/README.md", "docs-site/AGENTS.md", "CLAUDE.md"],
+)
+@pytest.mark.parametrize("permissive_classifier", [False, True])
+def test_an_instruction_file_change_is_reviewed_in_full(
+    request_history, tmp_path, monkeypatch, instruction_file, permissive_classifier
+) -> None:
+    """A change to what an agent or the reviewer is told is never carried over.
+
+    Also with a target-branch classifier that calls everything documentation, so the
+    harness's own check holds even where the classifier on the target lags behind.
+    """
+    repo, reviewed, point_refs = request_history
+    head = _commit(repo, {"CHANGELOG.md": "y\n", instruction_file: "be brief\n"}, "docs")
+    point_refs()
+    if permissive_classifier:
+        classifier = types.SimpleNamespace(docs_only=lambda paths: True)
+    else:
+        classifier = _classifier()
+        assert not classifier.docs_only([instruction_file])
+    monkeypatch.setattr(review, "_load_target_classifier", lambda branch: classifier)
+    forge = _CarryForge(
+        [review.PriorReview(reviewed, review.PROMPT_REVISION, _review_body(reviewed), "u")]
+    )
+    merge_request = review.MergeRequest(7, "t", "a", "feature", "develop", "w", head, False)
+    args = review.parse_args(["--mr", "7", "--artifact-dir", str(tmp_path)])
+    assert review.try_carry_over(forge, merge_request, args, tmp_path) is None
+    assert forge.posted == []
+
+
+def test_a_carried_over_blocking_finding_names_the_changed_files_it_cites() -> None:
+    merge_request = review.MergeRequest(7, "t", "a", "x", "develop", "w", "f" * 40, False)
+    body = _review_body(
+        _REVIEW_AT,
+        verdict="❌ Block",
+        findings="- 🔴 **Blocking** — `docs/a.md:3` — The page states the wrong default.\n",
+    )
+    note = review.compose_carry_over(
+        merge_request, review.PriorReview(_REVIEW_AT, 2, body), ["docs/a.md", "docs/b.md"], "PR"
+    )
+    assert (
+        "named by a blocking finding, so check whether this push addressed it: `docs/a.md`." in note
+    )
+    assert "`docs/b.md`." not in note
+    assert review.scan_for_disclosure(note) == []
 
 
 def test_force_always_reviews_in_full(monkeypatch, tmp_path) -> None:
