@@ -863,6 +863,33 @@ def test_the_teams_watchdog_values_are_settings_not_main_stack_parameters(templa
         assert template["Parameters"][parameter]["Default"] == by_parameter[parameter]
 
 
+def test_the_display_name_is_a_setting_with_the_parameter_as_its_fallback(template: dict) -> None:
+    """The display name is set on the Configuration page; the parameter is the fallback.
+
+    lma-main.yaml neither declares nor passes LMAIdentity, so the nested stack's
+    parameter is always at its default, and that default must be the setting's
+    shipped one or a VP that cannot read the configuration joins under a
+    different name from one that can.
+    """
+    import json
+
+    main = yaml.load((TEMPLATE.parents[1] / "lma-main.yaml").read_text(), Loader=_CfnLoader)
+    passed = main["Resources"]["VIRTUALPARTICIPANTSTACK"]["Properties"]["Parameters"]
+    shipped = json.loads(
+        (
+            TEMPLATE.parents[1]
+            / "lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/setting_defaults.json"
+        ).read_text()
+    )["virtual_participant"]["displayName"]
+    assert shipped["formerParameter"] == "LMAIdentity"
+    assert "LMAIdentity" not in main["Parameters"]
+    assert "LMAIdentity" not in passed
+    assert template["Parameters"]["LMAIdentity"]["Default"] == shipped["default"]
+    assert _task_definition_env(template)["LMA_IDENTITY"] == {"Ref": "LMAIdentity"}
+    details = (TEMPLATE.parent / "backend" / "src" / "details.ts").read_text()
+    assert f"process.env.LMA_IDENTITY || '{shipped['default']}'" in details
+
+
 def test_launcher_passes_the_watchdog_tunables_as_static_config(launcher: str) -> None:
     """The MicroVM path must inherit these, and MICROVM is the default launch type.
 

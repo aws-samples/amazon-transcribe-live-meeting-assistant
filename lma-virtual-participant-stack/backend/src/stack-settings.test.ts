@@ -57,6 +57,17 @@ test('a value the configuration holds replaces the variable, as text', () => {
     assert.deepEqual(result.notes, []);
 });
 
+test('the display name is applied with its {LMA_USER} placeholder kept for details.ts to fill', () => {
+    const env = { ...started(), LMA_IDENTITY: 'LMA ({LMA_USER})' };
+    const result = applySections({ virtual_participant: { displayName: 'LMA Notetaker ({LMA_USER})' } }, env);
+    assert.equal(env['LMA_IDENTITY'], 'LMA Notetaker ({LMA_USER})');
+    assert.ok(result.applied.includes('LMA_IDENTITY'));
+
+    const unchanged = { ...started(), LMA_IDENTITY: 'LMA ({LMA_USER})' };
+    applySections({ virtual_participant: {} }, unchanged);
+    assert.equal(unchanged['LMA_IDENTITY'], 'LMA ({LMA_USER})');
+});
+
 test('the meeting chat switch is applied as text, and left unset when the configuration has no value', () => {
     const env = started();
     applySections({ virtual_participant: { captureMeetingChat: false } }, env);

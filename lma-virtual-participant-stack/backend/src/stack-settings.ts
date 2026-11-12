@@ -12,8 +12,9 @@
  * environment variable: the Amazon Transcribe options and the audio-recording
  * default (the Amazon Transcribe and Meeting Recording sections, which the
  * WebSocket transcriber reads too), and the Virtual Participant's own voice
- * assistant and its activation mode, avatar and Teams meeting-end detection
- * (the Virtual Participant section). The parameter is now each setting's
+ * assistant and its activation mode, avatar and Teams meeting-end detection,
+ * and the display name it joins meetings under (the Virtual Participant
+ * section; the display name was a parameter of this nested stack only). The parameter is now each setting's
  * default: the configuration seeder writes its value into the configuration's
  * baseline, and an administrator's change wins over it. The meeting retention
  * its usage records are written with (the Retention section) is applied too;
@@ -75,6 +76,7 @@ export const VIRTUAL_PARTICIPANT_SETTINGS: readonly SettingTarget[] = [
     { section: 'transcription', setting: 'preferredLanguage', envVar: 'TRANSCRIBE_PREFERRED_LANGUAGE', type: 'string' },
     { section: 'transcription', setting: 'customVocabularyName', envVar: 'CUSTOM_VOCABULARY_NAME', type: 'string' },
     { section: 'recording', setting: 'recordAudio', envVar: 'ENABLE_AUDIO_RECORDING', type: 'boolean' },
+    { section: 'virtual_participant', setting: 'displayName', envVar: 'LMA_IDENTITY', type: 'string' },
     { section: 'virtual_participant', setting: 'voiceAssistantProvider', envVar: 'VOICE_ASSISTANT_PROVIDER', type: 'string' },
     { section: 'virtual_participant', setting: 'voiceAssistantActivationMode', envVar: 'VOICE_ASSISTANT_ACTIVATION_MODE', type: 'string' },
     { section: 'virtual_participant', setting: 'voiceAssistantWakePhrases', envVar: 'VOICE_ASSISTANT_WAKE_PHRASES', type: 'string' },
