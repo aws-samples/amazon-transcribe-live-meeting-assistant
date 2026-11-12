@@ -98,7 +98,11 @@ CONTENT_TYPE_MEDIA_FORMATS = {
 # The languages a batch transcription job accepts as LanguageCode: the enum in
 # the Amazon Transcribe service model of the botocore this function runs with.
 # A languageCode outside it would be refused by StartTranscriptionJob after the
-# file is uploaded, so it is refused here instead.
+# file is uploaded, so it is refused here instead. The list is only as current as
+# the runtime's botocore (requirements.txt does not pin boto3/botocore): a batch
+# language the service added after that botocore was built is refused for an API
+# caller's languageCode. Languages set on the Configuration page are not checked
+# against it.
 BATCH_LANGUAGE_CODES = frozenset(
     botocore.session.get_session().get_service_model("transcribe").shape_for("LanguageCode").enum
 )
