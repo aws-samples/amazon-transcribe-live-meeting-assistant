@@ -297,9 +297,9 @@ RECORDING = register(
     )
 )
 
-#: The Virtual Participant's own settings: its voice assistant provider, wake
-#: phrases and activation duration, the ElevenLabs agent and the Simli face, and
-#: how a Teams Virtual Participant decides its meeting has ended. Read once, when
+#: The Virtual Participant's own settings: the display name it joins meetings
+#: under, its voice assistant provider, wake phrases and activation duration, the
+#: ElevenLabs agent and the Simli face, and how a Teams Virtual Participant decides its meeting has ended. Read once, when
 #: a Virtual Participant starts, and applied to its environment before anything
 #: in it reads them (stack-settings.ts in the Virtual Participant).
 #:
@@ -311,9 +311,9 @@ VIRTUAL_PARTICIPANT = register(
         name="virtual_participant",
         cache_tier=CacheTier.IMMEDIATE,
         description=(
-            "Virtual Participant settings read when it starts: the voice assistant provider, "
-            "wake phrases and activation duration, the ElevenLabs agent and Simli face, and "
-            "Teams meeting-end detection."
+            "Virtual Participant settings read when it starts: the display name, the voice "
+            "assistant provider, wake phrases and activation duration, the ElevenLabs agent "
+            "and Simli face, and Teams meeting-end detection."
         ),
     )
 )

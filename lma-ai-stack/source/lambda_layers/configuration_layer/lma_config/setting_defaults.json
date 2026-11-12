@@ -109,6 +109,11 @@
     }
   },
   "virtual_participant": {
+    "displayName": {
+      "type": "string",
+      "default": "LMA ({LMA_USER})",
+      "formerParameter": "LMAIdentity"
+    },
     "voiceAssistantProvider": {
       "type": "string",
       "default": "none",

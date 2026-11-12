@@ -27,6 +27,11 @@ Parameters:
   # by the name to add after "LMA" to address this VP (the owner's first name
   # or email local part).
 
+  # The VP's display name is the Configuration page setting Virtual Participant
+  # > Display name (virtual_participant.displayName), applied over LMA_IDENTITY
+  # when the VP starts (backend/src/stack-settings.ts). lma-main.yaml does not
+  # pass this parameter; it stays at the setting's shipped default as the
+  # fallback for a VP that cannot read the configuration.
   LMAIdentity:
     Type: String
     Default: LMA ({LMA_USER})
