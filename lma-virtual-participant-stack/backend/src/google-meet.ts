@@ -914,7 +914,7 @@ export default class GoogleMeet {
         // Meet's guest check refuses some page loads and accepts the next one:
         // measured from this network, the same browser was refused on one load
         // of a meeting with open access and shown the name field on the next.
-        // So a refusal before the join is retried with a fresh page load, a
+        // So a refusal before or just after the join click is retried with a fresh page load, a
         // few times and with a growing pause. A Meet join always starts from a
         // fresh browser profile (acquireProfile saves none for Meet), but the
         // refused loads of this session leave Google cookies behind, so from
@@ -1057,6 +1057,8 @@ export default class GoogleMeet {
             // manual action (a CAPTCHA) is being solved in the live view.
             await substep('Waiting to be admitted to the meeting…');
             const POLL_INTERVAL_MS = 1500;
+            // The deadline restarts on each join attempt: a refusal comes within
+            // seconds of the click, so a retry adds about that much to the wait.
             const startWait = Date.now();
             const baseDeadline = startWait + details.waitingTimeout;
             const MANUAL_ACTION_GRACE_MS = 5 * 60 * 1000;

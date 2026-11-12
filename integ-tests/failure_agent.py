@@ -306,7 +306,8 @@ def _run_window(report_path: Path) -> str:
             return "unknown (no testsuite in the report)"
         start = datetime.fromisoformat(suite.attrib["timestamp"])
         if start.tzinfo is None:
-            start = start.replace(tzinfo=UTC)
+            # pytest writes an offset-less timestamp in the runner's local time.
+            start = start.astimezone(UTC)
         end = start + timedelta(seconds=float(suite.attrib.get("time", "0")))
     except Exception as exc:  # noqa: BLE001 - the brief must not be the failure
         return f"unknown ({exc})"
