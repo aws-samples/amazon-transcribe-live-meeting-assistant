@@ -699,7 +699,8 @@ def test_an_identify_mode_asks_transcribe_to_identify_among_the_options(
         transcribe.params
     )
     assert sent == {parameter}
-    # Shown as identified by Amazon Transcribe until Stage 3 knows the language.
+    # The identify mode stays the meeting's Transcription language; the languages
+    # heard reach DetectedLanguages through the segments Stage 3 writes.
     assert kinesis.payloads[0]["TranscriptionLanguage"] == mode
 
 

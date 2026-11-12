@@ -169,8 +169,9 @@ def _language_settings(job: dict) -> dict[str, Any]:
 def _transcription_language(job: dict) -> str:
     """The meeting's TranscriptionLanguage: the language code, or the identify mode.
 
-    The UI shows an identify mode as identified by Amazon Transcribe; Stage 3
-    replaces it with the identified language once the job is done.
+    The meeting's TranscriptionLanguage keeps the identify mode, as for a
+    streaming meeting; Stage 3 lists the identified languages as its
+    DetectedLanguages through each segment's LanguageCode.
     """
     mode = (job.get("LanguageIdentification") or "").strip()
     if mode in IDENTIFY_PARAMETERS:
