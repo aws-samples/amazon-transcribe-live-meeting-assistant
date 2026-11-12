@@ -101,8 +101,11 @@ speaker IDs. Every speaker in an uploaded recording is on the `REMOTE` channel,
 since an upload has no local microphone; the `spk_N` label is what tells the
 speakers apart.
 
-Diarization works with every language setting, including language
-identification.
+Diarization is requested with every language setting, including language
+identification. Amazon Transcribe documents that
+[batch language identification can be combined with any other feature](https://docs.aws.amazon.com/transcribe/latest/dg/lang-id-batch.html#lang-id-batch-features);
+an upload with language identification and diarization together has not been
+run against a deployment.
 
 ## Transcription Language
 
