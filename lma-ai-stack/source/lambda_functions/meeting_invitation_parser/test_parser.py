@@ -110,6 +110,34 @@ class TestMeetingIdGeneralCleanup(unittest.TestCase):
         self.assertEqual(out["meetingPassword"], "ixpjsDWNj8cLxyHlQD")
 
 
+class TestMeetingPassword(unittest.TestCase):
+    """Passwords are passed to the meeting client exactly as it expects them."""
+
+    def parse(self, platform, password):
+        return index.validate_parsed_data(
+            {"meetingPlatform": platform, "meetingId": "96187501703", "meetingPassword": password}
+        )["meetingPassword"]
+
+    def test_zoom_numeric_passcode_grouping_spaces_removed(self):
+        self.assertEqual(self.parse("ZOOM", "1234 5678"), "12345678")
+        self.assertEqual(self.parse("ZOOM", " 123 456\t789 "), "123456789")
+
+    def test_zoom_alphanumeric_passcode_kept(self):
+        self.assertEqual(self.parse("ZOOM", "aB3x9Q"), "aB3x9Q")
+        self.assertEqual(self.parse("ZOOM", "ab 12"), "ab 12")
+
+    def test_surrounding_whitespace_removed_on_every_platform(self):
+        self.assertEqual(self.parse("WEBEX", "  Xy7pQ  "), "Xy7pQ")
+        self.assertEqual(self.parse("TEAMS", " ixpjsDWNj8 "), "ixpjsDWNj8")
+
+    def test_inner_spaces_kept_for_other_platforms(self):
+        self.assertEqual(self.parse("WEBEX", "1234 5678"), "1234 5678")
+
+    def test_missing_or_blank_password_is_none(self):
+        self.assertIsNone(self.parse("ZOOM", None))
+        self.assertIsNone(self.parse("ZOOM", "   "))
+
+
 if __name__ == "__main__":
     unittest.main()
 
