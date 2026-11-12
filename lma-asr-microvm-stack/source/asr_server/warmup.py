@@ -32,7 +32,9 @@ import math
 import os
 import struct
 import sys
+import wave
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import cast
 
 from asr_protocol import Config as _Config
@@ -57,6 +59,9 @@ __all__ = [
     "RecognizerFactory",
     "OfflineRecognizerFactory",
     "synthetic_pcm",
+    "speech_like_pcm",
+    "warm_decode_pcm",
+    "WARM_DECODE_SECONDS",
     "warmup",
     "config_from_args",
     "offline_config_from_args",
@@ -103,6 +108,94 @@ def synthetic_pcm(
     step = 2.0 * math.pi * freq_hz / sample_rate
     samples = [int(amplitude * math.sin(step * i)) for i in range(n)]
     return struct.pack("<" + "h" * n, *samples)
+
+
+# Length of the warm-up decode run before the MicroVM snapshot: the VAD's longest
+# segment (``max_speech_ms``, 20 s) plus its 300 ms onset and end padding, so the
+# warm-up allocates what the longest utterance a session can produce will need.
+WARM_DECODE_SECONDS = 20.6
+# Speech-like warm-up audio: syllables of a few voiced harmonics with a pitch and
+# vowel colour that change per syllable, and a short gap every few syllables.
+_SYLLABLE_MS = 200
+_GAP_EVERY = 5
+_HARMONICS = 12
+_PITCHES_HZ = (110.0, 125.0, 140.0, 118.0, 132.0, 104.0, 150.0)
+# Approximate first and second formants of a handful of vowels.
+_FORMANTS_HZ = ((730.0, 1090.0), (270.0, 2290.0), (530.0, 1840.0), (570.0, 840.0), (300.0, 870.0))
+
+
+def speech_like_pcm(seconds: float, sample_rate: int = 16000) -> bytes:
+    """Deterministic 16-bit LE mono PCM with the broad structure of speech.
+
+    Used for the warm-up decode when the bundle ships no sample clip. The offline
+    warm-up decode does not depend on it being recognised: it bypasses the VAD, and
+    the encoder runs over every frame whatever the content. Being speech-like only
+    makes the decoder's token loop do some work too.
+    """
+    if seconds <= 0:
+        raise ValueError("seconds must be positive")
+    if sample_rate <= 0:
+        raise ValueError("sample_rate must be positive")
+    total = int(sample_rate * seconds)
+    syllable = max(1, sample_rate * _SYLLABLE_MS // 1000)
+    out = [0] * total
+    for index, begin in enumerate(range(0, total, syllable)):
+        length = min(syllable, total - begin)
+        if index % (_GAP_EVERY + 1) == _GAP_EVERY:
+            continue  # a pause between phrases
+        pitch = _PITCHES_HZ[index % len(_PITCHES_HZ)]
+        f1, f2 = _FORMANTS_HZ[index % len(_FORMANTS_HZ)]
+        period = max(2, round(sample_rate / pitch))
+        cycle = []
+        for n in range(period):
+            value = 0.0
+            for h in range(1, _HARMONICS + 1):
+                freq = h * sample_rate / period
+                # Harmonics near a formant are louder; the rest fall off with order.
+                near_f1 = 4.0 / (1.0 + ((freq - f1) / 150.0) ** 2)
+                near_f2 = 3.0 / (1.0 + ((freq - f2) / 200.0) ** 2)
+                weight = (1.0 + near_f1 + near_f2) / h
+                value += weight * math.sin(2.0 * math.pi * h * n / period)
+            cycle.append(value)
+        peak = max(abs(v) for v in cycle) or 1.0
+        for n in range(length):
+            # Raised-cosine envelope so each syllable rises and decays.
+            envelope = 0.5 - 0.5 * math.cos(2.0 * math.pi * n / length)
+            out[begin + n] = int(_TONE_AMPLITUDE * envelope * cycle[n % period] / peak)
+    return struct.pack("<" + "h" * total, *out)
+
+
+def _read_wav_pcm(path: Path, sample_rate: int) -> bytes | None:
+    """The clip's frames if it is 16-bit mono at ``sample_rate``, else ``None``."""
+    try:
+        with wave.open(str(path), "rb") as wav:
+            if (
+                wav.getnchannels() == 1
+                and wav.getsampwidth() == _INT16_BYTES
+                and wav.getframerate() == sample_rate
+            ):
+                return wav.readframes(wav.getnframes())
+    except (OSError, EOFError, wave.Error):
+        return None
+    return None
+
+
+def warm_decode_pcm(
+    seconds: float = WARM_DECODE_SECONDS,
+    sample_rate: int = 16000,
+    wav: Path | None = None,
+) -> tuple[bytes, str]:
+    """Audio for the warm-up decode and a description of where it came from.
+
+    The bundle's sample clip (``test_wavs/warm.wav``) repeated to ``seconds`` when
+    it has one, otherwise :func:`speech_like_pcm`.
+    """
+    want = int(sample_rate * seconds) * _INT16_BYTES
+    clip = _read_wav_pcm(wav, sample_rate) if wav is not None and wav.is_file() else None
+    if wav is not None and clip:
+        repeats = -(-want // len(clip))
+        return (clip * repeats)[:want], f"{wav.name} repeated to {seconds:.1f}s"
+    return speech_like_pcm(seconds, sample_rate), f"{seconds:.1f}s of synthetic speech-like audio"
 
 
 def warmup(

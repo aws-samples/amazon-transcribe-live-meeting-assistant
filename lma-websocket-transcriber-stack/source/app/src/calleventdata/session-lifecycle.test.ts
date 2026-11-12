@@ -519,3 +519,174 @@ test('the end of a START changes nothing for an open connection or one whose clo
     assert.equal(sessions.heldCount, 1, 'held once, by its own close');
     assert.deepEqual(effects.ends, []);
 });
+
+test('ending a meeting whose engine is still starting waits for it before the END event', async () => {
+    const order: string[] = [];
+    const { sessions } = lifecycle({
+        writeCallEndEvent: async () => {
+            order.push('end-event');
+        },
+        stopEngine: async () => {
+            order.push('engine-stopped');
+        },
+    });
+    const ws = new FakeSocket('a');
+    const meeting = session();
+    let finishStart: () => void = () => undefined;
+    meeting.engineStarting = new Promise<void>((resolve) => {
+        finishStart = () => {
+            order.push('engine-started');
+            resolve();
+        };
+    });
+    sessions.register(ws, meeting);
+
+    const ending = sessions.end(ws, meeting);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(meeting.ended, true, 'marked ended at once, so the starting engine finishes rather than streams');
+    assert.deepEqual(order, [], 'nothing is written while the engine is starting');
+    assert.equal(meeting.audioInputStream?.destroyed, false, 'the audio held for the engine is kept');
+
+    finishStart();
+    await ending;
+    assert.deepEqual(order, ['engine-started', 'engine-stopped', 'end-event']);
+    assert.equal(meeting.audioInputStream?.destroyed, true);
+});
+
+test('the engine is finished, and its last rows written, before the END event', async () => {
+    // The meeting's last utterance is still open when its stream ends: its
+    // final row exists only once the engine has been finished, and the
+    // end-of-meeting summary reads the transcript when END arrives.
+    const order: string[] = [];
+    const { sessions } = lifecycle({
+        writeCallEndEvent: async () => {
+            order.push('end-event');
+        },
+        stopEngine: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            order.push('final-row-written');
+        },
+        finishRecording: async () => {
+            order.push('recording');
+        },
+    });
+    const ws = new FakeSocket('a');
+    const meeting = session();
+    sessions.register(ws, meeting);
+
+    await sessions.end(ws, meeting);
+
+    assert.deepEqual(order, ['final-row-written', 'end-event', 'recording'], 'and the engine is stopped once');
+});
+
+test('the wait for a starting engine is bounded, and skipped while the task shuts down', async () => {
+    const { sessions, effects } = lifecycle({ engineStartWaitMs: 30 });
+    const ws = new FakeSocket('a');
+    const meeting = session();
+    meeting.engineStarting = new Promise<void>(() => undefined);
+    sessions.register(ws, meeting);
+    await sessions.end(ws, meeting);
+    assert.deepEqual(effects.ends, ['meeting-1']);
+    assert.ok(effects.warnings.some((line) => line.includes('had not started')));
+
+    const shutting = lifecycle({ engineStartWaitMs: 60_000 });
+    shutting.shutDown();
+    const other = session('meeting-2');
+    other.engineStarting = new Promise<void>(() => undefined);
+    shutting.sessions.register(new FakeSocket('b'), other);
+    const started = Date.now();
+    await shutting.sessions.end(undefined, other);
+    assert.ok(Date.now() - started < 1000, 'shutdown does not wait for an engine to start');
+    assert.deepEqual(shutting.effects.ends, ['meeting-2']);
+});
+
+// A meeting the server ends (consent): the client's connection is closed at
+// once, while the rows of the audio received before then still land ahead of
+// the END event.
+
+test('a meeting the server ends closes its connection at once, even while the engine takes 30 s to finish', async () => {
+    const order: string[] = [];
+    let finishEngine: () => void = () => undefined;
+    const { sessions, effects } = lifecycle({
+        writeCallEndEvent: async () => {
+            order.push('end-event');
+        },
+        // An engine that takes 30 s to finalise the audio it has: it finishes
+        // only when the test says so.
+        stopEngine: async () => {
+            await new Promise<void>((resolve) => {
+                finishEngine = resolve;
+            });
+            order.push('final-row-written');
+        },
+        finishRecording: async () => {
+            order.push('recording');
+        },
+    });
+    const ws = new FakeSocket('a');
+    const meeting = session();
+    sessions.register(ws, meeting);
+
+    const started = Date.now();
+    const ending = sessions.end(ws, meeting, meeting.callMetadata, {
+        closeConnection: { code: 1008, reason: 'meeting consent does not allow capture' },
+    });
+    await sleep(20);
+    assert.deepEqual(ws.closes, [{ code: 1008, reason: 'meeting consent does not allow capture' }]);
+    assert.ok(Date.now() - started < 1000, 'closed without waiting for the engine');
+    assert.deepEqual(order, [], 'no END event while the engine is still finishing');
+
+    // The client's close arrives while the meeting is ending: it is neither
+    // held for a reconnect nor taken for a second end.
+    await sessions.onConnectionClosed(ws);
+    assert.equal(sessions.heldCount, 0);
+    assert.deepEqual(effects.errors, []);
+
+    finishEngine();
+    await ending;
+    assert.deepEqual(order, ['final-row-written', 'end-event', 'recording'], 'one END event, after the last rows');
+    assert.equal(sessions.sessionOf(ws), undefined);
+    await sleep(20);
+    assert.equal(sessions.heldCount, 0);
+});
+
+test('closing at end reaches the connection a resumed meeting streams on now', async () => {
+    const { sessions } = lifecycle();
+    const first = new FakeSocket('first');
+    const second = new FakeSocket('second');
+    const meeting = session();
+    sessions.register(first, meeting);
+    await sessions.onConnectionClosed(first);
+    await sessions.resume(second, 'meeting-1', 'user-a', newTokens);
+
+    await sessions.end(undefined, meeting, meeting.callMetadata, { closeConnection: { code: 1008, reason: 'stop' } });
+
+    assert.deepEqual(second.closes, [{ code: 1008, reason: 'stop' }]);
+    assert.deepEqual(first.closes, [], 'the old connection had already closed');
+});
+
+test('an END from the client leaves its connection for the client to close, and its close is no second end', async () => {
+    let finishEngine: () => void = () => undefined;
+    const { sessions, effects } = lifecycle({
+        stopEngine: async () => {
+            await new Promise<void>((resolve) => {
+                finishEngine = resolve;
+            });
+        },
+    });
+    const ws = new FakeSocket('a');
+    const meeting = session();
+    sessions.register(ws, meeting);
+
+    const ending = sessions.end(ws, meeting);
+    await sleep(10);
+    assert.deepEqual(ws.closes, [], 'the server does not close a connection whose client sent END');
+    // Clients close right after sending END.
+    await sessions.onConnectionClosed(ws);
+    finishEngine();
+    await ending;
+
+    assert.deepEqual(effects.ends, ['meeting-1']);
+    assert.deepEqual(effects.errors, [], 'no duplicate end is reported');
+    assert.equal(sessions.heldCount, 0);
+});

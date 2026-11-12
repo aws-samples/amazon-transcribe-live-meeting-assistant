@@ -338,6 +338,25 @@ group keeps the logs it already
 holds and is not removed on upgrade, so delete it yourself once you no longer
 need them.
 
+**How the image is warmed.** Every MicroVM starts from a snapshot that Lambda takes
+when the image's `/ready` hook first answers 200, and Lambda prefetches on later
+launches the memory pages that the `/validate` hook touches. The hook therefore
+answers 503 until two things have run in the ASR server. The first is a warm-up
+decode: about 20.6 s of audio (the VAD's 20 s longest segment plus its padding) is
+handed to every model the engine holds. For the offline model it goes straight to the
+decoder as one utterance rather than through the VAD, so the encoder runs and its
+buffers for the longest utterance are allocated even when the warm-up audio would not
+pass as speech. The audio is the bundle's sample clip (`test_wavs/warm.wav`) repeated
+to that length when the bundle has one, and otherwise a deterministic synthetic
+speech-like signal; the Parakeet TDT v3 bundles have no clip. The second is the
+existing exercise, which streams warm audio through the real WebSocket path. `/validate`
+repeats both. The hook asks for the decode over a pipe between its own process and the
+server's, not over the network. In the image build's log the server reports
+`warm-up decode: <n> decode(s) of 20.6s of synthetic speech-like audio in <t>s,
+rss=<m>MB` (two decodes for a two-pass bundle: the offline model and the live
+preview) and the hook reports `warm-up decode complete in <t>s`. `ASR_WARM_DECODE_S` changes the length and
+`ASR_WARM_DECODE_TIMEOUT_S` (default 600) how long the hook waits for it.
+
 That is the whole deploy-time surface. Two more values are fixed in the `AsrDefaults`
 mapping in `lma-main.yaml` rather than asked, because neither is a question a
 deployer should have to answer:
@@ -543,6 +562,80 @@ engine for one run with `--asr-engine`, which wins over the deployment setting.
 A meeting that selects this engine and whose MicroVM cannot start falls back to Amazon
 Transcribe by itself, so a failed launch costs a warning in the log rather than a
 transcript.
+
+### While the MicroVM starts
+
+A meeting's MicroVM is launched when its transcription starts: at the meeting's start,
+or, for a meeting that needs a consent record, once consent is recorded. A cold launch
+took 21 seconds on the integration stack on 2026-11-11, and the launcher allows up to
+four minutes before it gives up. There is no warm pool, so every meeting pays that
+launch. The audio the meeting sends meanwhile is kept and transcribed:
+
+- **Stream Audio, the Chrome extension and Desktop Capture.** The transcriber holds the
+  audio twice while the MicroVM launches: in each channel's engine session, which sends it
+  as its first audio when it connects, and in the meeting's audio stream, which Amazon
+  Transcribe reads if the launch fails. Rows are timed from the start of the meeting's
+  audio either way. Each copy is bounded at 60 seconds (`ASR_MAX_PENDING_BYTES`, in
+  bytes of 16 kHz mono audio). If the launch runs past that, the oldest audio is dropped
+  and the transcriber logs `taking longer than 60s to start` or `more than 60s of audio
+  is waiting for the engine`. The dropped audio stays in the recording, and the rows
+  after it keep their place on the recording's timeline.
+- **A meeting that ends while its MicroVM launches**, whether it sent a short stream or
+  its client hung up or disconnected, is not ended until the audio held for it has been
+  transcribed. The transcriber waits up to five minutes for the launch. If the launch
+  succeeds, the held audio is sent to the MicroVM and the sessions are finished at once.
+  If it fails, the held audio goes to Amazon Transcribe in one request. In both cases the
+  rows are written before the meeting's END event, so the end-of-meeting summary
+  includes them. The log line is `Call ended while the MicroVM was being acquired`, or
+  `Call ended while its transcription engine was starting` when Amazon Transcribe took
+  the audio. A task that is shutting down does not wait, because its stop timeout is
+  shorter than a launch.
+- **Virtual Participants.** The VP starts capturing the meeting, and recording it, when
+  it starts acquiring the MicroVM, not when the MicroVM is ready. The audio captured
+  meanwhile is held, up to the same 60 seconds, and sent when the engine sessions
+  connect. A meeting that ends during the launch is waited for for up to two minutes,
+  and the held audio is transcribed before the END event. If no MicroVM can be acquired,
+  Amazon Transcribe takes over and its rows start after the audio captured meanwhile.
+  That audio is in the recording, but on this path it is not transcribed; the
+  transcriber's fallback is the only one that replays it.
+
+### When a stream ends
+
+The last utterance of a meeting is usually still open when its stream ends, because the
+engine closes an utterance on its own only after 1.2 seconds of silence (the bundle's
+endpointing setting). Its only final
+row comes from the end of the stream, when the client sends `eos`. The engine then
+decodes whatever audio it has not yet reached, closes the open utterance and sends its
+`final`, and only then sends `termination`. Both clients, the WebSocket transcriber and
+the Virtual Participant, wait for that `termination` and write the final rows before the
+meeting's END event, because the end-of-meeting summary is made from the transcript when
+END arrives. A row that lands after END is stored but is not in the summary.
+
+How long the client waits grows with the audio the engine has not yet finalised on that
+connection: the five-second grace (`ASR_FINISH_TIMEOUT_MS`), plus two seconds
+(`ASR_FINISH_MS_PER_OPEN_SECOND`) for every second of audio sent since the engine's last
+final, up to a minute (`ASR_FINISH_MAX_WAIT_MS`). An engine that has caught up answered within
+0.6 seconds in the integration runs, so the bound only matters when it has not. The wait ends at once if
+the engine closes the connection. The transcriber logs `engine finished N ms after the
+end of the stream` when the rows arrived, and `the engine had not finished` when the wait
+ran out and the last rows were lost. The engine logs `eos:` with how much audio it had
+received and decoded at that moment. A task that is shutting down, and a capture
+discarded for consent, give each session only the five-second grace.
+
+The wait does not hold the client's connection open. A client that ends a meeting sends
+END and closes its connection itself. When the server ends a meeting because its consent
+no longer allows capture (an objection, for example), it closes the client's connection
+as soon as the meeting is marked ended, and goes on finishing the engine for the audio
+received before then. Those rows are still written before the END event. A capture
+discarded for consent has its connection closed first too, and then its engine and files
+released without waiting for rows.
+
+A fixed five-second wait was not enough. On the integration stack on 2026-11-11, 20-second
+probe streams whose MicroVM had started 10 seconds in ended with their single utterance
+still open, and the engine had not sent its final 5.7 seconds after `eos`. Those meetings
+were stored with one partial row and no final rows, and their summary saw no transcript.
+Why the engine took that long there is not established: in earlier runs the same streams
+finished within half a second.
 
 ## Runtime switches
 
@@ -890,6 +983,19 @@ validate the pairing on a live multi-speaker meeting before marking it `vetted`.
   `termination` message carries `dropped_seconds`. A nonzero total means the engine
   could not keep up at some point in that meeting, whether from load or from a
   single slow step (look for `sortformer step ... took` nearby).
+- Every offline (final-text) decode logs one line, as
+  `offline decode: audio=<a>s wall=<w>s cpu=<c>s (<c/w> cores) lock_wait=<l>s
+  first_in_process=False first_in_session=True warm_up=False`. `wall` is how long the
+  decode took, `cpu` the CPU time the whole process used meanwhile (so another
+  session's work in the same interval counts too), and `lock_wait` how long it waited
+  for the other channel's decode, since the two channels' decodes take turns.
+  `first_in_session` marks the session's first decode. `first_in_process` is true only
+  for the first decode since the server process started, which in a MicroVM launched
+  from the snapshot was the image's warm-up (`warm_up=True`), so a meeting's first
+  decode reads `first_in_process=False first_in_session=True`. A two-pass bundle also
+  logs each session's first live-preview decode, as `preview decode: ...`. A decode
+  whose `wall` is much larger than `cpu` over a single call was waiting rather than
+  computing (for memory being paged in, or for the host), not short of cores.
 - **How a MicroVM is billed.** Memory for the whole lifetime at the configured size,
   and vCPU-seconds at the larger of the baseline and the cores in use. The baseline is
   one vCPU per 2 GiB, 4 vCPUs at 8 GiB, and a MicroVM can burst to four times it, which
@@ -1097,6 +1203,16 @@ aws s3api list-object-versions --bucket "$B" \
 aws s3api delete-objects --bucket "$B" --delete file:///tmp/objects.json
 aws cloudformation delete-stack --stack-name <the nested ASR stack>
 ```
+
+**A meeting's first long utterance falls behind and drops audio.** Look at the
+session's first `offline decode:` lines (`first_in_session=True`) in
+`/aws/lambda-microvms/<stack>-asr-logs`. If `wall` is tens of seconds while `cpu` is
+a small fraction of it, the decode was waiting rather than computing. Check that the
+image's build log shows `warm-up decode complete` before `ready warm=True` and in the
+`validate workloadExercised=True (warm-up decode=True, ...)` line; an image built
+before the warm-up decode existed never ran the offline model before its snapshot when
+the bundle had no sample clip, and rebuilding the image (any change of bundle, or a
+stack update that changes the image source) picks it up.
 
 **The image build fails.** Check `/aws/lambda-microvms/<stack>-asr-logs`. A `SHA256
 mismatch` means the pinned checksum does not match the download (for a model pinned

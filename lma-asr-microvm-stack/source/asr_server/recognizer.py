@@ -31,9 +31,11 @@ real engine is actually constructed.
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import sys
 import threading
+import time
 from abc import ABC, abstractmethod
 from array import array
 from collections.abc import Sequence
@@ -48,6 +50,7 @@ __all__ = [
     "RecognizerEngine",
     "SessionConfig",
     "SessionConfigError",
+    "DecodeClock",
     "DecoderBackend",
     "SherpaModelConfig",
     "SherpaOnlineRecognizer",
@@ -55,7 +58,10 @@ __all__ = [
     "build_model_config",
     "create_sherpa_backend",
     "create_sherpa_engine",
+    "log_decode_timing",
 ]
+
+_LOG = logging.getLogger(__name__)
 
 # Default model directory baked into the MicroVM image (design §7 COPYs the
 # model into ``/opt/models``). Overridable via ``--model`` / ``ASR_MODEL_DIR``.
@@ -239,6 +245,68 @@ class Recognizer(ABC):
         return []
 
 
+class DecodeClock:
+    """Wall and process CPU time since construction, for one decode's timing line.
+
+    CPU time is the whole process's (every thread, including ONNX Runtime's own
+    pool), so a decode that overlaps another session's work reports that work too.
+    Wall time far above CPU time over a single call means the decode was waiting
+    rather than computing: for memory, a lock, or the host.
+    """
+
+    def __init__(self) -> None:
+        self._wall = time.perf_counter()
+        self._cpu = time.process_time()
+
+    def elapsed(self) -> tuple[float, float]:
+        return time.perf_counter() - self._wall, time.process_time() - self._cpu
+
+
+_FIRST_DECODES: set[str] = set()
+_FIRST_DECODES_LOCK = threading.Lock()
+
+
+def _first_in_process(model: str) -> bool:
+    with _FIRST_DECODES_LOCK:
+        if model in _FIRST_DECODES:
+            return False
+        _FIRST_DECODES.add(model)
+        return True
+
+
+def log_decode_timing(
+    model: str,
+    clock: DecodeClock,
+    *,
+    audio_seconds: float,
+    first_in_session: bool,
+    warm_up: bool = False,
+    lock_wait_seconds: float | None = None,
+) -> None:
+    """Log one decode's wall time, process CPU time and audio length at INFO.
+
+    ``model`` names which model decoded (``offline`` for the authority, ``preview``
+    for the two-pass live preview, ``streaming``). ``first_in_process`` is true for
+    the first decode by that model since the process started; in a MicroVM resumed
+    from the snapshot that was the image's warm-up, so a meeting's first decode
+    reports ``first_in_process=False`` and ``first_in_session=True``.
+    """
+    wall, cpu = clock.elapsed()
+    _LOG.info(
+        "%s decode: audio=%.2fs wall=%.3fs cpu=%.3fs (%.2f cores) lock_wait=%s "
+        "first_in_process=%s first_in_session=%s warm_up=%s",
+        model,
+        audio_seconds,
+        wall,
+        cpu,
+        cpu / wall if wall > 0 else 0.0,
+        "n/a" if lock_wait_seconds is None else f"{lock_wait_seconds:.3f}s",
+        _first_in_process(model),
+        first_in_session,
+        warm_up,
+    )
+
+
 class RecognizerEngine(ABC):
     """The heavy, shared ASR model — built ONCE, reused across all sessions.
 
@@ -266,6 +334,18 @@ class RecognizerEngine(ABC):
         server rejects the connection rather than decoding with the wrong config.
         ``None`` uses the engine's build-time defaults (standalone / test use).
         """
+
+    def warm_up(self, pcm: bytes) -> int:
+        """Decode ``pcm`` once on every model this engine holds; the number of decodes.
+
+        Runs before the MicroVM snapshot so each model's weights are paged in and
+        its buffers for an utterance of this length allocated. Unlike a session, it
+        does not gate the audio on voice activity, so the offline model runs even
+        when the warm-up audio is not recognised as speech. The default warms
+        nothing; engines that hold a model override it.
+        """
+        del pcm
+        return 0
 
 
 class DecoderBackend(Protocol):
@@ -738,6 +818,20 @@ class SherpaOnlineEngine(RecognizerEngine):
         stream = self._rec.create_stream()
         backend = _SherpaBackend(self._rec, stream, lock=self._lock)
         return SherpaOnlineRecognizer(backend, sample_rate=self._sample_rate)
+
+    def warm_up(self, pcm: bytes, *, model: str = "streaming") -> int:
+        clock = DecodeClock()
+        session = self.new_session()
+        session.accept_pcm(pcm)
+        session.flush()
+        log_decode_timing(
+            model,
+            clock,
+            audio_seconds=len(pcm) / 2 / self._sample_rate,
+            first_in_session=True,
+            warm_up=True,
+        )
+        return 1
 
 
 def _require_model_files(config: SherpaModelConfig) -> None:

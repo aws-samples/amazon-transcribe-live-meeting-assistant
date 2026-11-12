@@ -910,7 +910,9 @@ choices:
 - **Virtual Participants: engine** chooses the engine for every VP that starts after the
   change: the ASR MicroVM engine (the default) or Amazon Transcribe. On the MicroVM
   engine the VP acquires and releases its own MicroVM, and falls back to Amazon
-  Transcribe when none can be acquired.
+  Transcribe when none can be acquired. The VP captures and records the meeting while
+  the MicroVM launches and sends that audio to it when it connects; see
+  [While the MicroVM starts](microvm-asr.md#while-the-microvm-starts).
 - **The voice assistant is its own channel.** With the assistant enabled, its speech is
   transcribed from a second engine session on the same MicroVM and appears on the `LOCAL`
   channel under the VP's own name, never diarized, exactly as Stream Audio separates the
