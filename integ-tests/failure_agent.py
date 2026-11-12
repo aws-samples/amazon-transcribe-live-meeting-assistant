@@ -164,11 +164,11 @@ HOW TO WORK
   Lambda, and the Virtual Participant's. Find the log groups rather than
   guessing their names.
 - `git log` and `git diff` are available if you need to know what changed.
-- Every Bash call must be ONE literal command from the allowed list. There is
-  nobody to approve anything else, so these are denied outright: command
-  substitution ($(...) or backticks), a leading VAR=value, and commands joined
-  with ; && or ||. Pass --region on each aws call, and use the epoch-millisecond
-  run window above for --start-time / --end-time instead of computing one.
+- Write each Bash call as one literal command from the allowed list. There is
+  nobody to approve anything else, so command substitution ($(...) or
+  backticks) and a leading VAR=value are denied outright. Pass --region on
+  each aws call, and use the epoch-millisecond run window above for
+  --start-time / --end-time instead of computing one.
 - A Virtual Participant runs on a Lambda MicroVM or an ECS task; MicroVM logs
   are under /aws/lambda-microvms/. Its DynamoDB record (the stack's
   VirtualParticipant table) holds endTrigger and errorMessage, which say why it
