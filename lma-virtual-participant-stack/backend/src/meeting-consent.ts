@@ -778,7 +778,7 @@ export class MeetingConsentFlow {
             this.queueEvidence(`after an objection for ${name} was recorded in LMA`, false);
         }
         if (record.Status === 'granted' && previous?.Status !== 'granted' && this.noticePosted) {
-            this.queueEvidence(this.plan.mode === 'notify' ? 'after the notice was posted' : 'when consent was granted');
+            this.queueEvidence(grantEvidenceNote(record, this.plan.mode));
         }
     }
 
@@ -1323,6 +1323,26 @@ export function latestDecisions(record: ConsentRecord): Map<string, string> {
         if (name && (event.Decision === 'consent' || event.Decision === 'objection')) latest.set(name, event.Decision);
     }
     return latest;
+}
+
+/**
+ * What the screenshots taken when the record becomes granted were taken for.
+ * After an objection, capture resumes on a consent: the latest one recorded
+ * after the latest objection names the event ("when Bo Chen consented").
+ * Otherwise the first grant: in notify, the notice being posted.
+ */
+export function grantEvidenceNote(record: ConsentRecord, mode: PlannedMode): string {
+    const events = (record.Events ?? []).filter((event) => event.Source !== 'attestation');
+    let lastObjection = -1;
+    events.forEach((event, index) => {
+        if (event.Decision === 'objection') lastObjection = index;
+    });
+    if (lastObjection >= 0) {
+        const consents = events.slice(lastObjection + 1).filter((event) => event.Decision === 'consent' && event.ParticipantName);
+        const who = consents.length ? consents[consents.length - 1].ParticipantName : null;
+        return who ? `when ${who} consented` : 'when recording resumed';
+    }
+    return mode === 'notify' ? 'after the notice was posted' : 'when consent was granted';
 }
 
 /** Whether a display name reads as one of the participant list's placeholders, or the unknown sender. */

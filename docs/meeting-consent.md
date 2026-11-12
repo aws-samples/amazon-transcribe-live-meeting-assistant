@@ -630,8 +630,13 @@ participant list, takes a second one, and puts the chat back. The screenshots
 are taken from the meeting page itself, so nothing open in the live view covers
 them. Each is a JPEG stored in the recordings bucket under
 `lma-consent-evidence/<meeting>/` and added to the record with
-`addMeetingConsentEvidence`, with a note of what it shows and when
-(*"Meeting chat when Bo Chen objected"*). For each chat screenshot the VP then
+`addMeetingConsentEvidence`, with a note of what it shows and the event it was
+taken for: *"Meeting chat after the notice was posted"* (notify) or *"… when
+consent was granted"* (opt-in) the first time the status becomes `granted`;
+*"Meeting chat when Bo Chen objected"*; *"… after an objection for Bo Chen was
+recorded in LMA"*; and, when capture resumes after an objection, *"Meeting chat
+when Bo Chen consented"*, naming the latest participant to consent after the
+latest objection on the record. For each chat screenshot the VP then
 asks for the vision-model check (`verifyMeetingConsentEvidence`) without
 waiting for it; a participant list on its own is not checked, because the check
 reads a chat for the notice and the replies. Nor are the screenshots taken for

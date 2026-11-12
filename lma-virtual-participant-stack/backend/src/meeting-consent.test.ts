@@ -23,6 +23,7 @@ import {
     MeetingConsentFlow,
     describeWaiting,
     effectiveConsentSettings,
+    grantEvidenceNote,
     planConsent,
 } from './meeting-consent.js';
 import { normalizeParticipantName } from './consent-matcher.js';
@@ -521,6 +522,14 @@ test('notify: the objector consenting later resumes capture', async () => {
     assert.equal(h.capture.releases, 1);
     assert.ok(h.chat.includes('Live Meeting Assistant started.'));
     assert.equal(h.details[h.details.length - 1], '(cleared)');
+    assert.deepEqual(h.api.notes, [
+        'Meeting chat after the notice was posted',
+        'Participant list after the notice was posted',
+        'Meeting chat when Bo Chen objected',
+        'Participant list when Bo Chen objected',
+        'Meeting chat when Bo Chen consented',
+        'Participant list when Bo Chen consented',
+    ]);
 });
 
 test('where spoken replies are read, the objection acknowledgement gives the typed and the spoken consent', async () => {
@@ -1326,6 +1335,23 @@ test('when the Meeting Consent section cannot be read, spoken replies are not re
     assert.equal(h.flow.readsSpokenReplies, false);
     assert.ok(!h.log.includes('listen:on'));
     h.flow.stop();
+});
+
+test('the screenshots taken when the record is granted are noted for the event that granted it', () => {
+    const record = (events: Array<[string, string, string?]>): ConsentRecord => ({
+        Events: events.map(([ParticipantName, Decision, Source]) => ({ ParticipantName, Decision, Source: Source ?? 'chat' })),
+    });
+    assert.equal(grantEvidenceNote(record([]), 'notify'), 'after the notice was posted');
+    assert.equal(grantEvidenceNote(record([['Bo Chen', 'consent']]), 'opt_in'), 'when consent was granted');
+    assert.equal(
+        grantEvidenceNote(record([['Bo Chen', 'objection'], ['Cy Diaz', 'consent'], ['Bo Chen', 'consent', 'voice']]), 'notify'),
+        'when Bo Chen consented',
+    );
+    assert.equal(
+        grantEvidenceNote(record([['Bo Chen', 'consent'], ['Bo Chen', 'objection'], ['Ana Silva', 'consent', 'attestation']]), 'opt_in'),
+        'when recording resumed',
+        'an attestation is not a consent that withdraws an objection',
+    );
 });
 
 test('describeWaiting names people and counts unidentified seats', () => {
