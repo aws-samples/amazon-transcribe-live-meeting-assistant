@@ -236,7 +236,11 @@ The summary's downloads and its copy to the clipboard, under **Download** in
 the meeting page's header, add the consent record after the summary: the
 mode, rule and status, whether capture was allowed at the time of the download,
 the notice, the attestation, each participant's latest reply, the timeline, and
-each evidence image's check, followed by the note that the record is supporting
+each evidence image, described by its note with when it was captured and its
+image check (*"- Meeting chat when Bo Chen objected (screenshot captured
+2026-11-02T10:02:30.000Z). Image check: Objection found (model
+amazon.nova-lite-v1:0, confidence 0.9)"*, or *"Image check: not run"*),
+followed by the note that the record is supporting
 evidence and not a legal determination. A meeting without a consent record
 downloads as before. The email link carries the summary only.
 

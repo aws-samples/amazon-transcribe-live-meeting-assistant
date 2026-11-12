@@ -104,6 +104,28 @@ describe('meeting-consent', () => {
     expect(consentAsText(null)).toBe('');
   });
 
+  it('describes each evidence image by its note in the download', () => {
+    const text = consentAsText({
+      ...CONSENT,
+      Evidence: [
+        { ...CONSENT.Evidence[0], Note: 'Meeting chat when Bo Chen objected' },
+        {
+          EvidenceId: 'e2',
+          Kind: 'screenshot',
+          CapturedAt: '2026-11-02T10:02:31.000Z',
+          Note: 'Participant list\nwhen Bo Chen objected',
+        },
+      ],
+    });
+    expect(text).toContain(
+      '- Meeting chat when Bo Chen objected (screenshot captured 2026-11-02T10:02:30.000Z). ' +
+        'Image check: Objection found (model amazon.nova-lite-v1:0, confidence 0.9)',
+    );
+    expect(text).toContain(
+      '- Participant list when Bo Chen objected (screenshot captured 2026-11-02T10:02:31.000Z). Image check: not run',
+    );
+  });
+
   it('adds the record to the summary download only when there is one', () => {
     const meeting = { callId: 'm1', callSummaryText: 'All good.' };
     expect(getTextFileFormattedMeetingDetails(meeting)).not.toContain('CONSENT');

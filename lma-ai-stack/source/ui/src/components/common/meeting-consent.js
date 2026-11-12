@@ -220,10 +220,11 @@ export const consentAsText = (consent) => {
             item.Verification.ModelId
           }, confidence ${item.Verification.Confidence})`
         : 'not run';
-      // The check reports what the image shows, which can differ from the status.
-      lines.push(
-        `- ${item.Kind || 'screenshot'} captured ${item.CapturedAt || 'at an unknown time'}. Image check: ${check}`,
-      );
+      // What the image shows, from its note, then when it was captured; the
+      // check reports what the image shows, which can differ from the status.
+      const captured = `${item.Kind || 'screenshot'} captured ${item.CapturedAt || 'at an unknown time'}`;
+      const note = (item.Note || '').replace(/\s+/g, ' ').trim();
+      lines.push(`- ${note ? `${note} (${captured})` : captured}. Image check: ${check}`);
     });
   }
   lines.push(
