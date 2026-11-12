@@ -49,8 +49,19 @@ test('clicks a RECORDING_NOTICE action', () => {
     assert.deepEqual(d, { kind: 'click', selector: '#got-it' });
 });
 
-test('clicks an icon-only action whose text is empty', () => {
-    assert.equal(decideDialogAction(consent(), 'TEAMS', '').kind, 'click');
+test('clicks an icon-only action on a dialog that is not about media devices', () => {
+    const notice: DialogAnalysis = {
+        type: 'RECORDING_NOTICE',
+        primaryActionSelector: 'button[aria-label]',
+        message: 'This meeting is being recorded.',
+        needsHuman: false,
+    };
+    assert.equal(decideDialogAction(notice, 'ZOOM', '').kind, 'click');
+});
+
+test('escalates an icon-only action on a camera/microphone dialog', () => {
+    const d = decideDialogAction(consent(), 'TEAMS', '');
+    assert.ok(d.kind === 'escalate' && d.message.includes(NO_AUDIO_WARNING));
 });
 
 test('escalates a CONSENT dialog that has no action to click', () => {

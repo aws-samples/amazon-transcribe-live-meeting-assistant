@@ -1,5 +1,4 @@
 import { launchPersistentContext } from 'cloakbrowser';
-import { grantMeetingMediaPermissions } from './meeting-permissions.js';
 import { promises as fs, readFileSync } from 'fs';
 import Chime from './chime.js';
 import Zoom from './zoom.js';
@@ -8,6 +7,7 @@ import Teams from './teams.js';
 import TeamsSdk from './teams-sdk.js';
 import Webex from './webex.js';
 import GoogleMeet from './google-meet.js';
+import { grantMeetingMediaPermissions } from './meeting-permissions.js';
 import { details, ExitInfo, formatExitMessage, didJoinMeeting, normalizeExitTrigger } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager, beginShutdown } from './status-manager.js';

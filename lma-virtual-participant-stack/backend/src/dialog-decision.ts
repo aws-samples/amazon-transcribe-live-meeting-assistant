@@ -72,7 +72,8 @@ export function manualActionMessage(
  *
  * - An auto-click type with a button is clicked whatever the model returned
  *   for `needsHuman`, unless the button joins without audio or cannot be read.
- *   Both of those go to a human instead.
+ *   Both of those go to a human instead, as does a camera/microphone dialog
+ *   whose button has no text (an icon-only close can dismiss it without audio).
  * - An auto-click type with no button goes to a human: the dialog is blocking
  *   and the watchdog has nothing it can safely click.
  * - Any other type goes to a human when the model says one is needed, and is
@@ -91,6 +92,7 @@ export function decideDialogAction(
     if (AUTOCLICK_TYPES.has(analysis.type)) {
         const selector = analysis.primaryActionSelector;
         if (!selector || actionText === null || isNoAudioAction(actionText)) return escalate();
+        if (!actionText && isMediaPermissionDialog(analysis)) return escalate();
         return { kind: 'click', selector };
     }
     return analysis.needsHuman ? escalate() : { kind: 'ignore' };
