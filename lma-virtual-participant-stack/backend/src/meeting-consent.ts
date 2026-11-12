@@ -376,6 +376,14 @@ export class MeetingConsentFlow {
 
     private settingsRead: ConsentSettings | null = null;
 
+    /**
+     * The Meeting Consent section's Keep evidence screenshots, as the consent
+     * API answers it; null until read. The resolver deletes an image once its
+     * check is stored when this is off, so an image that is not checked would
+     * otherwise be kept: see captureEvidence.
+     */
+    private keepEvidenceScreenshots: boolean | null = null;
+
     private noticeRepostTimer: ReturnType<typeof setTimeout> | null = null;
 
     private rosterSyncTimer: ReturnType<typeof setTimeout> | null = null;
@@ -622,6 +630,7 @@ export class MeetingConsentFlow {
             const phrases = state.settings;
             if (phrases?.ConsentPhrases?.length) this.settings = { ...this.settings, consentPhrases: phrases.ConsentPhrases };
             if (phrases?.ObjectionPhrases?.length) this.settings = { ...this.settings, objectionPhrases: phrases.ObjectionPhrases };
+            if (typeof phrases?.KeepEvidenceScreenshots === 'boolean') this.keepEvidenceScreenshots = phrases.KeepEvidenceScreenshots;
         } catch (error) {
             log.warn(`[consent] could not read the consent settings back; using the configuration's phrases: ${String(error)}`);
         }
@@ -1272,8 +1281,22 @@ export class MeetingConsentFlow {
         await this.apiChain;
     }
 
+    /**
+     * Whether an image that will not be checked may be stored. Only where the
+     * deployment keeps evidence screenshots: where it does not, an image is
+     * deleted once its check is stored, and one that is never checked would
+     * outlive that. Not when the setting could not be read.
+     */
+    private get keepsUncheckedEvidence(): boolean {
+        return this.keepEvidenceScreenshots === true;
+    }
+
     private async captureEvidence(note: string, check: boolean): Promise<void> {
         if (!this.io?.screenshots || !this.started) return;
+        if (!check && !this.keepsUncheckedEvidence) {
+            log.info(`[consent] no screenshot ${note}: evidence screenshots are kept only until checked, and these would not be`);
+            return;
+        }
         if (this.evidenceUsed >= MAX_EVIDENCE_IMAGES) {
             log.info(`[consent] no screenshot ${note}: this meeting already has ${MAX_EVIDENCE_IMAGES}`);
             return;
@@ -1287,6 +1310,10 @@ export class MeetingConsentFlow {
         }
         for (const shot of shots) {
             if (this.evidenceUsed >= MAX_EVIDENCE_IMAGES) break;
+            // The check reads a chat for the notice and the replies; a
+            // participant list alone would always come back inconclusive.
+            const checked = check && shot.view !== 'participants';
+            if (!checked && !this.keepsUncheckedEvidence) continue;
             const key = consentEvidenceKey(this.deps.callId(), Date.parse(shot.capturedAt) || this.clock(), shot.view);
             try {
                 await this.deps.upload(key, shot.image);
@@ -1299,9 +1326,7 @@ export class MeetingConsentFlow {
             const record = await this.callApi((api) => api.addEvidence({ S3Key: key, CapturedAt: shot.capturedAt, Note: `${what} ${note}` }));
             const evidenceId = record?.Evidence?.find((entry) => entry.S3Key === key)?.EvidenceId;
             log.info(`[consent] evidence stored: ${key}${evidenceId ? ` (${evidenceId})` : ''}`);
-            // The check reads a chat for the notice and the replies; a
-            // participant list alone would always come back inconclusive.
-            if (check && evidenceId && shot.view !== 'participants' && this.api) {
+            if (checked && evidenceId && this.api) {
                 void this.api.verifyEvidence(evidenceId);
             }
         }

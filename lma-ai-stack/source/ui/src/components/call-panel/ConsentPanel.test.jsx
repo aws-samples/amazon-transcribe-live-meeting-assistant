@@ -141,6 +141,28 @@ describe('ConsentPanel', () => {
     expect(screen.queryByText('Check with model')).not.toBeInTheDocument();
   });
 
+  it('shows a check that failed because the automatic check deleted the image as the deleted state', async () => {
+    const state = stateWith({ verifyEvidence: vi.fn().mockResolvedValue('the evidence image could not be read') });
+    const { rerender } = render(<ConsentPanel state={state} canEdit isOwner />);
+    fireEvent.click(screen.getByText('Check with model'));
+    await waitFor(() => expect(screen.getByText('the evidence image could not be read')).toBeInTheDocument());
+    const checked = {
+      ...CONSENT,
+      Evidence: [
+        {
+          ...CONSENT.Evidence[0],
+          SignedUrl: null,
+          ImageDeletedAt: '2026-11-02T10:03:00.000Z',
+          Verification: { Verdict: 'inconclusive', Confidence: 0.4, ModelId: 'amazon.nova-lite-v1:0' },
+        },
+      ],
+    };
+    rerender(<ConsentPanel state={{ ...state, consent: checked }} canEdit isOwner />);
+    expect(screen.getByText('Image deleted after its check')).toBeInTheDocument();
+    expect(screen.queryByText('the evidence image could not be read')).not.toBeInTheDocument();
+    expect(screen.queryByText('Check again')).not.toBeInTheDocument();
+  });
+
   it('says when an image has expired', () => {
     render(<ConsentPanel state={stateWith()} canEdit />);
     fireEvent.error(screen.getByRole('img'));

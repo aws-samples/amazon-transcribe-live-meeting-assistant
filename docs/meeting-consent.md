@@ -152,7 +152,7 @@ the `ConfigurationPreset` stack parameter; see
 | Consent phrases | Comma-separated phrases read as consent | I consent, I agree, I accept |
 | Objection phrases | Comma-separated phrases read as an objection | I object, I do not consent, I don't consent, I do not agree, I don't agree, do not record, don't record, stop recording |
 | Allow a different choice per meeting | Whether a meeting may be started with another mode, rule or notice | On |
-| Keep evidence screenshots | Whether evidence images stay with the meeting, or are deleted once checked | On |
+| Keep evidence screenshots | Whether evidence images stay with the meeting. Off: each image is deleted once its check is stored, and the Virtual Participant stores only images it has checked automatically, so it keeps no participant-list screenshots and none for objections recorded in LMA or said aloud (see [Evidence screenshots](#evidence-screenshots)) | On |
 | Evidence check model | The Amazon Bedrock vision model that checks evidence images; see [Checking evidence with a vision model](#checking-evidence-with-a-vision-model) | Amazon Nova Lite |
 | Streaming clients without a consent step | What the WebSocket transcriber does, in Notify or Opt-in, with a meeting from a client that shows no consent step: **Accept with a warning** (captured as before, with no consent record, and a warning logged) or **Refuse** (not recorded or transcribed, and the client is told why). See [Clients without a consent step](#clients-without-a-consent-step) | Accept with a warning |
 | Virtual Participant leaves after an objection | Whether a Virtual Participant leaves the meeting after a participant objects, in the chat or aloud, rather than staying in it without recording | Off |
@@ -648,9 +648,26 @@ an objection that was not made in the chat: one recorded in LMA (**Record an
 objection**, or `recordMeetingConsentEvent` through the API) or one said aloud.
 Such an objection never appears in the chat as a participant's reply, and LMA's
 own announcement of it is not read as one, so a check of that chat could only
-report what else the chat shows, such as an earlier consent. Those images are
-kept and listed like the others, and the owner or an Admin can still check them
-with **Check with model**. Neither the screenshots nor the
+report what else the chat shows, such as an earlier consent. With **Keep
+evidence screenshots** on, those images are kept and listed like the others,
+and the owner or an Admin can still check them with **Check with model**.
+
+With **Keep evidence screenshots** off, the VP stores only the screenshots it
+asks to have checked: the chat screenshot (or, where the chat and the
+participant list are on screen together, the one screenshot of both) after the
+notice, when consent is granted or
+resumes, and when an objection is typed in the chat. It stores no participant
+list screenshot, and nothing for an objection recorded in LMA or said aloud,
+because each image is deleted once its check is stored and these would never
+be checked. Each stored image is deleted after its automatic check, and the
+entry keeps the check, so the meeting page shows it as deleted after its check
+and offers no **Check with model**. A manual check started on the meeting page
+just before the automatic check deleted the image fails, and the entry then
+shows the same deleted state. The VP reads the setting from the consent API
+when consent starts; if it cannot, it treats the setting as off. An image whose
+automatic check fails, or that was uploaded but could not be added to the
+record, stays until the meeting is deleted or the lifecycle rule removes it.
+Neither the screenshots nor the
 check ever hold up the meeting: a failure is logged and the meeting carries on.
 A VP keeps at most 24 images per meeting, below the record's 30, and takes no
 more after that. Before leaving after an objection it waits up to 30 seconds for
@@ -971,7 +988,9 @@ results from them, and choose a larger model if the default reads them poorly.
 **Keeping or deleting the image.** With **Keep evidence screenshots** on (the
 default), the image stays with the meeting until the meeting is deleted. With it
 off, the image is deleted as soon as its check is stored, and the entry keeps
-the check and `ImageDeletedAt`; such an entry cannot be checked again. If the
+the check and `ImageDeletedAt`; such an entry cannot be checked again. The
+Virtual Participant then stores only images it has checked automatically (see
+[Evidence screenshots](#evidence-screenshots)). If the
 deletion fails, the check is still stored and the image is left for the
 meeting's deletion or the lifecycle rule to remove. If the image is deleted but
 `ImageDeletedAt` cannot be recorded, the failure is logged with the evidence

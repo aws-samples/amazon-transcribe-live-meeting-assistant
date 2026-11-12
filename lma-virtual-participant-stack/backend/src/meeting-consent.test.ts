@@ -101,9 +101,16 @@ class FakeApi implements ConsentApi {
         return {
             record: this.record ? JSON.parse(JSON.stringify(this.record)) : null,
             captureAllowed: this.record?.CaptureAllowed === true,
-            settings: { ConsentPhrases: ['I consent', 'I agree'], ObjectionPhrases: ['I object', 'I do not consent', 'stop recording'] },
+            settings: {
+                ConsentPhrases: ['I consent', 'I agree'],
+                ObjectionPhrases: ['I object', 'I do not consent', 'stop recording'],
+                ...(this.keepEvidence === undefined ? {} : { KeepEvidenceScreenshots: this.keepEvidence }),
+            },
         };
     }
+
+    /** The section's Keep evidence screenshots as the API answers it; undefined leaves it out. */
+    keepEvidence: boolean | undefined = true;
 
     noticeTexts: string[] = [];
 
@@ -613,6 +620,37 @@ test('evidence of an objection recorded in LMA is kept but not checked automatic
     ]);
     assert.equal(h.api.verified.length, verified, 'the chat cannot show an objection made outside it');
 });
+
+for (const [what, keep] of [
+    ['off', false],
+    ['not answered by the API', undefined],
+] as const) {
+    test(`with Keep evidence screenshots ${what}, only screenshots that are checked are stored`, async () => {
+        const api = new FakeApi({ mode: 'notify', rule: 'each_participant' });
+        api.keepEvidence = keep;
+        const h = await harness({ deployment: { mode: 'notify' }, api });
+        // The notice: the chat screenshot is checked, the participant list would not be.
+        assert.deepEqual(h.api.notes, ['Meeting chat after the notice was posted']);
+        assert.equal(h.uploads.length, 1);
+        assert.equal(h.api.verified.length, 1);
+
+        await h.flow.handleChat('Bo Chen', 'I object');
+        await h.settle();
+        assert.deepEqual(h.api.notes.slice(1), ['Meeting chat when Bo Chen objected']);
+        assert.equal(h.api.verified.length, 2, 'every stored image is checked, so none outlives its check');
+
+        h.api.objectFromPage('Cy Diaz');
+        await h.flow.pollOnce();
+        await h.settle();
+        h.advance(60_000);
+        assert.equal(h.flow.handleSpeech('Dee Eng', 'LMA, I object'), 'objection');
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        await h.settle();
+        assert.equal(h.uploads.length, 2, 'nothing for objections made outside the chat, which are not checked');
+        assert.equal(h.api.notes.length, 2);
+        assert.equal(h.api.verified.length, 2);
+    });
+}
 
 test('evidence of an objection said aloud is kept but not checked automatically', async () => {
     const h = await harness({ deployment: { mode: 'notify' } });

@@ -51,6 +51,7 @@ export interface ConsentSettingsView {
     ConsentPhrases?: string[] | null;
     ObjectionPhrases?: string[] | null;
     AllowPerMeetingOverride?: boolean | null;
+    KeepEvidenceScreenshots?: boolean | null;
 }
 
 export interface ConsentState {
@@ -184,7 +185,7 @@ export function createConsentApi(callId: string, send: GraphqlSender): ConsentAp
         get: async () => {
             const query = `query Consent($CallId: ID!) { getMeetingConsent(CallId: $CallId) {
                 CallId CaptureAllowed Consent { ${CONSENT_RECORD_FIELDS} }
-                Settings { Mode Rule ConsentPhrases ObjectionPhrases AllowPerMeetingOverride } } }`;
+                Settings { Mode Rule ConsentPhrases ObjectionPhrases AllowPerMeetingOverride KeepEvidenceScreenshots } } }`;
             const data = await send(query, { CallId: callId });
             const state = (data.getMeetingConsent || {}) as {
                 Consent?: ConsentRecord | null;

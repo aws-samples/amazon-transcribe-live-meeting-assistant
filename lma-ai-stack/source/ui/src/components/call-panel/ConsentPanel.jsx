@@ -134,7 +134,9 @@ const EvidenceItem = ({ item, onVerify, canVerify }) => {
             {verification ? 'Check again' : 'Check with model'}
           </Button>
         )}
-        {failure && <StatusIndicator type="error">{failure}</StatusIndicator>}
+        {/* A check that raced the automatic one, which then deleted the image,
+            fails; the entry now shows the image as deleted after its check. */}
+        {failure && !item.ImageDeletedAt && <StatusIndicator type="error">{failure}</StatusIndicator>}
       </SpaceBetween>
     </Box>
   );
