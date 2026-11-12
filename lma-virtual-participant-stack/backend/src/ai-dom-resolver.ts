@@ -53,6 +53,8 @@ export interface DialogAnalysis {
   primaryActionSelector?: string;
   message: string;
   needsHuman: boolean;
+  /** True when the dialog asks about camera/microphone access or devices. */
+  mediaPermission?: boolean;
 }
 
 /**
@@ -626,10 +628,15 @@ const DIALOG_PROMPT = (platform: Platform, dialogs: { html: string }[]): string 
     '  "type": "CONSENT" | "RECORDING_NOTICE" | "CAPTCHA" | "SSO_REDIRECT" | "LOGIN_REQUIRED" | "BLOCKED" | "OTHER",',
     '  "primaryActionSelector": "<CSS selector for the button to click to dismiss/accept, or null if a human is needed>",',
     '  "message": "<one sentence describing the dialog for a human user>",',
-    '  "needsHuman": <true if this requires manual user action (CAPTCHA / 2FA / SSO / blocked), else false>',
+    '  "needsHuman": <true if this requires manual user action (CAPTCHA / 2FA / SSO / blocked), else false>,',
+    '  "mediaPermission": <true if the dialog is about camera/microphone access or audio/video devices, else false>',
     '}',
     '',
     'CONSENT and RECORDING_NOTICE should always have a primaryActionSelector and needsHuman=false.',
+    'A camera/microphone permission dialog is CONSENT. Its primaryActionSelector must be the action that keeps',
+    'meeting audio (e.g. "Allow", "Use audio", "Join with computer audio"). Never choose an action that continues or',
+    'joins without audio (e.g. "Continue without audio or video"); if that is the only action, return',
+    'primaryActionSelector=null.',
     'CAPTCHA, SSO_REDIRECT, LOGIN_REQUIRED, BLOCKED should set needsHuman=true.',
     'If unsure, return type=OTHER, needsHuman=true.',
   ].join('\n');
@@ -764,6 +771,7 @@ export async function analyzeUnknownDialog(
           : undefined,
       message: typeof json.message === 'string' ? json.message : '',
       needsHuman: !!json.needsHuman,
+      mediaPermission: !!json.mediaPermission,
     };
     return result;
   } catch (err) {
@@ -926,6 +934,39 @@ export async function analyzePageAction(
  * scrolled to (e.g. Zoom's right-column form on a wide layout). Falls
  * back to a normal page.click if the scroll-then-click flow fails.
  */
+/**
+ * Visible text of the element `selector` resolves to (label, aria-label,
+ * title, value), collapsed to single spaces. Resolves the selector the same way
+ * scrollIntoViewAndClick does, so it reads the element that would be clicked.
+ * Null when the selector matches nothing or cannot be evaluated.
+ */
+export async function readActionText(page: Page, selector: string): Promise<string | null> {
+  try {
+    const handle = (await querySelectorAllSafe(page, selector))[0];
+    if (!handle) return null;
+    return await withCdpTimeout(
+      handle.evaluate((el: Element) => {
+        const h = el as HTMLElement;
+        const parts = [
+          h.innerText,
+          h.getAttribute('aria-label'),
+          h.getAttribute('title'),
+          (h as HTMLInputElement).value,
+        ];
+        return parts
+          .filter((p) => typeof p === 'string' && p.trim())
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }),
+      2000,
+      `readActionText(${selector})`,
+    );
+  } catch {
+    return null;
+  }
+}
+
 export async function scrollIntoViewAndClick(
   page: Page,
   selector: string,

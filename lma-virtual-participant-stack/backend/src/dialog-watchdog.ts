@@ -8,7 +8,11 @@
  * handlers haven't dealt with it), it asks Claude (via vision + DOM
  * snapshot) to classify the dialog. The action depends on the type:
  *
- *   - CONSENT / RECORDING_NOTICE  → click the primary action (auto-dismiss)
+ *   - CONSENT / RECORDING_NOTICE  → click the primary action (auto-dismiss),
+ *                                  whatever the model said about needsHuman.
+ *                                  Escalated instead when there is no action,
+ *                                  the click fails, or the action would join
+ *                                  without meeting audio (see dialog-decision.ts).
  *   - CAPTCHA / LOGIN_REQUIRED / SSO_REDIRECT / BLOCKED → escalate via
  *                                  setManualActionRequired so the React UI
  *                                  shows the VNC takeover banner.
@@ -24,9 +28,11 @@ import { Page } from 'playwright-core';
 import {
     analyzeUnknownDialog,
     isResolverEnabled,
+    readActionText,
     scrollIntoViewAndClick,
 } from './ai-dom-resolver.js';
 import { details } from './details.js';
+import { decideDialogAction, manualActionMessage } from './dialog-decision.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('dialog-watchdog');
@@ -43,8 +49,6 @@ const PLATFORM_DIALOG_SELECTORS: Record<string, string[]> = {
     CHIME: ['[data-test-id*="modal"]'],
     GOOGLE_MEET: ['[aria-modal="true"]'],
 };
-
-const AUTOCLICK_TYPES = new Set(['CONSENT', 'RECORDING_NOTICE']);
 
 interface WatchdogOpts {
     platform: 'ZOOM' | 'TEAMS' | 'WEBEX' | 'CHIME' | 'GOOGLE_MEET';
@@ -131,25 +135,39 @@ export function startDialogWatchdog(page: Page, opts: WatchdogOpts): () => void 
         if (!analysis) return true;
         log.info(`[dialog-watchdog ${opts.platform}] ${analysis.type}: ${analysis.message}`);
 
-        if (
-            !analysis.needsHuman &&
-            analysis.primaryActionSelector &&
-            AUTOCLICK_TYPES.has(analysis.type)
-        ) {
-            const ok = await scrollIntoViewAndClick(page, analysis.primaryActionSelector);
-            if (ok) {
-                log.info(`[dialog-watchdog ${opts.platform}] auto-dismissed via ${analysis.primaryActionSelector}`);
-            } else {
-                log.warn(`[dialog-watchdog ${opts.platform}] click failed on ${analysis.primaryActionSelector}`);
-            }
-        } else if (analysis.needsHuman && details.invite.virtualParticipantId) {
+        const escalate = async (message: string): Promise<void> => {
+            log.info(`[dialog-watchdog ${opts.platform}] escalating ${analysis.type}: ${message}`);
+            if (!details.invite.virtualParticipantId) return;
             const { createStatusManager } = await import('./status-manager.js');
             await createStatusManager(details.invite.virtualParticipantId).setManualActionRequired(
                 analysis.type,
-                analysis.message || `Manual action required in the ${opts.platform} web client.`,
+                message,
                 manualActionTimeoutSec,
             );
             escalated = true;
+        };
+
+        const actionText = analysis.primaryActionSelector
+            ? await readActionText(page, analysis.primaryActionSelector)
+            : null;
+        const decision = decideDialogAction(analysis, opts.platform, actionText);
+        if (decision.kind === 'click') {
+            const ok = await scrollIntoViewAndClick(page, decision.selector);
+            if (ok) {
+                log.info(
+                    `[dialog-watchdog ${opts.platform}] auto-dismissed via ${decision.selector} ("${actionText}")`,
+                );
+            } else {
+                log.warn(`[dialog-watchdog ${opts.platform}] click failed on ${decision.selector}`);
+                await escalate(manualActionMessage(analysis, opts.platform, actionText));
+            }
+        } else if (decision.kind === 'escalate') {
+            if (actionText) {
+                log.info(
+                    `[dialog-watchdog ${opts.platform}] not clicking ${analysis.primaryActionSelector} ("${actionText}")`,
+                );
+            }
+            await escalate(decision.message);
         }
         return true;
     };

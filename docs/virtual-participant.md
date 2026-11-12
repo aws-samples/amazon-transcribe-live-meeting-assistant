@@ -585,7 +585,8 @@ The banner is dismissible — dismissed alerts are remembered in `localStorage` 
 Every platform handler (Zoom, Teams, Webex, Chime, Google Meet) wraps its hard-coded CSS selectors in an AI fallback resolver. When a primary selector misses (because the meeting platform shipped a UI change), the resolver asks Claude (Bedrock, vision-capable) to find the right element by reading a compact DOM summary plus a screenshot of the current page. Successful resolutions are cached in a shared `DomSelectorCache` DynamoDB table (30-day TTL on `lastUsedAt`) so the cost is paid only once per platform UI change.
 
 The same resolver classifies unknown popup dialogs:
-- `CONSENT` / `RECORDING_NOTICE` → auto-clicked by the VP.
+- `CONSENT` / `RECORDING_NOTICE` → auto-clicked by the VP. It is escalated to `MANUAL_ACTION_REQUIRED` instead when the resolver finds no button to click, the click fails, or the button would join without meeting audio (for example Teams' "Continue without audio or video"), which the VP never clicks.
+  - On a camera/microphone dialog, the manual-action message tells you not to choose "Continue without audio or video": the VP would stay in the meeting but capture no audio, so there would be no transcript and no recording. The VP grants camera and microphone to the meeting sites at launch, so this dialog normally does not appear.
 - `CAPTCHA` / `LOGIN_REQUIRED` / `SSO_REDIRECT` / `BLOCKED` → escalated to `MANUAL_ACTION_REQUIRED` (see above) so a human can solve it via the live VNC viewer.
 
 Disable the AI fallback by setting `BedrockDomResolverModelId` to an empty string at deploy time — the VP reverts to hardcoded-selector-only behavior.

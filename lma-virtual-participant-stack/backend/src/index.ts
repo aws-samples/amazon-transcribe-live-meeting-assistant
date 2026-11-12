@@ -1,4 +1,5 @@
 import { launchPersistentContext } from 'cloakbrowser';
+import { grantMeetingMediaPermissions } from './meeting-permissions.js';
 import { promises as fs, readFileSync } from 'fs';
 import Chime from './chime.js';
 import Zoom from './zoom.js';
@@ -455,6 +456,14 @@ const main = async (): Promise<void> => {
     // default here — it makes every transient wait hang instead of failing fast.
     context.setDefaultTimeout(30_000);
 
+    // Grant camera/microphone to the meeting origins for every join, before
+    // warmup or the meeting page loads, so a fresh profile does not get the
+    // meeting client's own device-permission dialog. See meeting-permissions.ts.
+    const grantedOrigins = await grantMeetingMediaPermissions(context, (origin, err) =>
+        log.warn(`[browser] camera/microphone grant failed for ${origin}:`, err),
+    );
+    log.info(`✓ Camera and microphone permissions granted for ${grantedOrigins.length} meeting origins`);
+
     await new Promise(resolve => setTimeout(resolve, 2000));
     log.info('✓ Chrome launched with remote debugging on port 9222');
 
@@ -682,13 +691,11 @@ const main = async (): Promise<void> => {
             }
             if (!simliAvatar.isConnected()) return;
             try {
-                // 1. Grant camera+mic permissions at context level for all meeting domains
-                for (const origin of ['https://zoom.us', 'https://app.zoom.us', 'https://app.chime.aws', 'https://teams.microsoft.com', 'https://web.webex.com', 'https://meet.google.com']) {
-                    await context.grantPermissions(['camera', 'microphone'], { origin }).catch(() => {});
-                }
-                log.info('✓ Camera and microphone permissions granted for meeting platforms');
-
-                // 2. Inject the getUserMedia override AND start the Node-side
+                // Camera/microphone permissions for the meeting origins were
+                // already granted right after the browser launched (see
+                // grantMeetingMediaPermissions), for every join.
+                //
+                // Inject the getUserMedia override AND start the Node-side
                 // WebRTC bridge poll loop (both live inside
                 // injectGetUserMediaOverride). The poll loop scans page.frames()
                 // and services any frame that calls getUserMedia({video}) —
