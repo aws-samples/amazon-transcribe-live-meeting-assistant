@@ -64,7 +64,7 @@ from pathlib import Path
 
 #: Areas, with the one-line description the job summary shows.
 AREAS: dict[str, str] = {
-    "docs": "documentation, CHANGELOG, READMEs, images and the docs site",
+    "docs": "documentation, CHANGELOG, READMEs, images and the docs site's pages",
     "ui": "React UI (lma-ai-stack/source/ui)",
     "lambdas": "Python Lambda functions and the meeting-assist stack",
     "layers": "Lambda layers shared by the Lambda functions",
@@ -82,18 +82,53 @@ AREAS: dict[str, str] = {
     "test_fixtures": "test-fixtures/ shared by the UI and the Python suites",
     "integ_plumbing": "integration-test machinery (integ-tests/)",
     "pr_review": "advisory AI review harness (scripts/pr_review)",
-    "agent_instructions": "CLAUDE.md and the .claude/ skill files",
+    "agent_instructions": "CLAUDE.md, AGENTS.md and .claude/ at any depth (instructions)",
+    "docs_site": "the docs site's build: its package files, scripts and Astro config",
     "demo_recorder": "product demo recorder and its helpers",
     "python_tooling": "Python generators the AI stack static tests run",
     "ai_stack_tests": "AI stack static tests (lma-ai-stack/test)",
+    "ai_stack_inputs": "files elsewhere that the AI stack static tests scan wholesale",
     "no_ci_coverage": "files no step of this job builds or tests",
     "workflow": "the CI configuration itself",
     "shared": "build configuration every suite depends on",
     "unknown": "paths no rule classifies",
 }
 
-#: Any of these runs every step.
-FULL_RUN_AREAS = frozenset({"workflow", "shared", "unknown"})
+#: Any of these runs every step. ``docs_site`` is here because no step of the job builds
+#: or tests the docs site, and its package files are dependencies like any other.
+FULL_RUN_AREAS = frozenset({"workflow", "shared", "unknown", "docs_site"})
+
+#: File names Claude Code loads as instructions wherever they sit, and the directory
+#: it loads skills, agents and settings from. The same set as ``_is_instruction_path``
+#: in ``scripts/pr_review/ai_pr_review.py``.
+INSTRUCTION_NAMES = frozenset({"CLAUDE.md", "AGENTS.md"})
+
+#: What counts as documentation inside ``docs-site/``: its pages and its media. The
+#: rest of that directory (package files, setup scripts, Astro config and plugins) is
+#: the site's build.
+DOCS_SITE_PAGE_SUFFIXES = (
+    ".md",
+    ".mdx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".webp",
+    ".ico",
+    ".mp4",
+    ".webm",
+)
+
+
+def is_instruction_path(path: str) -> bool:
+    """Whether ``path`` is a file an agent loads as instructions.
+
+    Any ``CLAUDE.md`` or ``AGENTS.md`` at any depth, and anything under a ``.claude/``
+    directory at any depth. Never documentation, whatever directory it sits in.
+    """
+    parts = path.split("/")
+    return parts[-1] in INSTRUCTION_NAMES or ".claude" in parts[:-1]
 
 
 @dataclass(frozen=True)
@@ -152,9 +187,19 @@ VP = "lma-virtual-participant-stack"
 TRANSCRIBER = "lma-websocket-transcriber-stack"
 ASR = "lma-asr-microvm-stack"
 
-#: Ordered; the FIRST match is a path's primary area. Documentation comes first so a
-#: README inside a stack is documentation rather than that stack's code.
+#: Ordered; the FIRST match is a path's primary area. Instruction files come first, so
+#: a ``docs/CLAUDE.md`` or a ``.claude/skills/<name>/README.md`` is never documentation.
+#: Documentation comes next, so a README inside a stack is documentation rather than
+#: that stack's code.
 PRIMARY_RULES: tuple[Rule, ...] = _rules(
+    # --- agent instructions, at any depth ------------------------------------
+    ("**/CLAUDE.md", "agent_instructions"),
+    ("**/AGENTS.md", "agent_instructions"),
+    ("**/.claude/**", "agent_instructions"),
+    (".cline/**", "agent_instructions"),
+    (".clinerules", "agent_instructions"),
+    # The review harness, README included: it is what the AI review runs.
+    ("scripts/pr_review/**", "pr_review"),
     # --- documentation -------------------------------------------------------
     ("CHANGELOG.md", "docs"),
     ("CONTRIBUTING.md", "docs"),
@@ -167,7 +212,9 @@ PRIMARY_RULES: tuple[Rule, ...] = _rules(
     ("**/README_*.md", "docs"),
     ("docs/**", "docs"),
     ("images/**", "docs"),
-    ("docs-site/**", "docs"),
+    # Only the docs site's pages and media; the rest of it is the site's build.
+    *((f"docs-site/**/*{suffix}", "docs") for suffix in DOCS_SITE_PAGE_SUFFIXES),
+    ("docs-site/**", "docs_site"),
     ("threat-modeling/**", "docs"),
     # The AI stack's redirect stubs, its images and its PR template.
     ("lma-ai-stack/*.md", "docs"),
@@ -231,13 +278,7 @@ PRIMARY_RULES: tuple[Rule, ...] = _rules(
     ("lib/**", "sdk_cli"),
     ("test-fixtures/**", "test_fixtures"),
     ("integ-tests/**", "integ_plumbing"),
-    # --- review harness, agent instructions, demo recorder, tooling ----------
-    ("scripts/pr_review/**", "pr_review"),
-    ("CLAUDE.md", "agent_instructions"),
-    ("AGENTS.md", "agent_instructions"),
-    (".claude/**", "agent_instructions"),
-    (".cline/**", "agent_instructions"),
-    (".clinerules", "agent_instructions"),
+    # --- demo recorder and tooling -------------------------------------------
     ("scripts/ux_recorder*.py", "demo_recorder"),
     ("scripts/ux_test_session.py", "demo_recorder"),
     ("scripts/demo_storyboards.yaml", "demo_recorder"),
@@ -305,6 +346,12 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # tests and the SDK's publish tests. (The demo recorder's session helper reads it
     # too; that step takes the whole `templates` area.)
     ("lma-main.yaml", ("asr", "lambdas", "sdk_cli")),
+    # The AI stack static tests scan every source file under utilities/ for
+    # createVirtualParticipant selections (test_shared_with_access.py), and check the
+    # anchors of every Markdown link into the parameters page in every *.md in the
+    # repository (test_cloudformation_parameters_doc.py).
+    ("utilities/**", "ai_stack_inputs"),
+    ("**/*.md", "ai_stack_inputs"),
 )
 
 
@@ -354,6 +401,7 @@ STEPS: dict[str, Step] = {
     "ai_stack": _step(
         "AI stack static tests",
         "ai_stack_tests",
+        "ai_stack_inputs",
         "ui",
         "lambdas",
         "layers",
@@ -417,10 +465,12 @@ def docs_only(paths: Iterable[str]) -> bool:
 
     Primary rather than all areas: ``docs/virtual-participant.md`` also runs the VP
     tests (they read it), but it is still a documentation change. This is the test the
-    advisory AI review uses to decide that a new head needs no new model call.
+    advisory AI review uses to decide that a new head needs no new model call, so an
+    instruction file is never documentation here, even if a rule above were reordered:
+    a change to what an agent or the reviewer is told counts as a code change.
     """
     listed = [p for p in (q.strip() for q in paths) if p]
-    return all(primary_area(p) == ("docs",) for p in listed)
+    return all(primary_area(p) == ("docs",) and not is_instruction_path(p) for p in listed)
 
 
 @dataclass

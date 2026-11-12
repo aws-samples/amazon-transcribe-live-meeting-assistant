@@ -2516,11 +2516,20 @@ def compose_carry_over(
     blocking = blocking_findings(source.body)
     if blocking:
         quoted = "\n".join(blocking[:10])
+        overlap = sorted({path for path in changed for line in blocking if path in line})
+        if overlap:
+            named = ", ".join(f"`{path}`" for path in overlap)
+            overlap_note = (
+                f" Of the files listed above, these are named by a blocking finding, so "
+                f"check whether this push addressed it: {named}."
+            )
+        else:
+            overlap_note = " None of the files listed above is named by one of them."
         caution = (
             f"⚠️ **That review has {len(blocking)} 🔴 Blocking finding(s). Carrying it "
             f"over does not resolve them**; they still apply to this head unless the "
-            f"files they name are among those listed above. Their first lines, from "
-            f"that review:\n\n{quoted}\n\n"
+            f"files they name are among those listed above.{overlap_note} Their first "
+            f"lines, from that review:\n\n{quoted}\n\n"
         )
     elif "❌" in verdict or "block" in verdict.lower():
         caution = (
@@ -2568,6 +2577,13 @@ def try_carry_over(
     )
     if changed is None:
         print(f"  cannot compare with the reviewed head {source.sha[:8]}; reviewing in full")
+        return None
+    # Checked here as well as by the classifier, so a target branch whose classifier
+    # predates the rule still never carries a review over an instruction file: a
+    # change to what an agent or this review is told is reviewed like code.
+    instructions = [path for path in changed if _is_instruction_path(path)]
+    if instructions:
+        print(f"  instruction files changed ({', '.join(instructions[:5])}); reviewing in full")
         return None
     if not classifier.docs_only(changed):
         return None
