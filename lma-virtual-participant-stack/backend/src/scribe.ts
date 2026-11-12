@@ -185,7 +185,11 @@ export function transcribeLanguageParams(): {
         .map((s) => s.trim())
         .filter((s) => s.length > 0)
         .join(',');
-    const preferredLang = (details.transcribePreferredLanguage || '').trim();
+    // 'None' is the stack parameter's "not set" value (its default), and the
+    // Configuration page can store it too; Transcribe accepts only a language
+    // code here, so treat it as unset, as the WebSocket transcriber does.
+    const rawPreferredLang = (details.transcribePreferredLanguage || '').trim();
+    const preferredLang = /^none$/i.test(rawPreferredLang) ? '' : rawPreferredLang;
 
     if (langCode === 'identify-language' || langCode === 'identify-multiple-languages') {
         if (!langOptions) {
