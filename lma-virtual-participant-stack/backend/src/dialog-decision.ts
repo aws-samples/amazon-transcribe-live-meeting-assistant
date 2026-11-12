@@ -70,14 +70,16 @@ export function manualActionMessage(
  * `analysis.primaryActionSelector` (label, aria-label, title), or null when
  * that element could not be found or read.
  *
- * - An auto-click type with a button is clicked whatever the model returned
- *   for `needsHuman`, unless the button joins without audio or cannot be read.
- *   Both of those go to a human instead, as does a camera/microphone dialog
- *   whose button has no text (an icon-only close can dismiss it without audio).
- * - An auto-click type with no button goes to a human: the dialog is blocking
- *   and the watchdog has nothing it can safely click.
- * - Any other type goes to a human when the model says one is needed, and is
- *   otherwise left alone.
+ * - An auto-click type with a readable button is clicked whatever the model
+ *   returned for `needsHuman`, except that a button that joins without audio
+ *   is never clicked: that dialog goes to a human.
+ * - A camera/microphone dialog the watchdog cannot safely answer (no button, a
+ *   button it cannot read, or an unlabeled one such as an icon-only close,
+ *   which can dismiss it without audio) goes to a human. It blocks the join.
+ * - Any other dialog the watchdog cannot click goes to a human only when the
+ *   model says one is needed, and is otherwise left alone. That keeps an
+ *   in-meeting notice without a usable button from changing a joined VP's
+ *   status.
  */
 export function decideDialogAction(
     analysis: DialogAnalysis,
@@ -90,10 +92,27 @@ export function decideDialogAction(
     });
 
     if (AUTOCLICK_TYPES.has(analysis.type)) {
+        if (isNoAudioAction(actionText)) return escalate();
+        const media = isMediaPermissionDialog(analysis, actionText);
         const selector = analysis.primaryActionSelector;
-        if (!selector || actionText === null || isNoAudioAction(actionText)) return escalate();
-        if (!actionText && isMediaPermissionDialog(analysis)) return escalate();
-        return { kind: 'click', selector };
+        const readable = !!selector && actionText !== null;
+        if (readable && !(media && !actionText)) return { kind: 'click', selector: selector as string };
+        if (media) return escalate();
     }
     return analysis.needsHuman ? escalate() : { kind: 'ignore' };
+}
+
+/**
+ * What to do when the watchdog's click on a dialog failed. A camera/microphone
+ * dialog goes to a human, because it blocks the join; any other dialog is left
+ * alone, as before the click was attempted.
+ */
+export function decideAfterClickFailure(
+    analysis: DialogAnalysis,
+    platform: string,
+    actionText: string | null,
+): DialogDecision {
+    return isMediaPermissionDialog(analysis, actionText)
+        ? { kind: 'escalate', message: manualActionMessage(analysis, platform, actionText) }
+        : { kind: 'ignore' };
 }

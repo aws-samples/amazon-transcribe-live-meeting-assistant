@@ -9,10 +9,11 @@
  * snapshot) to classify the dialog. The action depends on the type:
  *
  *   - CONSENT / RECORDING_NOTICE  → click the primary action (auto-dismiss),
- *                                  whatever the model said about needsHuman.
- *                                  Escalated instead when there is no action,
- *                                  the click fails, or the action would join
- *                                  without meeting audio (see dialog-decision.ts).
+ *                                  whatever the model said about needsHuman,
+ *                                  but never one that joins without meeting
+ *                                  audio. A camera/microphone dialog that cannot
+ *                                  be answered safely is escalated. The rules
+ *                                  are in dialog-decision.ts.
  *   - CAPTCHA / LOGIN_REQUIRED / SSO_REDIRECT / BLOCKED → escalate via
  *                                  setManualActionRequired so the React UI
  *                                  shows the VNC takeover banner.
@@ -32,7 +33,7 @@ import {
     scrollIntoViewAndClick,
 } from './ai-dom-resolver.js';
 import { details } from './details.js';
-import { decideDialogAction, manualActionMessage } from './dialog-decision.js';
+import { decideAfterClickFailure, decideDialogAction } from './dialog-decision.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('dialog-watchdog');
@@ -159,7 +160,8 @@ export function startDialogWatchdog(page: Page, opts: WatchdogOpts): () => void 
                 );
             } else {
                 log.warn(`[dialog-watchdog ${opts.platform}] click failed on ${decision.selector}`);
-                await escalate(manualActionMessage(analysis, opts.platform, actionText));
+                const after = decideAfterClickFailure(analysis, opts.platform, actionText);
+                if (after.kind === 'escalate') await escalate(after.message);
             }
         } else if (decision.kind === 'escalate') {
             if (actionText) {

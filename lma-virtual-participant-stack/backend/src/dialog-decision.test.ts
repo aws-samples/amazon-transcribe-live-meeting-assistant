@@ -14,6 +14,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { DialogAnalysis } from './ai-dom-resolver.js';
 import {
+    decideAfterClickFailure,
     decideDialogAction,
     isMediaPermissionDialog,
     isNoAudioAction,
@@ -64,13 +65,45 @@ test('escalates an icon-only action on a camera/microphone dialog', () => {
     assert.ok(d.kind === 'escalate' && d.message.includes(NO_AUDIO_WARNING));
 });
 
-test('escalates a CONSENT dialog that has no action to click', () => {
+test('escalates a camera/microphone dialog that has no action to click', () => {
     const d = decideDialogAction(consent({ primaryActionSelector: undefined }), 'TEAMS', null);
     assert.equal(d.kind, 'escalate');
 });
 
-test('escalates when the chosen action cannot be found or read', () => {
+test('escalates a camera/microphone dialog whose action cannot be found or read', () => {
     assert.equal(decideDialogAction(consent(), 'TEAMS', null).kind, 'escalate');
+});
+
+const recordingNotice = (overrides: Partial<DialogAnalysis> = {}): DialogAnalysis => ({
+    type: 'RECORDING_NOTICE',
+    primaryActionSelector: '#got-it',
+    message: 'This meeting is being recorded.',
+    needsHuman: false,
+    ...overrides,
+});
+
+test('leaves a recording notice alone when it has no action to click', () => {
+    const d = decideDialogAction(recordingNotice({ primaryActionSelector: undefined }), 'TEAMS', null);
+    assert.deepEqual(d, { kind: 'ignore' });
+});
+
+test('leaves a recording notice alone when its action cannot be found or read', () => {
+    assert.deepEqual(decideDialogAction(recordingNotice(), 'TEAMS', null), { kind: 'ignore' });
+});
+
+test('escalates a notice without a usable action only when the model says a human is needed', () => {
+    const notice = recordingNotice({ primaryActionSelector: undefined, needsHuman: true });
+    const d = decideDialogAction(notice, 'TEAMS', null);
+    assert.deepEqual(d, { kind: 'escalate', message: 'This meeting is being recorded.' });
+});
+
+test('a failed click escalates a camera/microphone dialog', () => {
+    const d = decideAfterClickFailure(consent(), 'TEAMS', 'Allow');
+    assert.ok(d.kind === 'escalate' && d.message.includes(NO_AUDIO_WARNING));
+});
+
+test('a failed click leaves any other dialog alone', () => {
+    assert.deepEqual(decideAfterClickFailure(recordingNotice(), 'ZOOM', 'Got it'), { kind: 'ignore' });
 });
 
 test('never clicks an action that continues without audio', () => {
