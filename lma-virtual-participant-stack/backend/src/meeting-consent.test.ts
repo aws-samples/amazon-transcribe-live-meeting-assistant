@@ -520,6 +520,46 @@ test('notify: the objector consenting later resumes capture', async () => {
     assert.equal(h.details[h.details.length - 1], '(cleared)');
 });
 
+test('where spoken replies are read, the objection acknowledgement gives the typed and the spoken consent', async () => {
+    // The deployment's first consent phrase is the one offered.
+    const api = new FakeApi({ mode: 'notify', rule: 'each_participant' });
+    const get = api.get.bind(api);
+    api.get = async () => ({ ...(await get()), settings: { ConsentPhrases: ['I agree', 'I consent'], ObjectionPhrases: ['I object'] } });
+    const h = await harness({ deployment: { mode: 'notify' }, api });
+    await h.flow.handleChat('Bo Chen', 'I object');
+    await h.settle();
+    assert.ok(
+        h.chat.includes(
+            'Bo Chen objected. Live Meeting Assistant has stopped recording and transcribing this meeting. ' +
+                'If Bo Chen types "I agree" in the chat or says "LMA, I agree", it can continue.',
+        ),
+        h.chat.join('\n'),
+    );
+});
+
+test('where spoken replies are not read, the objection acknowledgement gives the chat reply only', async () => {
+    const h = await harness({ deployment: { mode: 'notify', readSpokenReplies: false } });
+    await h.flow.handleChat('Bo Chen', 'I object');
+    await h.settle();
+    assert.ok(
+        h.chat.includes(
+            'Bo Chen objected. Live Meeting Assistant has stopped recording and transcribing this meeting. ' +
+                'If Bo Chen replies "I consent", it can continue.',
+        ),
+        h.chat.join('\n'),
+    );
+});
+
+test('where the platform shows no chat sender, the objection acknowledgement gives the spoken consent only', async () => {
+    const h = await harness({ deployment: { mode: 'notify' }, sendersHidden: true });
+    assert.equal(h.flow.handleSpeech('Bo Chen', 'LMA, I object'), 'objection');
+    await h.settle();
+    assert.ok(
+        h.chat.some((m) => m.startsWith('Bo Chen objected.') && m.endsWith('If Bo Chen says "LMA, I consent" aloud, it can continue.')),
+        h.chat.join('\n'),
+    );
+});
+
 test('notify with leaveOnObjection: the VP says goodbye and leaves after an objection', async () => {
     const h = await harness({ deployment: { mode: 'notify', leaveOnObjection: true } });
     await h.flow.handleChat('Bo Chen', 'stop recording');

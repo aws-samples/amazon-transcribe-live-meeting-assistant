@@ -404,7 +404,15 @@ and while capture is still stopped by the first, is acted on and recorded once.
   VP stays, and listens for spoken replies while capture is stopped. Each
   participant's latest reply is the one that counts, so if the objector later
   replies with consent, in the chat or aloud, capture resumes, as the
-  acknowledgement says. The transcript and the audio recording resume; the screen recording does
+  acknowledgement says. Its last sentence gives the forms of reply this VP
+  reads, with the deployment's first consent phrase: *"If <name> types "I
+  consent" in the chat or says "LMA, I consent", it can continue."* where
+  spoken replies are read, because a reply said aloud counts only when it is
+  addressed to LMA; *"If <name> says "LMA, I consent" aloud, it can
+  continue."* on the Teams browser join, which shows no chat senders; and *"If
+  <name> replies "I consent", it can continue."* where spoken replies are not
+  read. An objection with no sender gets no such sentence, because a consent
+  needs a sender. The transcript and the audio recording resume; the screen recording does
   not. It stops for the rest of the meeting the first time capture is withheld
   after it started, and what it recorded until then is kept on the meeting as
   usual.

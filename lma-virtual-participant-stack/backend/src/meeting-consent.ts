@@ -843,7 +843,9 @@ export class MeetingConsentFlow {
         }
         const waiting = waitingFor(record);
         // Where the chat shows no sender, consent can only be given aloud.
-        const aloud = this.io?.sendersHidden ? ' On this meeting platform consent is given aloud ("LMA, I consent"), not in the chat.' : '';
+        const aloud = this.io?.sendersHidden
+            ? ` On this meeting platform consent is given aloud ("LMA, ${this.settings.consentPhrases[0] || 'I consent'}"), not in the chat.`
+            : '';
         if (waiting.length === 0) return `Waiting for consent: no participants are listed yet.${aloud}`;
         return `Waiting for consent: ${waiting.length} of ${(record.Participants ?? []).length} participants present have not consented yet.${aloud}`;
     }
@@ -1080,10 +1082,9 @@ export class MeetingConsentFlow {
         this.syncListening();
         await this.stopVideo();
         await this.writeDetail('Not recording: a participant objected to recording.');
-        const consentPhrase = this.settings.consentPhrases[0] || 'I consent';
         // A sender the platform did not show cannot withdraw by replying (a
         // consent needs a sender), so no such way is offered to them.
-        const resume = name === UNKNOWN_SENDER ? '' : ` If ${name} replies "${consentPhrase}", it can continue.`;
+        const resume = name === UNKNOWN_SENDER ? '' : ` ${this.resumeLine(name)}`;
         await this.say([
             `${name} objected. Live Meeting Assistant has stopped recording and transcribing this meeting.` +
                 (leave ? ' It will now leave the meeting.' : resume),
@@ -1095,6 +1096,19 @@ export class MeetingConsentFlow {
             await this.say(this.deps.exitMessages());
             this.io.leave(name);
         }
+    }
+
+    /**
+     * How the objector can let capture continue, in the forms this VP reads: a
+     * reply said aloud counts only when addressed to LMA, so where spoken
+     * replies are read the spoken form is given with the "LMA" addressee, and
+     * where the platform shows no chat sender only that form is offered.
+     */
+    private resumeLine(name: string): string {
+        const phrase = this.settings.consentPhrases[0] || 'I consent';
+        if (!this.readsSpokenReplies) return `If ${name} replies "${phrase}", it can continue.`;
+        if (this.io?.sendersHidden) return `If ${name} says "LMA, ${phrase}" aloud, it can continue.`;
+        return `If ${name} types "${phrase}" in the chat or says "LMA, ${phrase}", it can continue.`;
     }
 
     /**
