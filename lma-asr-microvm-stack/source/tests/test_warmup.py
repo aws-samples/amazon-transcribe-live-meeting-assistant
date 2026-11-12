@@ -22,6 +22,7 @@ import logging
 import struct
 import subprocess
 import sys
+import wave
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -47,7 +48,9 @@ from asr_server.warmup import (
     _parse_args,
     config_from_args,
     run,
+    speech_like_pcm,
     synthetic_pcm,
+    warm_decode_pcm,
     warm_language_identifier,
     warmup,
 )
@@ -482,3 +485,47 @@ def test_a_one_language_bundle_builds_without_the_classifier(
 ) -> None:
     monkeypatch.setenv("ASR_BUNDLE_LANGUAGES", "en")
     assert warm_language_identifier() == 0
+
+
+# --- Audio for the pre-snapshot warm-up decode ------------------------------
+
+
+def test_speech_like_audio_is_deterministic_and_not_silent() -> None:
+    pcm = speech_like_pcm(2.0)
+
+    assert pcm == speech_like_pcm(2.0)
+    assert len(pcm) == 2 * SAMPLE_RATE * 2
+    samples = struct.unpack("<" + "h" * (len(pcm) // 2), pcm)
+    assert max(abs(s) for s in samples) > 1000
+
+
+def test_the_warm_decode_repeats_the_bundle_clip_to_the_requested_length(
+    tmp_path: Path,
+) -> None:
+    clip = struct.pack("<" + "h" * SAMPLE_RATE, *range(SAMPLE_RATE))
+    path = tmp_path / "warm.wav"
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(SAMPLE_RATE)
+        wav.writeframes(clip)
+
+    pcm, origin = warm_decode_pcm(2.5, wav=path)
+
+    assert len(pcm) == int(2.5 * SAMPLE_RATE) * 2
+    assert pcm[: len(clip)] == clip
+    assert pcm[len(clip) : 2 * len(clip)] == clip
+    assert "warm.wav" in origin
+
+
+def test_the_warm_decode_falls_back_to_synthetic_audio_without_a_usable_clip(
+    tmp_path: Path,
+) -> None:
+    missing, origin = warm_decode_pcm(1.0, wav=tmp_path / "absent.wav")
+    assert missing == speech_like_pcm(1.0)
+    assert "synthetic" in origin
+
+    broken = tmp_path / "broken.wav"
+    broken.write_bytes(b"RIFF" + b"\x00" * 40)
+    pcm, _ = warm_decode_pcm(1.0, wav=broken)
+    assert pcm == speech_like_pcm(1.0)

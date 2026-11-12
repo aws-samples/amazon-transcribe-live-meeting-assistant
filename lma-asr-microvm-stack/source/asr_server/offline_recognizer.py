@@ -42,6 +42,7 @@ import contextlib
 import os
 import sys
 import threading
+import time
 from array import array
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -50,12 +51,14 @@ from typing import Any
 
 from asr_server.recognizer import (
     DEFAULT_MODEL_DIR,
+    DecodeClock,
     Event,
     Recognizer,
     RecognizerEngine,
     SessionConfig,
     SessionConfigError,
     WordTiming,
+    log_decode_timing,
     words_from_tokens,
 )
 from asr_server.vad import (
@@ -216,6 +219,7 @@ class SherpaOfflineRecognizer(Recognizer):
         self._buffer_base = 0  # absolute index of _buffer[0]
         self._total_samples = 0  # absolute samples fed so far (drives the timeline)
         self._seg_start_t: float | None = None  # open segment's start time, if any
+        self._decodes = 0  # offline decodes run for this session (timing log)
 
     @classmethod
     def from_model(cls, config: OfflineModelConfig) -> SherpaOfflineRecognizer:
@@ -286,7 +290,16 @@ class SherpaOfflineRecognizer(Recognizer):
 
         if not segment_samples:
             return []
+        clock = DecodeClock()
         result = self._backend.decode(self._sample_rate, segment_samples)
+        log_decode_timing(
+            "offline",
+            clock,
+            audio_seconds=len(segment_samples) / self._sample_rate,
+            first_in_session=self._decodes == 0,
+            lock_wait_seconds=getattr(self._backend, "last_lock_wait_s", None),
+        )
+        self._decodes += 1
         text = result.text.strip()
         if not text:
             # No hypothesis for this segment (e.g. non-speech that tripped the VAD):
@@ -513,6 +526,9 @@ class _SherpaOfflineBackend(OfflineDecoderBackend):
     def __init__(self, recognizer: Any, *, lock: Any = None) -> None:
         self._rec = recognizer
         self._lock = lock if lock is not None else contextlib.nullcontext()
+        # How long the last decode waited for another session's decode to finish;
+        # reported on the timing line so a wait is not mistaken for a slow decode.
+        self.last_lock_wait_s = 0.0
 
     def decode(self, sample_rate: int, samples: Sequence[float]) -> OfflineResult:
         np = _load_numpy()
@@ -520,7 +536,9 @@ class _SherpaOfflineBackend(OfflineDecoderBackend):
         # stateless across utterances). # verify sherpa OfflineRecognizer API.
         stream = self._rec.create_stream()
         stream.accept_waveform(sample_rate, np.asarray(samples, dtype=np.float32))
+        waiting = time.perf_counter()
         with self._lock:
+            self.last_lock_wait_s = time.perf_counter() - waiting
             self._rec.decode_stream(stream)
         result = stream.result
         text = str(getattr(result, "text", ""))
@@ -705,6 +723,30 @@ class SherpaOfflineEngine(RecognizerEngine):
             emit_segment_partial=self._config.emit_segment_partial,
             max_idle_ms=self._max_idle_ms,
         )
+
+    def warm_up(self, pcm: bytes) -> int:
+        """Decode ``pcm`` as one utterance on the shared model, without the VAD.
+
+        A session decodes only what its VAD gate accepts as speech, so warm-up
+        audio that the gate rejects would never reach the model. This hands the
+        whole clip to the offline decoder as one segment, the way the gate hands
+        over its longest utterance.
+        """
+        samples = _pcm16_to_float32(pcm)
+        if not samples:
+            return 0
+        backend = _SherpaOfflineBackend(self._offline_recognizer, lock=self._lock)
+        clock = DecodeClock()
+        backend.decode(self._config.sample_rate, samples)
+        log_decode_timing(
+            "offline",
+            clock,
+            audio_seconds=len(samples) / self._config.sample_rate,
+            first_in_session=True,
+            warm_up=True,
+            lock_wait_seconds=backend.last_lock_wait_s,
+        )
+        return 1
 
 
 def create_sherpa_offline_engine(config: OfflineModelConfig) -> SherpaOfflineEngine:

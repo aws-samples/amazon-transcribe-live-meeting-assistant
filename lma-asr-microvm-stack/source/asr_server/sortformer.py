@@ -618,6 +618,9 @@ class SortformerEngine(RecognizerEngine):
     def inner(self) -> RecognizerEngine:
         return self._inner
 
+    def warm_up(self, pcm: bytes) -> int:
+        return self._inner.warm_up(pcm)
+
     def new_session(self, config: SessionConfig | None = None) -> Recognizer:
         session = self._inner.new_session(config)
         if config is not None and config.diarize is False:
