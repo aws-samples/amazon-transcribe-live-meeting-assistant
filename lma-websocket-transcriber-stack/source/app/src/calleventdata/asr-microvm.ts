@@ -52,6 +52,11 @@ const ASR_LAUNCHER_FUNCTION_ARN = process.env['ASR_LAUNCHER_FUNCTION_ARN'] || ''
 const ASR_DIRECT_ENDPOINT = process.env['ASR_DIRECT_ENDPOINT'] || '';
 const ASR_READY_TIMEOUT_MS = parseInt(process.env['ASR_READY_TIMEOUT_MS'] || '30000', 10);
 const ASR_FINISH_TIMEOUT_MS = parseInt(process.env['ASR_FINISH_TIMEOUT_MS'] || '5000', 10);
+// How much longer finishing a session waits for the engine's last finals, per
+// second of this connection's audio the engine has not yet finalised, and the
+// ceiling on the whole wait (finishWaitMs).
+const ASR_FINISH_MS_PER_OPEN_SECOND = parseInt(process.env['ASR_FINISH_MS_PER_OPEN_SECOND'] || '2000', 10);
+const ASR_FINISH_MAX_WAIT_MS = parseInt(process.env['ASR_FINISH_MAX_WAIT_MS'] || '60000', 10);
 // Audio held while the MicroVM starts or a session reconnects, as bytes of 16 kHz
 // mono 16-bit PCM. The default is 60 seconds, which covers a MicroVM launch.
 const ASR_MAX_PENDING_BYTES = parseInt(
@@ -168,7 +173,87 @@ export interface AsrSessionSet {
     lease: AsrLease;
     deinterleaver: StereoDeinterleaver;
     sessions: Map<AsrChannelId, AsrChannelSession>;
+    /**
+     * True while the MicroVM is being acquired and its sessions started. The
+     * meeting's audio stream then holds the same audio for an Amazon Transcribe
+     * fallback, and is bounded (trimHeldFallbackAudio).
+     */
+    starting?: boolean;
 }
+
+/** Seconds of audio held while the MicroVM starts: the per-channel backlog cap, as a duration. */
+const ASR_MAX_PENDING_SECONDS = ASR_MAX_PENDING_BYTES / (ASR_SAMPLE_RATE * 2);
+
+/**
+ * Bound the audio the meeting's stream holds for an Amazon Transcribe fallback
+ * while its MicroVM is acquired, at the same duration as the MicroVM sessions'
+ * own backlog. Past it the OLDEST audio is dropped, for the reason the backlog
+ * drops its oldest (AsrChannelSession.send): what is kept is one unbroken
+ * stretch ending now, and the bytes dropped (heldAudioDroppedBytes) put the
+ * fallback's clock at its start. Returns the bytes dropped by this call.
+ */
+export const trimHeldFallbackAudio = (
+    socketData: SocketCallData,
+    server: FastifyInstance,
+    maxSeconds: number = ASR_MAX_PENDING_SECONDS
+): number => {
+    const source = socketData.audioInputStream;
+    if (!source || source.destroyed) {
+        return 0;
+    }
+    const rate = socketData.callMetadata.samplingRate || ASR_SAMPLE_RATE;
+    // The meeting stream is always two channels of 16-bit PCM.
+    const capBytes = Math.round(maxSeconds * rate) * 4;
+    const writable = (source as unknown as { writableLength?: number }).writableLength ?? 0;
+    let excess = source.readableLength + writable - capBytes;
+    let dropped = 0;
+    // Only the readable side can be taken from; what waits on the writable side
+    // moves across as it is read, so a later frame's call takes the rest.
+    while (excess > 0 && source.readableLength > 0) {
+        // Whole stereo frames, so the stream keeps its sample alignment.
+        const want = Math.min(source.readableLength, Math.ceil(excess / 4) * 4);
+        const chunk = source.read(want) as Buffer | null;
+        if (!chunk) {
+            break;
+        }
+        dropped += chunk.length;
+        excess -= chunk.length;
+    }
+    if (dropped > 0) {
+        if (!socketData.heldAudioDroppedBytes) {
+            server.log.warn(
+                `[ASR]: [${socketData.callMetadata.callId}] - The MicroVM is taking longer than ${maxSeconds.toFixed(0)}s to start; ` +
+                    'the oldest audio held for it is being dropped (it stays in the recording).'
+            );
+        }
+        socketData.heldAudioDroppedBytes = (socketData.heldAudioDroppedBytes ?? 0) + dropped;
+    }
+    return dropped;
+};
+
+/**
+ * How long finishing a session waits for the engine's termination after eos.
+ *
+ * On eos the engine decodes whatever audio it has not yet reached, then closes
+ * the utterance still open and sends its final; that final is the only row the
+ * open utterance gets. Its cost grows with the audio not yet finalised -- an
+ * utterance that has run for twenty seconds, or a backlog sent when the session
+ * opened -- and on a busy MicroVM it has taken well over five seconds, so a
+ * fixed grace cut the final off. The wait is the usual grace plus
+ * `perOpenSecondMs` for every second of audio not yet finalised, up to
+ * `maxMs`. An engine that has caught up answers within a fraction of a second,
+ * so the bound only matters when it has not.
+ */
+export const finishWaitMs = (
+    unfinalisedSeconds: number,
+    baseMs: number = ASR_FINISH_TIMEOUT_MS,
+    perOpenSecondMs: number = ASR_FINISH_MS_PER_OPEN_SECOND,
+    maxMs: number = ASR_FINISH_MAX_WAIT_MS
+): number =>
+    Math.min(Math.max(baseMs, maxMs), baseMs + Math.max(0, unfinalisedSeconds) * perOpenSecondMs);
+
+/** The usual grace alone: for a session being discarded, or a task shutting down. */
+export const ASR_FINISH_GRACE_MS = ASR_FINISH_TIMEOUT_MS;
 
 /** Injected in tests so the engine-to-transcript mapping runs without Kinesis. */
 export type SegmentWriter = (
@@ -498,6 +583,13 @@ export class AsrChannelSession {
 
     private diarizeEffective = false;
 
+    /**
+     * Engine time (on the current connection's own clock) up to which the
+     * engine has sent finals. Audio past it is still in an open utterance, or
+     * not yet decoded; finishing the session waits for it (finishWaitMs).
+     */
+    private finalisedThroughSeconds = 0;
+
     constructor(
         private readonly server: FastifyInstance,
         private readonly socketData: SocketCallData,
@@ -594,29 +686,65 @@ export class AsrChannelSession {
         this.pendingBytes += frame.length;
         while (this.pendingBytes > ASR_MAX_PENDING_BYTES && this.pending.length > 1) {
             const dropped = this.pending.shift() as Buffer;
+            if (this.droppedBytes === 0) {
+                this.server.log.warn(
+                    `[ASR]: [${this.callId}][${this.channelId}] - more than ${ASR_MAX_PENDING_SECONDS.toFixed(0)}s of audio is waiting for the engine; dropping the oldest.`
+                );
+            }
             this.pendingBytes -= dropped.length;
             this.droppedBytes += dropped.length;
             this.consumedBytes += dropped.length;
         }
     }
 
-    /** Flush the tail utterance, then close. */
-    async finish(): Promise<void> {
+    /** Seconds of this connection's audio past the engine's last final. */
+    private get unfinalisedSeconds(): number {
+        const sentSeconds = this.consumedBytes / (ASR_SAMPLE_RATE * 2) - this.timeOffsetSeconds;
+        return Math.max(0, sentSeconds - this.finalisedThroughSeconds);
+    }
+
+    /**
+     * Send eos and wait for the engine's termination, which comes after the
+     * final of every utterance still open, then close. Those finals are written
+     * before this resolves. `maxWaitMs` overrides the wait (finishWaitMs), for a
+     * session whose rows are not needed or a task that is shutting down.
+     */
+    async finish(options: { maxWaitMs?: number } = {}): Promise<void> {
         if (this.finished) {
             return;
         }
         this.finished = true;
         this.flushOutbound();
         if (this.open && this.ws?.readyState === WebSocket.OPEN) {
-            const terminated = new Promise<void>((resolve) => {
-                this.terminationResolve = resolve;
+            const terminated = new Promise<'terminated'>((resolve) => {
+                this.terminationResolve = () => resolve('terminated');
             });
+            // The engine still has to decode what it has not reached and close
+            // the open utterance; how long that takes grows with the audio not
+            // yet finalised. A fixed grace cut off the final of a meeting's
+            // last utterance, which is often its only row on a short stream.
+            const unfinalised = this.unfinalisedSeconds;
+            const waitMs = options.maxWaitMs ?? finishWaitMs(unfinalised);
+            const startedAt = Date.now();
+            let timer: NodeJS.Timeout | undefined;
             try {
                 this.ws.send(JSON.stringify({ type: 'eos' }));
-                await Promise.race([
+                const outcome = await Promise.race([
                     terminated,
-                    new Promise<void>((resolve) => setTimeout(resolve, ASR_FINISH_TIMEOUT_MS)),
+                    new Promise<'timeout'>((resolve) => {
+                        timer = setTimeout(() => resolve('timeout'), waitMs);
+                    }),
                 ]);
+                clearTimeout(timer);
+                if (outcome === 'timeout') {
+                    this.server.log.warn(
+                        `[ASR]: [${this.callId}][${this.channelId}] - the engine had not finished ${waitMs} ms after the end of the stream (${unfinalised.toFixed(1)}s of audio not yet finalised); closing without its last rows.`
+                    );
+                } else {
+                    this.server.log.info(
+                        `[ASR]: [${this.callId}][${this.channelId}] - engine finished ${Date.now() - startedAt} ms after the end of the stream (${unfinalised.toFixed(1)}s of audio had not been finalised).`
+                    );
+                }
             } catch (error) {
                 this.server.log.debug(
                     `[ASR]: [${this.callId}][${this.channelId}] - eos failed: ${normalizeErrorForLogging(error)}`
@@ -704,6 +832,7 @@ export class AsrChannelSession {
             };
             // The backlog is this connection's, sent or not, from here on.
             this.consumedBytes += this.pendingBytes;
+            this.finalisedThroughSeconds = 0;
             try {
                 socket.send(JSON.stringify(config));
                 for (const frame of coalesceBacklog(this.pending)) {
@@ -742,7 +871,14 @@ export class AsrChannelSession {
 
         socket.on('close', (code: number, reason: Buffer) => {
             this.open = false;
-            if (this.finished || this.socketData.ended) {
+            if (this.finished) {
+                // Nothing more can arrive: a finish waiting for termination
+                // stops waiting rather than running out its bound.
+                this.terminationResolve?.();
+                this.terminationResolve = null;
+                return;
+            }
+            if (this.socketData.ended) {
                 return;
             }
             this.server.log.warn(
@@ -810,8 +946,14 @@ export class AsrChannelSession {
                 );
                 this.settleReady(true);
                 break;
-            case 'partial':
             case 'final':
+                this.finalisedThroughSeconds = Math.max(
+                    this.finalisedThroughSeconds,
+                    message.end ?? message.start ?? 0
+                );
+                this.queueSegment(message);
+                break;
+            case 'partial':
                 this.queueSegment(message);
                 break;
             case 'termination':
@@ -910,12 +1052,20 @@ export class AsrChannelSession {
  * audio that arrives while it boots is buffered rather than lost — otherwise the
  * opening seconds of every meeting would be missing from the transcript.
  *
+ * A meeting that ENDS while the MicroVM is acquired is still transcribed: the
+ * end of a meeting waits for this to settle (engine-start.ts), the sessions are
+ * started as usual and sent the audio buffered meanwhile, and then finished at
+ * once, so the rows land before the meeting's END event is written. Only an
+ * explicit stopMicrovmAsr during the acquisition (a capture discarded for
+ * consent, a task shutting down, or that wait running out) abandons it.
+ *
  * Returns false if the engine could not be started, so the caller can fall back
  * to Amazon Transcribe for this meeting instead of losing its transcript.
  */
 export const startMicrovmAsr = async (
     socketData: SocketCallData,
-    server: FastifyInstance
+    server: FastifyInstance,
+    acquire: (callId: string, server: FastifyInstance) => Promise<AsrLease | undefined> = acquireLease
 ): Promise<boolean> => {
     const callMetadata = socketData.callMetadata;
 
@@ -959,21 +1109,45 @@ export const startMicrovmAsr = async (
             )
         );
     }
-    socketData.asr = { lease: pendingLease, deinterleaver: new StereoDeinterleaver(), sessions };
+    const asrSet: AsrSessionSet = {
+        lease: pendingLease,
+        deinterleaver: new StereoDeinterleaver(),
+        sessions,
+        starting: true,
+    };
+    socketData.asr = asrSet;
+    try {
+        return await startAcquiredSessions(socketData, server, asrSet, acquire, enrolledVoices, options);
+    } finally {
+        asrSet.starting = false;
+    }
+};
 
-    const lease = await acquireLease(callMetadata.callId, server);
+const startAcquiredSessions = async (
+    socketData: SocketCallData,
+    server: FastifyInstance,
+    asrSet: AsrSessionSet,
+    acquire: (callId: string, server: FastifyInstance) => Promise<AsrLease | undefined>,
+    enrolledVoices: Promise<EnrolledVoice[]>,
+    options: Map<AsrChannelId, AsrSessionOptions>
+): Promise<boolean> => {
+    const callMetadata = socketData.callMetadata;
+    const sessions = asrSet.sessions;
+    const lease = await acquire(callMetadata.callId, server);
     if (!lease) {
-        socketData.asr = undefined;
+        if (socketData.asr === asrSet) {
+            socketData.asr = undefined;
+        }
         return false;
     }
-    // The client can disconnect while the acquire is in flight (a MicroVM boot
-    // takes seconds); stopMicrovmAsr then clears socketData.asr but has nothing
-    // to release because the pending lease carries no microvmId yet. Writing
-    // through the cleared reference would throw, and the freshly acquired
-    // MicroVM would run unreleased until its max-duration backstop.
-    if (socketData.asr?.lease !== pendingLease) {
+    // stopMicrovmAsr can run while the acquire is in flight (a MicroVM boot
+    // takes seconds) and clear socketData.asr, with nothing to release because
+    // the pending lease carries no microvmId yet. Writing through the cleared
+    // reference would throw, and the freshly acquired MicroVM would run
+    // unreleased until its max-duration backstop.
+    if (socketData.asr !== asrSet) {
         server.log.warn(
-            `[ASR]: [${callMetadata.callId}] - call ended during MicroVM acquisition; releasing ${lease.microvmId}.`
+            `[ASR]: [${callMetadata.callId}] - the MicroVM ASR engine was stopped during MicroVM acquisition; releasing ${lease.microvmId}.`
         );
         if (lease.microvmId) {
             await releaseLease(lease.microvmId, server);
@@ -981,7 +1155,7 @@ export const startMicrovmAsr = async (
         }
         return false;
     }
-    socketData.asr.lease = lease;
+    asrSet.lease = lease;
     for (const session of sessions.values()) {
         session.updateLease(lease);
     }
@@ -1014,10 +1188,19 @@ export const startMicrovmAsr = async (
     server.log.info(
         `[ASR]: [${callMetadata.callId}] - MicroVM ASR active on ${sessions.size} channel(s), client rate ${callMetadata.samplingRate}Hz, diarized channel(s)=${diarized.length ? diarized.join(',') : 'none'}`
     );
+    if (socketData.ended) {
+        // The meeting ended while the MicroVM started: the sessions were sent
+        // its audio as they opened. Finish them now, so the tail is flushed and
+        // the MicroVM released before the meeting's end goes on.
+        server.log.info(
+            `[ASR]: [${callMetadata.callId}] - Call ended while the MicroVM was being acquired; finishing the audio sent to it.`
+        );
+        await stopMicrovmAsr(socketData, server);
+    }
     return true;
 };
 
-export const pushAsrAudio = (socketData: SocketCallData, data: Uint8Array): void => {
+export const pushAsrAudio = (socketData: SocketCallData, data: Uint8Array, server?: FastifyInstance): void => {
     const asr = socketData.asr;
     if (!asr) {
         return;
@@ -1026,11 +1209,21 @@ export const pushAsrAudio = (socketData: SocketCallData, data: Uint8Array): void
     for (const [channelId, session] of asr.sessions) {
         session.pushPcm(split[channelId]);
     }
+    if (asr.starting && server) {
+        trimHeldFallbackAudio(socketData, server);
+    }
 };
 
+/**
+ * Finish every channel's session -- each waits for the engine's last finals and
+ * writes them -- then release the MicroVM. `options.finishWaitMs` caps each
+ * session's wait (AsrChannelSession.finish), for a capture being discarded or a
+ * task shutting down.
+ */
 export const stopMicrovmAsr = async (
     socketData: SocketCallData,
-    server: FastifyInstance
+    server: FastifyInstance,
+    options: { finishWaitMs?: number } = {}
 ): Promise<void> => {
     const asr = socketData.asr;
     if (!asr) {
@@ -1041,7 +1234,7 @@ export const stopMicrovmAsr = async (
     await Promise.all(
         [...asr.sessions.values()].map(async (session) => {
             try {
-                await session.finish();
+                await session.finish({ maxWaitMs: options.finishWaitMs });
             } catch (error) {
                 server.log.error(
                     `[ASR]: [${socketData.callMetadata.callId}] - error finishing ASR session: ${normalizeErrorForLogging(error)}`

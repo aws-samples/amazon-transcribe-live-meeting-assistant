@@ -835,6 +835,7 @@ class AsrSession:
                     continue
                 frame_config, ended = _classify_first_text(frame)
                 if ended:
+                    self._log_end_of_stream()
                     return True
                 # A second ``config`` mid-stream is ignored (config is negotiated
                 # once at open, R2.1); genuinely bad text raised above already.
@@ -848,6 +849,24 @@ class AsrSession:
             await self._send_error(exc.code, exc.message)
             self._fatal = True
             return False
+
+    def _log_end_of_stream(self) -> None:
+        """Log, at INFO, how much audio is still to decode when the client ends the stream.
+
+        Everything queued is decoded, and the utterance still open is closed as a
+        ``final``, before ``termination`` is sent; the client waits for that. This
+        line, with the session summary that follows ``termination``, shows how long
+        the end of a stream took and how much work it found waiting.
+        """
+        bytes_per_second = _BYTES_PER_SAMPLE * self._sample_rate
+        _LOG.info(
+            "session %s eos: %.1fs of audio received, %.1fs decoded, %d frame(s) queued; "
+            "decoding the rest and closing the open utterance",
+            self._session_id,
+            self._bytes_queued / bytes_per_second,
+            self._audio_bytes / bytes_per_second,
+            self._queue.qsize(),
+        )
 
     async def _enqueue(self, pcm: bytes) -> None:
         """Hand one PCM frame to the bounded queue, applying backpressure (R7).

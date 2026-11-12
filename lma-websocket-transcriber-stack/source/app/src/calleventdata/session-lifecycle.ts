@@ -64,8 +64,18 @@ export interface SessionLog {
     debug(message: string): void;
 }
 
+/**
+ * How long ending a meeting waits for a transcription engine that is still
+ * starting (engine-start.ts). The ASR launcher gives up on a MicroVM after four
+ * minutes, and the sessions on it get 30 seconds to become ready; past this the
+ * meeting ends without the audio held for that engine.
+ */
+export const DEFAULT_ENGINE_START_WAIT_MS = 300_000;
+
 export interface SessionLifecycleDeps {
     graceMs: number;
+    /** See DEFAULT_ENGINE_START_WAIT_MS. */
+    engineStartWaitMs?: number;
     log: SessionLog;
     isShuttingDown: () => boolean;
     /** Write the meeting's END event. */
@@ -81,6 +91,18 @@ export interface SessionLifecycleDeps {
     noteSessionEnded: (callMetaData: CallMetaData) => void;
     describe: (callMetaData: CallMetaData) => string;
     describeError: (error: unknown) => string;
+}
+
+/** How a meeting's session is ended (SessionLifecycle.end). */
+export interface EndOptions {
+    /**
+     * Close the client's connection as soon as the session is marked ended,
+     * before its engine is finished and its END event written: a meeting the
+     * server ends (consent) stops talking to its client at once, while the
+     * rows of the audio it received before then are still finished and
+     * written ahead of the END event.
+     */
+    closeConnection?: { code: number; reason: string };
 }
 
 /** The tokens of the connection a client reconnected with. */
@@ -276,7 +298,15 @@ export class SessionLifecycle<W extends SessionSocket> {
         if (!session) {
             return;
         }
-        if (!this.deps.isShuttingDown() && !session.ended && this.detached.detach(session)) {
+        if (session.ended) {
+            // Its end is under way (the client sent END, or the server ended
+            // the meeting and closed the connection): that end clears the entry.
+            this.deps.log.debug(
+                `[ON WSCLOSE]: [${session.callMetadata.callId}] - Connection closed while the meeting is ending.`
+            );
+            return;
+        }
+        if (!this.deps.isShuttingDown() && this.detached.detach(session)) {
             this.sockets.delete(ws);
             this.deps.log.info(
                 `[ON WSCLOSE]: [${session.callMetadata.callId}] - Connection closed without END; holding the meeting for ${this.deps.graceMs} ms for the client to reconnect.`
@@ -305,8 +335,14 @@ export class SessionLifecycle<W extends SessionSocket> {
      * End a meeting's session once: its END event, its recording, its engine,
      * and its connection entries. `ws` is the connection the END arrived on, if
      * it arrived on one; the session's current connection is cleared as well.
+     * See EndOptions for closing the connection first.
      */
-    async end(ws: W | undefined, session: SocketCallData, callMetaData: CallMetaData = session.callMetadata): Promise<void> {
+    async end(
+        ws: W | undefined,
+        session: SocketCallData,
+        callMetaData: CallMetaData = session.callMetadata,
+        options: EndOptions = {}
+    ): Promise<void> {
         if (session.ended) {
             this.deps.log.error(
                 `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Duplicate End call event. Already received the end call event: ${this.deps.describe(callMetaData)}`
@@ -319,7 +355,36 @@ export class SessionLifecycle<W extends SessionSocket> {
         // Inside the ran-once guard, so a second close does not count the same
         // meeting twice.
         this.deps.noteSessionEnded(session.callMetadata);
+        if (options.closeConnection) {
+            // After the session is marked ended, so the close is not taken for
+            // a dropped connection and held for a reconnect.
+            this.closeConnections(ws, session, options.closeConnection);
+        }
+        let engineStopped = false;
+        const stopEngine = async (): Promise<void> => {
+            engineStopped = true;
+            // Finishes each channel's session: the engine closes the utterance
+            // still open, and its final rows are written, before this returns.
+            // Then terminates the MicroVM. No-op for meetings transcribed by
+            // Amazon Transcribe.
+            try {
+                await this.deps.stopEngine(session);
+            } catch (error) {
+                this.deps.log.error(
+                    `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Error stopping the MicroVM ASR engine: ${this.deps.describeError(error)}`
+                );
+            }
+        };
         try {
+            // Before the END event, so the rows of audio held for an engine that
+            // was still starting are written ahead of it (the end-of-meeting
+            // summary is made from the transcript when END arrives), and before
+            // the audio stream below is released.
+            await this.awaitEngineStart(session, callMetaData);
+            // Also before the END event, for the same reason: the last utterance
+            // of every meeting is still open when its stream ends, and its final
+            // row exists only once the engine has been finished.
+            await stopEngine();
             await this.deps.writeCallEndEvent(callMetaData);
             await this.deps.finishRecording(session, callMetaData);
         } finally {
@@ -327,14 +392,9 @@ export class SessionLifecycle<W extends SessionSocket> {
                 session.audioInputStream.end();
                 session.audioInputStream.destroy();
             }
-            // Flushes the tail utterance on each channel, then terminates the
-            // MicroVM. No-op for meetings transcribed by Amazon Transcribe.
-            try {
-                await this.deps.stopEngine(session);
-            } catch (error) {
-                this.deps.log.error(
-                    `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Error stopping the MicroVM ASR engine: ${this.deps.describeError(error)}`
-                );
+            // Reached here first only if waiting for the engine's start threw.
+            if (!engineStopped) {
+                await stopEngine();
             }
             // Only this meeting's entry: a client that reuses the connection
             // may have started its next meeting while this one finished.
@@ -346,6 +406,47 @@ export class SessionLifecycle<W extends SessionSocket> {
             if (current && this.sockets.get(current) === session) {
                 this.sockets.delete(current);
             }
+        }
+    }
+
+    /** Close the connection an END arrived on and the one the session streams on now. */
+    private closeConnections(ws: W | undefined, session: SocketCallData, close: { code: number; reason: string }): void {
+        const current = this.connections.get(session)?.ws;
+        for (const socket of new Set([ws, current])) {
+            if (!socket) {
+                continue;
+            }
+            try {
+                socket.close(close.code, close.reason);
+            } catch {
+                // already closed
+            }
+        }
+    }
+
+    /**
+     * Wait, bounded, for the session's engine to finish starting. Not while the
+     * task shuts down: its stop timeout is shorter than a MicroVM acquisition,
+     * and the recording has to be uploaded within it.
+     */
+    private async awaitEngineStart(session: SocketCallData, callMetaData: CallMetaData): Promise<void> {
+        const starting = session.engineStarting;
+        if (!starting || this.deps.isShuttingDown()) {
+            return;
+        }
+        const waitMs = this.deps.engineStartWaitMs ?? DEFAULT_ENGINE_START_WAIT_MS;
+        let timer: NodeJS.Timeout | undefined;
+        const outcome = await Promise.race([
+            starting.then(() => 'started' as const),
+            new Promise<'timeout'>((resolve) => {
+                timer = setTimeout(() => resolve('timeout'), waitMs);
+            }),
+        ]);
+        clearTimeout(timer);
+        if (outcome === 'timeout') {
+            this.deps.log.warn(
+                `[${callMetaData.callEvent}]: [${callMetaData.callId}] - The transcription engine had not started ${waitMs} ms after the meeting ended; ending it without the audio held for that engine.`
+            );
         }
     }
 

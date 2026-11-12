@@ -28,7 +28,7 @@ import type { AsrSegment } from './asr-microvm-client.js';
 // at 2 s backoff, no endpoint - and the timing and fallback tests below would run
 // against those. A dynamic import after the assignments is what makes the env
 // actually apply.
-const { MicrovmAsrSession, coalesceBacklog, fetchAsrRuntimeSwitches, resolveVpAsrEngine, speakerNameFor } =
+const { MicrovmAsrSession, coalesceBacklog, fetchAsrRuntimeSwitches, finishWaitMs, resolveVpAsrEngine, speakerNameFor } =
     await import('./asr-microvm-client.js');
 
 interface FakeAsr {
@@ -714,4 +714,126 @@ test('without a meeting language option a row takes the Virtual Participant lang
         if (previous === undefined) delete process.env.TRANSCRIBE_LANGUAGE_CODE;
         else process.env.TRANSCRIBE_LANGUAGE_CODE = previous;
     }
+});
+
+test('a session created before its MicroVM exists sends what it held once it is given one, even after the meeting ended', async () => {
+    // The engine answers eos only after a second, twice the usual grace in this
+    // file (ASR_FINISH_TIMEOUT_MS=500), as it would while decoding a backlog.
+    const asr = await startFakeAsr((socket) => {
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (isBinary) return;
+            const message = JSON.parse(data.toString());
+            if (message.type === 'config') {
+                socket.send(JSON.stringify({ type: 'ready', effective_config: { diarize: false } }));
+            }
+            if (message.type === 'eos') {
+                setTimeout(() => {
+                    socket.send(JSON.stringify({ type: 'final', segment: 0, text: 'said while it launched', start: 0.2, end: 1.4 }));
+                    socket.send(JSON.stringify({ type: 'termination', audio_seconds: 1.5, segments: 1 }));
+                }, 1000);
+            }
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const live = { value: true };
+    const session = new MicrovmAsrSession({
+        callId: 'vp-test-call',
+        lease: { endpointUrl: '' },
+        diarize: false,
+        onSegment: (segment) => rows.push(segment),
+        isMeetingLive: () => live.value,
+    });
+    try {
+        // A second and a half captured while the MicroVM launches, then the meeting ends.
+        for (let i = 0; i < 15; i += 1) {
+            session.pushPcm(Buffer.alloc(3200, 1));
+        }
+        live.value = false;
+        assert.equal(session.heldSeconds, 1.5);
+        session.updateLease({ endpointUrl: asr.url, microvmId: 'm-1' });
+        assert.equal(session.microvmId, 'm-1');
+        assert.equal(await session.start(), true);
+        await session.finish();
+        assert.equal(asr.audioBytes, 3200 * 15, 'every held byte reached the engine');
+        assert.deepEqual(rows.map((row) => [row.text, row.startSec]), [['said while it launched', 0.2]]);
+    } finally {
+        await asr.close();
+    }
+});
+
+test('a stream that ends mid-utterance gets that utterance\'s final before finish returns', async () => {
+    // Only partials have been sent for the utterance in progress when the
+    // meeting ends; on eos the engine closes it, and its final takes three
+    // times the usual grace in this file (ASR_FINISH_TIMEOUT_MS=500) to arrive.
+    const asr = await startFakeAsr((socket) => {
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (isBinary) return;
+            const message = JSON.parse(data.toString());
+            if (message.type === 'config') {
+                socket.send(JSON.stringify({ type: 'ready', effective_config: { diarize: false } }));
+                socket.send(JSON.stringify({ type: 'partial', segment: 0, text: 'I bumped into', start: 0.5, end: 2 }));
+            }
+            if (message.type === 'eos') {
+                setTimeout(() => {
+                    socket.send(
+                        JSON.stringify({ type: 'final', segment: 0, text: 'I bumped into the wall.', start: 0.5, end: 3 }),
+                    );
+                    socket.send(JSON.stringify({ type: 'termination', audio_seconds: 3, segments: 1 }));
+                }, 1500);
+            }
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const session = newSession(asr, rows, { value: true }, false);
+    try {
+        assert.equal(await session.start(), true);
+        // Three seconds of live audio, none of it finalised.
+        for (let i = 0; i < 30; i += 1) {
+            session.pushPcm(Buffer.alloc(3200, 1));
+        }
+        await session.finish();
+        assert.deepEqual(
+            rows.map((row) => [row.text, row.isPartial]),
+            [
+                ['I bumped into', true],
+                ['I bumped into the wall.', false],
+            ],
+        );
+        assert.equal(rows[0].segmentId, rows[1].segmentId, 'the final closes the row its partial opened');
+    } finally {
+        await asr.close();
+    }
+});
+
+test('finishing stops waiting when the engine closes the connection', async () => {
+    const asr = await startFakeAsr((socket) => {
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (isBinary) return;
+            const message = JSON.parse(data.toString());
+            if (message.type === 'config') {
+                socket.send(JSON.stringify({ type: 'ready', effective_config: { diarize: false } }));
+            }
+            if (message.type === 'eos') socket.close();
+        });
+    });
+    const session = newSession(asr, [], { value: true }, false);
+    try {
+        assert.equal(await session.start(), true);
+        // Ten seconds unfinalised: a wait of several seconds were the close ignored.
+        for (let i = 0; i < 100; i += 1) {
+            session.pushPcm(Buffer.alloc(3200, 1));
+        }
+        const started = Date.now();
+        await session.finish();
+        assert.ok(Date.now() - started < 1000, `finish took ${Date.now() - started} ms`);
+    } finally {
+        await asr.close();
+    }
+});
+
+test('the finish wait grows with the audio not yet finalised, within its bounds', () => {
+    assert.equal(finishWaitMs(0, 5000, 2000, 60000), 5000);
+    assert.equal(finishWaitMs(17, 5000, 2000, 60000), 39000);
+    assert.equal(finishWaitMs(3600, 5000, 2000, 60000), 60000);
+    assert.equal(finishWaitMs(10, 5000, 2000, 1000), 5000);
 });

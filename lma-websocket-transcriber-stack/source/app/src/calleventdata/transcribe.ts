@@ -333,7 +333,7 @@ export interface AudioTap {
     close(): number;
 }
 
-export const openAudioTap = (source: stream.Readable): AudioTap => {
+export const openAudioTap = (source: stream.Readable, endWithSource = false): AudioTap => {
     const sink = new stream.PassThrough();
     let bytes = 0;
     let closed = false;
@@ -344,7 +344,11 @@ export const openAudioTap = (source: stream.Readable): AudioTap => {
         bytes += chunk.length;
     };
     source.on('data', count);
-    source.pipe(sink, { end: false });
+    // A live meeting's source outlives every request, so ending it must not end
+    // a request's sink. The one exception is a request for the audio held for a
+    // meeting that has already ended (heldAudioOnly): there the source's end is
+    // the end of that request's audio.
+    source.pipe(sink, { end: endWithSource });
     return {
         sink,
         close: (): number => {
@@ -453,12 +457,35 @@ export const applyTranscribeOptions = (
     }
 };
 
+/** Bytes waiting in a meeting's audio stream that no request has taken yet. */
+export const heldAudioBytes = (source: stream.Readable | undefined): number => {
+    if (!source) {
+        return 0;
+    }
+    const writable = (source as unknown as { writableLength?: number }).writableLength ?? 0;
+    return source.readableLength + writable;
+};
+
+export interface TranscribeStartOptions {
+    /**
+     * The meeting has already ended, while another engine was starting for it
+     * (an ASR MicroVM that could not be acquired in time or at all). Its audio
+     * stream still holds what the client sent meanwhile: that audio is sent in
+     * one request, which ends with it, and no further request is opened.
+     */
+    heldAudioOnly?: boolean;
+}
+
 export const startTranscribe = async (
     socketCallMap: SocketCallData,
-    server: FastifyInstance
+    server: FastifyInstance,
+    options: TranscribeStartOptions = {}
 ) => {
     const callMetaData = socketCallMap.callMetadata;
     const audioInputStream = socketCallMap.audioInputStream;
+    // Taken by the first request only; every later attempt is an ordinary one,
+    // which a meeting that has ended does not open.
+    let heldAudioRequestPending = options.heldAudioOnly === true;
     // Resolved ONCE per call, not per Transcribe session: a meeting keeps the
     // options it started with across every reconnect, so a change saved on the
     // Configuration page mid-meeting cannot change its language or redaction
@@ -525,7 +552,21 @@ export const startTranscribe = async (
     const startTranscribeSession = async (retryCount = 0, timeOffsetSeconds = 0): Promise<void> => {
         // Stop retrying once the call has legitimately ended (socket closed /
         // end event) — otherwise we'd spin forever after a normal hang-up.
-        if (socketCallMap.ended) {
+        const heldAudioOnly = heldAudioRequestPending;
+        heldAudioRequestPending = false;
+        if (heldAudioOnly) {
+            const held = heldAudioBytes(audioInputStream);
+            // A capture discarded for consent has its stream destroyed: none of
+            // its audio is transcribed.
+            if (!audioInputStream || audioInputStream.destroyed || socketCallMap.discarded || held === 0) {
+                server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Call ended with no audio held for transcription.`);
+                return;
+            }
+            server.log.info(
+                `[TRANSCRIBING]: [${callMetaData.callId}] - Call ended while its transcription engine was starting; ` +
+                    `transcribing the ${pcmSeconds(held, callMetaData.samplingRate, TRANSCRIBE_CHANNELS).toFixed(1)}s of audio held for it.`
+            );
+        } else if (socketCallMap.ended) {
             server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Call ended; not (re)starting transcription session.`);
             return;
         }
@@ -537,7 +578,7 @@ export const startTranscribe = async (
         // Audio waits in the shared stream between requests, so this reads its
         // buffer without taking anything from it.
         const waitStartMs = Date.now();
-        if (audioInputStream && !(await waitForAudio(audioInputStream, () => socketCallMap.ended))) {
+        if (!heldAudioOnly && audioInputStream && !(await waitForAudio(audioInputStream, () => socketCallMap.ended))) {
             server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Call ended while waiting for audio; not (re)starting transcription session.`);
             return;
         }
@@ -549,7 +590,12 @@ export const startTranscribe = async (
         const attemptStartMs = Date.now();
         // This attempt's own reader of the shared audio stream. Opened before
         // the request so its byte count covers everything this attempt takes.
-        const tap = audioInputStream ? openAudioTap(audioInputStream) : undefined;
+        const tap = audioInputStream ? openAudioTap(audioInputStream, heldAudioOnly) : undefined;
+        if (heldAudioOnly) {
+            // Nothing more is written to an ended meeting's stream: ending it
+            // flushes what it holds into the tap, whose end ends the request.
+            audioInputStream?.end();
+        }
         // Audio bytes this attempt's request carried, and whether the request was
         // accepted at all: Transcribe bills an accepted request for the seconds of
         // audio it was sent (15-second minimum), and nothing for one it refused.
@@ -762,7 +808,13 @@ export const startTranscribe = async (
         }
     };
 
-    await startTranscribeSession();
+    // Audio dropped from the front of the stream while an ASR MicroVM was
+    // being acquired (heldAudioDroppedBytes) is in the recording but reaches no
+    // request, so the first request's clock starts after it.
+    await startTranscribeSession(
+        0,
+        pcmSeconds(socketCallMap.heldAudioDroppedBytes ?? 0, callMetaData.samplingRate, TRANSCRIBE_CHANNELS)
+    );
 };
 
 interface Segment {
