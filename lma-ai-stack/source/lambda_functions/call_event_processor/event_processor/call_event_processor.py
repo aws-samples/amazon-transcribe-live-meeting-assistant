@@ -85,6 +85,7 @@ from pure import (  # noqa: E402
     language_to_record,
     merge_dicts,
     segment_analyses,
+    transcription_pause_state,
 )
 
 # pylint: enable=import-error
@@ -1050,6 +1051,47 @@ async def execute_update_capture_context_mutation(
     return result
 
 
+async def execute_update_transcription_pause_mutation(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> Dict:
+    """Sets Call.TranscriptionPause from an UPDATE_TRANSCRIPTION_PAUSE event.
+
+    Sent by a Virtual Participant when someone pauses or resumes transcription
+    with the meeting chat commands. Published to onUpdateCall, so the meeting
+    page shows or hides its pause banner as it happens; the selection carries
+    the usual Call fields so the update reads like the pipeline's others.
+    """
+    call_id = message.get("CallId")
+    state = transcription_pause_state(message, _now_iso())
+    if not call_id or state is None:
+        error_message = "update transcription pause event has no CallId or no Paused flag"
+        raise TypeError(error_message)
+
+    if not appsync_session.client.schema:
+        raise ValueError("invalid AppSync schema")
+    schema = DSLSchema(appsync_session.client.schema)
+
+    query = dsl_gql(
+        DSLMutation(
+            schema.Mutation.updateTranscriptionPause.args(
+                input={"CallId": call_id, "TranscriptionPause": state}
+            ).select(*call_fields(schema), schema.Call.TranscriptionPause)
+        )
+    )
+
+    result = await execute_gql_query_with_retries(
+        query,
+        client_session=appsync_session,
+        logger=LOGGER,
+    )
+
+    query_string = print_ast(query)
+    LOGGER.debug("query result", extra=dict(query=query_string, result=result))
+
+    return result
+
+
 async def execute_add_s3_video_recording_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
@@ -1529,6 +1571,7 @@ async def execute_process_event_api_mutation(
         ADD_S3_VIDEO_RECORDING_URL="ADD_S3_VIDEO_RECORDING_URL",
         ADD_VIDEO_KEYFRAME="ADD_VIDEO_KEYFRAME",
         UPDATE_CAPTURE_CONTEXT="UPDATE_CAPTURE_CONTEXT",
+        UPDATE_TRANSCRIPTION_PAUSE="UPDATE_TRANSCRIPTION_PAUSE",
     )
 
     msg_event_type = message.get("EventType", "")
@@ -1941,6 +1984,16 @@ async def execute_process_event_api_mutation(
     elif event_type == "UPDATE_CAPTURE_CONTEXT":
         LOGGER.debug("Update capture context")
         response = await execute_update_capture_context_mutation(
+            message=message, appsync_session=appsync_session
+        )
+        if isinstance(response, Exception):
+            return_value["errors"].append(response)
+        else:
+            return_value["successes"].append(response)
+
+    elif event_type == "UPDATE_TRANSCRIPTION_PAUSE":
+        LOGGER.debug("Update transcription pause")
+        response = await execute_update_transcription_pause_mutation(
             message=message, appsync_session=appsync_session
         )
         if isinstance(response, Exception):

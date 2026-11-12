@@ -22,6 +22,7 @@ session belongs in call_event_processor.py, not in this module.
 
 from __future__ import annotations
 
+import json
 from statistics import fmean
 from typing import Any, Callable, Dict, List, Literal, NamedTuple, Optional, Pattern, TypedDict
 
@@ -273,6 +274,34 @@ def capture_context_fields(message: Dict[str, Any]) -> Dict[str, str]:
         for field in CAPTURE_CONTEXT_FIELDS
         if isinstance(message.get(field), str) and message[field].strip()
     }
+
+
+#: Longest chat sender name stored in Call.TranscriptionPause.
+MAX_PAUSED_BY_LENGTH = 200
+
+
+def transcription_pause_state(message: Dict[str, Any], now_iso: str) -> Optional[str]:
+    """Call.TranscriptionPause for an UPDATE_TRANSCRIPTION_PAUSE event, or None
+    when the event does not say whether transcription is paused.
+
+    A JSON string, always written whole, so a resume replaces the pause (and its
+    sender) rather than leaving fields of it behind: the Call update resolver
+    skips blank values, so a field cannot be cleared by writing it empty.
+    ``{"Paused": true, "At": ..., "By": ...}`` for a pause, ``By`` only when
+    the chat showed a sender; ``{"Paused": false, "At": ...}`` for a resume.
+    ``At`` is when the Virtual Participant saw the command, or ``now_iso`` when
+    the event does not carry it.
+    """
+    paused = message.get("Paused")
+    if not isinstance(paused, bool):
+        return None
+    changed_at = message.get("ChangedAt")
+    at = changed_at.strip() if isinstance(changed_at, str) and changed_at.strip() else now_iso
+    state: Dict[str, Any] = {"Paused": paused, "At": at}
+    paused_by = message.get("PausedBy")
+    if paused and isinstance(paused_by, str) and paused_by.strip():
+        state["By"] = paused_by.strip()[:MAX_PAUSED_BY_LENGTH]
+    return json.dumps(state, separators=(",", ":"))
 
 
 #: How many meetings an execution environment remembers the languages of before

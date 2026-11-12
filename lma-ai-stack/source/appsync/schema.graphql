@@ -127,6 +127,15 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# does not list yet. Absent when no segment named a language: a fixed
 	# language setting, or the ASR MicroVM engine.
 	DetectedLanguages: [String]
+	# Whether transcription is paused because someone typed the pause command
+	# (LMA pause) to the meeting's Virtual Participant in the meeting chat, as a
+	# JSON string: {"Paused": true, "At": <when>, "By": <chat sender, when the
+	# chat showed one>}, or {"Paused": false, "At": <when>} once LMA start
+	# resumed it. Written through updateTranscriptionPause. Absent on a meeting
+	# never paused that way. The meeting page shows a banner while it reads
+	# paused and the meeting is live. Consent withholding capture is not
+	# recorded here; see Consent.
+	TranscriptionPause: String
 	Owner: String
 	SharedWith: String
 }
@@ -289,6 +298,9 @@ type Mutation @aws_iam {
 	# when the engine that transcribes it is not the one its START named, as
 	# when the MicroVM could not start and Amazon Transcribe took over.
 	updateCaptureContext(input: UpdateCaptureContextInput!): Call
+	# Sets Call.TranscriptionPause: written by the call event processor for an
+	# UPDATE_TRANSCRIPTION_PAUSE event from a Virtual Participant.
+	updateTranscriptionPause(input: UpdateTranscriptionPauseInput!): Call
 	# Appends one language to Call.DetectedLanguages when the meeting does not
 	# list it yet; written by the call event processor for the first segment it
 	# sees in that language. A language already listed fails the write's
@@ -790,7 +802,7 @@ type Subscription {
 	onCreateCall: CreateCallOutput
 		@aws_subscribe(mutations: ["createCall"])
 	onUpdateCall(CallId: ID): Call
-		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updateAgent", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "addCallSummaryText", "addCallDetectedLanguage"])
+		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updateAgent", "updateTranscriptionPause", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "addCallSummaryText", "addCallDetectedLanguage"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
 	onAddVideoKeyframe(CallId: ID): VideoKeyframe
@@ -1010,6 +1022,13 @@ input UpdateVideoRecordingUrlInput {
 input AddCallDetectedLanguageInput {
 	CallId: ID!
 	LanguageCode: String!
+}
+
+input UpdateTranscriptionPauseInput {
+	CallId: ID!
+	# The whole value, as Call.TranscriptionPause describes it.
+	TranscriptionPause: String!
+	UpdatedAt: AWSDateTime
 }
 
 # A field left out (or null) keeps its stored value.

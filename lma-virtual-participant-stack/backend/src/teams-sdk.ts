@@ -2,6 +2,7 @@
 import { Page, ConsoleMessage } from 'playwright-core';
 import { CommunicationIdentityClient } from '@azure/communication-identity';
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
+import { recordTranscriptionPause } from './transcription-pause.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
@@ -500,10 +501,12 @@ export default class TeamsSdk {
                         await this.sendMessages(page, chatHelpMessages(voiceAssistant));
                     } else if (details.start && matchesChatCommand(body, details.pauseCommand)) {
                         details.start = false;
+                        void recordTranscriptionPause(true, sender);
                         log.info(details.pauseMessages[0]);
                         await this.sendMessages(page, details.pauseMessages);
                     } else if (!details.start && matchesChatCommand(body, details.startCommand)) {
                         details.start = true;
+                        void recordTranscriptionPause(false, null);
                         log.info(details.startMessages[0]);
                         await this.sendMessages(page, details.startMessages);
                         transcriptionService.startTranscription();
