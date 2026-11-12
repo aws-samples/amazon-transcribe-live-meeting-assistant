@@ -9,9 +9,12 @@ title: "Voice Enrollment (Speaker Recognition)"
 
 > **Status: Beta.** The **Enroll My Voice** page and its navigation entry are
 > marked Beta in the web UI. Enrolling and matching both require the
-> [ASR MicroVM speech engine](microvm-asr.md), LMA's default transcription engine,
-> which is deployed by default (`EnableMicrovmAsr=true`) in Regions with AWS Lambda
-> MicroVMs.
+> [ASR MicroVM speech engine](microvm-asr.md), which is deployed by default
+> (`EnableMicrovmAsr=true`) in Regions with AWS Lambda MicroVMs. Amazon Transcribe
+> is the default transcription engine for every meeting source, so matching also
+> needs an admin to move the meeting sources it should apply to onto the ASR
+> MicroVM engine in the **Transcription Engine** section of the
+> [Configuration page](configuration-guide.md).
 
 > **Off by default, and off unless you deliberately turn it on.** A voiceprint is
 > biometric data about a person. `EnableVoiceEnrollment` defaults to `false`, and
@@ -195,8 +198,16 @@ reconstruct the speech.
 
 ## How a match is used
 
-When a meeting starts in a deployment with enrollment on, the transcription
-session is seeded with the active centroids it is allowed to use, each labelled
+Matching happens only in meetings the ASR MicroVM engine transcribes. Amazon
+Transcribe is the default engine for every meeting source, so an admin moves the
+sources that should be matched (Stream Audio, the Chrome extension and the Desktop
+Capture app together, and Virtual Participants separately) onto the ASR MicroVM
+engine in the **Transcription Engine** section of the
+[Configuration page](configuration-guide.md). A meeting on Amazon Transcribe is
+labelled the way it would be without enrollment.
+
+When a meeting on that engine starts in a deployment with enrollment on, the
+transcription session is seeded with the active centroids it is allowed to use, each labelled
 with its `DisplayName`. From then on the engine assigns speech to those names
 directly instead of minting `spk_0`.
 
@@ -303,7 +314,9 @@ the engine that computes speaker embeddings — one to build a voiceprint, the
 other to compare against it. Amazon Transcribe exposes none, so with enrollment
 on and that engine off the tables, the portal and the consent log all exist and
 work, and the step that would create a voiceprint reports that the engine is
-missing.
+missing. With the engine deployed, matching still applies only to the meeting
+sources an admin has moved onto it in the **Transcription Engine** section of
+the Configuration page; every source ships on Amazon Transcribe.
 
 ## Related Documentation
 

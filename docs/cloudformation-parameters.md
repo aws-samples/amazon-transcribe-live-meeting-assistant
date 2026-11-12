@@ -436,7 +436,7 @@ Console label: *Content Redaction Type for Transcription*
 
 Type of content redaction from Amazon Transcribe transcription output.
 
-## ASR MicroVM speech engine (default transcription engine)
+## ASR MicroVM speech engine (alternative transcription engine)
 
 | Parameter | Default | Kind |
 |---|---|---|
@@ -450,7 +450,7 @@ Console label: *Deploy the ASR MicroVM speech engine*
 - **Allowed values:** `true`, `false`
 - **Kind:** Resource. Decides whether the ASR MicroVM engine's nested stack exists, in a Region with AWS Lambda MicroVMs.
 
-Deploys the ASR MicroVM speech engine (open-source models on AWS Lambda MicroVMs in this account), the default transcription engine for Stream Audio, Chrome extension, Desktop Capture and Virtual Participant meetings; it also provides the speaker embeddings voice enrollment needs. Deployed only in Regions with AWS Lambda MicroVMs (us-east-1, us-east-2, us-west-2, ap-northeast-1, eu-west-1 -- not GovCloud); elsewhere this setting has no effect and every meeting uses Amazon Transcribe. Set false to use Amazon Transcribe for every meeting. Each source's engine can be changed in the Transcription Engine section of the Configuration page. See docs/microvm-asr.md.
+Deploys the ASR MicroVM speech engine (open-source models on AWS Lambda MicroVMs in this account), an alternative to Amazon Transcribe for Stream Audio, Chrome extension, Desktop Capture and Virtual Participant meetings; it also provides the speaker embeddings voice enrollment needs. Amazon Transcribe is the default engine for every meeting source: an admin moves a source onto the ASR MicroVM engine in the Transcription Engine section of the Configuration page. Deployed only in Regions with AWS Lambda MicroVMs (us-east-1, us-east-2, us-west-2, ap-northeast-1, eu-west-1 -- not GovCloud); elsewhere this setting has no effect and every meeting uses Amazon Transcribe. Set false to leave the engine undeployed. See docs/microvm-asr.md.
 
 ## Voice enrollment (Beta; biometric; off by default)
 
@@ -985,23 +985,25 @@ split across the two.
 ### The ASR MicroVM speech engine
 
 `EnableMicrovmAsr` is the only deploy-time question for this engine, and it
-defaults to `true`: the ASR MicroVM engine is the default transcription engine for
-Stream Audio, Chrome extension, Desktop Capture and Virtual Participant meetings,
-with Amazon Transcribe as the alternative and the fallback. The nested stack is
+defaults to `true`, which deploys the engine. Amazon Transcribe is the default
+transcription engine for Stream Audio, Chrome extension, Desktop Capture and
+Virtual Participant meetings; an admin moves a meeting source onto the ASR
+MicroVM engine in the Transcription Engine section of the Configuration page, and
+Amazon Transcribe remains the fallback for a meeting whose MicroVM cannot start. The nested stack is
 created only in a Region with AWS Lambda MicroVMs (us-east-1, us-east-2,
 us-west-2, ap-northeast-1 and eu-west-1, the Region list in the Conditions
 of `lma-main.yaml`); in any other Region, GovCloud included, the
 parameter has no effect and every meeting uses Amazon Transcribe. Set it to
-`false` to use Amazon Transcribe for every meeting.
+`false` to leave the engine undeployed.
 
 A meeting this engine transcribes does not go through Amazon Transcribe, so the
 redaction, custom vocabulary, custom language model and language identification
 settings are not available on it, and it transcribes only the languages its model
 bundle supports (20 European languages, English among them, with the default bundle;
 see [Languages](microvm-asr.md#languages)); a meeting whose Amazon Transcribe settings
-use any of them, or another language, is therefore kept on Amazon Transcribe. It is the default because voice enrollment and per-voice speaker
-separation need it, not because its transcripts are better: its quality is below
-Amazon Transcribe's and has not been benchmarked. Two more values are fixed in the `AsrDefaults`
+use any of them, or another language, is therefore kept on Amazon Transcribe. Voice enrollment needs it, and its
+quality is below Amazon Transcribe's and has not been benchmarked, so measure it in
+a dev stack before moving a meeting source onto it. Two more values are fixed in the `AsrDefaults`
 mapping in `lma-main.yaml` rather than asked: `ModelBundle`, which models the
 MicroVM image is built from (`parakeet-tdt-v3-live-nemotron35-sortformer` by
 default), and `MaxMeetingSeconds` (`14400`), the hard lifetime ceiling per MicroVM.
@@ -1021,7 +1023,10 @@ need the ASR MicroVM engine (`EnableMicrovmAsr=true`, the default, in a Region
 with AWS Lambda MicroVMs), because that engine is what computes speaker
 embeddings; with enrollment on and that engine absent, the tables, the portal and the
 consent log all exist and work, and the step that would create a voiceprint
-reports that the engine is missing.
+reports that the engine is missing. Matching applies only to meetings that engine
+transcribes, so an admin also moves the meeting sources it should apply to onto
+it in the Transcription Engine section of the Configuration page; every source
+ships on Amazon Transcribe.
 
 `VoiceEnrollmentRetentionDays` and `VoiceEnrollmentTermsVersion` are read only by
 application code, but they are stack parameters on purpose and are not on the

@@ -214,14 +214,15 @@ Parameters:
       - "false"
     Description: >-
       Deploys the ASR MicroVM speech engine (open-source models on AWS Lambda
-      MicroVMs in this account), the default transcription engine for Stream
+      MicroVMs in this account), an alternative to Amazon Transcribe for Stream
       Audio, Chrome extension, Desktop Capture and Virtual Participant meetings;
-      it also provides the speaker embeddings voice enrollment needs. Deployed
-      only in Regions with AWS Lambda MicroVMs (us-east-1, us-east-2, us-west-2,
-      ap-northeast-1, eu-west-1 -- not GovCloud); elsewhere this setting has no
-      effect and every meeting uses Amazon Transcribe. Set false to use Amazon
-      Transcribe for every meeting. Each source's engine can be changed in the
-      Transcription Engine section of the Configuration page. See
+      it also provides the speaker embeddings voice enrollment needs. Amazon
+      Transcribe is the default engine for every meeting source: an admin moves
+      a source onto the ASR MicroVM engine in the Transcription Engine section
+      of the Configuration page. Deployed only in Regions with AWS Lambda
+      MicroVMs (us-east-1, us-east-2, us-west-2, ap-northeast-1, eu-west-1 --
+      not GovCloud); elsewhere this setting has no effect and every meeting uses
+      Amazon Transcribe. Set false to leave the engine undeployed. See
       docs/microvm-asr.md.
 
   EnableVoiceEnrollment:
@@ -928,7 +929,7 @@ Metadata:
           - IsPartialTranscriptEnabled
           - TranscribeContentRedactionType
       - Label:
-          default: ASR MicroVM speech engine (default transcription engine)
+          default: ASR MicroVM speech engine (alternative transcription engine)
         Parameters:
           - EnableMicrovmAsr
       - Label:
@@ -3035,8 +3036,9 @@ Resources:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
 
   # On-demand streaming ASR + speaker diarization on AWS Lambda MicroVMs, used by
-  # the WebSocket transcriber and the Virtual Participant as the default engine,
-  # with Amazon Transcribe streaming as the alternative and fallback. Created only
+  # the WebSocket transcriber and the Virtual Participant for each meeting source
+  # an admin moves onto it; Amazon Transcribe streaming is the default engine and
+  # the fallback. Created only
   # in Regions with Lambda MicroVMs (see the IsMicrovmRegion condition).
   # One MicroVM per meeting, launched at meeting start and terminated at the end.
   ASRMICROVMSTACK:

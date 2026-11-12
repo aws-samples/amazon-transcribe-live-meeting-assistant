@@ -10,15 +10,16 @@ Audio reaches LMA by one of two routes and leaves as transcript segments:
   meeting, opens a WebSocket to a Fastify server on ECS Fargate.
 - That server streams the audio to a speech engine. There are two, and which
   one runs is a per-source runtime switch, not a deployment-wide setting:
-  an on-demand ASR MicroVM (open-source models on AWS Lambda MicroVMs; the
-  default for every source when its nested stack is deployed, which needs
-  EnableMicrovmAsr true AND a Region with Lambda MicroVMs) or Amazon
-  Transcribe (used when that stack is absent, when an admin has moved the
-  source onto it in the Transcription Engine section of the Configuration
-  page, when the meeting's Amazon Transcribe options use content redaction,
-  a custom vocabulary or language model, language identification, or a
-  language the deployed ASR model bundle does not support, or when
-  a MicroVM could not start for a meeting). The [ASR] log line says which.
+  Amazon Transcribe (the default for every source) or an on-demand ASR
+  MicroVM (open-source models on AWS Lambda MicroVMs; used only for a source
+  an admin has moved onto it in the Transcription Engine section of the
+  Configuration page, and only when its nested stack is deployed, which needs
+  EnableMicrovmAsr true AND a Region with Lambda MicroVMs). A source on the
+  MicroVM still uses Amazon Transcribe when the meeting's Amazon Transcribe
+  options use content redaction, a custom vocabulary or language model,
+  language identification, or a language the deployed ASR model bundle does
+  not support, or when a MicroVM could not start for a meeting. The [ASR] log
+  line says which.
 - Both engines emit identical ADD_TRANSCRIPT_SEGMENT events onto a Kinesis Data
   Stream, so nothing downstream of Kinesis is engine-aware.
 - The Call Event Processor Lambda consumes Kinesis, writes DynamoDB and

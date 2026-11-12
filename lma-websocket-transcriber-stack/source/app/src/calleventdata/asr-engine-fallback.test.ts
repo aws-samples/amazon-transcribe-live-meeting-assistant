@@ -33,7 +33,7 @@ const recordingServer = () => {
     return { server, lines };
 };
 
-const SHIPPED_DEFAULT: AsrRuntimeConfig = {
+const MICROVM_CHOSEN: AsrRuntimeConfig = {
     streamingEngineMicrovm: true,
     virtualParticipantEngineMicrovm: true,
     diarizeVirtualParticipant: true,
@@ -42,9 +42,9 @@ const SHIPPED_DEFAULT: AsrRuntimeConfig = {
 const meeting = (fields: Partial<CallMetaData> = {}): CallMetaData =>
     ({ callId: 'call-1', ...fields }) as CallMetaData;
 
-test('the shipped MicroVM default uses Amazon Transcribe where no ASR launcher is deployed', () => {
+test('a MicroVM engine choice uses Amazon Transcribe where no ASR launcher is deployed', () => {
     const { server, lines } = recordingServer();
-    assert.equal(resolveAsrEngine(meeting(), server, SHIPPED_DEFAULT), 'transcribe');
+    assert.equal(resolveAsrEngine(meeting(), server, MICROVM_CHOSEN), 'transcribe');
     // Expected on every meeting of such a deployment, so not a warning.
     assert.deepEqual(
         lines.map((line) => line.level),
@@ -55,7 +55,7 @@ test('the shipped MicroVM default uses Amazon Transcribe where no ASR launcher i
 test('a client that names the MicroVM engine on such a deployment is warned and still transcribed', () => {
     const { server, lines } = recordingServer();
     assert.equal(
-        resolveAsrEngine(meeting({ asrEngine: 'microvm' }), server, SHIPPED_DEFAULT),
+        resolveAsrEngine(meeting({ asrEngine: 'microvm' }), server, MICROVM_CHOSEN),
         'transcribe'
     );
     assert.deepEqual(
@@ -67,7 +67,7 @@ test('a client that names the MicroVM engine on such a deployment is warned and 
 test('a deployment switched to Amazon Transcribe logs nothing', () => {
     const { server, lines } = recordingServer();
     assert.equal(
-        resolveAsrEngine(meeting(), server, { ...SHIPPED_DEFAULT, streamingEngineMicrovm: false }),
+        resolveAsrEngine(meeting(), server, { ...MICROVM_CHOSEN, streamingEngineMicrovm: false }),
         'transcribe'
     );
     assert.equal(lines.length, 0);

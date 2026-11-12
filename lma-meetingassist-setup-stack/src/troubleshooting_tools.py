@@ -1270,10 +1270,10 @@ class TroubleshootingTools:
         "EnableMicrovmAsr": (
             "Whether the on-demand ASR engine is deployed (true by default). "
             "It is deployed only in a Region with Lambda MicroVMs, so true "
-            "does not guarantee it exists. Where it is deployed it is the "
-            "default engine for every source, but an admin can move a source "
-            "onto Amazon Transcribe in the Transcription Engine section of the "
-            "Configuration page, and a meeting whose MicroVM could not start "
+            "does not guarantee it exists. Amazon Transcribe is the default "
+            "engine for every source; where the ASR engine is deployed an admin "
+            "can move a source onto it in the Transcription Engine section of "
+            "the Configuration page, and a meeting whose MicroVM could not start "
             "falls back to Amazon Transcribe."
         ),
         "MeetingAssistService": (

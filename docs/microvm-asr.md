@@ -7,31 +7,32 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 
 # On-demand ASR & Speaker Diarization (MicroVM)
 
-> **The default transcription engine.** `EnableMicrovmAsr` defaults to `true`, and
-> where the engine is deployed it transcribes Stream Audio, Chrome extension, Desktop
-> Capture and Virtual Participant meetings unless an admin moves them onto Amazon
-> Transcribe in the Transcription Engine section of the Configuration page. Amazon
-> Transcribe is the alternative, and the fallback: it is used for every meeting where
-> the engine is not deployed (`EnableMicrovmAsr=false`, or a Region without AWS Lambda
-> MicroVMs, GovCloud included), and for any meeting whose MicroVM cannot start. A
+> **An alternative transcription engine, deployed by default and selected per
+> meeting source.** `EnableMicrovmAsr` defaults to `true`, which deploys the engine,
+> but Amazon Transcribe is the default transcription engine for every meeting source.
+> Where the engine is deployed, an admin moves Stream Audio, Chrome extension and
+> Desktop Capture meetings, Virtual Participants, or both onto it in the
+> Transcription Engine section of the Configuration page. Amazon Transcribe is also
+> the fallback: it is used for every meeting where the engine is not deployed
+> (`EnableMicrovmAsr=false`, or a Region without AWS Lambda MicroVMs, GovCloud
+> included), and for any meeting whose MicroVM cannot start. A
 > meeting whose Amazon Transcribe options use content redaction, a custom vocabulary,
 > a custom language model, language identification or a language the deployed model
 > bundle does not support, which this engine does not offer, stays on Amazon Transcribe
 > whichever engine is selected (see [Feature trade-offs](#feature-trade-offs-versus-amazon-transcribe)).
 >
-> **Why it is the default, and what that does not mean.** It is the default because
-> two features need it: [voice enrollment](voice-enrollment.md), whose speaker
-> embeddings only this engine computes, and separating the several voices on one
-> microphone or one attendee tile, which it does better than Amazon Transcribe in the
-> measurement in [Virtual Participant](virtual-participant.md). It is not the default
-> because its transcripts are better. Transcript quality here is below Amazon
-> Transcribe's, its word error rate (WER) and diarization error rate have not been
-> benchmarked against Amazon Transcribe (see
+> **When to move a source onto it.** Two features need it:
+> [voice enrollment](voice-enrollment.md), whose speaker embeddings only this engine
+> computes, so enrolled voices are matched only in meetings it transcribes; and
+> separating the several voices on one microphone or one attendee tile, which it does
+> better than Amazon Transcribe in the measurement in
+> [Virtual Participant](virtual-participant.md). Its transcripts are not better:
+> transcript quality here is below Amazon Transcribe's, its word error rate (WER) and
+> diarization error rate have not been benchmarked against Amazon Transcribe (see
 > [What is not yet measured](#what-is-not-yet-measured)), and its defaults may change
-> between releases. Measure it in a dev stack before relying on it for production
-> meetings. **To keep Amazon Transcribe**, set `EnableMicrovmAsr` to `false`, or
-> choose Amazon Transcribe for each meeting source in the Transcription Engine
-> section (see [Choosing the engine](#choosing-the-engine)).
+> between releases. Measure it in a dev stack, with the meeting features you use
+> (consent modes and the voice assistant included), before moving a production
+> meeting source onto it (see [Choosing the engine](#choosing-the-engine)).
 >
 > Nothing about it is tunable at deploy time: `EnableMicrovmAsr` is the only
 > CloudFormation question, the model bundle ships with its diarization operating
@@ -316,15 +317,15 @@ deployment would fail. In any other Region `EnableMicrovmAsr` has no effect, the
 Transcription Engine section shows no engine choice, and every meeting uses Amazon
 Transcribe. When Lambda MicroVMs reach another Region, add it to that condition.
 
-**Using Amazon Transcribe for every meeting.** Set `EnableMicrovmAsr` to `false`, or
-keep the engine deployed and move both meeting sources onto Amazon Transcribe in the
-Transcription Engine section (see [Choosing the engine](#choosing-the-engine)).
+**Using Amazon Transcribe for every meeting.** That is what a deployment does until
+an admin moves a meeting source onto this engine. Set `EnableMicrovmAsr` to `false`
+to leave the engine undeployed altogether.
 
 **Upgrading.** A stack update keeps the value the stack was deployed with unless you
 change it: the console and `lma deploy` both reuse a parameter's previous value, so a
-deployment created with `EnableMicrovmAsr=false` stays on Amazon Transcribe until
-you set it to `true`. See [Choosing the engine](#choosing-the-engine) for what
-happens to the engine switches on upgrade.
+deployment created with `EnableMicrovmAsr=false` has no engine until you set it to
+`true`. See [Choosing the engine](#choosing-the-engine) for what happens to the
+engine switches on upgrade.
 
 **First deployment builds the image**, which downloads the models (~3.1 GB for the
 default bundle) and warms them. Expect several extra minutes on the first create and
@@ -528,28 +529,32 @@ each meeting, so a change needs no redeploy:
 
 | Setting | Covers | Default |
 |---|---|---|
-| Stream Audio, Chrome extension and Desktop Capture | Every meeting from those three sources | ASR MicroVM engine |
-| Virtual Participants | Every Virtual Participant | ASR MicroVM engine |
+| Stream Audio, Chrome extension and Desktop Capture | Every meeting from those three sources | Amazon Transcribe |
+| Virtual Participants | Every Virtual Participant | Amazon Transcribe |
 
-Both settings ship on the ASR MicroVM engine. Choosing **Amazon Transcribe** for a
-setting moves every meeting of that kind onto it. Upload Audio always uses Amazon
-Transcribe batch transcription and has no engine setting.
+Both settings ship on Amazon Transcribe. Choosing **ASR MicroVM speech engine** for a
+setting moves every meeting of that kind onto this engine. Upload Audio always uses
+Amazon Transcribe batch transcription and has no engine setting.
 
-The shipped values are part of the deployment's baseline configuration, so they reach
-every deployment whose admin has not chosen an engine. A choice an admin saved is
-kept on upgrade and keeps winning: one saved in the Transcription Engine section is
-stored in the active configuration profile, and one saved on the Transcription
-Engine page of a release before v0.4.0 is carried into that profile by the upgrade.
-A deployment upgraded from such a release on which nobody saved that page moves onto
-the ASR MicroVM engine wherever the engine is deployed; choose Amazon Transcribe in
-the section to keep it. That happens in one of two ways on an upgrade from 0.3.x. If
-the deployment's `custom` profile holds no settings at all, it is removed and the
-deployment runs on the default profile, so it follows the shipped switches of this
-and every later release. If it holds settings, it is converted into a full-copy
-Custom profile, and every switch nobody saved is filled in from this release's
-baseline, which puts those sources on the ASR MicroVM engine. From then on that
-profile keeps its own copy of the switches, so a later release that changes the
-shipped switches does not change it.
+The shipped values are part of the deployment's baseline configuration, which every
+stack update rewrites, so they reach a deployment running on the default profile or
+on a Managed (preset) profile. A Custom profile is a full copy of the configuration:
+it keeps the switches it holds, whatever a later release ships. To keep a meeting
+source on this engine across upgrades, choose it in the Transcription Engine section
+while a Custom profile is active.
+
+On an upgrade from 0.3.x, a choice saved on the Transcription Engine page of that
+release is carried into the deployment's `custom` profile and keeps winning. If
+nobody saved that page, the meeting sources stay on Amazon Transcribe, as they were:
+a `custom` profile holding no settings at all is removed and the deployment runs on
+the default profile, and one holding settings is converted into a full-copy Custom
+profile whose unsaved switches are filled in from this release's baseline.
+
+On an update from a pre-release build of 0.4.0 whose baseline put both meeting
+sources on this engine, a deployment running on the default profile or a Managed
+profile moves onto Amazon Transcribe, and one running on a Custom profile keeps the
+engine that profile holds. Choose the ASR MicroVM engine in the Transcription Engine
+section, in a Custom profile, to keep using it.
 
 On a deployment without the engine (`EnableMicrovmAsr=false`, or a Region without
 AWS Lambda MicroVMs) the settings are not shown and have no effect: the transcriber

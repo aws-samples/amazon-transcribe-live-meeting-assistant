@@ -740,16 +740,15 @@ class LegacyAsrConfigTable:
 ASR_TABLES = {"asr_engine": "old-asr-table"}
 
 
-def test_the_shipped_asr_switches_choose_the_microvm_engine(seeder) -> None:
-    """Both meeting kinds default to the ASR MicroVM engine; voice separation is on.
+def test_the_shipped_asr_switches_choose_amazon_transcribe(seeder) -> None:
+    """Both meeting kinds default to Amazon Transcribe; voice separation is on.
 
-    A deployment without the engine still transcribes with Amazon Transcribe: its
-    readers fall back when no launcher is configured. Voice separation works on
-    either engine.
+    An administrator moves a meeting source onto the ASR MicroVM engine in the
+    Transcription Engine section. Voice separation works on either engine.
     """
     assert seeder.shipped_default_body("default")["asr_engine"] == {
-        "streamingEngineMicrovm": True,
-        "virtualParticipantEngineMicrovm": True,
+        "streamingEngineMicrovm": False,
+        "virtualParticipantEngineMicrovm": False,
         "diarizeVirtualParticipant": True,
     }
 
@@ -765,9 +764,9 @@ def test_an_upgrade_carries_the_asr_switches_across(seeder) -> None:
         legacy_client=LegacyAsrConfigTable(
             {
                 "AsrConfigId": {"S": "CustomAsrConfig"},
-                # An administrator's saved choices: Amazon Transcribe for
+                # An administrator's saved choices: the ASR MicroVM engine for
                 # streaming meetings, and voice separation off.
-                "streamingEngineMicrovm": {"BOOL": False},
+                "streamingEngineMicrovm": {"BOOL": True},
                 "diarizeVirtualParticipant": {"BOOL": False},
                 # Retired by an earlier release; nothing reads it.
                 "speakerThreshold": {"S": "0.35"},
@@ -778,16 +777,63 @@ def test_an_upgrade_carries_the_asr_switches_across(seeder) -> None:
 
     assert adoption(outcome)["asr_engine"] == "adopted-from-previous-table"
     assert dynamo.body("Config#custom")["asr_engine"] == {
-        "streamingEngineMicrovm": False,
+        "streamingEngineMicrovm": True,
         "diarizeVirtualParticipant": False,
     }
     resolved = store.get_section("asr_engine").values
-    # The saved choices win over the shipped defaults of the MicroVM engine and
+    # The saved choices win over the shipped defaults of Amazon Transcribe and
     # of voice separation on...
-    assert resolved["streamingEngineMicrovm"] is False
+    assert resolved["streamingEngineMicrovm"] is True
     assert resolved["diarizeVirtualParticipant"] is False
     # ...and a switch never saved takes the shipped default.
+    assert resolved["virtualParticipantEngineMicrovm"] is False
+
+
+def _baseline_choosing_the_microvm_engine(seeder) -> Dict[str, Any]:
+    """The baseline as a pre-release that chose the ASR MicroVM engine shipped it."""
+    previous = seeder.shipped_default_body("default")
+    previous["asr_engine"] = {
+        "streamingEngineMicrovm": True,
+        "virtualParticipantEngineMicrovm": True,
+        "diarizeVirtualParticipant": True,
+    }
+    return previous
+
+
+def test_a_custom_profile_keeps_its_engine_when_the_shipped_default_changes(seeder) -> None:
+    """A Custom profile is a full copy, so a stack update leaves its engine choice alone."""
+    store, dynamo = build_store()
+    store.write_default(_baseline_choosing_the_microvm_engine(seeder))
+    store.create_profile("team", updated_by="admin@example.com")
+    store.activate_profile("team")
+
+    seeder.seed(store, domain="default")
+
+    assert dynamo.body("Config#default")["asr_engine"]["streamingEngineMicrovm"] is False
+    assert dynamo.body("Config#team")["asr_engine"] == {
+        "streamingEngineMicrovm": True,
+        "virtualParticipantEngineMicrovm": True,
+        "diarizeVirtualParticipant": True,
+    }
+    resolved = store.get_section("asr_engine").values
+    assert resolved["streamingEngineMicrovm"] is True
     assert resolved["virtualParticipantEngineMicrovm"] is True
+
+
+def test_the_default_and_managed_profiles_follow_the_shipped_engine(seeder) -> None:
+    """A deployment on the default or a Managed profile takes the release's engine choice."""
+    store, _dynamo = build_store()
+    store.write_default(_baseline_choosing_the_microvm_engine(seeder))
+
+    seeder.seed(store, domain="default")
+    seeder.write_managed_profiles(
+        store, store.read_profile("default").body, {"AsrEngineAvailable": "true"}
+    )
+
+    for name in ("default", *PRESETS):
+        engine = store.read_profile(name).body["asr_engine"]
+        assert engine["streamingEngineMicrovm"] is False, name
+        assert engine["virtualParticipantEngineMicrovm"] is False, name
 
 
 def test_an_asr_table_that_was_never_written_records_an_empty_section(seeder) -> None:

@@ -175,8 +175,8 @@ export function resolveVpAsrEngine(
         }
     };
     if (!isMicrovmAsrConfigured()) {
-        // The shipped default selects the MicroVM engine, so on a deployment
-        // without it every VP arrives here: the expected fallback.
+        // A switch or per-VP override asked for the MicroVM engine on a
+        // deployment without it: the expected fallback.
         report('[ASR] MicroVM ASR requested but this deployment has no ASR launcher configured; using Amazon Transcribe.');
         return 'transcribe';
     }

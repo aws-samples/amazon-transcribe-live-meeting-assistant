@@ -79,8 +79,8 @@ For headless/CLI use, the same options are `--diarize-system` / `--diarize-mic`
 
 Which engine a desktop meeting uses is the deployment's **Stream Audio, Chrome extension and Desktop Capture** setting
 in the **Transcription Engine** section of **Configuration ▸ Configuration**, the same setting that covers Stream Audio and the
-Chrome extension; it ships on the [ASR MicroVM engine](microvm-asr.md) wherever that
-engine is deployed. When the deployment runs that engine, `--asr-engine microvm` or
+Chrome extension; it ships on Amazon Transcribe, and an admin can move it onto the
+[ASR MicroVM engine](microvm-asr.md) wherever that engine is deployed. When the deployment runs that engine, `--asr-engine microvm` or
 `--asr-engine transcribe` (`LMA_ASR_ENGINE`, or `asrEngine` in `lma-config.json`)
 overrides that setting for one run in either direction; omit it and the deployment
 setting applies.
