@@ -53,7 +53,8 @@ export interface DialogAnalysis {
   primaryActionSelector?: string;
   message: string;
   needsHuman: boolean;
-  /** True when the dialog asks about camera/microphone access or devices. */
+  /** True when the dialog asks about camera/microphone access or devices;
+   *  undefined when the model did not say. */
   mediaPermission?: boolean;
 }
 
@@ -771,7 +772,8 @@ export async function analyzeUnknownDialog(
           : undefined,
       message: typeof json.message === 'string' ? json.message : '',
       needsHuman: !!json.needsHuman,
-      mediaPermission: !!json.mediaPermission,
+      mediaPermission:
+        typeof json.mediaPermission === 'boolean' ? json.mediaPermission : undefined,
     };
     return result;
   } catch (err) {
@@ -980,6 +982,10 @@ export async function scrollIntoViewAndClick(
  * title, value), collapsed to single spaces. Resolves the selector the same way
  * scrollIntoViewAndClick does, so it reads the element that would be clicked.
  * Null when the selector matches nothing or cannot be evaluated.
+ *
+ * If the selector matches a container rather than a button, the text covers
+ * every button inside it, so a container that also holds a "without audio"
+ * action is escalated rather than clicked. That is intended.
  */
 export async function readActionText(page: Page, selector: string): Promise<string | null> {
   try {

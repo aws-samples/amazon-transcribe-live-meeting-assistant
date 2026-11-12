@@ -36,15 +36,20 @@ export function isNoAudioAction(actionText: string | null | undefined): boolean 
     return !!actionText && NO_AUDIO_ACTION.test(actionText);
 }
 
+/**
+ * Whether a dialog is about camera/microphone access. An action that joins
+ * without audio always counts. Otherwise the model's `mediaPermission` answer
+ * decides; the keyword check on its message is used only when that answer is
+ * missing, so an in-meeting notice that merely mentions the microphone is not
+ * treated as a permission dialog.
+ */
 export function isMediaPermissionDialog(
     analysis: Pick<DialogAnalysis, 'message' | 'mediaPermission'>,
     actionText?: string | null,
 ): boolean {
-    return (
-        !!analysis.mediaPermission ||
-        MEDIA_PERMISSION_TEXT.test(analysis.message || '') ||
-        isNoAudioAction(actionText)
-    );
+    if (isNoAudioAction(actionText)) return true;
+    if (typeof analysis.mediaPermission === 'boolean') return analysis.mediaPermission;
+    return MEDIA_PERMISSION_TEXT.test(analysis.message || '');
 }
 
 export type DialogDecision =

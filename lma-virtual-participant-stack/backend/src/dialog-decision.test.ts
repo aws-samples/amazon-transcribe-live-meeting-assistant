@@ -97,6 +97,16 @@ test('escalates a notice without a usable action only when the model says a huma
     assert.deepEqual(d, { kind: 'escalate', message: 'This meeting is being recorded.' });
 });
 
+test('leaves alone a notice that mentions the microphone when the model says it is not a media dialog', () => {
+    const notice = recordingNotice({
+        message: 'This meeting is being recorded, including your microphone audio.',
+        mediaPermission: false,
+    });
+    assert.deepEqual(decideDialogAction(notice, 'TEAMS', null), { kind: 'ignore' });
+    assert.deepEqual(decideAfterClickFailure(notice, 'TEAMS', 'Got it'), { kind: 'ignore' });
+    assert.equal(decideDialogAction(notice, 'TEAMS', '').kind, 'click');
+});
+
 test('a failed click escalates a camera/microphone dialog', () => {
     const d = decideAfterClickFailure(consent(), 'TEAMS', 'Allow');
     assert.ok(d.kind === 'escalate' && d.message.includes(NO_AUDIO_WARNING));
@@ -148,9 +158,11 @@ test('recognises no-audio action labels', () => {
     }
 });
 
-test('identifies a media-permission dialog from the flag, the message, or the action', () => {
+test('identifies a media-permission dialog from the flag, the action, or (without a flag) the message', () => {
     assert.ok(isMediaPermissionDialog({ message: '', mediaPermission: true }));
     assert.ok(isMediaPermissionDialog({ message: 'Allow access to your microphone?' }));
+    assert.ok(!isMediaPermissionDialog({ message: 'Allow access to your microphone?', mediaPermission: false }));
+    assert.ok(isMediaPermissionDialog({ message: '', mediaPermission: false }, 'Continue without audio or video'));
     assert.ok(isMediaPermissionDialog({ message: 'Before you join' }, 'Continue without audio or video'));
     assert.ok(!isMediaPermissionDialog({ message: 'This meeting is being recorded.' }, 'Got it'));
 });
