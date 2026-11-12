@@ -1362,6 +1362,9 @@ class DiarizingEngine(RecognizerEngine):
         """The shared speaker-turn detector, when one was baked into the image."""
         return self._turn_detector
 
+    def warm_up(self, pcm: bytes) -> int:
+        return self._inner.warm_up(pcm)
+
     def new_session(self, config: SessionConfig | None = None) -> Recognizer:
         # Delegate first: the inner engine owns sample-rate/endpointing validation
         # and raises SessionConfigError, which must surface unchanged.

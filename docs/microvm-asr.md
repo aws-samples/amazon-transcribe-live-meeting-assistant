@@ -338,6 +338,25 @@ group keeps the logs it already
 holds and is not removed on upgrade, so delete it yourself once you no longer
 need them.
 
+**How the image is warmed.** Every MicroVM starts from a snapshot that Lambda takes
+when the image's `/ready` hook first answers 200, and Lambda prefetches on later
+launches the memory pages that the `/validate` hook touches. The hook therefore
+answers 503 until two things have run in the ASR server. The first is a warm-up
+decode: about 20.6 s of audio (the VAD's 20 s longest segment plus its padding) is
+handed to every model the engine holds. For the offline model it goes straight to the
+decoder as one utterance rather than through the VAD, so the encoder runs and its
+buffers for the longest utterance are allocated even when the warm-up audio would not
+pass as speech. The audio is the bundle's sample clip (`test_wavs/warm.wav`) repeated
+to that length when the bundle has one, and otherwise a deterministic synthetic
+speech-like signal; the Parakeet TDT v3 bundles have no clip. The second is the
+existing exercise, which streams warm audio through the real WebSocket path. `/validate`
+repeats both. The hook asks for the decode over a pipe between its own process and the
+server's, not over the network. In the image build's log the server reports
+`warm-up decode: <n> decode(s) of 20.6s of synthetic speech-like audio in <t>s,
+rss=<m>MB` (two decodes for a two-pass bundle: the offline model and the live
+preview) and the hook reports `warm-up decode complete in <t>s`. `ASR_WARM_DECODE_S` changes the length and
+`ASR_WARM_DECODE_TIMEOUT_S` (default 600) how long the hook waits for it.
+
 That is the whole deploy-time surface. Two more values are fixed in the `AsrDefaults`
 mapping in `lma-main.yaml` rather than asked, because neither is a question a
 deployer should have to answer:
@@ -964,6 +983,19 @@ validate the pairing on a live multi-speaker meeting before marking it `vetted`.
   `termination` message carries `dropped_seconds`. A nonzero total means the engine
   could not keep up at some point in that meeting, whether from load or from a
   single slow step (look for `sortformer step ... took` nearby).
+- Every offline (final-text) decode logs one line, as
+  `offline decode: audio=<a>s wall=<w>s cpu=<c>s (<c/w> cores) lock_wait=<l>s
+  first_in_process=False first_in_session=True warm_up=False`. `wall` is how long the
+  decode took, `cpu` the CPU time the whole process used meanwhile (so another
+  session's work in the same interval counts too), and `lock_wait` how long it waited
+  for the other channel's decode, since the two channels' decodes take turns.
+  `first_in_session` marks the session's first decode. `first_in_process` is true only
+  for the first decode since the server process started, which in a MicroVM launched
+  from the snapshot was the image's warm-up (`warm_up=True`), so a meeting's first
+  decode reads `first_in_process=False first_in_session=True`. A two-pass bundle also
+  logs each session's first live-preview decode, as `preview decode: ...`. A decode
+  whose `wall` is much larger than `cpu` over a single call was waiting rather than
+  computing (for memory being paged in, or for the host), not short of cores.
 - **How a MicroVM is billed.** Memory for the whole lifetime at the configured size,
   and vCPU-seconds at the larger of the baseline and the cores in use. The baseline is
   one vCPU per 2 GiB, 4 vCPUs at 8 GiB, and a MicroVM can burst to four times it, which
@@ -1171,6 +1203,16 @@ aws s3api list-object-versions --bucket "$B" \
 aws s3api delete-objects --bucket "$B" --delete file:///tmp/objects.json
 aws cloudformation delete-stack --stack-name <the nested ASR stack>
 ```
+
+**A meeting's first long utterance falls behind and drops audio.** Look at the
+session's first `offline decode:` lines (`first_in_session=True`) in
+`/aws/lambda-microvms/<stack>-asr-logs`. If `wall` is tens of seconds while `cpu` is
+a small fraction of it, the decode was waiting rather than computing. Check that the
+image's build log shows `warm-up decode complete` before `ready warm=True` and in the
+`validate workloadExercised=True (warm-up decode=True, ...)` line; an image built
+before the warm-up decode existed never ran the offline model before its snapshot when
+the bundle had no sample clip, and rebuilding the image (any change of bundle, or a
+stack update that changes the image source) picks it up.
 
 **The image build fails.** Check `/aws/lambda-microvms/<stack>-asr-logs`. A `SHA256
 mismatch` means the pinned checksum does not match the download (for a model pinned
