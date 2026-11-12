@@ -91,7 +91,7 @@ You are a meeting invitation parser. Extract the following information from the 
 - meetingName: The title/subject of the meeting
 - meetingPlatform: The platform (ZOOM, TEAMS, CHIME, WEBEX, GOOGLE_MEET) - if not explicitly mentioned, try to infer from URLs or context
 - meetingId: The meeting ID, room number, or join URL
-- meetingPassword: The meeting password or passcode (if provided)
+- meetingPassword: The meeting password or passcode (if provided), without spaces added only for readability (a Zoom passcode shown as "1234 5678" is "12345678")
 - meetingDate: The date in YYYY-MM-DD format (if provided/Optional)
 - meetingTime: The time in HH:MM format (24-hour, if provided/Optional)
 - timezone: The timezone (if provided)
@@ -321,6 +321,19 @@ def is_google_meet_link(value):
     return bool(_MEET_ANY_LINK.match("".join(value.split()).lower()))
 
 
+def normalize_meeting_password(password, platform):
+    """The password with surrounding whitespace removed, and for a Zoom passcode
+    made only of digits and spaces, with the grouping spaces removed too. Any
+    other password keeps its inner characters: only a numeric Zoom passcode is
+    known to be shown with readability spaces."""
+    if not isinstance(password, str):
+        return password
+    cleaned = password.strip()
+    if platform == "ZOOM" and re.fullmatch(r"[\d\s]+", cleaned):
+        cleaned = re.sub(r"\s+", "", cleaned)
+    return cleaned or None
+
+
 def validate_parsed_data(data):
     """Validate and clean parsed meeting data"""
     if not isinstance(data, dict):
@@ -365,6 +378,12 @@ def validate_parsed_data(data):
         zoom_id_match = re.search(r"(\d{9,11})", meeting_id)
         if zoom_id_match:
             data["meetingId"] = zoom_id_match.group(1)
+
+    # Zoom shows numeric passcodes in groups for readability ("1234 5678"); the
+    # spaces are not part of the passcode, and Zoom refuses it with them.
+    data["meetingPassword"] = normalize_meeting_password(
+        data.get("meetingPassword"), data.get("meetingPlatform")
+    )
 
     # Clean up meeting ID for Webex.
     # Personal-room URLs look like https://meetXXXX.webex.com/meet/prYYYYYYYYYY and the
