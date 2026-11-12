@@ -143,6 +143,11 @@ export function setVpPeerNames(names: () => readonly string[]): void {
     peerNames = names;
 }
 
+/** Whether another LMA VP than `displayName` is known to be in the meeting. */
+export function otherVpsPresent(displayName: string): boolean {
+    return peerNames().some((peer) => !sameVpName(peer, displayName));
+}
+
 /**
  * The name to tell people to add after "LMA" to address this VP (the intro's
  * `{LMA_HANDLE}`, the help reply): `preferredVpHandle`, unless another VP in

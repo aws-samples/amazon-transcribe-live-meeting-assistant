@@ -16,6 +16,24 @@
 #
 # Keep the target list in sync with the `code_checks` job in .gitlab-ci.yml.
 #
+# STEPS ARE SELECTED BY WHAT A PULL REQUEST CHANGED. The "Select the checks this
+# change needs" step runs scripts/ci/changed_areas.py over the files the pull
+# request changes and sets one output per gated step; each gated step carries
+# `if: steps.areas.outputs.<key> != 'false'`. The rules (which paths belong to
+# which area, and which areas each step needs, including the files its tests read
+# from other stacks) live in that script, shared with .gitlab-ci.yml, and are
+# tested by scripts/ci/test_changed_areas.py. Three properties to keep:
+#
+#   * The job itself always runs and keeps the name "Lint and unit tests", which is
+#     the required status check. Only steps inside it are skipped, and a skipped
+#     step is shown as skipped; the job summary lists the areas and the reason for
+#     each step.
+#   * Pushes to develop and main and manual runs run every step (`--all`).
+#   * Doubt runs the step. `!= 'false'` means a missing or misspelt output runs the
+#     step, and the script runs everything for an unclassified path, for a change
+#     to this workflow, the Makefile or other shared configuration, and when the
+#     changed files cannot be listed.
+#
 # Third-party actions are pinned to a full commit SHA (GitHub's hardening
 # guidance for public repositories); the `github-actions` entry in
 # .github/dependabot.yml keeps the pins and the trailing version comments
@@ -53,12 +71,33 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # On a pull request the checkout is the merge commit refs/pull/<n>/merge,
+          # whose first parent is the target branch tip. Depth 2 fetches that parent,
+          # so the step below can list exactly what merging would change.
+          fetch-depth: 2
 
       # Matches the python:3.13-bookworm image the GitLab pipeline runs on.
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: '3.13'
+
+      # Lists the files the pull request changes (merge commit vs. its first
+      # parent) and decides which of the steps below need to run. See the header.
+      - name: Select the checks this change needs
+        id: areas
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = pull_request ]; then
+            python3 scripts/ci/changed_areas.py --base HEAD^1 --head HEAD \
+              --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+          else
+            python3 scripts/ci/changed_areas.py \
+              --all "a $EVENT_NAME run on $GITHUB_REF_NAME runs every check" \
+              --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+          fi
 
       # Node 22 LTS, pinned exactly by .nvmrc (>=22.22.2 is required by jsdom 30;
       # vite 8 / rolldown native bindings are optional deps that npm silently
@@ -93,45 +132,60 @@ jobs:
       - name: Install LMA SDK and CLI (dev extras)
         run: make setup-cli-dev
 
+      # The step selection's own tests, including the check that every gated step
+      # below names a real selection key. Seconds; always run.
+      - name: CI step-selection tests
+        run: make test-ci-tooling
+
       # CloudFormation lint (no AWS).
       - name: Lint CloudFormation templates
+        if: steps.areas.outputs.cfn_lint != 'false'
         run: make lint-cfn
 
       # ruff check + format check over the Lambda functions, the Lambda layers,
-      # scripts/pr_review and the demo recorder (read-only; `make lint-python`
+      # scripts/pr_review, scripts/ci and the demo recorder (read-only; `make lint-python`
       # is the fixing form).
       - name: Lint Python (ruff)
+        if: steps.areas.outputs.python_lint != 'false'
         run: make lint-python-check
 
       # Python unit suites (all mock boto3 / use dummy env — no AWS).
       - name: LMA SDK unit tests
+        if: steps.areas.outputs.sdk_cli != 'false'
         run: make test-sdk
 
       - name: LMA CLI unit tests
+        if: steps.areas.outputs.sdk_cli != 'false'
         run: make test-cli
 
       - name: Lambda function unit tests
+        if: steps.areas.outputs.lambdas != 'false'
         run: make test-lambdas
 
       # UI: lint + tests (force = ignore the local checksum cache).
       - name: Lint React UI
+        if: steps.areas.outputs.ui != 'false'
         run: make lint-ui-force
 
       - name: React UI tests
+        if: steps.areas.outputs.ui != 'false'
         run: make test-ui-force
 
       # TypeScript build checks (tsc/eslint) for the transcriber + VP stacks and
       # the utilities/websocket-client sample client.
       - name: TypeScript build checks
+        if: steps.areas.outputs.typescript != 'false'
         run: make lint-typescript
 
       # Virtual Participant backend unit tests (launch modes, MicroVM hooks).
       - name: Virtual Participant unit tests
+        if: steps.areas.outputs.vp != 'false'
         run: make test-vp
 
       # VP CloudFormation template invariants (state machine renders for each
       # launch type; ECS paths unchanged by the MICROVM addition).
       - name: Virtual Participant template tests
+        if: steps.areas.outputs.vp_template != 'false'
         run: make test-vp-template
 
       # Static AI stack tests: the AppSync contract (every resolver attaches to
@@ -140,6 +194,7 @@ jobs:
       # resolves, lma-main.yaml's expected outputs are still declared). Both are
       # deploy-time or run-time failures otherwise.
       - name: AI stack static tests
+        if: steps.areas.outputs.ai_stack != 'false'
         run: make test-ai-stack
 
       # Unit tests for the scheduled integration run's own machinery (credential
@@ -147,17 +202,25 @@ jobs:
       # nightly, because it is what keeps a nightly from reporting green after
       # skipping everything.
       - name: Integration-test plumbing tests
+        if: steps.areas.outputs.integ_plumbing != 'false'
         run: make test-integ-plumbing
 
       # ASR MicroVM runtime unit tests + ruff (no AWS, no model weights).
       - name: ASR MicroVM runtime tests
+        if: steps.areas.outputs.asr != 'false'
         run: make test-asr
+
+      # Load simulator unit tests, including the ASR model benchmark (no AWS).
+      - name: Load simulator tests
+        if: steps.areas.outputs.load_simulator != 'false'
+        run: make test-load-simulator
 
       # The advisory AI review's own machinery: the disclosure guard that decides
       # whether a model-written comment reaches this public repository, and the
       # four properties of ai-pr-review.yml most likely to be deleted by accident.
       # No AWS and no model call.
       - name: Advisory AI review tests
+        if: steps.areas.outputs.pr_review != 'false'
         run: make test-pr-review
 
       # The product demo recorder (scripts/ux_recorder*.py), its stack-session
@@ -165,14 +228,17 @@ jobs:
       # Pillow and ffmpeg are not installed here, so the render tests skip and the
       # rendering path is covered only by a local `make test-ux-recorder`.
       - name: Demo recorder tests
+        if: steps.areas.outputs.demo_recorder != 'false'
         run: make test-ux-recorder
 
       - name: WebSocket transcriber dependencies
+        if: steps.areas.outputs.transcriber != 'false'
         working-directory: lma-websocket-transcriber-stack/source/app
         run: npm ci
 
       # Unit tests (tsc + eslint via `npm run build`, then node --test on dist).
       - name: WebSocket transcriber unit tests
+        if: steps.areas.outputs.transcriber != 'false'
         working-directory: lma-websocket-transcriber-stack/source/app
         run: npm test
 
@@ -182,11 +248,13 @@ jobs:
       # lockfile has repeatedly drifted such that `npm ci` fails where the real
       # build succeeds. Matching CodeBuild is the point of this job.
       - name: Browser extension dependencies
+        if: steps.areas.outputs.browser_extension != 'false'
         working-directory: lma-browser-extension-stack
         run: npm install --no-audit --no-fund
 
       # CI=true keeps react-scripts out of interactive watch mode.
       - name: Browser extension tests
+        if: steps.areas.outputs.browser_extension != 'false'
         working-directory: lma-browser-extension-stack
         env:
           CI: 'true'
@@ -199,6 +267,7 @@ jobs:
       # succeeds — the opposite of what this job is for. Clearing those warnings
       # would let this be tightened.
       - name: Browser extension build
+        if: steps.areas.outputs.browser_extension != 'false'
         working-directory: lma-browser-extension-stack
         env:
           CI: 'false'
@@ -207,5 +276,6 @@ jobs:
       # Fastify 5 websocket smoke test (boots the server, round-trips a frame) —
       # runtime coverage the unit tests do not provide.
       - name: WebSocket transcriber smoke test
+        if: steps.areas.outputs.transcriber != 'false'
         working-directory: lma-websocket-transcriber-stack/source/app
         run: npm run smoke

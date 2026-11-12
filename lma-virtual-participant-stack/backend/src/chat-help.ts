@@ -23,11 +23,11 @@
  */
 import { details, END_COMMAND_VERBS } from './details.js';
 import { configuredWakePhrases } from './stop-request.js';
-import { ASSISTANT_CHAT_COMMANDS } from './assistant-toggles.js';
+import { ASSISTANT_CHAT_COMMANDS, VOICE_CONTROL_COMMANDS } from './assistant-toggles.js';
 import type { VoiceAssistantProvider } from './voice-assistant-interface.js';
 import { chatAskAvailable } from './chat-ask.js';
 import { consentHelpActive, consentHelpLine } from './consent-help.js';
-import { addressingVpHandle, preferredVpHandle } from './vp-handle.js';
+import { addressingVpHandle, otherVpsPresent, preferredVpHandle } from './vp-handle.js';
 import { normalizeChatText } from './chat-text.js';
 
 /**
@@ -69,6 +69,7 @@ export function chatHelpMessages(
     assistant: ChatHelpAssistant,
     canAsk: boolean = chatAskAvailable(),
     consent: boolean = consentHelpActive(),
+    othersPresent: boolean = otherVpsPresent(details.scribeIdentity),
 ): string[] {
     // `LMA ask` is listed only when a Strands meeting assistant is there to
     // answer it, for the same reason as the mode commands below.
@@ -82,8 +83,11 @@ export function chatHelpMessages(
     ];
 
     // Addressing this VP by name, for a meeting with more than one
-    // (chat-addressing.ts). Not listed for a display name that names nobody.
-    const handle = addressingHandle();
+    // (chat-addressing.ts). Only while another VP is actually here: in a
+    // meeting with one, which is nearly every meeting, the line is noise, and
+    // the help reply was the bulk of what participants saw as "a bunch of
+    // messages from LMA". Not listed for a display name that names nobody.
+    const handle = othersPresent ? addressingHandle() : null;
     if (handle) {
         messages.push(
             `With more than one LMA in the meeting, add my name after "LMA": "LMA ${handle} help", `
@@ -94,11 +98,20 @@ export function chatHelpMessages(
     if (assistant.isEnabled() && assistant.supportsModeChanges()) {
         const modes = ASSISTANT_CHAT_COMMANDS.map((entry) => `${typed(entry.phrases[0])} (${entry.summary})`);
         messages.push(`Voice assistant: ${modes.join(', ')}.`);
-        // The spoken route to the same changes (voice-mode-switch.ts). Translator
-        // mode is left by a phrase, which needs no wake phrase.
+    }
+    if (assistant.isEnabled()) {
+        // Muting (assistant-toggles.ts VOICE_CONTROL_COMMANDS) works with any
+        // provider; the spoken mode switch (voice-mode-switch.ts) only with
+        // one that changes mode. Translator mode is left by a phrase, which
+        // needs no wake phrase.
+        const [mute, unmute] = VOICE_CONTROL_COMMANDS.map((entry) => typed(entry.phrases[0]));
+        const spoken = assistant.supportsModeChanges()
+            ? ` Or say "${spokenWakePhrase()}, switch to translator mode" (or assistant, listen mode),`
+                + ' and "stop translating" to leave it.'
+            : '';
         messages.push(
-            `Or say it: "${spokenWakePhrase()}, switch to translator mode" (or assistant, listen mode), `
-                + 'and "stop translating" to leave translator mode.',
+            `${mute} / ${unmute} to silence the voice assistant or bring it back; `
+                + `"${spokenWakePhrase()}, stop" cuts off an answer.${spoken}`,
         );
     }
 
@@ -115,10 +128,18 @@ export function chatHelpMessages(
  */
 export function allChatHelpMessages(): string[] {
     const all: string[] = [];
+    const assistants: ChatHelpAssistant[] = [
+        { isEnabled: () => true, supportsModeChanges: () => true },
+        { isEnabled: () => true, supportsModeChanges: () => false },
+        { isEnabled: () => false, supportsModeChanges: () => false },
+    ];
     for (const canAsk of [true, false]) {
         for (const consent of [true, false]) {
-            all.push(...chatHelpMessages({ isEnabled: () => true, supportsModeChanges: () => true }, canAsk, consent));
-            all.push(...chatHelpMessages({ isEnabled: () => false, supportsModeChanges: () => false }, canAsk, consent));
+            for (const othersPresent of [true, false]) {
+                for (const assistant of assistants) {
+                    all.push(...chatHelpMessages(assistant, canAsk, consent, othersPresent));
+                }
+            }
         }
     }
     return [...new Set(all)];

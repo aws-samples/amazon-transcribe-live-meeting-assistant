@@ -20,6 +20,7 @@ title: "Voice Assistant"
 - [Barge-In](#barge-in)
 - [How the Assistant Appears in the Transcript](#how-the-assistant-appears-in-the-transcript)
 - [Asking the Assistant to Stop Talking](#asking-the-assistant-to-stop-talking)
+- [Muting the Assistant from Chat](#muting-the-assistant-from-chat)
 - [Meeting Mode](#meeting-mode)
   - [Group Meeting Mode](#group-meeting-mode)
   - [Translator Mode](#translator-mode)
@@ -76,6 +77,14 @@ The voice agent activates only when a configured wake phrase is detected in the 
 
 The duration is idle time, not a deadline from the wake phrase. The countdown starts again whenever the assistant is busy and whenever someone engages with it: it does not run while a lookup is in progress or while the meeting can still hear the assistant's answer (Nova Sonic delivers speech several times faster than it is played, so the answer is still playing well after the last of it has arrived), and it restarts when the assistant is addressed by wake phrase again or spoken over. Any wake phrase heard while the window is running restarts it, including "Hey Alex, stop", so a participant who has just silenced the assistant can still follow up. A question asked just as the window is about to lapse is given about three seconds for the assistant to start answering; conversation among the other participants is not engagement and can delay closing only that way, by a few seconds at a time and never beyond twice the configured duration. Because the session stays open for as long as the assistant is audible, asking it to stop while it is still talking always reaches a session that can hear the request. These rules apply to both Amazon Nova Sonic and ElevenLabs; on ElevenLabs, "busy" means a `strands_agent` client tool call is running or the agent's audio is still arriving or queued for playback.
 
+**What an activated assistant answers (Nova Sonic, `normal` mode).** While activated, the session hears the whole meeting, and the model would otherwise answer every turn it hears, because it cannot tell a question put to it from participants talking to each other. So LMA only lets a reply be heard when the turn it answers was addressed to the assistant:
+
+- the request the wake phrase activated it with, or any later turn that contains the wake phrase;
+- a turn that starts within 4 seconds of an addressed one, which is the same request split by a pause ("Hey Alex … what's on the agenda?");
+- any turn while the answer to a lookup that an addressed request started is still to come, so participants talking while they wait do not cost them the answer.
+
+The reply to any other turn is withheld: it is not played, and it is kept out of the transcript and out of the conversation history. A lookup the model asks for as part of a withheld reply is not run, and is logged as `[lookup] action=skipped reason=unaddressed-turn`. Each withheld reply writes `[wake-gate] action=withheld-reply reason=not-addressed` to the Virtual Participant log. Once an answer has been heard in full, a follow-up needs the wake phrase again ("Hey Alex, and the next item?"); the session stays open for the rest of the idle window, so that follow-up is answered without opening a new session. The system prompt for this state says the same thing to the model (answer only what is addressed to you; say nothing — not "okay" — to anything else; stop when you have answered), so the model normally does not produce the replies the gate withholds. Talking over the assistant without saying the wake phrase ends its answer, and its reply to the interruption is withheld like any other. A withheld reply plays nothing, so it does not keep the activation window open. On ElevenLabs the agent's behaviour is configured in the ElevenLabs dashboard and this gate does not apply.
+
 ## Wake Phrase Configuration
 
 Configure the wake phrase with **Virtual Participant › Wake phrases** on the [Configuration page](configuration-guide.md):
@@ -84,7 +93,9 @@ Configure the wake phrase with **Virtual Participant › Wake phrases** on the [
 - Matching is case-insensitive
 - Multiple phrases allow flexibility in how participants address the assistant
 
-**Pre-connect optimization**: LMA detects the wake phrase in partial (streaming) transcripts and pre-warms the voice provider connection in the background. This eliminates 1-2 seconds of latency that would otherwise occur when establishing the connection after the wake phrase is fully recognized.
+**Pre-connect optimization**: LMA detects the wake phrase in partial (streaming) transcripts and pre-warms the voice provider connection in the background. This eliminates 1-2 seconds of latency that would otherwise occur when establishing the connection after the wake phrase is fully recognized. The question itself is still sent when the participants' transcript finalizes the segment that contains it, because only then is the whole question known; with the MicroVM ASR engine a segment is finalized after the speaker pauses (on one recorded meeting, a median of 1.5 seconds after the segment's last partial result). On that meeting the assistant's first audible response came about a second after the finalized segment: the "looking that up" acknowledgement LMA plays when a lookup starts without a spoken preamble.
+
+The wake phrases are matched with "Okay" read as "OK", because both the participants' transcript and Nova Sonic's write the spoken "OK" as "Okay": with the default phrases, "Okay Alex" activates the assistant and "Okay Alex, stop" stops it.
 
 ## Session Management
 
@@ -149,16 +160,37 @@ This works in `normal` mode under either activation mode, and in `group` mode (w
 Three mechanisms act together, so that a stop does not depend on any one of them:
 
 1. **A `mute` tool.** Nova Sonic is given a tool it can call to silence itself, and its system prompt tells it that a request to stop is a request for silence rather than the preface to a new request. This is the only mechanism that can produce the spoken "Okay", because it is the model itself deciding to stop — and it is expected to be the slower of the first two, since the model has to hear the audio, decide, and ask, where the transcript only has to be finalized.
-2. **The transcript.** LMA watches completed transcript segments for a stop request addressed to the assistant. This is what makes silence certain, because it does not depend on the model noticing. It is also expected to be the faster route, so it holds back briefly — long enough for the `mute` tool above to arrive and the acknowledgement to be heard — and then silences the assistant anyway if the tool does not come. Matching is deliberately strict: the utterance has to name the assistant by wake phrase and has to contain no other request, so "Hey Alex, can you stop the recording and summarize the last hour?" and "Hey Alex, why did the build stop?" leave the assistant talking.
+2. **The transcripts.** LMA watches both the participants' completed transcript segments and Nova Sonic's own transcript of what it hears for a stop request addressed to the assistant, and the first to recognise one acts. This is what makes silence certain, because it does not depend on the model calling its tool; reading both matters because either recognizer can mishear the request (on one recorded meeting only Nova Sonic's transcript heard "Hey Alex, stop", while the model said "Okay, I will stop now" and did not call the tool). It is also expected to be the faster route, so it holds back briefly — long enough for the `mute` tool above to arrive and the acknowledgement to be heard — and then silences the assistant anyway if the tool does not come. Matching is deliberately strict: the utterance has to name the assistant — by wake phrase ("Okay Alex" counts as "OK Alex"), or by the name the wake phrases share ("Alex, stop") — and has to contain no other request, so "Hey Alex, can you stop the recording and summarize the last hour?" and "Hey Alex, why did the build stop?" leave the assistant talking.
 3. **Audio barge-in.** Speaking over the assistant at all cuts its current utterance short, as described under [Barge-In](#barge-in).
 
 A stop request writes a few `[stop-request]` lines to the Virtual Participant's CloudWatch log stream, recording which mechanism silenced the assistant and how long the model took to ask, so that a meeting where the acknowledgement was missing can be explained rather than guessed at. An acknowledgement spoken after the model's request to be muted is recorded as `action=ack-started` followed by `action=ack-played` (or `action=ack-capped` if it reached the 1.5-second limit), each with the milliseconds of audio played. The lines carry only the route, the timings and the state flags — never the utterance.
 
-**Getting the assistant back.** Being asked to stop silences the assistant until it is addressed again — it is not silenced for the rest of the meeting. Saying a wake phrase makes it audible again, whether that comes in as a fresh `wake_phrase` activation or as a wake phrase in an `always_active` session's transcript.
+**On `wake_phrase`, a stop also ends the activation.** Once the assistant has been silenced, and its acknowledgement has finished playing (at most 3 seconds later), the session is closed rather than left open, still hearing the meeting, until its idle window lapses. The next wake phrase opens a fresh activation that starts from the request it was woken for. The log records this as `[stop-request] action=ending-activation`.
+
+**Getting the assistant back.** Being asked to stop silences the assistant until it is addressed again — it is not silenced for the rest of the meeting. Saying a wake phrase makes it audible again, whether that comes in as a fresh `wake_phrase` activation or as a wake phrase in an `always_active` session's transcript. `LMA unmute` in the chat does too. To keep it silent even when someone says the wake phrase, use [`LMA mute`](#muting-the-assistant-from-chat) instead.
 
 On an `always_active` deployment a wake phrase is the **only** way back, so it is worth knowing the configured phrase even if you never otherwise need it: an always-on assistant is normally addressed without one. Because the assistant hears the whole meeting, the `mute` tool and its prompt both require a stop request to be addressed to the assistant — by name or wake phrase, or as a direct reply to something it just said — so that participants telling each other to be quiet is read as ordinary conversation and leaves it alone.
 
-Translator mode is not affected: it is paused and resumed only by its own configured trigger phrases (see [Translator Mode](#translator-mode)), so a stop request from the transcript route is ignored there.
+Translator mode is not affected: it is paused and resumed only by its own configured trigger phrases (see [Translator Mode](#translator-mode)) and by `LMA mute` / `LMA unmute` in the chat, so a stop request from the transcript route is ignored there.
+
+## Muting the Assistant from Chat
+
+A typed command needs no interpreting, so these are applied by LMA directly, without the model, and every one is answered in the chat:
+
+| Type in chat | Assistant or listen mode | Translator mode |
+|---|---|---|
+| `LMA mute` (also `LMA quiet`, `LMA be quiet`, `LMA silence`, `LMA stop talking`, `LMA hush`) | Playback stops at once and a `wake_phrase` activation ends. The assistant then stays silent, **even when someone says the wake phrase**, until `LMA unmute`. Reply: *voice assistant muted. It stays silent, even when addressed, until someone types "LMA unmute".* | Pauses the translator, as its pause phrase does. Reply: *translation paused. Type "LMA unmute" to resume it.* |
+| `LMA unmute` (also `LMA resume`, `LMA speak`) | Lifts a chat mute, and also brings the assistant back after a spoken stop. On `wake_phrase` the assistant is listening for the wake phrase again; in listen mode it stays quiet until addressed, as that mode does. Reply: *voice assistant unmuted. Say "Hey Alex" to ask it something.* | Resumes translating. Reply: *translation resumed.* |
+
+How these relate to the other ways of silencing the assistant:
+
+- **A spoken stop** ("Hey Alex, stop") cuts off the current answer, and the next wake phrase brings the assistant back. **`LMA mute`** holds until it is lifted. Use it when the assistant should stay out of the conversation for a while, whatever is said.
+- **`LMA pause` / `LMA start`** pause and resume the transcript and the recording. While the transcript is paused the assistant hears nothing either. `LMA resume` is an unmute, not a transcript resume: the reply to an unmute says so while the transcript is paused (*The transcript is paused; type "LMA start" to resume it.*).
+- **`LMA stop`** on its own is not a mute: it is one of the dismissal commands and removes the Virtual Participant from the meeting.
+- **Changing mode** (`LMA translate`, `LMA assist`, `LMA listen`, by chat or by voice) lifts a chat mute, because asking for a mode is a decision about whether the assistant is heard.
+- A command that changes nothing is still answered: *the voice assistant is already muted*, *the voice assistant is not muted*, *translation is already paused*, *the translator is not paused*. With no voice assistant the answer says there is none to mute.
+
+Each command writes one `[voice-control]` line to the Virtual Participant log, with the sender, `action=mute|unmute`, `result=applied|unchanged|declined` and the resulting `state`. A wake phrase ignored because of a chat mute is logged as `[voice-control] wake phrase ignored - the voice assistant is muted from chat`. Both providers support these commands; on ElevenLabs translator mode is configured in the ElevenLabs dashboard, so there they mute and unmute rather than pause and resume.
 
 On **ElevenLabs**, only the transcript mechanism and audio barge-in apply. The ElevenLabs agent's system prompt and tools live in the ElevenLabs dashboard rather than in LMA, so LMA cannot give it a `mute` tool or amend its instructions — which also means it may keep speaking for a moment, and may say more than one word, before LMA's transcript path drops its audio. There is nothing there to wait for, either: with no tool to call, the transcript path silences an ElevenLabs agent at once rather than holding back for an acknowledgement. To get the one-word behavior there, add the equivalent instruction to the agent's own system prompt in the ElevenLabs dashboard.
 
@@ -304,7 +336,9 @@ The phrase has to be the whole utterance, apart from the name and filler. That i
 
 The phrase is read from two transcripts, and whichever recognises it first acts: Nova Sonic's own transcript of the meeting, and the participants' transcript (Amazon Transcribe's participant channel, or the MicroVM ASR engine). Nova Sonic's transcript has been seen to be wrong in translator mode, so the participants' transcript is the more reliable of the two. Nova Sonic's translator also tends to call its pause tool when it hears "stop translating"; a pause tool call that comes from the same utterance, or within five seconds of either transcript recognising the phrase, is taken as the request to leave translator mode rather than as a pause.
 
-**While the translator is paused**, it answers to three things, read from the participants' transcript:
+**Pausing the translator** happens only on its pause phrase (`translator mute` or `alex mute` by default) or on `LMA mute` in the chat. The pause phrase on the participants' transcript pauses it directly, as the resume phrase resumes it, so a pause does not depend on the model calling its tool. A call to the tool is acted on only when one of the two transcripts heard the pause phrase within the previous 8 seconds; otherwise it is ignored, the model is told to keep translating, and the log records `[translator] action=mute-tool-ignored why=no-pause-phrase`. On one recorded meeting the translator called its tool nine seconds after it started, on hearing a sentence that described turning translator mode on, and stayed paused for the rest of translator mode without translating anything. A pause from the transcript is logged as `[translator] action=pause route=transcript`, and one from the chat as `route=chat`.
+
+**While the translator is paused**, it answers to three things, read from the participants' transcript (and to `LMA unmute` in the chat):
 
 - The resume phrase (`translator unmute` or `alex unmute` by default) resumes translating, with the same rising tone as before.
 - "Stop translating" (or any of the wordings above) leaves translator mode, as it does while translating.

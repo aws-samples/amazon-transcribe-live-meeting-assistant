@@ -32,10 +32,14 @@
  * rebuild, which is exactly when it needs to answer.
  */
 
-import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
+import { configuredWakePhrases, foldWakeSpellings, isStopTalkingRequest } from './stop-request.js';
 
-/** Why a lookup was not run. */
-export type LookupSkipReason = 'not-addressed';
+/**
+ * Why a lookup was not run: `not-addressed` while muted (above);
+ * `unaddressed-turn` for a lookup requested as the reply to a turn the
+ * wake-phrase reply gate withheld (wake-reply-gate.ts), which nobody would hear.
+ */
+export type LookupSkipReason = 'not-addressed' | 'unaddressed-turn';
 
 /**
  * The tool result returned to the model in place of a lookup that was not run.
@@ -61,10 +65,10 @@ function escapeForRegExp(text: string): string {
  * used because it drops every character outside a-z and 0-9.
  */
 function normalizeForWakePhrase(text: string): string {
-    return text.toLowerCase()
+    return foldWakeSpellings(text.toLowerCase()
         .replace(/[,.?!;:'"]/g, ' ')
         .replace(/\s+/g, ' ')
-        .trim();
+        .trim());
 }
 
 /** Whether `text` addresses the assistant by one of the configured wake phrases. */
@@ -113,5 +117,18 @@ export function mutedLookupSkipReason(
  * the decision, never the utterance or the query.
  */
 export function skippedLookupLogLine(reason: LookupSkipReason, meetingMode: string, activationMode: string): string {
-    return `[lookup] action=skipped reason=${reason} muted=true mode=${meetingMode} activation=${activationMode}`;
+    const muted = reason === 'not-addressed';
+    return `[lookup] action=skipped reason=${reason} muted=${muted} mode=${meetingMode} activation=${activationMode}`;
+}
+
+/** The result for a lookup skipped as `unaddressed-turn`. */
+export const UNADDRESSED_LOOKUP_RESULT = {
+    status: 'skipped',
+    instruction: 'Not run: nobody asked you anything. The participants are talking to each other. '
+        + 'Stay silent, do not answer, and do not request another lookup until someone says your wake phrase.',
+};
+
+/** The tool result to return for a lookup skipped for `reason`. */
+export function skippedLookupResult(reason: LookupSkipReason): typeof SKIPPED_LOOKUP_RESULT {
+    return reason === 'unaddressed-turn' ? UNADDRESSED_LOOKUP_RESULT : SKIPPED_LOOKUP_RESULT;
 }

@@ -47,6 +47,7 @@ VP_BACKEND_DIR := $(VP_DIR)/backend
 WEBSOCKET_CLIENT_DIR := utilities/websocket-client
 ASR_DIR := lma-asr-microvm-stack
 ASR_SOURCE_DIR := $(ASR_DIR)/source
+LOAD_SIM_DIR := utilities/load-simulator
 MEETINGASSIST_TEST_DIR := lma-meetingassist-setup-stack/test
 STRANDS_LAYER_REQUIREMENTS := lma-meetingassist-setup-stack/strands_layer/requirements.txt
 VERSION_FILE := VERSION
@@ -65,6 +66,7 @@ PYTHON_LINT_PATHS := \
 	$(CURDIR)/$(LAMBDA_FUNCTIONS_DIR) \
 	$(CURDIR)/$(LAMBDA_LAYERS_DIR) \
 	$(CURDIR)/scripts/pr_review \
+	$(CURDIR)/scripts/ci \
 	$(CURDIR)/scripts/cloudformation_parameters_doc.py \
 	$(CURDIR)/scripts/bedrock_inference_catalog.py \
 	$(CURDIR)/scripts/ux_recorder.py \
@@ -379,7 +381,7 @@ build-vp: ## Build Virtual Participant (TypeScript)
 	@echo -e "$(GREEN)✅ Virtual Participant build complete!$(NC)"
 
 ##@ Testing
-test: test-ui test-sdk test-cli test-lambdas test-ai-stack test-integ-plumbing test-asr test-pr-review test-ux-recorder ## Run all tests (no AWS required)
+test: test-ui test-sdk test-cli test-lambdas test-ai-stack test-integ-plumbing test-asr test-load-simulator test-pr-review test-ux-recorder test-ci-tooling ## Run all tests (no AWS required)
 
 test-sdk: ## Run LMA SDK unit tests
 	@echo "Running LMA SDK tests..."
@@ -493,6 +495,14 @@ test-pr-review: ## Unit tests for the advisory AI review harness (no AWS, no mod
 	$(PYTHON) -m pytest scripts/pr_review/test_ai_pr_review.py -q
 	@echo -e "$(GREEN)✅ Advisory AI review tests passed!$(NC)"
 
+# The CI step selection (scripts/ci/changed_areas.py): which steps of the "Lint and
+# unit tests" job a pull request's changed files need, plus the check that every
+# gated step in code-checks.yml and .gitlab-ci.yml names a real selection key.
+test-ci-tooling: ## Unit tests for the CI step selection (scripts/ci; no AWS)
+	@echo "Running CI step-selection tests..."
+	$(PYTHON) -m pytest scripts/ci -q
+	@echo -e "$(GREEN)✅ CI step-selection tests passed!$(NC)"
+
 # The demo recorder (scripts/ux_recorder*.py), the stack-session helper and the
 # product-demo skill's storyboard file. Needs no AWS, Chrome or network; the
 # render tests skip without ffmpeg and Pillow.
@@ -523,6 +533,13 @@ test-asr: ## Run ASR MicroVM runtime unit tests (no AWS, no model weights)
 	cd $(ASR_SOURCE_DIR) && .venv/bin/python -m pytest -q && .venv/bin/ruff check .
 	$(ASR_SOURCE_DIR)/.venv/bin/python $(ASR_DIR)/scripts/sync_bundles.py --check
 	@echo -e "$(GREEN)✅ ASR MicroVM runtime tests passed!$(NC)"
+
+test-load-simulator: ## Run load simulator unit tests, including the ASR benchmark (no AWS)
+	@echo "Running load simulator tests..."
+	@test -d $(LOAD_SIM_DIR)/.venv || $(PYTHON) -m venv $(LOAD_SIM_DIR)/.venv
+	@$(LOAD_SIM_DIR)/.venv/bin/pip install -q -e lib/lma_sdk -e "$(LOAD_SIM_DIR)[dev]"
+	cd $(LOAD_SIM_DIR) && .venv/bin/python -m pytest -q tests
+	@echo -e "$(GREEN)✅ Load simulator tests passed!$(NC)"
 
 test-ui-force: check-node ## Run React UI tests (ignore checksum, always run)
 	@echo "Running UI tests (forced)..."
@@ -615,6 +632,21 @@ test-vp-microvm-e2e: ## VP MicroVM launch-path e2e against a local container (no
 # (make setup-cli-dev) and AWS creds (AWS_PROFILE=default). Resolves the target
 # stack from STACK, else $LMA_STACK_NAME, else 'LMA'.
 INTEG_STACK ?= $(or $(STACK),$(LMA_STACK_NAME),LMA)
+
+asr-benchmark: ## Compare ASR model configurations on a live dev stack (Usage: make asr-benchmark STACK=<name> DATASET=ami/IS1009c|WAV=<stereo.wav> [BUNDLES=<a,b>] [TRANSCRIBE=1] [REFERENCE=<stm>] [KEEP_BUNDLE=1] [DRY_RUN=1], or STACK=<name> SWITCH_ONLY=<bundle>)
+ifeq ($(STACK),)
+	$(error Set STACK to the dev stack to benchmark: this target updates that stack's ASR bundle)
+endif
+ifeq ($(WAV)$(DATASET)$(SWITCH_ONLY),)
+	$(error Set DATASET (e.g. ami/IS1009c) or WAV. Usage: make asr-benchmark STACK=<name> DATASET=ami/IS1009c BUNDLES=<a,b> [TRANSCRIBE=1])
+endif
+	@test -d $(LOAD_SIM_DIR)/.venv || $(PYTHON) -m venv $(LOAD_SIM_DIR)/.venv
+	@$(LOAD_SIM_DIR)/.venv/bin/python -c "import lma_load, numpy" 2>/dev/null || $(LOAD_SIM_DIR)/.venv/bin/pip install -q -e lib/lma_sdk -e "$(LOAD_SIM_DIR)[benchmark]"
+	$(LOAD_SIM_DIR)/.venv/bin/python -m lma_load.cli asr-benchmark --stack-name "$(STACK)" \
+		$(if $(SWITCH_ONLY),--switch-only "$(SWITCH_ONLY)",$(if $(DATASET),--dataset "$(DATASET)",--wav "$(WAV)")) \
+		$(if $(BUNDLES),--bundles "$(BUNDLES)") $(if $(TRANSCRIBE),--transcribe) \
+		$(if $(REFERENCE),--reference "$(REFERENCE)") $(if $(KEEP_BUNDLE),--keep-bundle) \
+		$(if $(DRY_RUN),--dry-run)
 
 integ-tests: ## Run integration tests vs a live stack (Usage: make integ-tests STACK=<name>)
 	@echo -e "$(CYAN)Running LMA integration tests against stack '$(INTEG_STACK)'...$(NC)"
