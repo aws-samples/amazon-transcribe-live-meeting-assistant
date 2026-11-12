@@ -154,7 +154,7 @@ def test_files_no_step_covers_run_nothing() -> None:
 
 
 def test_utilities_run_only_the_static_tests_that_scan_them() -> None:
-    assert ran(["utilities/load-simulator/x.py"]) == {"ai_stack"}
+    assert ran(["utilities/websocket-server-mock/x.py"]) == {"ai_stack"}
 
 
 @pytest.mark.parametrize(
@@ -176,6 +176,10 @@ def test_the_docs_site_build_is_not_documentation(path: str) -> None:
     assert not ca.docs_only([path])
     selection = ca.select(["CHANGELOG.md", path])
     assert selection.full and "docs_site" in selection.reason
+
+
+def test_a_load_simulator_change_runs_its_tests_and_the_static_scan_of_utilities() -> None:
+    assert ran(["utilities/load-simulator/lma_load/cli.py"]) == {"load_simulator", "ai_stack"}
 
 
 def test_a_rename_out_of_an_area_counts_against_both_areas() -> None:

@@ -72,6 +72,7 @@ AREAS: dict[str, str] = {
     "vp": "Virtual Participant backend",
     "vp_template": "Virtual Participant template, Lambdas and static tests",
     "asr": "ASR MicroVM stack",
+    "load_simulator": "load simulator and ASR benchmark (utilities/load-simulator)",
     "transcriber": "WebSocket transcriber stack",
     "browser_extension": "browser extension",
     "websocket_client": "utilities/websocket-client sample client",
@@ -288,10 +289,11 @@ PRIMARY_RULES: tuple[Rule, ...] = _rules(
     ("scripts/bedrock_inference_catalog.py", "python_tooling"),
     # --- tracked, but built or tested by nothing in this job -----------------
     # Each of these is a deliberate "nothing to run" rather than an unknown. The
-    # desktop capture app, the load simulator and the placeholder packages have no
+    # desktop capture app, the other utilities and the placeholder packages have no
     # suite here; the SRT files feed the separate security-review job; the rest are
     # developer scripts.
     ("lma-desktop-capture-app-stack/**", "no_ci_coverage"),
+    ("utilities/load-simulator/**", "load_simulator"),
     ("utilities/**", "no_ci_coverage"),
     ("pypi-placeholder-packages/**", "no_ci_coverage"),
     ("amazon-quick-desktop-skills-pack/**", "no_ci_coverage"),
@@ -417,6 +419,8 @@ STEPS: dict[str, Step] = {
     ),
     "integ_plumbing": _step("Integration-test plumbing tests", "integ_plumbing", "sdk_cli"),
     "asr": _step("ASR MicroVM runtime tests", "asr"),
+    # It installs lib/lma_sdk, so an SDK change runs it too.
+    "load_simulator": _step("Load simulator tests", "load_simulator", "sdk_cli"),
     # Its false-positive test reads every docs page, so documentation runs it.
     # Both read CLAUDE.md and the skill files; the review harness's false-positive
     # test also reads every docs page, and the demo recorder checks its storyboard

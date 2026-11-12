@@ -374,6 +374,13 @@ def test_build_offline_config_num_threads_default(monkeypatch: pytest.MonkeyPatc
     assert build_offline_model_config(model_dir="/opt/models").num_threads == 4
 
 
+def test_build_offline_config_keeps_short_utterances(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_model_env(monkeypatch)
+    vad = build_offline_model_config(model_dir="/opt/models").vad
+    assert vad.threshold == 0.35
+    assert vad.min_speech_ms == 100
+
+
 def test_build_offline_config_endpointing_maps_to_vad_silence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

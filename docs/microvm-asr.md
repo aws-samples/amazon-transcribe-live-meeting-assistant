@@ -326,7 +326,7 @@ deployment created with `EnableMicrovmAsr=false` stays on Amazon Transcribe unti
 you set it to `true`. See [Choosing the engine](#choosing-the-engine) for what
 happens to the engine switches on upgrade.
 
-**First deployment builds the image**, which downloads the models (~1.1 GB for the
+**First deployment builds the image**, which downloads the models (~3.1 GB for the
 default bundle) and warms them. Expect several extra minutes on the first create and
 on any later change of bundle. Build logs, and the logs of every ASR session's
 MicroVM, land in `/aws/lambda-microvms/<stack-name>-asr-logs`, which the stack
@@ -450,6 +450,17 @@ image, so the runtime does not know which was used. The Parakeet TDT v3 and v2 e
 the per-file form, pinned to the sherpa-onnx maintainer's Hugging Face repositories. A
 Qwen3-ASR model needs its tokenizer directory and so must come from an archive.
 
+A transducer may also give an `encoder_data` file, for an encoder whose weights are
+stored outside its ONNX graph; that file keeps its own name in the image, because the
+graph records it. Every Parakeet v3 bundle uses the full-precision export of Parakeet TDT
+0.6B v3 this way (about 2.5 GB, exported by the sherpa-onnx maintainer), not the int8
+export (0.5 GB). On AMI meeting audio the int8 export left out the rest of some
+utterances after their first sentences; the full-precision export transcribed the same
+audio in full, with word error rates matching NVIDIA's published AMI figure, for about 10%
+more decode time and about 2.8 GB resident instead of 1.2 GB. The offline engine also
+keeps 300 ms of audio either side of each utterance the voice activity detector finds, so
+the first and last words of an utterance are not clipped.
+
 The runtime also carries an offline (`accurate`) engine — VAD-segmented, one decode
 per closed utterance, for transducer models that cannot stream — which the
 Parakeet, Qwen3-ASR and Cohere Transcribe bundles use. It produces no interim text while somebody is speaking: a row
@@ -459,6 +470,12 @@ utterance has run 10 s, or 20 s of speech at the latest, so a row arrives within
 test meeting at a real-time factor of 0.14 on a 4-core host with punctuated, cased text.
 See *Not included: Whisper* below for why Parakeet TDT rather than Whisper is the
 offline model offered.
+
+The voice activity detector counts a 32 ms frame as speech at a Silero probability of
+0.35 and opens an utterance after 100 ms of speech, so a short reply such as "okay" or
+"not sure" reaches the model. With the stricter 0.5 and 250 ms it used before, those
+replies were discarded as noise: on clean AMI headset audio about 2% of the microphone
+channel's words were lost that way.
 
 **Two-pass bundles.** `parakeet-tdt-v3-live-titanet-small` and
 `parakeet-tdt-v3-live-nemotron35-titanet-small` pair Parakeet with a streaming model that
@@ -841,8 +858,8 @@ validate the pairing on a live multi-speaker meeting before marking it `vetted`.
   inference threads for 4.
 - The engine logs its CPU use once a minute while a meeting is open, as
   `engine load: 5.57 of 16 cores (35%) over the last 60s, 2 session(s), rss=2340MB`,
-  in `/aws/lambda-microvms/<stack>-asr-logs`. The size is billed whatever the load, so
-  this line is what tells you whether a bundle would fit a smaller size.
+  in `/aws/lambda-microvms/<stack>-asr-logs`. It is what tells you whether a bundle
+  would fit a smaller size, and what its CPU costs (below).
   `ASR_LOAD_LOG_INTERVAL_S` changes the interval; `0` turns it off.
 - **Virtual Participant voice separation is on by default, and on this engine it
   adds work but not billed size.** With it on, a VP's participant session also runs
@@ -873,11 +890,47 @@ validate the pairing on a live multi-speaker meeting before marking it `vetted`.
   `termination` message carries `dropped_seconds`. A nonzero total means the engine
   could not keep up at some point in that meeting, whether from load or from a
   single slow step (look for `sortformer step ... took` nearby).
+- **How a MicroVM is billed.** Memory for the whole lifetime at the configured size,
+  and vCPU-seconds at the larger of the baseline and the cores in use. The baseline is
+  one vCPU per 2 GiB, 4 vCPUs at 8 GiB, and a MicroVM can burst to four times it, which
+  is the 16 CPUs the engine sees. Measured against Cost Explorer on a dev stack in
+  October 2026: bundles that stay under 4 cores bill the baseline, while the two-pass
+  bundles ran about 11 cores on two channels and were billed for them. Amazon
+  Transcribe bills a stereo meeting once per streamed second, with a 15-second minimum
+  per request.
 - `MaxMeetingSeconds` in the `AsrDefaults` mapping (default 4 h, service maximum 8 h)
   bounds what a single
   MicroVM can cost. The transcriber terminates the MicroVM on meeting end and on
   SIGTERM (deploys, scale-in); the ceiling is the backstop if the task dies
   without doing either.
+
+### Benchmarking model configurations
+
+To compare bundles, or a bundle with Amazon Transcribe, play the same recording through
+each on a dev stack:
+
+```bash
+AWS_PROFILE=default make asr-benchmark STACK=<dev-stack> DATASET=ami/IS1009c \
+    BUNDLES=parakeet-tdt-v3-sortformer,parakeet-tdt-v3-titanet-small TRANSCRIBE=1 DRY_RUN=1
+```
+
+For each bundle the stack is updated with only the `AsrDefaults` bundle changed (the
+image rebuilds, about 20-25 minutes), the WAV is streamed once at real time over the
+transcriber WebSocket, and the run is priced from the engine's measured CPU and the
+MicroVM's lifetime. Each run's transcript is saved and, with a reference, scored for word
+error rate per channel. `DATASET=ami/IS1009c` and `ami/IS1009d` (clean audio) and `ami/ES2004a`
+(low-level, noisier headsets, for noise robustness) are meetings from the AMI
+Meeting Corpus (CC BY 4.0) whose reference transcripts ship with the tool; their audio is
+downloaded and mixed into a stereo recording on first use. Your own recording works with
+`WAV=` and an optional `REFERENCE=` STM file. The original
+bundle is restored at the end; `SWITCH_ONLY=<bundle>` puts a stack back after an
+interrupted run. The switch refuses to run when a nested stack's published template
+differs from the deployed one, so it never deploys a re-published build as a side
+effect. The packaged AMI meetings are close-talk headset audio without crosstalk, so
+every engine hears the same clean speech. See the load simulator's
+[`asr-benchmark`](../utilities/load-simulator/README.md#5-asr-benchmark--compare-model-configurations)
+scenario. This is a lab comparison; the cost of real meetings is
+[estimated per meeting](meeting-cost-estimate.md).
 
 ## Local development
 
