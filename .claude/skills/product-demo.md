@@ -421,10 +421,11 @@ Meet with nobody watching. Each of these cost at least one wasted take.
   afterwards (`timeline.json` maps each mark to a frame), and replace the
   placeholder in `narration.md` before rendering. Narrating a predicted answer
   is narrating something that did not happen.
-- **Typed consent replies must be exact unless addressed to LMA.** Have the guest
-  type `I object` or `I consent`, or `LMA, I object to recording`; check
-  `classifyChatReply` in `consent-matcher.ts` for the rule the deployed version
-  applies.
+- **Typed consent must be the whole message; an objection need not be.** Have the
+  guest type exactly `I consent`; a sentence containing an objection phrase
+  ("I object to this being recorded") is an objection. Stacks built before
+  #1109 needed the exact phrase for an unaddressed objection too; check
+  `classifyChatReply` in `consent-matcher.ts` for the deployed rule.
 - **Each-participant opt-in waits for everyone present**, including a muted human
   host and the silent keepalive guest, who never reply. To show consent being
   granted live, use the owner-attests rule (the owner's **Attest that everyone
