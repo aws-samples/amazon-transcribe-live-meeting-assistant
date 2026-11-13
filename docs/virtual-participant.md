@@ -516,7 +516,7 @@ Most values are one of these fixed strings:
 
 | Group | Values |
 | --- | --- |
-| Never got in | `pre-join:not-admitted`, `pre-join:no-join-button`, `pre-join:no-name-input`, `pre-join:goto-failed`, `pre-join:ai-error-screen`, `pre-join:meet-refused`, `pre-join:meet-denied`, `pre-join:meet-invalid-code`, `pre-join:meet-ended`, `acs-not-admitted`, `sdk-not-admitted`, `enterprise-login-timeout` |
+| Never got in | `pre-join:not-admitted`, `pre-join:no-join-button`, `pre-join:no-name-input`, `pre-join:goto-failed`, `pre-join:ai-error-screen`, `pre-join:meet-refused`, `pre-join:meet-denied`, `pre-join:meet-invalid-code`, `pre-join:meet-ended`, `pre-join:passcode-not-entered`, `acs-not-admitted`, `sdk-not-admitted`, `enterprise-login-timeout` |
 | Asked to leave in chat | `chat` |
 | Left after a participant objected to recording ([Meeting Consent](meeting-consent.md#objections)) | `consent-objection` |
 | The meeting ended | `post-meeting-screen`, `meeting-ended-text`, `meet-ended-screen`, `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |

@@ -277,6 +277,11 @@ export default class ZoomSdk {
             {
                 meetingNumber,
                 signature,
+                // Passed as given, including a password that is the pwd value
+                // of a Zoom join link (meeting-password.ts zoomPasswordKind).
+                // The web-client join puts such a value on the join URL; for
+                // the Meeting SDK it has not been tested whether `passWord`
+                // takes it in place of the passcode.
                 passWord: details.invite.meetingPassword || '',
                 userName: details.scribeIdentity,
                 leaveUrl: `${this.server.origin}/left.html`,
