@@ -101,6 +101,13 @@ settings:
   is an objection.
 - Anything else is neither, and is not recorded.
 
+The Virtual Participant reads the meeting chat and speech by its own rules: a
+typed consent must be the whole message, a typed objection may be part of a
+message of up to 200 characters when it stands outside quotation marks, and a
+spoken reply counts only when it is addressed to LMA. See
+[Replies in the chat](#replies-in-the-chat) and
+[Spoken replies](#spoken-replies).
+
 Each participant's **latest** reply is the one that counts: somebody who
 objected and then consented has consented, and the other way round. Replies are
 matched to participants by their display name in the meeting, compared without
@@ -443,24 +450,49 @@ recorded in LMA. …"*.
 
 ### Replies in the chat
 
-The VP reads a chat message as a reply only when **the whole message** is a
-reply, as it reads its chat commands: case, punctuation and spacing are ignored,
-and an `LMA` addressee may stand anywhere in it.
+The VP compares a chat message with the phrases as it compares its chat
+commands: case, punctuation and spacing are ignored, phrases match only as
+whole words, and an `LMA` addressee may stand anywhere in the message. Consent
+must be the whole message; an objection may be part of a sentence, because
+reading a message as an objection can only stop capture, never start it.
 
-- **Consent** is a message that is one of the consent phrases (*"I consent"*,
-  *"i agree!"*, *"LMA, I accept"*), or `LMA consent`.
+- **Consent** is a message that is one of the consent phrases and nothing else
+  (*"I consent"*, *"i agree!"*, *"LMA, I accept"*), or `LMA consent`. A
+  sentence that contains a consent phrase is not consent, addressed to `LMA` or
+  not: *"I agree with Bo's point"* and *"LMA, I agree with the plan"* are
+  ordinary chat.
 - **An objection** is a message that is one of the objection phrases (*"I
   object"*, *"Stop recording."*), `LMA no consent` or `LMA object`, or a message
-  of up to 200 characters addressed to `LMA` that contains an objection phrase
-  anywhere (*"LMA, please stop recording now"*).
+  of up to 200 characters that contains an objection phrase:
+  - addressed to `LMA`: *"LMA, please stop recording now"*, except an `LMA ask`
+    question for the meeting assistant, which is answered and is not a reply
+    whatever it mentions;
+  - not addressed: *"I object to this meeting being recorded"*, *"I agree with
+    Sam, but I don't consent to being recorded"*, and also *"I don't agree with
+    the roadmap"*, which with the default phrases is handled as any objection
+    is (see [Objections](#objections)): capture stops until the sender consents
+    again, the screen recording stays off for the rest of the meeting, and with
+    **Virtual Participant leaves after an objection** on, the VP leaves. The
+    default phrases `I do not agree`, `I don't agree`, `do not record` and
+    `don't record` match everyday sentences (*"please do not record the demo
+    twice"*); remove them from the objection phrases where that is too eager
+    for a deployment's meetings.
+- Only the text outside quotation marks (double or single) is searched for an
+  objection phrase, so a message that quotes one to tell people how to reply is
+  not an objection (*'Reply "I consent" to agree, or "I object" to decline.'*),
+  and the shipped notices, posted by another LMA in the same meeting or pasted
+  from Stream Audio, are not read as replies. A custom notice text should keep
+  `{objection_phrase}` in quotation marks for the same reason. A phrase outside the quotation marks still
+  counts (*'LMA, "stop recording" please'* does not, *'Bo said "stop
+  recording", and I agree: stop recording'* does), and the phrase typed on its
+  own is an objection, quoted or not.
+- A message longer than 200 characters is searched for no phrase.
 - Objections are looked for first, so *"LMA I do not consent"* is an objection.
-- Anything else is ordinary chat. In particular *"I agree with Bo's point"* and
-  *"I don't agree with the roadmap"* are not replies, although they contain
-  default phrases: a meeting chat is full of such sentences.
+- Anything else is ordinary chat.
 
-This is stricter than the reading in [How a reply is read](#how-a-reply-is-read),
-which looks for a phrase anywhere in a reply; the VP does not use that reading
-for the chat or for speech. `LMA consent`, `LMA no consent` and `LMA object` work whatever
+This differs from the reading in [How a reply is read](#how-a-reply-is-read),
+which looks for a consent phrase anywhere in a reply; the VP does not use that
+reading for the chat or for speech. `LMA consent`, `LMA no consent` and `LMA object` work whatever
 phrases are configured, so they are the forms to suggest when a deployment's
 phrases are long or in another language.
 
@@ -493,7 +525,9 @@ cannot read the Meeting Consent section, it reads the chat only.
 
 **What counts as a spoken reply.** Only an utterance addressed to LMA is a
 reply, because people say *"I agree"* and *"I don't agree"* in conversation far
-more often than they type them as a whole message. Addressed, it is read as an
+more often than they type them, so an unaddressed sentence that contains an
+objection phrase, which is an objection in the chat, is ordinary speech.
+Addressed, it is read as an
 addressed chat message is (see [Replies in the chat](#replies-in-the-chat)),
 with the deployment's phrases, the whole utterance as the speech engine
 finalises it being the reply:
@@ -506,7 +540,7 @@ finalises it being the reply:
   now"*). Objections are looked for first.
 - A bare phrase is not a reply when said aloud: *"I consent."* and *"Stop
   recording!"* are ordinary speech, although the same words typed in the chat
-  are replies.
+  are replies, as is a typed sentence containing an objection phrase.
 
 Speech engines often write `LMA` as its letters, so *"L M A"* and *"L.M.A."*
 are read as `LMA`. Only final results are read, never the engine's partial
