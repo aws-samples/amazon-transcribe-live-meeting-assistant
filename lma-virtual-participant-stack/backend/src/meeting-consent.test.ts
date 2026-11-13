@@ -719,6 +719,32 @@ test('the VP never reads its own messages as replies', async () => {
     assert.equal(h.capture.on, true);
 });
 
+test("another LMA's reply line and help line, which quote the replies, are not replies", async () => {
+    const h = await harness({ deployment: OPT_IN_EACH });
+    for (const message of [
+        'Type or say "LMA, I consent" or "LMA, I object".',
+        'Say "LMA, I consent" or "LMA, I object".',
+        'Meeting consent: type or say "LMA, I consent" to agree to recording and transcription, or "LMA, I object" to object.',
+    ]) {
+        assert.equal(await h.flow.handleChat('LMA (Bo Chen)', message), false, message);
+        assert.equal(await h.flow.handleChat('Cy Diaz', message), false, message);
+    }
+    assert.deepEqual(h.api.events, []);
+    h.flow.stop();
+});
+
+test('a chat message ending in LMA and a consent phrase is recorded as consent', async () => {
+    const h = await harness({ deployment: OPT_IN_EACH });
+    h.flow.noteAttendeeCount(2); // the VP and Bo
+    assert.equal(await h.flow.handleChat('Bo Chen', "OK, so that's the plan. LMA, I consent."), true);
+    await h.flow.syncRoster();
+    await h.settle();
+    const event = h.api.events[h.api.events.length - 1];
+    assert.deepEqual([event.ParticipantName, event.Decision, event.Source], ['Bo Chen', 'consent', 'chat']);
+    assert.equal(h.capture.on, true);
+    h.flow.stop();
+});
+
 // ─── Opt-in, each participant ───────────────────────────────────────────────
 
 const OPT_IN_EACH = { mode: 'opt_in', consentRule: 'each_participant' };

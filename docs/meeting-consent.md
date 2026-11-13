@@ -102,9 +102,11 @@ settings:
 - Anything else is neither, and is not recorded.
 
 The Virtual Participant reads the meeting chat and speech by its own rules: a
-typed consent must be the whole message, a typed objection may be part of a
-message of up to 200 characters when it stands outside quotation marks, and a
-spoken reply counts only when it is addressed to LMA. See
+consent is a consent phrase as the whole message, or `LMA` followed at once by
+a consent phrase anywhere in a message of up to 200 characters; a typed
+objection may be part of a message of up to 200 characters; only text outside
+quotation marks is searched; and a spoken reply counts only when it is
+addressed to LMA. See
 [Replies in the chat](#replies-in-the-chat) and
 [Spoken replies](#spoken-replies).
 
@@ -487,15 +489,21 @@ recorded in LMA. …"*.
 
 The VP compares a chat message with the phrases as it compares its chat
 commands: case, punctuation and spacing are ignored, phrases match only as
-whole words, and an `LMA` addressee may stand anywhere in the message. Consent
-must be the whole message; an objection may be part of a sentence, because
-reading a message as an objection can only stop capture, never start it.
+whole words, and an `LMA` addressee may stand anywhere in the message. A
+consent is either the whole message or `LMA` followed at once by the phrase;
+an objection may be part of any sentence, because reading a message as an
+objection can only stop capture, never start it.
 
 - **Consent** is a message that is one of the consent phrases and nothing else
-  (*"I consent"*, *"i agree!"*, *"LMA, I accept"*), or `LMA consent`. A
-  sentence that contains a consent phrase is not consent, addressed to `LMA` or
-  not: *"I agree with Bo's point"* and *"LMA, I agree with the plan"* are
-  ordinary chat.
+  (*"I consent"*, *"i agree!"*, *"I accept, LMA"*), or a message of up to 200
+  characters in which `LMA` is followed at once by a consent phrase or by
+  `consent`, anywhere in it: *"…so that's the plan. LMA, I consent."*, *"Sounds
+  good, LMA I agree, let's go on"*, *"LMA, I agree with the plan"*. Punctuation
+  and spacing between `LMA` and the phrase do not matter. A consent phrase
+  without `LMA` just before it is not consent: *"I agree with Bo's point"* is
+  ordinary chat, and so is *"LMA, what do you think? I consent"*, where other
+  words stand between them. A bare *"I consent"* is still consent, so a
+  participant who does not use the `LMA` form is still heard.
 - **An objection** is a message that is one of the objection phrases (*"I
   object"*, *"Stop recording."*), `LMA no consent` or `LMA object`, or a message
   of up to 200 characters that contains an objection phrase:
@@ -513,16 +521,19 @@ reading a message as an objection can only stop capture, never start it.
     twice"*); remove them from the objection phrases where that is too eager
     for a deployment's meetings.
 - Only the text outside quotation marks (double or single) is searched for an
-  objection phrase, so a message that quotes one to tell people how to reply is
-  not an objection (*'Reply "I consent" to agree, or "I object" to decline.'*),
-  and the shipped notices, posted by another LMA in the same meeting or pasted
-  from Stream Audio, are not read as replies. A custom notice text should keep
+  objection phrase or for `LMA` and a consent phrase, so a message that quotes
+  one to tell people how to reply is not a reply (*'Reply "I consent" to agree,
+  or "I object" to decline.'*, *'Type or say "LMA, I consent" or "LMA, I
+  object".'*), and the shipped notices and reply lines, posted by another LMA in
+  the same meeting or pasted from Stream Audio, are not read as replies. A custom notice text should keep
   `{objection_phrase}` in quotation marks for the same reason. A phrase outside the quotation marks still
   counts (*'LMA, "stop recording" please'* does not, *'Bo said "stop
   recording", and I agree: stop recording'* does), and the phrase typed on its
-  own is an objection, quoted or not.
-- A message longer than 200 characters is searched for no phrase.
-- Objections are looked for first, so *"LMA I do not consent"* is an objection.
+  own is an objection, quoted or not, as *'"LMA, I consent"'* is consent.
+- A message longer than 200 characters is searched for no phrase, and an `LMA
+  ask` question is searched for neither an objection nor a consent.
+- Objections are looked for first, so *"LMA I do not consent"* is an objection,
+  and so is a message that contains both an objection and *"LMA, I consent"*.
 - Anything else is ordinary chat.
 
 This differs from the reading in [How a reply is read](#how-a-reply-is-read),
@@ -567,8 +578,11 @@ addressed chat message is (see [Replies in the chat](#replies-in-the-chat)),
 with the deployment's phrases, the whole utterance as the speech engine
 finalises it being the reply:
 
-- **Consent** is `LMA consent`, or `LMA` with one of the consent phrases and
-  nothing else (*"LMA, I consent."*, *"I agree, LMA"*).
+- **Consent** is `LMA consent`, `LMA` with one of the consent phrases and
+  nothing else (*"I agree, LMA"*), or `LMA` followed at once by a consent
+  phrase anywhere in an utterance of up to 200 characters (*"LMA, I
+  consent."*, *"OK, so that's the plan. LMA, I consent."*). *"LMA, what do you
+  think? I consent"* is not consent.
 - **An objection** is `LMA object` or `LMA no consent`, `LMA` with one of the
   objection phrases, or an utterance of up to 200 characters addressed to `LMA`
   that contains an objection phrase anywhere (*"LMA, please stop recording
