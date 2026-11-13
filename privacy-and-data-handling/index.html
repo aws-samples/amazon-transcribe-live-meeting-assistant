@@ -1,0 +1,994 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-g5ptsecz"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Privacy and Data Handling Controls | LMA</title><link rel="canonical" href="https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/privacy-and-data-handling/"/><link rel="sitemap" href="/amazon-transcribe-live-meeting-assistant/sitemap-index.xml"/><link rel="shortcut icon" href="/amazon-transcribe-live-meeting-assistant/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v7.4.7"/><meta name="generator" content="Starlight v0.42.10"/><meta property="og:title" content="Privacy and Data Handling Controls"/><meta property="og:type" content="article"/><meta property="og:url" content="https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/privacy-and-data-handling/"/><meta property="og:locale" content="en"/><meta property="og:description" content="Live Meeting Assistant — Real-time meeting transcription, AI-powered meeting assistance, and virtual meeting participation on AWS"/><meta property="og:site_name" content="LMA"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="Live Meeting Assistant — Real-time meeting transcription, AI-powered meeting assistance, and virtual meeting participation on AWS"/><script>
+	window.StarlightThemeProvider = (() => {
+		const storedTheme =
+			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+		const theme =
+			storedTheme ||
+			(window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+		document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+		return {
+			updatePickers(theme = storedTheme || 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = theme;
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector(`#theme-icons`);
+					const newIcon = tmpl && tmpl.content.querySelector('.' + theme);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script><template id="theme-icons"><svg aria-hidden="true" class="light astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z"/></svg><svg aria-hidden="true" class="dark astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z"/></svg><svg aria-hidden="true" class="auto astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg></template><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/print.C9eyqPGL.css" media="print"><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/common.C-io9741.css"><style>@layer starlight.components{svg:where(.astro-hkc32dio){color:var(--sl-icon-color);font-size:var(--sl-icon-size,1em);width:1em;height:1em;overflow:visible}}
+</style><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/page.cNngjUgL.js"></script></head><body class="astro-g5ptsecz"><a class="sl-skip-link astro-qb7clj6f" href="#_top">Skip to content</a><div class="page sl-flex astro-yntsjkba"><header class="header astro-yntsjkba"><div class="header astro-by6fddyj"><div class="title-wrapper sl-flex astro-by6fddyj"><a href="/amazon-transcribe-live-meeting-assistant/" class="site-title sl-flex astro-6rvad3va"><img class="light:sl-hidden print:hidden astro-6rvad3va" alt src="/amazon-transcribe-live-meeting-assistant/_astro/logo-dark.DjwyAsdJ.svg" width="120" height="40"><img class="dark:sl-hidden print:block astro-6rvad3va" alt src="/amazon-transcribe-live-meeting-assistant/_astro/logo-light.Therjg_H.svg" width="120" height="40"><span class="astro-6rvad3va" translate="no">LMA</span></a></div><div class="sl-flex print:hidden astro-by6fddyj"><site-search class="astro-by6fddyj astro-b5kgnn7o" data-translations="{&quot;placeholder&quot;:&quot;Search&quot;}"><button data-open-modal disabled aria-label="Search" aria-keyshortcuts="Control+K" class="astro-b5kgnn7o"><svg aria-hidden="true" class="astro-b5kgnn7o astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.71 20.29 18 16.61A9 9 0 1 0 16.61 18l3.68 3.68a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.39ZM11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg><span class="sl-hidden md:sl-block astro-b5kgnn7o" aria-hidden="true">Search</span><kbd class="sl-hidden md:sl-flex astro-b5kgnn7o" style="display: none"><kbd class="astro-b5kgnn7o">Ctrl</kbd><kbd class="astro-b5kgnn7o">K</kbd></kbd></button><dialog style="padding: 0" aria-label="Search" class="astro-b5kgnn7o"><div class="dialog-frame sl-flex astro-b5kgnn7o"><button data-close-modal class="sl-flex md:sl-hidden astro-b5kgnn7o">Cancel</button><div class="search-container astro-b5kgnn7o"><div id="starlight__search" class="astro-b5kgnn7o"></div></div></div></dialog></site-search><script>
+	(() => {
+		const openBtn = document.querySelector('button[data-open-modal]');
+		const shortcut = openBtn?.querySelector('kbd');
+		if (!openBtn || !(shortcut instanceof HTMLElement)) return;
+		const platformKey = shortcut.querySelector('kbd');
+		if (platformKey && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+			platformKey.textContent = '⌘';
+			openBtn.setAttribute('aria-keyshortcuts', 'Meta+K');
+		}
+		shortcut.style.display = '';
+	})();
+</script><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/Search.astro_astro_type_script_index_0_lang.CdQ5PyDR.js"></script></div><div class="sl-hidden md:sl-flex print:hidden right-group astro-by6fddyj"><div class="sl-flex social-icons astro-by6fddyj"><a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" rel="me" class="sl-flex astro-n2mnl6yq"><span class="sr-only astro-n2mnl6yq">GitHub</span><svg aria-hidden="true" class="astro-n2mnl6yq astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-2z5xp7gb"><span class="sr-only astro-2z5xp7gb">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-2z5xp7gb"><option value="dark" class="astro-2z5xp7gb">Dark</option><option value="light" class="astro-2z5xp7gb">Light</option><option value="auto" selected class="astro-2z5xp7gb">Auto</option></select><svg aria-hidden="true" class="icon caret astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script><script type="module">var e=`starlight-theme`,t=e=>e===`auto`||e===`dark`||e===`light`?e:`auto`,n=()=>t(typeof localStorage<`u`&&localStorage.getItem(e));function r(t){typeof localStorage<`u`&&localStorage.setItem(e,t===`light`||t===`dark`?t:``)}var i=()=>matchMedia(`(prefers-color-scheme: light)`).matches?`light`:`dark`;function a(e){StarlightThemeProvider.updatePickers(e),document.documentElement.dataset.theme=e===`auto`?i():e,r(e)}matchMedia(`(prefers-color-scheme: light)`).addEventListener(`change`,()=>{n()===`auto`&&a(`auto`)});var o=class extends HTMLElement{constructor(){super(),a(n()),this.querySelector(`select`)?.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&a(t(e.currentTarget.value))})}};customElements.define(`starlight-theme-select`,o);</script><script type="module">var e=class extends HTMLElement{constructor(){super();let e=this.querySelector(`select`);e&&(e.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&(window.location.pathname=e.currentTarget.value)}),window.addEventListener(`pageshow`,t=>{if(!t.persisted)return;let n=e.querySelector(`option[selected]`)?.index;n!==e.selectedIndex&&(e.selectedIndex=n??0)}))}};customElements.define(`starlight-lang-select`,e);</script></div></div></header><nav class="sidebar print:hidden astro-yntsjkba" aria-label="Main"><button popovertarget="starlight__sidebar" class="sl-menu-button sl-flex md:sl-hidden print:hidden astro-r2osgdlg"><svg aria-hidden="true" class="open-menu astro-r2osgdlg astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M3 8h18a1 1 0 1 0 0-2H3a1 1 0 0 0 0 2Zm18 8H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Zm0-5H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Z"/></svg><svg aria-hidden="true" class="close-menu astro-r2osgdlg astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="m13.41 12 6.3-6.29a1.004 1.004 0 1 0-1.42-1.42L12 10.59l-6.29-6.3a1.004 1.004 0 0 0-1.42 1.42l6.3 6.29-6.3 6.29a1 1 0 0 0 0 1.42.998.998 0 0 0 1.42 0l6.29-6.3 6.29 6.3a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.42L13.41 12Z"/></svg><span class="sr-only astro-r2osgdlg">Menu</span></button><script type="module">var e=class extends HTMLElement{constructor(){super();let e=matchMedia(`(min-width: 50em)`),t=()=>{this.popover=e.matches?null:`auto`};t(),e.addEventListener(`change`,()=>t()),this.addEventListener(`toggle`,({newState:e})=>this.trapFocus(e===`open`))}trapFocus(e){document.querySelectorAll(`.main-frame, .sl-skip-link`).forEach(t=>{t.toggleAttribute(`inert`,e)})}};customElements.define(`sl-sidebar-pane`,e);</script><sl-sidebar-pane popover id="starlight__sidebar" class="sidebar-pane astro-yntsjkba"><div class="sidebar-content sl-flex astro-yntsjkba"><sl-sidebar-state-persist data-hash="0qghz1d" class="astro-ipdry5cl"><script aria-hidden="true">
+		(() => {
+			try {
+				if (!matchMedia('(min-width: 50em)').matches) return;
+				/** @type {HTMLElement | null} */
+				const target = document.querySelector('sl-sidebar-state-persist');
+				const state = JSON.parse(sessionStorage.getItem('sl-sidebar-state') || '0');
+				if (!target || !state || target.dataset.hash !== state.hash) return;
+				window._starlightScrollRestore = state.scroll;
+				customElements.define(
+					'sl-sidebar-restore',
+					class SidebarRestore extends HTMLElement {
+						connectedCallback() {
+							try {
+								const idx = parseInt(this.dataset.index || '');
+								const details = this.closest('details');
+								if (details && typeof state.open[idx] === 'boolean') details.open = state.open[idx];
+							} catch {}
+						}
+					}
+				);
+			} catch {}
+		})();
+	</script><ul class="top-level astro-rmhv4bp6"><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Overview</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="0"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Welcome</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Getting Started</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="1"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/prerequisites-and-deployment/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Prerequisites &amp; Deployment</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/quick-start-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Quick Start Guide</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/demo-videos/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Demo Videos</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lma-in-action/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">LMA in Action</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Core Features</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="2"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/transcription-and-translation/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Transcription &amp; Translation</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/microvm-asr/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">On-demand ASR &amp; Diarization (MicroVM)</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-assistant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Assistant</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/transcript-summarization/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Transcript Summarization</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-agenda/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Agenda</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-consent/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Consent</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/transcript-deletion/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Transcript Deletion After the Summary</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-video/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Video and Key Frames</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meetings-query-tool/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meetings Query Tool</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Meeting Sources</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="3"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-sources/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Sources Overview</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/stream-audio/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Stream Audio</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/browser-extension/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Browser Extension</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/desktop-capture-app/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Desktop Capture App</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/virtual-participant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Virtual Participant</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Voice Assistant &amp; Avatar</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="4"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/voice-assistant/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Voice Assistant</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/nova-sonic-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Nova Sonic Setup</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/elevenlabs-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">ElevenLabs Setup</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/simli-avatar-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Simli Avatar Setup</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">MCP Server Integration</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="5"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/mcp-servers/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">MCP Servers Overview</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/mcp-api-key-auth/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">MCP API Key Auth</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/salesforce-mcp-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Salesforce MCP</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/amazon-quick-mcp-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Amazon QuickSuite MCP</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/deepwiki-mcp-setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">DeepWiki MCP</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Web UI</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="6"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/web-ui-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Web UI Guide</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Access Control &amp; Security</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="7"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/user-management/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">User Management</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/user-based-access-control/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">User-Based Access Control</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/infrastructure-and-security/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Infrastructure &amp; Security</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/privacy-and-data-handling/" aria-current="page" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Privacy and Data Handling Controls</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/security-scanning/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Security Scanning (SRT)</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Integration &amp; API</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="8"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/websocket-streaming-api/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">WebSocket Streaming API</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/embeddable-components/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Embeddable Components</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lambda-hook-functions/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Lambda Hook Functions</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Administration</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="9"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/cloudformation-parameters/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">CloudFormation Parameters</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/configuration-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Configuration Guide</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/configuration-store/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Unified Configuration Store</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/stack-updates-and-upgrades/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Stack Updates &amp; Upgrades</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/well-architected/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Well-Architected Assessment</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/meeting-cost-estimate/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Meeting Cost Estimate</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/monitoring/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Monitoring &amp; Alerting</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/troubleshooting/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Troubleshooting</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/cleanup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Cleanup</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Development</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="10"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/developer-guide/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Developer Guide</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lma-cli/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">LMA CLI Reference</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/lma-sdk/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">LMA SDK Reference</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">New &amp; Uncategorized</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="11"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/amazon-quick-desktop-integration/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Amazon Quick Desktop Integration</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/blog-update-proposal/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Blog Update Proposal</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/cloudformation-service-role/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Cloudformation Service Role</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/dependency-upgrade-validation-runbook/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Dependency Upgrade Validation Runbook</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/scheduled-integration-tests/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Scheduled Integration Tests</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/teams-acs-sdk/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Teams Acs Sdk</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/test-coverage/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Test Coverage</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/troubleshooting-agent/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Troubleshooting Agent</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/upload-audio/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Upload Audio</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/virtual-participant-local-dev/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Virtual Participant Local Dev</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/voice-enrollment/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Voice Enrollment</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/zoom-credentials-and-join-reliability/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Zoom Credentials And Join Reliability</span></a></li><li class="astro-rmhv4bp6"><a href="/amazon-transcribe-live-meeting-assistant/zoom-meeting-sdk/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Zoom Meeting Sdk</span></a></li></ul></details></li></ul><script aria-hidden="true">
+		(() => {
+			const scroller = document.getElementById('starlight__sidebar');
+			if (!window._starlightScrollRestore || !scroller) return;
+			scroller.scrollTop = window._starlightScrollRestore;
+			delete window._starlightScrollRestore;
+		})();
+	</script></sl-sidebar-state-persist><div class="md:sl-hidden"><div class="mobile-preferences sl-flex astro-p4azlveh"><div class="social-icons astro-p4azlveh"><a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" rel="me" class="sl-flex astro-n2mnl6yq"><span class="sr-only astro-n2mnl6yq">GitHub</span><svg aria-hidden="true" class="astro-n2mnl6yq astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-2z5xp7gb"><span class="sr-only astro-2z5xp7gb">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-2z5xp7gb"><option value="dark" class="astro-2z5xp7gb">Dark</option><option value="light" class="astro-2z5xp7gb">Light</option><option value="auto" selected class="astro-2z5xp7gb">Auto</option></select><svg aria-hidden="true" class="icon caret astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script></div></div></div></sl-sidebar-pane></nav><div class="main-frame astro-yntsjkba"><script type="module">var e=document.getElementById(`starlight__sidebar`),t=e?.querySelector(`sl-sidebar-state-persist`),n=`sl-sidebar-state`,r=()=>{let r=[],i=t?.dataset.hash||``;try{let e=sessionStorage.getItem(n),t=JSON.parse(e||`{}`);Array.isArray(t.open)&&t.hash===i&&(r=t.open)}catch{}return{hash:i,open:r,scroll:e?.scrollTop||0}},i=e=>{try{sessionStorage.setItem(n,JSON.stringify(e))}catch{}},a=()=>i(r()),o=(e,t)=>{let n=r();n.open[t]=e,i(n)};t?.addEventListener(`click`,e=>{if(!(e.target instanceof Element))return;let t=e.target.closest(`summary`)?.closest(`details`);if(!t)return;let n=t.querySelector(`sl-sidebar-restore`),r=parseInt(n?.dataset.index||``);isNaN(r)||o(!t.open,r)}),addEventListener(`visibilitychange`,()=>{document.visibilityState===`hidden`&&a()});</script><div class="lg:sl-flex astro-lrzkfocr"><aside class="right-sidebar-container print:hidden astro-lrzkfocr"><div class="right-sidebar astro-lrzkfocr"><div class="lg:sl-hidden astro-qok35upx"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-66cqc7ze"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-66cqc7ze"><details id="starlight__mobile-toc" class="astro-66cqc7ze"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-66cqc7ze"><span class="toggle sl-flex astro-66cqc7ze">On this page<svg aria-hidden="true" class="caret astro-66cqc7ze astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></span><span class="display-current astro-66cqc7ze"></span></summary><div class="dropdown astro-66cqc7ze"><ul class="isMobile astro-jugkfwgx" style="--depth: 0;"><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#_top" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Overview</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#contents" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Contents</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#consent-options" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Consent options</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#the-three-modes-and-the-two-opt-in-rules" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">The three modes and the two opt-in rules</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#how-each-capture-method-runs-it" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">How each capture method runs it</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#objections" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Objections</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#evidence-kept" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Evidence kept</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#choosing-a-mode" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Choosing a mode</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#what-lma-stores-and-for-how-long" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">What LMA stores, and for how long</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#retention-controls" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Retention controls</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#data-inventory" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Data inventory</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#copies-that-follow-their-own-lifetime" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Copies that follow their own lifetime</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#earlier-versions-in-the-recordings-bucket" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Earlier versions in the recordings bucket</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#the-knowledge-bases-copy-of-the-summary" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">The knowledge base’s copy of the summary</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#deleting-data" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Deleting data</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#transcript-deletion-after-the-summary" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Transcript deletion after the summary</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#deleting-a-meeting" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Deleting a meeting</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#deleting-a-stack" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Deleting a stack</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#where-content-is-processed" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Where content is processed</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#logging" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Logging</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#configuration-presets-and-deploy-time-controls" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Configuration presets and deploy-time controls</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#what-each-preset-sets" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">What each preset sets</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#controls-no-preset-can-set" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Controls no preset can set</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#checklist-for-a-regulated-deployment" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Checklist for a regulated deployment</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#related" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Related</span></a></li></ul></div></details></nav></mobile-starlight-toc><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/MobileTableOfContents.astro_astro_type_script_index_0_lang.C3fM4Kra.js"></script></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-qok35upx"><div class="sl-container astro-qok35upx"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-jugkfwgx" style="--depth: 0;"><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#_top" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Overview</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#contents" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Contents</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#consent-options" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Consent options</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#the-three-modes-and-the-two-opt-in-rules" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">The three modes and the two opt-in rules</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#how-each-capture-method-runs-it" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">How each capture method runs it</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#objections" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Objections</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#evidence-kept" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Evidence kept</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#choosing-a-mode" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Choosing a mode</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#what-lma-stores-and-for-how-long" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">What LMA stores, and for how long</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#retention-controls" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Retention controls</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#data-inventory" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Data inventory</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#copies-that-follow-their-own-lifetime" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Copies that follow their own lifetime</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#earlier-versions-in-the-recordings-bucket" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Earlier versions in the recordings bucket</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#the-knowledge-bases-copy-of-the-summary" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">The knowledge base’s copy of the summary</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#deleting-data" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Deleting data</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#transcript-deletion-after-the-summary" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Transcript deletion after the summary</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#deleting-a-meeting" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Deleting a meeting</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#deleting-a-stack" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Deleting a stack</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#where-content-is-processed" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Where content is processed</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#logging" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Logging</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#configuration-presets-and-deploy-time-controls" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Configuration presets and deploy-time controls</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#what-each-preset-sets" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">What each preset sets</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#controls-no-preset-can-set" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Controls no preset can set</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#checklist-for-a-regulated-deployment" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Checklist for a regulated deployment</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#related" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Related</span></a></li></ul></nav></starlight-toc><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/TableOfContents.astro_astro_type_script_index_0_lang.BpJaGz7G.js"></script></div></div></div></aside><div class="main-pane astro-lrzkfocr"><main data-pagefind-body class="astro-g5ptsecz" lang="en" dir="ltr"><div class="content-panel astro-a7po4psb"><div class="sl-container astro-a7po4psb"><h1 id="_top" class="astro-bebwqqxs">Privacy and Data Handling Controls</h1></div></div><div class="content-panel astro-a7po4psb"><div class="sl-container astro-a7po4psb"><div class="sl-markdown-content"><!-- Copyright (c) 2025 Amazon.com. This file is licensed under the MIT-0 License. -->
+<!-- See the LICENSE file in the project root for full license information. -->
+<div class="sl-heading-wrapper level-h1"><h1 id="privacy-and-data-handling-controls">Privacy and Data Handling Controls</h1><a class="sl-anchor-link" href="#privacy-and-data-handling-controls"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Privacy and Data Handling Controls”</span></a></div>
+<p>This page brings together, in one place, the controls that decide what LMA tells
+a meeting’s participants, what it captures and keeps, for how long, where the
+content is processed, and what is removed when a meeting or a whole deployment is
+deleted. It is written for an administrator or a reviewer deciding how to
+configure a deployment for internal meetings, customer-facing meetings or
+regulated meetings. Each section summarises a control and links to the page that
+describes it in full:</p>
+<ul>
+<li><a href="../meeting-consent/">Meeting Consent</a> — the consent modes, the consent record
+and how each capture method runs the consent flow.</li>
+<li><a href="../transcript-deletion/">Transcript Deletion After the Summary</a> — deleting a
+meeting’s transcript once it is summarized.</li>
+<li><a href="../configuration-guide/">Configuration Guide</a> — the runtime settings, the
+<a href="../configuration-guide/#retention-settings-the-stack-limits">Retention</a> section
+and the <a href="../configuration-guide/#configuration-presets">configuration presets</a>.</li>
+<li><a href="../infrastructure-and-security/">Infrastructure &#x26; Security</a> — encryption,
+<a href="../infrastructure-and-security/#data-retention">data retention</a> and
+<a href="../infrastructure-and-security/#where-meeting-content-is-processed">where meeting content is processed</a>.</li>
+<li><a href="../cloudformation-parameters/">CloudFormation Parameters</a> — the deploy-time
+parameters named below.</li>
+</ul>
+<p>Two kinds of control appear throughout. <strong>Settings</strong> are stored in the
+deployment’s configuration and changed by an Admin on <strong>Configuration ▸
+Configuration</strong> without a redeploy. <strong>Stack parameters</strong> are chosen when the
+CloudFormation stack is deployed or updated. Where a control is a stack
+parameter, this page says so, because no configuration preset or page can change
+it.</p>
+<p>LMA records evidence of what participants were told and what they replied. It
+does not decide which recording, transcription or data-protection rules apply to
+a meeting, and nothing on this page is legal advice. Choose the configuration
+with whoever advises your organisation on those rules.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="contents">Contents</h2><a class="sl-anchor-link" href="#contents"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Contents”</span></a></div>
+<ul>
+<li><a href="#consent-options">Consent options</a></li>
+<li><a href="#what-lma-stores-and-for-how-long">What LMA stores, and for how long</a></li>
+<li><a href="#deleting-data">Deleting data</a></li>
+<li><a href="#where-content-is-processed">Where content is processed</a></li>
+<li><a href="#configuration-presets-and-deploy-time-controls">Configuration presets and deploy-time controls</a></li>
+<li><a href="#related">Related</a></li>
+</ul>
+<div class="sl-heading-wrapper level-h2"><h2 id="consent-options">Consent options</h2><a class="sl-anchor-link" href="#consent-options"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Consent options”</span></a></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="the-three-modes-and-the-two-opt-in-rules">The three modes and the two opt-in rules</h3><a class="sl-anchor-link" href="#the-three-modes-and-the-two-opt-in-rules"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “The three modes and the two opt-in rules”</span></a></div>
+<p>The <strong>consent mode</strong> is set for the whole deployment in the <strong>Meeting Consent</strong>
+section of the Configuration page and, where the deployment allows it, chosen
+again for a single meeting when it starts. It ships set to Off.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Mode</th><th>What participants see</th><th>When the meeting is recorded and transcribed</th></tr></thead><tbody><tr><td><strong>Off</strong></td><td>Nothing</td><td>Always. This is the shipped default.</td></tr><tr><td><strong>Notify</strong></td><td>A notice that the meeting is recorded and transcribed, and how to object</td><td>From the start, until a participant objects</td></tr><tr><td><strong>Opt-in</strong></td><td>A request to agree, with the phrase to reply</td><td>Not until the consent rule is met; an objection from anybody stops it again</td></tr></tbody></table>
+<p>An opt-in meeting is granted by one of two <strong>consent rules</strong>:</p>
+<ul>
+<li><strong>Each participant consents.</strong> Every participant listed as present has replied
+with consent. A participant who joins later and has not replied withholds
+recording and transcription again until they do.</li>
+<li><strong>The meeting owner attests that everyone agreed.</strong> The person who owns the
+meeting in LMA confirms that everyone agreed, out loud, in the chat or in the
+invitation’s terms. An objection from any participant still stops capture.</li>
+</ul>
+<p>The other Meeting Consent settings decide the notice and request texts, the
+phrases a reply is read by, whether a meeting may be started with a different
+mode (<strong>Allow a different choice per meeting</strong>; with it off, a meeting may still
+choose a stricter mode or rule), whether evidence screenshots are kept, the model
+that checks them, what happens to streaming clients that show no consent step,
+whether a Virtual Participant leaves after an objection, and whether it reads
+replies said aloud. Their defaults are listed in
+<a href="../meeting-consent/#the-meeting-consent-settings">The Meeting Consent settings</a>.
+A saved change applies to meetings whose consent starts after the save.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="how-each-capture-method-runs-it">How each capture method runs it</h3><a class="sl-anchor-link" href="#how-each-capture-method-runs-it"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “How each capture method runs it”</span></a></div>
+<p>The consent record and its rules are shared by every way a meeting reaches LMA;
+each capture method decides how the notice is shown and how replies are read
+(see <a href="../meeting-consent/#flows-by-capture-method">Flows by capture method</a>).</p>
+<p><strong>Virtual Participant.</strong> The Virtual Participant posts the notice in the meeting
+chat once it is admitted, and again when somebody joins. It reads replies typed in
+the chat by the sender’s display name and, with <strong>Read spoken replies</strong> on (the
+shipped default), replies said aloud and addressed to LMA (“LMA, I consent”, “LMA,
+I object”) under the name of the participant shown speaking. In an opt-in meeting
+it writes no transcript, recording, chat lines, key frames or screen recording
+until consent is given.</p>
+<p>While consent is awaited and <strong>Read spoken replies</strong> is on, the Virtual
+Participant still sends the meeting audio to the meeting’s transcription engine,
+on a session of its own, only to hear spoken replies. What it hears is discarded
+inside the Virtual Participant: it does not reach the transcript, the recording,
+the summary or the logs, and only the reply events are kept on the consent
+record. With Amazon Transcribe that audio is processed by the Amazon Transcribe
+streaming service in the stack’s Region, and billed. Turn <strong>Read spoken replies</strong>
+off where no meeting audio may leave the Virtual Participant before consent; the
+Virtual Participant then reads the chat only, and an objection made out loud takes
+effect when the LMA user records it in LMA. No preset changes this setting. See
+<a href="../meeting-consent/#spoken-replies">Spoken replies</a>.</p>
+<p>What a Virtual Participant can read differs by meeting platform, which matters
+for the each-participant rule:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Join</th><th>Each participant consents</th><th>Notes</th></tr></thead><tbody><tr><td>Chime, Zoom (browser and Meeting SDK), Google Meet</td><td>Supported</td><td>The platform shows chat senders and an attendee count. Google Meet’s sender and speaker reading has not been confirmed in a live meeting</td></tr><tr><td>Teams (browser)</td><td>Supported <strong>aloud only</strong></td><td>Teams shows no chat sender, so a typed consent cannot be attributed. With <strong>Read spoken replies</strong> off the rule is never met</td></tr><tr><td>Teams (Azure Communication Services)</td><td>Supported</td><td>The platform gives the participants’ names</td></tr><tr><td>Webex (browser)</td><td><strong>Not supported</strong></td><td>The page shows no attendee count, so one unidentified participant is always listed. Use the owner-attests rule on Webex</td></tr></tbody></table>
+<p>Notify, owner-attests and objections work on every join. The full table, with how
+the participant list is screenshotted on each platform, is in
+<a href="../meeting-consent/#what-each-platform-supports">What each platform supports</a>.</p>
+<p><strong>Stream Audio and the Desktop Capture App.</strong> Neither can see the meeting’s
+participants or chat, so the consent step is the LMA user’s own. They show the
+notice with a copy button for the user to share in the meeting, and ask the user
+to confirm that it was shared or, in opt-in, that everyone agreed (the
+owner-attests rule). The WebSocket transcriber records that confirmation on the
+meeting and decides whether audio is transcribed and recorded: in opt-in nothing
+is captured until the record allows it, and audio sent before then is discarded.
+<strong>Participant objected</strong> stops capture and ends the meeting. Because neither can
+collect each participant’s consent, an opt-in deployment whose rule is <strong>Each
+participant consents</strong> and that does not allow a different choice per meeting
+refuses Start from both. See
+<a href="../meeting-consent/#stream-audio-and-the-desktop-capture-app">Stream Audio and the Desktop Capture App</a>.</p>
+<p><strong>Clients without a consent step.</strong> The browser extension, the Stream Audio embed,
+Desktop Capture App builds from before the consent step, and scripts written
+against the streaming API send no consent step. In Notify or Opt-in the setting
+<strong>Streaming clients without a consent step</strong> decides what happens to their
+meetings: <strong>Accept with a warning</strong> (the shipped default) captures them as before,
+with no consent record and a warning in the transcriber’s log, so in an opt-in
+deployment such a meeting is captured without anybody having confirmed consent;
+<strong>Refuse</strong> does not create, record or transcribe the meeting. Choose Refuse only
+once every client in use shows the consent step. See
+<a href="../meeting-consent/#clients-without-a-consent-step">Clients without a consent step</a>.</p>
+<p><strong>Upload Audio</strong> has no consent step: the recording already exists, and should
+only be uploaded with the consent its participants gave when it was made.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="objections">Objections</h3><a class="sl-anchor-link" href="#objections"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Objections”</span></a></div>
+<p>In every mode an objection, typed in the chat, said aloud to LMA, recorded by a
+signed-in user with <strong>Record an objection</strong> on the meeting page, or reported with
+<strong>Participant objected</strong> in Stream Audio or the Desktop Capture App, stops
+recording and transcription at once. What was captured before the objection is
+kept: an objection stops capture, it does not delete what was captured while
+capture was allowed. Delete the meeting if that content must go too.</p>
+<p>With <strong>Virtual Participant leaves after an objection</strong> off (the default) the
+Virtual Participant stays without recording, and resumes if the objector later
+consents; the screen recording does not resume. With it on, the Virtual
+Participant leaves the meeting. See <a href="../meeting-consent/#objections">Objections</a>.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="evidence-kept">Evidence kept</h3><a class="sl-anchor-link" href="#evidence-kept"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Evidence kept”</span></a></div>
+<p>What participants were told and replied is kept on the meeting as its <strong>consent
+record</strong>, an attribute of the meeting’s row, so it is shared, kept and deleted
+with the meeting. It holds the mode and rule, the status and whether capture was
+allowed, the notice text and each time it was posted, the participants listed as
+present, every reply and attestation with the participant’s display name, where
+it was read and when, the status history with reasons, and the evidence images
+with the result of their vision-model check. See
+<a href="../meeting-consent/#what-is-stored">What is stored</a>.</p>
+<p>Evidence images are screenshots of the meeting chat and participant list taken by
+the Virtual Participant when consent is granted and on every objection, or one
+frame captured by the user in Stream Audio or the Desktop Capture App. An Amazon
+Bedrock vision model can check each image (the <strong>Evidence check model</strong>, Amazon
+Nova Lite by default); its verdict is supporting evidence and never changes the
+meeting’s consent status. With <strong>Keep evidence screenshots</strong> off, an image is
+deleted once its check is stored. The consent record is included in the
+summary’s downloads.</p>
+<p>Display names are not verified identities, and a model’s reading of a screenshot
+can be wrong; see <a href="../meeting-consent/#limitations">Limitations</a>.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="choosing-a-mode">Choosing a mode</h3><a class="sl-anchor-link" href="#choosing-a-mode"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Choosing a mode”</span></a></div>
+<p>The following describes how the modes fit common situations. It is not a
+statement of what any law requires.</p>
+<ul>
+<li><strong>Off</strong> suits deployments where participants are told about recording by other
+means, such as an organisation-wide policy or the meeting platform’s own
+notice, and for testing.</li>
+<li><strong>Notify</strong> suits internal meetings where a notice and the chance to object are
+what is expected. It works on every capture method and every Virtual
+Participant join. The <strong>Internal meetings – notify participants</strong> preset sets
+it.</li>
+<li><strong>Opt-in with each participant consenting</strong> suits meetings in which nothing may
+be captured until every participant has agreed. Only a Virtual Participant can
+collect it, and not on the Webex join; on the Teams browser join consent must be
+said aloud. The <strong>Regulated – consent required, transcript not retained</strong>
+preset sets it.</li>
+<li><strong>Opt-in with the owner attesting</strong> suits meetings whose consent is gathered
+outside LMA (in the invitation’s terms, or out loud at the start), meetings
+streamed from Stream Audio or the Desktop Capture App, and Virtual Participant
+joins that cannot list the participants. The record then rests on the owner’s
+attestation, plus any evidence image.</li>
+</ul>
+<p>Whatever the mode, set <strong>Streaming clients without a consent step</strong> to <strong>Refuse</strong>
+in a deployment where every meeting must go through the consent step, and check
+first that no one relies on the browser extension or the Stream Audio embed.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="what-lma-stores-and-for-how-long">What LMA stores, and for how long</h2><a class="sl-anchor-link" href="#what-lma-stores-and-for-how-long"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “What LMA stores, and for how long”</span></a></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="retention-controls">Retention controls</h3><a class="sl-anchor-link" href="#retention-controls"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Retention controls”</span></a></div>
+<p>Five stack parameters set how long meeting data is kept, each defaulting to 90
+days except where noted. Two of them can be shortened, but not lengthened, from
+the <strong>Retention</strong> section of the Configuration page (see
+<a href="../configuration-guide/#retention-settings-the-stack-limits">Retention: settings the stack limits</a>):</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Control</th><th>Kind</th><th>Default</th><th>What it governs</th></tr></thead><tbody><tr><td><code dir="auto">MeetingRecordExpirationInDays</code></td><td>Stack parameter, and the limit of <strong>Retention › Days to keep meeting records</strong></td><td>90</td><td>The DynamoDB time to live of the meeting record (with its summary, agenda and consent record) and of its usage records. Also, from the parameter only, the time to live of each Virtual Participant record, counted from when it was created or, if later, from the time it is scheduled for</td></tr><tr><td><code dir="auto">TranscriptionExpirationInDays</code></td><td>Stack parameter, and the limit of <strong>Retention › Days to keep transcript segments</strong></td><td>90</td><td>The DynamoDB time to live of transcript segments, chat lines, meeting assistant answers and key-frame items. Also, from the parameter only, the S3 lifecycle rules on the transcript knowledge base’s files (the transcript and summary files), key-frame images and consent evidence images</td></tr><tr><td><code dir="auto">AudioRecordingExpirationInDays</code></td><td>Stack parameter</td><td>90</td><td>The S3 lifecycle rules on audio and video recordings</td></tr><tr><td><code dir="auto">CloudWatchLogsExpirationInDays</code></td><td>Stack parameter</td><td>90</td><td>The retention of the stack’s CloudWatch log groups</td></tr><tr><td><code dir="auto">VPSchedulerStateMachineLogsExpirationInDays</code></td><td>Stack parameter</td><td>7</td><td>The retention of the scheduled Virtual Participant state machine’s log group</td></tr><tr><td><strong>Retention › Delete the transcript after the summary</strong></td><td>Setting</td><td>Off</td><td>Deletes each meeting’s transcript at a fixed time after its summary; see <a href="#deleting-data">Deleting data</a></td></tr></tbody></table>
+<p>A value saved in the Retention section applies to records written about five
+minutes after the save or later; a record already written keeps its expiry. The
+S3 lifecycle rules and the Virtual Participant records’ expiry follow the stack
+parameters only, so shortening a retention on the Configuration page does not
+remove files from the recordings bucket, or Virtual Participant records, sooner.</p>
+<p>DynamoDB removes an expired item in the background, typically within a few days
+of its expiry rather than at it. The S3 lifecycle rules count whole days from when
+an object was written. The recordings bucket is versioned: when a lifecycle rule
+expires a file, Amazon S3 keeps its last version as a noncurrent version, and a
+further rule removes every noncurrent version one day after it stopped being
+current (see
+<a href="#earlier-versions-in-the-recordings-bucket">Earlier versions in the recordings bucket</a>).
+A file is therefore gone from the bucket within about two days of the end of its
+retention period, rather than at it.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="data-inventory">Data inventory</h3><a class="sl-anchor-link" href="#data-inventory"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Data inventory”</span></a></div>
+<p>Every item below is in the AWS account and Region of the stack. “The meetings
+table” is the AI stack’s event-sourcing DynamoDB table; “the recordings bucket” is
+the S3 bucket the main stack creates for recordings and transcript files. Both are
+encrypted with the stack’s customer-managed AWS KMS key, as are the other tables,
+the CloudWatch log groups and the Kinesis call data stream (see
+<a href="../infrastructure-and-security/#encryption">Encryption</a>). Objects written to the
+recordings bucket by a version of LMA before it used the customer-managed key
+keep the encryption they were written with, Amazon S3 managed keys, until they
+are rewritten or expire (see
+<a href="../infrastructure-and-security/#recordings-bucket-and-call-data-stream">Recordings bucket and call data stream</a>).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Data</th><th>Where it is stored</th><th>Kept by default</th><th>Controlled by</th><th>Deleting the meeting</th></tr></thead><tbody><tr><td><strong>Meeting record</strong>: title, owner, sharing list, times, participants, speaker names, sentiment, transcript-deletion stamps</td><td>The meetings table, the meeting’s row and its meeting-list rows</td><td>90 days</td><td><code dir="auto">MeetingRecordExpirationInDays</code>; <strong>Days to keep meeting records</strong></td><td>Deleted</td></tr><tr><td><strong>Transcript segments</strong>: every turn, partial or final, on every channel</td><td>The meetings table, the meeting’s transcript items</td><td>90 days</td><td><code dir="auto">TranscriptionExpirationInDays</code>; <strong>Days to keep transcript segments</strong>; <strong>Delete the transcript after the summary</strong></td><td>Deleted</td></tr><tr><td><strong>Meeting chat lines</strong> a Virtual Participant adds to the transcript</td><td>Stored with the transcript segments</td><td>As the transcript</td><td>As the transcript; <strong>Virtual Participant › Add the meeting chat to the transcript</strong> (default On) decides whether they are captured. See <a href="../virtual-participant/#meeting-chat-in-the-transcript">Meeting Chat in the Transcript</a></td><td>Deleted</td></tr><tr><td><strong>Summary</strong></td><td>On the meeting record; with the transcript knowledge base deployed, also as a file in the recordings bucket (see the next rows)</td><td>As the meeting record; the file as the transcript files</td><td>As the meeting record. Kept when the transcript is deleted after the summary</td><td>Deleted</td></tr><tr><td><strong>Meeting assistant answers</strong></td><td>Stored with the transcript segments</td><td>As the transcript</td><td>As the transcript</td><td>Deleted</td></tr><tr><td><strong>Other model outputs</strong>: the derived agenda, speaker names found from the transcript, key-frame text</td><td>On the meeting record (agenda, speaker names) or on the key-frame items (text)</td><td>As the record they are on</td><td>As that record</td><td>Deleted</td></tr><tr><td><strong>Transcript and summary files</strong>: the transcript as text (speech only, without chat lines, followed by the shared screen’s text), the formatted summary, a metadata file for each, and for an uploaded meeting the Amazon Transcribe output</td><td>The recordings bucket, <code dir="auto">lma-transcripts/</code>. The summary step writes the transcript file for every meeting (the MCP server’s transcript tool reads it), and the summary file only when the transcript knowledge base is deployed, because nothing else reads it</td><td>90 days</td><td>The <code dir="auto">lma-transcripts/</code> lifecycle rule, from <code dir="auto">TranscriptionExpirationInDays</code>, for the summary file as for the transcript files: see <a href="#the-knowledge-bases-copy-of-the-summary">The knowledge base’s copy of the summary</a>. <strong>Delete the transcript after the summary</strong> deletes the transcript files (every version) and keeps the summary file</td><td>Deleted, every version</td></tr><tr><td><strong>Transcript knowledge base entries</strong></td><td>The transcript knowledge base the stack creates (<code dir="auto">TranscriptKnowledgeBase</code>, on by default): an Amazon Bedrock knowledge base over <code dir="auto">lma-transcripts/</code>, with its vectors in an Amazon S3 Vectors index, which uses the service’s default encryption (the template names no customer-managed key). Synced every 15 minutes</td><td>As long as the files they were built from</td><td>Set <code dir="auto">TranscriptKnowledgeBase</code> to <code dir="auto">DISABLED</code> to deploy no transcript knowledge base</td><td>Removed at the next sync, within about 15 minutes, once the files are gone</td></tr><tr><td><strong>Audio recording</strong></td><td>The recordings bucket, <code dir="auto">lma-audio-recordings/</code></td><td>90 days</td><td><code dir="auto">AudioRecordingExpirationInDays</code>; <strong>Meeting Recording › Record meeting audio</strong> (default On) decides whether it is recorded</td><td>Deleted, every version</td></tr><tr><td><strong>Meeting video</strong> (screen recording) from a Virtual Participant or the Desktop Capture App</td><td>The recordings bucket, <code dir="auto">lma-video-recordings/</code>; a Virtual Participant’s in-progress segments under <code dir="auto">lma-video-chunks/</code></td><td>90 days; segments are deleted when the video is assembled, or after 1 day</td><td><code dir="auto">AudioRecordingExpirationInDays</code>; <code dir="auto">EnableVideoRecording</code> (default <code dir="auto">true</code>), the <strong>Record meeting video</strong> toggle per Virtual Participant, and the Desktop Capture App’s own setting per machine. See <a href="../virtual-participant/#meeting-video-recording">Meeting Video Recording</a></td><td>Deleted, every version</td></tr><tr><td><strong>Key frames</strong> of the shared screen, and the text read from them</td><td>Images in the recordings bucket, <code dir="auto">lma-video-keyframes/&#x3C;meeting>/</code>; items in the meetings table. Taken only when the meeting’s video is recorded</td><td>90 days</td><td>Items: as the transcript, including the page setting. Images: the lifecycle rule, from <code dir="auto">TranscriptionExpirationInDays</code> only. Not removed by <strong>Delete the transcript after the summary</strong>. See <a href="../meeting-video/#retention-access-and-deletion">Retention, access and deletion</a></td><td>Deleted; the images, every version</td></tr><tr><td><strong>Agenda</strong></td><td>On the meeting record; an agenda given when a Virtual Participant is started or scheduled is also on that Virtual Participant’s record</td><td>As the record it is on</td><td>As the meeting record; see the Virtual Participant records row</td><td>Deleted, from the meeting and from its Virtual Participant records</td></tr><tr><td><strong>Consent record</strong></td><td>On the meeting record (<code dir="auto">Consent</code>)</td><td>As the meeting record</td><td>As the meeting record. Kept when the transcript is deleted after the summary</td><td>Deleted</td></tr><tr><td><strong>Consent evidence images</strong></td><td>The recordings bucket, <code dir="auto">lma-consent-evidence/&#x3C;meeting>/</code></td><td>90 days</td><td>The lifecycle rule, from <code dir="auto">TranscriptionExpirationInDays</code>; <strong>Keep evidence screenshots</strong> off deletes each image once checked</td><td>Deleted, every version</td></tr><tr><td><strong>Usage records</strong> behind the meeting’s cost estimate</td><td>The meetings table</td><td>90 days</td><td><code dir="auto">MeetingRecordExpirationInDays</code>; <strong>Days to keep meeting records</strong></td><td>Deleted</td></tr><tr><td><strong>Virtual Participant records</strong>: meeting name, platform, meeting ID and password, schedule, agenda, per-meeting consent and video choices, status</td><td>The Virtual Participant DynamoDB table</td><td>90 days from when the record was created, or from the time it is scheduled for if that is later. A record written before these records were given an expiry has none, and is kept until it is deleted</td><td><code dir="auto">MeetingRecordExpirationInDays</code>, the stack parameter only; deleted from the <strong>Virtual Participants</strong> page</td><td>Every record that names the meeting is deleted</td></tr><tr><td><strong>Pending uploads</strong>: a file uploaded for batch transcription, before it is processed</td><td>The recordings bucket, <code dir="auto">lma-uploads-pending/</code></td><td>7 days</td><td>Fixed lifecycle rule</td><td>Not applicable</td></tr><tr><td><strong>Voice enrollment</strong> voiceprint (only with <code dir="auto">EnableVoiceEnrollment=true</code>)</td><td>The voice enrollment DynamoDB table. The sample audio is discarded once the voiceprint is computed</td><td>Until the person withdraws, or until their consent is older than <code dir="auto">VoiceEnrollmentRetentionDays</code> (default 365), when a nightly pass deletes it</td><td>The enrollee, from <strong>Enroll My Voice</strong>; an Admin can revoke on their behalf. See <a href="../voice-enrollment/#retention">Voice Enrollment</a></td><td>Not affected: a voiceprint belongs to a person, not a meeting</td></tr><tr><td><strong>Voice consent log</strong> (only with <code dir="auto">EnableVoiceEnrollment=true</code>)</td><td>The voice consent log DynamoDB table, append-only, with no biometric data</td><td>No expiry</td><td>None; it is the audit trail of consent given and withdrawn</td><td>Not affected</td></tr><tr><td><strong>CloudWatch logs</strong> of the Lambda functions, containers, MicroVMs and the GraphQL API</td><td>CloudWatch Logs log groups</td><td>90 days (7 for the scheduler state machine)</td><td><code dir="auto">CloudWatchLogsExpirationInDays</code>; <code dir="auto">LogLevel</code> and <code dir="auto">AppSyncFieldLogLevel</code> decide whether meeting content is logged (see <a href="#logging">Logging</a>)</td><td>Not affected</td></tr><tr><td><strong>S3 server access logs</strong> of the stack’s buckets, which name the objects read and written, and so the file names derived from meeting IDs</td><td>The stack’s logging bucket, encrypted with Amazon S3 managed keys</td><td>180 days</td><td>Fixed lifecycle rule</td><td>Not affected</td></tr><tr><td><strong>Virtual Participant browser profiles</strong> (meeting-platform cookies, per user)</td><td>The Virtual Participant profiles bucket</td><td>365 days after the profile was last saved</td><td>Removed when the user removes their Zoom credentials. See <a href="../zoom-credentials-and-join-reliability/#persistent-chromium-profile-per-user">Persistent Chromium profile per user</a></td><td>Not affected</td></tr><tr><td><strong>Downloads</strong>: transcript, summary and slide exports</td><td>Produced in the user’s browser and saved on the user’s device</td><td>Outside LMA</td><td>Outside LMA. See <a href="../web-ui-guide/#transcript-downloads">Transcript Downloads</a></td><td>Not affected</td></tr></tbody></table>
+<p>Who can read each item is described in
+<a href="../user-based-access-control/">User-Based Access Control</a>: the meeting’s owner,
+the people it is shared with, and Admins read the meeting, its transcript, its key
+frames and its consent record. Key-frame and evidence images are reached through
+links signed for one hour after the same check, and recordings through
+short-lived links the web UI signs when playback starts (see
+<a href="../user-based-access-control/#recording-playback">Recording Playback</a>).</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="copies-that-follow-their-own-lifetime">Copies that follow their own lifetime</h3><a class="sl-anchor-link" href="#copies-that-follow-their-own-lifetime"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Copies that follow their own lifetime”</span></a></div>
+<p>Meeting content also passes through places that keep it for their own period and
+that neither the retention settings nor deleting a meeting change:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Where</th><th>How long</th></tr></thead><tbody><tr><td>The Kinesis call data stream</td><td>24 hours</td></tr><tr><td>The meetings table’s DynamoDB stream</td><td>24 hours</td></tr><tr><td>The point-in-time recovery of the stack’s DynamoDB tables</td><td>35 days; a deleted item can be restored from it until then. Point-in-time recovery is a safety protection and stays on</td></tr><tr><td>Earlier versions of objects in the recordings bucket</td><td>Up to about two days after they stop being current; see <a href="#earlier-versions-in-the-recordings-bucket">Earlier versions in the recordings bucket</a>. Deleting a meeting, and <strong>Delete the transcript after the summary</strong>, delete every version of the files they remove at once</td></tr><tr><td>CloudWatch logs</td><td><code dir="auto">CloudWatchLogsExpirationInDays</code></td></tr><tr><td>Amazon Bedrock model invocation logging</td><td>As configured for the account. Off by default; if the account has it on, every prompt is logged, including summary prompts that contain the whole transcript</td></tr><tr><td>Optional integrations outside AWS</td><td>Under each provider’s own terms; see <a href="../infrastructure-and-security/#optional-integrations-outside-aws">Optional integrations outside AWS</a></td></tr></tbody></table>
+<p><a href="../transcript-deletion/#copies-outside-the-transcript-store">Copies outside the transcript store</a>
+lists the same places for a transcript deleted after its summary.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="earlier-versions-in-the-recordings-bucket">Earlier versions in the recordings bucket</h3><a class="sl-anchor-link" href="#earlier-versions-in-the-recordings-bucket"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Earlier versions in the recordings bucket”</span></a></div>
+<p>The recordings bucket has S3 Versioning turned on. When a lifecycle rule expires a
+file, Amazon S3 does not erase it: it adds a delete marker, and the file’s last
+version becomes a noncurrent version. An overwritten file keeps its earlier
+version in the same way. The bucket’s <code dir="auto">ExpireNoncurrentVersions</code> lifecycle rule
+removes every noncurrent version one day after it stopped being current, and
+removes a delete marker once no version is left behind it, for every object in
+the bucket. Amazon S3 applies lifecycle rules once a day and rounds to the next
+midnight UTC, so an expired file can take up to about two days to leave the
+bucket entirely. In that time it is not served to anyone, because it is no longer
+the current version, but it still exists in the bucket.</p>
+<p>The window is one day, where the configuration bucket keeps its replaced objects
+for 35: the configuration bucket’s earlier objects are what a configuration table
+restored from point-in-time recovery refers to, while nothing in LMA restores an
+earlier version of a recording or transcript file, and for meeting content the
+retention period is the point.</p>
+<p>Deleting a meeting, and <strong>Delete the transcript after the summary</strong>, do not wait
+for the rule: they delete every version and delete marker of the files they
+remove at once. LMA’s other deletions in the bucket remove the current version
+and leave the rest to the rule: a consent evidence image deleted once checked,
+with <strong>Keep evidence screenshots</strong> off; an uploaded file once it is processed;
+and a Virtual Participant’s video segments once its video is assembled.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="the-knowledge-bases-copy-of-the-summary">The knowledge base’s copy of the summary</h3><a class="sl-anchor-link" href="#the-knowledge-bases-copy-of-the-summary"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “The knowledge base’s copy of the summary”</span></a></div>
+<p>With the transcript knowledge base deployed, the summary step also writes the
+summary as a file in <code dir="auto">lma-transcripts/</code>, next to the transcript file, so that
+meeting-history search can find a meeting by its summary. Both files are the
+knowledge base’s documents and follow the same rule: the <code dir="auto">lma-transcripts/</code>
+lifecycle rule, from <code dir="auto">TranscriptionExpirationInDays</code>. The summary on the meeting
+record follows <code dir="auto">MeetingRecordExpirationInDays</code>. A lifecycle rule takes whole days
+and the meeting record’s retention may be a fraction of a day, so the file cannot
+follow the meeting record’s parameter. With both parameters at their default of
+90 days the two copies are kept equally long; to keep the file no longer than the
+meeting record, set <code dir="auto">TranscriptionExpirationInDays</code> no higher than
+<code dir="auto">MeetingRecordExpirationInDays</code>. Deleting the meeting deletes both copies.</p>
+<p>Without the transcript knowledge base (<code dir="auto">TranscriptKnowledgeBase</code> set to
+<code dir="auto">DISABLED</code>), the summary file is not written, and the summary is kept on the
+meeting record only. Summary files written while a knowledge base was deployed
+stay until their lifecycle rule removes them.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="deleting-data">Deleting data</h2><a class="sl-anchor-link" href="#deleting-data"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Deleting data”</span></a></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="transcript-deletion-after-the-summary">Transcript deletion after the summary</h3><a class="sl-anchor-link" href="#transcript-deletion-after-the-summary"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Transcript deletion after the summary”</span></a></div>
+<p><strong>Retention › Delete the transcript after the summary</strong> deletes each meeting’s
+transcript permanently once the meeting is summarized: <strong>Immediately</strong>, or <strong>15</strong>,
+<strong>30</strong> or <strong>60 minutes</strong> after the summary is stored. It ships set to Off, applies
+to the whole deployment, and an Admin can change it at any time; a change applies
+to the next meeting that ends. Unlike a retention period, it does not rely on
+DynamoDB’s background expiry: an EventBridge Scheduler schedule runs the deletion
+within the minute it is due.</p>
+<ul>
+<li><strong>When.</strong> The delay counts from when the summary is stored. If no summary is
+stored within 60 minutes of the meeting’s end, the delay counts from then, and
+the transcript is deleted whether or not a summary was written. A deletion made
+immediately is checked again ten minutes later, to remove anything written for
+the meeting after it. A scheduled deletion runs even if the setting has since
+been turned off.</li>
+<li><strong>What is deleted.</strong> Every transcript segment, the chat lines a Virtual
+Participant added, the meeting assistant answers, the transcript files in the
+recordings bucket (every version), and their entries in the transcript
+knowledge base.</li>
+<li><strong>What is kept.</strong> The summary (on the meeting and in the knowledge base), the
+meeting record, the audio and video recordings, key frames and their text, and
+the consent record. Turn <strong>Record meeting audio</strong> off and set
+<code dir="auto">EnableVideoRecording</code> to <code dir="auto">false</code> if the recordings must not be kept either.</li>
+<li><strong>What users see.</strong> The meeting page says when the transcript will be, or was,
+deleted; after it, <strong>Regenerate</strong> on the summary is refused.</li>
+</ul>
+<p>As a backstop, while the setting is on, each transcript segment and assistant
+answer is written with a DynamoDB time to live of at most two days. A deletion
+that keeps failing is retried for up to 24 hours and then raises the
+<code dir="auto">transcript-deletion-dead-letter-queue-depth</code> alarm (see
+<a href="../monitoring/">Monitoring &#x26; Alerting</a>). See
+<a href="../transcript-deletion/">Transcript Deletion After the Summary</a>.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="deleting-a-meeting">Deleting a meeting</h3><a class="sl-anchor-link" href="#deleting-a-meeting"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Deleting a meeting”</span></a></div>
+<p>A meeting’s owner can delete it, and an Admin can delete any meeting, from the
+meetings list or from the meeting page’s <strong>⋮</strong> menu. People the meeting is shared
+with cannot delete it. The meeting disappears from their meeting lists, without a
+notification. See <a href="../user-based-access-control/#meeting-deletion">Meeting Deletion</a>.</p>
+<p>Deleting a meeting removes, for that meeting:</p>
+<ul>
+<li>the meeting record and its meeting-list rows, and with them the summary, the
+agenda, the speaker names and the consent record;</li>
+<li>every transcript item, partial or final, including chat lines and meeting
+assistant answers;</li>
+<li>the usage records behind its cost estimate;</li>
+<li>its key-frame items and images, and its consent evidence images;</li>
+<li>its audio recording and its video recording, with any video segments still in
+the bucket;</li>
+<li>the transcript and summary files in <code dir="auto">lma-transcripts/</code> whose names begin with
+the meeting’s ID; the transcript knowledge base drops their entries at its next
+sync;</li>
+<li>every Virtual Participant record that names the meeting, after ending a Virtual
+Participant still in it.</li>
+</ul>
+<p>Every file it removes from the recordings bucket is removed with all its versions
+and delete markers, so no earlier version is left behind. If a step fails, for
+example a file that Amazon S3 does not delete or a Virtual Participant record that
+cannot be removed, the meeting record is not deleted: the page reports that the
+deletion failed, the meeting stays in the list, and deleting it again repeats
+every step.</p>
+<p>It does not change the copies listed in
+<a href="#copies-that-follow-their-own-lifetime">Copies that follow their own lifetime</a>:
+the Kinesis and DynamoDB streams, point-in-time recovery, CloudWatch logs, and
+anything already downloaded or sent to an integration. In particular, the deleted
+meeting’s items can still be restored from the DynamoDB tables’ point-in-time
+recovery for 35 days. Deleting a user from <a href="../user-management/">User Management</a>
+does not delete the meetings they own.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="deleting-a-stack">Deleting a stack</h3><a class="sl-anchor-link" href="#deleting-a-stack"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Deleting a stack”</span></a></div>
+<p>The <code dir="auto">EnableDataRetentionOnDelete</code> stack parameter, <code dir="auto">true</code> by default, decides
+what deleting the stack leaves behind:</p>
+<ul>
+<li><strong><code dir="auto">true</code></strong>: the DynamoDB tables, the S3 buckets (recordings, logging,
+configuration history and Virtual Participant profiles), the transcript
+knowledge base’s vector bucket and the customer-managed KMS key are kept, with
+their contents.</li>
+<li><strong><code dir="auto">false</code></strong>: the S3 buckets are emptied of every object version and deleted,
+and the vector bucket, the tables and the key are deleted with the stack (AWS
+KMS deletes a key only after its waiting period).</li>
+</ul>
+<p>Most of the stack’s CloudWatch log groups are deleted with the stack, whatever
+the parameter says. The resources that do not follow these rules are listed in
+<a href="../cleanup/#retained-resources">Retained Resources</a>:</p>
+<ul>
+<li>Kept whatever the parameter says: the voice enrollment table and the voice
+consent log (with <code dir="auto">EnableVoiceEnrollment=true</code>); the log groups of the WebSocket
+transcriber’s and the Virtual Participant’s containers and of the scheduled
+Virtual Participant state machine; and the GraphQL API’s log group, which
+AppSync creates and the stack does not own. The log groups go on expiring their
+entries under their retention periods.</li>
+<li>Kept only with <code dir="auto">true</code>: the MicroVM log groups of the Virtual Participant and of
+the ASR MicroVM speech engine.</li>
+<li>A deployment upgraded from a version before 0.4.0 may also have older log groups
+that the stack does not own.</li>
+</ul>
+<p>See <a href="../cleanup/">Cleanup</a> for the steps to remove what remains.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="where-content-is-processed">Where content is processed</h2><a class="sl-anchor-link" href="#where-content-is-processed"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Where content is processed”</span></a></div>
+<p><a href="../infrastructure-and-security/#where-meeting-content-is-processed">Where meeting content is processed</a>
+lists every place LMA sends meeting content. In summary:</p>
+<ul>
+<li><strong>The stack’s AWS Region.</strong> LMA’s own resources, the tables and buckets that
+store meeting content, and the services that carry it all run in the Region the
+stack is deployed to. CloudFront caches only the web UI’s static files.</li>
+<li><strong>Amazon Bedrock.</strong> The <strong>Model inference geography</strong> setting, in the <strong>Amazon
+Bedrock Models</strong> section, decides where every Bedrock model LMA calls may run:
+<strong>Global</strong> (the default; the shipped <code dir="auto">global.</code> profiles may be served from any
+commercial Region), <strong>Same geography as this deployment</strong>, or <strong>In-region only</strong>.
+When the chosen geography offers no profile for a model, the feature reports an
+error rather than calling Bedrock outside it. The Nova Sonic voice assistant
+runs in the Region <code dir="auto">AmazonNovaSonicRegion</code> names (this stack’s Region when
+blank), and knowledge-base embeddings run in the knowledge base’s Region. See
+<a href="../infrastructure-and-security/#amazon-bedrock">Amazon Bedrock</a>.</li>
+<li><strong>The transcription engine.</strong> Amazon Transcribe, in the stack’s Region, is the
+default for every meeting. Where the experimental on-demand engine is deployed
+(<code dir="auto">EnableMicrovmAsr=true</code>), an Admin can move streaming meetings or Virtual
+Participants onto it in the <strong>Transcription Engine</strong> section; it runs on AWS
+Lambda MicroVMs in the stack’s Region, and the audio is not sent to Amazon
+Transcribe. A meeting whose MicroVM cannot start falls back to Amazon
+Transcribe. See <a href="../microvm-asr/#choosing-the-engine">Choosing the engine</a>.
+Live translation on the meeting page calls Amazon Translate in the stack’s
+Region.</li>
+<li><strong>Redaction.</strong> <strong>Amazon Transcribe › Redact personal information</strong> (off by
+default) has Amazon Transcribe redact the entity types chosen in <strong>Entity types
+to redact</strong> from the transcript. It applies only to meetings transcribed by
+Amazon Transcribe in <code dir="auto">en-US</code>, <code dir="auto">en-AU</code>, <code dir="auto">en-GB</code> or <code dir="auto">es-US</code>; it does not apply to
+meetings using language identification or the on-demand engine, which has no
+redaction. It redacts the transcript text only: the audio recording, the video,
+key frames and their text, and the meeting chat are not redacted. See
+<a href="../transcription-and-translation/#content-redaction-pii">Content Redaction (PII)</a>.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="logging">Logging</h3><a class="sl-anchor-link" href="#logging"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Logging”</span></a></div>
+<p>The <code dir="auto">LogLevel</code> stack parameter sets the Lambda functions’ and containers’ logging.
+At <code dir="auto">INFO</code> (the default) and above, log lines record identifiers, sizes and
+outcomes rather than meeting content. At <code dir="auto">DEBUG</code> they also record meeting content:
+the summary prompt with its transcript, meeting assistant requests and answers,
+and the voice assistants’ heard and spoken text. The <code dir="auto">AppSyncFieldLogLevel</code>
+parameter sets what the GraphQL API logs: <code dir="auto">ERROR</code> (the default) and <code dir="auto">NONE</code> log no
+request content, while <code dir="auto">DEBUG</code> and <code dir="auto">ALL</code> log each request’s content, transcript
+segments included. Use either <code dir="auto">DEBUG</code> setting only while diagnosing a problem. The
+audio a Virtual Participant hears while waiting for consent is not logged at any
+level.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="configuration-presets-and-deploy-time-controls">Configuration presets and deploy-time controls</h2><a class="sl-anchor-link" href="#configuration-presets-and-deploy-time-controls"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Configuration presets and deploy-time controls”</span></a></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="what-each-preset-sets">What each preset sets</h3><a class="sl-anchor-link" href="#what-each-preset-sets"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “What each preset sets”</span></a></div>
+<p>A <strong>configuration preset</strong> sets the consent, retention and privacy settings
+together. An Admin applies one from <strong>Configuration ▸ Configuration ▸ Actions ▸
+Apply a preset…</strong>, or chooses one at deploy time with the <code dir="auto">ConfigurationPreset</code>
+stack parameter; each preset is also available as a read-only <strong>Managed</strong>
+profile. All four set the same settings, so applying one replaces whatever another
+preset set, and leaves every other setting as it is. See
+<a href="../configuration-guide/#configuration-presets">Configuration presets</a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Setting</th><th>Standard</th><th>Internal meetings – notify participants</th><th>Regulated – consent required, transcript not retained</th><th>Regulated – notify with opt-out, transcript not retained</th></tr></thead><tbody><tr><td>Consent mode</td><td>Off</td><td>Notify</td><td>Opt-in</td><td>Notify</td></tr><tr><td>Consent rule (opt-in)</td><td>Each participant</td><td>Each participant</td><td>Each participant</td><td>Each participant</td></tr><tr><td>Allow a different choice per meeting</td><td>On</td><td>On</td><td>Off (stricter only)</td><td>Off (stricter only)</td></tr><tr><td>Keep evidence screenshots</td><td>On</td><td>On</td><td>On</td><td>On</td></tr><tr><td>Streaming clients without a consent step</td><td>Accept with a warning</td><td>Accept with a warning</td><td>Refuse</td><td>Refuse</td></tr><tr><td>Virtual Participant leaves after an objection</td><td>Off</td><td>Off</td><td>On</td><td>On</td></tr><tr><td>Delete the transcript after the summary</td><td>Off</td><td>Off</td><td>15 minutes after</td><td>15 minutes after</td></tr><tr><td>Record meeting audio</td><td>On</td><td>On</td><td>Off</td><td>Off</td></tr><tr><td>Add the meeting chat to the transcript</td><td>On</td><td>On</td><td>Off</td><td>Off</td></tr><tr><td>Redact personal information</td><td>Off</td><td>Off</td><td>On</td><td>On</td></tr><tr><td>Model inference geography</td><td>Global</td><td>Global</td><td>Same geography</td><td>Same geography</td></tr></tbody></table>
+<p>No preset sets <strong>Read spoken replies</strong>. Under the consent-required preset, Stream
+Audio and the Desktop Capture App cannot be used to start a meeting, the Webex
+join cannot be granted, and the Teams browser join is granted only by consent
+said aloud. Under the notify preset, every capture method that shows a consent
+step works, and clients without one are refused.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="controls-no-preset-can-set">Controls no preset can set</h3><a class="sl-anchor-link" href="#controls-no-preset-can-set"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Controls no preset can set”</span></a></div>
+<p>Some controls are stack parameters, not settings, so a deployment that needs a
+regulated posture sets them when it deploys or updates the stack:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Default</th><th>For a regulated deployment</th></tr></thead><tbody><tr><td><code dir="auto">LogLevel</code></td><td><code dir="auto">INFO</code></td><td>Keep <code dir="auto">INFO</code> or <code dir="auto">WARN</code>; <code dir="auto">DEBUG</code> logs meeting content</td></tr><tr><td><code dir="auto">AppSyncFieldLogLevel</code></td><td><code dir="auto">ERROR</code></td><td>Keep <code dir="auto">ERROR</code> or <code dir="auto">NONE</code></td></tr><tr><td><code dir="auto">MeetingRecordExpirationInDays</code></td><td>90</td><td>The longest meeting records, summaries and consent records are kept, and how long Virtual Participant records are kept</td></tr><tr><td><code dir="auto">TranscriptionExpirationInDays</code></td><td>90</td><td>The longest transcript segments are kept, and how long transcript and summary files, key-frame images and consent evidence images stay in the recordings bucket</td></tr><tr><td><code dir="auto">AudioRecordingExpirationInDays</code></td><td>90</td><td>How long audio and video recordings are kept</td></tr><tr><td><code dir="auto">CloudWatchLogsExpirationInDays</code></td><td>90</td><td>How long logs are kept</td></tr><tr><td><code dir="auto">EnableVideoRecording</code></td><td><code dir="auto">true</code></td><td>Video is not part of any preset. Set <code dir="auto">false</code> if no meeting video, and so no key frames, may be kept; otherwise a Virtual Participant records video unless its <strong>Record meeting video</strong> toggle is turned off</td></tr><tr><td><code dir="auto">TranscriptKnowledgeBase</code></td><td><code dir="auto">BEDROCK_KNOWLEDGE_BASE (Create)</code></td><td><code dir="auto">DISABLED</code> if transcripts and summaries must not be indexed for search across meetings</td></tr><tr><td><code dir="auto">EnableDataRetentionOnDelete</code></td><td><code dir="auto">true</code></td><td>Decide whether data must outlive the stack</td></tr></tbody></table>
+<p><code dir="auto">TranscriptionExpirationInDays</code> is shared by the transcript files and the consent
+evidence images, while the consent record follows
+<code dir="auto">MeetingRecordExpirationInDays</code>. A short transcript retention therefore also
+shortens how long the evidence images are kept; keep the two parameters equal if
+the images are needed for as long as the record, or copy them elsewhere before
+they expire.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="checklist-for-a-regulated-deployment">Checklist for a regulated deployment</h3><a class="sl-anchor-link" href="#checklist-for-a-regulated-deployment"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Checklist for a regulated deployment”</span></a></div>
+<ol>
+<li>Apply <strong>Regulated – consent required, transcript not retained</strong> or
+<strong>Regulated – notify with opt-out, transcript not retained</strong>, at deploy time
+with <code dir="auto">ConfigurationPreset</code> or from the Configuration page, and activate it.</li>
+<li>Decide <strong>Read spoken replies</strong>: off if no meeting audio may reach the
+transcription engine before consent.</li>
+<li>Under the consent-required preset, use Virtual Participants on joins that
+support the each-participant rule, and tell users that Stream Audio, the
+Desktop Capture App and the Webex join will not capture meetings.</li>
+<li>Set <code dir="auto">EnableVideoRecording</code> to <code dir="auto">false</code>, unless meeting video is wanted and its
+retention is acceptable.</li>
+<li>Keep <code dir="auto">LogLevel</code> at <code dir="auto">INFO</code> or <code dir="auto">WARN</code> and <code dir="auto">AppSyncFieldLogLevel</code> at <code dir="auto">ERROR</code> or
+<code dir="auto">NONE</code>.</li>
+<li>Set <code dir="auto">MeetingRecordExpirationInDays</code>, <code dir="auto">TranscriptionExpirationInDays</code>,
+<code dir="auto">AudioRecordingExpirationInDays</code> and <code dir="auto">CloudWatchLogsExpirationInDays</code> to the
+periods your policy allows, bearing in mind that evidence images and the
+knowledge base’s summary file follow <code dir="auto">TranscriptionExpirationInDays</code>.</li>
+<li>Decide whether the transcript knowledge base (<code dir="auto">TranscriptKnowledgeBase</code>) and
+any optional integration outside AWS may receive meeting content.</li>
+<li>Check that the chosen <strong>Model inference geography</strong> offers a profile for every
+model in use; the Amazon Bedrock Models section shows which features have
+none.</li>
+<li>Decide how the day or two for which the recordings bucket keeps noncurrent
+object versions, the 35-day DynamoDB point-in-time recovery window, and Amazon
+Bedrock model invocation logging in the account fit your policy.</li>
+<li>Set <code dir="auto">EnableDataRetentionOnDelete</code> to match what must happen to the data when
+the deployment is removed.</li>
+</ol>
+<div class="sl-heading-wrapper level-h2"><h2 id="related">Related</h2><a class="sl-anchor-link" href="#related"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Related”</span></a></div>
+<ul>
+<li><a href="../meeting-consent/">Meeting Consent</a></li>
+<li><a href="../transcript-deletion/">Transcript Deletion After the Summary</a></li>
+<li><a href="../configuration-guide/">Configuration Guide</a> and
+<a href="../configuration-store/">Unified Configuration Store</a></li>
+<li><a href="../infrastructure-and-security/">Infrastructure &#x26; Security</a></li>
+<li><a href="../meeting-video/">Meeting Video and Key Frames</a></li>
+<li><a href="../voice-enrollment/">Voice Enrollment (Speaker Recognition)</a></li>
+<li><a href="../user-based-access-control/">User-Based Access Control</a></li>
+<li><a href="../cloudformation-parameters/">CloudFormation Parameters Reference</a></li>
+<li><a href="../cleanup/">Cleanup</a></li>
+</ul></div><footer class="sl-flex astro-ddtxxk7k"><div class="meta sl-flex astro-ddtxxk7k"></div><div class="pagination-links print:hidden astro-b5raizh3" dir="ltr"><a href="/amazon-transcribe-live-meeting-assistant/infrastructure-and-security/" rel="prev" class="astro-b5raizh3"><svg aria-hidden="true" class="astro-b5raizh3 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg><span class="astro-b5raizh3">Previous<br class="astro-b5raizh3"><span class="link-title astro-b5raizh3">Infrastructure &amp; Security</span></span></a><a href="/amazon-transcribe-live-meeting-assistant/security-scanning/" rel="next" class="astro-b5raizh3"><svg aria-hidden="true" class="astro-b5raizh3 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg><span class="astro-b5raizh3">Next<br class="astro-b5raizh3"><span class="link-title astro-b5raizh3">Security Scanning (SRT)</span></span></a></div></footer></div></div></main></div></div></div></div></body></html>
