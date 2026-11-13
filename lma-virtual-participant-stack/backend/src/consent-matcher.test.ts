@@ -118,8 +118,35 @@ test('an unaddressed sentence containing a consent phrase is not consent', () =>
     assert.equal(classify('I consent to the new budget'), null);
 });
 
-test('an unaddressed message naming both a consent and an objection phrase is not an objection', () => {
-    assert.equal(classify('Reply "I consent" to agree, or "I object" to decline.'), null);
+test('a sentence with both a consent and an objection phrase is an objection', () => {
+    assert.equal(classify("I agree with Sam, but I don't consent to being recorded"), 'objection');
+    assert.equal(classify('I accept that, but please stop recording'), 'objection');
+    assert.equal(classify('I agree, but I object to the recording'), 'objection');
+});
+
+test('a message that quotes an objection phrase is not an objection', () => {
+    for (const message of [
+        'Reply "I consent" to agree, or "I object" to decline.',
+        'If you do not agree, reply “I object” in the chat.',
+        "Type 'stop recording' if you want it to stop",
+        'Replies may be typed in this chat, or said aloud starting with "LMA": say "LMA, I consent" or "LMA, I object".',
+    ]) {
+        assert.equal(classify(message), null, message);
+    }
+    // An apostrophe is not a quotation mark.
+    assert.equal(classify("Sorry, I don't agree to 'being recorded' today"), 'objection');
+    // The phrase on its own, quoted, is still a reply.
+    assert.equal(classify('"I object"'), 'objection');
+    assert.equal(classify('LMA "I object"'), 'objection');
+});
+
+test('the shipped notices, posted by someone other than this VP, are not replies', () => {
+    const values = { lmaUser: 'Bo', meeting: 'Sync', consentPhrase: 'I consent', objectionPhrase: 'I object' };
+    for (const template of [DEFAULT_CONSENT_SETTINGS.notifyNoticeText, DEFAULT_CONSENT_SETTINGS.optInNoticeText]) {
+        for (const message of noticeChatMessages(renderNotice(template, values))) {
+            assert.equal(classify(message), null, message);
+        }
+    }
 });
 
 test('a long notice quoting the phrases is not an objection', () => {

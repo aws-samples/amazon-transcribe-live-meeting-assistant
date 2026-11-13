@@ -8,27 +8,28 @@
  * Reading a meeting chat message as a consent reply, and the other pure rules
  * of the Virtual Participant's consent flow that need no AWS and no page.
  *
- * A reply is matched as the whole message, as the VP's chat commands are
- * (details.ts `matchesChatCommand`): case, punctuation and spacing are ignored,
- * and an "LMA" addressee may stand anywhere in it. So "I consent", "i consent!"
- * and "LMA, I consent" are consent, and "I agree with Bo's point" is ordinary
- * chat. That is stricter than the reply
- * classifier in the configuration layer (lma_consent.classify_reply), which
- * looks for a phrase anywhere in a reply: a meeting chat is full of sentences
- * that contain "I agree" or "I don't agree" without being about the recording.
+ * A consent reply is matched as the whole message, as the VP's chat commands
+ * are (details.ts `matchesChatCommand`): case, punctuation and spacing are
+ * ignored, and an "LMA" addressee may stand anywhere in it. So "I consent", "i
+ * consent!" and "LMA, I consent" are consent, and "I agree with Bo's point" is
+ * ordinary chat. That is stricter than the reply classifier in the
+ * configuration layer (lma_consent.classify_reply), which looks for a phrase
+ * anywhere in a reply: a meeting chat is full of sentences that contain "I
+ * agree" without being about the recording, and reading one as consent would
+ * start capture.
  *
- * One exception, in the direction of stopping: a message of up to a sentence's
- * length that contains an objection phrase as whole words ("LMA, please stop
- * recording now", "I object to this meeting being recorded") is an objection,
- * addressed to LMA or not. Reading more messages as objections can only stop
- * capture, never start it. Consent is never read that way, because reading "I
- * agree with Bo's point" as consent would start it. Three kinds of message
+ * An objection may also be part of a sentence, in the direction of stopping: a
+ * message of up to a sentence's length that contains an objection phrase as
+ * whole words ("LMA, please stop recording now", "I object to this meeting
+ * being recorded", "I agree with Sam, but I don't consent to being recorded")
+ * is an objection, addressed to LMA or not. Reading more messages as
+ * objections can only stop capture, never start it. Three kinds of message
  * that mention an objection phrase are still not objections: a longer one,
- * which explains the phrases rather than using them (another bot's notice); an
- * unaddressed one that also contains a consent phrase, which is the same kind
- * of explanation ('Reply "I consent" to agree, or "I object" to decline.'); and
- * an `LMA ask` question, which is a question for the meeting assistant,
- * whatever it mentions.
+ * which explains the phrases rather than using them (another bot's notice);
+ * one that quotes an objection phrase, which tells people how to reply ('If you
+ * do not agree, reply "I object".'); and an `LMA ask` question, which is a
+ * question for the meeting assistant, whatever it mentions. The phrase typed
+ * on its own, quoted or not, is still an objection.
  *
  * Besides the configured phrases, "LMA consent" is always consent and "LMA no
  * consent" and "LMA object" are always objections, so a participant can reply
@@ -101,15 +102,17 @@ export function classifyChatReply(
 
     // The contains test is held to a sentence's length, so a long message
     // that merely explains the phrases (another bot's notice, say) is not
-    // read as somebody objecting.
-    const sentence = message.trim().length <= MAX_OBJECTION_SENTENCE_LENGTH;
+    // read as somebody objecting; nor is one that quotes an objection phrase
+    // ('reply "I object" to decline'), which tells people how to reply.
+    const searchable =
+        message.trim().length <= MAX_OBJECTION_SENTENCE_LENGTH && !quotesAPhrase(message, objections);
 
     if (addressed) {
         // Nor is a question for the meeting assistant ("LMA ask what do we
         // say if a client asks us to stop recording?"), which is answered as
         // one: only the exact forms are objections there.
         const question = rest === 'ask' || rest.startsWith('ask ');
-        const contained = !question && sentence && objections.some((phrase) => containsPhrase(rest, phrase));
+        const contained = !question && searchable && objections.some((phrase) => containsPhrase(rest, phrase));
         if (BUILT_IN_OBJECTION_PHRASES.includes(rest) || objections.includes(rest) || contained) {
             return 'objection';
         }
@@ -118,19 +121,29 @@ export function classifyChatReply(
         }
         return null;
     }
+    // Unaddressed, a sentence that contains an objection phrase is an
+    // objection too. Consent stays exact.
     if (objections.includes(whole)) return 'objection';
     if (consents.includes(whole)) return 'consent';
-    // Unaddressed, a sentence that contains an objection phrase is an
-    // objection, unless it also contains a consent phrase: a message naming
-    // both is telling people how to reply, not replying. Consent stays exact.
-    if (
-        sentence &&
-        objections.some((phrase) => containsPhrase(whole, phrase)) &&
-        !consents.some((phrase) => containsPhrase(whole, phrase))
-    ) {
-        return 'objection';
-    }
+    if (searchable && objections.some((phrase) => containsPhrase(whole, phrase))) return 'objection';
     return null;
+}
+
+/**
+ * Text between quotation marks: double quotes straight or curly, guillemets,
+ * corner brackets, and single quotes whose closing mark is not followed by a
+ * letter, so the apostrophe in "don't" closes nothing.
+ */
+const QUOTED =
+    /["“”„«»「」『』]([^"“”„«»「」『』]+)["“”„«»「」『』]|(?:^|[^\p{L}\p{N}])['‘](.+?)['’](?=$|[^\p{L}\p{N}])/gu;
+
+/** Whether `message` has one of `phrases` (normalised) inside quotation marks. */
+function quotesAPhrase(message: string, phrases: readonly string[]): boolean {
+    for (const match of message.matchAll(QUOTED)) {
+        const quoted = normalizeReplyText(match[1] ?? match[2] ?? '');
+        if (phrases.some((phrase) => containsPhrase(quoted, phrase))) return true;
+    }
+    return false;
 }
 
 /**

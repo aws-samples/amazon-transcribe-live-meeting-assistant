@@ -101,9 +101,10 @@ settings:
   is an objection.
 - Anything else is neither, and is not recorded.
 
-The Virtual Participant reads the meeting chat and speech by a stricter rule
-for consent: a typed consent must be the whole message, and a spoken reply
-counts only when it is addressed to LMA. See
+The Virtual Participant reads the meeting chat and speech by its own rules: a
+typed consent must be the whole message, a typed objection may be part of a
+message of up to 200 characters unless the message quotes the phrase, and a
+spoken reply counts only when it is addressed to LMA. See
 [Replies in the chat](#replies-in-the-chat) and
 [Spoken replies](#spoken-replies).
 
@@ -466,12 +467,16 @@ reading a message as an objection can only stop capture, never start it.
   - addressed to `LMA`: *"LMA, please stop recording now"*, except an `LMA ask`
     question for the meeting assistant, which is answered and is not a reply
     whatever it mentions;
-  - not addressed: *"I object to this meeting being recorded"*, *"I don't agree
-    with the roadmap"*, unless the message also contains a consent phrase, as
-    instructions such as *'Reply "I consent" to agree, or "I object" to
-    decline.'* do.
-- A longer message is searched for no phrase, so a notice posted by another
-  bot that quotes the phrases is not a reply.
+  - not addressed: *"I object to this meeting being recorded"*, *"I agree with
+    Sam, but I don't consent to being recorded"*, and also *"I don't agree with
+    the roadmap"*, which with the default phrases stops capture until the sender
+    consents again.
+- A message that quotes an objection phrase, in double or single quotation
+  marks, is telling people how to reply and is not an objection (*'Reply "I
+  consent" to agree, or "I object" to decline.'*), so another LMA's notice in
+  the same meeting, or one pasted from Stream Audio, is not read as a reply.
+  The phrase on its own is still one, quoted or not.
+- A message longer than 200 characters is searched for no phrase.
 - Objections are looked for first, so *"LMA I do not consent"* is an objection.
 - Anything else is ordinary chat.
 
