@@ -24,8 +24,8 @@ An introduction to LMA for new viewers, and why it is much more than a note take
 
 **Duration**: ~7 minutes
 
-<!-- Replace with the GitHub asset URL of the lma-complete-demo recording (drag demo.mp4 into a PR comment). -->
-VIDEO_URL_LMA_COMPLETE_DEMO
+<!-- VIDEO_URL_LMA_COMPLETE_DEMO: replace this comment and the line below with the GitHub asset URL of the lma-complete-demo recording. -->
+*Video coming soon.*
 
 **Related Documentation**: [Quick Start Guide](./quick-start-guide.md), [MCP Servers](./mcp-servers.md), [Amazon Quick MCP Setup](./amazon-quick-mcp-setup.md), [Meeting Consent](./meeting-consent.md), [On-demand ASR](./microvm-asr.md)
 
@@ -34,8 +34,8 @@ For compliance, privacy and legal teams. The three consent modes (off, notify, o
 
 **Duration**: ~7 minutes
 
-<!-- Replace with the GitHub asset URL of the consent-and-compliance recording (drag demo.mp4 into a PR comment). -->
-VIDEO_URL_CONSENT_AND_COMPLIANCE
+<!-- VIDEO_URL_CONSENT_AND_COMPLIANCE: replace this comment and the line below with the GitHub asset URL of the consent-and-compliance recording. -->
+*Video coming soon.*
 
 **Related Documentation**: [Meeting Consent](./meeting-consent.md), [Privacy and Data Handling Controls](./privacy-and-data-handling.md), [Configuration Guide](./configuration-guide.md#configuration-presets)
 
@@ -44,8 +44,8 @@ A software vendor gathers requirements from a customer in a Google Meet, three p
 
 **Duration**: ~5 minutes
 
-<!-- Replace with the GitHub asset URL of the requirements-workshop-coach recording (drag demo.mp4 into a PR comment). -->
-VIDEO_URL_REQUIREMENTS_WORKSHOP_COACH
+<!-- VIDEO_URL_REQUIREMENTS_WORKSHOP_COACH: replace this comment and the line below with the GitHub asset URL of the requirements-workshop-coach recording. -->
+*Video coming soon.*
 
 **Related Documentation**: [Meeting Assistant](./meeting-assistant.md), [Virtual Participant](./virtual-participant.md)
 
@@ -65,8 +65,8 @@ A tour of the 0.4.0 release following one meeting from its invitation to its sha
 
 **Duration**: ~4 minutes
 
-<!-- Replace with the GitHub asset URL of the whats-new-0-4-0-meeting-life recording (drag demo.mp4 into a PR comment). -->
-VIDEO_URL_WHATS_NEW_0_4_0_MEETING_LIFE
+<!-- VIDEO_URL_WHATS_NEW_0_4_0_MEETING_LIFE: replace this comment and the line below with the GitHub asset URL of the whats-new-0-4-0-meeting-life recording. -->
+*Video coming soon.*
 
 **Related Documentation**: [Meeting Consent](./meeting-consent.md), [Transcript Deletion](./transcript-deletion.md), [Virtual Participant](./virtual-participant.md), [Meeting Cost Estimate](./meeting-cost-estimate.md)
 
@@ -75,8 +75,8 @@ Scheduling a Virtual Participant for later and editing it before it starts, then
 
 **Duration**: ~2 minutes
 
-<!-- Replace with the GitHub asset URL of the vp-in-depth recording (drag demo.mp4 into a PR comment). -->
-VIDEO_URL_VP_IN_DEPTH
+<!-- VIDEO_URL_VP_IN_DEPTH: replace this comment and the line below with the GitHub asset URL of the vp-in-depth recording. -->
+*Video coming soon.*
 
 **Related Documentation**: [Virtual Participant](./virtual-participant.md)
 
@@ -85,8 +85,8 @@ A tour of the meeting page: the compact header and tabs, the itemised cost estim
 
 **Duration**: ~3 minutes
 
-<!-- Replace with the GitHub asset URL of the meeting-page-in-depth recording (drag demo.mp4 into a PR comment). -->
-VIDEO_URL_MEETING_PAGE_IN_DEPTH
+<!-- VIDEO_URL_MEETING_PAGE_IN_DEPTH: replace this comment and the line below with the GitHub asset URL of the meeting-page-in-depth recording. -->
+*Video coming soon.*
 
 **Related Documentation**: [Web UI Guide](./web-ui-guide.md#meeting-detail-page)
 
@@ -95,8 +95,8 @@ How LMA tells apart and names several people sharing one microphone, with the wo
 
 **Duration**: ~2 minutes
 
-<!-- Replace with the GitHub asset URL of the speakers-and-screen-share recording (drag demo.mp4 into a PR comment). -->
-VIDEO_URL_SPEAKERS_AND_SCREEN_SHARE
+<!-- VIDEO_URL_SPEAKERS_AND_SCREEN_SHARE: replace this comment and the line below with the GitHub asset URL of the speakers-and-screen-share recording. -->
+*Video coming soon.*
 
 **Related Documentation**: [Web UI Guide](./web-ui-guide.md#meeting-detail-page), [Voice Enrollment](./voice-enrollment.md), [Meeting Video and Key Frames](./meeting-video.md)
 
@@ -105,8 +105,8 @@ The MISSING ACTION OWNER or ETA quick action, the Claude Haiku 5.5 default with 
 
 **Duration**: ~2 minutes
 
-<!-- Replace with the GitHub asset URL of the assistant-consent-privacy recording (drag demo.mp4 into a PR comment). -->
-VIDEO_URL_ASSISTANT_CONSENT_PRIVACY
+<!-- VIDEO_URL_ASSISTANT_CONSENT_PRIVACY: replace this comment and the line below with the GitHub asset URL of the assistant-consent-privacy recording. -->
+*Video coming soon.*
 
 **Related Documentation**: [Meeting Consent](./meeting-consent.md), [Transcript Deletion](./transcript-deletion.md)
 
@@ -115,8 +115,8 @@ The View / Edit Configuration page: named profiles and Managed presets, Form, YA
 
 **Duration**: ~3 minutes
 
-<!-- Replace with the GitHub asset URL of the configuration-and-admin recording (drag demo.mp4 into a PR comment). -->
-VIDEO_URL_CONFIGURATION_AND_ADMIN
+<!-- VIDEO_URL_CONFIGURATION_AND_ADMIN: replace this comment and the line below with the GitHub asset URL of the configuration-and-admin recording. -->
+*Video coming soon.*
 
 **Related Documentation**: [Configuration Guide](./configuration-guide.md#configuration-profiles), [Meeting Cost Estimate](./meeting-cost-estimate.md)
 
