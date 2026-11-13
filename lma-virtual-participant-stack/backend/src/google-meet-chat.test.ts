@@ -21,6 +21,7 @@ import {
     MEET_IN_PAGE_SELECTORS,
     readMeetChatInPage,
     senderFromMeetGroupHeader,
+    stripMeetMessageActions,
 } from './google-meet-page.js';
 
 type FakeNode = FakeElement | FakeText;
@@ -174,4 +175,16 @@ test('a group marked with data-sender-id (not seen live) is read through the mar
     const marked = div([div(['Dana', ' 8:15 AM']), div([message('m1', 'marked')])], { 'data-sender-id': 'u1' });
     const [m] = read(div([marked]));
     assert.equal(m.sender, 'Dana');
+});
+
+test("a message's text leaves out the pin button Meet draws on it", () => {
+    assert.equal(
+        stripMeetMessageActions('say "LMA, I consent" or "LMA, I object". keep Pin message'),
+        'say "LMA, I consent" or "LMA, I object".',
+    );
+    assert.equal(stripMeetMessageActions('hello Unpin message'), 'hello');
+    assert.equal(stripMeetMessageActions('hello  Pin message'), 'hello');
+    assert.equal(stripMeetMessageActions('I object'), 'I object');
+    assert.equal(stripMeetMessageActions('please keep this'), 'please keep this');
+    assert.equal(stripMeetMessageActions('can you keep pin message'), 'can you keep pin message');
 });

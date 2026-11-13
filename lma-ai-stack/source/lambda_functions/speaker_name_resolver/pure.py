@@ -43,6 +43,12 @@ from lma_channels import (  # pylint: disable=import-error
     canonical_keyed,
 )
 
+# When a name's voices are shown as several people (configuration layer).
+from lma_speakers import (  # pylint: disable=import-error
+    SEVERAL_PEOPLE,
+    speaker_groups,
+)
+
 # Shared with the UI's speaker-identities.js -- see the note there on why the key
 # is the channel plus the speaker string AS STORED.
 DEFAULT_OTHER_SPEAKER_NAME = "Other Participant"
@@ -380,7 +386,24 @@ def is_virtual_participant_capture(capture_source):
     )
 
 
-def channel_label_bases(turns, capture_source=None):
+def _rooms_shown_as_several(turns, identities):
+    """A Virtual Participant meeting's names whose voices are shown as several people.
+
+    A roster name is one person's unless the Speakers panel shows it as several
+    people: it reads as a room or a room device, two or more of its voices were
+    given different names, or somebody chose Several people for it (stored in
+    ``speakerModes``). Then each of its voices is somebody to name. The mode is
+    taken from lma_speakers.speaker_groups itself, so the resolver and the
+    panel cannot disagree on it.
+    """
+    out = set()
+    for group in speaker_groups(turns, identities or {}).values():
+        if group["mode"] == SEVERAL_PEOPLE and group["voices"]:
+            out.add((group["channel"], group["base"]))
+    return out
+
+
+def channel_label_bases(turns, capture_source=None, identities=None):
     """Base names that label a whole channel rather than one person.
 
     The participant name on the Stream Audio form and the desktop app's labels
@@ -395,9 +418,11 @@ def channel_label_bases(turns, capture_source=None):
     split it into several people.
 
     A meeting whose record says the Virtual Participant captured it
-    (``capture_source``, the meeting's CaptureSource) has none: its names come
-    from the meeting roster, so one attendee whose voice separation split in
-    two is still one named attendee, even when nobody else spoke. A meeting
+    (``capture_source``, the meeting's CaptureSource) has none of those: its
+    names come from the meeting roster, so one attendee whose voice separation
+    split in two is still one named attendee, even when nobody else spoke. Its
+    names shown as several people (a conference room, or one somebody switched
+    to Several people, read from ``identities``) are open instead. A meeting
     with no CaptureSource (one recorded before the field existed) keeps the
     structural test. The UI's `channelLabelBases` applies the same rules, and
     the two must agree.
@@ -405,7 +430,7 @@ def channel_label_bases(turns, capture_source=None):
     Returns a set of `(channel, base)` pairs.
     """
     if is_virtual_participant_capture(capture_source):
-        return set()
+        return _rooms_shown_as_several(turns, identities)
     bases = {}
     voice_ids = {}
     for turn in turns:
@@ -445,7 +470,9 @@ def unresolved_voices(turns, identities, all_turns=None, capture_source=None):
     # trimmed list the model reads: a second voice heard only in the trimmed
     # middle still makes the label a channel's, and the Speakers panel, which
     # sees every segment, has to reach the same answer.
-    labels = channel_label_bases(turns if all_turns is None else all_turns, capture_source)
+    labels = channel_label_bases(
+        turns if all_turns is None else all_turns, capture_source, identities
+    )
     out = []
     for key in voices_in(turns):
         if merges.get(key):
