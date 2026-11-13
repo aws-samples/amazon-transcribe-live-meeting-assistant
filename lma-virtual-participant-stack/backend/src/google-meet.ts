@@ -39,7 +39,7 @@ import { allChatHelpMessages, chatHelpMessages } from './chat-help.js';
 import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { toolbarPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
-import { noteSentChat } from './meeting-chat.js';
+import { noteSentChat, ownChatLedger } from './meeting-chat.js';
 import { meetingChat } from './meeting-chat-runtime.js';
 import { chatAddressing } from './chat-addressing.js';
 import { simliAvatar } from './simli-avatar.js';
@@ -69,6 +69,7 @@ import {
     parseGoogleMeetMeeting,
     parseMeetParticipantCount,
     senderFromMeetGroupHeader,
+    stripMeetMessageActions,
     readMeetChatInPage,
     MeetChatRaw,
     MEET_CHAT_HEADER_MAX_LEVELS,
@@ -178,7 +179,8 @@ export function meetInMeetingExit(screen: MeetScreen | null): ExitInfo | null {
  *
  * A backstop for messages read without a sender, which Meet's chat can give
  * when the reader cannot find the header of a message's group. Compared with
- * the configured message lists, so a deployment that customises them is covered.
+ * the configured message lists, so a deployment that customises them is covered,
+ * and with the messages this VP posted (meeting-chat.ts OwnChatLedger).
  */
 export function isOwnMeetMessage(message: string): boolean {
     const text = message.trim();
@@ -190,7 +192,9 @@ export function isOwnMeetMessage(message: string): boolean {
             ...details.pauseMessages,
             ...details.exitMessages,
             ...allChatHelpMessages(),
-        ].some((own) => own && own.trim() === text) || meetingConsent.isOwnMessage(text)
+        ].some((own) => own && own.trim() === text) ||
+        meetingConsent.isOwnMessage(text) ||
+        ownChatLedger.matches(text)
     );
 }
 
@@ -500,7 +504,7 @@ export default class GoogleMeet {
         });
         return raw.map(({ header, text, id, links }) => ({
             sender: senderFromMeetGroupHeader(header),
-            text,
+            text: stripMeetMessageActions(text),
             id: id || null,
             time: timeFromMeetGroupHeader(header),
             links,
