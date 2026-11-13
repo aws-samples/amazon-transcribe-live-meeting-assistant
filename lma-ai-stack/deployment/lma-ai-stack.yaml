@@ -11280,13 +11280,24 @@ Resources:
                         Description: "Platform (Zoom, Teams, Chime, Webex, Google Meet)"
                       meetingId:
                         Type: string
-                        Description: "Meeting ID (numeric ID only; for Google Meet the meeting code, e.g. abc-defg-hij)"
+                        Description: >-
+                          Meeting ID (numeric ID only; for Google Meet the
+                          meeting code, e.g. abc-defg-hij). For Zoom, the full
+                          join link from the invitation (for example
+                          https://us05web.zoom.us/j/81234567890?pwd=...) may be
+                          passed instead of the ID and passcode, and is the
+                          most reliable option.
                       scheduledTime:
                         Type: string
                         Description: "ISO 8601 datetime when meeting should start"
                       meetingPassword:
                         Type: string
-                        Description: "Optional meeting password"
+                        Description: >-
+                          Optional meeting passcode, as the invitation text
+                          shows it (for example "Passcode: 1234 5678"), not the
+                          pwd= value of a join link. If only a Zoom link is
+                          available, pass the whole link as meetingId, or the
+                          link's pwd value whole here.
                       agenda:
                         Type: string
                         Description: >-
@@ -11321,10 +11332,21 @@ Resources:
                         Description: "Platform (Zoom, Teams, Chime, Webex, Google Meet)"
                       meetingId:
                         Type: string
-                        Description: "Meeting ID (numeric ID only; for Google Meet the meeting code, e.g. abc-defg-hij)"
+                        Description: >-
+                          Meeting ID (numeric ID only; for Google Meet the
+                          meeting code, e.g. abc-defg-hij). For Zoom, the full
+                          join link from the invitation (for example
+                          https://us05web.zoom.us/j/81234567890?pwd=...) may be
+                          passed instead of the ID and passcode, and is the
+                          most reliable option.
                       meetingPassword:
                         Type: string
-                        Description: "Optional meeting password"
+                        Description: >-
+                          Optional meeting passcode, as the invitation text
+                          shows it (for example "Passcode: 1234 5678"), not the
+                          pwd= value of a join link. If only a Zoom link is
+                          available, pass the whole link as meetingId, or the
+                          link's pwd value whole here.
                       useStoredZoomCredentials:
                         Type: boolean
                         Description: >-

@@ -305,12 +305,22 @@ MCP_TOOLS = [
                 "meetingId": {
                     "type": "string",
                     "description": (
-                        "Meeting ID (numeric ID only; for Google Meet the meeting code, "
-                        "e.g. abc-defg-hij)"
+                        "Meeting ID (numeric ID only; for Google Meet the meeting code, e.g. "
+                        "abc-defg-hij). For Zoom, the full join link from the invitation (for "
+                        "example https://us05web.zoom.us/j/81234567890?pwd=...) may be passed "
+                        "instead of the ID and passcode, and is the most reliable option."
                     ),
                 },
                 "scheduledTime": {"type": "string", "description": "ISO 8601 datetime"},
-                "meetingPassword": {"type": "string", "description": "Optional meeting password"},
+                "meetingPassword": {
+                    "type": "string",
+                    "description": (
+                        "Optional meeting passcode, as the invitation text shows it (for "
+                        'example "Passcode: 1234 5678"), not the pwd= value of a join link. '
+                        "If only a Zoom link is available, pass the whole link as meetingId, "
+                        "or the link's pwd value whole here."
+                    ),
+                },
                 "agenda": {
                     "type": "string",
                     "description": (
@@ -347,11 +357,21 @@ MCP_TOOLS = [
                 "meetingId": {
                     "type": "string",
                     "description": (
-                        "Meeting ID (numeric ID only; for Google Meet the meeting code, "
-                        "e.g. abc-defg-hij)"
+                        "Meeting ID (numeric ID only; for Google Meet the meeting code, e.g. "
+                        "abc-defg-hij). For Zoom, the full join link from the invitation (for "
+                        "example https://us05web.zoom.us/j/81234567890?pwd=...) may be passed "
+                        "instead of the ID and passcode, and is the most reliable option."
                     ),
                 },
-                "meetingPassword": {"type": "string", "description": "Optional meeting password"},
+                "meetingPassword": {
+                    "type": "string",
+                    "description": (
+                        "Optional meeting passcode, as the invitation text shows it (for "
+                        'example "Passcode: 1234 5678"), not the pwd= value of a join link. '
+                        "If only a Zoom link is available, pass the whole link as meetingId, "
+                        "or the link's pwd value whole here."
+                    ),
+                },
                 "agenda": {
                     "type": "string",
                     "description": (
