@@ -5,6 +5,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { normalizeChatText } from './chat-text.js';
 import { addressingVpHandle } from './vp-handle.js';
 import { normalizeMeetingPassword } from './meeting-password.js';
+import { parseZoomJoinLink, resolveZoomMeeting } from './zoom-join-link.js';
+import { registerSecretValue } from './logger.js';
 
 export interface MeetingInvite {
   meetingId: string;
@@ -127,9 +129,20 @@ class DetailsManager {
   constructor() {
     // Initialize from environment variables
     const meetingPlatform = (process.env.MEETING_PLATFORM as 'Chime' | 'Zoom' | 'Teams' | 'Webex' | 'CHIME' | 'ZOOM' | 'TEAMS' | 'WEBEX' | 'GOOGLE_MEET') || 'Chime';
-    const meetingId = process.env.MEETING_ID || '';
+    let meetingId = process.env.MEETING_ID || '';
     // Grouping spaces removed from a numeric Zoom passcode: see meeting-password.ts.
-    const meetingPassword = normalizeMeetingPassword(process.env.MEETING_PASSWORD, meetingPlatform);
+    let meetingPassword = normalizeMeetingPassword(process.env.MEETING_PASSWORD, meetingPlatform);
+    // A Zoom join link given as the meeting ID: its meeting number, and its
+    // pwd value unless a passcode was given too (zoom-join-link.ts). The pwd
+    // value came in MEETING_ID, which the logger does not treat as a secret.
+    if (meetingPlatform.toUpperCase() === 'ZOOM') {
+      // The link's own pwd is a secret whether or not it becomes the password
+      // (a separately given passcode wins over it).
+      const linkPwd = parseZoomJoinLink(meetingId)?.pwd;
+      if (linkPwd) registerSecretValue(linkPwd);
+      ({ meetingId, meetingPassword } = resolveZoomMeeting(meetingId, meetingPassword));
+      registerSecretValue(meetingPassword);
+    }
     const meetingName = process.env.MEETING_NAME || 'LMA Meeting';
     const meetingTime = parseInt(process.env.MEETING_TIME || '0');
     const userName = process.env.LMA_USER || 'LMA User';

@@ -15,6 +15,7 @@ title: "Virtual Participant"
   - [Live rows](#live-rows)
 - [Supported Platforms](#supported-platforms)
   - [Google Meet](#google-meet)
+  - [Zoom passcodes and join links](#zoom-passcodes-and-join-links)
 - [Joining a Meeting](#joining-a-meeting)
   - [Reviewing the launch settings](#reviewing-the-launch-settings)
 - [Status Lifecycle](#status-lifecycle)
@@ -460,6 +461,19 @@ What has been observed in live attempts, from a browser on an Amazon EC2 host an
 - **Screen-share key frames:** key frames are judged only while a participant tile shows a presentation ("(Presentation)" or "is presenting"), so the camera grid is not kept when nobody presents. See [Screen-share signal per platform](meeting-video.md#screen-share-signal-per-platform).
 - The Simli avatar has not been tested on Meet. Joining with a Google account signed in to the VP's browser profile is not supported; the VP joins as a guest.
 
+### Zoom passcodes and join links
+
+A Zoom meeting can be given to the VP in two ways: as the numeric meeting ID with the meeting passcode, or as the meeting's full join link.
+
+- **Meeting ID and passcode.** The passcode is the one the invitation text shows, for example `Passcode: 1234 5678`. Zoom limits a passcode to 10 characters ("By default, a passcode can only have a maximum length of 10 characters", in the `password` field of Zoom's [Create a meeting](https://developers.zoom.us/docs/api/meetings/) API reference). The VP removes the grouping spaces from a numeric passcode and types it into the passcode box on Zoom's join screen.
+- **Join link.** For Zoom, the meeting ID may be the full join link, such as `https://us05web.zoom.us/j/81234567890?pwd=...`, in the create form, `lma vp create`, the SDK, or the meeting assistant's `start_meeting_now` and `schedule_meeting` tools. The VP reads the meeting number and the link's `pwd` value from links of the forms `/j/<number>`, `/wc/<number>/join` and `/wc/join/<number>` on `zoom.us` or any of its subdomains. A personal link (`zoom.us/my/<name>`) does not carry the meeting number, so it cannot be used; give the meeting ID and passcode instead. If a passcode is also given, the VP uses the passcode.
+
+The `pwd` value of a join link is not the passcode: it is an encoded form of it, usually 32 characters ending in `.1`, and the passcode box refuses it. A meeting password that is longer than 10 characters, or ends in a period followed by digits, is therefore treated as a link's `pwd` value. The VP's web-client join opens the meeting at `/wc/<number>/join?pwd=<value>`, as the link does, and does not type the value. If Zoom still asks for a passcode, for example because the value was cut off, the VP sets `MANUAL_ACTION_REQUIRED` with the message *"The meeting password looks like the pwd value from a Zoom link and Zoom did not accept it; enter the meeting passcode from the invitation and select Join."* Enter the passcode and select **Join** in the live view; if nobody does within five minutes, the join ends with `pre-join:passcode-not-entered`.
+
+The meeting assistant's `start_meeting_now` and `schedule_meeting` tools check a Zoom meeting before creating the VP. A password longer than 10 characters is refused unless it has the shape of a whole `pwd` value (at least 30 letters and digits, then a period and digits, the shape seen on Zoom links) or the meeting ID is a join link with its own `pwd` value, and a meeting ID that is a link must be a Zoom join link of one of the forms above.
+
+The Zoom Meeting SDK join (used when Zoom Meeting SDK credentials are configured) passes the password to the SDK unchanged. Whether the SDK accepts a link's `pwd` value in place of the passcode has not been tested, so give the SDK path the passcode from the invitation.
+
 ## Joining a Meeting
 
 1. Navigate to **Virtual Participant** in the LMA UI.
@@ -516,7 +530,7 @@ Most values are one of these fixed strings:
 
 | Group | Values |
 | --- | --- |
-| Never got in | `pre-join:not-admitted`, `pre-join:no-join-button`, `pre-join:no-name-input`, `pre-join:goto-failed`, `pre-join:ai-error-screen`, `pre-join:meet-refused`, `pre-join:meet-denied`, `pre-join:meet-invalid-code`, `pre-join:meet-ended`, `acs-not-admitted`, `sdk-not-admitted`, `enterprise-login-timeout` |
+| Never got in | `pre-join:not-admitted`, `pre-join:no-join-button`, `pre-join:no-name-input`, `pre-join:goto-failed`, `pre-join:ai-error-screen`, `pre-join:meet-refused`, `pre-join:meet-denied`, `pre-join:meet-invalid-code`, `pre-join:meet-ended`, `pre-join:passcode-not-entered`, `acs-not-admitted`, `sdk-not-admitted`, `enterprise-login-timeout` |
 | Asked to leave in chat | `chat` |
 | Left after a participant objected to recording ([Meeting Consent](meeting-consent.md#objections)) | `consent-objection` |
 | The meeting ended | `post-meeting-screen`, `meeting-ended-text`, `meet-ended-screen`, `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |

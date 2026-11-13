@@ -341,13 +341,19 @@ Common parameters for the most-used tools.
 
 - `meetingName`, `meetingPlatform` (Zoom/Teams/Chime/Webex/Google Meet), `meetingId`
   (numeric), `scheduledTime` (ISO 8601), `meetingPassword` (optional)
+- `meetingPassword` is the passcode the invitation text shows (for example
+  `Passcode: 1234 5678`), not the `pwd=` value of a join link. For Zoom,
+  `meetingId` may instead be the full join link, which is the most reliable
+  option; see [Zoom passcodes and join links](virtual-participant.md#zoom-passcodes-and-join-links)
+  for what the tools accept and refuse
 - `agenda` (optional) — the meeting agenda, one item per line, for example the
   agenda from the calendar invite. It is stored on the meeting record when the
   meeting starts; see [Meeting Agenda](meeting-agenda.md)
 
 ### `start_meeting_now`
 
-- `meetingName`, `meetingPlatform`, `meetingId`, `meetingPassword` (optional)
+- `meetingName`, `meetingPlatform`, `meetingId`, `meetingPassword` (optional), as for
+  `schedule_meeting`
 - `useStoredZoomCredentials` — default `true`; when the user has stored Zoom
   credentials in LMA, the VP signs in with them rather than joining as a guest
 - `agenda` (optional) — as for `schedule_meeting`
@@ -451,7 +457,8 @@ Meeting IDs in LMA are UUIDs (`abc123-def456-ghi789`). Get them from:
 - The `list_meetings` tool response
 
 For `schedule_meeting` / `start_meeting_now`, the `meetingId` is the
-**platform's numeric meeting ID** (e.g. Zoom `123456789`), not LMA's UUID.
+**platform's numeric meeting ID** (e.g. Zoom `123456789`), not LMA's UUID. For
+Zoom it may also be the meeting's full join link.
 
 ### Virtual participant tools fail
 

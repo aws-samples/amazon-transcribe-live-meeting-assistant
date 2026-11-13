@@ -198,6 +198,14 @@ test('microvmVncEndpoint returns empty string when the endpoint is missing', () 
     assert.equal(microvmVncEndpoint('   '), '');
 });
 
+test('redactPerMeetingConfig logs only the host of a meeting ID that is a join link', () => {
+    const red = redactPerMeetingConfig({
+        MEETING_ID: 'https://us02web.zoom.us/j/6878620134?pwd=abcDEF123456789012345678901234.1',
+    } as never);
+    assert.equal(red['MEETING_ID'], '<link:us02web.zoom.us>');
+    assert.equal(redactPerMeetingConfig({ MEETING_ID: '6878620134' } as never)['MEETING_ID'], '6878620134');
+});
+
 test('redactPerMeetingConfig hides tokens and passwords but keeps shape', () => {
     const red = redactPerMeetingConfig({
         MEETING_ID: '42',

@@ -26,3 +26,45 @@ export function normalizeMeetingPassword(password: string | undefined | null, pl
     }
     return cleaned;
 }
+
+/**
+ * The longest passcode Zoom lets a host set. Zoom's Meetings API reference
+ * (developers.zoom.us/docs/api/meetings/, "Create a meeting", `password`)
+ * says: "By default, a passcode can only have a maximum length of 10
+ * characters and only contain alphanumeric characters and the @, -, _, and *
+ * characters."
+ */
+export const ZOOM_PASSCODE_MAX_LENGTH = 10;
+
+/** What a Zoom meeting password given to the Virtual Participant is. */
+export type ZoomPasswordKind = 'passcode' | 'link-token';
+
+/**
+ * Whether a Zoom meeting password is a passcode, which is typed into the
+ * passcode box on the join screen, or the `pwd=` value of a Zoom join link,
+ * which is an encoded form of the passcode (commonly 32 characters ending in
+ * ".1") and is only accepted on the join URL.
+ *
+ * A value is a link token when it is longer than {@link ZOOM_PASSCODE_MAX_LENGTH}
+ * or ends in a period followed by digits, since a passcode cannot contain a
+ * period. A truncated token is still longer than any passcode, so it is
+ * classed as a token too. Anything else, including an empty value, is a
+ * passcode. Expects the value {@link normalizeMeetingPassword} returns.
+ */
+export function zoomPasswordKind(password: string | undefined | null): ZoomPasswordKind {
+    const value = (password ?? '').trim();
+    if (value.length > ZOOM_PASSCODE_MAX_LENGTH || /\.\d+$/.test(value)) return 'link-token';
+    return 'passcode';
+}
+
+/**
+ * The Zoom web-client join URL. A link token goes on it as `pwd`, the way a
+ * Zoom join link carries it; a passcode does not, because it is typed into
+ * the join screen instead.
+ */
+export function zoomWebJoinUrl(meetingId: string, password: string | undefined | null): string {
+    const base = `https://zoom.us/wc/${meetingId}/join`;
+    const value = (password ?? '').trim();
+    if (!value || zoomPasswordKind(value) !== 'link-token') return base;
+    return `${base}?pwd=${encodeURIComponent(value)}`;
+}

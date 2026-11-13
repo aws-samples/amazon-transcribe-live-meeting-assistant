@@ -28,6 +28,7 @@ import {
 } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
+import { zoomPasswordKind, zoomWebJoinUrl } from './meeting-password.js';
 import { humanClick, humanType } from './prejoin-actions.js';
 import {
     fetchZoomCredentials,
@@ -38,6 +39,13 @@ import {
 import { createLogger } from './logger.js';
 
 const log = createLogger('zoom');
+
+/**
+ * How long the user has to enter the meeting passcode in the live view when
+ * Zoom did not accept the pwd value of a join link. The same five minutes the
+ * manual sign-in prompt gives.
+ */
+const PASSCODE_PROMPT_TIMEOUT_SECONDS = 300;
 
 /** How often the chat list is read. */
 const ZOOM_CHAT_POLL_MS = 1500;
@@ -874,12 +882,20 @@ export default class Zoom {
         await prepareAvatar();
 
         log.info('Getting Zoom meeting link.');
+        // A password that is the pwd value of a Zoom join link rather than a
+        // passcode goes on the join URL, as the link carries it, and is never
+        // typed: the passcode box takes only the passcode itself.
+        const passwordIsLinkToken =
+            !!details.invite.meetingPassword && zoomPasswordKind(details.invite.meetingPassword) === 'link-token';
+        if (passwordIsLinkToken) {
+            log.info('[zoom] Meeting password is a Zoom link pwd value — passing it on the join URL instead of typing it.');
+        }
         // 60s + tolerate a late-but-successful arrival. A bare goto inherits
         // waitUntil:'load' and the 20s page default, and a live join failed
         // that way AFTER the page had already reached the meeting URL (#547).
         await gotoMeetingPage(
             page,
-            `https://zoom.us/wc/${details.invite.meetingId}/join`,
+            zoomWebJoinUrl(details.invite.meetingId, details.invite.meetingPassword),
             MEETING_HOST_PATTERNS.zoom,
             'zoom-join',
         );
@@ -977,6 +993,11 @@ export default class Zoom {
             // stable) and proceed if absent rather than failing the join.
             // Type, verify the value landed, and re-type once if not (the
             // form can still re-mount under us right after settling).
+            // A link token was already given on the join URL. If Zoom still
+            // asks for a passcode, it did not accept the token (a truncated
+            // copy, for one), and typing it would be refused as well, so the
+            // user is asked to enter the passcode in the live view instead.
+            let passcodeLeftToUser = false;
             if (details.invite.meetingPassword) {
                 const findPwd = async (): Promise<ElementHandle<Element> | null> => {
                     for (let attempt = 1; attempt <= 6; attempt++) {
@@ -990,7 +1011,21 @@ export default class Zoom {
                     return null;
                 };
                 let passwordHandle = await findPwd();
-                if (passwordHandle) {
+                if (passwordHandle && passwordIsLinkToken) {
+                    log.warn('[zoom] Zoom still asks for a passcode after the link pwd value was given on the URL.');
+                    passcodeLeftToUser = true;
+                    if (details.invite.virtualParticipantId) {
+                        const { createStatusManager } = await import('./status-manager.js');
+                        await createStatusManager(details.invite.virtualParticipantId)
+                            .setManualActionRequired(
+                                'PASSCODE',
+                                'The meeting password looks like the pwd value from a Zoom link and Zoom did not ' +
+                                    'accept it; enter the meeting passcode from the invitation and select Join.',
+                                PASSCODE_PROMPT_TIMEOUT_SECONDS,
+                            )
+                            .catch((err) => log.warn('[zoom] Could not raise the passcode prompt (non-fatal):', err));
+                    }
+                } else if (passwordHandle) {
                     const pwd = details.invite.meetingPassword;
                     let entered = false;
                     for (let attempt = 1; attempt <= 2 && !entered; attempt++) {
@@ -1018,6 +1053,8 @@ export default class Zoom {
                     if (!entered) {
                         log.warn('Could not reliably enter meeting passcode after retries — continuing; Join may reject it.');
                     }
+                } else if (passwordIsLinkToken) {
+                    log.info('[zoom] Zoom accepted the link pwd value — no passcode box shown.');
                 } else {
                     log.info('Meeting does not require a password — skipping password entry.');
                 }
@@ -1182,24 +1219,45 @@ export default class Zoom {
                 }
             };
 
-            await clickJoin();
-
             // Did the click advance us past the prejoin form? Poll briefly.
             const waitLeftPrejoin = async (ms: number): Promise<boolean> => {
                 const until = Date.now() + ms;
                 while (Date.now() < until) {
+                    if (page.isClosed()) return false;
                     if (await this.hasLeftPrejoin(page)) return true;
                     await new Promise((r) => setTimeout(r, 500));
                 }
                 return false;
             };
 
-            if (!(await waitLeftPrejoin(6000))) {
+            if (passcodeLeftToUser) {
+                // The user enters the passcode and selects Join in the live
+                // view. Clicking Join here with an empty passcode box would
+                // only show Zoom's error under their cursor.
+                await substep('Waiting for the meeting passcode to be entered in the live view…');
+                const left = await waitLeftPrejoin(PASSCODE_PROMPT_TIMEOUT_SECONDS * 1000);
+                if (details.invite.virtualParticipantId) {
+                    const { createStatusManager } = await import('./status-manager.js');
+                    await createStatusManager(details.invite.virtualParticipantId)
+                        .clearManualAction()
+                        .catch(() => {});
+                }
+                if (!left) {
+                    log.warn('[zoom] The meeting passcode was not entered in the live view in time.');
+                    return { reason: 'never-joined', trigger: 'pre-join:passcode-not-entered' };
+                }
+                log.info('[zoom] Left the prejoin screen after the passcode was entered in the live view.');
+            } else {
+                await clickJoin();
+            }
+
+            if (!passcodeLeftToUser && !(await waitLeftPrejoin(6000))) {
                 log.warn('Join did not advance the prejoin screen — re-entering passcode and retrying once.');
                 await substep('Re-attempting to join the meeting…');
                 // Re-enter passcode if the field is still there (it being
-                // present is itself the signal Join didn't take).
-                if (details.invite.meetingPassword) {
+                // present is itself the signal Join didn't take). A link
+                // token is never typed: it is on the join URL already.
+                if (details.invite.meetingPassword && !passwordIsLinkToken) {
                     const pwd2 = await page.$('#input-for-pwd');
                     if (pwd2) {
                         await pwd2.evaluate((el: Element) => {
@@ -1224,7 +1282,7 @@ export default class Zoom {
                 } else {
                     log.warn('Still on prejoin after retry — handing off to admission poll / dialog-watchdog.');
                 }
-            } else {
+            } else if (!passcodeLeftToUser) {
                 log.info('Left the prejoin screen — proceeding to admission wait.');
             }
         }
