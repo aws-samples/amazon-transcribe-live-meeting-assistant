@@ -91,5 +91,6 @@ test('teams.ts reopens the chat through the "More" menu, after the People-pane s
     assert.ok(open.includes('this.openChatFromMoreMenu(page)'), 'openChatPanel falls back to the "More" menu');
     assert.match(source, /reopenChat: async \(\) => \{\s+const open = await this\.openChatPanel\(page\);/);
     assert.ok(source.includes('chatWatchAction({'), 'the chat watch runs');
-    assert.ok(source.includes('await this.retryFailedMessages(page);'), 'failed messages are retried before posting');
+    assert.ok(source.includes('await this.markFailedMessagesSeen(page);'), 'earlier failures are set aside before posting');
+    assert.ok(!source.includes('retryFailedMessages'), 'Teams Retry is not pressed, so a failed notice is not sent twice');
 });
