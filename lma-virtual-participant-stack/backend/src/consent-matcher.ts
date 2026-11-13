@@ -150,8 +150,9 @@ function quotesAPhrase(message: string, phrases: readonly string[]): boolean {
  * `consent`, `objection` or null for one final utterance heard in the meeting.
  *
  * Only an utterance addressed to LMA is a reply: people say "I agree" and
- * "I don't agree" in conversation far more often than they type them as a
- * whole message. Addressed, it is read as an addressed chat message is
+ * "I don't agree" in conversation far more often than they type them, so the
+ * unaddressed sentence that is an objection in the chat is ordinary speech.
+ * Addressed, it is read as an addressed chat message is
  * (classifyChatReply): "LMA consent", or LMA plus a consent phrase and nothing
  * else ("LMA, I consent"), is consent; "LMA object", "LMA no consent", LMA plus
  * an objection phrase, or an addressed sentence of up to 200 characters that

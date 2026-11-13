@@ -138,6 +138,8 @@ test('a message that quotes an objection phrase is not an objection', () => {
     // The phrase on its own, quoted, is still a reply.
     assert.equal(classify('"I object"'), 'objection');
     assert.equal(classify('LMA "I object"'), 'objection');
+    // A quoted phrase anywhere makes the whole message a quotation, by design.
+    assert.equal(classify('Bo said "stop recording" and I agree, stop recording'), null);
 });
 
 test('the shipped notices, posted by someone other than this VP, are not replies', () => {

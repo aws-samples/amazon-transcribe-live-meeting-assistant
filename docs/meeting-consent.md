@@ -469,8 +469,12 @@ reading a message as an objection can only stop capture, never start it.
     whatever it mentions;
   - not addressed: *"I object to this meeting being recorded"*, *"I agree with
     Sam, but I don't consent to being recorded"*, and also *"I don't agree with
-    the roadmap"*, which with the default phrases stops capture until the sender
-    consents again.
+    the roadmap"*, which with the default phrases is handled as any objection
+    is (see [Objections](#objections)): capture stops until the sender consents
+    again, the screen recording stays off for the rest of the meeting, and with
+    **Virtual Participant leaves after an objection** on, the VP leaves. Remove
+    `I do not agree` and `I don't agree` from the objection phrases where that
+    is too eager for a deployment's meetings.
 - A message that quotes an objection phrase, in double or single quotation
   marks, is telling people how to reply and is not an objection (*'Reply "I
   consent" to agree, or "I object" to decline.'*), so another LMA's notice in
@@ -515,7 +519,9 @@ cannot read the Meeting Consent section, it reads the chat only.
 
 **What counts as a spoken reply.** Only an utterance addressed to LMA is a
 reply, because people say *"I agree"* and *"I don't agree"* in conversation far
-more often than they type them as a whole message. Addressed, it is read as an
+more often than they type them, so an unaddressed sentence that contains an
+objection phrase, which is an objection in the chat, is ordinary speech.
+Addressed, it is read as an
 addressed chat message is (see [Replies in the chat](#replies-in-the-chat)),
 with the deployment's phrases, the whole utterance as the speech engine
 finalises it being the reply:
@@ -528,7 +534,7 @@ finalises it being the reply:
   now"*). Objections are looked for first.
 - A bare phrase is not a reply when said aloud: *"I consent."* and *"Stop
   recording!"* are ordinary speech, although the same words typed in the chat
-  are replies.
+  are replies, as is a typed sentence containing an objection phrase.
 
 Speech engines often write `LMA` as its letters, so *"L M A"* and *"L.M.A."*
 are read as `LMA`. Only final results are read, never the engine's partial
