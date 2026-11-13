@@ -180,6 +180,32 @@
       "keys": ["REMOTE#Bob Strahan (spk_0)", "REMOTE#Bob Strahan (spk_1)"]
     },
     {
+      "name": "a Virtual Participant attendee whose voices were given two names has its other voice to name",
+      "captureSource": "VIRTUAL_PARTICIPANT",
+      "identities": {"identities": {
+        "REMOTE#Bob Strahan (spk_0)": {"name": "Grace", "status": "confirmed"},
+        "REMOTE#Bob Strahan (spk_1)": {"name": "Sam", "status": "confirmed"}
+      }},
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_0)", "start": 0, "transcript": "Hi, I'm Grace"},
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_1)", "start": 5, "transcript": "And I'm Sam"},
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_2)", "start": 10, "transcript": "Morning"}
+      ],
+      "keys": ["REMOTE#Bob Strahan (spk_2)"]
+    },
+    {
+      "name": "a Virtual Participant attendee whose voices were given one name is already named",
+      "captureSource": "VIRTUAL_PARTICIPANT",
+      "identities": {"identities": {
+        "REMOTE#Bob Strahan (spk_0)": {"name": "Bob Strahan", "status": "confirmed"}
+      }},
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_0)", "start": 0, "transcript": "Hi all"},
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_1)", "start": 5, "transcript": "Can you hear me?"}
+      ],
+      "keys": []
+    },
+    {
       "name": "a conference room shown as one person is already named",
       "captureSource": "VIRTUAL_PARTICIPANT",
       "identities": {"speakerModes": {"REMOTE#Conference Room 4": {"mode": "one"}}},

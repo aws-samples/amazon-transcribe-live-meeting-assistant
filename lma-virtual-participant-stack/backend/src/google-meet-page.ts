@@ -490,10 +490,15 @@ export function readMeetChatInPage(sels: { message: string; group: string; maxLe
  * name and label: "… keep Pin message", as read live on 2026-11-12. Left in,
  * the text no longer matches a message the VP posted itself, so its own
  * consent instructions could be read back as a participant's reply.
+ *
+ * Only Meet's English labels are matched, in the case Meet writes them, so a
+ * participant's own words ending in "pin message" are kept. With Meet shown in
+ * another language the label stays in the text, and the VP still recognises
+ * its own messages through the posted-message ledger (isOwnMeetMessage).
  */
 export function stripMeetMessageActions(text: string): string {
     let out = (text || '').replace(/\s+/g, ' ').trim();
-    const trailing = /\s*(?:\b(?:keep|keep_off|push_pin)\s+)?\b(?:Pin|Unpin) message$/i;
+    const trailing = /\s*(?:\b(?:keep|keep_off|push_pin)\s+)?\b(?:Pin|Unpin) message$/;
     while (trailing.test(out)) out = out.replace(trailing, '').trim();
     return out;
 }

@@ -38,7 +38,7 @@
 import { canonicalChannel, canonicalKeyed, isSpeechChannel, REMOTE_CHANNEL } from './channels';
 import { DEFAULT_DESKTOP_SYSTEM_LABEL, DEFAULT_LOCAL_SPEAKER_NAME, DEFAULT_OTHER_SPEAKER_NAME } from './constants';
 import { groupKey, groupOfKey, own, resolveMergeTarget, speakerKey } from './speaker-keys';
-import { looksLikeRoom, ONE_PERSON, resolveInGroup, SEVERAL_PEOPLE, speakerGroups } from './speaker-modes';
+import { ONE_PERSON, resolveInGroup, SEVERAL_PEOPLE, speakerGroups } from './speaker-modes';
 import { splitDiarizationLabel } from './utilities';
 
 export { resolveMergeTarget, speakerKey, speakerGroups };
@@ -219,18 +219,16 @@ export const isVirtualParticipantCapture = (captureSource) =>
  * CaptureSource (recorded before the field existed) keeps the structural test.
  * The resolver's channel_label_bases applies the same rules.
  */
+// The names the Speakers panel shows as several people (a room name, two or
+// more voices given different names, or Several people chosen), taken from
+// speakerGroups itself so the panel's toggle and this rule cannot disagree.
 const roomsShownAsSeveral = (segments, identities) => {
-  const modes = identities?.speakerModes ?? {};
+  const spoken = (segments ?? []).filter(
+    (segment) => !segment.isPartial && isNameable(segment) && `${segment.transcript ?? ''}`.trim(),
+  );
   const out = new Set();
-  (segments ?? []).forEach((segment) => {
-    if (segment.isPartial || !isNameable(segment) || !`${segment.transcript ?? ''}`.trim()) return;
-    const { base, suffix } = splitDiarizationLabel(segment.speaker);
-    if (!suffix.trim()) return;
-    const key = `${canonicalChannel(segment.channel)}#${base}`;
-    const chosen = own(modes, key);
-    const mode = chosen && typeof chosen === 'object' ? chosen.mode : undefined;
-    const several = mode === ONE_PERSON || mode === SEVERAL_PEOPLE ? mode === SEVERAL_PEOPLE : looksLikeRoom(base);
-    if (several) out.add(key);
+  Object.values(speakerGroups(spoken, identities ?? {})).forEach((group) => {
+    if (group.mode === SEVERAL_PEOPLE && group.voices.length) out.add(group.key);
   });
   return out;
 };

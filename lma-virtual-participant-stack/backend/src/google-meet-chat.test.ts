@@ -186,4 +186,5 @@ test("a message's text leaves out the pin button Meet draws on it", () => {
     assert.equal(stripMeetMessageActions('hello  Pin message'), 'hello');
     assert.equal(stripMeetMessageActions('I object'), 'I object');
     assert.equal(stripMeetMessageActions('please keep this'), 'please keep this');
+    assert.equal(stripMeetMessageActions('can you keep pin message'), 'can you keep pin message');
 });

@@ -45,9 +45,8 @@ from lma_channels import (  # pylint: disable=import-error
 
 # When a name's voices are shown as several people (configuration layer).
 from lma_speakers import (  # pylint: disable=import-error
-    ONE_PERSON,
     SEVERAL_PEOPLE,
-    looks_like_room,
+    speaker_groups,
 )
 
 # Shared with the UI's speaker-identities.js -- see the note there on why the key
@@ -390,25 +389,17 @@ def is_virtual_participant_capture(capture_source):
 def _rooms_shown_as_several(turns, identities):
     """A Virtual Participant meeting's names whose voices are shown as several people.
 
-    A roster name is one person's unless it reads as a room or a room device,
-    or somebody chose Several people for it (the Speakers panel's toggle,
-    stored in ``speakerModes``); then each of its voices is somebody to name.
-    The same rule lma_speakers.speaker_groups applies to decide the mode.
+    A roster name is one person's unless the Speakers panel shows it as several
+    people: it reads as a room or a room device, two or more of its voices were
+    given different names, or somebody chose Several people for it (stored in
+    ``speakerModes``). Then each of its voices is somebody to name. The mode is
+    taken from lma_speakers.speaker_groups itself, so the resolver and the
+    panel cannot disagree on it.
     """
-    modes = (identities or {}).get("speakerModes") or {}
     out = set()
-    for turn in turns:
-        base, suffix = split_diarization_label(turn["key"].split("#", 1)[1])
-        if not suffix:
-            continue
-        chosen = modes.get(f"{turn['channel']}#{base}")
-        mode = chosen.get("mode") if isinstance(chosen, dict) else None
-        if mode in (ONE_PERSON, SEVERAL_PEOPLE):
-            several = mode == SEVERAL_PEOPLE
-        else:
-            several = looks_like_room(base)
-        if several:
-            out.add((turn["channel"], base))
+    for group in speaker_groups(turns, identities or {}).values():
+        if group["mode"] == SEVERAL_PEOPLE and group["voices"]:
+            out.add((group["channel"], group["base"]))
     return out
 
 
