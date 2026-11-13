@@ -375,7 +375,7 @@ describe('the editor', () => {
     renderEditor();
     openSection(await screen.findByText('Transcription Engine'));
     const engine = section('Transcription Engine');
-    fireEvent.click(within(engine).getByRole('checkbox'));
+    fireEvent.click(within(engine).getByRole('switch'));
     fireEvent.click(pageButton('Save changes'));
     const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
     graphqlMock.mockResolvedValueOnce(saved()).mockResolvedValueOnce(answer({ version: 5 }));
@@ -471,7 +471,7 @@ describe('the editor', () => {
     renderEditor();
     openSection(await screen.findByText('Virtual Participant'));
     const vp = section('Virtual Participant');
-    const toggle = within(vp).getByRole('checkbox', { name: /Add the meeting chat to the transcript/ });
+    const toggle = within(vp).getByRole('switch', { name: /Add the meeting chat to the transcript/ });
     expect(toggle.checked).toBe(true);
     fireEvent.click(toggle);
     fireEvent.click(pageButton('Save changes'));
@@ -491,7 +491,7 @@ describe('the editor', () => {
     const transcribe = section('Amazon Transcribe');
     expect(within(transcribe).getAllByText('Custom vocabulary').length).toBeGreaterThan(0);
     expect(within(transcribe).queryByText('Entity types to redact')).toBeNull();
-    fireEvent.click(within(transcribe).getByRole('checkbox', { name: /Redact personal information/ }));
+    fireEvent.click(within(transcribe).getByRole('switch', { name: /Redact personal information/ }));
     expect(within(transcribe).getAllByText('Entity types to redact').length).toBeGreaterThan(0);
   });
 

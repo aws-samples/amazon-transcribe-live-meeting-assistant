@@ -173,7 +173,7 @@ describe('VNCViewer connection lifecycle', () => {
     await flush(MINT_MS + 50);
     expect(instances[0].viewOnly).toBe(true);
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /View Only/ }));
+    fireEvent.click(screen.getByRole('switch', { name: /View Only/ }));
     await flush(30000);
 
     expect(instances).toHaveLength(1);
