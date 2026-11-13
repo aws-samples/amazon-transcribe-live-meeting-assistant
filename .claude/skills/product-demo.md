@@ -369,7 +369,7 @@ Meet with nobody watching. Each of these cost at least one wasted take.
 
 - **Hold the Meet open with a silent guest for the whole session.** Start one with
   a WAV of silence, a neutral name and a long `--max-minutes`:
-  `meeting_guest.py --state guest-keep.json start --name "Meeting host" --audio silence.wav --max-minutes 720`.
+  `meeting_guest.py --state guest-keep.json start --stack <stack> --meet-url <link> --name "Meeting host" --audio silence.wav --max-minutes 720`.
   Run it from a small loop that checks the ECS task every minute and starts a new
   guest when it stops. An empty meeting refuses joins, and a VP alone leaves.
   The guest is a visible tile in every video; name it as a plausible attendee.
@@ -397,7 +397,7 @@ Meet with nobody watching. Each of these cost at least one wasted take.
   showed a finished meeting as live and a failed VP's page. Throw when the VP
   never reaches ACTIVE (or reaches FAILED or COMPLETED), and read the meeting ID
   from the VP you launched, not "the newest meeting with this name".
-- **Two VPs in one meeting:** `lma vp create --as-user <email> --platform google_meet --id <code> --no-wait`
+- **Two VPs in one meeting:** `lma vp create --stack-name <stack> --name "<meeting name>" --as-user <email> --platform google_meet --id <code> --no-wait`
   for each user, then poll `lma vp get --id <id> --json` for `ACTIVE`. Chat
   commands address one by its user's name (`LMA jordan leave`).
 
