@@ -195,9 +195,13 @@ ADMIN_ONLY_FIELDS = [
 #   managing them is what belongs to the Admin group. `redact_server` in
 #   mcp_server_manager projects AuthConfig away on this path, and
 #   test_mcp_server_manager.py pins both that and the open read.
+# * getMeetingConsentDefaults -- the Create Virtual Participant form reads the
+#   deployment's consent mode, rule and per-meeting-choice switch to show which
+#   consent choices apply. It returns those three values only.
 UNRESTRICTED_READS = [
     ("Query", "getChatButtonConfig"),
     ("Query", "getAsrConfig"),
+    ("Query", "getMeetingConsentDefaults"),
     ("Query", "listInstalledMCPServers"),
     ("Query", "getMCPServer"),
 ]

@@ -9,6 +9,7 @@ import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { Alert, Box, Button, Checkbox, Form, FormField, Modal, SpaceBetween } from '@cloudscape-design/components';
 
+import useMeetingConsentDefaults from '../../hooks/use-meeting-consent-defaults';
 import VirtualParticipantFormFields from './VirtualParticipantFormFields';
 import ZoomCredentialsManager from './ZoomCredentialsManager';
 import { meetingConsentChoiceAvailable } from './meeting-consent-options';
@@ -66,12 +67,14 @@ const EditScheduledVirtualParticipant = ({ vp, visible, onDismiss, onSaved, zoom
     }
   }, [visible]);
 
-  // A consent choice the platform cannot support goes back to the default.
+  const consentDefaults = useMeetingConsentDefaults(visible);
+  // A consent choice the platform cannot support, or the deployment would not
+  // use, goes back to the default.
   useEffect(() => {
-    if (!meetingConsentChoiceAvailable(state.consentChoice, state.form.meetingPlatform)) {
+    if (!meetingConsentChoiceAvailable(state.consentChoice, state.form.meetingPlatform, consentDefaults)) {
       setState((prev) => ({ ...prev, consentChoice: 'default' }));
     }
-  }, [state.form.meetingPlatform, state.consentChoice]);
+  }, [state.form.meetingPlatform, state.consentChoice, consentDefaults]);
 
   const handleZoomCredsChange = useCallback((status) => setZoomCredsPresent(!!status?.present), []);
 
@@ -167,6 +170,7 @@ const EditScheduledVirtualParticipant = ({ vp, visible, onDismiss, onSaved, zoom
             }
             consentChoice={state.consentChoice}
             onConsentChoiceChange={(value) => setState((prev) => ({ ...prev, consentChoice: value }))}
+            consentDefaults={consentDefaults}
             enableVideoRecording={state.enableVideoRecording}
             onEnableVideoRecordingChange={(checked) => setState((prev) => ({ ...prev, enableVideoRecording: checked }))}
           />

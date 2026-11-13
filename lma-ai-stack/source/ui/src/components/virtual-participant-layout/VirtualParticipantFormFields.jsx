@@ -47,6 +47,7 @@ const VirtualParticipantFormFields = ({
   passwordPlaceholder = 'Enter meeting password if required',
   consentChoice,
   onConsentChoiceChange,
+  consentDefaults = null,
   enableVideoRecording,
   onEnableVideoRecordingChange,
 }) => {
@@ -64,6 +65,8 @@ const VirtualParticipantFormFields = ({
   }
   // The resolver refuses a longer agenda, so the form does not offer to submit one.
   const agendaTooLong = agendaIsTooLong(form.agenda);
+  // A choice the platform or the deployment rules out is shown disabled, with the reason.
+  const consentOptions = meetingConsentOptionsFor(form.meetingPlatform, consentDefaults);
 
   return (
     <>
@@ -182,20 +185,17 @@ const VirtualParticipantFormFields = ({
         label="Meeting consent"
         description={
           'Whether participants are told the meeting is recorded and transcribed, and whether the Virtual ' +
-          'Participant waits for their consent first. The deployment may not allow a less strict choice than ' +
-          'its own, in which case its own applies. Once recording has been withheld after it started (an ' +
-          'objection, or a newcomer who has not consented yet), the screen recording stays off for the rest ' +
-          'of the meeting; the transcript and audio recording resume.'
+          'Participant waits for their consent first. When the deployment does not allow a less strict ' +
+          'choice than its own, those choices are shown but cannot be chosen. Once recording has been withheld ' +
+          'after it started (an objection, or a newcomer who has not consented yet), the screen recording stays ' +
+          'off for the rest of the meeting; the transcript and audio recording resume.'
         }
         stretch
       >
         <Select
-          selectedOption={
-            meetingConsentOptionsFor(form.meetingPlatform).find((option) => option.value === consentChoice) ||
-            MEETING_CONSENT_OPTIONS[0]
-          }
+          selectedOption={consentOptions.find((option) => option.value === consentChoice) || MEETING_CONSENT_OPTIONS[0]}
           onChange={({ detail }) => onConsentChoiceChange(detail.selectedOption.value)}
-          options={meetingConsentOptionsFor(form.meetingPlatform)}
+          options={consentOptions}
           ariaLabel="Meeting consent"
         />
       </FormField>
@@ -239,6 +239,11 @@ VirtualParticipantFormFields.propTypes = {
   passwordPlaceholder: PropTypes.string,
   consentChoice: PropTypes.string.isRequired,
   onConsentChoiceChange: PropTypes.func.isRequired,
+  consentDefaults: PropTypes.shape({
+    Mode: PropTypes.string,
+    Rule: PropTypes.string,
+    AllowPerMeetingOverride: PropTypes.bool,
+  }),
   enableVideoRecording: PropTypes.bool.isRequired,
   onEnableVideoRecordingChange: PropTypes.func.isRequired,
 };
