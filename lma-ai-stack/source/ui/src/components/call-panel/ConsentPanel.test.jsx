@@ -52,6 +52,23 @@ describe('ConsentPanel', () => {
     expect(screen.getByText('The consent record could not be read: Network error')).toBeInTheDocument();
   });
 
+  it('shows present placeholder seats as one line and leaves out those no longer present', () => {
+    const consent = {
+      ...CONSENT,
+      Participants: ['Bo Chen', 'Unidentified participant 1', 'Unidentified participant 2'],
+      ParticipantsSeen: [
+        'Bo Chen',
+        'Unidentified participant 1',
+        'Unidentified participant 2',
+        'Unidentified participant 3',
+      ],
+    };
+    render(<ConsentPanel state={stateWith({ consent })} />);
+    expect(screen.getByText('2 participants not yet identified')).toBeInTheDocument();
+    expect(screen.queryByText(/^Unidentified participant/)).not.toBeInTheDocument();
+    expect(screen.getAllByText('No reply')).toHaveLength(1);
+  });
+
   it('offers attestation only where it grants the meeting', () => {
     const eachParticipant = { ...CONSENT, Rule: 'each_participant' };
     render(<ConsentPanel state={stateWith({ consent: eachParticipant })} canEdit isOwner />);

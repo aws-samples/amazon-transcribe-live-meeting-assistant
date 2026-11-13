@@ -86,8 +86,23 @@ export const latestDecisions = (events) => {
 };
 
 /**
+ * Whether a name is one of the seats the Virtual Participant lists for people
+ * it has counted but not yet seen by name, on platforms that give only an
+ * attendee count ("Unidentified participant 2"; consent-roster.ts in the
+ * Virtual Participant). Such a seat is not a person: the same seat number can
+ * stand for somebody else after the count changes. "Unidentified participant"
+ * with no number is how a reply with no sender is recorded, and is not a seat.
+ */
+export const isPlaceholderSeat = (name) => /^unidentified participant \d+$/.test(normalizeName(name));
+
+/**
  * One row per participant: everyone listed as present now, then anybody else
  * who replied or was listed earlier, each with their latest reply.
+ *
+ * Placeholder seats (isPlaceholderSeat) are not rows: one that is present is
+ * counted by unidentifiedPresentCount instead, and one that is no longer
+ * present is not shown at all. A seat with a reply recorded under its name
+ * stays a row, so the record's replies are all shown.
  */
 export const participantRows = (consent) => {
   if (!consent) return [];
@@ -99,13 +114,30 @@ export const participantRows = (consent) => {
     const key = normalizeName(name);
     if (!key || seen.has(key)) return;
     seen.add(key);
-    rows.push({ name, present: present.has(key), decision: decisions.get(key) || null });
+    const decision = decisions.get(key) || null;
+    if (isPlaceholderSeat(name) && !decision) return;
+    rows.push({ name, present: present.has(key), decision });
   };
   (consent.Participants || []).forEach(add);
   (consent.ParticipantsSeen || []).forEach(add);
   (consent.Events || []).filter((e) => e && e.Source !== 'attestation').forEach((e) => add(e.ParticipantName));
   return rows;
 };
+
+/** How many placeholder seats are listed as present now, with no reply under their name. */
+export const unidentifiedPresentCount = (consent) => {
+  if (!consent) return 0;
+  const decisions = latestDecisions(consent.Events);
+  const seats = new Set(
+    (consent.Participants || [])
+      .filter((name) => isPlaceholderSeat(name) && !decisions.get(normalizeName(name)))
+      .map(normalizeName),
+  );
+  return seats.size;
+};
+
+/** "1 participant not yet identified", "2 participants not yet identified". */
+export const unidentifiedLabel = (count) => `${count} participant${count === 1 ? '' : 's'} not yet identified`;
 
 const describeEvent = (event) => {
   const who = event.ParticipantName || 'Someone';
@@ -199,12 +231,14 @@ export const consentAsText = (consent) => {
     );
   }
   const rows = participantRows(consent);
-  if (rows.length) {
+  const unidentified = unidentifiedPresentCount(consent);
+  if (rows.length || unidentified) {
     lines.push('', 'Participants:');
     rows.forEach((row) => {
       const reply = row.decision ? row.decision : 'no reply';
       lines.push(`- ${row.name}: ${reply}${row.present ? '' : ' (not present at the time of this download)'}`);
     });
+    if (unidentified) lines.push(`- ${unidentifiedLabel(unidentified)}`);
   }
   const timeline = buildTimeline(consent);
   if (timeline.length) {

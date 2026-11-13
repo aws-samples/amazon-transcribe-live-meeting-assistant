@@ -42,6 +42,8 @@ import {
   buildTimeline,
   participantRows,
   statusIndicatorType,
+  unidentifiedLabel,
+  unidentifiedPresentCount,
   verdictColor,
 } from '../common/meeting-consent';
 
@@ -270,6 +272,7 @@ const ConsentPanel = ({ state, canEdit = false, isOwner = false, isAdmin = false
   }
 
   const rows = participantRows(consent);
+  const unidentified = unidentifiedPresentCount(consent);
   const timeline = buildTimeline(consent);
   const evidence = consent.Evidence || [];
   const attestation = consent.Attestation;
@@ -337,7 +340,7 @@ const ConsentPanel = ({ state, canEdit = false, isOwner = false, isAdmin = false
           </div>
         )}
 
-        {rows.length > 0 && (
+        {(rows.length > 0 || unidentified > 0) && (
           <div>
             <Box variant="awsui-key-label">Participants</Box>
             <SpaceBetween size="xxs">
@@ -352,6 +355,8 @@ const ConsentPanel = ({ state, canEdit = false, isOwner = false, isAdmin = false
                   )}
                 </SpaceBetween>
               ))}
+              {/* Seats counted on a platform that gives only a count, not people. */}
+              {unidentified > 0 && <Box color="text-body-secondary">{unidentifiedLabel(unidentified)}</Box>}
             </SpaceBetween>
           </div>
         )}

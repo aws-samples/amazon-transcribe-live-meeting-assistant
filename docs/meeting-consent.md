@@ -211,7 +211,13 @@ on its **Details** tab. It shows:
 - the **notice** posted, and when it was first posted;
 - the **participants**: everyone listed as present, then anybody else who was
   listed or replied, each with their latest reply (*Consented*, *Objected* or
-  *No reply*);
+  *No reply*). The seats a Virtual Participant lists for people it has counted
+  but not yet seen by name (*Unidentified participant 1*, …; see
+  [Who is present](#who-is-present)) are not people, so they are not listed one
+  by one: while any are present they are shown as one line, *"2 participants
+  not yet identified"*, and a seat that is no longer present is not shown. An
+  objection recorded for *Unidentified participant* (a reply with no sender) is
+  a participant's reply, and is listed with it;
 - the owner's **attestation**, when there is one;
 - the **evidence** images as thumbnails, each with what it was taken for and,
   when it has been checked, the vision model's verdict (shown as *Image check:*,
@@ -253,7 +259,8 @@ Three actions, each offered only to the people the backend lets do it:
 The summary's downloads and its copy to the clipboard, under **Download** in
 the meeting page's header, add the consent record after the summary: the
 mode, rule and status, whether capture was allowed at the time of the download,
-the notice, the attestation, each participant's latest reply, the timeline, and
+the notice, the attestation, each participant's latest reply (with the
+seats not yet identified counted on one line, as on the page), the timeline, and
 each evidence image, described by its note with when it was captured and its
 image check (*"- Meeting chat when Bo Chen objected (screenshot captured
 2026-11-02T10:02:30.000Z). Image check: Objection found (model
@@ -661,7 +668,8 @@ rule, so it is never allowed to be shorter than the meeting:
   browser joins, and the Zoom Meeting SDK join), the list is the names the VP
   has seen since the count last went up, as the active speaker, as the speaker
   of a spoken reply, or as a chat sender, plus one
-  *Unidentified participant N* for each seat no name accounts for. An
+  *Unidentified participant N* for each seat no name accounts for (the meeting
+  page counts these seats on one line rather than listing them). An
   unidentified participant can never consent, so the meeting is not granted
   until everybody present has spoken or written in the chat, and consented.
   When the count goes up, the names seen before stop counting, because one of
