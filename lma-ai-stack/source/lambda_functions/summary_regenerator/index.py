@@ -343,6 +343,7 @@ _CALL_FIELDS = """
       CallSummaryText
       CallSummaryState
       DetectedLanguages
+      TranscriptionPause
       SpeakerIdentities
       Agenda
       AgendaSource
