@@ -81,6 +81,9 @@ NOTICE_CHANNELS: Tuple[str, ...] = ("chat", "voice", "banner", "invite")
 ATTESTATION_METHODS: Tuple[str, ...] = ("verbal", "chat", "invite_terms")
 
 #: The deployment settings when the configuration section holds nothing. The
+#: notice texts carry no reply instruction: each capture client adds its own
+#: (the Virtual Participant posts a line giving the "LMA, <phrase>" form after
+#: the notice), so a customised text is posted as written. The
 #: seeder's shipped defaults (configuration_seeder/defaults/MeetingConsent.json)
 #: carry the same values; a test holds the two together.
 DEFAULT_SETTINGS: Dict[str, Any] = {
@@ -88,13 +91,11 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "consentRule": RULE_EACH_PARTICIPANT,
     "notifyNoticeText": (
         "{LMA_USER} is using Live Meeting Assistant to record and transcribe this meeting "
-        '({meeting}). If you do not agree, reply "{objection_phrase}" in the chat or say '
-        "so, and recording and transcription will stop."
+        "({meeting}). If you do not agree, say so, and recording and transcription will stop."
     ),
     "optInNoticeText": (
         "{LMA_USER} would like to record and transcribe this meeting ({meeting}) with Live "
-        "Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed. "
-        'Reply "{consent_phrase}" to agree, or "{objection_phrase}" to decline.'
+        "Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed."
     ),
     "consentPhrases": "I consent, I agree, I accept",
     "objectionPhrases": (

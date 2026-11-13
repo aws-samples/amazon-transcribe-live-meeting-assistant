@@ -21,7 +21,7 @@ import {
     splitPhrases,
     strictness,
 } from './consent-matcher.js';
-import { CONSENT_HELP_LINE, CONSENT_HELP_SPOKEN_LINE } from './consent-help.js';
+import { consentHelpLineFor } from './consent-help.js';
 import { DEFAULT_CONSENT_SETTINGS } from './meeting-consent.js';
 
 const CONSENT = DEFAULT_CONSENT_SETTINGS.consentPhrases;
@@ -131,6 +131,9 @@ test('an objection phrase inside quotation marks is not searched for', () => {
         'If you do not agree, reply “I object” in the chat.',
         "Type 'stop recording' if you want it to stop",
         'Replies may be typed in this chat, or said aloud starting with "LMA": say "LMA, I consent" or "LMA, I object".',
+        'Type or say "LMA, I consent" or "LMA, I object".',
+        'Say "LMA, I consent" or "LMA, I object".',
+        'Type "LMA, I consent" or "LMA, I object" in this chat. An objection made out loud takes effect when Bo records it in LMA.',
     ]) {
         assert.equal(classify(message), null, message);
     }
@@ -155,7 +158,7 @@ test('the shipped notices and help lines, posted by someone other than this VP, 
             assert.equal(classify(message), null, message);
         }
     }
-    for (const line of [CONSENT_HELP_LINE, CONSENT_HELP_SPOKEN_LINE]) {
+    for (const line of [consentHelpLineFor('chat'), consentHelpLineFor('chat_and_voice'), consentHelpLineFor('voice')]) {
         assert.equal(classify(line), null, line);
     }
 });

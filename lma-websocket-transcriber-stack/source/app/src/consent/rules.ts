@@ -65,12 +65,10 @@ export const DEFAULT_SETTINGS: Readonly<Record<string, string | boolean>> = {
     consentRule: RULE_EACH_PARTICIPANT,
     notifyNoticeText:
         '{LMA_USER} is using Live Meeting Assistant to record and transcribe this meeting ' +
-        '({meeting}). If you do not agree, reply "{objection_phrase}" in the chat or say ' +
-        'so, and recording and transcription will stop.',
+        '({meeting}). If you do not agree, say so, and recording and transcription will stop.',
     optInNoticeText:
         '{LMA_USER} would like to record and transcribe this meeting ({meeting}) with Live ' +
-        'Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed. ' +
-        'Reply "{consent_phrase}" to agree, or "{objection_phrase}" to decline.',
+        'Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed.',
     consentPhrases: 'I consent, I agree, I accept',
     objectionPhrases:
         'I object, I do not consent, I don\'t consent, I do not agree, I don\'t agree, ' +

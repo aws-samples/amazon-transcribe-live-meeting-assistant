@@ -154,8 +154,8 @@ the `ConfigurationPreset` stack parameter; see
 |---|---|---|
 | Consent mode | Off, Notify or Opt-in | Off |
 | Consent rule (opt-in) | Each participant consents, or the meeting owner attests | Each participant consents |
-| Notice text (notify) | The notice a notify meeting posts | "{LMA_USER} is using Live Meeting Assistant to record and transcribe this meeting ({meeting}). If you do not agree, reply "{objection_phrase}" in the chat or say so, and recording and transcription will stop." |
-| Consent request text (opt-in) | The request an opt-in meeting posts | "{LMA_USER} would like to record and transcribe this meeting ({meeting}) with Live Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed. Reply "{consent_phrase}" to agree, or "{objection_phrase}" to decline." |
+| Notice text (notify) | The notice a notify meeting posts | "{LMA_USER} is using Live Meeting Assistant to record and transcribe this meeting ({meeting}). If you do not agree, say so, and recording and transcription will stop." |
+| Consent request text (opt-in) | The request an opt-in meeting posts | "{LMA_USER} would like to record and transcribe this meeting ({meeting}) with Live Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed." |
 | Consent phrases | Comma-separated phrases read as consent | I consent, I agree, I accept |
 | Objection phrases | Comma-separated phrases read as an objection | I object, I do not consent, I don't consent, I do not agree, I don't agree, do not record, don't record, stop recording |
 | Allow a different choice per meeting | Whether a meeting may be started with another mode, rule or notice | On |
@@ -168,6 +168,15 @@ the `ConfigurationPreset` stack parameter; see
 In the two texts, `{LMA_USER}` is the person using LMA in the meeting,
 `{meeting}` the meeting's name, and `{consent_phrase}` and `{objection_phrase}`
 the first phrase of each list. Any other text in braces is posted as written.
+The shipped texts say nothing about how to reply, because each capture method
+reads replies in its own way: a Virtual Participant posts one line after the
+notice that gives the reply in the form it reads (see
+[How the Virtual Participant asks for replies](#how-the-virtual-participant-asks-for-replies)),
+and Stream Audio and the Desktop Capture App show the notice to the LMA user,
+who confirms how everyone agreed. A customised text is posted as written,
+placeholders filled in, and the Virtual Participant's line still follows it, so
+a text customised before this line existed and that carries its own reply
+instruction gives both.
 
 With **Allow a different choice per meeting** off, a meeting may still be
 started with a *stricter* choice than the default — opt-in in a notify
@@ -356,8 +365,35 @@ always passes the parameter. In the same way, if it
 cannot read the meeting's own choice from its row (it tries three times before
 joining), it withholds capture and does not start the meeting's consent until a
 later read succeeds, because the choice it could not read may have been
-opt-in. While the meeting runs a consent flow, `LMA help` also lists
-`LMA consent` and `LMA no consent`.
+opt-in. While the meeting runs a consent flow, `LMA help` also gives the
+consent replies, in the same form as the notice's reply line: *"Meeting
+consent: type or say "LMA, I consent" to agree to recording and transcription,
+or "LMA, I object" to object."*, with *"type in this chat"* instead of *"type
+or say"* where spoken replies are not read, and *"say"* on the Teams browser
+join.
+
+### How the Virtual Participant asks for replies
+
+Every notice the VP posts is followed by one line that says how to reply, in
+one form for the chat and for speech: `LMA`, a comma, and the deployment's
+first consent or objection phrase. With the shipped phrases the line is:
+
+- *"Type or say "LMA, I consent" or "LMA, I object"."* where spoken replies
+  are read (the default);
+- *"Type "LMA, I consent" or "LMA, I object" in this chat. An objection made
+  out loud takes effect when <LMA user> records it in LMA."* where **Read
+  spoken replies** is off;
+- *"Say "LMA, I consent" or "LMA, I object"."* on the Teams browser join, which
+  shows no chat senders, so a typed consent cannot be attributed there (see
+  [Who is present](#who-is-present)); with **Read spoken replies** off it gets
+  the chat line above.
+
+The line is the same in notify and opt-in meetings. Every other VP message that
+says how to reply uses the same form: the acknowledgement of an objection (see
+[Objections](#objections)), the answer to a consent whose sender cannot be
+told, the detail line on the Teams browser join, and `LMA help`. The form is a
+suggestion, not a requirement: a bare *"I consent"* typed in the chat is still
+consent (see [Replies in the chat](#replies-in-the-chat)).
 
 ### Notify
 
@@ -426,15 +462,14 @@ and while capture is still stopped by the first, is acted on and recorded once.
   VP stays, and listens for spoken replies while capture is stopped. Each
   participant's latest reply is the one that counts, so if the objector later
   replies with consent, in the chat or aloud, capture resumes, as the
-  acknowledgement says. Its last sentence gives the forms of reply this VP
-  reads, with the deployment's first consent phrase: *"If <name> types "I
-  consent" in the chat or says "LMA, I consent", it can continue."* where
-  spoken replies are read, because a reply said aloud counts only when it is
-  addressed to LMA; *"If <name> says "LMA, I consent" aloud, it can
-  continue."* on the Teams browser join, which shows no chat senders; and *"If
-  <name> replies "I consent", it can continue."* where spoken replies are not
-  read. An objection with no sender gets no such sentence, because a consent
-  needs a sender. The transcript and the audio recording resume; the screen recording does
+  acknowledgement says. Its last sentence gives the reply in the form of the
+  notice's reply line, with the deployment's first consent phrase: *"If <name>
+  types or says "LMA, I consent", it can continue."* where spoken replies are
+  read; *"If <name> says "LMA, I consent", it can continue."* on the Teams
+  browser join, which shows no chat senders; and *"If <name> types "LMA, I
+  consent" in this chat, it can continue."* where spoken replies are not read.
+  An objection with no sender gets no such sentence, because a consent needs a
+  sender. The transcript and the audio recording resume; the screen recording does
   not. It stops for the rest of the meeting the first time capture is withheld
   after it started, and what it recorded until then is kept on the meeting as
   usual.
@@ -512,15 +547,15 @@ reads its own messages as replies.
 
 With **Read spoken replies** on (the shipped default), the VP also reads
 replies said aloud, on every join and with either transcription engine, and
-every notice it posts is followed by *"Replies may be typed in this chat, or
-said aloud starting with "LMA": say "LMA, I consent" or "LMA, I object"."*
-(with the deployment's first consent and objection phrases). With it off, the
-VP reads the chat only, as it did before spoken replies, sends no meeting audio
-anywhere while consent is awaited, does not read spoken objections from the
-transcription while capture runs, and follows every notice instead with *"Live
-Meeting Assistant reads replies in this chat; an objection made out loud takes
-effect when <LMA user> records it in LMA."*, which **Record an objection** in
-the Consent section does. The VP reads the setting before it joins; if it
+every notice it posts is followed by *"Type or say "LMA, I consent" or "LMA, I
+object"."* (with the deployment's first consent and objection phrases; see
+[How the Virtual Participant asks for replies](#how-the-virtual-participant-asks-for-replies)).
+With it off, the VP reads the chat only, as it did before spoken replies, sends
+no meeting audio anywhere while consent is awaited, does not read spoken
+objections from the transcription while capture runs, and follows every notice
+instead with *"Type "LMA, I consent" or "LMA, I object" in this chat. An
+objection made out loud takes effect when <LMA user> records it in LMA."*,
+which **Record an objection** in the Consent section does. The VP reads the setting before it joins; if it
 cannot read the Meeting Consent section, it reads the chat only.
 
 **What counts as a spoken reply.** Only an utterance addressed to LMA is a

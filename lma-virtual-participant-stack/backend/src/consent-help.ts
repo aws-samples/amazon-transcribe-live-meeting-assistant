@@ -9,28 +9,51 @@
  * (meeting-consent.ts), and whether it does. Dependency-free, so chat-help.ts
  * can read it without importing the flow.
  *
- * It names the built-in replies only, which the flow accepts whatever phrases
- * the deployment configured (consent-matcher.ts). Where the deployment reads
- * spoken replies, which count only when addressed to LMA, it says so.
+ * It gives the replies in the one form the notice's reply line gives ("LMA,
+ * <phrase>", with the deployment's first consent and objection phrases), by
+ * the routes this VP reads: typed or said where spoken replies are read, typed
+ * otherwise, and said where the platform shows no chat sender.
  */
-export const CONSENT_HELP_LINE =
-    'Meeting consent: reply "LMA consent" to agree to recording and transcription, or "LMA no consent" to object.';
 
-/** The line where spoken replies are read too. */
-export const CONSENT_HELP_SPOKEN_LINE =
-    'Meeting consent: reply "LMA consent" to agree to recording and transcription, or "LMA no consent" to object, typed here or said aloud.';
+export interface ConsentHelpPhrases {
+    consent: string;
+    objection: string;
+}
+
+const DEFAULT_PHRASES: ConsentHelpPhrases = { consent: 'I consent', objection: 'I object' };
+
+/** How replies are read in the meeting, which decides the line's wording. */
+export type ConsentHelpRoute = 'chat' | 'chat_and_voice' | 'voice';
+
+/** The line for one route and pair of phrases. */
+export function consentHelpLineFor(route: ConsentHelpRoute, phrases: ConsentHelpPhrases = DEFAULT_PHRASES): string {
+    const consent = `"LMA, ${phrases.consent}"`;
+    const objection = `"LMA, ${phrases.objection}"`;
+    const how = route === 'chat' ? 'type in this chat' : route === 'voice' ? 'say' : 'type or say';
+    return `Meeting consent: ${how} ${consent} to agree to recording and transcription, or ${objection} to object.`;
+}
 
 let consentFlowActive = false;
 
-let spokenRepliesRead = false;
+let route: ConsentHelpRoute = 'chat';
+
+let currentPhrases: ConsentHelpPhrases = DEFAULT_PHRASES;
 
 /**
  * Set by the consent flow when it starts running in the meeting, and cleared
- * when it stops; `spoken` when it also reads replies said aloud.
+ * when it stops; `spoken` when it also reads replies said aloud,
+ * `sendersHidden` where the platform shows no chat sender, and the
+ * deployment's first phrases.
  */
-export function setConsentHelpActive(active: boolean, spoken = false): void {
+export function setConsentHelpActive(
+    active: boolean,
+    spoken = false,
+    phrases: ConsentHelpPhrases = DEFAULT_PHRASES,
+    sendersHidden = false,
+): void {
     consentFlowActive = active;
-    spokenRepliesRead = active && spoken;
+    route = !active || !spoken ? 'chat' : sendersHidden ? 'voice' : 'chat_and_voice';
+    currentPhrases = phrases;
 }
 
 export function consentHelpActive(): boolean {
@@ -39,5 +62,5 @@ export function consentHelpActive(): boolean {
 
 /** The line to post now. */
 export function consentHelpLine(): string {
-    return spokenRepliesRead ? CONSENT_HELP_SPOKEN_LINE : CONSENT_HELP_LINE;
+    return consentHelpLineFor(route, currentPhrases);
 }

@@ -251,8 +251,16 @@ def test_the_notice_placeholders_are_filled() -> None:
         objection_phrase="I object",
     )
     assert text.startswith("Ana would like to record and transcribe this meeting (Weekly sync)")
-    assert '"I consent"' in text and '"I object"' in text
     assert "{" not in text
+    # The shipped texts carry no reply instruction: each capture client adds
+    # its own. A customised text may still name the phrases.
+    assert "Reply" not in text and "I consent" not in text
+    custom = rules.render_notice(
+        'Reply "{consent_phrase}" or "{objection_phrase}".',
+        consent_phrase="I consent",
+        objection_phrase="I object",
+    )
+    assert custom == 'Reply "I consent" or "I object".'
     assert rules.render_notice("{other} {LMA_USER}") == "{other} The meeting organizer"
 
 

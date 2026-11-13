@@ -166,10 +166,11 @@ test('every command the help reply lists is accepted by its matcher', () => {
     // matchers fails here rather than in a meeting.
     const listed = [...new Set(allChatHelpMessages()
         .join(' ')
-        .match(/"LMA [^"]+"/g)!
+        .match(/"LMA,? [^"]+"/g)!
         .map((quoted) => quoted.slice(1, -1)))];
     // leave, pause, start, ask and help, one canonical form per mode command,
-    // mute and unmute, the two consent replies, and help addressed to this VP
+    // mute and unmute, the two consent replies ("LMA, I consent" and "LMA, I
+    // object", in the reply line's form), and help addressed to this VP
     // by name.
     assert.equal(listed.length, 5 + ASSISTANT_CHAT_COMMANDS.length + VOICE_CONTROL_COMMANDS.length + 2 + 1);
     // The addressed form, read as this VP reads it (chat-addressing.ts).
@@ -251,10 +252,11 @@ test('the help reply lists mute and unmute whenever a voice assistant is running
 });
 
 test('the help reply lists the consent replies only while the meeting runs a consent flow', () => {
-    assert.ok(!chatHelpMessages(NO_ASSISTANT, false, false, false).join(' ').includes('LMA consent'));
+    assert.ok(!chatHelpMessages(NO_ASSISTANT, false, false, false).join(' ').includes('Meeting consent'));
     const withConsent = chatHelpMessages(NO_ASSISTANT, false, true, false);
     assert.equal(withConsent.length, 2);
-    assert.ok(withConsent[1].includes('"LMA consent"') && withConsent[1].includes('"LMA no consent"'));
+    // The same "LMA, <phrase>" form as the line after the notice.
+    assert.ok(withConsent[1].includes('"LMA, I consent"') && withConsent[1].includes('"LMA, I object"'), withConsent[1]);
 });
 
 test('every help message is one short line', () => {
