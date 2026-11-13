@@ -103,7 +103,7 @@ settings:
 
 The Virtual Participant reads the meeting chat and speech by its own rules: a
 typed consent must be the whole message, a typed objection may be part of a
-message of up to 200 characters unless the message quotes the phrase, and a
+message of up to 200 characters when it stands outside quotation marks, and a
 spoken reply counts only when it is addressed to LMA. See
 [Replies in the chat](#replies-in-the-chat) and
 [Spoken replies](#spoken-replies).
@@ -475,11 +475,14 @@ reading a message as an objection can only stop capture, never start it.
     **Virtual Participant leaves after an objection** on, the VP leaves. Remove
     `I do not agree` and `I don't agree` from the objection phrases where that
     is too eager for a deployment's meetings.
-- A message that quotes an objection phrase, in double or single quotation
-  marks, is telling people how to reply and is not an objection (*'Reply "I
-  consent" to agree, or "I object" to decline.'*), so another LMA's notice in
-  the same meeting, or one pasted from Stream Audio, is not read as a reply.
-  The phrase on its own is still one, quoted or not.
+- Only the text outside quotation marks (double or single) is searched for an
+  objection phrase, so a message that quotes one to tell people how to reply is
+  not an objection (*'Reply "I consent" to agree, or "I object" to decline.'*),
+  and another LMA's notice in the same meeting, or one pasted from Stream
+  Audio, is not read as a reply. A phrase outside the quotation marks still
+  counts (*'LMA, "stop recording" please'* does not, *'Bo said "stop
+  recording", and I agree: stop recording'* does), and the phrase typed on its
+  own is an objection, quoted or not.
 - A message longer than 200 characters is searched for no phrase.
 - Objections are looked for first, so *"LMA I do not consent"* is an objection.
 - Anything else is ordinary chat.

@@ -1107,10 +1107,14 @@ meeting after an objection. With mode Off it behaves as before, apart from a
 short read of its own row before joining, where a per-meeting choice is stored;
 see [Choosing the mode for one meeting](meeting-consent.md#choosing-the-mode-for-one-meeting).
 
-A reply is the whole chat message, as for the commands above: the configured
-consent and objection phrases (by default *"I consent"*, *"I agree"*, *"I
-accept"*, and *"I object"*, *"I do not consent"*, *"stop recording"* and
-others), or `LMA consent`, `LMA no consent` and `LMA object`. Said aloud, a
+A consent reply is the whole chat message, as for the commands above: one of
+the configured consent phrases (by default *"I consent"*, *"I agree"*, *"I
+accept"*) or `LMA consent`. An objection is one of the configured objection
+phrases (by default *"I object"*, *"I do not consent"*, *"stop recording"* and
+others), `LMA no consent` or `LMA object`, or a chat message of up to 200
+characters that contains an objection phrase outside quotation marks (*"I
+object to this meeting being recorded"*); see
+[Replies in the chat](meeting-consent.md#replies-in-the-chat). Said aloud, a
 reply counts only when it is addressed to LMA: *"LMA, I consent"* or *"LMA
 consent"*, and *"LMA, I object"* or *"LMA, please stop recording"*. Which platforms
 support which rule, how the participants present are counted, and what is

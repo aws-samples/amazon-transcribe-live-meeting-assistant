@@ -23,13 +23,13 @@
  * whole words ("LMA, please stop recording now", "I object to this meeting
  * being recorded", "I agree with Sam, but I don't consent to being recorded")
  * is an objection, addressed to LMA or not. Reading more messages as
- * objections can only stop capture, never start it. Three kinds of message
- * that mention an objection phrase are still not objections: a longer one,
- * which explains the phrases rather than using them (another bot's notice);
- * one that quotes an objection phrase, which tells people how to reply ('If you
- * do not agree, reply "I object".'); and an `LMA ask` question, which is a
- * question for the meeting assistant, whatever it mentions. The phrase typed
- * on its own, quoted or not, is still an objection.
+ * objections can only stop capture, never start it. Only the text outside
+ * quotation marks is searched, so a phrase quoted to tell people how to reply
+ * ('If you do not agree, reply "I object".') is not an objection, while the
+ * phrase typed on its own, quoted or not, still is. Two kinds of message are
+ * not searched at all: a longer one, which explains the phrases rather than
+ * using them (another bot's notice), and an `LMA ask` question, which is a
+ * question for the meeting assistant, whatever it mentions.
  *
  * Besides the configured phrases, "LMA consent" is always consent and "LMA no
  * consent" and "LMA object" are always objections, so a participant can reply
@@ -75,6 +75,14 @@ export function splitPhrases(value: unknown): string[] {
     return parts.map((part) => part.trim()).filter((part) => part.length > 0);
 }
 
+/**
+ * Text between quotation marks: double quotes straight or curly, guillemets,
+ * corner brackets, and single quotes whose closing mark is not followed by a
+ * letter, so the apostrophe in "don't" closes nothing.
+ */
+const QUOTED =
+    /["“”„«»「」『』][^"“”„«»「」『』]+["“”„«»「」『』]|(?:^|[^\p{L}\p{N}])['‘].+?['’](?=$|[^\p{L}\p{N}])/gu;
+
 function containsPhrase(words: string, phrase: string): boolean {
     return phrase.length > 0 && ` ${words} `.includes(` ${phrase} `);
 }
@@ -102,18 +110,24 @@ export function classifyChatReply(
 
     // The contains test is held to a sentence's length, so a long message
     // that merely explains the phrases (another bot's notice, say) is not
-    // read as somebody objecting; nor is one that quotes an objection phrase
-    // ('reply "I object" to decline'), which tells people how to reply.
-    const searchable =
-        message.trim().length <= MAX_OBJECTION_SENTENCE_LENGTH && !quotesAPhrase(message, objections);
+    // read as somebody objecting. It searches only the text outside quotation
+    // marks, so a phrase quoted to tell people how to reply ('reply "I
+    // object" to decline') is not read as one either.
+    const unquoted =
+        message.trim().length <= MAX_OBJECTION_SENTENCE_LENGTH
+            ? normalizeReplyText(message.replace(QUOTED, ' '))
+                  .split(' ')
+                  .filter((token) => token !== 'lma')
+                  .join(' ')
+            : '';
+    const contained = objections.some((phrase) => containsPhrase(unquoted, phrase));
 
     if (addressed) {
         // Nor is a question for the meeting assistant ("LMA ask what do we
         // say if a client asks us to stop recording?"), which is answered as
         // one: only the exact forms are objections there.
         const question = rest === 'ask' || rest.startsWith('ask ');
-        const contained = !question && searchable && objections.some((phrase) => containsPhrase(rest, phrase));
-        if (BUILT_IN_OBJECTION_PHRASES.includes(rest) || objections.includes(rest) || contained) {
+        if (BUILT_IN_OBJECTION_PHRASES.includes(rest) || objections.includes(rest) || (contained && !question)) {
             return 'objection';
         }
         if (BUILT_IN_CONSENT_PHRASES.includes(rest) || consents.includes(rest)) {
@@ -125,25 +139,8 @@ export function classifyChatReply(
     // objection too. Consent stays exact.
     if (objections.includes(whole)) return 'objection';
     if (consents.includes(whole)) return 'consent';
-    if (searchable && objections.some((phrase) => containsPhrase(whole, phrase))) return 'objection';
+    if (contained) return 'objection';
     return null;
-}
-
-/**
- * Text between quotation marks: double quotes straight or curly, guillemets,
- * corner brackets, and single quotes whose closing mark is not followed by a
- * letter, so the apostrophe in "don't" closes nothing.
- */
-const QUOTED =
-    /["“”„«»「」『』]([^"“”„«»「」『』]+)["“”„«»「」『』]|(?:^|[^\p{L}\p{N}])['‘](.+?)['’](?=$|[^\p{L}\p{N}])/gu;
-
-/** Whether `message` has one of `phrases` (normalised) inside quotation marks. */
-function quotesAPhrase(message: string, phrases: readonly string[]): boolean {
-    for (const match of message.matchAll(QUOTED)) {
-        const quoted = normalizeReplyText(match[1] ?? match[2] ?? '');
-        if (phrases.some((phrase) => containsPhrase(quoted, phrase))) return true;
-    }
-    return false;
 }
 
 /**

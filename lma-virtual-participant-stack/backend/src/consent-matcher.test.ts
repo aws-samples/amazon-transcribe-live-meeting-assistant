@@ -21,6 +21,7 @@ import {
     splitPhrases,
     strictness,
 } from './consent-matcher.js';
+import { CONSENT_HELP_LINE, CONSENT_HELP_SPOKEN_LINE } from './consent-help.js';
 import { DEFAULT_CONSENT_SETTINGS } from './meeting-consent.js';
 
 const CONSENT = DEFAULT_CONSENT_SETTINGS.consentPhrases;
@@ -124,7 +125,7 @@ test('a sentence with both a consent and an objection phrase is an objection', (
     assert.equal(classify('I agree, but I object to the recording'), 'objection');
 });
 
-test('a message that quotes an objection phrase is not an objection', () => {
+test('an objection phrase inside quotation marks is not searched for', () => {
     for (const message of [
         'Reply "I consent" to agree, or "I object" to decline.',
         'If you do not agree, reply “I object” in the chat.',
@@ -138,16 +139,24 @@ test('a message that quotes an objection phrase is not an objection', () => {
     // The phrase on its own, quoted, is still a reply.
     assert.equal(classify('"I object"'), 'objection');
     assert.equal(classify('LMA "I object"'), 'objection');
-    // A quoted phrase anywhere makes the whole message a quotation, by design.
-    assert.equal(classify('Bo said "stop recording" and I agree, stop recording'), null);
 });
 
-test('the shipped notices, posted by someone other than this VP, are not replies', () => {
+test('an objection phrase outside quotation marks is still found in a message that quotes one', () => {
+    assert.equal(classify('Bo said "stop recording" and I agree, stop recording'), 'objection');
+    assert.equal(classify('LMA, please stop recording, as in "do not record"'), 'objection');
+    // Only the quoted text names the phrase here, so nothing is left to find.
+    assert.equal(classify('LMA, "stop recording" please'), null);
+});
+
+test('the shipped notices and help lines, posted by someone other than this VP, are not replies', () => {
     const values = { lmaUser: 'Bo', meeting: 'Sync', consentPhrase: 'I consent', objectionPhrase: 'I object' };
     for (const template of [DEFAULT_CONSENT_SETTINGS.notifyNoticeText, DEFAULT_CONSENT_SETTINGS.optInNoticeText]) {
         for (const message of noticeChatMessages(renderNotice(template, values))) {
             assert.equal(classify(message), null, message);
         }
+    }
+    for (const line of [CONSENT_HELP_LINE, CONSENT_HELP_SPOKEN_LINE]) {
+        assert.equal(classify(line), null, line);
     }
 });
 
