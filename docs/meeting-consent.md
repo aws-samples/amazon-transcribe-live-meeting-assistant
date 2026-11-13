@@ -636,7 +636,7 @@ them. Each is a JPEG stored in the recordings bucket under
 `lma-consent-evidence/<meeting>/` and added to the record with
 `addMeetingConsentEvidence`, with a note of what it shows and the event it was
 taken for: *"Meeting chat after the notice was posted"* (notify) or *"… when
-consent was granted"* (opt-in) the first time the status becomes `granted`;
+consent was granted"* (opt-in) when the status becomes `granted` with no objection on the record;
 *"Meeting chat when Bo Chen objected"*; *"… after an objection for Bo Chen was
 recorded in LMA"*; and, when capture resumes after an objection, *"Meeting chat
 when Bo Chen consented"*, naming the latest participant to consent after the
