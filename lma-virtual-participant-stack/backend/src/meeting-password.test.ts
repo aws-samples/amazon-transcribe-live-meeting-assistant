@@ -5,8 +5,9 @@
  */
 
 /**
- * The meeting password the Virtual Participant enters: the same rule as the
- * invitation parser's normalize_meeting_password, applied to every way a
+ * The meeting password the Virtual Participant enters: the rule of the
+ * invitation parser's normalize_meeting_password (which also maps an empty
+ * result to None and matches only "ZOOM"), applied to every way a
  * password reaches it.
  */
 import assert from 'node:assert/strict';
