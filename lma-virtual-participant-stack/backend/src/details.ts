@@ -158,7 +158,7 @@ class DetailsManager {
     const virtualParticipantId = process.env.VIRTUAL_PARTICIPANT_ID || uuidv4();
 
     // LMA Configuration
-    const lmaIdentity = process.env.LMA_IDENTITY || 'LMA ({LMA_USER})';
+    const lmaIdentity = process.env.LMA_IDENTITY || 'LMA - {LMA_USER}';
     const lmaUser = userName;
 
     // Replace the {LMA_USER} placeholder in messages, and {LMA_HANDLE} with

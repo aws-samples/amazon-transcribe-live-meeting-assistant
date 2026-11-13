@@ -58,6 +58,44 @@ test('a display name answers to its owner part and the first word of it', () => 
     assert.equal(preferredVpHandle('LMA'), null);
 });
 
+// The default display name is `LMA - {LMA_USER}`; it answers to the same
+// handles as the parenthesised form `LMA ({LMA_USER})` that earlier profiles
+// may have saved.
+const BOB_DASH = 'LMA - Bob Strahan';
+const EMAIL_DASH = 'LMA - strahanr@example.com';
+
+test('a "LMA - <owner>" display name answers to the same handles as "LMA (<owner>)"', () => {
+    assert.deepEqual(vpHandles(BOB_DASH), vpHandles(BOB));
+    assert.deepEqual(vpHandles(EMAIL_DASH), vpHandles(EMAIL));
+    assert.equal(preferredVpHandle(BOB_DASH), 'Bob');
+    assert.equal(preferredVpHandle(EMAIL_DASH), 'strahanr');
+    assert.equal(preferredVpHandle('LMA Bob'), 'Bob');
+    assert.deepEqual(vpHandles('LMA -'), []);
+    assert.deepEqual(vpHandles('LMAX - Bob'), []);
+    for (const [message, self] of [
+        ['LMA Bob leave', BOB_DASH],
+        ['LMA strahanr leave', EMAIL_DASH],
+        ['@LMA - Bob Strahan leave', BOB_DASH],
+        ['LMA (Bob Strahan) leave', BOB_DASH],
+    ]) {
+        const route = routeChatMessage(message, 'Carol', self, []);
+        assert.equal(route.act, true, `${message} did not reach ${self}`);
+        assert.equal(route.text, 'LMA leave', message);
+    }
+});
+
+test('two "LMA - <owner>" VPs for two Bobs are told apart as the parenthesised ones are', () => {
+    const smithDash = 'LMA - Bob Smith';
+    assert.equal(routeChatMessage('LMA Bob leave', 'Carol', BOB_DASH, [smithDash]).act, false);
+    assert.equal(routeChatMessage('LMA Bob Smith leave', 'Carol', smithDash, [BOB_DASH]).act, true);
+    assert.equal(routeChatMessage('LMA Bob Smith leave', 'Carol', BOB_DASH, [smithDash]).act, false);
+    assert.equal(addressingVpHandle(BOB_DASH, []), 'Bob');
+    assert.equal(addressingVpHandle(BOB_DASH, [smithDash]), '(Bob Strahan)');
+    assert.equal(routeChatMessage('LMA (Bob Strahan) leave', 'Carol', BOB_DASH, [smithDash]).act, true);
+    // A VP still running under the old default and one under the new tell each other apart too.
+    assert.equal(routeChatMessage('LMA Bob Smith leave', 'Carol', BOB_DASH, ['LMA (Bob Smith)']).act, false);
+});
+
 test('a handle that is a command or question word is not used', () => {
     assert.deepEqual(vpHandles('LMA (Help Desk)'), ['help desk']);
     assert.deepEqual(vpHandles('LMA (Leave)'), []);

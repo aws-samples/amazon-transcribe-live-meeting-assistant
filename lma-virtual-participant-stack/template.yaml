@@ -34,7 +34,7 @@ Parameters:
   # fallback for a VP that cannot read the configuration.
   LMAIdentity:
     Type: String
-    Default: LMA ({LMA_USER})
+    Default: 'LMA - {LMA_USER}'
 
   IntroMessage:
     Type: String
