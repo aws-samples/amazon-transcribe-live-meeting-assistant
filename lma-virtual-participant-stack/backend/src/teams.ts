@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Page } from 'playwright-core';
+import { ElementHandle, Page } from 'playwright-core';
 
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, ExitReasonCode, MeetingInitOptions } from "./details.js";
 import { recordTranscriptionPause } from './transcription-pause.js';
@@ -22,6 +22,16 @@ import { humanClick, humanType, POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-ac
 import { cameraToggleState, CameraToggleState } from './blank-camera.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 import { createLogger } from './logger.js';
+import {
+    chatMenuItemIndex,
+    chatReopenBackoffMs,
+    chatWatchAction,
+    MenuItemInfo,
+    TEAMS_CHAT_WATCH_MS,
+    TEAMS_FAILED_MESSAGE_RETRY_SELECTOR,
+    TEAMS_MENU_ITEM_SELECTOR,
+    TEAMS_MORE_BUTTON_SELECTORS,
+} from './teams-chat-menu.js';
 
 const log = createLogger('teams');
 
@@ -499,12 +509,46 @@ export default class Teams {
 
     // Open the in-meeting chat panel idempotently. No-op if the compose box is
     // already visible (the toolbar button is a toggle — re-clicking would close
-    // it). Otherwise locate the chat button (primary selectors → AI fallback)
-    // and click ONCE, then wait briefly for the input to render. Returns whether
-    // the panel ended up open. Never throws.
+    // it). Otherwise click a chat button in the toolbar when there is one. The
+    // anonymous light-meetings client has none: its chat is an item of the
+    // toolbar's "More" menu (teams-chat-menu.ts), which is tried next, and the
+    // AI resolver last. Returns whether the compose box ended up visible.
+    // Concurrent callers (a post, the chat watch) share one attempt. Never throws.
+    private openingChat: Promise<boolean> | null = null;
+
+    /** The People pane is up for a consent screenshot; the chat watch leaves the side rail alone. */
+    private sidePaneBusy = false;
+
+    /** The meeting has ended; the chat watch stops. */
+    private meetingOver = false;
+
     private async openChatPanel(page: Page): Promise<boolean> {
         if (await this.chatInputVisible(page)) return true;
+        if (!this.openingChat) {
+            this.openingChat = this.openChatPanelNow(page).finally(() => {
+                this.openingChat = null;
+            });
+        }
+        return this.openingChat;
+    }
+
+    private async openChatPanelNow(page: Page): Promise<boolean> {
         try {
+            // The toolbar renders a moment after admission: wait up to ~4 s for
+            // either a chat button or the "More" button.
+            let toolbarButton: Awaited<ReturnType<Teams['firstVisible']>> = null;
+            let more: Awaited<ReturnType<Teams['firstVisible']>> = null;
+            for (let i = 0; i < 8 && !toolbarButton && !more; i += 1) {
+                if (i > 0) await new Promise((r) => setTimeout(r, 500));
+                toolbarButton = await this.firstVisible(page, Teams.CHAT_BUTTON_SELECTORS);
+                if (!toolbarButton) more = await this.firstVisible(page, TEAMS_MORE_BUTTON_SELECTORS);
+            }
+            if (toolbarButton) {
+                log.info(`Opening chat panel (via toolbar selector: ${toolbarButton.selector}).`);
+                await humanClick(page, toolbarButton.element);
+                if (await this.waitForChatInput(page, 4000)) return true;
+            }
+            if (await this.openChatFromMoreMenu(page)) return true;
             const chatBtn = await findElementWithFallback(
                 page,
                 Teams.CHAT_BUTTON_SELECTORS,
@@ -514,7 +558,7 @@ export default class Teams {
                     step: 'teams.meeting.chatButton',
                     useScreenshot: true,
                 },
-                { maxRetries: 8, delayMs: 500 },
+                { maxRetries: 1, delayMs: 0 },
             );
             if (!chatBtn) {
                 log.warn('Could not locate Teams chat panel button — dumping toolbar DOM for diagnosis.');
@@ -527,12 +571,136 @@ export default class Teams {
             log.warn('Opening chat panel failed (non-fatal):', e);
             return false;
         }
-        const until = Date.now() + 4000;
+        return this.waitForChatInput(page, 4000);
+    }
+
+    // Waits up to `ms` for the chat compose box to be visible.
+    private async waitForChatInput(page: Page, ms: number): Promise<boolean> {
+        const until = Date.now() + ms;
         while (Date.now() < until) {
             if (await this.chatInputVisible(page)) return true;
             await new Promise((r) => setTimeout(r, 300));
         }
         return this.chatInputVisible(page);
+    }
+
+    // The first of `selectors` that matches a visible element, without the AI
+    // resolver's retries. Never throws.
+    private async firstVisible(page: Page, selectors: string[]): Promise<{ element: ElementHandle<Element>; selector: string } | null> {
+        for (const selector of selectors) {
+            try {
+                const handle = await page.$(selector);
+                if (handle && (await handle.isVisible())) return { element: handle, selector };
+            } catch {
+                /* try the next selector */
+            }
+        }
+        return null;
+    }
+
+    // The chat through the toolbar's "More" menu, where the toolbar has no chat
+    // button (the anonymous light-meetings client): open the menu, click its
+    // Chat item, and check that the compose box appeared. A menu with no Chat
+    // item is closed again with Escape. Never throws.
+    private async openChatFromMoreMenu(page: Page): Promise<boolean> {
+        try {
+            const more = await this.firstVisible(page, TEAMS_MORE_BUTTON_SELECTORS);
+            if (!more) {
+                log.info('[teams-chat] no chat button and no "More" button in the toolbar.');
+                return false;
+            }
+            log.info(`[teams-chat] opening the chat through the "More" menu (${more.selector}).`);
+            await humanClick(page, more.element);
+            // The menu renders a moment after the click.
+            let items: MenuItemInfo[] = [];
+            for (let i = 0; i < 8 && items.length === 0; i += 1) {
+                await new Promise((r) => setTimeout(r, 250));
+                items = await this.markMenuItems(page);
+            }
+            const index = chatMenuItemIndex(items);
+            let item: ElementHandle<Element> | null = index >= 0 ? await page.$(`[data-lma-menu-item="${index}"]`) : null;
+            let via = index >= 0 ? JSON.stringify(items[index]) : '';
+            if (!item) {
+                // Not recognised from the labels: ask the resolver for the menu item.
+                const found = await findElementWithFallback(
+                    page,
+                    ['[role="menuitem"][aria-label*="chat" i]', '[role="menuitem"][data-tid*="chat" i]'],
+                    {
+                        intent: 'The item of the open Microsoft Teams "More" menu that opens the meeting chat (labelled "Chat"). NOT a close/hide item, NOT chat settings.',
+                        platform: 'TEAMS',
+                        step: 'teams.meeting.moreMenuChat',
+                        useScreenshot: true,
+                    },
+                    { maxRetries: 1, delayMs: 0 },
+                );
+                item = found?.element ?? null;
+                via = found ? `${found.source} selector ${found.selector}` : '';
+            }
+            if (!item) {
+                log.warn(`[teams-chat] the "More" menu has no Chat item; items=${JSON.stringify(items)}`);
+                await page.keyboard.press('Escape').catch(() => undefined);
+                return false;
+            }
+            log.info(`[teams-chat] clicking the "More" menu's Chat item (${via}).`);
+            await humanClick(page, item);
+            const open = await this.waitForChatInput(page, 4000);
+            if (open) log.info('[teams-chat] the chat is open again.');
+            else log.warn('[teams-chat] the Chat item was clicked, but no compose box appeared.');
+            return open;
+        } catch (e) {
+            log.warn('[teams-chat] opening the chat through the "More" menu failed (non-fatal):', e);
+            return false;
+        }
+    }
+
+    // Reads the visible items of the open menu, in order, and tags each with
+    // data-lma-menu-item=<index> so the chosen one can be clicked. Never throws.
+    private async markMenuItems(page: Page): Promise<MenuItemInfo[]> {
+        return page
+            .evaluate((selector: string) => {
+                document.querySelectorAll('[data-lma-menu-item]').forEach((el) => el.removeAttribute('data-lma-menu-item'));
+                const out: { tid?: string; aria?: string; text?: string }[] = [];
+                for (const el of Array.from(document.querySelectorAll(selector))) {
+                    const r = (el as HTMLElement).getBoundingClientRect();
+                    if (r.width <= 0 || r.height <= 0) continue;
+                    el.setAttribute('data-lma-menu-item', String(out.length));
+                    out.push({
+                        tid: el.getAttribute('data-tid') || undefined,
+                        aria: el.getAttribute('aria-label') || undefined,
+                        text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40) || undefined,
+                    });
+                }
+                return out;
+            }, TEAMS_MENU_ITEM_SELECTOR)
+            .catch(() => [] as MenuItemInfo[]);
+    }
+
+    // A message that failed to send shows a "Retry" button in the chat. Each one
+    // is clicked once, and tagged so it is not clicked again. Never throws.
+    private async retryFailedMessages(page: Page): Promise<number> {
+        const clicked = await page
+            .evaluate((selector: string) => {
+                let n = 0;
+                for (const el of Array.from(document.querySelectorAll(selector))) {
+                    if (el.getAttribute('data-lma-retried')) continue;
+                    const r = (el as HTMLElement).getBoundingClientRect();
+                    if (r.width <= 0 || r.height <= 0) continue;
+                    el.setAttribute('data-lma-retried', '1');
+                    (el as HTMLElement).click();
+                    n += 1;
+                }
+                return n;
+            }, TEAMS_FAILED_MESSAGE_RETRY_SELECTOR)
+            .catch(() => 0);
+        if (clicked > 0) log.warn(`[teams-chat] ${clicked} chat message(s) had failed to send; clicked Retry once on each.`);
+        return clicked;
+    }
+
+    // How many failed-message Retry buttons the chat shows now.
+    private async failedMessageCount(page: Page): Promise<number> {
+        return page
+            .evaluate((selector: string) => document.querySelectorAll(selector).length, TEAMS_FAILED_MESSAGE_RETRY_SELECTOR)
+            .catch(() => 0);
     }
 
     // Diagnostic dump of the in-meeting top toolbar buttons (chat/people/etc.)
@@ -667,8 +835,9 @@ export default class Teams {
     // Send button (data-tid="newMessageCommands-send", confirmed via DOM dump);
     // the anon light-meetings composer does not reliably submit on Enter.
     //
-    // Answers true only when every message left the composer; the consent
-    // flow records its notice as posted only then.
+    // Answers true only when every message left the composer and no new
+    // failed-message Retry button appeared while posting; the consent flow
+    // records its notice as posted only then.
     private async sendMessages(page: Page, messages: string[]): Promise<boolean> {
         // So the meeting chat capture knows these when it reads them back.
         noteSentChat(messages);
@@ -677,6 +846,8 @@ export default class Teams {
             if (!(await this.chatInputVisible(page))) {
                 await this.openChatPanel(page);
             }
+            await this.retryFailedMessages(page);
+            const failedBefore = await this.failedMessageCount(page);
             const found = await findElementWithFallback(
                 page,
                 Teams.CHAT_INPUT_SELECTORS,
@@ -778,6 +949,11 @@ export default class Teams {
                     log.info('Chat message submitted (composer cleared).');
                 }
                 await new Promise((resolve) => setTimeout(resolve, 150));
+            }
+            const failedAfter = await this.failedMessageCount(page);
+            if (failedAfter > failedBefore) {
+                all = false;
+                log.warn(`[teams-chat] ${failedAfter - failedBefore} message(s) show as failed to send.`);
             }
             return all;
         } catch (e) {
@@ -1696,7 +1872,9 @@ export default class Teams {
         // tool to run per-message, so it's NOT used per poll; instead it's a
         // bounded fallback (below) that fires once if our heuristic extraction
         // comes up empty for a sustained window, to survive a future redesign.
-        await page.evaluate(() => {
+        // Installed again by the chat watch (watchChat, below) if a reload of
+        // the page removes it.
+        const installChatReader = () => page.evaluate(() => {
             (window as any).__lmaSeenMessages = new Set<string>();
             // Extraction driven by the real anon DOM (confirmed via dump): each
             // message renders an author span [data-tid="message-author-name"]
@@ -1767,6 +1945,7 @@ export default class Teams {
                 return out;
             };
         });
+        await installChatReader();
 
         // One-shot diagnostic dump of the chat-list DOM (confirms real selectors
         // in CloudWatch). Kept — cheap and behind a single call.
@@ -1830,6 +2009,52 @@ export default class Teams {
             if (!page.isClosed()) setTimeout(() => { void pollMessages(); }, 2000);
         };
         void pollMessages();
+
+        // The reader above sees only the rows the chat pane renders, so once
+        // the pane closes (the People pane took its place, or a participant
+        // closed it) nothing is read and nothing can be posted. Every
+        // TEAMS_CHAT_WATCH_MS the pane is checked and, when closed, reopened the
+        // way a post reopens it (openChatPanel, through the "More" menu on the
+        // anonymous client), backing off while it will not open. A reader that
+        // a reload of the page removed is installed again, with what the chat
+        // already shows marked as read so old commands are not run again.
+        let reopenFailures = 0;
+        let lastReopenAt = 0;
+        const watchChat = async (): Promise<void> => {
+            if (page.isClosed() || this.meetingOver) return;
+            try {
+                const readerInstalled = await page
+                    .evaluate(() => typeof (window as any).__lmaScrapeMessages === 'function')
+                    .catch(() => true);
+                const action = chatWatchAction({
+                    paneOpen: await this.chatInputVisible(page),
+                    readerInstalled,
+                    busy: this.sidePaneBusy || this.openingChat !== null,
+                    failures: reopenFailures,
+                    msSinceLastAttempt: Date.now() - lastReopenAt,
+                });
+                if (action === 'reinstall-reader') {
+                    await installChatReader();
+                    const primed = await page
+                        .evaluate((extra) => (window as any).__lmaScrapeMessages(extra).length, aiMessageSelector)
+                        .catch(() => 0);
+                    log.warn(`[teams-chat] the chat reader was gone from the page; installed it again (${primed} message(s) already shown marked as read).`);
+                } else if (action === 'reopen-chat') {
+                    lastReopenAt = Date.now();
+                    log.warn('[teams-chat] the chat pane is closed; reopening it so the chat is read again.');
+                    if (await this.openChatPanel(page)) {
+                        reopenFailures = 0;
+                    } else {
+                        reopenFailures += 1;
+                        log.warn(`[teams-chat] the chat pane could not be reopened (attempt ${reopenFailures}); next try in ${Math.round(chatReopenBackoffMs(reopenFailures) / 1000)} s.`);
+                    }
+                }
+            } catch (e) {
+                log.warn('[teams-chat] the chat check failed (non-fatal):', e);
+            }
+            if (!page.isClosed() && !this.meetingOver) setTimeout(() => { void watchChat(); }, TEAMS_CHAT_WATCH_MS);
+        };
+        setTimeout(() => { void watchChat(); }, TEAMS_CHAT_WATCH_MS);
         } catch (e) {
             // A monitoring-setup failure is non-fatal: the VP is admitted and
             // (below) transcribing. Speaker/attendee attribution may be degraded
@@ -1839,17 +2064,36 @@ export default class Teams {
 
         // The meeting consent flow, when the meeting runs one (meeting-consent.ts).
         // The People pane takes the chat's place in the side rail, so the chat
-        // is reopened after the screenshot of it.
+        // is reopened after the screenshot of it (through the "More" menu on the
+        // anonymous client, which has no chat button). The chat watch leaves
+        // the rail alone while the People pane is up for the screenshot.
+        const rosterPanels = toolbarPanels(page, {
+            listVisible: ['[data-tid="roster-list"]', '[data-tid^="participantsInCall"]', '[data-cid="roster-participant"]'],
+            open: ['#roster-button', 'button[data-inp="roster-button"]', '[data-tid="roster-button"]'],
+            close: [],
+            reopenChat: async () => {
+                const open = await this.openChatPanel(page);
+                if (!open) log.warn('[teams-chat] the chat could not be reopened after the participant-list screenshot; the chat watch tries again.');
+                return open;
+            },
+        });
         attachMeetingConsent(page, {
             send: (messages) => this.sendMessages(page, messages),
             // The chat rows this handler reads carry no sender (see handleIncomingMessage).
             sendersHidden: true,
-            panels: toolbarPanels(page, {
-                listVisible: ['[data-tid="roster-list"]', '[data-tid^="participantsInCall"]', '[data-cid="roster-participant"]'],
-                open: ['#roster-button', 'button[data-inp="roster-button"]', '[data-tid="roster-button"]'],
-                close: [],
-                reopenChat: () => this.openChatPanel(page),
-            }),
+            panels: {
+                showParticipants: async () => {
+                    this.sidePaneBusy = true;
+                    return (await rosterPanels.showParticipants?.()) ?? false;
+                },
+                restore: async () => {
+                    try {
+                        await rosterPanels.restore?.();
+                    } finally {
+                        this.sidePaneBusy = false;
+                    }
+                },
+            },
             leave: (objector) => {
                 details.start = false;
                 this.requestEnd({ reason: 'consent-objection', trigger: 'consent-objection', requestedBy: objector });
@@ -1883,6 +2127,7 @@ export default class Teams {
                 .then((): ExitInfo => ({ reason: 'page-closed', trigger: 'URL_CHANGE_BLANK' }));
 
             exitInfo = await Promise.race([this.endRequested, hangupHidden, rejoinAppeared, urlBlank]);
+            this.meetingOver = true;
         } catch (error) {
             log.info(`DEBUG: Teams meeting timeout error: ${error instanceof Error ? error.message : String(error)}`);
             log.info("Meeting timed out.");
