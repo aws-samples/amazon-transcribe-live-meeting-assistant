@@ -105,7 +105,10 @@ export function parseZoomPersonalLink(value: string | undefined | null): ZoomPer
     const match = ZOOM_PERSONAL_PATH.exec(url.pathname);
     if (!match) return null;
     const pwd = (url.searchParams.get('pwd') ?? '').trim();
-    const link: ZoomPersonalLink = { url: text, host: url.hostname, name: match[1] };
+    // The link is requested over https whatever scheme it was given with: its
+    // query string can carry the meeting's pwd value.
+    url.protocol = 'https:';
+    const link: ZoomPersonalLink = { url: url.toString(), host: url.hostname, name: match[1] };
     return pwd ? { ...link, pwd } : link;
 }
 

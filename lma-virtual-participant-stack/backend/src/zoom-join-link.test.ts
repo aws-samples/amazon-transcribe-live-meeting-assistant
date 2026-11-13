@@ -261,3 +261,9 @@ test("Zoom's meeting-does-not-exist messages are recognised, and an ordinary joi
         assert.equal(zoomSaysMeetingDoesNotExist(text), false, String(text));
     }
 });
+
+test('a personal meeting link given with http is requested over https', () => {
+    const link = parseZoomPersonalLink('http://example.zoom.us/my/someone?pwd=abc123abc123abc123abc123abc123.1');
+    assert.ok(link);
+    assert.ok(link.url.startsWith('https://example.zoom.us/my/someone?pwd='), link.url);
+});
