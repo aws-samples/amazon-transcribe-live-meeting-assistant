@@ -20,7 +20,9 @@ import { ConsentApiError } from './consent-api.js';
 import {
     ConsentFlowDeps,
     MAX_EVIDENCE_IMAGES,
+    MAX_NOTICE_ATTEMPTS,
     MeetingConsentFlow,
+    NOTICE_RETRY_MS,
     describeWaiting,
     effectiveConsentSettings,
     grantEvidenceNote,
@@ -198,6 +200,8 @@ async function harness(options: {
     listen?: (on: boolean) => void;
     /** The Meeting Consent section cannot be read before joining. */
     sectionUnreadable?: boolean;
+    /** True when the platform cannot post these messages now (its sendMessages answers false). */
+    sendFails?: (messages: string[]) => boolean;
 } = {}): Promise<Harness> {
     const deployment = effectiveConsentSettings(options.deployment ?? { mode: 'notify' });
     const api = options.api ?? new FakeApi({ mode: deployment.mode, rule: deployment.rule });
@@ -271,7 +275,10 @@ async function harness(options: {
     capture.on = !flow.held;
     flow.attach({
         sendMessages: async (messages) => {
+            // A platform whose chat cannot be posted in answers false, and nothing reaches the chat.
+            if (options.sendFails?.(messages)) return false;
             chat.push(...messages);
+            return true;
         },
         screenshots:
             options.screenshots === false
@@ -367,7 +374,7 @@ test('an unreadable setting that turns out to be off releases capture once the A
     );
     assert.deepEqual(result, { holdCapture: true, deferVideo: true });
     assert.equal(flow.plan.mode, 'unknown');
-    flow.attach({ sendMessages: async () => {}, leave: () => {} });
+    flow.attach({ sendMessages: async () => true, leave: () => {} });
     await flow.begun;
     assert.deepEqual(events, ['hold', 'createMeeting', 'release']);
     assert.equal(flow.active, false);
@@ -405,7 +412,7 @@ test("a meeting choice that cannot be read withholds capture until it is read, t
     const result = await flow.prepare(readChoice, async () => ({ mode: 'notify' }));
     assert.equal(flow.plan.mode, 'unknown', 'not the deployment notify: the meeting may have chosen opt-in');
     assert.deepEqual(result, { holdCapture: true, deferVideo: true });
-    flow.attach({ sendMessages: async () => {}, leave: () => {} });
+    flow.attach({ sendMessages: async () => true, leave: () => {} });
     await flow.begun;
     assert.deepEqual(api.starts, [], 'consent is not started with a choice that may be wrong');
     readable = true;
@@ -1026,7 +1033,7 @@ test('a meeting that chose Off, read only after joining, still goes on its recor
         },
         async () => ({ mode: 'opt_in', consentRule: 'each_participant' }),
     );
-    flow.attach({ sendMessages: async () => {}, leave: () => {} });
+    flow.attach({ sendMessages: async () => true, leave: () => {} });
     await flow.begun;
     assert.deepEqual(events, ['hold']);
     readable = true;
@@ -1088,6 +1095,138 @@ test('a notice posted before consent could start is recorded as it was posted', 
     await h.settle();
     assert.equal(api.noticeTexts.length, 1);
     assert.equal(api.noticeTexts[0], posted);
+});
+
+// ─── A notice the chat would not take ───────────────────────────────────────
+
+test('notify: a notice the chat did not take is not recorded, and is posted and recorded on a later poll', async () => {
+    let failing = true;
+    const h = await harness({ deployment: { mode: 'notify' }, sendFails: () => failing });
+    assert.ok(!h.chat.some((m) => m.includes('to stop it')), 'nothing reached the chat');
+    assert.ok(!h.api.calls.includes('recordNotice'), 'not recorded as posted');
+    assert.notEqual(h.api.record?.Status, 'granted', 'notify is granted only once the notice is recorded');
+
+    // Not tried again before its wait is over.
+    failing = false;
+    h.advance(10_000);
+    await h.flow.pollOnce();
+    await h.settle();
+    assert.ok(!h.api.calls.includes('recordNotice'));
+
+    h.advance(NOTICE_RETRY_MS);
+    await h.flow.pollOnce();
+    await h.settle();
+    assert.equal(h.chat.filter((m) => m.includes('to stop it')).length, 1, 'posted once');
+    assert.ok(h.chat.some((m) => m.includes('"LMA, I object"')), 'with the reply line');
+    assert.equal(h.api.calls.filter((c) => c === 'recordNotice').length, 1);
+    assert.equal(h.api.noticeTexts[0], h.chat.join(' '), 'recorded as it was posted');
+    assert.equal(h.api.record?.Status, 'granted');
+    h.flow.stop();
+});
+
+test('a send that throws counts as not posted', async () => {
+    const api = new FakeApi({ mode: 'notify', rule: 'each_participant' });
+    const deployment = effectiveConsentSettings({ mode: 'notify' });
+    let now = Date.parse('2026-11-02T10:00:00.000Z');
+    const flow = new MeetingConsentFlow({
+        clock: () => now,
+        capture: { isOn: () => true, hold: () => {}, release: () => {}, startVideo: async () => {}, stopVideo: async () => {} },
+        api: () => api,
+        setStatusDetail: async () => {},
+        createMeeting: async () => {},
+        upload: async () => {},
+        callId: () => 'm-1',
+        lmaUser: 'Ana Silva',
+        meetingName: 'Weekly sync',
+        ownIdentities: ['LMA'],
+        startMessages: () => [],
+        exitMessages: () => [],
+        sleep: async () => {},
+        startRetryMs: 0,
+    });
+    await flow.prepare(async () => null, async () => ({ mode: deployment.mode }));
+    let throws = true;
+    const chat: string[] = [];
+    flow.attach({
+        sendMessages: async (messages) => {
+            if (throws) throw new Error('page gone');
+            chat.push(...messages);
+            return true;
+        },
+        leave: () => {},
+    });
+    await flow.begun;
+    await flow.evidenceSettled();
+    assert.ok(!api.calls.includes('recordNotice'));
+    throws = false;
+    now += NOTICE_RETRY_MS;
+    await flow.pollOnce();
+    await flow.evidenceSettled();
+    assert.equal(api.calls.filter((c) => c === 'recordNotice').length, 1);
+    assert.ok(chat.length > 0);
+    flow.stop();
+});
+
+test('a notice that is never taken is tried a bounded number of times', async () => {
+    let attempts = 0;
+    const h = await harness({
+        deployment: { mode: 'notify' },
+        screenshots: false,
+        sendFails: (messages) => {
+            if (messages.some((m) => m.includes('to stop it'))) attempts += 1;
+            return true;
+        },
+    });
+    for (let i = 0; i < MAX_NOTICE_ATTEMPTS + 5; i += 1) {
+        h.advance(NOTICE_RETRY_MS);
+        await h.flow.pollOnce();
+    }
+    await h.settle();
+    assert.equal(attempts, MAX_NOTICE_ATTEMPTS);
+    assert.ok(!h.api.calls.includes('recordNotice'));
+    h.flow.stop();
+});
+
+test('opt-in: the notice is retried until posted, and only then recorded', async () => {
+    let failing = true;
+    const h = await harness({ deployment: OPT_IN_EACH, sendFails: () => failing });
+    assert.equal(h.capture.on, false);
+    assert.ok(!h.api.calls.includes('recordNotice'));
+    failing = false;
+    h.advance(NOTICE_RETRY_MS);
+    await h.flow.pollOnce();
+    await h.settle();
+    assert.equal(h.api.calls.filter((c) => c === 'recordNotice').length, 1);
+    assert.ok(h.chat.some((m) => m.includes('"LMA, I consent"')), 'the reply line was posted with it');
+    h.flow.stop();
+});
+
+test('each participant: a notice re-posted for a newcomer that the chat did not take is retried, then recorded', async () => {
+    let failing = false;
+    const h = await harness({ deployment: OPT_IN_EACH, sendFails: () => failing });
+    h.flow.noteAttendeeCount(2);
+    await h.flow.handleChat('Bo Chen', 'I consent');
+    await h.flow.syncRoster();
+    await h.settle();
+    assert.equal(h.capture.on, true);
+    const notices = h.api.calls.filter((c) => c === 'recordNotice').length;
+
+    failing = true;
+    h.flow.noteAttendeeCount(3);
+    await h.flow.syncRoster();
+    await h.settle();
+    // The repost waits a few seconds after the join; give it the chance.
+    await new Promise((resolve) => setTimeout(resolve, 3100));
+    await h.settle();
+    assert.equal(h.api.calls.filter((c) => c === 'recordNotice').length, notices, 'the repost was not taken, so not recorded');
+
+    failing = false;
+    h.advance(NOTICE_RETRY_MS);
+    await h.flow.pollOnce();
+    await h.settle();
+    assert.equal(h.api.calls.filter((c) => c === 'recordNotice').length, notices + 1);
+    assert.ok(h.chat.includes('Recording and transcription are paused until everyone present has consented.'));
+    h.flow.stop();
 });
 
 test('evidence stops at the per-meeting budget', async () => {

@@ -259,8 +259,10 @@ export function buildZoomSdkPageHtml(version: string): string {
         };
       };
 
+      // Answers false when there is no SDK to send with or it threw.
       w.__lmaSendChat = function (message) {
-        try { if (w.ZoomMtg) w.ZoomMtg.sendChat({ message: message }); } catch (e) { log('sendChat error: ' + e); }
+        if (!w.ZoomMtg) return false;
+        try { w.ZoomMtg.sendChat({ message: message }); return true; } catch (e) { log('sendChat error: ' + e); return false; }
       };
 
       w.__lmaLeave = function () {

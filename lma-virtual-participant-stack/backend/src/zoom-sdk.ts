@@ -83,18 +83,29 @@ export default class ZoomSdk {
         });
     }
 
-    private async sendMessages(page: Page, messages: string[]): Promise<void> {
+    /**
+     * Posts chat messages through the SDK page; true when the page took every
+     * one (its __lmaSendChat answers false when the SDK refused one). Never throws.
+     */
+    private async sendMessages(page: Page, messages: string[]): Promise<boolean> {
         // So the meeting chat capture knows these when it reads them back.
         noteSentChat(messages);
+        let all = true;
         for (const message of messages) {
             if (!message) continue;
             try {
-                await page.evaluate((m: string) => (window as any).__lmaSendChat(m), message);
+                const taken = await page.evaluate((m: string) => (window as any).__lmaSendChat(m), message);
+                if (taken === false) {
+                    all = false;
+                    log.warn('[zoom-sdk] the SDK did not take a chat message (non-fatal)');
+                }
                 await new Promise((r) => setTimeout(r, 200));
             } catch (err) {
+                all = false;
                 log.warn('[zoom-sdk] sendChat failed (non-fatal):', err);
             }
         }
+        return all;
     }
 
     private async clickBySvg(page: Page, svgSelectors: string[], labelRe: string): Promise<boolean> {

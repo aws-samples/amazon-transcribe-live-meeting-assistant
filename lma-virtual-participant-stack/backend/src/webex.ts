@@ -243,18 +243,29 @@ export default class Webex {
         frame: Frame,
         messages: string[],
         isEnterprise: boolean | null = false
-    ): Promise<void> {
-        // Cap the input lookup so a stale/missing chat editor selector can't hang
-        // the caller forever (the goodbye-on-exit path is time-sensitive).
-        const messageElement = await frame.waitForSelector(
-            isEnterprise ? '#chat-panel > div > textarea' : '.ql-editor[contenteditable="true"]',
-            { timeout: 8000 },
-        );
-        for (const message of messages) {
-            await messageElement?.type(message);
-            await messageElement?.press('Enter');
+    ): Promise<boolean> {
+        // Answers true when every message was typed and sent. Never throws.
+        try {
+            // Cap the input lookup so a stale/missing chat editor selector can't hang
+            // the caller forever (the goodbye-on-exit path is time-sensitive).
+            const messageElement = await frame.waitForSelector(
+                isEnterprise ? '#chat-panel > div > textarea' : '.ql-editor[contenteditable="true"]',
+                { timeout: 8000 },
+            );
+            if (!messageElement) {
+                log.warn('Could not locate the Webex chat input — skipping message post (non-fatal).');
+                return false;
+            }
+            for (const message of messages) {
+                await messageElement.type(message);
+                await messageElement.press('Enter');
+            }
+            log.info(`Sent ${messages.length} chat message(s).`);
+            return true;
+        } catch (e) {
+            log.warn('sendMessages failed (non-fatal — VP remains in meeting):', e);
+            return false;
         }
-        log.info(`Sent ${messages.length} chat message(s).`);
     }
 
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {

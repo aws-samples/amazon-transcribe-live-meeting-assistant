@@ -140,12 +140,21 @@ w.__lmaParticipantNames = (): string[] | null => {
         .filter((name) => name.length > 0);
 };
 
-w.__lmaSendChat = (message: string) => {
+// Answers true once the chat took the message, false when it refused it. A
+// message sent before the chat is ready is queued and posted when it is, and
+// counts as taken.
+w.__lmaSendChat = async (message: string): Promise<boolean> => {
     if (!adapter || !w.__lmaChatReady) {
         pendingOutgoingChat.push(message);
-        return;
+        return true;
     }
-    adapter.sendMessage(message).catch((e: unknown) => log(`sendMessage error: ${e}`));
+    try {
+        await adapter.sendMessage(message);
+        return true;
+    } catch (e: unknown) {
+        log(`sendMessage error: ${e}`);
+        return false;
+    }
 };
 
 function flushOutgoingChat(): void {

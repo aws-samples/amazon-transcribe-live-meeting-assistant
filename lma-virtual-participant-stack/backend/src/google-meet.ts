@@ -398,8 +398,9 @@ export default class GoogleMeet {
      * Post chat messages. Non-fatal: the VP is in the meeting by the time this
      * runs, and a host can turn chat off for participants ("Let everyone send
      * messages"), in which case the composer is disabled and nothing is posted.
+     * Answers true when every message left the composer, false otherwise.
      */
-    private async sendMessages(page: Page, messages: string[]): Promise<void> {
+    private async sendMessages(page: Page, messages: string[]): Promise<boolean> {
         // So the meeting chat capture knows these when it reads them back.
         noteSentChat(messages);
         try {
@@ -416,7 +417,7 @@ export default class GoogleMeet {
             );
             if (!found) {
                 log.warn('Could not locate the Meet chat input — skipping message post (non-fatal).');
-                return;
+                return false;
             }
             const disabled = await found.element
                 .evaluate((el) => (el as HTMLTextAreaElement).disabled || el.getAttribute('aria-disabled') === 'true')
@@ -426,12 +427,13 @@ export default class GoogleMeet {
                     this.chatUnavailableLogged = true;
                     log.warn('The Meet chat composer is disabled (the host may have turned chat off) — not posting.');
                 }
-                return;
+                return false;
             }
             const composerText = () =>
                 found.element
                     .evaluate((el) => ((el as HTMLTextAreaElement).value ?? el.textContent ?? '').trim())
                     .catch(() => '');
+            let all = true;
             for (const message of messages) {
                 // The whole message goes in at once, from inside the page. The
                 // browser runs with CloakBrowser's humanize layer, which turns
@@ -478,11 +480,15 @@ export default class GoogleMeet {
                 if (left) {
                     await this.clickIfPresent(page, MEET_SELECTORS.chatSend, 'chat send');
                     await new Promise((r) => setTimeout(r, 300));
+                    // Still in the composer after Enter and the Send button: not posted.
+                    if ((await composerText()).includes(head)) all = false;
                 }
             }
-            log.info(`Sent ${messages.length} chat message(s).`);
+            log.info(`Sent ${messages.length} chat message(s)${all ? '' : ' (at least one stayed in the composer)'}.`);
+            return all;
         } catch (e) {
             log.warn('sendMessages failed (non-fatal — VP remains in meeting):', e);
+            return false;
         }
     }
 

@@ -666,9 +666,13 @@ export default class Teams {
     // back to keystrokes if the paste doesn't land. Submit by clicking the real
     // Send button (data-tid="newMessageCommands-send", confirmed via DOM dump);
     // the anon light-meetings composer does not reliably submit on Enter.
-    private async sendMessages(page: Page, messages: string[]): Promise<void> {
+    //
+    // Answers true only when every message left the composer; the consent
+    // flow records its notice as posted only then.
+    private async sendMessages(page: Page, messages: string[]): Promise<boolean> {
         // So the meeting chat capture knows these when it reads them back.
         noteSentChat(messages);
+        let all = true;
         try {
             if (!(await this.chatInputVisible(page))) {
                 await this.openChatPanel(page);
@@ -687,7 +691,7 @@ export default class Teams {
             if (!found) {
                 await this.dumpChatDom(page, 'no-input');
                 log.warn('Could not locate Teams chat input — skipping message post (non-fatal).');
-                return;
+                return false;
             }
             log.info(`Teams chat input resolved via ${found.source} selector: ${found.selector}`);
             for (const message of messages) {
@@ -739,7 +743,7 @@ export default class Teams {
                     }
                 } catch (e) {
                     log.warn('Chat composer typing failed (non-fatal), skipping rest:', e);
-                    return;
+                    return false;
                 }
                 // Verify the text actually entered the composer before submitting.
                 const typed = await found.element
@@ -763,13 +767,22 @@ export default class Teams {
                     log.info('Composer still holds text after submit — retrying Enter once.');
                     await page.keyboard.press('Enter');
                     await new Promise((resolve) => setTimeout(resolve, 400));
+                    const stuck = await found.element
+                        .evaluate((el, text) => ((el as HTMLElement).innerText || el.textContent || '').includes((text as string).slice(0, 20)), message)
+                        .catch(() => false);
+                    if (stuck) {
+                        all = false;
+                        log.warn('The message is still in the composer after Enter — not posted.');
+                    }
                 } else {
                     log.info('Chat message submitted (composer cleared).');
                 }
                 await new Promise((resolve) => setTimeout(resolve, 150));
             }
+            return all;
         } catch (e) {
             log.warn('sendMessages failed (non-fatal — VP remains in meeting):', e);
+            return false;
         }
     }
 

@@ -219,8 +219,12 @@ export interface CaptureControl {
 
 /** What a platform handler gives the flow once it is in the meeting. */
 export interface ConsentMeetingIo {
-    /** Posts messages in the meeting chat, as the introduction is posted. */
-    sendMessages(messages: string[]): Promise<void>;
+    /**
+     * Posts messages in the meeting chat, as the introduction is posted.
+     * Answers true only when every message was posted, false when any was not
+     * (no chat input could be found, say). Never throws.
+     */
+    sendMessages(messages: string[]): Promise<boolean>;
     /** Screenshots of the chat and the participant list; see consent-evidence.ts. */
     screenshots?(): Promise<EvidenceShot[]>;
     /** The platform's participant list, VP left out, or null where it has none. */
@@ -259,6 +263,8 @@ export interface ConsentFlowDeps {
     startAttempts?: number;
     startRetryMs?: number;
     noticeRepostMs?: number;
+    /** How long after a notice that could not be posted it is tried again; 30 s by default. */
+    noticeRetryMs?: number;
 }
 
 /**
@@ -306,6 +312,15 @@ const DUPLICATE_REPLY_MS = 5000;
  */
 const CROSS_SOURCE_OBJECTION_MS = 30_000;
 
+/**
+ * Attempts at posting one notice that could not be posted, the first included,
+ * each NOTICE_RETRY_MS after the last: 40 attempts is about 20 minutes.
+ */
+export const MAX_NOTICE_ATTEMPTS = 40;
+
+/** The wait before a notice that could not be posted is tried again. */
+export const NOTICE_RETRY_MS = 30_000;
+
 /** How a reply's sender is recorded when the platform did not say. */
 export const UNKNOWN_SENDER = 'Unidentified participant';
 
@@ -341,7 +356,17 @@ export class MeetingConsentFlow {
 
     private starting: Promise<boolean> | null = null;
 
+    /** Whether a notice has been posted in the chat: the platform said every message of it was. */
     private noticePosted = false;
+
+    /** A notice that could not be posted, to be tried again; null when none is waiting. */
+    private noticeRetry: { notice: string; record: boolean; attempts: number; lastAttemptAt: number } | null = null;
+
+    /** A notice is being posted now, so another is not started alongside it. */
+    private noticeInFlight = false;
+
+    /** A notice was to be recorded while another was being posted: that one is recorded once posted. */
+    private noticeRecordWanted = false;
 
     /** What the last notice posted said, all its messages joined. */
     private postedNoticeText: string | null = null;
@@ -541,7 +566,7 @@ export class MeetingConsentFlow {
             }
         }
         const ok = await this.ensureStarted();
-        if (!ok && this.plan.mode !== 'unknown' && !this.noticePosted) {
+        if (!ok && this.plan.mode !== 'unknown' && !this.noticePosted && !this.noticeRetry) {
             // Participants are told even when the record cannot be written yet;
             // it is recorded once the API answers (pollOnce retries).
             await this.postNotice(this.localNotice(), false);
@@ -599,7 +624,9 @@ export class MeetingConsentFlow {
                 if (this.plan.mode === 'notify' && !this.noticePosted && !this.stopped) {
                     // Capture is already on in a notify meeting, so participants
                     // are told now; the posting is recorded once consent starts.
-                    await this.postNotice(this.localNotice(), false);
+                    // One that could not be posted is tried again when it is due.
+                    if (this.noticeRetry) await this.retryNoticeIfDue();
+                    else await this.postNotice(this.localNotice(), false);
                 }
                 await this.sleep(this.deps.startRetryMs ?? 5000);
             }
@@ -661,6 +688,8 @@ export class MeetingConsentFlow {
             return;
         }
         if (!this.noticePosted) {
+            // Also when an earlier attempt could not be posted: this one is
+            // recorded if it is posted, and tried again if it is not.
             await this.postNotice(record?.NoticeText || this.localNotice(), true);
         } else {
             // Posted before the record could be written: record now exactly
@@ -697,8 +726,28 @@ export class MeetingConsentFlow {
         });
     }
 
-    /** Posts the notice (with a line for the owner-attests rule) and, when `record`, records it. */
+    /**
+     * Posts the notice (with a line for the owner-attests rule and the reply
+     * line) and, when `record`, records it. The notice is recorded as posted
+     * only when the platform says every message of it was posted: in Notify
+     * the record is granted once it is, so a notice nobody could see must not
+     * be. One that was not posted is tried again by retryNoticeIfDue.
+     */
     private async postNotice(notice: string, record: boolean): Promise<void> {
+        if (this.stopped) return;
+        if (this.noticeInFlight) {
+            if (record) this.noticeRecordWanted = true;
+            return;
+        }
+        this.noticeInFlight = true;
+        try {
+            await this.postNoticeNow(notice, record);
+        } finally {
+            this.noticeInFlight = false;
+        }
+    }
+
+    private async postNoticeNow(notice: string, record: boolean): Promise<void> {
         const messages = noticeChatMessages(notice);
         if (this.plan.mode === 'opt_in' && this.plan.rule === 'owner_attests') {
             messages.push(`Recording starts when ${this.deps.lmaUser} confirms in LMA that everyone has agreed.`);
@@ -710,12 +759,50 @@ export class MeetingConsentFlow {
         if (this.held && this.noticePosted && this.eachParticipant) {
             messages.push('Recording and transcription are paused until everyone present has consented.');
         }
-        await this.say(messages);
+        const posted = await this.say(messages);
+        if (!posted) {
+            const attempts = (this.noticeRetry?.attempts ?? 0) + 1;
+            // A notice that should be recorded stays so on a later attempt.
+            const toRecord = record || this.noticeRecordWanted || this.noticeRetry?.record === true;
+            this.noticeRecordWanted = false;
+            if (attempts >= MAX_NOTICE_ATTEMPTS) {
+                this.noticeRetry = null;
+                log.warn(
+                    `[consent] the notice could not be posted in the chat after ${attempts} attempts; ` +
+                        'it is not recorded as posted, and is not tried again until somebody joins',
+                );
+                return;
+            }
+            this.noticeRetry = { notice, record: toRecord, attempts, lastAttemptAt: this.clock() };
+            log.warn(
+                `[consent] the notice could not be posted in the chat (attempt ${attempts}); ` +
+                    `it is not recorded as posted, and is tried again in ${Math.round(this.noticeRetryMs / 1000)} s`,
+            );
+            return;
+        }
+        this.noticeRetry = null;
         this.noticePosted = true;
         this.postedNoticeText = messages.join(' ');
         this.lastNoticeAt = this.clock();
         log.info(`[consent] notice posted in the chat (${messages.length} message${messages.length === 1 ? '' : 's'})`);
-        if (record) await this.callApi((api) => api.recordNotice(messages.join(' ')));
+        const recordIt = record || this.noticeRecordWanted;
+        this.noticeRecordWanted = false;
+        if (recordIt) await this.callApi((api) => api.recordNotice(messages.join(' ')));
+    }
+
+    private get noticeRetryMs(): number {
+        return this.deps.noticeRetryMs ?? NOTICE_RETRY_MS;
+    }
+
+    /** Tries again to post a notice that could not be posted, once its wait is over. */
+    private async retryNoticeIfDue(): Promise<void> {
+        const pending = this.noticeRetry;
+        if (!pending || this.stopped || this.noticeInFlight) return;
+        if (this.clock() - pending.lastAttemptAt < this.noticeRetryMs) return;
+        log.info(`[consent] posting the notice again (attempt ${pending.attempts + 1})`);
+        // Recorded only once consent has started: callApi does nothing before,
+        // and afterStart records a notice posted before it.
+        await this.postNotice(pending.notice, pending.record);
     }
 
     /** The deployment's first consent and objection phrases, as the reply instructions give them. */
@@ -737,14 +824,17 @@ export class MeetingConsentFlow {
         return REPLY_LINE(consent, objection);
     }
 
-    private async say(messages: string[]): Promise<void> {
+    /** Posts in the chat; true when every message was posted. */
+    private async say(messages: string[]): Promise<boolean> {
         const wanted = messages.filter((message) => message && message.trim());
-        if (!this.io || wanted.length === 0) return;
+        if (!this.io) return false;
+        if (wanted.length === 0) return true;
         for (const message of wanted) this.posted.add(normalizeReplyText(message));
         try {
-            await this.io.sendMessages(wanted);
+            return (await this.io.sendMessages(wanted)) === true;
         } catch (error) {
             log.warn(`[consent] could not post in the chat: ${String(error)}`);
+            return false;
         }
     }
 
@@ -1280,6 +1370,7 @@ export class MeetingConsentFlow {
         if (!this.active || this.polling) return;
         this.polling = true;
         try {
+            await this.retryNoticeIfDue();
             if (!this.started) {
                 await this.ensureStarted();
                 return;

@@ -27,25 +27,32 @@ export default class Chime {
         });
     }
 
-    private async sendMessages(page: Page, messages: string[]): Promise<void> {
-        const found = await findElementWithFallback(
-            page,
-            ['textarea[placeholder="Message all attendees"]'],
-            {
-                intent: 'Chime in-meeting chat panel message compose textarea',
-                platform: 'CHIME',
-                step: 'chime.chat.input',
-            },
-            { maxRetries: 10, delayMs: 500 },
-        );
-        if (!found) {
-            log.warn('Could not locate Chime chat input — aborting sendMessages');
-            return;
-        }
-        for (const message of messages) {
-            await found.element.type(message);
-            await found.element.press('Enter');
-            await new Promise(resolve => setTimeout(resolve, 100));
+    /** Posts chat messages; true when every one was typed and sent. Never throws. */
+    private async sendMessages(page: Page, messages: string[]): Promise<boolean> {
+        try {
+            const found = await findElementWithFallback(
+                page,
+                ['textarea[placeholder="Message all attendees"]'],
+                {
+                    intent: 'Chime in-meeting chat panel message compose textarea',
+                    platform: 'CHIME',
+                    step: 'chime.chat.input',
+                },
+                { maxRetries: 10, delayMs: 500 },
+            );
+            if (!found) {
+                log.warn('Could not locate Chime chat input — aborting sendMessages');
+                return false;
+            }
+            for (const message of messages) {
+                await found.element.type(message);
+                await found.element.press('Enter');
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            return true;
+        } catch (e) {
+            log.warn('sendMessages failed (non-fatal — VP remains in meeting):', e);
+            return false;
         }
     }
 
