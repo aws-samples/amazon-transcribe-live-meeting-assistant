@@ -675,31 +675,37 @@ export default class Teams {
             .catch(() => [] as MenuItemInfo[]);
     }
 
-    // A message that failed to send shows a "Retry" button in the chat. Each one
-    // is clicked once, and tagged so it is not clicked again. Never throws.
-    private async retryFailedMessages(page: Page): Promise<number> {
-        const clicked = await page
+    // A message that failed to send shows a "Retry" button in the chat. The VP
+    // does not press it: whoever asked for the post (the consent notice, say)
+    // posts again when it is told the post failed, so pressing Retry as well
+    // would send the message twice. Before a post, every Retry button already
+    // on screen is tagged as seen, so that afterwards only the failures of this
+    // post are counted. Never throws.
+    private async markFailedMessagesSeen(page: Page): Promise<number> {
+        return page
             .evaluate((selector: string) => {
                 let n = 0;
                 for (const el of Array.from(document.querySelectorAll(selector))) {
-                    if (el.getAttribute('data-lma-retried')) continue;
-                    const r = (el as HTMLElement).getBoundingClientRect();
-                    if (r.width <= 0 || r.height <= 0) continue;
-                    el.setAttribute('data-lma-retried', '1');
-                    (el as HTMLElement).click();
-                    n += 1;
+                    if (!el.getAttribute('data-lma-seen')) {
+                        el.setAttribute('data-lma-seen', '1');
+                        n += 1;
+                    }
                 }
                 return n;
             }, TEAMS_FAILED_MESSAGE_RETRY_SELECTOR)
             .catch(() => 0);
-        if (clicked > 0) log.warn(`[teams-chat] ${clicked} chat message(s) had failed to send; clicked Retry once on each.`);
-        return clicked;
     }
 
-    // How many failed-message Retry buttons the chat shows now.
-    private async failedMessageCount(page: Page): Promise<number> {
+    // How many failed-message Retry buttons have appeared since the last
+    // markFailedMessagesSeen.
+    private async newFailedMessageCount(page: Page): Promise<number> {
         return page
-            .evaluate((selector: string) => document.querySelectorAll(selector).length, TEAMS_FAILED_MESSAGE_RETRY_SELECTOR)
+            .evaluate(
+                (selector: string) =>
+                    Array.from(document.querySelectorAll(selector)).filter((el) => !el.getAttribute('data-lma-seen'))
+                        .length,
+                TEAMS_FAILED_MESSAGE_RETRY_SELECTOR,
+            )
             .catch(() => 0);
     }
 
@@ -846,8 +852,10 @@ export default class Teams {
             if (!(await this.chatInputVisible(page))) {
                 await this.openChatPanel(page);
             }
-            await this.retryFailedMessages(page);
-            const failedBefore = await this.failedMessageCount(page);
+            const earlierFailures = await this.markFailedMessagesSeen(page);
+            if (earlierFailures > 0) {
+                log.warn(`[teams-chat] ${earlierFailures} earlier chat message(s) show as failed to send; not retried.`);
+            }
             const found = await findElementWithFallback(
                 page,
                 Teams.CHAT_INPUT_SELECTORS,
@@ -950,10 +958,10 @@ export default class Teams {
                 }
                 await new Promise((resolve) => setTimeout(resolve, 150));
             }
-            const failedAfter = await this.failedMessageCount(page);
-            if (failedAfter > failedBefore) {
+            const failedNow = await this.newFailedMessageCount(page);
+            if (failedNow > 0) {
                 all = false;
-                log.warn(`[teams-chat] ${failedAfter - failedBefore} message(s) show as failed to send.`);
+                log.warn(`[teams-chat] ${failedNow} message(s) show as failed to send.`);
             }
             return all;
         } catch (e) {
