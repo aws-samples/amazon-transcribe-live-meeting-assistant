@@ -187,6 +187,18 @@ export default class ZoomSdk {
             }
             if (!state.videoOff) videoDone = true;
 
+            // Without the avatar the camera must stay off. The SDK used to land
+            // video-off because the browser had no camera; with the blank camera
+            // (blank-camera.ts) listed it could start video, so stop it here.
+            if (!wantVideo && state.videoOn && videoClicks < 3) {
+                videoClicks += 1;
+                if (await this.clickBySvg(page, ['svg.SvgVideoOn'], 'stop video|stop my video')) {
+                    log.info(`[zoom-sdk] stopped video (no avatar) attempt ${videoClicks}`);
+                }
+                await new Promise((r) => setTimeout(r, 2000));
+                continue;
+            }
+
             if (audioDone && micDone && videoDone) {
                 log.info(`[zoom-sdk] media setup complete (audio=${audioDone} mic=${micDone} video=${!wantVideo ? 'n/a' : 'on'})`);
                 return;

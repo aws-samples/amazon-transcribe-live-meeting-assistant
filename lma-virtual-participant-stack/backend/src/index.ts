@@ -528,6 +528,9 @@ const main = async (): Promise<void> => {
     // avatar path is unchanged. The pre-join flows still turn the camera off.
     // Not on Chime, whose join flow has no camera-off step.
     if (platform !== 'CHIME') {
+        // Added after installAudioDiagnostics, so this wrapper is the outer one:
+        // a camera request it answers never reaches the [LMA-Audio] failure log,
+        // which sees only the microphone part it forwards.
         await page.addInitScript({ content: blankCameraInitScript() });
         log.info('✓ Blank camera installed for camera requests without the avatar');
     }
