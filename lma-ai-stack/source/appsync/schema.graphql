@@ -436,6 +436,10 @@ type Query @aws_cognito_user_pools
 	# images, whether it may be recorded and transcribed now, and the
 	# deployment's consent settings. Answered to the callers getCall answers.
 	getMeetingConsent(CallId: ID!): MeetingConsentState
+	# The deployment's consent mode and rule, and whether a meeting may choose a
+	# less strict one, for the Create Virtual Participant form to show which
+	# choices apply. Read by every signed-in user, before any meeting exists.
+	getMeetingConsentDefaults: MeetingConsentDefaults @aws_cognito_user_pools
 	listCallsDateRange(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!, limit: Int, nextToken: String): CallList
 	getCallCount(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!): CallCount
     queryKnowledgeBase(input: String!, sessionId: String): String
@@ -1309,6 +1313,14 @@ type MeetingConsentSettings @aws_cognito_user_pools
 	AllowPerMeetingOverride: Boolean
 	KeepEvidenceScreenshots: Boolean
 	VerifierModelId: String
+}
+
+# The part of those settings that decides which per-meeting choices apply
+# (getMeetingConsentDefaults).
+type MeetingConsentDefaults @aws_cognito_user_pools {
+	Mode: String
+	Rule: String
+	AllowPerMeetingOverride: Boolean
 }
 
 type MeetingConsentState @aws_cognito_user_pools

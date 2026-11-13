@@ -27,6 +27,7 @@ import { useCollection } from '@cloudscape-design/collection-hooks';
 
 import useAppContext from '../../contexts/app';
 import useUserGroups from '../../hooks/use-user-groups';
+import useMeetingConsentDefaults from '../../hooks/use-meeting-consent-defaults';
 import awsExports from '../../aws-exports';
 import useSettingsContext from '../../contexts/settings';
 import useLocalStorage from '../common/local-storage';
@@ -128,12 +129,16 @@ const VirtualParticipantList = () => {
   // transcript only.
   const [enableVideoRecording, setEnableVideoRecording] = useState(true);
   const [meetingConsentChoice, setMeetingConsentChoice] = useState('default');
-  // A choice the selected platform cannot support goes back to the default.
+  // Read each time the form opens. Null until read, or when it cannot be:
+  // every choice is then offered, and the VP still applies the deployment's rule.
+  const consentDefaults = useMeetingConsentDefaults(showCreateModal);
+  // A choice the selected platform cannot support, or the deployment would not
+  // use, goes back to the default.
   useEffect(() => {
-    if (!meetingConsentChoiceAvailable(meetingConsentChoice, createForm.meetingPlatform)) {
+    if (!meetingConsentChoiceAvailable(meetingConsentChoice, createForm.meetingPlatform, consentDefaults)) {
       setMeetingConsentChoice('default');
     }
-  }, [createForm.meetingPlatform, meetingConsentChoice]);
+  }, [createForm.meetingPlatform, meetingConsentChoice, consentDefaults]);
   const [notification, setNotification] = useState(null);
   const [isCreating, setIsCreating] = useState(false);
   const [creatingType, setCreatingType] = useState(null);
@@ -855,6 +860,7 @@ const VirtualParticipantList = () => {
               meetingTimeError={meetingTimeErrorText}
               consentChoice={meetingConsentChoice}
               onConsentChoiceChange={setMeetingConsentChoice}
+              consentDefaults={consentDefaults}
               enableVideoRecording={enableVideoRecording}
               onEnableVideoRecordingChange={setEnableVideoRecording}
             />

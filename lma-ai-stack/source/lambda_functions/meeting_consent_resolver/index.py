@@ -15,6 +15,10 @@ Who may do what:
 =============================== ==================================================
 ``getMeetingConsent``           The ``getCall`` rule: an Admin, the meeting's owner,
                                 somebody it is shared with, or a backend role.
+``getMeetingConsentDefaults``   Any signed-in user. Only the deployment's mode and
+                                rule and whether a meeting may choose a less
+                                strict one, which the Create Virtual Participant
+                                form reads to show which choices apply.
 ``startMeetingConsent``         The owner, an Admin or a backend role.
 ``recordMeetingConsentNotice``  The owner, an Admin or a backend role.
 ``setMeetingConsentParticipants`` The owner, an Admin or a backend role.
@@ -210,6 +214,15 @@ def settings_out(settings: Mapping[str, Any]) -> Dict[str, Any]:
         "AllowPerMeetingOverride": bool(settings["allowPerMeetingOverride"]),
         "KeepEvidenceScreenshots": bool(settings["keepEvidenceScreenshots"]),
         "VerifierModelId": settings["verifierModelId"],
+    }
+
+
+def defaults_out(settings: Mapping[str, Any]) -> Dict[str, Any]:
+    """The ``MeetingConsentDefaults`` GraphQL shape: no notice texts or phrases."""
+    return {
+        "Mode": settings["mode"],
+        "Rule": settings["consentRule"],
+        "AllowPerMeetingOverride": bool(settings["allowPerMeetingOverride"]),
     }
 
 
@@ -907,6 +920,11 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     field = ((event.get("info") or {}).get("fieldName")) or ""
     arguments = event.get("arguments") or {}
     caller = caller_of(event)
+    if field == "getMeetingConsentDefaults":
+        # About no one meeting, so no meeting row is read and no rule applies
+        # beyond the schema's, which admits any signed-in user. Settings that
+        # cannot be read are an error; the form then offers every choice.
+        return defaults_out(consent_settings())
     if field == "getMeetingConsent":
         call_id = arguments.get("CallId")
         if not isinstance(call_id, str) or not call_id:

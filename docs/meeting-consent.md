@@ -319,7 +319,17 @@ than the deployment's is stored on the VP's row (`consentMode` and `consentRule`
 `createVirtualParticipant`) and read by the VP when it starts, so scheduled
 meetings keep it too. Whether the deployment allows the choice is decided as for
 any capture client: with **Allow a different choice per meeting** off, a less
-strict choice is not used. The VP applies that rule itself before joining, so it
+strict choice is not used. When the form opens it reads the deployment's mode,
+rule and that setting through `getMeetingConsentDefaults` (see [API](#api)), and
+with the setting off it shows each less strict choice disabled, with a
+description that names the mode the meeting would use instead (for example "Not
+allowed in this deployment: the meeting would use Notify"). The deployment's
+setting and every choice at least as strict as it stay available, and the
+deployment's setting is described with the mode it stands for. A choice already
+selected, or stored on a scheduled VP being edited, that becomes disabled goes
+back to the deployment's setting. When the form cannot read the settings it
+offers every choice, as the platform allows, and does not stop the VP from
+being created. The form only shows the rule; the VP applies it itself before joining, so it
 knows whether to withhold capture, and the resolver applies it again when the VP
 starts the meeting's consent; when the resolver refuses the meeting's choice,
 the VP runs the deployment's mode instead. A meeting that chose Off in a
@@ -1006,6 +1016,7 @@ result is seen on the next read of the record.
 | Operation | Who |
 |---|---|
 | Read the record (`getMeetingConsent`, `Call.Consent`, `onUpdateMeetingConsent`) | The meeting's owner, the people it is shared with, Admins, and LMA's backend roles |
+| Read the deployment's mode, rule and **Allow a different choice per meeting** (`getMeetingConsentDefaults`) | Any signed-in user (Cognito user pool); it returns those three values only |
 | Start consent (`startMeetingConsent`) | The owner, an Admin, or a backend role |
 | Record that the notice was posted (`recordMeetingConsentNotice`) | The owner, an Admin, or a backend role |
 | List the participants present (`setMeetingConsentParticipants`) | The owner, an Admin, or a backend role |
@@ -1075,6 +1086,11 @@ query {
       AllowPerMeetingOverride KeepEvidenceScreenshots VerifierModelId
     }
   }
+}
+
+# Before any meeting exists, as the Create Virtual Participant form reads it.
+query {
+  getMeetingConsentDefaults { Mode Rule AllowPerMeetingOverride }
 }
 
 mutation {

@@ -6513,7 +6513,8 @@ Resources:
   ##########################################################################
   # Meeting consent: the consent record on each meeting (Call.Consent), the
   # deployment's consent settings, and the capture gate. One resolver Lambda
-  # for getMeetingConsent and every consent mutation. See
+  # for getMeetingConsent, getMeetingConsentDefaults and every consent
+  # mutation. See
   # docs/meeting-consent.md.
   ##########################################################################
 
@@ -7951,6 +7952,21 @@ Resources:
       DataSourceName: !GetAtt MeetingConsentLambdaDataSource.Name
       TypeName: Query
       FieldName: getMeetingConsent
+      RequestMappingTemplateS3Location: ../source/appsync/meetingConsent.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  GetMeetingConsentDefaultsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingConsentLambdaDataSource.Name
+      TypeName: Query
+      FieldName: getMeetingConsentDefaults
       RequestMappingTemplateS3Location: ../source/appsync/meetingConsent.request.vtl
       ResponseMappingTemplate: |
         #if( $ctx.error )
