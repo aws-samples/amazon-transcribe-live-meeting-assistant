@@ -14,6 +14,7 @@ import {
   describeToggle,
   describeZoomAccount,
   meetingIdLabel,
+  zoomMeetingLinkHint,
 } from './launch-settings';
 
 // 2026-11-10T19:00:00Z: 14:00 in New York, 11:00 in Los Angeles.
@@ -50,6 +51,21 @@ describe('meetingIdLabel', () => {
     expect(meetingIdLabel('ZOOM', '123 456')).toBe('Meeting ID');
     expect(meetingIdLabel('TEAMS', 'https://teams.microsoft.com/l/meetup-join/x')).toBe('Meeting URL');
     expect(meetingIdLabel('GOOGLE_MEET', 'abc-defg-hij')).toBe('Meeting code or link');
+  });
+});
+
+describe('zoomMeetingLinkHint', () => {
+  it('lists the Zoom link forms, including a personal meeting link, for a Zoom link', () => {
+    const hint = zoomMeetingLinkHint('ZOOM', 'https://acme.zoom.us/my/someone?pwd=x');
+    expect(hint).toMatch(/\/j\//);
+    expect(hint).toMatch(/\/wc\//);
+    expect(hint).toMatch(/\/my\//);
+  });
+
+  it('shows nothing for a meeting ID or another platform', () => {
+    expect(zoomMeetingLinkHint('ZOOM', '812 3456 7890')).toBeNull();
+    expect(zoomMeetingLinkHint('ZOOM', '')).toBeNull();
+    expect(zoomMeetingLinkHint('TEAMS', 'https://teams.microsoft.com/l/meetup-join/x')).toBeNull();
   });
 });
 

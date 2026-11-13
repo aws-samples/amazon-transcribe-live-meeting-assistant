@@ -42,8 +42,9 @@ def execute(
         meeting_name: Name/title of the meeting
         meeting_platform: Platform (Zoom, Teams, Chime, Webex, Google Meet)
         meeting_id: Meeting ID (numeric ID only; for Zoom, the full join link
-            may be given instead; for Google Meet the meeting code, e.g.
-            abc-defg-hij, or its meet.google.com link)
+            or a personal meeting link (/my/<room>) may be given instead; for
+            Google Meet the meeting code, e.g. abc-defg-hij, or its
+            meet.google.com link)
         scheduled_time: ISO 8601 datetime when meeting should start
         meeting_password: Optional meeting passcode, as the invitation text
             shows it; for Zoom, a link's whole pwd value is accepted too

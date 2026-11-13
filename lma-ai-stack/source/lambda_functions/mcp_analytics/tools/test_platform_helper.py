@@ -21,6 +21,7 @@ from tools.platform_helper import (  # noqa: E402
     normalize_meeting_id,
     normalize_platform,
     zoom_link_parts,
+    zoom_personal_link_pwd,
 )
 
 # The table of Meet inputs every implementation of the Meet code rule runs.
@@ -132,6 +133,25 @@ class TestZoomLinkParts(unittest.TestCase):
             self.assertIsNone(zoom_link_parts(value), value)
 
 
+class TestZoomPersonalLinkPwd(unittest.TestCase):
+    def test_a_personal_link_gives_its_pwd(self):
+        self.assertEqual(
+            zoom_personal_link_pwd(f"https://acme.zoom.us/my/someone?pwd={TOKEN}"), ("", TOKEN)
+        )
+        self.assertEqual(zoom_personal_link_pwd(" https://zoom.us/my/someone "), ("", None))
+
+    def test_other_values_are_not_personal_links(self):
+        for value in (
+            "https://zoom.us/j/81234567890",
+            "https://zoom.us.example.com/my/someone",
+            "https://zoom.us/my/",
+            "someone",
+            "",
+            None,
+        ):
+            self.assertIsNone(zoom_personal_link_pwd(value), value)
+
+
 class TestCheckZoomMeeting(unittest.TestCase):
     def test_a_passcode_is_accepted_with_or_without_grouping_spaces(self):
         for password in ("02061967", "0206 1967", "1234 5678 90", "aB3x9", "ab@-_*1234", "", None):
@@ -154,8 +174,23 @@ class TestCheckZoomMeeting(unittest.TestCase):
         with self.assertRaises(ValueError):
             check_zoom_meeting("https://zoom.us/j/81234567890", TOKEN[:20])
 
+    def test_a_personal_meeting_link_is_accepted_and_its_pwd_covers_a_cut_off_password(self):
+        for link in ("https://zoom.us/my/someone", "https://acme.zoom.us/my/someone/"):
+            check_zoom_meeting(link, None)
+            check_zoom_meeting(link, "02061967")
+        with_pwd = f"https://acme.zoom.us/my/someone?pwd={TOKEN}"
+        check_zoom_meeting(with_pwd, TOKEN[:20])
+        with self.assertRaises(ValueError):
+            check_zoom_meeting("https://zoom.us/my/someone", TOKEN[:20])
+
     def test_a_link_the_virtual_participant_cannot_read_is_refused(self):
-        for meeting_id in ("https://zoom.us/my/someone", "https://example.com/j/81234567890"):
+        for meeting_id in (
+            "https://example.com/j/81234567890",
+            "https://example.com/my/someone",
+            "https://zoom.us/my/",
+            "https://zoom.us/my/a/b",
+            "https://zoom.us/s/81234567890",
+        ):
             with self.assertRaises(ValueError, msg=meeting_id) as raised:
                 check_zoom_meeting(meeting_id, None)
             self.assertEqual(str(raised.exception), ZOOM_LINK_NOT_READ)

@@ -19,7 +19,7 @@ import {
 
 import { MAX_AGENDA_CHARS } from '../common/agenda';
 import { MEETING_CONSENT_OPTIONS, meetingConsentOptionsFor } from './meeting-consent-options';
-import { isMeetingUrl } from './launch-settings';
+import { isMeetingUrl, zoomMeetingLinkHint } from './launch-settings';
 import { PLATFORM_OPTIONS, agendaIsTooLong, meetingIdError } from './vp-form';
 
 /**
@@ -99,7 +99,7 @@ const VirtualParticipantFormFields = ({
           isGoogleMeetForm
             ? 'The meeting has to accept guests who join from a browser without a Google account, and ' +
               'someone in it may need to admit the participant.'
-            : undefined
+            : zoomMeetingLinkHint(form.meetingPlatform, form.meetingId) || undefined
         }
         errorText={idError || undefined}
         constraintText={(!form.meetingId && meetingIdNote) || undefined}

@@ -17,6 +17,19 @@ export const NOT_RECORDED = 'Not recorded';
 /** Whether a meeting ID is a full join link rather than an ID or code. */
 export const isMeetingUrl = (meetingId) => /^\s*https?:\/\//i.test(meetingId || '');
 
+/**
+ * The hint the form shows under a Zoom meeting link: the link forms the
+ * Virtual Participant joins from. Null for another platform or a meeting ID.
+ */
+export const zoomMeetingLinkHint = (platform, meetingId) => {
+  if (platform !== 'ZOOM' || !isMeetingUrl(meetingId)) return null;
+  return (
+    'Zoom links that work: the invitation link (…zoom.us/j/<number>?pwd=…), a web client link ' +
+    '(…zoom.us/wc/<number>/join) and a personal meeting link (…zoom.us/my/<name>). For any other ' +
+    'link, enter the meeting ID and passcode from the invitation instead.'
+  );
+};
+
 /** The label the form uses for the meeting ID field, for the value stored. */
 export const meetingIdLabel = (platform, meetingId) => {
   if (platform === 'GOOGLE_MEET') return 'Meeting code or link';

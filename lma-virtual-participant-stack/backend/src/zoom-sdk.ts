@@ -15,6 +15,7 @@ import { chatAddressing } from './chat-addressing.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startZoomSdkServer, ZoomSdkServerHandle } from './zoom-sdk-server.js';
 import { POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
+import { applyZoomPersonalLink } from './zoom-join-link.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('zoom-sdk');
@@ -259,6 +260,14 @@ export default class ZoomSdk {
         const clientSecret = (process.env.ZOOM_MEETING_SDK_CLIENT_SECRET || '').trim();
         if (!clientId || !clientSecret) {
             throw new Error('Zoom SDK method selected but ZOOM_MEETING_SDK_CLIENT_ID / ZOOM_MEETING_SDK_CLIENT_SECRET are not set');
+        }
+        // A personal meeting link (/my/<name>) is resolved to its meeting
+        // number first, as the web-client join does (zoom.ts).
+        if (details.invite.zoomPersonalLink) {
+            await substep('Looking up the personal meeting link…');
+            if (!(await applyZoomPersonalLink(details.invite))) {
+                return { reason: 'never-joined', trigger: 'pre-join:zoom-link-unresolved' };
+            }
         }
         const meetingNumber = (details.invite.meetingId || '').replace(/\D/g, '');
         if (!meetingNumber) {
