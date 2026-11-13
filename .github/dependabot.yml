@@ -119,6 +119,13 @@ updates:
         versions: [">=19"]
       - dependency-name: "@types/react-dom"
         versions: [">=19"]
+      # playwright-core follows cloakbrowser, which drives every meeting join:
+      # cloakbrowser 0.7.2 declares `playwright-core >=1.53.0 <1.65.0` (npm) and
+      # `playwright<1.65` (pip). Held below 1.65 until cloakbrowser's range
+      # includes it; then move it together with the Dockerfile's
+      # PLAYWRIGHT_PIP_VERSION and CLOAKBROWSER_PIP_VERSION pins.
+      - dependency-name: playwright-core
+        versions: [">=1.65"]
 
   # ── npm: browser extension (build/dev-heavy) ──────────────────────────────
   - package-ecosystem: npm
