@@ -47,6 +47,9 @@ const mapCallsAttributes = (calls) => {
       // The languages the speech engine identified, in the order first heard;
       // absent when it named none (detected-languages.js).
       DetectedLanguages: detectedLanguages,
+      // Whether transcription is paused from the meeting chat (LMA pause), as a
+      // JSON string; read by TranscriptionPauseAlert.
+      TranscriptionPause: transcriptionPause,
       TotalConversationDurationMillis: totalConversationDurationMillis = 0,
       Sentiment: storedSentiment = {},
       Owner: owner,
@@ -98,6 +101,7 @@ const mapCallsAttributes = (calls) => {
       transcriptionEngine,
       transcriptionLanguage,
       speakerSeparation,
+      transcriptionPause,
       detectedLanguages: Array.isArray(detectedLanguages) ? detectedLanguages.filter(Boolean) : [],
       totalConversationDurationMillis,
       conversationDurationTimeStamp: new Date(totalConversationDurationMillis).toISOString().substr(11, 8),
@@ -157,6 +161,7 @@ export const adoptMeetingCopy = (current, incoming) => {
     transcriptSegmentsDeleted: keep('transcriptSegmentsDeleted'),
     transcriptFilesDeleted: keep('transcriptFilesDeleted'),
     expiresAfter: keep('expiresAfter'),
+    transcriptionPause: keep('transcriptionPause'),
   };
 };
 

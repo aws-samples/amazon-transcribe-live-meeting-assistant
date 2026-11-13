@@ -134,6 +134,13 @@ assistant is a panel beside the tabs, on every tab; see
   consent is recorded, or that a participant objected, once the meeting has run
   for 30 seconds (the time a notice normally takes to be posted and answered);
   **Show the consent record** opens the record.
+- **Transcription paused** — while a live meeting's transcription is paused
+  because someone typed `LMA pause` to its Virtual Participant in the meeting
+  chat, a warning above the tabs says so, since when and, when the platform's
+  chat shows the sender, by whom, and that typing `LMA start` in the meeting
+  chat resumes it. It goes when transcription resumes or the meeting ends. A
+  meeting paused for consent as well shows both warnings. See
+  [In-meeting Chat Commands](virtual-participant.md#in-meeting-chat-commands).
 - **Owner** and **Speakers** — the people heard in the meeting, by the names
   the transcript shows for them: a name shown as
   [one person](transcription-and-translation.md#one-person-or-several-people)

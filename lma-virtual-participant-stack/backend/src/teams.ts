@@ -2,6 +2,7 @@
 import { Page } from 'playwright-core';
 
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, ExitReasonCode, MeetingInitOptions } from "./details.js";
+import { recordTranscriptionPause } from './transcription-pause.js';
 import { transcriptionService } from "./scribe.js";
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
@@ -885,10 +886,12 @@ export default class Teams {
             await this.sendMessages(page, chatHelpMessages(voiceAssistant));
         } else if (details.start && matchesChatCommand(message, details.pauseCommand)) {
             details.start = false;
+            void recordTranscriptionPause(true, null);
             log.info(details.pauseMessages[0]);
             await this.sendMessages(page, details.pauseMessages);
         } else if (!details.start && matchesChatCommand(message, details.startCommand)) {
             details.start = true;
+            void recordTranscriptionPause(false, null);
             log.info(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
         } else {

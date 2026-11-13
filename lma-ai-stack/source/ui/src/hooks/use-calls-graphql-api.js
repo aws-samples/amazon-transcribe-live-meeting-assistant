@@ -89,6 +89,10 @@ export const mergeCallUpdate = (existing, call) => ({
   // own (updateCallAgenda, updateCallSummaryText, updateSpeakerIdentities).
   // Not by the list query, so an update without it keeps the stored list.
   DetectedLanguages: call.DetectedLanguages ?? existing?.DetectedLanguages,
+  // Selected by getCall and by the one write that sets it (published to
+  // onUpdateCall); the pipeline's other updates leave it out. Every write is
+  // the whole value, a resume included, so it is never cleared to empty.
+  TranscriptionPause: call.TranscriptionPause || existing?.TranscriptionPause,
   ...(call.AgendaUpdatedAt
     ? {}
     : {

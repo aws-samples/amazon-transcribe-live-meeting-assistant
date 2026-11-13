@@ -299,6 +299,28 @@ class KinesisStreamManager {
     await this.sendRecord(record);
   }
 
+  /**
+   * UPDATE_TRANSCRIPTION_PAUSE: transcription was paused or resumed with the
+   * meeting chat commands (`LMA pause` / `LMA start`). The
+   * call_event_processor stores it on the meeting record
+   * (Call.TranscriptionPause), from which the meeting page says that, and since
+   * when, the transcript is paused. `pausedBy` is the chat sender's display
+   * name, when the platform shows one. See transcription-pause.ts.
+   */
+  async sendTranscriptionPause(paused: boolean, changedAt: string, pausedBy: string | null): Promise<void> {
+    const record: any = {
+      EventType: 'UPDATE_TRANSCRIPTION_PAUSE',
+      CallId: this.callId,
+      Paused: paused,
+      ChangedAt: changedAt,
+      ...(paused && pausedBy ? { PausedBy: pausedBy } : {}),
+      AccessToken: process.env.USER_ACCESS_TOKEN || '',
+      IdToken: process.env.USER_ID_TOKEN || '',
+      RefreshToken: process.env.USER_REFRESH_TOKEN || '',
+    };
+    await this.sendRecord(record);
+  }
+
   async sendEndMeeting(recordingUrl?: string): Promise<void> {
     // Match Python kds.py format exactly
     const record: any = {

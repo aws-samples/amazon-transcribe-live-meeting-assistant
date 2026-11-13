@@ -970,6 +970,87 @@ def test_an_update_capture_context_event_with_nothing_to_set_fails(schema, emitt
     assert session.queries == []
 
 
+def _sent_transcription_pause(sent: str) -> Dict[str, Any]:
+    """The TranscriptionPause value an updateTranscriptionPause query carries."""
+    match = re.search(r'TranscriptionPause: "((?:[^"\\]|\\.)*)"', sent)
+    assert match, sent
+    return json.loads(json.loads(f'"{match.group(1)}"'))
+
+
+def test_a_transcription_pause_event_records_when_and_by_whom(schema, emitted, monkeypatch):
+    updated = {"updateTranscriptionPause": {"CallId": "call-1"}}
+    session = FakeSession(schema, updated)
+    process_event(
+        session,
+        {
+            "EventType": "UPDATE_TRANSCRIPTION_PAUSE",
+            "CallId": "call-1",
+            "Paused": True,
+            "ChangedAt": "2026-11-12T10:15:00.000Z",
+            "PausedBy": "  Alice Example ",
+            "AccessToken": "not-sent",
+        },
+        monkeypatch,
+    )
+    assert len(session.queries) == 1
+    sent = print_ast(session.queries[0])
+    assert "updateTranscriptionPause" in sent
+    assert _sent_transcription_pause(sent) == {
+        "Paused": True,
+        "At": "2026-11-12T10:15:00.000Z",
+        "By": "Alice Example",
+    }
+    # Selected, so onUpdateCall delivers it to the meeting page.
+    assert re.search(r"^\s*TranscriptionPause\s*$", sent, re.M)
+    assert "not-sent" not in sent
+    assert "ExpiresAfter" not in sent
+
+
+def test_a_transcription_resume_event_replaces_the_pause_whole(schema, emitted, monkeypatch):
+    """A resume carries no sender, even if the event names one, so the stored
+    value never keeps the name of whoever paused."""
+    session = FakeSession(schema, {"updateTranscriptionPause": {"CallId": "call-1"}})
+    process_event(
+        session,
+        {
+            "EventType": "UPDATE_TRANSCRIPTION_PAUSE",
+            "CallId": "call-1",
+            "Paused": False,
+            "ChangedAt": "2026-11-12T10:20:00.000Z",
+            "PausedBy": "Alice Example",
+        },
+        monkeypatch,
+    )
+    assert _sent_transcription_pause(print_ast(session.queries[0])) == {
+        "Paused": False,
+        "At": "2026-11-12T10:20:00.000Z",
+    }
+
+
+def test_a_transcription_pause_event_without_a_time_is_stamped_now(schema, emitted, monkeypatch):
+    session = FakeSession(schema, {"updateTranscriptionPause": {"CallId": "call-1"}})
+    process_event(
+        session,
+        {"EventType": "UPDATE_TRANSCRIPTION_PAUSE", "CallId": "call-1", "Paused": True},
+        monkeypatch,
+    )
+    state = _sent_transcription_pause(print_ast(session.queries[0]))
+    assert state["Paused"] is True
+    assert "By" not in state
+    assert re.match(r"\d{4}-\d{2}-\d{2}T", state["At"])
+
+
+def test_a_transcription_pause_event_without_the_flag_fails(schema, emitted, monkeypatch):
+    session = FakeSession(schema, {})
+    with pytest.raises(TypeError):
+        process_event(
+            session,
+            {"EventType": "UPDATE_TRANSCRIPTION_PAUSE", "CallId": "call-1", "Paused": "yes"},
+            monkeypatch,
+        )
+    assert session.queries == []
+
+
 def test_a_redelivered_start_event_counts_no_meeting_started(schema, emitted, monkeypatch):
     """Otherwise the meeting count measures stream redelivery, not meetings.
 
