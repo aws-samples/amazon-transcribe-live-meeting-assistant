@@ -472,14 +472,17 @@ reading a message as an objection can only stop capture, never start it.
     the roadmap"*, which with the default phrases is handled as any objection
     is (see [Objections](#objections)): capture stops until the sender consents
     again, the screen recording stays off for the rest of the meeting, and with
-    **Virtual Participant leaves after an objection** on, the VP leaves. Remove
-    `I do not agree` and `I don't agree` from the objection phrases where that
-    is too eager for a deployment's meetings.
+    **Virtual Participant leaves after an objection** on, the VP leaves. The
+    default phrases `I do not agree`, `I don't agree`, `do not record` and
+    `don't record` match everyday sentences (*"please do not record the demo
+    twice"*); remove them from the objection phrases where that is too eager
+    for a deployment's meetings.
 - Only the text outside quotation marks (double or single) is searched for an
   objection phrase, so a message that quotes one to tell people how to reply is
   not an objection (*'Reply "I consent" to agree, or "I object" to decline.'*),
-  and another LMA's notice in the same meeting, or one pasted from Stream
-  Audio, is not read as a reply. A phrase outside the quotation marks still
+  and the shipped notices, posted by another LMA in the same meeting or pasted
+  from Stream Audio, are not read as replies. A custom notice text should keep
+  `{objection_phrase}` in quotation marks for the same reason. A phrase outside the quotation marks still
   counts (*'LMA, "stop recording" please'* does not, *'Bo said "stop
   recording", and I agree: stop recording'* does), and the phrase typed on its
   own is an objection, quoted or not.
