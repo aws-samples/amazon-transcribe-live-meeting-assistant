@@ -65,8 +65,7 @@ MEETING_NAME = "Consent probe"
 OBJECTOR = "Bo Chen"
 NOTICE = (
     f"{LMA_USER} would like to record and transcribe this meeting ({MEETING_NAME}) with Live "
-    'Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed. Reply '
-    '"I consent" to agree, or "I object" to decline.'
+    "Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed."
 )
 VERDICTS = {"supports_consent", "objection_found", "inconclusive"}
 # Seconds into the notify meeting's audio at which the objection is sent, and

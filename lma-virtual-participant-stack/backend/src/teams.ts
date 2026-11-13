@@ -2,6 +2,7 @@
 import { Page } from 'playwright-core';
 
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, ExitReasonCode, MeetingInitOptions } from "./details.js";
+import { recordTranscriptionPause } from './transcription-pause.js';
 import { transcriptionService } from "./scribe.js";
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
@@ -18,6 +19,7 @@ import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { findElementWithFallback, classifyJoinState, isResolverEnabled } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { humanClick, humanType, POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
+import { cameraToggleState, CameraToggleState } from './blank-camera.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 import { createLogger } from './logger.js';
 
@@ -884,10 +886,12 @@ export default class Teams {
             await this.sendMessages(page, chatHelpMessages(voiceAssistant));
         } else if (details.start && matchesChatCommand(message, details.pauseCommand)) {
             details.start = false;
+            void recordTranscriptionPause(true, null);
             log.info(details.pauseMessages[0]);
             await this.sendMessages(page, details.pauseMessages);
         } else if (!details.start && matchesChatCommand(message, details.startCommand)) {
             details.start = true;
+            void recordTranscriptionPause(false, null);
             log.info(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
         } else {
@@ -1142,7 +1146,31 @@ export default class Teams {
                 },
                 { maxRetries: 10, delayMs: 500 },
             );
-            if (videoRes) await humanClick(page, videoRes.element);
+            if (videoRes) {
+                // Click only when the camera is on or its state cannot be read
+                // (the previous unconditional click). With the blank camera
+                // (blank-camera.ts) Teams can show it either way, and clicking
+                // an already-off toggle would turn the camera on.
+                const state = await videoRes.element
+                    .evaluate((el: Element) => ({
+                        ariaChecked: el.getAttribute('aria-checked'),
+                        ariaPressed: el.getAttribute('aria-pressed'),
+                        checked:
+                            typeof (el as HTMLInputElement).checked === 'boolean'
+                                ? (el as HTMLInputElement).checked
+                                : null,
+                        ariaLabel: el.getAttribute('aria-label'),
+                        title: el.getAttribute('title'),
+                    }))
+                    .then(cameraToggleState)
+                    .catch((): CameraToggleState => 'unknown');
+                if (state === 'off') {
+                    log.info('Video is already off, skipping click.');
+                } else {
+                    log.info(`Video toggle state: ${state} - clicking to turn it off.`);
+                    await humanClick(page, videoRes.element);
+                }
+            }
         }
 
         await new Promise((resolve) => setTimeout(resolve, 250));

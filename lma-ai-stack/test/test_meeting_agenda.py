@@ -301,6 +301,22 @@ def test_both_mcp_endpoints_offer_the_agenda_argument(resources: dict, tool: str
     assert set(gateway["Properties"]) == set(api_key["properties"])
 
 
+@pytest.mark.parametrize("tool", ["start_meeting_now", "schedule_meeting"])
+def test_both_mcp_endpoints_describe_the_meeting_id_and_passcode_alike(
+    resources: dict, tool: str
+) -> None:
+    """The meeting password is described as the invitation's passcode, not a
+    link's pwd value, and the meeting ID as taking a whole Zoom join link, in
+    the same words on both endpoints."""
+    gateway = _gateway_tools(resources)[tool]["InputSchema"]["Properties"]
+    api_key = _api_key_endpoint_tools()[tool]["inputSchema"]["properties"]
+    for name in ("meetingId", "meetingPassword"):
+        assert " ".join(gateway[name]["Description"].split()) == api_key[name]["description"]
+    password = api_key["meetingPassword"]["description"]
+    assert "Passcode: 1234 5678" in password and "not the pwd= value of a join link" in password
+    assert "full join link" in api_key["meetingId"]["description"]
+
+
 # ── derivation from the transcript ──────────────────────────────────────────
 
 

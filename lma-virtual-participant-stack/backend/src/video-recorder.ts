@@ -32,6 +32,7 @@ import { S3Client, PutObjectCommand, DeleteObjectsCommand } from '@aws-sdk/clien
 import { details } from './details.js';
 import path from 'path';
 import { createLogger } from './logger.js';
+import { RecordingStartClock } from './video-start-time.js';
 
 const log = createLogger('video-recorder');
 
@@ -63,7 +64,7 @@ class VideoRecorder {
   private chunkWatcher: ReturnType<typeof setInterval> | null = null;
   private lastChunkIndex: number = -1;
   private _isRecording: boolean = false;
-  private _startedAtMs: number | null = null;
+  private startClock: RecordingStartClock | null = null;
 
   constructor() {
     this.s3Client = new S3Client({ region: REGION });
@@ -75,12 +76,15 @@ class VideoRecorder {
   }
 
   /**
-   * Wall-clock time FFmpeg was started, or null when nothing is recording.
-   * The recording's own timeline starts here, so a moment's position in the
-   * recording is its wall-clock time minus this (used for key frames).
+   * Wall-clock time of the recording's first captured frame, or null when
+   * nothing is recording or FFmpeg has not captured a frame yet. The
+   * recording's own timeline starts here, so a moment's position in the
+   * recording is its wall-clock time minus this (used for key frames). It is
+   * not the time FFmpeg was launched: FFmpeg can take tens of seconds to grab
+   * its first frame, and that gap is not in the recording (video-start-time.ts).
    */
   get startedAtMs(): number | null {
-    return this._isRecording ? this._startedAtMs : null;
+    return this._isRecording ? (this.startClock?.startMs ?? null) : null;
   }
 
   /** The recordings bucket, resolved at call time so details reflects env. */
@@ -222,8 +226,10 @@ class VideoRecorder {
     );
 
     // Launch FFmpeg
+    const launchedAtMs = Date.now();
     this.ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
-    this._startedAtMs = Date.now();
+    const startClock = new RecordingStartClock(launchedAtMs);
+    this.startClock = startClock;
 
     this.ffmpegProcess.on('error', (error: Error) => {
       log.error(`[VideoRecorder] FFmpeg error: ${error.message}`);
@@ -243,6 +249,13 @@ class VideoRecorder {
     // Log FFmpeg errors (filter out noisy progress lines)
     this.ffmpegProcess.stderr?.on('data', (data: Buffer) => {
       const msg = data.toString();
+      const nowMs = Date.now();
+      if (startClock.feed(msg, nowMs) && startClock.startMs !== null) {
+        log.info(
+          `[VideoRecorder] Recording starts at ${new Date(startClock.startMs).toISOString()} ` +
+          `(${startClock.source}), ${((startClock.startMs - launchedAtMs) / 1000).toFixed(1)}s after FFmpeg was launched`
+        );
+      }
       if (
         !msg.includes('frame=') &&
         !msg.includes('fps=') &&

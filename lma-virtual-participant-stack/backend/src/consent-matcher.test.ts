@@ -7,7 +7,8 @@
 /**
  * Reading a chat message as a consent reply (consent-matcher.ts): the whole
  * message, as the VP's chat commands are matched, with an "LMA" addressee
- * allowed, and the built-in "LMA consent" / "LMA no consent" forms.
+ * allowed; "LMA" followed at once by a consent phrase anywhere in a short
+ * message; and the built-in "LMA consent" / "LMA no consent" forms.
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
@@ -21,6 +22,7 @@ import {
     splitPhrases,
     strictness,
 } from './consent-matcher.js';
+import { consentHelpLineFor } from './consent-help.js';
 import { DEFAULT_CONSENT_SETTINGS } from './meeting-consent.js';
 
 const CONSENT = DEFAULT_CONSENT_SETTINGS.consentPhrases;
@@ -40,8 +42,12 @@ test('a spoken reply counts only when addressed to LMA', () => {
     }
 });
 
-test('an addressed spoken consent must be the whole utterance; an addressed objection may be a sentence', () => {
-    assert.equal(classifySpoken('LMA, I agree with what Bo said about the roadmap.'), null);
+test('a spoken consent is LMA followed at once by a consent phrase; an addressed objection may be a sentence', () => {
+    assert.equal(classifySpoken("OK, so that's the plan. LMA, I consent."), 'consent');
+    assert.equal(classifySpoken('Sounds good to me, L M A I agree, let us carry on.'), 'consent');
+    assert.equal(classifySpoken('LMA, what do you think? I consent.'), null, 'LMA not just before the phrase');
+    assert.equal(classifySpoken("I agree with Bo's point."), null, 'unaddressed');
+    assert.equal(classifySpoken(`LMA I consent ${'and then we talked about the plan '.repeat(8)}`), null, 'over 200 characters');
     assert.equal(classifySpoken('LMA, can you please stop recording now?'), 'objection');
     assert.equal(classifySpoken(`LMA ${'and then we talked about the plan '.repeat(8)}stop recording`), null, 'over 200 characters');
     assert.equal(classifySpoken('Can we record the demo again later?'), null);
@@ -80,19 +86,163 @@ test('objections are looked for first', () => {
     assert.equal(classify('LMA no consent'), 'objection');
 });
 
-test('a sentence that merely contains a phrase is ordinary chat', () => {
+test('a sentence that merely contains a consent phrase is ordinary chat', () => {
     for (const message of [
         "I agree with Bo's point",
-        "I don't agree with the roadmap",
-        'please do not record the demo twice',
         'I consent to the budget',
-        'LMA consent is a good feature',
+        'I accept the action item',
         'Reply "I consent" to agree, or "I object" to decline.',
+        'I agree, and LMA should take notes',
         '',
         '   ',
     ]) {
         assert.equal(classify(message), null, message);
     }
+});
+
+test('an unaddressed sentence containing an objection phrase is an objection', () => {
+    for (const message of [
+        'I object to this meeting being recorded',
+        'i object to this meeting being recorded.',
+        'Please stop recording now',
+        "Sorry, but I don't consent to that.",
+        'I do not agree to being transcribed',
+        "I don't agree with the roadmap",
+        'please do not record the demo twice',
+    ]) {
+        assert.equal(classify(message), 'objection', message);
+    }
+});
+
+test('LMA followed at once by a consent phrase anywhere in a message is consent', () => {
+    for (const message of [
+        "...so that's the plan. LMA, I consent.",
+        'Sounds good, LMA I agree, let us go on',
+        'ok LMA: I accept!',
+        'Fine by me. LMA consent',
+        'hello LMA, LMA I consent',
+        'LMA I agree; next topic',
+    ]) {
+        assert.equal(classify(message), 'consent', message);
+    }
+});
+
+test('LMA and a consent phrase that goes on into a longer clause is not consent', () => {
+    for (const message of [
+        'LMA, I agree with the plan',
+        'LMA consent is a good feature',
+        'How does the LMA consent mode work on Teams?',
+        'LMA, I agree with Ana that we should not record this part',
+        'Quick one: LMA ask whether I should say LMA I agree',
+    ]) {
+        assert.equal(classify(message), null, message);
+    }
+    assert.equal(classifySpoken('so LMA consent mode is on for this call'), null);
+    assert.equal(classifySpoken('ok that is settled. L M A, I agree.'), 'consent');
+});
+
+test('a consent phrase not immediately after LMA is not consent', () => {
+    for (const message of [
+        "I agree with Bo's point",
+        'LMA, what do you think? I consent',
+        'LMA please, I consent',
+        'I consent to the budget, LMA take a note',
+        'my lmao I agree',
+        'LMAI consent',
+    ]) {
+        assert.equal(classify(message), null, message);
+    }
+});
+
+test('a message with both an objection and LMA plus a consent phrase is an objection', () => {
+    assert.equal(classify('LMA, I consent. Actually no, stop recording'), 'objection');
+    assert.equal(classify("I don't agree. LMA, I consent"), 'objection');
+    assert.equal(classifySpoken('LMA I agree, but I object to the video'), 'objection');
+});
+
+test('LMA and a consent phrase is not searched for in a long message or an LMA ask question', () => {
+    const long = `${'We went through the agenda and the action items in detail, '.repeat(4)}LMA, I consent.`;
+    assert.ok(long.length > 200);
+    assert.equal(classify(long), null);
+    assert.equal(classify('LMA ask what happens when I type LMA I consent?'), null);
+    assert.equal(classify('@LMA ask: should I say LMA I agree now?'), null);
+});
+
+test('LMA and a consent phrase inside quotation marks is not consent', () => {
+    for (const message of [
+        'Type or say "LMA, I consent" or "LMA, I object".',
+        'Say "LMA, I consent" or "LMA, I object".',
+        "To agree, type 'LMA, I agree' here",
+        'Bo said “LMA I consent” earlier',
+        'If Bo Chen types or says "LMA, I consent", it can continue.',
+        'Meeting consent: type or say "LMA, I consent" to agree to recording and transcription, or "LMA, I object" to object.',
+    ]) {
+        assert.equal(classify(message), null, message);
+    }
+    // The reply typed on its own, quoted, still is one.
+    assert.equal(classify('"LMA, I consent"'), 'consent');
+    // Outside the quotes it still counts.
+    assert.equal(classify('Bo said "wait", but LMA, I consent'), 'consent');
+});
+
+test('an objection phrase counts only as whole words', () => {
+    assert.equal(classify('I objected to the timeline last week'), null);
+    assert.equal(classify('the stop recordings folder is shared'), null);
+});
+
+test('an unaddressed sentence containing a consent phrase is not consent', () => {
+    assert.equal(classify('I agree with Sam that the demo went well'), null);
+    assert.equal(classify('I consent to the new budget'), null);
+});
+
+test('a sentence with both a consent and an objection phrase is an objection', () => {
+    assert.equal(classify("I agree with Sam, but I don't consent to being recorded"), 'objection');
+    assert.equal(classify('I accept that, but please stop recording'), 'objection');
+    assert.equal(classify('I agree, but I object to the recording'), 'objection');
+});
+
+test('an objection phrase inside quotation marks is not searched for', () => {
+    for (const message of [
+        'Reply "I consent" to agree, or "I object" to decline.',
+        'If you do not agree, reply “I object” in the chat.',
+        "Type 'stop recording' if you want it to stop",
+        'Replies may be typed in this chat, or said aloud starting with "LMA": say "LMA, I consent" or "LMA, I object".',
+        'Type or say "LMA, I consent" or "LMA, I object".',
+        'Say "LMA, I consent" or "LMA, I object".',
+        'Type "LMA, I consent" or "LMA, I object" in this chat. An objection made out loud takes effect when Bo records it in LMA.',
+    ]) {
+        assert.equal(classify(message), null, message);
+    }
+    // An apostrophe is not a quotation mark.
+    assert.equal(classify("Sorry, I don't agree to 'being recorded' today"), 'objection');
+    // The phrase on its own, quoted, is still a reply.
+    assert.equal(classify('"I object"'), 'objection');
+    assert.equal(classify('LMA "I object"'), 'objection');
+});
+
+test('an objection phrase outside quotation marks is still found in a message that quotes one', () => {
+    assert.equal(classify('Bo said "stop recording" and I agree, stop recording'), 'objection');
+    assert.equal(classify('LMA, please stop recording, as in "do not record"'), 'objection');
+    // Only the quoted text names the phrase here, so nothing is left to find.
+    assert.equal(classify('LMA, "stop recording" please'), null);
+});
+
+test('the shipped notices and help lines, posted by someone other than this VP, are not replies', () => {
+    const values = { lmaUser: 'Bo', meeting: 'Sync', consentPhrase: 'I consent', objectionPhrase: 'I object' };
+    for (const template of [DEFAULT_CONSENT_SETTINGS.notifyNoticeText, DEFAULT_CONSENT_SETTINGS.optInNoticeText]) {
+        for (const message of noticeChatMessages(renderNotice(template, values))) {
+            assert.equal(classify(message), null, message);
+        }
+    }
+    for (const line of [consentHelpLineFor('chat'), consentHelpLineFor('chat_and_voice'), consentHelpLineFor('voice')]) {
+        assert.equal(classify(line), null, line);
+    }
+});
+
+test('a long notice quoting the phrases is not an objection', () => {
+    const notice = `${'Ana is using a meeting assistant to take notes on this call, '.repeat(3)}if you do not agree, reply "I object".`;
+    assert.ok(notice.length > 200);
+    assert.equal(classify(notice), null);
 });
 
 test('a message addressed to LMA that contains an objection phrase is an objection', () => {

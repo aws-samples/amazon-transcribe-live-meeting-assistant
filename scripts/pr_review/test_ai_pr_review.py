@@ -38,6 +38,7 @@ import http.client
 import importlib.util
 import re
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -1503,6 +1504,9 @@ def test_the_published_ci_status_is_sampled_after_the_model_run(tmp_path, monkey
         def reviewed_shas(self, iid):
             return set()
 
+        def prior_reviews(self, iid, web_url=""):
+            return []
+
         def check_status(self, sha):
             order.append("check_status")
             return next(statuses)
@@ -1740,3 +1744,326 @@ def test_the_ci_skill_carries_the_disclosure_contract() -> None:
             f"pr-review-ci.md no longer states {required!r}, so the model is not told "
             f"the output shape the guard enforces"
         )
+
+
+# --- Carrying a review over a documentation-only push -------------------------------
+
+_REVIEW_AT = "a" * 40
+
+
+def _review_body(sha: str, verdict: str = "✅ Approve", findings: str = "") -> str:
+    return (
+        f"<!-- ai-review: sha={sha} rev={review.PROMPT_REVISION} -->\n"
+        "## PR/MR Review: a title (#7)\n\n### Verdict\n\n"
+        "| Question | Verdict | Notes |\n|---|---|---|\n"
+        "| Good PR? | ✅ | Focused. |\n"
+        f"| **Safe to merge?** | {verdict} | No blocking findings. |\n\n"
+        f"### Findings\n{findings}\n"
+    )
+
+
+def test_the_source_review_is_the_last_full_review_at_this_revision() -> None:
+    full = review.PriorReview(_REVIEW_AT, review.PROMPT_REVISION, _review_body(_REVIEW_AT), "u1")
+    carried = review.PriorReview(
+        "b" * 40,
+        review.PROMPT_REVISION,
+        f"<!-- ai-review: sha={'b' * 40} rev=2 -->\n"
+        f"<!-- ai-review-carried-over: from={_REVIEW_AT} -->\n",
+    )
+    stale = review.PriorReview("c" * 40, review.PROMPT_REVISION - 1, _review_body("c" * 40))
+    assert review.source_review([full, carried, stale]) == full, (
+        "carried-over comments and older prompt revisions are not sources"
+    )
+    withheld = review.PriorReview("d" * 40, review.PROMPT_REVISION, "## PR/MR Review: withheld\n")
+    assert review.source_review([full, withheld]) is None, (
+        "the latest full review was withheld, so there is no verdict to carry"
+    )
+    no_verdict = review.PriorReview("e" * 40, review.PROMPT_REVISION, "## PR/MR Review: x\n")
+    assert review.source_review([no_verdict]) is None
+    assert review.source_review([]) is None
+
+
+def test_the_carried_comment_marks_the_new_head_and_quotes_the_verdict() -> None:
+    merge_request = review.MergeRequest(
+        7, "t", "a", "feature/x", "develop", "https://example.invalid/pull/7", "f" * 40, False
+    )
+    source = review.PriorReview(
+        _REVIEW_AT, review.PROMPT_REVISION, _review_body(_REVIEW_AT), "https://x/c1"
+    )
+    note = review.compose_carry_over(merge_request, source, ["CHANGELOG.md"], "PR", "3 success")
+    shas = {m.group("sha") for m in review.MARKER_RE.finditer(note)}
+    assert shas == {"f" * 40}, "the comment must carry the NEW head's marker, and only it"
+    assert review.CARRY_RE.search(note).group("sha") == _REVIEW_AT
+    assert "[the review of `aaaaaaaa`](https://x/c1)" in note
+    assert "✅ Approve — No blocking findings." in note
+    assert "- `CHANGELOG.md`" in note and "3 success" in note
+    assert "Blocking finding" not in note
+    assert review.scan_for_disclosure(note) == []
+
+    merged_only = review.compose_carry_over(merge_request, source, [], "PR")
+    assert "only bring in changes from `develop`" in merged_only
+
+
+def test_a_blocking_finding_is_stated_when_a_review_is_carried_over() -> None:
+    merge_request = review.MergeRequest(7, "t", "a", "x", "develop", "w", "f" * 40, False)
+    body = _review_body(
+        _REVIEW_AT,
+        verdict="❌ Block",
+        findings=(
+            "- 🔴 **Blocking** — `lma-ai-stack/source/x.py:3` — This needs the Admin-group "
+            "check.\n  - detail line\n- 🟢 **Nice to have** — `a.py:1` — nit.\n"
+        ),
+    )
+    note = review.compose_carry_over(
+        merge_request, review.PriorReview(_REVIEW_AT, 2, body), ["docs/a.md"], "PR"
+    )
+    assert "That review has 1 🔴 Blocking finding(s)" in note
+    assert "- 🔴 **Blocking** — `lma-ai-stack/source/x.py:3`" in note
+    assert "Nice to have" not in note
+    assert "None of the files listed above is named by one of them." in note
+    assert "❌ Block" in note
+    assert review.scan_for_disclosure(note) == []
+
+
+def _git(cwd: Path, *args: str) -> str:
+    import subprocess as sp
+
+    # Identity, signing and hooks are set here so a developer's global git
+    # configuration cannot fail the fixture.
+    result = sp.run(
+        [
+            "git",
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            *args,
+        ],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"git {args}: {result.stderr}"
+    return result.stdout.strip()
+
+
+def _commit(repo: Path, files: dict[str, str], message: str) -> str:
+    for name, text in files.items():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text(text)
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+@pytest.fixture
+def request_history(tmp_path, monkeypatch):
+    """A request reviewed at one head, then the target branch merged into it.
+
+    base ── reviewed (a.py) ─────────────── merge ── (the test's commits)
+      └──── develop (b.py, docs/d.md) ──────┘
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "develop")
+    _commit(repo, {"a.py": "1\n", "b.py": "1\n", "CHANGELOG.md": "x\n"}, "base")
+    _git(repo, "checkout", "-qb", "feature")
+    reviewed = _commit(repo, {"a.py": "2\n"}, "the request's code")
+    _git(repo, "checkout", "-q", "develop")
+    _commit(repo, {"b.py": "2\n", "docs/d.md": "d\n"}, "someone else's change")
+    _git(repo, "checkout", "-q", "feature")
+    _git(repo, "merge", "-q", "--no-edit", "develop")
+    monkeypatch.setattr(review, "REPO_ROOT", repo)
+
+    def point_refs():
+        _git(repo, "update-ref", "refs/ai-review/7", "HEAD")
+        _git(repo, "update-ref", "refs/ai-review/target-develop", "develop")
+
+    return repo, reviewed, point_refs
+
+
+def test_a_merge_of_the_target_branch_is_not_the_requests_change(request_history) -> None:
+    repo, reviewed, point_refs = request_history
+    point_refs()
+    assert review.changed_since_review(7, "develop", reviewed, "origin") == [], (
+        "b.py and docs/d.md came from develop; the request's own diff did not change"
+    )
+    _commit(repo, {"CHANGELOG.md": "y\n"}, "resolve the changelog")
+    point_refs()
+    assert review.changed_since_review(7, "develop", reviewed, "origin") == ["CHANGELOG.md"]
+    _commit(repo, {"a.py": "3\n"}, "more code")
+    point_refs()
+    assert review.changed_since_review(7, "develop", reviewed, "origin") == [
+        "CHANGELOG.md",
+        "a.py",
+    ]
+
+
+def test_an_unreachable_reviewed_head_means_a_full_review(request_history) -> None:
+    _repo, _reviewed, point_refs = request_history
+    point_refs()
+    assert review.changed_since_review(7, "develop", "0" * 40, "no-such-remote") is None
+
+
+def test_the_classifier_is_read_from_the_target_branch_not_the_checkout(
+    request_history,
+) -> None:
+    repo, _reviewed, point_refs = request_history
+    point_refs()
+    assert review._load_target_classifier("develop") is None, "absent on develop: None"
+
+    _git(repo, "checkout", "-q", "develop")
+    source = (REPO_ROOT / "scripts" / "ci" / "changed_areas.py").read_text()
+    _commit(repo, {"scripts/ci/changed_areas.py": source}, "add the classifier")
+    _git(repo, "checkout", "-q", "feature")
+    # The checkout's copy says everything is documentation. It must not be used.
+    (repo / "scripts" / "ci").mkdir(parents=True, exist_ok=True)
+    (repo / "scripts" / "ci" / "changed_areas.py").write_text(
+        "def docs_only(paths):\n    return True\n"
+    )
+    point_refs()
+    module = review._load_target_classifier("develop")
+    assert module is not None
+    assert module.docs_only(["CHANGELOG.md", "docs/x.md"])
+    assert not module.docs_only(["a.py"])
+
+
+class _CarryForge(review.Github):
+    def __init__(self, prior):
+        super().__init__("owner/name", "token")
+        self.prior = prior
+        self.posted: list[str] = []
+
+    def reviewed_shas(self, iid):
+        return {(p.sha, p.rev) for p in self.prior}
+
+    def prior_reviews(self, iid, web_url=""):
+        return self.prior
+
+    def check_status(self, sha):
+        return "4 success"
+
+    def post_note(self, iid, body):
+        self.posted.append(body)
+
+
+def _classifier():
+    spec = importlib.util.spec_from_file_location(
+        "changed_areas_for_tests", REPO_ROOT / "scripts" / "ci" / "changed_areas.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["changed_areas_for_tests"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_a_documentation_only_push_is_carried_over_without_a_model_call(
+    request_history, tmp_path, monkeypatch
+) -> None:
+    repo, reviewed, point_refs = request_history
+    head = _commit(repo, {"CHANGELOG.md": "y\n", "docs/new.md": "n\n"}, "docs")
+    point_refs()
+    monkeypatch.setattr(review, "_load_target_classifier", lambda branch: _classifier())
+    monkeypatch.setattr(review, "fetch_head", lambda *a, **k: head)
+
+    def no_model(*a, **k):
+        pytest.fail("a carried-over push called the model")
+
+    monkeypatch.setattr(review, "run_claude", no_model)
+    forge = _CarryForge(
+        [review.PriorReview(reviewed, review.PROMPT_REVISION, _review_body(reviewed), "u")]
+    )
+    merge_request = review.MergeRequest(7, "t", "a", "feature", "develop", "w", head, False)
+    args = review.parse_args(["--mr", "7", "--artifact-dir", str(tmp_path)])
+
+    outcome = review.review_one(forge, merge_request, args, tmp_path)
+
+    assert outcome.status == "carried", outcome.detail
+    assert len(forge.posted) == 1
+    posted = forge.posted[0]
+    assert f"<!-- ai-review: sha={head} rev={review.PROMPT_REVISION} -->" in posted
+    assert "- `CHANGELOG.md`" in posted and "- `docs/new.md`" in posted
+    assert "4 success" in posted
+    assert (tmp_path / "review-7.md").read_text() == posted
+
+
+def test_a_code_change_since_the_review_is_reviewed_in_full(
+    request_history, tmp_path, monkeypatch
+) -> None:
+    repo, reviewed, point_refs = request_history
+    head = _commit(repo, {"CHANGELOG.md": "y\n", "a.py": "3\n"}, "docs and code")
+    point_refs()
+    monkeypatch.setattr(review, "_load_target_classifier", lambda branch: _classifier())
+    forge = _CarryForge(
+        [review.PriorReview(reviewed, review.PROMPT_REVISION, _review_body(reviewed), "u")]
+    )
+    merge_request = review.MergeRequest(7, "t", "a", "feature", "develop", "w", head, False)
+    args = review.parse_args(["--mr", "7", "--artifact-dir", str(tmp_path)])
+    assert review.try_carry_over(forge, merge_request, args, tmp_path) is None
+    assert forge.posted == []
+
+
+@pytest.mark.parametrize(
+    "instruction_file",
+    ["docs/CLAUDE.md", ".claude/skills/x/README.md", "docs-site/AGENTS.md", "CLAUDE.md"],
+)
+@pytest.mark.parametrize("permissive_classifier", [False, True])
+def test_an_instruction_file_change_is_reviewed_in_full(
+    request_history, tmp_path, monkeypatch, instruction_file, permissive_classifier
+) -> None:
+    """A change to what an agent or the reviewer is told is never carried over.
+
+    Also with a target-branch classifier that calls everything documentation, so the
+    harness's own check holds even where the classifier on the target lags behind.
+    """
+    repo, reviewed, point_refs = request_history
+    head = _commit(repo, {"CHANGELOG.md": "y\n", instruction_file: "be brief\n"}, "docs")
+    point_refs()
+    if permissive_classifier:
+        classifier = types.SimpleNamespace(docs_only=lambda paths: True)
+    else:
+        classifier = _classifier()
+        assert not classifier.docs_only([instruction_file])
+    monkeypatch.setattr(review, "_load_target_classifier", lambda branch: classifier)
+    forge = _CarryForge(
+        [review.PriorReview(reviewed, review.PROMPT_REVISION, _review_body(reviewed), "u")]
+    )
+    merge_request = review.MergeRequest(7, "t", "a", "feature", "develop", "w", head, False)
+    args = review.parse_args(["--mr", "7", "--artifact-dir", str(tmp_path)])
+    assert review.try_carry_over(forge, merge_request, args, tmp_path) is None
+    assert forge.posted == []
+
+
+def test_a_carried_over_blocking_finding_names_the_changed_files_it_cites() -> None:
+    merge_request = review.MergeRequest(7, "t", "a", "x", "develop", "w", "f" * 40, False)
+    body = _review_body(
+        _REVIEW_AT,
+        verdict="❌ Block",
+        findings="- 🔴 **Blocking** — `docs/a.md:3` — The page states the wrong default.\n",
+    )
+    note = review.compose_carry_over(
+        merge_request, review.PriorReview(_REVIEW_AT, 2, body), ["docs/a.md", "docs/b.md"], "PR"
+    )
+    assert (
+        "named by a blocking finding, so check whether this push addressed it: `docs/a.md`." in note
+    )
+    assert "`docs/b.md`." not in note
+    assert review.scan_for_disclosure(note) == []
+
+
+def test_force_always_reviews_in_full(monkeypatch, tmp_path) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(review, "try_carry_over", lambda *a, **k: calls.append("carry"))
+    monkeypatch.setattr(review, "fetch_head", lambda *a, **k: "f" * 40)
+    # An empty diff ends the review right after the point the carry-over would run.
+    monkeypatch.setattr(review, "diff_stat", lambda *a, **k: (1, 1, 0))
+    monkeypatch.setattr(review, "build_diff", lambda *a, **k: pytest.fail("reached the diff"))
+    merge_request = review.MergeRequest(7, "t", "a", "x", "develop", "w", "f" * 40, False)
+    args = review.parse_args(["--mr", "7", "--force", "--artifact-dir", str(tmp_path)])
+    with pytest.raises(pytest.fail.Exception):
+        review.review_one(_CarryForge([]), merge_request, args, tmp_path)
+    assert calls == [], "--force must not consult the carry-over"

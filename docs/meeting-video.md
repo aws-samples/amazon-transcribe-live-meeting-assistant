@@ -402,9 +402,10 @@ compares it with two earlier pictures:
   whether the picture is still moving. A slide transition, scrolling, a video or
   a camera is not captured while it moves; a frame is kept only once the
   picture has held still for two seconds (three without a screen-share signal,
-  below). Comparing with the start of the spell as well means a picture that
-  creeps a little every second, as a live web page can, does not count as
-  holding still.
+  below), or for six seconds while the screen is busy (see
+  [Busy screens](#busy-screens)). Comparing with the start of the spell as well
+  means a picture that creeps a little every second, as a live web page can,
+  does not count as holding still.
 - **The last key frame's**, to tell whether the settled picture is new. Going
   back to the slide that was just captured, or a share that stops and starts
   again on the same slide, does not produce another frame.
@@ -449,8 +450,41 @@ adapts instead:
   It is judged against the picture just before it, not against the last key
   frame, because the small updates of a busy screen add up against an old frame.
 
+- A picture that holds still for 15 seconds is a page somebody stayed on, and
+  also waits only the four seconds, however far the wait has backed off. A
+  page switch inside a shared window can change less than 10% of the grid,
+  because the window's frame, the desktop and the meeting client around it stay
+  where they were.
+
 Frames that still show the same screen after this are collapsed once their text
 is read; see [Repeated frames](#repeated-frames).
+
+### Busy screens
+
+A live view moves in bursts a few seconds apart: a page is scrolled a step at a
+time, a list grows as it is typed into, a dialog opens and closes. Two seconds
+of stillness in such a view is usually a pause in the middle of it, and the
+frame kept is of the view half-way. So the detector tracks how close together
+the moves come:
+
+- A move that starts less than 10 seconds after the previous move ended makes
+  the screen **busy**. While it is busy, a picture has to hold still for six
+  seconds, not two, before it is kept. A scroll that pauses for a few seconds
+  at a time is kept once, where it stops; a dialog open for three seconds is
+  not kept at all.
+- A slide changed after the slide before it stayed up for longer than 10
+  seconds is not affected: it still settles in two seconds.
+- When 30 seconds have passed since the screen became busy and since the last
+  key frame, the two-second settle applies again, so a view that never holds
+  still for six seconds is still captured, at the spacing above.
+- The frame is stamped with when its picture appeared either way; the longer
+  settle delays only the decision.
+
+The longer settle was added after a meeting in which the presenter shared the
+LMA web UI. Two still samples were often a pause mid-scroll, and once a dialog
+was open for under three seconds: the samples judged showed the dialog, but the
+full-size grab taken a moment later showed it already closed, and closing it
+then produced a second frame.
 
 ### Screen-share signal per platform
 
@@ -477,6 +511,10 @@ thresholds.
 | Change from the picture settled before it that is a different screen (no wait beyond four seconds) | 10% | 10% |
 | Wait before the second, third and later frames while the screen keeps changing | 4 s, 30 s, 60 s | the same |
 | Quiet time that steps the wait back down one | 10 s | the same |
+| Seconds the picture must hold still while the screen is busy | 6 | 6 |
+| Gap between moves below which the screen is busy | 10 s | the same |
+| Time without a key frame after which a busy screen settles in the normal time again | 30 s | the same |
+| Seconds still after which a picture waits only four seconds | 15 | the same |
 
 Without a share signal, a gallery of moving cameras still produces no frames,
 because the cameras are moving. A layout change that then holds still — someone
@@ -511,6 +549,31 @@ page updating 5% of the grid every three seconds gives 44 frames in 42 minutes
 every 12 seconds keeps every slide. They have not yet been measured on a
 recorded or live meeting.
 
+The busy-screen settle and the 15-second hold were tuned by replaying a
+recorded meeting through the detector: the 34-minute screen recording of a
+Zoom meeting, scaled to the 64 × 36 grid once a second, in which the presenter
+shared the LMA web UI (scrolling a live transcript and a configuration page,
+switching tabs, opening dialogs), then a meeting window, then a chat
+application. The replay of the detector as it was reproduced the frames the
+meeting had stored (33 against 36, at the same moments and with the same
+change scores).
+
+| Replay of the recorded meeting | Before | Now |
+|---|---|---|
+| Frames kept | 33 | 28 |
+| Frames of a dialog open for under three seconds, and of its closing | 2 | 0 |
+| Frames of a dialog open for 9 seconds, closed, then opened again for 4 seconds | 4 | 2 (the first opening, and the page after the second closing) |
+| A configuration page that held still for 28 seconds after a live transcript | missed (it waited out a 60-second interval; the stored meeting has it, at a change of 10.1%, just over the change-of-screen fraction) | kept |
+| Frames while a meeting window was shared and only the VP's own chat panel changed | 6 | 6 |
+| Three chat channels shown in turn for 8 to 11 seconds each | 3 | 2 (the one that was still for only 3 of its 8 seconds is missed) |
+
+What a person would choose from that meeting is about 15 frames: one per page,
+tab or dialog. Most of the remaining difference is two things the detector does
+not address. The VP's own meeting window is in every sample, so a chat message
+arriving in its chat panel changes the picture as much as a template slide does;
+the samples are of the whole display, not of the share alone. And a shared
+transcript that keeps scrolling is still captured about once a minute.
+
 The alternative considered, FFmpeg's own scene-change filter on the five-frames-
 a-second recording picture, used 1.8% of a core; it compares each frame only
 with the one before, which is what makes a camera strip or a slow transition
@@ -527,7 +590,8 @@ LMA — so every picture is judged against the stricter thresholds, except that
 two still pictures in a row (about four seconds) are enough to settle, close to
 the Virtual Participant's three seconds. The spacing adapts in the same way
 (four seconds, then 30 and 60 while the picture keeps changing, stepping back
-down one for every 10 seconds it is quiet).
+down one for every 10 seconds it is quiet), and the busy-screen settle and the
+15-second hold apply as they do in the Virtual Participant.
 
 Each key frame's time is placed on the transcript's clock from the offset the
 app reports between the start of its audio and the start of its video, which is
@@ -554,10 +618,15 @@ Participant process — for example `KEYFRAME_CHANGE_FRACTION`,
 `KEYFRAME_BACKOFF_STEPS_MS` (the longer waits, comma-separated milliseconds,
 `30000,60000`), `KEYFRAME_QUIET_STEP_MS` (`10000`),
 `KEYFRAME_MAJOR_CHANGE_FRACTION` and `KEYFRAME_STRICT_MAJOR_CHANGE_FRACTION`
-(`0.1`), and `KEYFRAME_MAX_PER_MEETING`; see `keyframe-sampler.ts` — and, for
-desktop video, of the transcriber (`KEYFRAME_DESKTOP_CHANGE_FRACTION`,
-`KEYFRAME_DESKTOP_MAJOR_CHANGE_FRACTION`, the same `KEYFRAME_BACKOFF_STEPS_MS`
-and `KEYFRAME_QUIET_STEP_MS`, and the others in `videokeyframes.ts`). They are not stack parameters: they are meant for local
+(`0.1`), `KEYFRAME_BUSY_SETTLE_MS` and `KEYFRAME_STRICT_BUSY_SETTLE_MS` (the
+settle while busy, `6000`; `0` turns it off), `KEYFRAME_BUSY_GAP_MS` (`10000`),
+`KEYFRAME_MAX_BUSY_WAIT_MS` (`30000`), `KEYFRAME_HOLD_MS` (`15000`), and
+`KEYFRAME_MAX_PER_MEETING`; see `keyframe-sampler.ts` — and, for desktop video,
+of the transcriber (`KEYFRAME_DESKTOP_CHANGE_FRACTION`,
+`KEYFRAME_DESKTOP_MAJOR_CHANGE_FRACTION`, `KEYFRAME_DESKTOP_BUSY_SETTLE_MS`, the
+same `KEYFRAME_BACKOFF_STEPS_MS`, `KEYFRAME_QUIET_STEP_MS`,
+`KEYFRAME_BUSY_GAP_MS`, `KEYFRAME_MAX_BUSY_WAIT_MS` and `KEYFRAME_HOLD_MS`, and
+the others in `videokeyframes.ts`). They are not stack parameters: they are meant for local
 runs and calibration, and a value added to a task definition by hand is replaced
 at the next stack update.
 
@@ -575,7 +644,7 @@ finds the images. The item has:
 |---|---|
 | `FrameId` | The frame's id: its time in milliseconds, zero-padded, and a short suffix. Frames sort by it in time order. |
 | `Timestamp` | Seconds on the transcript's timeline, the same clock as a transcript segment's start time. |
-| `VideoOffset` | Seconds into the meeting's video recording, for playing the recording from that frame. |
+| `VideoOffset` | Seconds into the meeting's video recording, for playing the recording from that frame. Measured from the recording's first captured frame, which FFmpeg reports, not from when FFmpeg was launched. |
 | `ImageUrl`, `ThumbnailUrl` | Where the two images are stored. |
 | `Source` | What took the frame: `VIRTUAL_PARTICIPANT` or `DESKTOP_CAPTURE`. |
 | `ShareDetected` | `true` when the frame was taken while the platform showed a share; absent on platforms without the signal and for desktop video. |

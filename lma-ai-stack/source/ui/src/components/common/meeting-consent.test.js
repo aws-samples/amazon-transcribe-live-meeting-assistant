@@ -5,7 +5,16 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { buildTimeline, consentAsText, latestDecisions, participantRows, statusIndicatorType } from './meeting-consent';
+import {
+  buildTimeline,
+  consentAsText,
+  isPlaceholderSeat,
+  latestDecisions,
+  participantRows,
+  statusIndicatorType,
+  unidentifiedLabel,
+  unidentifiedPresentCount,
+} from './meeting-consent';
 import { getTextFileFormattedMeetingDetails } from './summary';
 
 const CONSENT = {
@@ -60,6 +69,42 @@ describe('meeting-consent', () => {
     expect(buildTimeline(null)).toEqual([]);
   });
 
+  it('shows placeholder seats as one count while present, and not at all once they are not', () => {
+    const consent = {
+      Mode: 'opt_in',
+      Participants: ['Ana Silva', 'Unidentified participant 1', 'Unidentified participant 2'],
+      ParticipantsSeen: [
+        'Ana Silva',
+        'Unidentified participant 1',
+        'Unidentified participant 2',
+        'Unidentified participant 3',
+      ],
+      Events: [
+        { ParticipantName: 'Ana Silva', Decision: 'consent', Source: 'chat' },
+        // A reply with no sender is recorded under the name without a number.
+        { ParticipantName: 'Unidentified participant', Decision: 'objection', Source: 'chat' },
+      ],
+    };
+    expect(isPlaceholderSeat('Unidentified participant 3')).toBe(true);
+    expect(isPlaceholderSeat('unidentified  PARTICIPANT 12')).toBe(true);
+    expect(isPlaceholderSeat('Unidentified participant')).toBe(false);
+    expect(isPlaceholderSeat('Unidentified participant Bob')).toBe(false);
+    expect(participantRows(consent)).toEqual([
+      { name: 'Ana Silva', present: true, decision: 'consent' },
+      { name: 'Unidentified participant', present: false, decision: 'objection' },
+    ]);
+    expect(unidentifiedPresentCount(consent)).toBe(2);
+    expect(unidentifiedLabel(2)).toBe('2 participants not yet identified');
+    expect(unidentifiedLabel(1)).toBe('1 participant not yet identified');
+    const text = consentAsText(consent);
+    expect(text).toContain('- 2 participants not yet identified');
+    expect(text).not.toContain('Unidentified participant 1');
+    expect(text).not.toContain('Unidentified participant 3');
+    // Nobody unidentified present: no line.
+    expect(unidentifiedPresentCount({ Participants: ['Ana Silva'], Events: [] })).toBe(0);
+    expect(consentAsText({ Mode: 'opt_in', Participants: ['Ana Silva'] })).not.toContain('not yet identified');
+  });
+
   it('matches names as the backend case-folds them', () => {
     const consent = {
       Participants: ['Strauß'],
@@ -96,9 +141,68 @@ describe('meeting-consent', () => {
     expect(text).toContain('Status: Objected');
     expect(text).toContain('- Bo Chen: objection');
     expect(text).toContain('- Cy Diaz: no reply (not present at the time of this download)');
-    expect(text).toContain('Objection found (model amazon.nova-lite-v1:0, confidence 0.9)');
+    expect(text).toContain(
+      '- screenshot captured 2026-11-02T10:02:30.000Z. ' +
+        'Image check: Objection found (model amazon.nova-lite-v1:0, confidence 0.9)',
+    );
     expect(text).toContain('not a legal determination');
     expect(consentAsText(null)).toBe('');
+  });
+
+  it('describes each evidence image by its note in the download', () => {
+    const text = consentAsText({
+      ...CONSENT,
+      Evidence: [
+        { ...CONSENT.Evidence[0], Note: 'Meeting chat when Bo Chen objected' },
+        {
+          EvidenceId: 'e2',
+          Kind: 'screenshot',
+          CapturedAt: '2026-11-02T10:02:31.000Z',
+          Note: 'Participant list\nwhen Bo Chen objected',
+        },
+      ],
+    });
+    expect(text).toContain(
+      '- Meeting chat when Bo Chen objected (screenshot captured 2026-11-02T10:02:30.000Z). ' +
+        'Image check: Objection found (model amazon.nova-lite-v1:0, confidence 0.9)',
+    );
+    expect(text).toContain(
+      '- Participant list when Bo Chen objected (screenshot captured 2026-11-02T10:02:31.000Z). ' +
+        'Not checked: participant lists are kept as a record',
+    );
+  });
+
+  it('says a chat image with no check was not run, and names consent given outside the chat', () => {
+    const text = consentAsText({
+      ...CONSENT,
+      Evidence: [
+        { EvidenceId: 'e3', Kind: 'screenshot', CapturedAt: 'x', Note: 'Meeting chat when Bo Chen consented' },
+        {
+          EvidenceId: 'e4',
+          Kind: 'screenshot',
+          CapturedAt: 'y',
+          S3Key: 'lma-consent-evidence/m1/2026-11-02T10-02-31-000Z-participants-abc123.jpg',
+        },
+        {
+          EvidenceId: 'e5',
+          Kind: 'screenshot',
+          CapturedAt: 'z',
+          Note: 'Meeting chat when Jeremy Feldman consented',
+          Verification: {
+            Verdict: 'supports_consent',
+            ModelId: 'm',
+            Confidence: 0.8,
+            ConsentedOutsideChat: ['Bo Chen'],
+          },
+        },
+      ],
+    });
+    expect(text).toContain('- Meeting chat when Bo Chen consented (screenshot captured x). Image check: not run');
+    expect(text).toContain('- screenshot captured y. Not checked: participant lists are kept as a record');
+    expect(text).toContain(
+      'Image check: Supports consent (model m, confidence 0.8). ' +
+        'Consented aloud or in LMA, so not expected in this image: Bo Chen',
+    );
   });
 
   it('adds the record to the summary download only when there is one', () => {

@@ -1,6 +1,7 @@
 import { Page } from 'playwright-core';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
+import { recordTranscriptionPause } from './transcription-pause.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
@@ -289,10 +290,12 @@ export default class Chime {
                     await this.sendMessages(page, chatHelpMessages(voiceAssistant));
                 } else if (details.start && text && matchesChatCommand(text, details.pauseCommand)) {
                     details.start = false;
+                    void recordTranscriptionPause(true, sender === 'Amazon Chime' ? null : sender);
                     log.info(details.pauseMessages[0]);
                     await this.sendMessages(page, details.pauseMessages);
                 } else if (!details.start && text && matchesChatCommand(text, details.startCommand)) {
                     details.start = true;
+                    void recordTranscriptionPause(false, null);
                     log.info(details.startMessages[0]);
                     await this.sendMessages(page, details.startMessages);
                     // Restart transcription if needed

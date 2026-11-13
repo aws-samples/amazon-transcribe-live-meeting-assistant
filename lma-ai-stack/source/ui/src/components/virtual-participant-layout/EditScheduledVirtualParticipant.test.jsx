@@ -4,8 +4,9 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import createWrapper from '@cloudscape-design/components/test-utils/dom';
 
 import LaunchSettings from './LaunchSettings';
 import EditScheduledVirtualParticipant from './EditScheduledVirtualParticipant';
@@ -17,6 +18,8 @@ vi.mock('aws-amplify/api', () => ({ generateClient: () => ({ graphql: graphqlMoc
 vi.mock('aws-amplify/utils', () => ({
   ConsoleLogger: class {
     error() {} // eslint-disable-line class-methods-use-this
+
+    warn() {} // eslint-disable-line class-methods-use-this
   },
 }));
 
@@ -93,11 +96,95 @@ describe('EditScheduledVirtualParticipant', () => {
     expect(onSaved).not.toHaveBeenCalled();
   });
 
-  it('closes without a request when nothing changed', () => {
+  it('closes without saving when nothing changed', () => {
     const { onDismiss } = renderEditor();
     fireEvent.click(screen.getByText('Save changes'));
     expect(onDismiss).toHaveBeenCalled();
-    expect(graphqlMock).not.toHaveBeenCalled();
+    const saves = graphqlMock.mock.calls.filter(([request]) => /updateScheduledVirtualParticipant/.test(request.query));
+    expect(saves).toEqual([]);
+  });
+});
+
+// The select in the form field labelled Meeting consent.
+const consentSelect = () =>
+  createWrapper(document.body)
+    .findAllFormFields()
+    .find((field) => field.findLabel()?.getElement().textContent === 'Meeting consent')
+    .findControl()
+    .findSelect();
+
+// openDropdown toggles, so it is opened only when no option is showing.
+const consentOptions = () => {
+  const select = consentSelect();
+  if (select.findDropdown().findOptions().length === 0) select.openDropdown();
+  return select
+    .findDropdown()
+    .findOptions()
+    .map((option) => ({
+      text: option.getElement().textContent,
+      disabled: option.isDisabled(),
+    }));
+};
+
+const answerDefaults = (defaults) =>
+  graphqlMock.mockImplementation(async ({ query }) => {
+    if (/getMeetingConsentDefaults/.test(query)) {
+      if (defaults instanceof Error) throw defaults;
+      return { data: { getMeetingConsentDefaults: defaults } };
+    }
+    return { data: {} };
+  });
+
+// Once the form has read the settings and rendered what it read.
+const settingsRead = async () => {
+  await waitFor(() =>
+    expect(graphqlMock.mock.calls.some(([request]) => /getMeetingConsentDefaults/.test(request.query))).toBe(true),
+  );
+  await act(async () => {});
+};
+
+describe('the Meeting consent choice', () => {
+  beforeEach(() => {
+    graphqlMock.mockReset();
+  });
+
+  it('disables each choice the deployment would not use, and keeps the stricter ones', async () => {
+    answerDefaults({ Mode: 'notify', Rule: 'each_participant', AllowPerMeetingOverride: false });
+    renderEditor();
+    await settingsRead();
+    const options = consentOptions();
+    expect(options.find((o) => /^Off/.test(o.text)).disabled).toBe(true);
+    expect(options.find((o) => /^Off/.test(o.text)).text).toMatch(
+      /Not allowed in this deployment: the meeting would use Notify/,
+    );
+    expect(options.find((o) => /^The deployment's setting/.test(o.text)).disabled).toBe(false);
+    expect(options.find((o) => /^Notify/.test(o.text)).disabled).toBe(false);
+    expect(options.filter((o) => /^Opt-in/.test(o.text)).map((o) => o.disabled)).toEqual([false, false]);
+  });
+
+  it('moves a stored choice the deployment would not use back to its setting', async () => {
+    answerDefaults({ Mode: 'opt_in', Rule: 'owner_attests', AllowPerMeetingOverride: false });
+    renderEditor({ vp: { ...SCHEDULED, consentMode: 'notify' } });
+    expect(consentSelect().findTrigger().getElement().textContent).toMatch(/^Notify/);
+    await settingsRead();
+    expect(consentSelect().findTrigger().getElement().textContent).toMatch(/The deployment's setting/);
+  });
+
+  it('offers every choice when the settings cannot be read', async () => {
+    answerDefaults(new Error('the meeting consent settings could not be read; try again'));
+    renderEditor({ vp: { ...SCHEDULED, consentMode: 'off' } });
+    await settingsRead();
+    expect(consentSelect().findTrigger().getElement().textContent).toMatch(/^Off/);
+    expect(consentOptions().map((o) => o.disabled)).toEqual([false, false, false, false, false]);
+  });
+
+  it('offers every choice when the deployment allows a per-meeting choice', async () => {
+    answerDefaults({ Mode: 'opt_in', Rule: 'each_participant', AllowPerMeetingOverride: true });
+    renderEditor();
+    await settingsRead();
+    const options = consentOptions();
+    expect(options[0].text).toMatch(/This deployment uses Opt-in, waiting until every participant consents/);
+    expect(options.map((o) => o.disabled)).toEqual([false, false, false, false, false]);
   });
 });
 

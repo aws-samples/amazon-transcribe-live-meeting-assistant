@@ -383,7 +383,7 @@ so a release cannot ship a default its own save would refuse.
 | `meeting_agenda` | `autoDeriveAfterSeconds`, a whole number from 0 to 3600, the parameter's range |
 | `retention` | `meetingRecordExpirationInDays` and `transcriptionExpirationInDays`, numbers of days of at least 0.1, each at most the baseline's value (`maximumIsDefault`, below); `transcriptDeletionAfterSummary`, one of `off`, `immediately`, `after_15_minutes`, `after_30_minutes` and `after_60_minutes` (see [Transcript Deletion After the Summary](transcript-deletion.md)) |
 | `meeting_consent` | `mode` and `consentRule` from their fixed lists; the two notice texts of 1 to 2,000 characters; the two phrase lists of 1 to 1,000 characters; `allowPerMeetingOverride`, `keepEvidenceScreenshots`, `leaveOnObjection` and `readSpokenReplies`, `true` or `false`; `verifierModelId`, one of the image-capable models the Key frame text setting offers; `clientsWithoutConsent`, `accept_with_warning` or `reject`; nothing else |
-| `virtual_participant` | The provider from its parameter's list; wake phrases as text; the activation duration, poll interval and poll counts as whole numbers in their parameters' ranges; the ElevenLabs agent and Simli face ids in the characters their services use, empty for none |
+| `virtual_participant` | The display name as text of 1 to 128 characters, not blank; the provider from its parameter's list; wake phrases as text; the activation duration, poll interval and poll counts as whole numbers in their parameters' ranges; the ElevenLabs agent and Simli face ids in the characters their services use, empty for none |
 | `call_pricing` | Prices that are finite and not negative, under `regions › <region or default> › <service>/<api-or-model> › <unit>`; region codes in the form `us-east-1`; each price's source under `sources`, laid out the same way, with a `basis` of `price-list-api`, `pricing-page` or `estimate`, a `retrieved` date written `YYYY-MM-DD`, an `https://` `url` and text fields of bounded length; the lists and notes as lists and objects of text; `currency` `USD`; no keys the estimator does not read |
 
 ### The validator
@@ -1177,19 +1177,22 @@ meetings use, which engine Virtual Participants use, and whether a Virtual
 Participant asks for per-voice labels — are the `asr_engine` section.
 
 - `Config#default` holds them as the release ships them, from
-  `configuration_seeder/defaults/AsrEngine.json`: both engine switches on, so
-  streaming meetings and Virtual Participants use the ASR MicroVM engine, and
-  voice separation on. On a deployment without that engine the readers find no
-  ASR launcher configured and use Amazon Transcribe whatever the switches say.
-  The previous table had no seeder, and its readers took an absent record as
-  every switch off; that reading now applies only to a rolled-back stack.
+  `configuration_seeder/defaults/AsrEngine.json`: both engine switches off, so
+  streaming meetings and Virtual Participants use Amazon Transcribe, and voice
+  separation on. An Admin moves a meeting source onto the ASR MicroVM engine by
+  turning its switch on in a Custom profile. On a deployment without that engine
+  the readers find no ASR launcher configured and use Amazon Transcribe whatever
+  the switches say. The previous table had no seeder, and its readers took an
+  absent record as every switch off, the same engine choice the baseline ships.
 - A Custom profile, when one is active, holds its own full copy of the switches,
   which wins over the baseline; a release that changes the shipped switches
-  reaches only deployments running on the default profile. On an upgrade from
-  0.3.x the seeder converts a `custom` profile that holds settings into a full
-  copy, filling every switch nobody saved from this release's baseline, and
-  removes one that holds none, so the deployment runs on the default profile
-  (see [Named profiles](#named-profiles)).
+  reaches only deployments running on the default profile or a Managed profile,
+  which every stack update rewrites from the baseline. On an upgrade from 0.3.x
+  the seeder converts a `custom` profile that holds settings into a full copy,
+  filling every switch nobody saved from this release's baseline, and removes one
+  that holds none, so the deployment runs on the default profile (see
+  [Named profiles](#named-profiles)). Either way a source nobody moved onto the
+  ASR MicroVM engine stays on Amazon Transcribe.
 - The WebSocket transcriber reads the section on the `short` tier. It falls back
   to the previous `AsrConfigTable` only when the configuration table cannot be
   read or holds no shipped switches, and a fallback answer is reused for the same

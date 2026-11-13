@@ -5,6 +5,8 @@
 """Meeting platform and meeting ID normalisation for the Virtual Participant tools."""
 
 import re
+from typing import Optional, Tuple
+from urllib.parse import parse_qs, urlsplit
 
 # The platform names a caller may pass, folded to lower case with spaces,
 # hyphens and underscores removed, and the value the Virtual Participant expects.
@@ -58,3 +60,85 @@ def normalize_meeting_id(platform: str, meeting_id: str) -> str:
             "abc-defg-hij) or a https://meet.google.com/ link to it"
         )
     return f"{code.group(1)}-{code.group(2)}-{code.group(3)}"
+
+
+# The longest passcode Zoom lets a host set. Zoom's Meetings API reference
+# (developers.zoom.us/docs/api/meetings/, "Create a meeting", `password`): "By
+# default, a passcode can only have a maximum length of 10 characters and only
+# contain alphanumeric characters and the @, -, _, and * characters." The
+# Virtual Participant uses the same limit (meeting-password.ts).
+ZOOM_PASSCODE_MAX_LENGTH = 10
+
+# The pwd value of a Zoom join link, as far as one has been seen whole: 30
+# letters and digits followed by ".1" (32 characters). A copy cut off at 20
+# characters had no ".1". So a value counts as complete only when it ends in a
+# period and digits after at least 30 letters and digits; anything shorter, or
+# without the ending, may have been cut off.
+_ZOOM_LINK_TOKEN = re.compile(r"^[A-Za-z0-9]{30,}\.\d+$")
+
+_ZOOM_HOST = re.compile(r"^([a-z0-9-]+\.)*zoom\.us$", re.IGNORECASE)
+# /j/<number> (the invitation link), and /wc/<number>/join and
+# /wc/join/<number> (the web client). The Virtual Participant reads the same
+# forms (zoom-join-link.ts).
+_ZOOM_PATHS = (
+    re.compile(r"^/j/(\d+)/?$"),
+    re.compile(r"^/wc/(\d+)(?:/join)?/?$"),
+    re.compile(r"^/wc/join/(\d+)/?$"),
+)
+
+ZOOM_PASSWORD_LOOKS_LIKE_LINK_VALUE = (
+    "This looks like the pwd value from a Zoom join link, possibly cut off. Pass the "
+    "passcode shown in the invitation text, or the full join link as meetingId."
+)
+ZOOM_LINK_NOT_READ = (
+    "For Zoom, meetingId must be the numeric meeting ID or a full zoom.us join link "
+    "(https://<name>.zoom.us/j/<number>?pwd=...). A personal link (zoom.us/my/<name>) "
+    "cannot be used; pass the meeting ID and passcode from the invitation instead."
+)
+
+
+def is_complete_zoom_link_token(value: Optional[str]) -> bool:
+    """Whether a value has the shape of a whole Zoom join-link pwd value (see _ZOOM_LINK_TOKEN)."""
+    return bool(_ZOOM_LINK_TOKEN.match((value or "").strip()))
+
+
+def zoom_link_parts(meeting_id: Optional[str]) -> Optional[Tuple[str, Optional[str]]]:
+    """The meeting number and pwd value of a Zoom join link, or None if it is not one."""
+    text = (meeting_id or "").strip()
+    if not re.match(r"^https?://", text, re.IGNORECASE):
+        return None
+    parts = urlsplit(text)
+    if not _ZOOM_HOST.match(parts.hostname or ""):
+        return None
+    for pattern in _ZOOM_PATHS:
+        match = pattern.match(parts.path)
+        if match:
+            pwd = (parse_qs(parts.query).get("pwd") or [""])[0].strip()
+            return match.group(1), (pwd or None)
+    return None
+
+
+def check_zoom_meeting(meeting_id: str, meeting_password: Optional[str]) -> None:
+    """Refuse a Zoom meeting ID or password the Virtual Participant cannot join with.
+
+    A meeting ID that is a link must be a zoom.us join link the Virtual
+    Participant reads. A password is accepted when it is a passcode (at most
+    ZOOM_PASSCODE_MAX_LENGTH characters, measured as the Virtual Participant
+    enters it, without the grouping spaces of a numeric passcode) or a complete
+    link pwd value, which the Virtual Participant puts on the join URL. Any
+    other password is refused, unless the meeting ID is a link with its own pwd
+    value, which the Virtual Participant then uses instead.
+    """
+    link = None
+    if re.match(r"^https?://", meeting_id or "", re.IGNORECASE):
+        link = zoom_link_parts(meeting_id)
+        if link is None:
+            raise ValueError(ZOOM_LINK_NOT_READ)
+    password = (meeting_password or "").strip()
+    if re.fullmatch(r"[\d\s]+", password):
+        password = "".join(password.split())
+    if not password or len(password) <= ZOOM_PASSCODE_MAX_LENGTH:
+        return
+    if is_complete_zoom_link_token(password) or (link and link[1]):
+        return
+    raise ValueError(ZOOM_PASSWORD_LOOKS_LIKE_LINK_VALUE)

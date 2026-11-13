@@ -251,8 +251,16 @@ def test_the_notice_placeholders_are_filled() -> None:
         objection_phrase="I object",
     )
     assert text.startswith("Ana would like to record and transcribe this meeting (Weekly sync)")
-    assert '"I consent"' in text and '"I object"' in text
     assert "{" not in text
+    # The shipped texts carry no reply instruction: each capture client adds
+    # its own. A customised text may still name the phrases.
+    assert "Reply" not in text and "I consent" not in text
+    custom = rules.render_notice(
+        'Reply "{consent_phrase}" or "{objection_phrase}".',
+        consent_phrase="I consent",
+        objection_phrase="I object",
+    )
+    assert custom == 'Reply "I consent" or "I object".'
     assert rules.render_notice("{other} {LMA_USER}") == "{other} The meeting organizer"
 
 
@@ -370,3 +378,25 @@ def test_the_evidence_check_offers_the_key_frame_reader_models() -> None:
         rules.DEFAULT_SETTINGS["verifierModelId"]
         in models["properties"]["keyframeTextModelId"]["enum"]
     )
+
+
+def test_consent_outside_the_chat_is_listed_by_its_latest_reply() -> None:
+    meeting = record(
+        "opt_in",
+        "each_participant",
+        Participants=["Ana Silva", "Bo Chen", "Cy Diaz", "Dee Ek", "Eve Fo"],
+        Events=[
+            reply("ana silva", "consent"),
+            reply("Bo Chen", "consent", source="voice"),
+            reply("Cy Diaz", "consent", source="voice"),
+            reply("Cy Diaz", "consent"),
+            reply("Dee Ek", "consent", source="ui"),
+            reply("Eve Fo", "consent", source="voice"),
+            reply("Eve Fo", "objection"),
+            reply("Owner", "consent", source="attestation"),
+        ],
+    )
+    # Ana and Cy last consented in the chat; Eve's latest reply is an objection.
+    assert rules.consented_outside_chat(meeting) == ["Bo Chen", "Dee Ek"]
+    assert rules.consented_outside_chat(None) == []
+    assert rules.consented_outside_chat(record("notify")) == []

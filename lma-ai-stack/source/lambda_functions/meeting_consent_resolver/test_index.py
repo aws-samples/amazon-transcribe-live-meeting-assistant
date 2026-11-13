@@ -191,6 +191,37 @@ def test_an_unknown_meeting_is_refused_like_one_without_access(dynamo) -> None:
         )
 
 
+def defaults(identity):
+    return index.handler(
+        {"info": {"fieldName": "getMeetingConsentDefaults"}, "arguments": {}, "identity": identity},
+        None,
+    )
+
+
+def test_the_defaults_are_read_by_any_signed_in_user_without_a_meeting(dynamo, monkeypatch) -> None:
+    settings(monkeypatch, mode="notify", consentRule="owner_attests", allowPerMeetingOverride=False)
+    dynamo.items.clear()
+    assert defaults(user(OTHER)) == {
+        "Mode": "notify",
+        "Rule": "owner_attests",
+        "AllowPerMeetingOverride": False,
+    }
+
+
+def test_the_defaults_carry_only_the_mode_rule_and_override(dynamo) -> None:
+    assert defaults(user(OTHER)) == {
+        "Mode": "off",
+        "Rule": "each_participant",
+        "AllowPerMeetingOverride": True,
+    }
+
+
+def test_unreadable_settings_leave_the_defaults_unanswered(dynamo, monkeypatch) -> None:
+    monkeypatch.setattr(index, "_STORE", FakeStore(fail=True))
+    with pytest.raises(index.ConfigurationUnavailableError):
+        defaults(user(OWNER))
+
+
 def test_unreadable_settings_refuse_rather_than_default_to_off(dynamo, monkeypatch) -> None:
     monkeypatch.setattr(index, "_STORE", FakeStore(fail=True))
     with pytest.raises(index.ConfigurationUnavailableError):
@@ -609,6 +640,26 @@ def test_a_check_is_stored_on_the_evidence_and_leaves_the_status(dynamo, monkeyp
     assert sent["ModelId"] == "amazon.nova-lite-v1:0"
     assert sent["ObjectionPhrases"][0] == "I object"
     assert sent["LmaMessages"] == []
+    assert sent["ConsentedOutsideChat"] == []
+
+
+def test_a_check_is_sent_the_participants_who_consented_outside_the_chat(
+    dynamo, monkeypatch
+) -> None:
+    verifier = FakeLambda(VERIFIED)
+    evidence_id = evidence_meeting(monkeypatch, verifier)
+    call("setMeetingConsentParticipants", BACKEND, Participants=["Ana", "Bo"])
+    for name, source in (("Ana", "chat"), ("Bo", "voice")):
+        call(
+            "recordMeetingConsentEvent",
+            BACKEND,
+            ParticipantName=name,
+            Decision="consent",
+            Source=source,
+        )
+    call("verifyMeetingConsentEvidence", user(OWNER), EvidenceId=evidence_id)
+    assert verifier.payloads[0]["Participants"] == ["Ana", "Bo"]
+    assert verifier.payloads[0]["ConsentedOutsideChat"] == ["Bo"]
 
 
 def test_a_check_is_sent_the_notices_as_posted(dynamo, monkeypatch) -> None:

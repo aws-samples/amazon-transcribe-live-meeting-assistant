@@ -199,7 +199,7 @@ them on the one thing the reader can get for free:
 | Already run by `code_checks` | Covers |
 |---|---|
 | `make lint-cfn` | cfn-lint over every CloudFormation template |
-| `make lint-python-check` | ruff check + ruff format --check over the Lambda functions, the Lambda layers, `scripts/pr_review`, the demo recorder (`scripts/ux_recorder*.py`, `scripts/ux_test_session.py`) and `scripts/tests` |
+| `make lint-python-check` | ruff check + ruff format --check over the Lambda functions, the Lambda layers, `scripts/pr_review`, `scripts/ci`, the demo recorder (`scripts/ux_recorder*.py`, `scripts/ux_test_session.py`) and `scripts/tests` |
 | `make lint-ui-force` | ESLint (airbnb-base) + Prettier over the React UI |
 | `make lint-typescript` | `tsc` + eslint for the transcriber and VP stacks and `utilities/websocket-client` |
 | `make test-sdk`, `test-cli`, `test-lambdas` | Python unit suites |
@@ -211,6 +211,17 @@ them on the one thing the reader can get for free:
 | `make test-ux-recorder` | demo recorder, its stack-session helper and the storyboard file (render tests skip: no Pillow or ffmpeg) |
 | transcriber `npm test` + `npm run smoke` | tsc, eslint, node:test, Fastify boot |
 | browser extension `npm test` + `npm run build` | CRA tests and production build |
+| `make test-ci-tooling` | the CI step selection in `scripts/ci/changed_areas.py` |
+
+⚠️ **On a pull request, only the steps the request's files need are run.**
+`scripts/ci/changed_areas.py` maps the changed paths to areas and skips every
+step whose areas were not touched (a CI, Makefile or other shared-configuration
+change, or an unclassified path, runs everything; pushes to `develop` run
+everything). So "CI passed" on a request covers the steps that ran, not the whole
+table above. Where a finding depends on a suite having run — a change that a
+suite elsewhere reads but whose area rules do not reach it — name the suite and
+the file, and say it may not have run on this head; that is a gap in
+`changed_areas.py` worth fixing in the same request.
 
 `srt_security_review` (SRT: bandit + semgrep + syft) runs on GitLab for every MR
 targeting `develop`. Do not try to reproduce it: read the diff for the security
@@ -287,6 +298,50 @@ choosing. The history you would have used those for is in `.ai-review/base/` and
 So do not plan around fetching or running anything. If a judgement needs
 information that is not in the worktree or the four input files, say in the finding
 what you could not check.
+
+## When no model runs: a review carried over a documentation-only push
+
+This section is about the orchestrator, not about what you write; it is here so a
+maintainer reading this contract knows when a head gets no fresh review.
+
+Before calling the model for a new head, `try_carry_over` in `ai_pr_review.py`
+looks for the most recent **full** review on the request at the current
+`PROMPT_REVISION` (carried-over comments are skipped; a withheld review, or one
+with no `**Safe to merge?**` verdict row, means a full review runs). It then
+compares the request's **own** diff at the two heads: for each head,
+`merge-base(target, head)..head`, and a file counts as changed when either diff
+touches it and its content differs at the head or at the merge base. Files that
+only the target branch changed — brought in by merging `develop` into the
+request — therefore do not count, while a file the request reverted does. If
+every changed file is documentation by the primary area of
+`scripts/ci/changed_areas.py` (`CHANGELOG.md`, `docs/**`, READMEs, images, the
+docs site's Markdown, MDX and media), or no file of the request changed at all, it
+posts a short comment instead of a review. Never documentation, at any depth: a
+`CLAUDE.md` or `AGENTS.md`, anything under `.claude/`, the review harness in
+`scripts/pr_review/`, the docs site's package files, scripts and configuration, and
+prompts shipped inside a stack. `try_carry_over` also refuses any instruction path
+itself, whatever the target branch's classifier says. The comment:
+
+- it carries `<!-- ai-review: sha=<new head> rev=<n> -->`, so the idempotency
+  check and any tool looking for a review of the new head find one, plus
+  `<!-- ai-review-carried-over: from=<reviewed head> -->`;
+- it links the earlier review, lists the documentation files that changed, and
+  quotes that review's "Safe to merge?" verdict and notes;
+- if that review had any 🔴 **Blocking** finding, it says so and quotes the
+  first line of each, and if its verdict was to block it says that too —
+  carrying a review over never hides a blocking result;
+- it passes `scan_for_disclosure` like any other comment, and on a match the
+  orchestrator runs a full review instead of posting it.
+
+Everything that cannot be computed falls back to a full review: a reviewed head
+that is no longer fetchable (a force-push), no `scripts/ci/changed_areas.py` on
+the target branch, or a git failure. `--force` always runs a full review.
+
+The classifier is read from the **target branch** with `git show`, not imported
+from the checkout, for the same reason the harness is pinned to the target
+branch: the checkout is the request under review. A request that changes the
+documentation rules in `changed_areas.py` therefore takes effect for carry-overs
+only once it is merged.
 
 ## Bounds worth stating in the review itself
 

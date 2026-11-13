@@ -88,8 +88,13 @@ test('a stop request is addressed but does not count as asking for a lookup', ()
 
 test('addressing needs the whole wake phrase as words', () => {
     assert.equal(addressesAssistant('hey alexander', WAKE), false);
-    assert.equal(addressesAssistant('okay alex', WAKE), false);
     assert.equal(addressesAssistant('so, OK Alex — the numbers?', WAKE), true);
+});
+
+test('addressing reads "Okay Alex" as the configured "ok alex"', () => {
+    // How both recognisers write the spoken "OK" (stop-request.ts foldWakeSpellings).
+    assert.equal(addressesAssistant('Okay, Alex. Stop.', WAKE), true);
+    assert.equal(addressesAssistant('okay', WAKE), false);
 });
 
 // ---------------------------------------------------------------------------

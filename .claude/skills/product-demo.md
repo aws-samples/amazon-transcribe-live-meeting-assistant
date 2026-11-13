@@ -320,12 +320,14 @@ summary. Ways to make one, from simplest:
   `meeting_guest.py start --stack <stack> --meet-url <link> --name "Conference Room 4"`,
   `wait`, and drive it with `chat "<text>"`, `present` (synthetic slides) and
   `shot <file>`; `leave` stops it and deletes its files. A VP leaves a meeting it
-  is alone in after about a minute, so start the guest first. Its audio plays
+  is alone in after about a minute, so keep the meeting occupied (see
+  [Live meetings, unattended](#live-meetings-unattended)). Its audio plays
   once, from the moment its microphone opens on the pre-join screen, after
-  `--lead-in` seconds of silence (default 60): set it to cover the VP's join. The
-  meeting needs open access; Meet turns a guest away now and then, and the guest
-  retries. If the host is presenting, the VP keeps key frames of their screen, so
-  ask them to stop before recording.
+  `--lead-in` seconds of silence (default 60), or after whatever silence your own
+  `--audio` WAV starts with: set it to cover the time until the VP is in. The
+  meeting needs open access; Meet turns guests and VPs away often (see below). If
+  the host is presenting, the VP keeps key frames of their screen, so ask them to
+  stop before recording.
 
 Check two settings on the Configuration page first: **Retention › Delete the
 transcript after the summary** must be Off (the default) or the transcript is gone
@@ -357,6 +359,119 @@ If a step **does not work** during rehearsal, the demo stops here. Report it as
 functional breakage — *steps → observed → expected*, with the stack's version and
 the persona — and do not record around it. A demo that hides a broken step is
 worse than no demo.
+
+### Live meetings, unattended
+
+Learned the hard way over a night of recording ten videos against one Google
+Meet with nobody watching. Each of these cost at least one wasted take.
+
+**Keeping the meeting open**
+
+- **Hold the Meet open with a silent guest for the whole session.** Start one with
+  a WAV of silence, a neutral name and a long `--max-minutes`:
+  `meeting_guest.py --state guest-keep.json start --stack <stack> --meet-url <link> --name "Meeting host" --audio silence.wav --max-minutes 720`.
+  Run it from a small loop that checks the ECS task every minute and starts a new
+  guest when it stops. An empty meeting refuses joins, and a VP alone leaves.
+  The guest is a visible tile in every video; name it as a plausible attendee.
+- **Give every guest its own `--state` file** (`guest.json`, `guest-r.json`,
+  `guest-keep.json`), or a second `start` overwrites the first one's state and
+  you can no longer send it chat or stop it.
+
+**Getting into the meeting**
+
+- **Meet refuses joins often.** Both the scripted guest and the VP get "You can't
+  join this video call" or "not admitted" on roughly half their attempts, in
+  bursts. Retry with 20–45 seconds between attempts, up to five or six times,
+  and close a failed VP's session ("Got it — close Virtual Participant session")
+  before the next one.
+- **Order: VP first, then the speaking guest.** With the meeting held open, launch
+  the VP, wait until it is ACTIVE, then start the guest whose WAV carries the
+  conversation, with a short lead-in (100–200 s covers its own join). The reverse
+  order wastes the conversation whenever the VP is refused.
+- **Join off camera.** Do the VP launch, its retries, and the guest's join inside
+  `pause`/`resume`, or launch before `start` and show the participant's
+  **Launch settings** instead of the join. A refusal mid-take then costs minutes,
+  not the take.
+- **A wait for ACTIVE must fail loudly.** One take polled for ACTIVE, ran out of
+  attempts, carried on, and picked up the *previous* meeting by name: the video
+  showed a finished meeting as live and a failed VP's page. Throw when the VP
+  never reaches ACTIVE (or reaches FAILED or COMPLETED), and read the meeting ID
+  from the VP you launched, not "the newest meeting with this name".
+- **Two VPs in one meeting:** `lma vp create --stack-name <stack> --name "<meeting name>" --as-user <email> --platform google_meet --id <code> --no-wait`
+  for each user, then poll `lma vp get --id <id> --json` for `ACTIVE`. Chat
+  commands address one by its user's name (`LMA jordan leave`).
+
+**Driving the meeting from the script**
+
+- **Trigger on transcript text, not on the clock.** Wait until the visible
+  transcript contains a phrase from the line you need ("trade-offs", "check my
+  notes"), then act. Read the *visible* tab panel
+  (`[...document.querySelectorAll('[role=tabpanel]')].find(e => e.offsetParent)`):
+  the first `[role=tabpanel]` in the DOM is the hidden Summary tab, and one take
+  waited ten minutes for text that was already on screen.
+- **Write pauses into the conversation.** When the narration has LMA answer
+  between two lines ("let me check my notes"), put 30–50 seconds of silence there
+  in the WAV. Assistant answers take 15–40 seconds; without the gap the meeting
+  races past the moment.
+- **Wait for an answer by counting it.** Before asking, count the chat panel's
+  "Complete" markers; the answer has arrived when the count goes up. Quick-action
+  buttons appear twice once MORE is open, so click the last match.
+- **Write the narration after you have seen the answer.** Mark a live answer's
+  chapter with a placeholder `--say`, read the answer from the session's frames
+  afterwards (`timeline.json` maps each mark to a frame), and replace the
+  placeholder in `narration.md` before rendering. Narrating a predicted answer
+  is narrating something that did not happen.
+- **Typed consent must be the whole message; an objection need not be.** Have the
+  guest type exactly `I consent`; a sentence containing an objection phrase
+  ("I object to this being recorded") is an objection. Stacks built before
+  #1109 needed the exact phrase for an unaddressed objection too; check
+  `classifyChatReply` in `consent-matcher.ts` for the deployed rule.
+- **Each-participant opt-in waits for everyone present**, including a muted human
+  host and the silent keepalive guest, who never reply. To show consent being
+  granted live, use the owner-attests rule (the owner's **Attest that everyone
+  agreed** in the Consent section) or have every guest type its consent.
+
+**Keeping the frame clean**
+
+- **The side navigation's Deployment Info section re-opens** on every reload and
+  after some saves, with the stack name in it, and a mouse click to collapse it
+  draws a click ring. Hide it instead: an init script
+  (`page.addInitScript`) that adds a style rule and, on an interval, marks the
+  section's `<li>` hidden. Navigate between pages by changing `location.hash`
+  rather than reloading, so the page never repaints with it showing. Check every
+  video with a contact sheet of the navigation area (`ffmpeg … fps=1/2,crop=…,tile=…`).
+- **Escape closes a dialog**, not just the popup inside it: do not press Escape to
+  dismiss a date picker in the Create Virtual Participant form.
+- **Create profile copies the selected profile, or else the open one.** Reload the
+  page before selecting, or a stale selection makes the copy from the wrong
+  profile; check the "Created … as a copy of …" message.
+- **Translate remembers its last language**: the control is "Translation language
+  French" after the first use, not "Choose a language".
+- **The Troubleshooting page's description contains "root cause"**; wait for the
+  answer's **Root Cause** heading with an exact match.
+
+**Before each re-take**
+
+Reset what the last take changed, or the second take shows a different story:
+**Speakers › Actions › Clear all names** for a naming chapter, a regenerate for a
+summary that was hand-edited, a deleted profile for a "save as new profile"
+chapter, a cancelled schedule for a scheduling chapter. Remove an aborted
+session directory by its literal path; `rm -rf $(ls -td … | head -1)` is refused
+by the harness, and rightly.
+
+**The stack**
+
+- **A stack cannot read another stack's integration secret.** Pointing
+  `TavilyApiKeySecretArn` at a secret another LMA stack created left web search
+  answering "the search API key couldn't be read". Pass each stack its own key
+  (the `TavilyApiKey` parameter), then check one web search answer names its
+  sources before relying on it on camera.
+- **`lma deploy --from-code` on a Mac with Finch** needs
+  `DOCKER_HOST=unix:///Applications/Finch/lima/data/finch/sock/finch.sock` and
+  `SAM_SKIP_PULL_IMAGE=true`; without the second, `sam build --use-container`
+  hangs on the image pull.
+- **A defect found while rehearsing is fixed, deployed and re-rehearsed** before
+  anything is recorded around it; ask for the fix as its own PR.
 
 ---
 

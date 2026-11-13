@@ -39,6 +39,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts" / "testing")
 import cognito_test_user  # noqa: E402
 import failure_cause  # noqa: E402
 import junit_summary  # noqa: E402
+import live_meeting  # noqa: E402
 import resume_rollback  # noqa: E402
 
 # No test in this module sends a request to AWS (scripts/testing/no_real_aws.py).
@@ -960,6 +961,49 @@ def test_the_agent_refuses_to_run_without_read_only_credentials(monkeypatch):
     )
 
 
+def test_the_agent_brief_gives_the_run_window_in_epoch_milliseconds(tmp_path: Path):
+    """The agent cannot compute a timestamp: command substitution is denied."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import failure_agent  # noqa: PLC0415
+
+    report = tmp_path / "report.xml"
+    report.write_text(
+        '<testsuites><testsuite name="pytest" tests="1" time="600.0" '
+        'timestamp="2026-11-12T01:40:00+00:00"><testcase classname="a" name="b"/>'
+        "</testsuite></testsuites>"
+    )
+    brief = failure_agent.build_brief(report, tmp_path / "none.log", "stack", "us-west-2")
+    # 01:35 to 01:55 UTC: the run's 10 minutes and 5 either side.
+    assert "--start-time 1794447300000 --end-time 1794448500000" in brief
+
+
+def test_the_agent_brief_survives_a_report_without_a_timestamp(tmp_path: Path):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import failure_agent  # noqa: PLC0415
+
+    report = tmp_path / "report.xml"
+    report.write_text("<testsuites><testsuite/></testsuites>")
+    brief = failure_agent.build_brief(report, tmp_path / "none.log", "s", "us-west-2")
+    assert "Run window: unknown" in brief
+
+
+def test_the_commands_the_agent_was_denied_are_read_from_its_output():
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import failure_agent  # noqa: PLC0415
+
+    stdout = json.dumps(
+        {
+            "result": "ROOT CAUSE: not determined",
+            "permission_denials": [
+                {"tool_name": "Bash", "tool_input": {"command": "aws logs x $(date)"}},
+            ],
+        }
+    )
+    assert failure_agent._denied_commands(stdout) == ["Bash: aws logs x $(date)"]
+    assert failure_agent._denied_commands("not json") == []
+    assert failure_agent._denied_commands(json.dumps({"result": "ok"})) == []
+
+
 def test_the_agent_is_off_unless_explicitly_enabled(monkeypatch):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import failure_agent  # noqa: PLC0415
@@ -1098,6 +1142,189 @@ def test_the_google_meet_test_is_marked_as_an_external_meeting() -> None:
     assert head.rstrip().endswith("@pytest.mark.external_meeting")
 
 
+# ── The guest-free live meeting test (test_vp_live_meeting.py) ──────────────
+#
+# What is tested here is what decides whether a scheduled run can pass without
+# having joined a meeting: the gate, the secret, and the verdicts. The meeting
+# value used below is the documentation's placeholder, not a real meeting.
+
+_MEET_LINK = "https://meet.google.com/abc-defg-hij"
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [("1", True), ("true", True), ("yes", True), ("", False), ("0", False), ("false", False), ("no", False)],
+)
+def test_the_live_meeting_test_is_switched_on_only_by_its_flag(value, expected) -> None:
+    assert live_meeting.enabled({"LMA_TEST_VP_LIVE_MEETING": value}) is expected
+    assert live_meeting.enabled({}) is False
+
+
+def test_the_live_meeting_secret_has_a_default_name_and_can_be_renamed() -> None:
+    assert live_meeting.secret_id({}) == "lma/integ-tests/live-meeting"
+    assert live_meeting.secret_id({"LMA_TEST_LIVE_MEETING_SECRET_ID": " other/name "}) == "other/name"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [_MEET_LINK, json.dumps({"url": _MEET_LINK}), json.dumps({"meeting_id": "abc-defg-hij"})],
+)
+def test_a_google_meet_secret_can_be_a_bare_link_or_json(raw) -> None:
+    meeting = live_meeting.parse_secret(raw, "s")
+    assert meeting.platform == "GOOGLE_MEET"
+    assert live_meeting.google_meet_code(meeting.meeting_id) == "abc-defg-hij"
+
+
+def test_a_secret_can_name_another_platform_with_a_password() -> None:
+    meeting = live_meeting.parse_secret(
+        json.dumps({"platform": "zoom", "meeting_id": "1234567890", "passcode": "pw-1234"}), "s"
+    )
+    assert (meeting.platform, meeting.meeting_id, meeting.password) == ("ZOOM", "1234567890", "pw-1234")
+
+
+@pytest.mark.parametrize(
+    "raw, message",
+    [
+        ("", "is empty"),
+        ("{not json", "does not parse"),
+        (json.dumps(["x-secret-value"]), "is not a JSON object"),
+        (json.dumps({"platform": "SKYPE", "url": "x-secret-value"}), "names platform"),
+        (json.dumps({"link": "x-secret-value"}), "has no meeting"),
+        ("https://meet.google.com/lookup/x-secret-value", "/lookup/"),
+        (json.dumps({"url": "https://example.com/x-secret-value"}), "Google Meet meeting code"),
+    ],
+)
+def test_a_malformed_secret_fails_without_quoting_its_value(raw, message) -> None:
+    """Each is a failure, not a skip, and the message names the key, not the value."""
+    with pytest.raises(live_meeting.LiveMeetingUnavailable, match=message) as caught:
+        live_meeting.parse_secret(raw, "lma/integ-tests/live-meeting")
+    assert "x-secret-value" not in str(caught.value)
+    assert "lma/integ-tests/live-meeting" in str(caught.value)
+
+
+def _secrets_session(payload=None, error=None):
+    client = mock.Mock()
+    if error is not None:
+        client.get_secret_value.side_effect = error
+    else:
+        client.get_secret_value.return_value = payload
+    session = mock.Mock()
+    session.client.return_value = client
+    return mock.Mock(return_value=session), client
+
+
+def test_the_meeting_is_read_from_the_default_secret() -> None:
+    factory, client = _secrets_session({"SecretString": _MEET_LINK})
+    meeting = live_meeting.resolve("us-west-2", env={}, session_factory=factory)
+    assert meeting.platform == "GOOGLE_MEET"
+    factory.assert_called_once_with(region_name="us-west-2")
+    client.get_secret_value.assert_called_once_with(SecretId="lma/integ-tests/live-meeting")
+
+
+def test_an_unreadable_live_meeting_secret_fails_with_what_to_do() -> None:
+    """A missing secret or a role without access to it, once the test is switched on."""
+    factory, _ = _secrets_session(error=RuntimeError("ResourceNotFoundException"))
+    with pytest.raises(live_meeting.LiveMeetingUnavailable) as caught:
+        live_meeting.resolve(
+            "us-west-2", env={"LMA_TEST_LIVE_MEETING_SECRET_ID": "lma/x"}, session_factory=factory
+        )
+    text = str(caught.value)
+    assert "'lma/x'" in text and "ResourceNotFoundException" in text
+    assert "LMA_TEST_VP_LIVE_MEETING" in text and "us-west-2" in text
+
+
+def test_a_binary_live_meeting_secret_fails() -> None:
+    factory, _ = _secrets_session({"SecretBinary": b"x"})
+    with pytest.raises(live_meeting.LiveMeetingUnavailable, match="no SecretString"):
+        live_meeting.resolve(None, env={}, session_factory=factory)
+
+
+def test_the_meeting_does_not_show_its_link_in_repr_or_in_redacted_text() -> None:
+    meeting = live_meeting.LiveMeeting("GOOGLE_MEET", _MEET_LINK, "pw-1234")
+    assert "abc" not in repr(meeting) and "pw-1234" not in repr(meeting)
+    text = f"joined {_MEET_LINK}; code abc-defg-hij, also abcdefghij; pw-1234"
+    assert meeting.redact(text) == "joined <meeting>; code <meeting>, also <meeting>; <meeting>"
+    assert meeting.redact(None) == ""
+
+
+@pytest.mark.parametrize(
+    "status, expected",
+    [("JOINING", None), ("MANUAL_ACTION_REQUIRED", None), ("JOINED", "joined"), ("ACTIVE", "joined"),
+     ("FAILED", "left"), ("COMPLETED", "left"), ("ENDED", "left")],
+)
+def test_join_state(status, expected) -> None:
+    assert live_meeting.join_state({"status": status}) == expected
+
+
+def test_a_vp_alone_in_a_meeting_passes_only_by_completing_through_the_watchdog() -> None:
+    ok = {"status": "COMPLETED", "endTrigger": "attendees-left"}
+    assert live_meeting.left_on_its_own_problem(ok) is None
+    assert "still ACTIVE" in live_meeting.left_on_its_own_problem({"status": "ACTIVE"})
+    assert "expected COMPLETED" in live_meeting.left_on_its_own_problem(
+        {"status": "ENDED", "endTrigger": "attendees-left"}
+    )
+    assert "expected COMPLETED" in live_meeting.left_on_its_own_problem({"status": "FAILED"})
+    assert "'navigated-away'" in live_meeting.left_on_its_own_problem(
+        {"status": "COMPLETED", "endTrigger": "navigated-away"}
+    )
+
+
+@pytest.mark.parametrize(
+    "launch_type, expected",
+    [("FARGATE", ("COMPLETED",)), ("ec2", ("COMPLETED",)), ("MICROVM", ("ENDED", "COMPLETED")),
+     (None, ("ENDED", "COMPLETED"))],
+)
+def test_completed_is_required_after_an_end_only_where_a_shutdown_handler_runs(launch_type, expected) -> None:
+    assert live_meeting.statuses_after_end(launch_type) == expected
+
+
+def test_a_vp_ended_from_lma_passes_with_an_accepted_status_and_the_tests_reason() -> None:
+    reason = "ended by the test"
+    for status in ("ENDED", "COMPLETED"):
+        assert live_meeting.ended_from_lma_problem({"status": status, "endReason": reason}, reason) is None
+    ecs = live_meeting.statuses_after_end("FARGATE")
+    assert "expected COMPLETED" in live_meeting.ended_from_lma_problem(
+        {"status": "ENDED", "endReason": reason}, reason, ecs
+    )
+    assert "FAILED" in live_meeting.ended_from_lma_problem({"status": "FAILED", "endReason": reason}, reason)
+    assert "ACTIVE" in live_meeting.ended_from_lma_problem({"status": "ACTIVE"}, reason)
+    assert "endReason" in live_meeting.ended_from_lma_problem({"status": "ENDED", "endReason": "x"}, reason)
+
+
+def test_wait_for_returns_the_last_value_when_time_runs_out() -> None:
+    now = [0.0]
+    values = iter([None, "", 0])
+    result = live_meeting.wait_for(
+        lambda: next(values), timeout=10, interval=5,
+        clock=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0] + s),
+    )
+    assert result == 0
+
+
+def test_the_status_trail_records_each_change_once() -> None:
+    trail = live_meeting.StatusTrail()
+    for status in ("JOINING", "JOINING", "JOINED", "ACTIVE", "ACTIVE", "COMPLETED"):
+        trail.note({"status": status})
+    assert str(trail) == "JOINING -> JOINED -> ACTIVE -> COMPLETED"
+    assert trail.reached(("ACTIVE",)) and not trail.reached(("FAILED",))
+
+
+def test_the_live_meeting_tests_are_opt_in_external_meetings() -> None:
+    """Without the marker, the scheduled run's --no-skips would fail its opt-in skip every night."""
+    import test_vp_live_meeting
+
+    names = [m.name for m in test_vp_live_meeting.pytestmark]
+    assert "external_meeting" in names, names
+    assert "skipif" in names, names
+
+
+def test_the_live_meeting_tests_never_skip_once_switched_on() -> None:
+    """Once opted in, every way of not joining is a failure; a skip would pass under the marker."""
+    source = (Path(__file__).resolve().parent / "test_vp_live_meeting.py").read_text()
+    assert "pytest.skip(" not in source
+    assert "importorskip" not in source
+
+
 def test_the_desktop_video_tests_are_opt_in_optional_features() -> None:
     """They need LMA_TEST_DESKTOP_VIDEO=1 and a stack that keeps desktop key frames.
 
@@ -1114,7 +1341,7 @@ def test_the_desktop_video_tests_are_opt_in_optional_features() -> None:
 def test_every_marker_used_in_the_suite_is_registered() -> None:
     """An unregistered marker is silently ignored, so the exemption would lapse."""
     registered = (Path(__file__).resolve().parent / "pytest.ini").read_text()
-    for marker in ("live", "optional_feature"):
+    for marker in ("live", "optional_feature", "external_meeting"):
         assert f"    {marker}:" in registered, f"{marker} is not registered in pytest.ini"
 
 

@@ -134,6 +134,13 @@ assistant is a panel beside the tabs, on every tab; see
   consent is recorded, or that a participant objected, once the meeting has run
   for 30 seconds (the time a notice normally takes to be posted and answered);
   **Show the consent record** opens the record.
+- **Transcription paused** — while a live meeting's transcription is paused
+  because someone typed `LMA pause` to its Virtual Participant in the meeting
+  chat, a warning above the tabs says so, since when and, when the platform's
+  chat shows the sender, by whom, and that typing `LMA start` in the meeting
+  chat resumes it. It goes when transcription resumes or the meeting ends. A
+  meeting paused for consent as well shows both warnings. See
+  [In-meeting Chat Commands](virtual-participant.md#in-meeting-chat-commands).
 - **Owner** and **Speakers** — the people heard in the meeting, by the names
   the transcript shows for them: a name shown as
   [one person](transcription-and-translation.md#one-person-or-several-people)
@@ -384,8 +391,8 @@ pass over chat messages, since they were typed rather than heard.
   assistant's answers); choosing **All** shows everything again. The search
   works within the speakers chosen.
 - **One person or several people** — the chips are grouped by the name the
-  meeting platform showed, and a name that speaker separation heard several
-  voices under has a small icon toggle beside it: a person icon while the name is
+  meeting platform showed, and a name that speaker separation gave a voice
+  label to (one is enough) has a small icon toggle beside it: a person icon while the name is
   shown as one person, a group icon while it is shown as several people.
   Clicking it switches to the other. Its tooltip, on hover or keyboard focus,
   says which mode the name is in, why, and what a click does. **One person** shows every line under
@@ -409,8 +416,11 @@ pass over chat messages, since they were typed rather than heard.
   beside a chip opens that speaker's dialog: give the voice a name (which
   renames every segment it spoke, earlier ones included), say it is the **Same
   person as** another voice on its channel, or **Separate** a voice combined
-  into it. When two voices are shown under one name, it can combine them into
-  one person. It writes the same names as the **Speakers** panel on the
+  into it. **Same person as** lists the other speakers by the names the
+  transcript shows, once each. When two separate voices are shown under one
+  name (two voices both named *Bob* without being combined, say), it can
+  combine them into one person; the voices of a name shown as one person are
+  already one speaker, so it does not offer that for them. It writes the same names as the **Speakers** panel on the
   **Details** tab, which remains the place to paste an attendee list, confirm
   or reject a suggested name, or lock a name.
 - **Chat** — shown when the transcript holds meeting chat messages. On by
@@ -676,7 +686,7 @@ each edited one section of the configuration. They are now sections of the
 |---|---|
 | `/#/configuration/nova-sonic` | The **Nova Sonic Voice Assistant** section. See [Nova Sonic 2 Setup](nova-sonic-setup.md) |
 | `/#/configuration/transcript-summary` | The **Transcript Summary** section. See [Transcript Summarization](transcript-summarization.md) |
-| `/#/configuration/asr` | The **Transcription Engine** section. Its engine choices (the ASR MicroVM engine by default, or Amazon Transcribe) are shown only when the ASR MicroVM engine is deployed (`EnableMicrovmAsr=true`, the default, in a Region with AWS Lambda MicroVMs); Virtual Participant voice separation, on by default, is shown on every deployment. See [MicroVM ASR](microvm-asr.md) |
+| `/#/configuration/asr` | The **Transcription Engine** section. Its engine choices (Amazon Transcribe by default, or the ASR MicroVM engine) are shown only when the ASR MicroVM engine is deployed (`EnableMicrovmAsr=true`, the default, in a Region with AWS Lambda MicroVMs); Virtual Participant voice separation, on by default, is shown on every deployment. See [MicroVM ASR](microvm-asr.md) |
 
 ### User Management
 

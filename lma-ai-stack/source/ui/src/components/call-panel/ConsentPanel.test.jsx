@@ -52,6 +52,23 @@ describe('ConsentPanel', () => {
     expect(screen.getByText('The consent record could not be read: Network error')).toBeInTheDocument();
   });
 
+  it('shows present placeholder seats as one line and leaves out those no longer present', () => {
+    const consent = {
+      ...CONSENT,
+      Participants: ['Bo Chen', 'Unidentified participant 1', 'Unidentified participant 2'],
+      ParticipantsSeen: [
+        'Bo Chen',
+        'Unidentified participant 1',
+        'Unidentified participant 2',
+        'Unidentified participant 3',
+      ],
+    };
+    render(<ConsentPanel state={stateWith({ consent })} />);
+    expect(screen.getByText('2 participants not yet identified')).toBeInTheDocument();
+    expect(screen.queryByText(/^Unidentified participant/)).not.toBeInTheDocument();
+    expect(screen.getAllByText('No reply')).toHaveLength(1);
+  });
+
   it('offers attestation only where it grants the meeting', () => {
     const eachParticipant = { ...CONSENT, Rule: 'each_participant' };
     render(<ConsentPanel state={stateWith({ consent: eachParticipant })} canEdit isOwner />);
@@ -71,7 +88,7 @@ describe('ConsentPanel', () => {
     expect(screen.getByText('Withheld')).toBeInTheDocument();
     expect(screen.getByText('Ana would like to record this meeting.')).toBeInTheDocument();
     expect(screen.getByRole('img')).toHaveAttribute('src', 'https://example.com/e1.jpg');
-    expect(screen.getByText('Not checked')).toBeInTheDocument();
+    expect(screen.getByText('Image check: not run')).toBeInTheDocument();
   });
 
   it('offers a viewer who may not change the meeting no actions', () => {
@@ -128,9 +145,35 @@ describe('ConsentPanel', () => {
       ],
     };
     rerender(<ConsentPanel state={{ ...state, consent: checked }} canEdit isAdmin />);
+    expect(screen.getByText('Image check:')).toBeInTheDocument();
     expect(screen.getByText('Objection found')).toBeInTheDocument();
     expect(screen.getByText('Bo objects.')).toBeInTheDocument();
     expect(screen.getByText('Check again')).toBeInTheDocument();
+  });
+
+  it('says a participant list is kept as a record, and who consented outside the chat', () => {
+    const consent = {
+      ...CONSENT,
+      Evidence: [
+        { EvidenceId: 'p1', Kind: 'screenshot', CapturedAt: 'x', Note: 'Participant list when Bo Chen consented' },
+        {
+          EvidenceId: 'c1',
+          Kind: 'screenshot',
+          CapturedAt: 'y',
+          Note: 'Meeting chat when Bo Chen consented',
+          Verification: {
+            Verdict: 'supports_consent',
+            ModelId: 'm',
+            Confidence: 0.8,
+            ConsentedOutsideChat: ['Bo Chen'],
+          },
+        },
+      ],
+    };
+    render(<ConsentPanel state={stateWith({ consent })} />);
+    expect(screen.getByText('Not checked: participant lists are kept as a record')).toBeInTheDocument();
+    expect(screen.queryByText('Image check: not run')).not.toBeInTheDocument();
+    expect(screen.getByText('Consented aloud or in LMA, so not expected in this image: Bo Chen')).toBeInTheDocument();
   });
 
   it('says when an image was deleted after its check', () => {
@@ -138,6 +181,28 @@ describe('ConsentPanel', () => {
     render(<ConsentPanel state={stateWith({ consent: deleted })} canEdit isOwner />);
     expect(screen.getByText('Image deleted after its check')).toBeInTheDocument();
     expect(screen.queryByText('Check with model')).not.toBeInTheDocument();
+  });
+
+  it('shows a check that failed because the automatic check deleted the image as the deleted state', async () => {
+    const state = stateWith({ verifyEvidence: vi.fn().mockResolvedValue('the evidence image could not be read') });
+    const { rerender } = render(<ConsentPanel state={state} canEdit isOwner />);
+    fireEvent.click(screen.getByText('Check with model'));
+    await waitFor(() => expect(screen.getByText('the evidence image could not be read')).toBeInTheDocument());
+    const checked = {
+      ...CONSENT,
+      Evidence: [
+        {
+          ...CONSENT.Evidence[0],
+          SignedUrl: null,
+          ImageDeletedAt: '2026-11-02T10:03:00.000Z',
+          Verification: { Verdict: 'inconclusive', Confidence: 0.4, ModelId: 'amazon.nova-lite-v1:0' },
+        },
+      ],
+    };
+    rerender(<ConsentPanel state={{ ...state, consent: checked }} canEdit isOwner />);
+    expect(screen.getByText('Image deleted after its check')).toBeInTheDocument();
+    expect(screen.queryByText('the evidence image could not be read')).not.toBeInTheDocument();
+    expect(screen.queryByText('Check again')).not.toBeInTheDocument();
   });
 
   it('says when an image has expired', () => {

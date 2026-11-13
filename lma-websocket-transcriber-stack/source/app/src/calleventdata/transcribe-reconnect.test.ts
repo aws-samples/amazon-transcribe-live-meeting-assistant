@@ -172,6 +172,94 @@ test('after a reconnect the transcript continues from the audio sent, not from t
     assert.equal(segments[1].EndTime, 12);
 });
 
+const endedMeeting = (source: stream.PassThrough): SocketCallData => ({
+    callMetadata: {
+        callId: 'held-audio-call',
+        callEvent: 'START',
+        activeSpeaker: 'Meeting audio',
+        agentId: 'Alex',
+        samplingRate: 16000,
+        channels: {},
+        diarizeSystemChannel: false,
+        diarizeMicChannel: false,
+    },
+    audioInputStream: source,
+    startStreamTime: new Date(),
+    speakerEvents: [],
+    ended: true,
+    sessionSettings: sessionSettingsFrom({}, {}),
+});
+
+test('the audio held for a meeting that ended while its MicroVM was acquired goes to one Transcribe request', async (t) => {
+    const source = new stream.PassThrough();
+    const socketData = endedMeeting(source);
+    // Three seconds reached the stream; one more second before them was
+    // dropped to bound it, and is in the recording ahead of them.
+    source.write(Buffer.alloc(BYTES_PER_SECOND * 3, 1));
+    socketData.heldAudioDroppedBytes = BYTES_PER_SECOND;
+
+    const requests: number[] = [];
+    t.mock.method(TranscribeStreamingClient.prototype, 'send', async (command: { input: Record<string, unknown> }) => {
+        const iterator = (command.input['AudioStream'] as AsyncIterable<unknown>)[Symbol.asyncIterator]();
+        // Reads to the END of the request's audio: a request that never ended
+        // would hang this test.
+        requests.push(await readBytes(iterator, Number.MAX_SAFE_INTEGER));
+        async function* results() {
+            yield {
+                TranscriptEvent: {
+                    Transcript: {
+                        Results: [
+                            {
+                                ResultId: 'held-0',
+                                ChannelId: 'ch_0',
+                                IsPartial: false,
+                                StartTime: 1,
+                                EndTime: 2,
+                                Alternatives: [
+                                    {
+                                        Transcript: 'held',
+                                        Items: [{ Type: 'pronunciation', Content: 'held', StartTime: 1, EndTime: 2 }],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                },
+            };
+        }
+        return { SessionId: 'session-1', TranscriptResultStream: results() };
+    });
+    const segments: Array<{ Transcript: string; StartTime: number }> = [];
+    t.mock.method(KinesisClient.prototype, 'send', async (command: { input: { Data: Buffer } }) => {
+        const record = JSON.parse(command.input.Data.toString()) as { EventType: string };
+        if (record.EventType === 'ADD_TRANSCRIPT_SEGMENT') {
+            segments.push(record as unknown as { Transcript: string; StartTime: number });
+        }
+        return {};
+    });
+
+    await startTranscribe(socketData, fakeServer, { heldAudioOnly: true });
+
+    assert.deepEqual(requests, [BYTES_PER_SECOND * 3], 'every held byte, in one request, and no reconnect');
+    assert.equal(segments.length, 1);
+    // One dropped second ahead of the request's audio, then the word's own 1 s.
+    assert.equal(segments[0].StartTime, 2);
+});
+
+test('no request is opened for a capture discarded for consent', async (t) => {
+    const source = new stream.PassThrough();
+    const socketData = endedMeeting(source);
+    source.write(Buffer.alloc(BYTES_PER_SECOND, 1));
+    socketData.discarded = true;
+    let requests = 0;
+    t.mock.method(TranscribeStreamingClient.prototype, 'send', async () => {
+        requests += 1;
+        throw new Error('not expected');
+    });
+    await startTranscribe(socketData, fakeServer, { heldAudioOnly: true });
+    assert.equal(requests, 0);
+});
+
 test('waiting for audio resolves once audio arrives, and not at all for a meeting that ends', async () => {
     const sink = new stream.PassThrough();
     let ended = false;

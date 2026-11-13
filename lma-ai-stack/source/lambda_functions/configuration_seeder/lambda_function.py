@@ -163,11 +163,13 @@ CHAT_BUTTONS_DEFAULTS_FILE = "ChatButtonConfig.json"
 #: docs/meeting-cost-estimate.md for where each price came from.
 CALL_PRICING_FILE = "CallPricing.json"
 #: The ASR engine's switches as the release ships them: streaming meetings and
-#: Virtual Participants on the ASR MicroVM engine, voice separation off. They are
-#: the baseline, so they reach every deployment whose administrator has not saved
-#: the Transcription Engine section; a saved choice lives in the profile and keeps
-#: winning. A deployment without the engine still transcribes with Amazon
-#: Transcribe, because the readers fall back when no ASR launcher is configured.
+#: Virtual Participants on Amazon Transcribe, voice separation on (it works on
+#: either engine). They are the baseline, so they reach the default profile and
+#: every Managed profile on each stack update; a Custom profile is a full copy
+#: and keeps the switches it holds. An administrator moves a meeting source onto
+#: the ASR MicroVM engine in the Transcription Engine section, where it is
+#: deployed. The readers fall back to Amazon Transcribe when no ASR launcher is
+#: configured, so the switches are only consulted where the engine exists.
 ASR_ENGINE_DEFAULTS_FILE = "AsrEngine.json"
 #: Meeting consent as a new deployment ships it: off, with the shipped notice
 #: texts and phrases ready for an administrator who turns it on. The same values

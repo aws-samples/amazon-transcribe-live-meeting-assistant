@@ -41,7 +41,7 @@ describe('renderNotice', () => {
       }),
     ).toBe(
       'Ana is using Live Meeting Assistant to record and transcribe this meeting (Weekly sync). ' +
-        'If you do not agree, reply "I object" in the chat or say so, and recording and transcription will stop.',
+        'If you do not agree, say so, and recording and transcription will stop.',
     );
     expect(renderNotice('{LMA_USER}, {meeting}, {other}', {})).toBe('The meeting organizer, this meeting, {other}');
   });

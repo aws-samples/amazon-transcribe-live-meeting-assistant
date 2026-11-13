@@ -74,12 +74,36 @@ Python uses Black (formatter), Flake8, Pylint (100 char lines). Config in `lma-a
 
 The `Lint and unit tests` check (`.github/workflows/code-checks.yml`, mirrored by
 the `code_checks` job in `.gitlab-ci.yml`) runs on every pull request and on every
-push to `develop` and `main`. It is the authoritative full run. The workflow file
-is the source of truth for what it covers; today that is cfn-lint, ruff (over the
-Lambda functions, the Lambda layers, `scripts/pr_review`, the demo recorder and the
-ASR runtime), the UI lint and vitest, `tsc`/eslint, and the SDK, CLI, Lambda, VP,
-VP-template, AI-stack, ASR, integ-plumbing, advisory-review, demo-recorder,
-transcriber and browser-extension suites.
+push to `develop` and `main`; the push runs are the authoritative full run. The
+workflow file is the source of truth for what it covers; today that is cfn-lint,
+ruff (over the Lambda functions, the Lambda layers, `scripts/pr_review`,
+`scripts/ci`, the demo recorder and the ASR runtime), the UI lint and vitest,
+`tsc`/eslint, and the SDK, CLI, Lambda, VP, VP-template, AI-stack, ASR,
+integ-plumbing, advisory-review, demo-recorder, CI step-selection, transcriber and
+browser-extension suites.
+
+**On a pull request, CI runs only the steps the change needs.**
+`scripts/ci/changed_areas.py` (tests in `scripts/ci/test_changed_areas.py`, run by
+`make test-ci-tooling`) maps the changed files to areas and each step to the areas
+it builds, tests or reads; skipped steps show as skipped and the job summary says
+why each step ran. Both platforms call it. A change to the CI configuration, the
+Makefile, `.nvmrc`, a root lockfile, `lma-ai-stack/` tool configuration, or any
+path no rule classifies runs everything; pushes to `develop` and `main` always
+run everything. When a test starts reading a file from another stack, add the
+read to `EXTRA_RULES` in that script, or the reading suite will not run on a PR
+that changes only that file (the next `develop` push would still catch it).
+
+**Do not wait for, or re-run, what a change cannot affect.** When nothing a
+check covers changed since a head that passed it — the common cases are a
+CHANGELOG conflict resolution and a docs-only fix — the earlier code head's
+passing run is the evidence: the change is ready to merge once the new head's
+required check reports (on a docs-only head it usually runs only a few short
+suites). Do not
+re-run CI, do not ask for a fresh AI review (on a docs-only push it posts a
+carry-over comment instead of calling the model; see
+`.claude/skills/pr-review-ci.md`), and do not run an integration deploy (see
+`.claude/skills/integ-tests.md` for when one is needed). `develop` pushes and the
+nightly integration run cover everything afterwards.
 
 When a change is going to a PR anyway:
 
@@ -110,7 +134,7 @@ dependency-specific gaps.
 | `lma-ai-stack/` | Core stack: Lambda functions, AppSync GraphQL API, Cognito auth, DynamoDB, UI (React/CloudFront) | Python (Lambdas), React (UI) |
 | `lma-websocket-transcriber-stack/` | WebSocket server on ECS Fargate ingesting stereo audio, streaming to Amazon Transcribe, writing to Kinesis | TypeScript/Fastify |
 | `lma-virtual-participant-stack/` | Headless CloakBrowser/Chromium (Playwright) on ECS Fargate joining meetings, optional voice assistant + avatar | TypeScript |
-| `lma-asr-microvm-stack/` | On-demand streaming ASR + speaker diarization on Lambda MicroVMs, the default transcription engine (Amazon Transcribe is the alternative and fallback); deployed by default where Lambda MicroVMs are available | Python (sherpa-onnx) |
+| `lma-asr-microvm-stack/` | On-demand streaming ASR + speaker diarization on Lambda MicroVMs, an alternative to Amazon Transcribe (the default engine) that an admin selects per meeting source; deployed by default where Lambda MicroVMs are available | Python (sherpa-onnx) |
 | `lma-vpc-stack/` | VPC networking, security groups, NAT gateways | CloudFormation |
 | `lma-meetingassist-setup-stack/` | Meeting assistant configuration | CloudFormation |
 | `lma-bedrockkb-stack/` | Bedrock Knowledge Base setup | CloudFormation |
@@ -119,9 +143,9 @@ dependency-specific gaps.
 | `lma-chat-button-config-stack/` | Chat UI button configuration | CloudFormation |
 | `lma-nova-sonic-config-stack/` | Nova Sonic voice assistant config | CloudFormation |
 
-**Data flow:** Browser audio -> WebSocket server (Fargate) -> speech engine (ASR MicroVM by default, or Amazon Transcribe) -> Kinesis Data Stream -> Call Event Processor Lambda (Strands Agents SDK) -> DynamoDB + AppSync (real-time GraphQL subscriptions) -> React UI.
+**Data flow:** Browser audio -> WebSocket server (Fargate) -> speech engine (Amazon Transcribe by default, or an ASR MicroVM) -> Kinesis Data Stream -> Call Event Processor Lambda (Strands Agents SDK) -> DynamoDB + AppSync (real-time GraphQL subscriptions) -> React UI.
 
-The speech engine is pluggable. By default meetings are transcribed by an ASR MicroVM (one per meeting, one WebSocket session per audio channel), which returns text and speaker labels together: `EnableMicrovmAsr` defaults to `true`, the ASR stack is deployed in Regions with AWS Lambda MicroVMs, and the Transcription Engine section of the Configuration page ships with every meeting source on it. Amazon Transcribe is the alternative an admin can choose per meeting source, and the fallback where the ASR stack is not deployed or a MicroVM cannot start. Both engines emit identical `ADD_TRANSCRIPT_SEGMENT` events, so nothing downstream of Kinesis is engine-aware. See `docs/microvm-asr.md`.
+The speech engine is pluggable. By default meetings are transcribed by Amazon Transcribe: the Transcription Engine section of the Configuration page ships with every meeting source on it. `EnableMicrovmAsr` defaults to `true`, so the ASR stack is deployed in Regions with AWS Lambda MicroVMs, and an admin can move a meeting source onto an ASR MicroVM (one per meeting, one WebSocket session per audio channel), which returns text and speaker labels together. Amazon Transcribe is also the fallback where the ASR stack is not deployed or a MicroVM cannot start. Both engines emit identical `ADD_TRANSCRIPT_SEGMENT` events, so nothing downstream of Kinesis is engine-aware. See `docs/microvm-asr.md`.
 
 **Key source locations:**
 - Lambda functions: `lma-ai-stack/source/lambda_functions/` (19 functions)
@@ -244,6 +268,7 @@ patterns.
 | `.claude/skills/dependabot-prs.md` | Triaging, verifying and merging Dependabot dependency PRs |
 | `.claude/skills/prepare-changelog.md` | Writing or updating CHANGELOG entries for a release |
 | `.claude/skills/integ-tests.md` | Running end-to-end integration tests against a live deployed stack (`make integ-tests`) |
+| `.claude/skills/asr-benchmark.md` | Comparing ASR model bundles and Amazon Transcribe on a dev stack for cost and transcript quality (`make asr-benchmark`) |
 | `.claude/skills/product-demo.md` | Recording a narrated product demo video of the web UI against a deployed stack (`scripts/ux_recorder.py`, `make ux-record-deps`) |
 
 When asked to `review <PR/MR URL>`, follow `.claude/skills/pr-review.md` and

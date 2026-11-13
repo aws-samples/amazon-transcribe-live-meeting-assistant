@@ -383,3 +383,146 @@ test('forgetting a keep undoes its step of the backoff', () => {
     d.forget(second.kept!); // not saved
     assert.equal(d.currentIntervalMs, 4000);
 });
+
+// The busy-screen rules, as shipped (keyframe-sampler.ts).
+const SHIPPED = { ...BACKOFF, busyGapMs: 10000, maxBusyWaitMs: 30000, holdMs: 15000 };
+const SHARE_LIVE: KeyframeThresholds = { ...SHARE_MAJOR, busySettleMs: 6000 };
+const shippedDetector = () => new KeyframeDetector(SHIPPED);
+
+/**
+ * A long page seen through a window, scrolled to `offset` grid rows: rows of
+ * words whose pattern depends on the page row, so a scroll moves every line.
+ */
+function page(offset: number): Uint8Array {
+    const s = new Uint8Array(N).fill(230);
+    for (let row = 2; row < H - 2; row++) {
+        const line = row + offset;
+        if (line % 3) continue;
+        let x = 4;
+        let k = line * 7919;
+        while (x < W - 8) {
+            const len = 2 + (k % 6);
+            for (let i = 0; i < len && x + i < W; i++) s[row * W + x + i] = 40;
+            x += len + 1 + ((k >> 3) % 3);
+            k = (k * 1103515245 + 12345) & 0x7fffffff;
+        }
+    }
+    return s;
+}
+
+test('a page scrolled a step at a time is kept once it stops, not at every pause', () => {
+    const d = shippedDetector();
+    // On the page for a while: kept once.
+    const first = keptTimes(d, () => page(0), 30, 0, SHARE_LIVE);
+    assert.equal(first.length, 1);
+    // Scrolled one step every 4 seconds for 24 seconds: three still samples
+    // between steps, enough for the two-sample settle.
+    const offsetAt = (t: number) => (t < 30 ? 0 : t < 54 ? 1 + Math.floor((t - 30) / 4) : 7);
+    assert.ok(changedFraction(page(1), page(2), 12) > 0.02, 'fixture: a scroll step moves the picture');
+    const kept = keptTimes(d, (t) => page(offsetAt(t)), 50, 30, SHARE_LIVE);
+    // The first step follows a long still spell, so it settles as a slide
+    // flip would; every later step is part of the busy spell, and only the
+    // place the page stops at is kept.
+    const later = kept.filter((k) => k.firstSeen >= 34);
+    assert.equal(later.length, 1, `kept at ${kept.map((k) => k.at)}`);
+    assert.equal(later[0].firstSeen, 54, 'stamped with when the scrolling stopped');
+    assert.ok(later[0].at >= 60 && later[0].at <= 61, `kept at ${later[0].at}`);
+    assert.ok(kept.length <= 2, `kept at ${kept.map((k) => k.at)}`);
+
+    // Without the busy settle the pauses are frames, as far as the interval allows.
+    const plain = shippedDetector();
+    keptTimes(plain, () => page(0), 30, 0, SHARE_MAJOR);
+    const before = keptTimes(plain, (t) => page(offsetAt(t)), 50, 30, SHARE_MAJOR);
+    assert.ok(before.length > kept.length, `${before.length} frames without it`);
+});
+
+test('a dialog opened for a few seconds on a busy screen is not kept', () => {
+    const base = slide(1);
+    const dimmed = base.map((v) => Math.round(v * 0.5));
+    // A click on the page, then a dialog for three samples, then the page again.
+    const clicked = Uint8Array.from(base);
+    for (let i = 0; i < Math.round(N * 0.04); i++) clicked[N - 1 - i] = 0;
+    const picture = (t: number) => (t < 25 ? base : t < 30 ? clicked : t < 33 ? dimmed : clicked);
+    const d = shippedDetector();
+    keptTimes(d, () => base, 20, 0, SHARE_LIVE);
+    const kept = keptTimes(d, picture, 30, 20, SHARE_LIVE);
+    assert.ok(
+        kept.every((k) => k.firstSeen < 30 || k.firstSeen >= 33),
+        `the dialog was kept: ${kept.map((k) => k.firstSeen)}`,
+    );
+    // With the plain settle the three dialog samples were enough.
+    const plain = shippedDetector();
+    keptTimes(plain, () => base, 20, 0, SHARE_MAJOR);
+    const before = keptTimes(plain, picture, 30, 20, SHARE_MAJOR);
+    assert.ok(before.some((k) => k.firstSeen === 30), `fixture: ${before.map((k) => k.firstSeen)}`);
+});
+
+test('with the busy-screen rules, a deck of 12 s slides still keeps every slide promptly', () => {
+    const d = shippedDetector();
+    const kept = keptTimes(d, (t) => slide(1 + Math.floor(t / 12)), 240, 0, SHARE_LIVE);
+    assert.equal(kept.length, 20);
+    kept.forEach((k, i) => {
+        assert.equal(k.firstSeen, i * 12);
+        assert.ok(k.at <= i * 12 + 2, `slide ${i + 1} kept at ${k.at}`);
+    });
+});
+
+test('slides flipped quickly wait for the busy settle, or the maximum wait, stamped when shown', () => {
+    const d = shippedDetector();
+    // A slide every 8 s: the flips are closer together than the busy gap
+    // (and than the quiet step, so the interval backs off as before).
+    const kept = keptTimes(d, (t) => slide(1 + Math.floor(t / 8)), 120, 0, SHARE_LIVE);
+    assert.ok(kept.length >= 3, `${kept.length} frames`);
+    kept.forEach((k, i) => {
+        assert.equal(k.firstSeen % 8, 0, `stamped ${k.firstSeen}, when its slide appeared`);
+        // The first flip follows a still spell longer than the busy gap; later
+        // ones wait for the busy settle unless no frame was kept for the
+        // maximum wait.
+        if (i < 2 || k.at - kept[i - 1].at >= 30) return;
+        assert.ok(k.at - k.firstSeen >= 6, `kept ${k.at - k.firstSeen}s after it appeared`);
+    });
+});
+
+test('with the busy-screen rules, a live page is still captured, at most once per backoff interval', () => {
+    const d = shippedDetector();
+    // The page redraws a block every three seconds, so it never holds still
+    // for the busy settle; after the first frames it is captured once the
+    // maximum wait has passed.
+    const kept = keptTimes(d, livePage(), 600, 0, SHARE_LIVE);
+    assert.ok(kept.length >= 5, `${kept.length} frames`);
+    const gaps = kept.slice(1).map((k, i) => k.at - kept[i].at);
+    gaps.slice(2).forEach((g) => assert.ok(g >= 30, `gap of ${g}s: ${gaps}`));
+    assert.ok(kept.length <= 12, `${kept.length} frames`);
+});
+
+test('a page somebody stays on is kept after the hold time, though the interval has backed off', () => {
+    const d = shippedDetector();
+    const busy = livePage();
+    keptTimes(d, busy, 240, 0, SHARE_LIVE);
+    // Until the next frame of the busy page is kept, so the next would be a
+    // minute away.
+    let t = 240;
+    while (!d.push(busy(t), t * 1000, SHARE_LIVE).keep) t++;
+    assert.equal(d.currentIntervalMs, 60000);
+    // Another page of the same application: 5% of the grid, below a change of
+    // screen, then left on screen.
+    const other = Uint8Array.from(busy(t));
+    for (let i = 0; i < Math.round(N * 0.05); i++) other[i] = 0;
+    const kept = keptTimes(d, () => other, 40, t + 1, SHARE_LIVE);
+    assert.equal(kept.length, 1);
+    assert.equal(kept[0].firstSeen, t + 1);
+    const after = kept[0].at - (t + 1);
+    assert.ok(after >= 15 && after <= 16, `kept ${after}s after it appeared`);
+});
+
+test('a pause ends a busy spell', () => {
+    const d = shippedDetector();
+    keptTimes(d, (t) => page(Math.floor(t / 3)), 30, 0, SHARE_LIVE);
+    assert.equal(d.isBusy, true);
+    d.pause();
+    assert.equal(d.isBusy, false);
+    // The share resumes on another page: settled in two samples.
+    const kept = keptTimes(d, () => page(40), 5, 100, SHARE_LIVE);
+    assert.equal(kept.length, 1);
+    assert.equal(kept[0].at, 102);
+});

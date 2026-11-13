@@ -251,9 +251,9 @@ def test_ws_stream_transcribes_to_meeting(client: LMAClient) -> None:
     DynamoDB, AND transcript segments were produced. In one shot this guards
     every regression this batch hit:
       * @fastify/websocket 11 upgrade ordering  (500 -> connection drops)
-      * fastify 5 audio handling / the speech engine: the ASR MicroVM engine by
-        default where the stack has it (EnableMicrovmAsr=true and the streaming
-        engine switch on), Amazon Transcribe streaming otherwise or on fallback
+      * fastify 5 audio handling / the speech engine: Amazon Transcribe
+        streaming by default, or the ASR MicroVM engine where the stack has it
+        (EnableMicrovmAsr=true) and an admin turned the streaming engine switch on
       * gql 3.5 <-> AppSync                      (gql-4 break -> no meeting/segments)
 
     Opt-in: requires LMA_TEST_USERNAME / LMA_TEST_PASSWORD (a Cognito user in the

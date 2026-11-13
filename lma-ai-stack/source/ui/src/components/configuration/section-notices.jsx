@@ -132,9 +132,10 @@ const AsrEngineNotice = ({ settings = {}, configuration = {} }) => {
     : 'every streaming meeting is';
   return (
     <>
-      <Alert type="info" header="The ASR MicroVM engine is the default">
-        The ASR MicroVM engine transcribes the languages the deployed speech model supports, listed below, and does not
-        offer Amazon Transcribe&apos;s content redaction, custom vocabulary, custom language model or language
+      <Alert type="info" header="Amazon Transcribe is the default engine">
+        Each kind of meeting ships on Amazon Transcribe; select the ASR MicroVM speech engine below to move it onto that
+        engine. The ASR MicroVM engine transcribes the languages the deployed speech model supports, listed below, and
+        does not offer Amazon Transcribe&apos;s content redaction, custom vocabulary, custom language model or language
         identification. While the Amazon Transcribe section sets a language the model does not support or uses any of
         those, meetings stay on Amazon Transcribe whichever engine is selected here. A meeting whose MicroVM cannot
         start also falls back to Amazon Transcribe.

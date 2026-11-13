@@ -255,6 +255,7 @@ export function buildZoomSdkPageHtml(version: string): string {
           audioJoined: audioJoined,
           muted: muted,
           videoOff: videoOff && !videoOn,
+          videoOn: videoOn,
         };
       };
 

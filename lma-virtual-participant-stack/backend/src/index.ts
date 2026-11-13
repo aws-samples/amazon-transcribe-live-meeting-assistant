@@ -7,6 +7,8 @@ import Teams from './teams.js';
 import TeamsSdk from './teams-sdk.js';
 import Webex from './webex.js';
 import GoogleMeet from './google-meet.js';
+import { grantMeetingMediaPermissions } from './meeting-permissions.js';
+import { blankCameraInitScript } from './blank-camera.js';
 import { details, ExitInfo, formatExitMessage, didJoinMeeting, normalizeExitTrigger } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager, beginShutdown } from './status-manager.js';
@@ -455,6 +457,14 @@ const main = async (): Promise<void> => {
     // default here — it makes every transient wait hang instead of failing fast.
     context.setDefaultTimeout(30_000);
 
+    // Grant camera/microphone to the meeting origins for every join, before
+    // warmup or the meeting page loads, so a fresh profile does not get the
+    // meeting client's own device-permission dialog. See meeting-permissions.ts.
+    const grantedOrigins = await grantMeetingMediaPermissions(context, (origin, err) =>
+        log.warn(`[browser] camera/microphone grant failed for ${origin}:`, err),
+    );
+    log.info(`✓ Camera and microphone permissions granted for ${grantedOrigins.length} meeting origins`);
+
     await new Promise(resolve => setTimeout(resolve, 2000));
     log.info('✓ Chrome launched with remote debugging on port 9222');
 
@@ -511,6 +521,19 @@ const main = async (): Promise<void> => {
     // never ran on Teams at all. Read-only by design — the previous attempt at
     // this path mutated constraints and silently killed transcription (#545).
     await installAudioDiagnostics(page);
+    // A camera that produces black frames, for joins without the avatar: the
+    // VP has a microphone but no camera, so a meeting client's combined
+    // camera+microphone request fails, which Teams reads as access denied
+    // (#1094). Steps aside when the Simli override is in the document, so the
+    // avatar path is unchanged. The pre-join flows still turn the camera off.
+    // Not on Chime, whose join flow has no camera-off step.
+    if (platform !== 'CHIME') {
+        // Added after installAudioDiagnostics, so this wrapper is the outer one:
+        // a camera request it answers never reaches the [LMA-Audio] failure log,
+        // which sees only the microphone part it forwards.
+        await page.addInitScript({ content: blankCameraInitScript() });
+        log.info('✓ Blank camera installed for camera requests without the avatar');
+    }
     // Node-side draining: page console.log does NOT reach CloudWatch under
     // cloakbrowser (only warnings/errors do), which is why the first version of
     // these diagnostics produced nothing across three live sessions.
@@ -682,13 +705,11 @@ const main = async (): Promise<void> => {
             }
             if (!simliAvatar.isConnected()) return;
             try {
-                // 1. Grant camera+mic permissions at context level for all meeting domains
-                for (const origin of ['https://zoom.us', 'https://app.zoom.us', 'https://app.chime.aws', 'https://teams.microsoft.com', 'https://web.webex.com', 'https://meet.google.com']) {
-                    await context.grantPermissions(['camera', 'microphone'], { origin }).catch(() => {});
-                }
-                log.info('✓ Camera and microphone permissions granted for meeting platforms');
-
-                // 2. Inject the getUserMedia override AND start the Node-side
+                // Camera/microphone permissions for the meeting origins were
+                // already granted right after the browser launched (see
+                // grantMeetingMediaPermissions), for every join.
+                //
+                // Inject the getUserMedia override AND start the Node-side
                 // WebRTC bridge poll loop (both live inside
                 // injectGetUserMediaOverride). The poll loop scans page.frames()
                 // and services any frame that calls getUserMedia({video}) —

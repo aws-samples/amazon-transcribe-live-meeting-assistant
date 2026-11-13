@@ -160,10 +160,9 @@ Because attribution is per channel, several people sharing one microphone appear
 as a single speaker unless you tick the **Speaker identification** boxes above.
 Your speaker-identification choices are sent once, in the session's opening
 message, and the server enables speaker partitioning for the channels you chose.
-Which engine does the partitioning depends on the deployment: the
-[ASR MicroVM engine](microvm-asr.md) by default where it is deployed, or Amazon
-Transcribe where it is not or where an admin has chosen Amazon Transcribe for these
-meetings. See [WebSocket Streaming API](websocket-streaming-api.md#speaker-identification-diarization)
+Which engine does the partitioning depends on the deployment: Amazon Transcribe by
+default, or the [ASR MicroVM engine](microvm-asr.md) where it is deployed and an admin
+has moved these meetings onto it. See [WebSocket Streaming API](websocket-streaming-api.md#speaker-identification-diarization)
 for the protocol details.
 
 ## Important Notice

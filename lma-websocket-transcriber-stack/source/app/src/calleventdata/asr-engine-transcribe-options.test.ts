@@ -37,7 +37,7 @@ const recordingServer = () => {
     return { server, lines };
 };
 
-const SHIPPED_DEFAULT: AsrRuntimeConfig = {
+const MICROVM_CHOSEN: AsrRuntimeConfig = {
     streamingEngineMicrovm: true,
     virtualParticipantEngineMicrovm: true,
     diarizeVirtualParticipant: true,
@@ -60,14 +60,14 @@ const meeting = (fields: Partial<CallMetaData> = {}): CallMetaData =>
 
 test('a meeting with no Amazon Transcribe-only option uses the MicroVM engine', () => {
     const { server, lines } = recordingServer();
-    assert.equal(resolveAsrEngine(meeting(), server, SHIPPED_DEFAULT, PLAIN), 'microvm');
+    assert.equal(resolveAsrEngine(meeting(), server, MICROVM_CHOSEN, PLAIN), 'microvm');
     assert.equal(lines.length, 0);
 });
 
 for (const languageCode of ['en-US', 'en-GB', 'en-AU', '']) {
     test(`a meeting in English (${languageCode || 'unset'}) uses the MicroVM engine`, () => {
         const { server, lines } = recordingServer();
-        assert.equal(resolveAsrEngine(meeting(), server, SHIPPED_DEFAULT, { ...PLAIN, languageCode }), 'microvm');
+        assert.equal(resolveAsrEngine(meeting(), server, MICROVM_CHOSEN, { ...PLAIN, languageCode }), 'microvm');
         assert.equal(lines.length, 0);
     });
 }
@@ -92,7 +92,7 @@ const TRANSCRIBE_ONLY: Array<[string, Partial<TranscriptionSettings>, RegExp]> =
 for (const [name, options, reason] of TRANSCRIBE_ONLY) {
     test(`a meeting using ${name} stays on Amazon Transcribe, logged at info with the reason`, () => {
         const { server, lines } = recordingServer();
-        assert.equal(resolveAsrEngine(meeting(), server, SHIPPED_DEFAULT, { ...PLAIN, ...options }), 'transcribe');
+        assert.equal(resolveAsrEngine(meeting(), server, MICROVM_CHOSEN, { ...PLAIN, ...options }), 'transcribe');
         assert.equal(lines.length, 1);
         assert.equal(lines[0]?.level, 'info');
         assert.match(lines[0]?.message ?? '', reason);
@@ -102,7 +102,7 @@ for (const [name, options, reason] of TRANSCRIBE_ONLY) {
 test('a client that names the MicroVM engine does not override an Amazon Transcribe-only option', () => {
     const { server, lines } = recordingServer();
     assert.equal(
-        resolveAsrEngine(meeting({ asrEngine: 'microvm' }), server, SHIPPED_DEFAULT, {
+        resolveAsrEngine(meeting({ asrEngine: 'microvm' }), server, MICROVM_CHOSEN, {
             ...PLAIN,
             contentRedactionEnabled: true,
         }),
@@ -117,7 +117,7 @@ test('a client that names the MicroVM engine does not override an Amazon Transcr
 test('the explicit client choice still wins over the deployment switch when no such option is used', () => {
     const { server } = recordingServer();
     assert.equal(
-        resolveAsrEngine(meeting({ asrEngine: 'microvm' }), server, { ...SHIPPED_DEFAULT, streamingEngineMicrovm: false }, PLAIN),
+        resolveAsrEngine(meeting({ asrEngine: 'microvm' }), server, { ...MICROVM_CHOSEN, streamingEngineMicrovm: false }, PLAIN),
         'microvm'
     );
 });
@@ -125,7 +125,7 @@ test('the explicit client choice still wins over the deployment switch when no s
 test('a meeting on Amazon Transcribe by choice logs nothing about its options', () => {
     const { server, lines } = recordingServer();
     assert.equal(
-        resolveAsrEngine(meeting(), server, { ...SHIPPED_DEFAULT, streamingEngineMicrovm: false }, {
+        resolveAsrEngine(meeting(), server, { ...MICROVM_CHOSEN, streamingEngineMicrovm: false }, {
             ...PLAIN,
             contentRedactionEnabled: true,
         }),
@@ -142,7 +142,7 @@ for (const languageCode of ['es-US', 'es-ES', 'de-DE', 'fr-FR', 'pt-BR']) {
     test(`a meeting in ${languageCode} uses the MicroVM engine when the deployed bundle transcribes it`, () => {
         const { server, lines } = recordingServer();
         assert.equal(
-            resolveAsrEngine(meeting(), server, SHIPPED_DEFAULT, { ...PLAIN, languageCode }, PARAKEET_V3_BUNDLE),
+            resolveAsrEngine(meeting(), server, MICROVM_CHOSEN, { ...PLAIN, languageCode }, PARAKEET_V3_BUNDLE),
             'microvm'
         );
         assert.equal(lines.length, 0);
@@ -152,7 +152,7 @@ for (const languageCode of ['es-US', 'es-ES', 'de-DE', 'fr-FR', 'pt-BR']) {
 test('a meeting in a language the deployed bundle does not transcribe stays on Amazon Transcribe', () => {
     const { server, lines } = recordingServer();
     assert.equal(
-        resolveAsrEngine(meeting(), server, SHIPPED_DEFAULT, { ...PLAIN, languageCode: 'ja-JP' }, PARAKEET_V3_BUNDLE),
+        resolveAsrEngine(meeting(), server, MICROVM_CHOSEN, { ...PLAIN, languageCode: 'ja-JP' }, PARAKEET_V3_BUNDLE),
         'transcribe'
     );
     assert.match(lines[0]?.message ?? '', /language ja-JP/);
@@ -164,7 +164,7 @@ test('language identification stays on Amazon Transcribe whatever the bundle tra
             resolveAsrEngine(
                 meeting(),
                 undefined,
-                SHIPPED_DEFAULT,
+                MICROVM_CHOSEN,
                 { ...PLAIN, languageCode, languageOptions: 'en-US,es-US' },
                 PARAKEET_V3_BUNDLE
             ),
@@ -177,11 +177,11 @@ test('the bundle list is read from ASR_MODEL_LANGUAGES', () => {
     process.env['ASR_MODEL_LANGUAGES'] = 'en,es';
     try {
         assert.equal(
-            resolveAsrEngine(meeting(), undefined, SHIPPED_DEFAULT, { ...PLAIN, languageCode: 'es-US' }),
+            resolveAsrEngine(meeting(), undefined, MICROVM_CHOSEN, { ...PLAIN, languageCode: 'es-US' }),
             'microvm'
         );
         assert.equal(
-            resolveAsrEngine(meeting(), undefined, SHIPPED_DEFAULT, { ...PLAIN, languageCode: 'de-DE' }),
+            resolveAsrEngine(meeting(), undefined, MICROVM_CHOSEN, { ...PLAIN, languageCode: 'de-DE' }),
             'transcribe'
         );
     } finally {

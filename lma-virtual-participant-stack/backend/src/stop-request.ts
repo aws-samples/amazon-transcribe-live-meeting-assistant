@@ -85,6 +85,42 @@ function escapeForRegExp(text: string): string {
 }
 
 /**
+ * Spellings a speech recogniser writes for the same spoken word, folded to the
+ * one the wake phrases are configured with.
+ *
+ * "ok alex" is a default wake phrase, and both recognisers in a meeting (the
+ * participants' transcript and Nova Sonic's own) write the spoken word as
+ * "Okay" at least as often as "OK". A participant saying "Okay Alex, stop" was
+ * heard as exactly that and matched no wake phrase, so the stop request was
+ * left to the model. Folding is applied to the text and to the phrase alike,
+ * so a deployment that configures "okay alex" is matched the same way.
+ *
+ * Expects text that has already been lowercased and had its punctuation turned
+ * into spaces, as every wake-phrase matcher here does first.
+ */
+export function foldWakeSpellings(normalized: string): string {
+    return normalized.replace(/\bokay\b/g, 'ok');
+}
+
+/**
+ * The assistant's name, read from the wake phrases: the last word, when every
+ * configured phrase has a greeting before it and ends in the same word ("hey
+ * alex", "ok alex" -> "alex"). Null when the phrases do not share one, in which
+ * case nothing is addressed by name alone.
+ */
+export function assistantNameFromWakePhrases(wakePhrases: string[]): string | null {
+    let name: string | null = null;
+    for (const phrase of wakePhrases) {
+        const words = foldWakeSpellings(normalize(phrase)).split(' ').filter((word) => word.length > 0);
+        if (words.length < 2) return null;
+        const last = words[words.length - 1];
+        if (name !== null && name !== last) return null;
+        name = last;
+    }
+    return name;
+}
+
+/**
  * The wake phrases this deployment is configured with, in the order given.
  *
  * Shared so that the transcript stop path and the wake-phrase resumption path
@@ -113,7 +149,7 @@ export function isStopTalkingRequest(
     text: string,
     wakePhrases: string[] = configuredWakePhrases(),
 ): boolean {
-    const normalized = normalize(text || '');
+    const normalized = foldWakeSpellings(normalize(text || ''));
     if (!normalized) {
         return false;
     }
@@ -121,7 +157,7 @@ export function isStopTalkingRequest(
     let addressedToAssistant = false;
     let remainder = normalized;
     for (const phrase of wakePhrases) {
-        const normalizedPhrase = normalize(phrase);
+        const normalizedPhrase = foldWakeSpellings(normalize(phrase));
         if (!normalizedPhrase) {
             continue;
         }
@@ -134,6 +170,20 @@ export function isStopTalkingRequest(
         addressedToAssistant = true;
         // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- same escaped phrase as above
         remainder = remainder.replace(new RegExp(`\\b${pattern}\\b`, 'g'), ' ');
+    }
+
+    // "Alex, stop": the name on its own addresses the assistant too. Safe for
+    // this matcher in a way it would not be for activation, because what is
+    // left once the name is removed must still be nothing but a stop command,
+    // and the callers only ask while the assistant is already listening.
+    const name = assistantNameFromWakePhrases(wakePhrases);
+    if (!addressedToAssistant && name) {
+        // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- the name is regex-escaped, so it cannot produce catastrophic backtracking
+        const byName = new RegExp(`\\b${escapeForRegExp(name)}\\b`, 'g');
+        if (byName.test(remainder)) {
+            addressedToAssistant = true;
+            remainder = remainder.replace(byName, ' ');
+        }
     }
 
     if (!addressedToAssistant) {

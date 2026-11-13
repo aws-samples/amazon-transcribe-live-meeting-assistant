@@ -101,6 +101,15 @@ settings:
   is an objection.
 - Anything else is neither, and is not recorded.
 
+The Virtual Participant reads the meeting chat and speech by its own rules: a
+consent is a consent phrase as the whole message, or `LMA` followed at once by
+a consent phrase anywhere in a message of up to 200 characters; a typed
+objection may be part of a message of up to 200 characters; only text outside
+quotation marks is searched; and a spoken reply counts only when it is
+addressed to LMA. See
+[Replies in the chat](#replies-in-the-chat) and
+[Spoken replies](#spoken-replies).
+
 Each participant's **latest** reply is the one that counts: somebody who
 objected and then consented has consented, and the other way round. Replies are
 matched to participants by their display name in the meeting, compared without
@@ -147,12 +156,12 @@ the `ConfigurationPreset` stack parameter; see
 |---|---|---|
 | Consent mode | Off, Notify or Opt-in | Off |
 | Consent rule (opt-in) | Each participant consents, or the meeting owner attests | Each participant consents |
-| Notice text (notify) | The notice a notify meeting posts | "{LMA_USER} is using Live Meeting Assistant to record and transcribe this meeting ({meeting}). If you do not agree, reply "{objection_phrase}" in the chat or say so, and recording and transcription will stop." |
-| Consent request text (opt-in) | The request an opt-in meeting posts | "{LMA_USER} would like to record and transcribe this meeting ({meeting}) with Live Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed. Reply "{consent_phrase}" to agree, or "{objection_phrase}" to decline." |
+| Notice text (notify) | The notice a notify meeting posts | "{LMA_USER} is using Live Meeting Assistant to record and transcribe this meeting ({meeting}). If you do not agree, say so, and recording and transcription will stop." |
+| Consent request text (opt-in) | The request an opt-in meeting posts | "{LMA_USER} would like to record and transcribe this meeting ({meeting}) with Live Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed." |
 | Consent phrases | Comma-separated phrases read as consent | I consent, I agree, I accept |
 | Objection phrases | Comma-separated phrases read as an objection | I object, I do not consent, I don't consent, I do not agree, I don't agree, do not record, don't record, stop recording |
 | Allow a different choice per meeting | Whether a meeting may be started with another mode, rule or notice | On |
-| Keep evidence screenshots | Whether evidence images stay with the meeting, or are deleted once checked | On |
+| Keep evidence screenshots | Whether evidence images stay with the meeting. Off: each image is deleted once its check is stored, and the Virtual Participant stores only images it has checked automatically, so it keeps no participant-list screenshots and none for objections recorded in LMA or said aloud (see [Evidence screenshots](#evidence-screenshots)) | On |
 | Evidence check model | The Amazon Bedrock vision model that checks evidence images; see [Checking evidence with a vision model](#checking-evidence-with-a-vision-model) | Amazon Nova Lite |
 | Streaming clients without a consent step | What the WebSocket transcriber does, in Notify or Opt-in, with a meeting from a client that shows no consent step: **Accept with a warning** (captured as before, with no consent record, and a warning logged) or **Refuse** (not recorded or transcribed, and the client is told why). See [Clients without a consent step](#clients-without-a-consent-step) | Accept with a warning |
 | Virtual Participant leaves after an objection | Whether a Virtual Participant leaves the meeting after a participant objects, in the chat or aloud, rather than staying in it without recording | Off |
@@ -161,6 +170,15 @@ the `ConfigurationPreset` stack parameter; see
 In the two texts, `{LMA_USER}` is the person using LMA in the meeting,
 `{meeting}` the meeting's name, and `{consent_phrase}` and `{objection_phrase}`
 the first phrase of each list. Any other text in braces is posted as written.
+The shipped texts say nothing about how to reply, because each capture method
+reads replies in its own way: a Virtual Participant posts one line after the
+notice that gives the reply in the form it reads (see
+[How the Virtual Participant asks for replies](#how-the-virtual-participant-asks-for-replies)),
+and Stream Audio and the Desktop Capture App show the notice to the LMA user,
+who confirms how everyone agreed. A customised text is posted as written,
+placeholders filled in, and the Virtual Participant's line still follows it, so
+a text customised before this line existed and that carries its own reply
+instruction gives both.
 
 With **Allow a different choice per meeting** off, a meeting may still be
 started with a *stricter* choice than the default — opt-in in a notify
@@ -193,11 +211,24 @@ on its **Details** tab. It shows:
 - the **notice** posted, and when it was first posted;
 - the **participants**: everyone listed as present, then anybody else who was
   listed or replied, each with their latest reply (*Consented*, *Objected* or
-  *No reply*);
+  *No reply*). The seats a Virtual Participant lists for people it has counted
+  but not yet seen by name (*Unidentified participant 1*, …; see
+  [Who is present](#who-is-present)) are not people, so they are not listed one
+  by one: while any are present they are shown as one line, *"2 participants
+  not yet identified"*, and a seat that is no longer present is not shown. An
+  objection recorded for *Unidentified participant* (a reply with no sender) is
+  a participant's reply, and is listed with it;
 - the owner's **attestation**, when there is one;
-- the **evidence** images as thumbnails, each with the vision model's verdict,
-  confidence and summary when it has been checked; selecting one opens it full
-  size;
+- the **evidence** images as thumbnails, each with what it was taken for and,
+  when it has been checked, the vision model's verdict (shown as *Image check:*,
+  because it reports what that image shows, which can differ from the record's
+  status), confidence and summary, the participants with no visible consent,
+  and those whose consent was said aloud or entered in LMA and so is not
+  expected in the image (*"Consented aloud or in LMA, so not expected in this
+  image: Bo Chen"*); a chat image not checked yet says *Image check: not run*,
+  and a participant-list image, which is never checked automatically, says
+  *"Not checked: participant lists are kept as a record"*. Selecting one opens
+  it full size;
 - a **timeline** of everything, oldest first: consent started, notices posted,
   replies and attestations, and each change of status with its reason. Replies
   are placed by when LMA recorded them, the order the status is decided in.
@@ -234,8 +265,14 @@ Three actions, each offered only to the people the backend lets do it:
 The summary's downloads and its copy to the clipboard, under **Download** in
 the meeting page's header, add the consent record after the summary: the
 mode, rule and status, whether capture was allowed at the time of the download,
-the notice, the attestation, each participant's latest reply, the timeline, and
-each evidence image's check, followed by the note that the record is supporting
+the notice, the attestation, each participant's latest reply (with the
+seats not yet identified counted on one line, as on the page), the timeline, and
+each evidence image, described by its note with when it was captured and its
+image check (*"- Meeting chat when Bo Chen objected (screenshot captured
+2026-11-02T10:02:30.000Z). Image check: Objection found (model
+amazon.nova-lite-v1:0, confidence 0.9)"*, *"Image check: not run"*, or, for
+a participant list, *"Not checked: participant lists are kept as a record"*),
+followed by the note that the record is supporting
 evidence and not a legal determination. A meeting without a consent record
 downloads as before. The email link carries the summary only.
 
@@ -314,7 +351,17 @@ than the deployment's is stored on the VP's row (`consentMode` and `consentRule`
 `createVirtualParticipant`) and read by the VP when it starts, so scheduled
 meetings keep it too. Whether the deployment allows the choice is decided as for
 any capture client: with **Allow a different choice per meeting** off, a less
-strict choice is not used. The VP applies that rule itself before joining, so it
+strict choice is not used. When the form opens it reads the deployment's mode,
+rule and that setting through `getMeetingConsentDefaults` (see [API](#api)), and
+with the setting off it shows each less strict choice disabled, with a
+description that names the mode the meeting would use instead (for example "Not
+allowed in this deployment: the meeting would use Notify"). The deployment's
+setting and every choice at least as strict as it stay available, and the
+deployment's setting is described with the mode it stands for. A choice already
+selected, or stored on a scheduled VP being edited, that becomes disabled goes
+back to the deployment's setting. When the form cannot read the settings it
+offers every choice, as the platform allows, and does not stop the VP from
+being created. The form only shows the rule; the VP applies it itself before joining, so it
 knows whether to withhold capture, and the resolver applies it again when the VP
 starts the meeting's consent; when the resolver refuses the meeting's choice,
 the VP runs the deployment's mode instead. A meeting that chose Off in a
@@ -334,8 +381,35 @@ always passes the parameter. In the same way, if it
 cannot read the meeting's own choice from its row (it tries three times before
 joining), it withholds capture and does not start the meeting's consent until a
 later read succeeds, because the choice it could not read may have been
-opt-in. While the meeting runs a consent flow, `LMA help` also lists
-`LMA consent` and `LMA no consent`.
+opt-in. While the meeting runs a consent flow, `LMA help` also gives the
+consent replies, in the same form as the notice's reply line: *"Meeting
+consent: type or say "LMA, I consent" to agree to recording and transcription,
+or "LMA, I object" to object."*, with *"type in this chat"* instead of *"type
+or say"* where spoken replies are not read, and *"say"* on the Teams browser
+join.
+
+### How the Virtual Participant asks for replies
+
+Every notice the VP posts is followed by one line that says how to reply, in
+one form for the chat and for speech: `LMA`, a comma, and the deployment's
+first consent or objection phrase. With the shipped phrases the line is:
+
+- *"Type or say "LMA, I consent" or "LMA, I object"."* where spoken replies
+  are read (the default);
+- *"Type "LMA, I consent" or "LMA, I object" in this chat. An objection made
+  out loud takes effect when <LMA user> records it in LMA."* where **Read
+  spoken replies** is off;
+- *"Say "LMA, I consent" or "LMA, I object"."* on the Teams browser join, which
+  shows no chat senders, so a typed consent cannot be attributed there (see
+  [Who is present](#who-is-present)); with **Read spoken replies** off it gets
+  the chat line above.
+
+The line is the same in notify and opt-in meetings. Every other VP message that
+says how to reply uses the same form: the acknowledgement of an objection (see
+[Objections](#objections)), the answer to a consent whose sender cannot be
+told, the detail line on the Teams browser join, and `LMA help`. The form is a
+suggestion, not a requirement: a bare *"I consent"* typed in the chat is still
+consent (see [Replies in the chat](#replies-in-the-chat)).
 
 ### Notify
 
@@ -404,7 +478,14 @@ and while capture is still stopped by the first, is acted on and recorded once.
   VP stays, and listens for spoken replies while capture is stopped. Each
   participant's latest reply is the one that counts, so if the objector later
   replies with consent, in the chat or aloud, capture resumes, as the
-  acknowledgement says. The transcript and the audio recording resume; the screen recording does
+  acknowledgement says. Its last sentence gives the reply in the form of the
+  notice's reply line, with the deployment's first consent phrase: *"If <name>
+  types or says "LMA, I consent", it can continue."* where spoken replies are
+  read; *"If <name> says "LMA, I consent", it can continue."* on the Teams
+  browser join, which shows no chat senders; and *"If <name> types "LMA, I
+  consent" in this chat, it can continue."* where spoken replies are not read.
+  An objection with no sender gets no such sentence, because a consent needs a
+  sender. The transcript and the audio recording resume; the screen recording does
   not. It stops for the rest of the meeting the first time capture is withheld
   after it started, and what it recorded until then is kept on the meeting as
   usual.
@@ -420,24 +501,62 @@ recorded in LMA. …"*.
 
 ### Replies in the chat
 
-The VP reads a chat message as a reply only when **the whole message** is a
-reply, as it reads its chat commands: case, punctuation and spacing are ignored,
-and an `LMA` addressee may stand anywhere in it.
+The VP compares a chat message with the phrases as it compares its chat
+commands: case, punctuation and spacing are ignored, phrases match only as
+whole words, and an `LMA` addressee may stand anywhere in the message. A
+consent is either the whole message or `LMA` followed at once by the phrase;
+an objection may be part of any sentence, because reading a message as an
+objection can only stop capture, never start it.
 
-- **Consent** is a message that is one of the consent phrases (*"I consent"*,
-  *"i agree!"*, *"LMA, I accept"*), or `LMA consent`.
+- **Consent** is a message that is one of the consent phrases and nothing else
+  (*"I consent"*, *"i agree!"*, *"I accept, LMA"*), or a message of up to 200
+  characters in which `LMA` is followed at once by a consent phrase or by
+  `consent`, and the phrase ends its clause (the end of the message, or `.`,
+  `!`, `?`, `,`, `;` or `:` after it), anywhere in it: *"…so that's the plan.
+  LMA, I consent."*, *"Sounds good, LMA I agree, let's go on"*. Punctuation and
+  spacing between `LMA` and the phrase do not matter. A phrase that runs on
+  into a longer clause is about something else and is not consent: *"LMA, I
+  agree with the plan"*, *"LMA consent is a good feature"*. Nor is a consent
+  phrase without `LMA` just before it: *"I agree with Bo's point"* is ordinary
+  chat, and so is *"LMA, what do you think? I consent"*, where other words
+  stand between them. A message that contains `LMA ask` anywhere is a
+  question for the meeting assistant and is not read as consent. A bare *"I consent"* is still consent, so a
+  participant who does not use the `LMA` form is still heard.
 - **An objection** is a message that is one of the objection phrases (*"I
   object"*, *"Stop recording."*), `LMA no consent` or `LMA object`, or a message
-  of up to 200 characters addressed to `LMA` that contains an objection phrase
-  anywhere (*"LMA, please stop recording now"*).
-- Objections are looked for first, so *"LMA I do not consent"* is an objection.
-- Anything else is ordinary chat. In particular *"I agree with Bo's point"* and
-  *"I don't agree with the roadmap"* are not replies, although they contain
-  default phrases: a meeting chat is full of such sentences.
+  of up to 200 characters that contains an objection phrase:
+  - addressed to `LMA`: *"LMA, please stop recording now"*, except an `LMA ask`
+    question for the meeting assistant, which is answered and is not a reply
+    whatever it mentions;
+  - not addressed: *"I object to this meeting being recorded"*, *"I agree with
+    Sam, but I don't consent to being recorded"*, and also *"I don't agree with
+    the roadmap"*, which with the default phrases is handled as any objection
+    is (see [Objections](#objections)): capture stops until the sender consents
+    again, the screen recording stays off for the rest of the meeting, and with
+    **Virtual Participant leaves after an objection** on, the VP leaves. The
+    default phrases `I do not agree`, `I don't agree`, `do not record` and
+    `don't record` match everyday sentences (*"please do not record the demo
+    twice"*); remove them from the objection phrases where that is too eager
+    for a deployment's meetings.
+- Only the text outside quotation marks (double or single) is searched for an
+  objection phrase or for `LMA` and a consent phrase, so a message that quotes
+  one to tell people how to reply is not a reply (*'Reply "I consent" to agree,
+  or "I object" to decline.'*, *'Type or say "LMA, I consent" or "LMA, I
+  object".'*), and the shipped notices and reply lines, posted by another LMA in
+  the same meeting or pasted from Stream Audio, are not read as replies. A custom notice text should keep
+  `{objection_phrase}` in quotation marks for the same reason. A phrase outside the quotation marks still
+  counts (*'LMA, "stop recording" please'* does not, *'Bo said "stop
+  recording", and I agree: stop recording'* does), and the phrase typed on its
+  own is an objection, quoted or not, as *'"LMA, I consent"'* is consent.
+- A message longer than 200 characters is searched for no phrase, and an `LMA
+  ask` question is searched for neither an objection nor a consent.
+- Objections are looked for first, so *"LMA I do not consent"* is an objection,
+  and so is a message that contains both an objection and *"LMA, I consent"*.
+- Anything else is ordinary chat.
 
-This is stricter than the reading in [How a reply is read](#how-a-reply-is-read),
-which looks for a phrase anywhere in a reply; the VP does not use that reading
-for the chat or for speech. `LMA consent`, `LMA no consent` and `LMA object` work whatever
+This differs from the reading in [How a reply is read](#how-a-reply-is-read),
+which looks for a consent phrase anywhere in a reply; the VP does not use that
+reading for the chat or for speech. `LMA consent`, `LMA no consent` and `LMA object` work whatever
 phrases are configured, so they are the forms to suggest when a deployment's
 phrases are long or in another language.
 
@@ -457,33 +576,38 @@ reads its own messages as replies.
 
 With **Read spoken replies** on (the shipped default), the VP also reads
 replies said aloud, on every join and with either transcription engine, and
-every notice it posts is followed by *"Replies may be typed in this chat, or
-said aloud starting with "LMA": say "LMA, I consent" or "LMA, I object"."*
-(with the deployment's first consent and objection phrases). With it off, the
-VP reads the chat only, as it did before spoken replies, sends no meeting audio
-anywhere while consent is awaited, does not read spoken objections from the
-transcription while capture runs, and follows every notice instead with *"Live
-Meeting Assistant reads replies in this chat; an objection made out loud takes
-effect when <LMA user> records it in LMA."*, which **Record an objection** in
-the Consent section does. The VP reads the setting before it joins; if it
+every notice it posts is followed by *"Type or say "LMA, I consent" or "LMA, I
+object"."* (with the deployment's first consent and objection phrases; see
+[How the Virtual Participant asks for replies](#how-the-virtual-participant-asks-for-replies)).
+With it off, the VP reads the chat only, as it did before spoken replies, sends
+no meeting audio anywhere while consent is awaited, does not read spoken
+objections from the transcription while capture runs, and follows every notice
+instead with *"Type "LMA, I consent" or "LMA, I object" in this chat. An
+objection made out loud takes effect when <LMA user> records it in LMA."*,
+which **Record an objection** in the Consent section does. The VP reads the setting before it joins; if it
 cannot read the Meeting Consent section, it reads the chat only.
 
 **What counts as a spoken reply.** Only an utterance addressed to LMA is a
 reply, because people say *"I agree"* and *"I don't agree"* in conversation far
-more often than they type them as a whole message. Addressed, it is read as an
+more often than they type them, so an unaddressed sentence that contains an
+objection phrase, which is an objection in the chat, is ordinary speech.
+Addressed, it is read as an
 addressed chat message is (see [Replies in the chat](#replies-in-the-chat)),
 with the deployment's phrases, the whole utterance as the speech engine
 finalises it being the reply:
 
-- **Consent** is `LMA consent`, or `LMA` with one of the consent phrases and
-  nothing else (*"LMA, I consent."*, *"I agree, LMA"*).
+- **Consent** is `LMA consent`, `LMA` with one of the consent phrases and
+  nothing else (*"I agree, LMA"*), or `LMA` followed at once by a consent
+  phrase anywhere in an utterance of up to 200 characters (*"LMA, I
+  consent."*, *"OK, so that's the plan. LMA, I consent."*). *"LMA, what do you
+  think? I consent"* is not consent.
 - **An objection** is `LMA object` or `LMA no consent`, `LMA` with one of the
   objection phrases, or an utterance of up to 200 characters addressed to `LMA`
   that contains an objection phrase anywhere (*"LMA, please stop recording
   now"*). Objections are looked for first.
 - A bare phrase is not a reply when said aloud: *"I consent."* and *"Stop
   recording!"* are ordinary speech, although the same words typed in the chat
-  are replies.
+  are replies, as is a typed sentence containing an objection phrase.
 
 Speech engines often write `LMA` as its letters, so *"L M A"* and *"L.M.A."*
 are read as `LMA`. Only final results are read, never the engine's partial
@@ -555,7 +679,8 @@ rule, so it is never allowed to be shorter than the meeting:
   browser joins, and the Zoom Meeting SDK join), the list is the names the VP
   has seen since the count last went up, as the active speaker, as the speaker
   of a spoken reply, or as a chat sender, plus one
-  *Unidentified participant N* for each seat no name accounts for. An
+  *Unidentified participant N* for each seat no name accounts for (the meeting
+  page counts these seats on one line rather than listing them). An
   unidentified participant can never consent, so the meeting is not granted
   until everybody present has spoken or written in the chat, and consented.
   When the count goes up, the names seen before stop counting, because one of
@@ -621,11 +746,45 @@ participant list, takes a second one, and puts the chat back. The screenshots
 are taken from the meeting page itself, so nothing open in the live view covers
 them. Each is a JPEG stored in the recordings bucket under
 `lma-consent-evidence/<meeting>/` and added to the record with
-`addMeetingConsentEvidence`, with a note of what it shows and when
-(*"Meeting chat when Bo Chen objected"*). For each chat screenshot the VP then
+`addMeetingConsentEvidence`, with a note of what it shows and the event it was
+taken for: *"Meeting chat after the notice was posted"* (notify) when the
+status becomes `granted` with no objection on the record; in opt-in under the
+each-participant rule, *"Meeting chat when Jeremy Feldman consented"*, naming
+the participant whose consent completed it, both the first time and when it is
+granted again after a newcomer consented; *"… when consent was granted"* under
+the owner-attests rule, where the owner's attestation grants it;
+*"Meeting chat when Bo Chen objected"*; *"… after an objection for Bo Chen was
+recorded in LMA"*; and, when capture resumes after an objection, *"Meeting chat
+when Bo Chen consented"*, naming the latest participant to consent after the
+latest objection on the record. For each chat screenshot the VP then
 asks for the vision-model check (`verifyMeetingConsentEvidence`) without
 waiting for it; a participant list on its own is not checked, because the check
-reads a chat for the notice and the replies. Neither the screenshots nor the
+reads a chat for the notice and the replies, and the meeting page and the
+download show it as *"Not checked: participant lists are kept as a record"*. Nor are the screenshots taken for
+an objection that was not made in the chat: one recorded in LMA (**Record an
+objection**, or `recordMeetingConsentEvent` through the API) or one said aloud.
+Such an objection never appears in the chat as a participant's reply, and LMA's
+own announcement of it is not read as one, so a check of that chat could only
+report what else the chat shows, such as an earlier consent. With **Keep
+evidence screenshots** on, those images are kept and listed like the others,
+and the owner or an Admin can still check them with **Check with model**.
+
+With **Keep evidence screenshots** off, the VP stores only the screenshots it
+asks to have checked: the chat screenshot (or, where the chat and the
+participant list are on screen together, the one screenshot of both) after the
+notice, when consent is granted or
+resumes, and when an objection is typed in the chat. It stores no participant
+list screenshot, and nothing for an objection recorded in LMA or said aloud,
+because each image is deleted once its check is stored and these would never
+be checked. Each stored image is deleted after its automatic check, and the
+entry keeps the check, so the meeting page shows it as deleted after its check
+and offers no **Check with model**. A manual check started on the meeting page
+just before the automatic check deleted the image fails, and the entry then
+shows the same deleted state. The VP reads the setting from the consent API
+when consent starts; if it cannot, it treats the setting as off. An image whose
+automatic check fails, or that was uploaded but could not be added to the
+record, stays until the meeting is deleted or the lifecycle rule removes it.
+Neither the screenshots nor the
 check ever hold up the meeting: a failure is logged and the meeting carries on.
 A VP keeps at most 24 images per meeting, below the record's 30, and takes no
 more after that. Before leaving after an objection it waits up to 30 seconds for
@@ -871,8 +1030,10 @@ equal, or copy the images elsewhere before they expire.
 An evidence screenshot — typically the meeting chat after the request was
 posted — can be checked by an Amazon Bedrock vision model with
 `verifyMeetingConsentEvidence`. The model is shown the image with the notice
-that was posted, the meeting's mode, the consent and objection phrases and the
-participants listed as present, and asked to report what the picture shows:
+that was posted, the meeting's mode, the consent and objection phrases, the
+participants listed as present and, among them, those whose latest reply is a
+consent said aloud or entered in LMA (source `voice` or `ui`), which the chat
+cannot show, and asked to report what the picture shows:
 
 - whether the notice is visible, and whether it says the same as the notice
   posted;
@@ -900,12 +1061,28 @@ From that answer LMA draws a **verdict**, the same way whichever model answered:
 | Verdict | When |
 |---|---|
 | `objection_found` | The model reported an objection, or a visible reply reads as one. Reported whatever the model's confidence. |
-| `supports_consent` | The notice is visible, nobody objected, the model's confidence is at least 0.5, and — for the opt-in rule **Each participant consents** — every participant listed as present has a visible reply reading as consent. |
+| `supports_consent` | The notice is visible, nobody objected, the model's confidence is at least 0.5, and — for the opt-in rule **Each participant consents** — every participant listed as present whose consent is expected in the chat has a visible reply reading as consent. |
 | `inconclusive` | Anything else, including an answer that could not be read. For the each-participant rule, the participants with no visible consent are listed (`MissingParticipants`). |
 
+Under the each-participant rule the image is judged only against the
+participants whose consent belongs in the chat. A participant whose latest reply
+is a consent said aloud or entered in LMA is not looked for in the image, and is
+listed on the result as `ConsentedOutsideChat` so that a reader sees why; so a
+chat image of a meeting where Ana consented in the chat and Bo said *"LMA, I
+consent"* supports consent when it shows Ana's reply. Everyone else listed is
+looked for, including participants who have not replied yet and those whose
+latest reply is an objection. When every participant consented outside the
+chat, the image supports consent when it shows the notice and no objection.
+The list is taken from the record when the check runs, whether the Virtual
+Participant asked for it or somebody chose **Check with model**.
+
 The result is stored on the evidence entry as `Verification`, with the model's
-id, when the check ran, who ran it and the tokens it used. It is supporting
-evidence only: **it never changes the meeting's consent status**, which follows
+id, when the check ran, who ran it and the tokens it used. The verdict
+describes that one image, not the meeting: an earlier reply scrolled out of
+view, or an objection made outside the chat, is not in it, and when a
+participant's replies are both visible the verdict does not apply the record's
+rule that their latest reply counts. The meeting page and the summary download
+show it as the *image check*. It is supporting evidence only: **it never changes the meeting's consent status**, which follows
 only from the replies and attestations recorded on the meeting. A check that
 finds an objection nobody recorded is for a person to look at — the owner can
 record the objection — and a check that supports consent does not grant it.
@@ -942,7 +1119,9 @@ results from them, and choose a larger model if the default reads them poorly.
 **Keeping or deleting the image.** With **Keep evidence screenshots** on (the
 default), the image stays with the meeting until the meeting is deleted. With it
 off, the image is deleted as soon as its check is stored, and the entry keeps
-the check and `ImageDeletedAt`; such an entry cannot be checked again. If the
+the check and `ImageDeletedAt`; such an entry cannot be checked again. The
+Virtual Participant then stores only images it has checked automatically (see
+[Evidence screenshots](#evidence-screenshots)). If the
 deletion fails, the check is still stored and the image is left for the
 meeting's deletion or the lifecycle rule to remove. If the image is deleted but
 `ImageDeletedAt` cannot be recorded, the failure is logged with the evidence
@@ -958,6 +1137,7 @@ result is seen on the next read of the record.
 | Operation | Who |
 |---|---|
 | Read the record (`getMeetingConsent`, `Call.Consent`, `onUpdateMeetingConsent`) | The meeting's owner, the people it is shared with, Admins, and LMA's backend roles |
+| Read the deployment's mode, rule and **Allow a different choice per meeting** (`getMeetingConsentDefaults`) | Any signed-in user (Cognito user pool); it returns those three values only |
 | Start consent (`startMeetingConsent`) | The owner, an Admin, or a backend role |
 | Record that the notice was posted (`recordMeetingConsentNotice`) | The owner, an Admin, or a backend role |
 | List the participants present (`setMeetingConsentParticipants`) | The owner, an Admin, or a backend role |
@@ -1008,7 +1188,7 @@ fragment ConsentRecord on MeetingConsent {
   Evidence {
     EvidenceId Kind S3Key CapturedAt AddedAt Note SignedUrl ImageDeletedAt
     Verification {
-      Verdict MissingParticipants Readable NoticeVisible NoticeMatches
+      Verdict MissingParticipants ConsentedOutsideChat Readable NoticeVisible NoticeMatches
       Replies { Name Text Decision }
       AnyObjection Confidence Summary ModelId VerifiedAt VerifiedBy InputTokens OutputTokens
     }
@@ -1027,6 +1207,11 @@ query {
       AllowPerMeetingOverride KeepEvidenceScreenshots VerifierModelId
     }
   }
+}
+
+# Before any meeting exists, as the Create Virtual Participant form reads it.
+query {
+  getMeetingConsentDefaults { Mode Rule AllowPerMeetingOverride }
 }
 
 mutation {

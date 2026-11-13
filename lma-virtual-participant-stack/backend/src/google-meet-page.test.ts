@@ -38,6 +38,7 @@ import {
 } from './google-meet-page.js';
 import { isOwnMeetMessage, meetInMeetingExit, meetPreJoinExit } from './google-meet.js';
 import { details } from './details.js';
+import { noteSentChat } from './meeting-chat.js';
 
 // ---------------------------------------------------------------- codes and links
 
@@ -237,6 +238,14 @@ test("the VP's own messages are recognised by text when no sender is read", () =
     assert.equal(isOwnMeetMessage(`  ${details.startMessages[0]} `), true);
     assert.equal(isOwnMeetMessage('LMA leave'), false);
     assert.equal(isOwnMeetMessage(''), false);
+});
+
+test('a message the VP posted is recognised by text when no sender is read', () => {
+    const posted = 'Pinned for this meeting only: the agenda is in the shared folder';
+    assert.equal(isOwnMeetMessage(posted), false);
+    noteSentChat([posted]);
+    assert.equal(isOwnMeetMessage(posted), true);
+    assert.equal(isOwnMeetMessage('the agenda moved'), false);
 });
 
 // ---------------------------------------------------------------- active speaker

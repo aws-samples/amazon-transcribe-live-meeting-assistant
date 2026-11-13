@@ -78,7 +78,9 @@ export const ConfigurationWorkspaceContent = () => {
   // The profile open in the editor: the one the address names, else the active one.
   const [profile, setProfile] = useState(query.get('profile') || null);
   const [selected, setSelected] = useState([]);
-  const [tableOpen, setTableOpen] = useState(true);
+  // The profile list starts collapsed, to leave the page to the editor; it is
+  // shown anyway while no profile is open, as then it is all the page has.
+  const [tableOpen, setTableOpen] = useState(false);
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
   // Changed to have the editor read its profile again.
@@ -366,7 +368,10 @@ export const ConfigurationWorkspaceContent = () => {
         headerText="Configuration Profiles"
         headerCounter={profilesLoading ? undefined : `(${profiles.length})`}
         headerDescription="Select profiles to compare, activate or delete them; open one by its name."
-        expanded={tableOpen}
+        // Shown open, whatever the heading was last set to, while there is no
+        // profile to edit: none is open, or the open one is not in the list (a
+        // link naming a profile that does not exist), so the list is the way on.
+        expanded={tableOpen || (!profilesLoading && (!profile || !profiles.some((entry) => entry.name === profile)))}
         onChange={({ detail }) => setTableOpen(detail.expanded)}
       >
         <ProfilesTable

@@ -292,10 +292,21 @@ export function redactPerMeetingConfig(config: PerMeetingConfig): Record<string,
         'ELEVENLABS_API_KEY',
         'SIMLI_API_KEY',
     ]);
+    // A meeting ID can be a join link, which can carry the meeting password in
+    // its query string; only its host is logged, as LINK_KEYS in the launcher.
+    const LINK_KEYS = new Set<string>(['MEETING_ID']);
     const out: Record<string, string> = {};
     for (const [key, value] of Object.entries(config)) {
         if (value === undefined) continue;
-        out[key] = SECRET_KEYS.has(key) ? `<redacted:${String(value).length}>` : String(value);
+        const text = String(value);
+        if (SECRET_KEYS.has(key)) {
+            out[key] = `<redacted:${text.length}>`;
+        } else if (LINK_KEYS.has(key) && text.includes('://')) {
+            const host = text.split('://', 2)[1].split('/', 1)[0].split('?', 1)[0];
+            out[key] = `<link:${host.split('@').pop()}>`;
+        } else {
+            out[key] = text;
+        }
     }
     return out;
 }

@@ -8,9 +8,9 @@
  * The speaker chips above the transcript, grouped by platform name.
  *
  * A chip limits the transcript to one speaker. Where a platform name carries
- * several voice labels -- 'Bob Strahan (spk_0)', 'Bob Strahan (spk_1)' -- its
- * chips sit together with a one-person / several-people icon toggle
- * (SpeakerModeToggle):
+ * voice labels -- 'Bob Strahan (spk_0)', and perhaps 'Bob Strahan (spk_1)'; one
+ * is enough (offersModeChoice) -- its chips sit together with a one-person /
+ * several-people icon toggle (SpeakerModeToggle):
  *
  *  - One person: every line under the name shows the name alone, and the chip's
  *    edit button opens the speaker modal (rename, combine, separate).

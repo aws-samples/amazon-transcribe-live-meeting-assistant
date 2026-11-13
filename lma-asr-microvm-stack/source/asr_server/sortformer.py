@@ -309,6 +309,13 @@ class SortformerConfig:
     min_turn_seconds: float = 0.5
     num_threads: int = 1
     slow_step_seconds: float = 2.0
+    # Partials with provisional labels (Config.partial_speakers): the diarizer is
+    # stepped when its labels fall this far behind an open segment's audio, and a
+    # partial takes the voice under the last ``partial_recent_seconds`` of what is
+    # labelled, if at least ``partial_min_seconds`` of the segment is labelled.
+    partial_refresh_seconds: float = 1.0
+    partial_recent_seconds: float = 1.0
+    partial_min_seconds: float = 0.3
 
 
 class SortformerSession:
@@ -423,12 +430,20 @@ class SortformerRecognizer(Recognizer):
         *,
         sample_rate: int = SAMPLE_RATE,
         min_turn_seconds: float = 0.5,
+        partial_speakers: bool = False,
+        partial_refresh_seconds: float = 1.0,
+        partial_recent_seconds: float = 1.0,
+        partial_min_seconds: float = 0.3,
     ) -> None:
         if sample_rate != SAMPLE_RATE:
             raise ValueError("the diarization model is built for 16 kHz audio")
         self._inner = inner
         self._diarizer = diarizer
         self._min_turn = min_turn_seconds
+        self._partial_speakers = partial_speakers
+        self._partial_refresh = partial_refresh_seconds
+        self._partial_recent = partial_recent_seconds
+        self._partial_min = partial_min_seconds
         self._offset = 0
         self._labels: dict[int, str] = {}
         self._failed = False
@@ -465,7 +480,13 @@ class SortformerRecognizer(Recognizer):
         out: list[Event] = []
         for event in events:
             if event.kind != "final":
-                out.append(replace(event, segment=event.segment + self._offset, speaker=None))
+                out.append(
+                    replace(
+                        event,
+                        segment=event.segment + self._offset,
+                        speaker=self._partial_speaker(event),
+                    )
+                )
                 continue
             self._diarize(self._diarizer.process_through, event.end or 0.0)
             if self._failed:
@@ -480,6 +501,36 @@ class SortformerRecognizer(Recognizer):
                 )
                 out.append(replace(event, segment=event.segment + self._offset, speaker=None))
         return out
+
+    def _partial_speaker(self, event: Event) -> str | None:
+        """The voice under the most recent labelled audio of an open segment.
+
+        Read only from this segment's own frames: the last speaker identified
+        before it is the person who just stopped talking, which is what partials
+        used to show. The diarizer is stepped (with its lookahead, so the frames
+        are labelled as a final's would be) only when its labels are more than
+        ``partial_refresh_seconds`` behind the segment, which bounds the extra
+        steps to about one per second of speech.
+        """
+        if not self._partial_speakers or self._failed or event.start is None:
+            return None
+        end = event.end if event.end is not None else event.start
+        if end - self._diarizer.labelled_until >= self._partial_refresh:
+            self._diarize(self._diarizer.process_available)
+            if self._failed:
+                return None
+        until = min(end, self._diarizer.labelled_until)
+        since = max(event.start, until - self._partial_recent)
+        if until - since < self._partial_min:
+            return None
+        try:
+            return self._label(self._diarizer.speaker_between(since, until))
+        except Exception:
+            self._failed = True
+            _LOG.exception(
+                "sortformer labelling failed; rows carry no speaker labels from here on"
+            )
+            return None
 
     def _label(self, index: int | None) -> str | None:
         if index is None:
@@ -567,23 +618,33 @@ class SortformerEngine(RecognizerEngine):
     def inner(self) -> RecognizerEngine:
         return self._inner
 
+    def warm_up(self, pcm: bytes) -> int:
+        return self._inner.warm_up(pcm)
+
     def new_session(self, config: SessionConfig | None = None) -> Recognizer:
         session = self._inner.new_session(config)
         if config is not None and config.diarize is False:
             _LOG.info("speaker labels off: sortformer diarizer not attached")
             return session
         sample_rate = config.sample_rate if config is not None else SAMPLE_RATE
+        partial_speakers = bool(config is not None and config.partial_speakers)
         _LOG.info(
-            "sortformer diarizer ready: speakers<=%d lookahead=%d frames max_chunk=%d frames",
+            "sortformer diarizer ready: speakers<=%d lookahead=%d frames max_chunk=%d frames "
+            "partial_speakers=%s",
             NUM_SPEAKERS,
             self._config.lookahead_frames,
             self._config.max_chunk_frames,
+            partial_speakers,
         )
         return SortformerRecognizer(
             session,
             SortformerSession(self._backend, self._config),
             sample_rate=sample_rate,
             min_turn_seconds=self._config.min_turn_seconds,
+            partial_speakers=partial_speakers,
+            partial_refresh_seconds=self._config.partial_refresh_seconds,
+            partial_recent_seconds=self._config.partial_recent_seconds,
+            partial_min_seconds=self._config.partial_min_seconds,
         )
 
 

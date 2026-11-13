@@ -122,6 +122,12 @@ controls bound the total and **all three have to stay**:
 
 `test_ai_pr_review.py` asserts 1 and 3 directly.
 
+A fourth saves the commonest repeat: a new head whose pull request differs from
+the last fully reviewed head only in documentation and changelog files (merging
+`develop` in does not count) gets a short carry-over comment with the earlier
+verdict and the new head's marker, and no model call. See "When no model runs"
+in `.claude/skills/pr-review-ci.md`.
+
 ## It is advisory, and must stay that way
 
 A model's opinion must not decide whether code merges. The `code_checks` job (on

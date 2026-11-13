@@ -44,6 +44,7 @@ export default /* GraphQL */ `
       SharedWith
       TotalConversationDurationMillis
       DetectedLanguages
+      TranscriptionPause
       Sentiment {
         OverallSentiment {
           REMOTE

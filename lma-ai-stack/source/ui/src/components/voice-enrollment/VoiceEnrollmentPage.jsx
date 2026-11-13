@@ -251,7 +251,9 @@ const VoiceEnrollmentPage = () => {
       // Dropped as soon as they are sent: the recordings exist only to compute
       // the voiceprint, and the terms say they are not kept.
       setClips([]);
-      setNotice('Your voice is enrolled. Meetings will label you by name from now on.');
+      setNotice(
+        'Your voice is enrolled. Meetings transcribed by the ASR MicroVM engine will label you by name from now on.',
+      );
       await load();
     } catch (problem) {
       logger.error('could not enroll', problem);
@@ -327,7 +329,8 @@ const VoiceEnrollmentPage = () => {
             <SpaceBetween direction="vertical" size="m">
               <TextContent>
                 <p>
-                  Meetings recorded by this deployment will label you as <strong>{state.DisplayName}</strong>.
+                  Meetings transcribed by this deployment&apos;s ASR MicroVM engine will label you as{' '}
+                  <strong>{state.DisplayName}</strong>.
                   {state.ConsentExpiresAt &&
                     ` Your consent lasts until ${state.ConsentExpiresAt.slice(0, 10)}, after
                   which you will be asked again.`}

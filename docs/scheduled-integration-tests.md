@@ -184,6 +184,11 @@ decreasing order of how much they protect you:
   lists read-only verbs, but Bash allowlist rules are prefix globs, so
   `Bash(aws logs *)` does not stop a chained
   `aws logs … ; aws cloudformation delete-stack …`. Treat it as noise reduction.
+  With nobody to approve a prompt, the forms it does refuse are refused
+  outright: command substitution (`$(…)`, backticks) and a leading
+  `VAR=value`. So the brief gives the agent the run's window in epoch
+  milliseconds rather than leaving it to compute one, and the job log lists
+  each command the agent was denied (`failure-agent: denied: …`).
 - **The agent never decides pass/fail.** Python owns the verdict; the agent is
   advisory, and returns nothing rather than guessing. A notification that
   called a run green because an agent said so would be worse than no agent.
@@ -295,7 +300,7 @@ ELBv2, ECS, Kinesis), `appsync:GraphQL` on the stack's API, read/write on the
 EventSourcing DynamoDB table (it creates rows and deletes them),
 `states:StartSyncExecution` on the Virtual Participant scheduler, use of the
 stack's KMS key through those services, and `secretsmanager:GetSecretValue` on
-the one secret above. The Cognito side needs no IAM at all: the test user
+the secret above (and on the live meeting secret, if that test is on). The Cognito side needs no IAM at all: the test user
 authenticates over the public SRP API with the password from the secret.
 
 The trust policy is a template with two values to fill in — your GitLab group
@@ -349,6 +354,8 @@ Under **Settings > CI/CD > Variables**, or on the schedule itself:
 | `LMA_FAILURE_AGENT` | no | `1` enables the failure-triage agent. Off by default. |
 | `LMA_FAILURE_AGENT_ROLE_ARN` | if the agent is on | The **read-only** role it runs as. **Mask it.** Without it the agent declines to run; see [Triage of a failed run](#triage-of-a-failed-run). |
 | `LMA_TEST_MEET_URL` | no | A Google Meet link for the [Google Meet end-to-end test](#optional-a-google-meet-meeting). **Mask it.** Absent, that test skips. |
+| `LMA_TEST_VP_LIVE_MEETING` | no | `1` runs the [live meeting test](#optional-a-virtual-participant-in-a-live-meeting), which reads its meeting from Secrets Manager. Absent, that test skips; set, a missing secret fails the run. |
+| `LMA_TEST_LIVE_MEETING_SECRET_ID` | no | The secret that test reads. Defaults to `lma/integ-tests/live-meeting`. A secret name, not its value, so it need not be masked. |
 
 ### Optional: a Google Meet meeting
 
@@ -375,6 +382,125 @@ whatever it does. The guest retries, and when Meet still refuses it, the test
 skips rather than failing the run (it carries the `external_meeting` marker,
 which `--no-skips` leaves alone). A Virtual Participant that cannot join is a
 failure.
+
+### Optional: a Virtual Participant in a live meeting
+
+`integ-tests/test_vp_live_meeting.py` sends a Virtual Participant into a real
+meeting that nobody else attends, with no scripted guest. It uses
+`client.vp.create`, which is the path `lma vp create` takes and the one the Web
+UI's Create form follows: the `createVirtualParticipant` mutation, then the
+Virtual Participant scheduler state machine. It runs two tests, each with its own
+Virtual Participant, and takes about five minutes in all.
+
+Both tests first wait for the Virtual Participant to be admitted (`JOINED`, up to
+seven minutes, with one relaunch when the platform refuses it at the join step)
+and then for it to start transcribing (`ACTIVE`, with a `CallId`). They then check
+that the meeting record `c#<CallId>` has been written to the EventSourcing table.
+
+| Test | Then | Passes when |
+|---|---|---|
+| `test_vp_leaves_a_meeting_it_is_alone_in` | Leaves the Virtual Participant alone in the meeting. | It leaves by itself within five minutes, as `COMPLETED` with the end trigger `attendees-left` (its attendee watchdog ends the meeting about a minute after it finds itself alone), and the meeting record reaches `ENDED`. |
+| `test_vp_ended_from_lma_leaves_the_meeting` | Ends it the way the End button does (`endVirtualParticipant`), as soon as it is transcribing. | The row carries the test's end reason and a clean terminal status, and the meeting record reaches `ENDED`. |
+
+For the second test, the expected status depends on the stack's `VPLaunchType`
+parameter, which the test reads. The end mutation always writes `ENDED` first.
+Under `FARGATE` or `EC2` it then stops the ECS task, whose shutdown handler writes
+`COMPLETED` over that `ENDED`, so the test requires `COMPLETED`. Under the default
+`MICROVM` it deletes the MicroVM instead. Nothing in the code shows whether the
+handler gets to run before the MicroVM is gone, and that has not been observed,
+so the test accepts `ENDED` or `COMPLETED` there, and does the same when it cannot
+read the parameter. It prints the status it saw. It fails on `FAILED`, on a status
+that is not terminal, and on a missing end reason.
+
+The test cannot check two things without a second participant in the meeting.
+Whatever the Virtual Participant posts in the meeting chat, including its
+introduction and the consent notice where consent is on, is deliberately kept
+out of its own transcript, and nobody else is there to read it. There is also no
+speech to transcribe. The [Google Meet end-to-end test](#optional-a-google-meet-meeting)
+above covers both, using the scripted guest. The two tests can share one meeting.
+
+The Meeting Consent mode must not be opt-in on the test stack. Under opt-in, the
+Virtual Participant waits for consent before it transcribes, nobody in an empty
+meeting gives it, and the test fails at the `ACTIVE` step with a message that says
+so.
+
+**The meeting.** Use a meeting that admits participants with nobody hosting it
+and nobody admitting them:
+
+- **Google Meet** (the default, and the platform this was designed for). Follow
+  the steps in the previous section: a calendar event that recurs daily with no
+  end date, so its link does not expire, and **Host controls > Meeting access >
+  Open**, so that anyone with the link joins without being admitted. If the
+  meeting belongs to a Google Workspace organisation, its admin settings must
+  also let people without a Google account join that organisation's meetings,
+  because the Virtual Participant joins as an anonymous guest. The value must be
+  the `meet.google.com/abc-defg-hij` link of the meeting itself; a meeting-nickname
+  (`/lookup/`) link only opens for signed-in members of the organisation and is
+  refused.
+- **Zoom** works only with the stack's Meeting SDK credentials set (see
+  [Zoom Meeting SDK Join](zoom-meeting-sdk.md)). Zoom blocks automated joins
+  through its web client, which is the default method. Without Zoom's approval of
+  the SDK app, it can join only meetings hosted on the app owner's own account. The
+  meeting needs the waiting room off and **Allow participants to join before host**
+  on, and a recurring meeting with no fixed time keeps the same ID. Put the
+  passcode in the secret. A free Zoom account limits a meeting's length, so use a
+  licensed host.
+- **Microsoft Teams** needs a tenant that allows anonymous users to join meetings,
+  and the meeting option **Who can bypass the lobby?** set to **Everyone** (see
+  [Teams ACS SDK](teams-acs-sdk.md)). Teams' web client can challenge an anonymous
+  join with a CAPTCHA, which an unattended run cannot answer. The ACS SDK join
+  method avoids that, but it needs an Azure Communication Services resource.
+
+The Zoom and Teams variants have not been run by this test. The secret format
+accepts them, but only the Google Meet setup has been designed against.
+
+**The secret.** Store the meeting in Secrets Manager, in the stack's account and
+Region, either as a bare Google Meet link or as a JSON object:
+
+```bash
+aws secretsmanager create-secret \
+    --region us-west-2 \
+    --name lma/integ-tests/live-meeting \
+    --description "Meeting the scheduled LMA integration tests send a Virtual Participant to" \
+    --secret-string '{"url":"https://meet.google.com/abc-defg-hij"}'
+
+# Another platform: platform, meeting_id (or url), and password if it has one.
+#   '{"platform":"ZOOM","meeting_id":"1234567890","password":"REPLACE_ME"}'
+```
+
+`platform` defaults to `GOOGLE_MEET` and is one of `ZOOM`, `TEAMS`, `CHIME`,
+`WEBEX` or `GOOGLE_MEET`. A secret that cannot be read, is not a JSON object,
+names an unknown platform, has no meeting, or holds a Google Meet value that is
+not a meeting code or link fails the run, with a message that names the secret
+and the problem but never quotes the value. A meeting link lets anyone who has it
+join the meeting, so it is kept out of CI variables and out of the test's output.
+Failure messages pass any status text the Virtual Participant wrote through a
+redaction step first.
+
+**Turning it on.** Set `LMA_TEST_VP_LIVE_MEETING` = `1` on the schedule (step 4),
+and `LMA_TEST_LIVE_MEETING_SECRET_ID` if the secret has another name. The job's
+role needs `secretsmanager:GetSecretValue` on the secret, which a role with
+`AdministratorAccess` in the test account already has.
+
+Without the flag the test skips, and `--no-skips` allows that skip because the
+module carries the `external_meeting` marker. With the flag set, nothing in the
+module skips. A missing secret, a Virtual Participant that does not join, one
+that does not start transcribing, and one that stays in an empty meeting are each
+reported as a failure.
+
+⚠️ **Mind the job's timeout.** The test adds about five minutes, and up to
+roughly twenty when every wait runs to its limit. The tests job is capped at 50
+minutes so that it stays inside the one-hour credential ceiling. If the nightly
+already runs close to that cap, or the Google Meet end-to-end test (about ten
+minutes) is enabled as well, check the job's recent durations before turning this
+on. Raising the cap is not an option, because of that ceiling.
+
+Run it by hand against the same stack:
+
+```bash
+AWS_PROFILE=<the test account> AWS_DEFAULT_REGION=us-west-2 LMA_TEST_VP_LIVE_MEETING=1 \
+    .venv/bin/python -m pytest integ-tests/test_vp_live_meeting.py --stack-name lma-integtest1 -s
+```
 
 ### 5. The schedule
 

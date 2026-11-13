@@ -164,10 +164,10 @@ COMPONENT_NOTES: Dict[str, str] = {
         "message text is in msg."
     ),
     ASR_MICROVM: (
-        "The on-demand ASR server, the default engine for every source where "
-        "its nested stack is deployed (EnableMicrovmAsr on, in a Region with "
-        "Lambda MicroVMs). Absent otherwise, and empty while every source has "
-        "been moved onto Amazon Transcribe."
+        "The on-demand ASR server, used for each source an admin has moved "
+        "onto it, where its nested stack is deployed (EnableMicrovmAsr on, in a "
+        "Region with Lambda MicroVMs). Absent otherwise, and empty while every "
+        "source is on Amazon Transcribe, the default."
     ),
     TRANSCRIPT_PIPELINE: (
         "Kinesis -> DynamoDB -> AppSync. 'reporting Kinesis batch item "

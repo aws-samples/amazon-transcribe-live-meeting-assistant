@@ -82,6 +82,7 @@ Stack resolution order: `--stack-name` / `STACK=` → `$LMA_STACK_NAME` → `LMA
 | `test_ws_stream_connects` *(opt-in)* | stream audio over the live `wss://.../api/v1/ws` and stay OPEN | **@fastify/websocket 11 upgrade ordering (the WS 500 regression)** |
 | `test_vp_registry_lifecycle` | VP create → get → list → end via AppSync (no meeting) | VP CRUD surface |
 | `test_vp_live_join` *(opt-in)* | VP actually joins a real meeting and leaves `INITIALIZING` | **@zoom/meetingsdk 4→6** |
+| `test_vp_live_meeting.py` *(opt-in, `LMA_TEST_VP_LIVE_MEETING=1`)* | a VP launched as `lma vp create` launches one joins a real meeting nobody else attends, starts transcribing, and gets a meeting record; left alone it leaves by itself as `COMPLETED` (`attendees-left`); ended from LMA it shows the end reason and a clean status; the meeting record ends both times | the VP's join, its empty-meeting exit, and the end path, against a real platform |
 | `test_desktop_video.py` *(opt-in, `LMA_TEST_DESKTOP_VIDEO=1`)* | a narrated synthetic slideshow streamed as the desktop capture app streams it → one key frame per slide, at the right times, with both images in S3; the meeting assistant reads the last slide | desktop video key frames and the assistant's shared-screen tool |
 | `test_meeting_consent.py` *(opt-in, `LMA_TEST_CONSENT=1`)* | with the Meeting Consent setting changed for the run and put back afterwards: an unconfirmed opt-in stream is refused and captures nothing; an attested one is transcribed, with its attestation, evidence image and evidence check stored; a notify stream stops, and is recorded as objected and ended, on an objection | the transcriber's consent gate on the Stream Audio path |
 | `test_mcp_api_key_logging.py` *(needs a Cognito test user)* | generates an MCP API key as the test user, calls the API-key MCP endpoint with it (`x-api-key` and `Authorization: Bearer`) and with an unknown key, revokes it; the authorizer log names the matched key by its stored prefix and holds neither key, AppSync logging excludes request content, and its log for the `generateMCPApiKey` call holds no key and no resolver context or template | what the MCP API key path writes to CloudWatch Logs |
@@ -225,6 +226,42 @@ test skips.
 AWS_PROFILE=default LMA_TEST_MEET_URL=https://meet.google.com/abc-defg-hij \
     .venv/bin/python -m pytest integ-tests/test_meet_end_to_end.py --stack-name lma-integtest1 -s
 ```
+
+## A Virtual Participant in a live meeting, with nobody else there
+
+`test_vp_live_meeting.py` needs no scripted guest. It launches a Virtual
+Participant with `client.vp.create`, the path `lma vp create` uses, into a real
+meeting that nobody else attends, and runs two tests with one VP each. In both,
+the VP must be admitted, start transcribing (`ACTIVE`), and get a meeting record
+`c#<CallId>`. In the first, the VP is left alone and must leave by itself, as
+`COMPLETED` with the `attendees-left` trigger. In the second, the test ends it with
+`endVirtualParticipant` and the row must carry the test's end reason. Under
+`VPLaunchType` `FARGATE` or `EC2` it must be `COMPLETED`; under `MICROVM` it may be
+`ENDED`. Both tests then require the meeting record to reach `ENDED`. It takes
+about five minutes.
+
+It cannot see what the VP posts in the chat, because the VP keeps its own messages
+out of its transcript, and there is no speech to transcribe. The guest test above
+covers both. Every VP it starts is ended in a `finally`.
+
+It is opt-in with `LMA_TEST_VP_LIVE_MEETING=1`, and reads the meeting from the
+Secrets Manager secret `lma/integ-tests/live-meeting`, or the one
+`LMA_TEST_LIVE_MEETING_SECRET_ID` names. The secret holds a bare Google Meet link,
+or JSON such as `{"url": "https://meet.google.com/abc-defg-hij"}` or
+`{"platform": "ZOOM", "meeting_id": "...", "password": "..."}`. Without the flag
+it skips, including under `make integ-tests-nightly`, because it carries the
+`external_meeting` marker. With the flag set, a missing or malformed secret, a VP
+that does not join, and a VP that does not leave are failures. The meeting's
+settings, for Google Meet and for the Zoom and Teams alternatives, are in
+[Scheduled Integration Tests](../docs/scheduled-integration-tests.md#optional-a-virtual-participant-in-a-live-meeting).
+
+```bash
+AWS_PROFILE=default LMA_TEST_VP_LIVE_MEETING=1 \
+    .venv/bin/python -m pytest integ-tests/test_vp_live_meeting.py --stack-name lma-integtest1 -s
+```
+
+Its gate, its reading of the secret and its pass/fail rules are unit-tested in
+`test_ci_plumbing.py` (`make test-integ-plumbing`), with no AWS.
 
 ## Meeting consent on the Stream Audio path
 

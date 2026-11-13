@@ -483,6 +483,27 @@ export function readMeetChatInPage(sels: { message: string; group: string; maxLe
 }
 
 /**
+ * A chat message's text without the labels of the actions Meet draws on it.
+ *
+ * Meet adds a pin button to each message while the pointer is over it, and
+ * the message's text, read from the page, then ends with that button's icon
+ * name and label: "… keep Pin message", as read live on 2026-11-12. Left in,
+ * the text no longer matches a message the VP posted itself, so its own
+ * consent instructions could be read back as a participant's reply.
+ *
+ * Only Meet's English labels are matched, in the case Meet writes them, so a
+ * participant's own words ending in "pin message" are kept. With Meet shown in
+ * another language the label stays in the text, and the VP still recognises
+ * its own messages through the posted-message ledger (isOwnMeetMessage).
+ */
+export function stripMeetMessageActions(text: string): string {
+    let out = (text || '').replace(/\s+/g, ' ').trim();
+    const trailing = /\s*(?:\b(?:keep|keep_off|push_pin)\s+)?\b(?:Pin|Unpin) message$/;
+    while (trailing.test(out)) out = out.replace(trailing, '').trim();
+    return out;
+}
+
+/**
  * The sender named by a chat group's header, or null.
  *
  * The header reads "<name> <time>" ("Alice Smith 10:32 AM"). The reader's own

@@ -64,6 +64,8 @@ import shutil
 import subprocess  # nosec B404 - fixed argv, no shell, no interpolated input
 import sys
 import time
+import xml.etree.ElementTree as ET  # nosec B405 - our own pytest report, not external input
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # ── Configuration ──────────────────────────────────────────────────────────
@@ -127,11 +129,14 @@ _ALLOWED_TOOLS = [
     "Bash(aws dynamodb query*)",
     "Bash(aws dynamodb scan*)",
     "Bash(aws dynamodb describe-table*)",
+    "Bash(aws dynamodb get-item*)",
+    "Bash(aws dynamodb list-tables*)",
     "Bash(aws appsync get-graphql-api*)",
     "Bash(aws appsync list-graphql-apis*)",
     "Bash(aws stepfunctions list-executions*)",
     "Bash(aws stepfunctions describe-execution*)",
     "Bash(aws stepfunctions get-execution-history*)",
+    "Bash(aws stepfunctions list-state-machines*)",
     "Bash(aws cognito-idp describe-user-pool*)",
     "Bash(aws cognito-idp list-users*)",
     "Bash(aws lambda get-function-configuration*)",
@@ -159,6 +164,15 @@ HOW TO WORK
   Lambda, and the Virtual Participant's. Find the log groups rather than
   guessing their names.
 - `git log` and `git diff` are available if you need to know what changed.
+- Write each Bash call as one literal command from the allowed list. There is
+  nobody to approve anything else, so command substitution ($(...) or
+  backticks) and a leading VAR=value are denied outright. Pass --region on
+  each aws call, and use the epoch-millisecond run window above for
+  --start-time / --end-time instead of computing one.
+- A Virtual Participant runs on a Lambda MicroVM or an ECS task; MicroVM logs
+  are under /aws/lambda-microvms/. Its DynamoDB record (the stack's
+  VirtualParticipant table) holds endTrigger and errorMessage, which say why it
+  ended.
 
 GROUNDING RULES - follow strictly
 - Base the root cause ONLY on evidence you actually read: a concrete log line,
@@ -264,6 +278,7 @@ def build_brief(report_path: Path, log_path: Path, stack: str, region: str) -> s
     lines = [
         f"Stack: {stack or '(not named)'}",
         f"Region: {region or '(not named)'}",
+        f"Run window: {_run_window(report_path)}",
         f"JUnit report on disk: {report_path}",
         f"Full run output on disk: {log_path}"
         if log_path.is_file()
@@ -273,6 +288,35 @@ def build_brief(report_path: Path, log_path: Path, stack: str, region: str) -> s
         *(failures or ["(none recorded — the run may have failed before pytest ran)"]),
     ]
     return "\n".join(lines)
+
+
+def _run_window(report_path: Path) -> str:
+    """When the run happened, in the epoch milliseconds CloudWatch takes.
+
+    The agent cannot compute a timestamp itself: command substitution is denied
+    in a session with nobody to approve it. So the window comes from the
+    report's own start time and duration, with a few minutes either side for
+    clean-up that outlives a test.
+    """
+    try:
+        suite = ET.parse(report_path).getroot()  # nosec B314 - our own pytest report
+        if suite.tag != "testsuite":
+            suite = suite.find("testsuite")
+        if suite is None:
+            return "unknown (no testsuite in the report)"
+        start = datetime.fromisoformat(suite.attrib["timestamp"])
+        if start.tzinfo is None:
+            # pytest writes an offset-less timestamp in the runner's local time.
+            start = start.astimezone(UTC)
+        end = start + timedelta(seconds=float(suite.attrib.get("time", "0")))
+    except Exception as exc:  # noqa: BLE001 - the brief must not be the failure
+        return f"unknown ({exc})"
+    margin = timedelta(minutes=5)
+    lo, hi = start - margin, end + margin
+    return (
+        f"{lo:%Y-%m-%dT%H:%M:%SZ} to {hi:%Y-%m-%dT%H:%M:%SZ} UTC "
+        f"(--start-time {int(lo.timestamp() * 1000)} --end-time {int(hi.timestamp() * 1000)})"
+    )
 
 
 # ── Entry point ────────────────────────────────────────────────────────────
@@ -381,6 +425,9 @@ def run_failure_agent(
         return None
 
     report, cost = _parse_agent_output(result.stdout)
+    for denied in _denied_commands(result.stdout):
+        # The agent's report only says it was blocked; this says by what.
+        _log(f"denied: {denied}")
     if not report:
         _log(f"produced no text after {elapsed:.0f}s — no triage this run")
         return None
@@ -402,6 +449,26 @@ def _parse_agent_output(stdout: str) -> tuple[str | None, float | None]:
     text = (payload.get("result") or payload.get("text") or "").strip()
     cost = payload.get("total_cost_usd")
     return (text or None), (float(cost) if isinstance(cost, (int, float)) else None)
+
+
+def _denied_commands(stdout: str) -> list[str]:
+    """The tool calls the harness refused, from `--output-format json`.
+
+    Never raises: this only feeds the job log.
+    """
+    try:
+        payload = json.loads(stdout)
+        if isinstance(payload, list):
+            payload = payload[-1] if payload else {}
+        denials = payload.get("permission_denials") or []
+        out = []
+        for denial in denials:
+            tool_input = denial.get("tool_input") or {}
+            what = tool_input.get("command") or json.dumps(tool_input)[:200]
+            out.append(f"{denial.get('tool_name', '?')}: {what[:300]}")
+        return out
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -20,13 +20,16 @@ from typing import Protocol, cast
 from asr_server.offline_recognizer import OfflineModelConfig, create_sherpa_offline_engine
 from asr_server.recognizer import (
     DEFAULT_MODEL_DIR,
+    DecodeClock,
     Event,
     Recognizer,
     RecognizerEngine,
     SessionConfig,
     SherpaModelConfig,
+    SherpaOnlineEngine,
     WordTiming,
     create_sherpa_engine,
+    log_decode_timing,
 )
 
 _LOG = logging.getLogger(__name__)
@@ -92,6 +95,7 @@ class TwoPassRecognizer(Recognizer):
         self._preview_finals: list[str] = []
         self._preview_partial = ""
         self._preview_text = ""
+        self._preview_timed = False
 
     def accept_pcm(self, pcm: bytes) -> list[Event]:
         if not pcm:
@@ -110,12 +114,24 @@ class TwoPassRecognizer(Recognizer):
         if self._preview is not None and open_start != self._preview_start:
             self._drop_preview()
         try:
+            clock = None if self._preview_timed else DecodeClock()
             if self._preview is None:
                 self._preview = self._preview_factory()
                 self._preview_start = open_start
-                preview_events = self._preview.accept_pcm(self._since(open_start))
+                fed = self._since(open_start)
             else:
-                preview_events = self._preview.accept_pcm(pcm)
+                fed = pcm
+            preview_events = self._preview.accept_pcm(fed)
+            if clock is not None:
+                # Only the session's first preview decode is logged: it is the one a
+                # cold model would slow, and the rest run every 20-100 ms.
+                self._preview_timed = True
+                log_decode_timing(
+                    "preview",
+                    clock,
+                    audio_seconds=len(fed) / _BYTES_PER_SAMPLE / self._sample_rate,
+                    first_in_session=True,
+                )
         except Exception:
             self._preview_failed = True
             self._drop_preview()
@@ -229,6 +245,12 @@ class TwoPassEngine(RecognizerEngine):
     @property
     def preview(self) -> RecognizerEngine:
         return self._preview
+
+    def warm_up(self, pcm: bytes) -> int:
+        decodes = self._authority.warm_up(pcm)
+        if isinstance(self._preview, SherpaOnlineEngine):
+            return decodes + self._preview.warm_up(pcm, model="preview")
+        return decodes + self._preview.warm_up(pcm)
 
     def new_session(self, config: SessionConfig | None = None) -> Recognizer:
         session = cast("UtteranceRecognizer", self._authority.new_session(config))

@@ -2,6 +2,7 @@
 import { Page, ConsoleMessage } from 'playwright-core';
 import jwt from 'jsonwebtoken';
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
+import { recordTranscriptionPause } from './transcription-pause.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
@@ -187,6 +188,18 @@ export default class ZoomSdk {
             }
             if (!state.videoOff) videoDone = true;
 
+            // Without the avatar the camera must stay off. The SDK used to land
+            // video-off because the browser had no camera; with the blank camera
+            // (blank-camera.ts) listed it could start video, so stop it here.
+            if (!wantVideo && state.videoOn && videoClicks < 3) {
+                videoClicks += 1;
+                if (await this.clickBySvg(page, ['svg.SvgVideoOn'], 'stop video|stop my video')) {
+                    log.info(`[zoom-sdk] stopped video (no avatar) attempt ${videoClicks}`);
+                }
+                await new Promise((r) => setTimeout(r, 2000));
+                continue;
+            }
+
             if (audioDone && micDone && videoDone) {
                 log.info(`[zoom-sdk] media setup complete (audio=${audioDone} mic=${micDone} video=${!wantVideo ? 'n/a' : 'on'})`);
                 return;
@@ -264,6 +277,11 @@ export default class ZoomSdk {
             {
                 meetingNumber,
                 signature,
+                // Passed as given, including a password that is the pwd value
+                // of a Zoom join link (meeting-password.ts zoomPasswordKind).
+                // The web-client join puts such a value on the join URL; for
+                // the Meeting SDK it has not been tested whether `passWord`
+                // takes it in place of the passcode.
                 passWord: details.invite.meetingPassword || '',
                 userName: details.scribeIdentity,
                 leaveUrl: `${this.server.origin}/left.html`,
@@ -461,10 +479,12 @@ export default class ZoomSdk {
                     await this.sendMessages(page, chatHelpMessages(voiceAssistant));
                 } else if (details.start && matchesChatCommand(body, details.pauseCommand)) {
                     details.start = false;
+                    void recordTranscriptionPause(true, sender);
                     log.info(details.pauseMessages[0]);
                     await this.sendMessages(page, details.pauseMessages);
                 } else if (!details.start && matchesChatCommand(body, details.startCommand)) {
                     details.start = true;
+                    void recordTranscriptionPause(false, null);
                     log.info(details.startMessages[0]);
                     await this.sendMessages(page, details.startMessages);
                     transcriptionService.startTranscription();

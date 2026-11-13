@@ -29,13 +29,14 @@ import {
 import { voiceAssistant } from './voice-assistant.js';
 import { meterTranscribeRequest, pcmSeconds } from './metering.js';
 import { RosterTimeline } from './roster-timeline.js';
+import { PartialNameHold } from './partial-name-hold.js';
 import { SpeakerFusion } from './speaker-fusion.js';
 import { recordedAudio } from './recorded-audio.js';
 import { noteParticipantSeen } from './consent-roster.js';
 import { noteSpokenUtterance } from './spoken-replies.js';
 import type { HeardResult, ListenerEngines, ListeningSession } from './consent-listener.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
-import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
+import { configuredWakePhrases, foldWakeSpellings, isStopTalkingRequest } from './stop-request.js';
 import { OpenPartialTracker, assistantRowSpan, onAssistantTurn } from './translator-transcript.js';
 import {
     PcmQueue,
@@ -51,6 +52,12 @@ import { LOCAL_CHANNEL, REMOTE_CHANNEL } from './channels.js';
 const log = createLogger('scribe');
 
 const ASR_STOP_RELEASE_TIMEOUT_MS = 10_000;
+// How long stopping transcription waits for a MicroVM that is still being
+// acquired or started, so the audio captured meanwhile is transcribed before
+// the meeting's END event. A cold launch takes about 20 seconds.
+const ASR_STOP_STARTING_WAIT_MS = 120_000;
+// How long the END event waits for transcript rows still being sent to Kinesis.
+const SEGMENT_SEND_DRAIN_TIMEOUT_MS = 10_000;
 
 /**
  * How late the platform reports a change of active speaker, on both engines.
@@ -178,7 +185,11 @@ export function transcribeLanguageParams(): {
         .map((s) => s.trim())
         .filter((s) => s.length > 0)
         .join(',');
-    const preferredLang = (details.transcribePreferredLanguage || '').trim();
+    // 'None' is the stack parameter's "not set" value (its default), and the
+    // Configuration page can store it too; Transcribe accepts only a language
+    // code here, so treat it as unset, as the WebSocket transcriber does.
+    const rawPreferredLang = (details.transcribePreferredLanguage || '').trim();
+    const preferredLang = /^none$/i.test(rawPreferredLang) ? '' : rawPreferredLang;
 
     if (langCode === 'identify-language' || langCode === 'identify-multiple-languages') {
         if (!langOptions) {
@@ -259,7 +270,11 @@ export class TranscriptionService {
     private engineRuns = 0;
     private engineTimeBase = 0;
     private sessionsFinishing: Promise<void> = Promise.resolve();
+    /** Transcript rows on their way to Kinesis, so the END event can be sent after them. */
+    private readonly segmentSends = new Set<Promise<void>>();
     private microvmRun: Promise<boolean> | null = null;
+    // The engine run is acquiring its MicroVM or waiting for its sessions.
+    private microvmStarting = false;
     // The MicroVM the running engine transcription uses, while it runs.
     private microvmLease: AsrLease | null = null;
     // A MicroVM acquired to listen for spoken consent replies before
@@ -281,6 +296,8 @@ export class TranscriptionService {
     // ids are renumbered by every session, so a new one starts a new vote.
     private speakerFusion = new SpeakerFusion();
     private speakerFusionSession: string | undefined;
+    // The name each open live row shows, held against flicker (partial-name-hold.ts).
+    private partialNames = new PartialNameHold();
     private isTranscribing = false;
     private mockTranscriptionInterval: NodeJS.Timeout | null = null;
     
@@ -851,37 +868,16 @@ export class TranscriptionService {
         diarize: boolean,
     ): Promise<boolean> {
         const callId = kinesisStreamManager.currentCallId;
-        // Under the lease lock, so a MicroVM the consent listener is acquiring
-        // at this moment is waited for and taken over, never acquired twice.
-        const { lease, handedOver } = await this.withLeaseLock(async () => {
-            // The MicroVM that listened for spoken consent replies, when there
-            // is one: it is this meeting's, and its listening session is closing.
-            const pending = this.pendingLease;
-            this.pendingLease = null;
-            const acquired = pending ?? (await acquireLease(callId)) ?? null;
-            if (acquired && this.isTranscribing) {
-                this.microvmLease = acquired;
-            }
-            return { lease: acquired, handedOver: pending !== null };
-        });
-        if (!lease) {
-            return false;
-        }
-        if (handedOver) {
-            log.info('[ASR] transcribing on the MicroVM that listened for spoken consent replies');
-        }
-        if (!this.isTranscribing) {
-            this.microvmLease = null;
-            if (lease.microvmId) {
-                await releaseLease(lease.microvmId).catch(() => undefined);
-            }
-            return true;
-        }
         const run = this.engineRuns;
         this.engineRuns += 1;
+        // The sessions exist, and the meeting is captured, before the MicroVM
+        // does: a session holds what it is pushed until it connects (up to
+        // ASR_MAX_PENDING_BYTES) and sends it as its first audio, so the
+        // seconds a MicroVM takes to launch are transcribed rather than lost.
+        // The endpoint is filled in once the MicroVM is acquired.
         const common = {
             callId,
-            lease,
+            lease: { endpointUrl: '' } as AsrLease,
             run,
             timeBaseSeconds: Math.max(this.engineTimeBase, this.transcribeTimeOffsetSeconds),
             // A paused meeting is not over: the sessions stay up and are fed silence.
@@ -901,67 +897,129 @@ export class TranscriptionService {
                   onSegment: (segment) => this.handleAgentAsrSegment(segment),
               })
             : null;
+        const sessions = [meetingSession, agentSession].filter(
+            (session): session is MicrovmAsrSession => session !== null,
+        );
+        // Set now, so rows and roster changes are timed on these sessions' clock
+        // from the first captured byte. Stopping transcription leaves them to
+        // this run while it is still starting (microvmStarting).
         this.meetingSession = meetingSession;
         this.agentSession = agentSession;
-        const agentReady = agentSession ? agentSession.start() : Promise.resolve(true);
-        const meetingReady = await meetingSession.start();
-        if (!meetingReady && !this.isTranscribing) {
-            await this.finishMicrovmSessions();
-            await this.releaseMicrovm(meetingSession);
-            return true;
-        }
-        if (!meetingReady) {
-            log.error('[ASR] MicroVM ASR session never became ready');
-            // Finish first, or the sessions keep reconnecting against a released MicroVM.
-            await this.finishMicrovmSessions();
-            await this.releaseMicrovm(meetingSession);
-            return false;
-        }
-        void agentReady.then((ready) => {
-            if (!ready && this.agentSession === agentSession) {
-                log.warn("[ASR LOCAL] session not ready at start; the assistant's replies appear once it connects");
-            }
-        });
-        const agent = this.agentSession;
-        log.info(
-            `[ASR] MicroVM ASR active for ${callId} (speaker labels: ${meetingSession.speakerLabelsActive}, assistant channel: ${agent ? LOCAL_CHANNEL : 'none'})`,
-        );
-        await this.markActive();
 
-        // Both feeds start together so the two engine clocks share one meeting timeline.
+        // Both feeds start together so the two engine clocks share one meeting
+        // timeline, and with the recording (teed by audioStream below), so the
+        // recording starts where the transcript does.
         this.startMeetingAudioFanout((chunk) => meetingSession.pushPcm(chunk));
-        if (agent) {
-            this.startAgentAudioCapture((chunk) => agent.pushPcm(chunk));
+        if (agentSession) {
+            this.startAgentAudioCapture((chunk) => agentSession.pushPcm(chunk));
         }
         let fellBack = false;
+        let capturing = true;
         let agentGaveUpLogged = false;
-        try {
-            // The combined stream is consumed only for the recording tee and liveness;
-            // the engine hears the two separate sources above.
-            for await (const frame of this.audioStream(recordingStream)) {
-                void frame;
-                if (!this.isTranscribing) {
-                    break;
+        const capture = (async () => {
+            try {
+                // The combined stream is consumed only for the recording tee and
+                // liveness; the engine hears the two separate sources above.
+                for await (const frame of this.audioStream(recordingStream)) {
+                    void frame;
+                    if (!this.isTranscribing || !capturing) {
+                        break;
+                    }
+                    if (meetingSession.hasGivenUp) {
+                        log.error('[ASR] MicroVM ASR session gave up; Amazon Transcribe takes over for the rest of this meeting');
+                        fellBack = true;
+                        break;
+                    }
+                    if (agentSession?.hasGivenUp && !agentGaveUpLogged) {
+                        log.error("[ASR LOCAL] session gave up; the assistant's audio is no longer transcribed (Nova Sonic replies are written from its own text)");
+                        agentGaveUpLogged = true;
+                    }
                 }
-                if (meetingSession.hasGivenUp) {
-                    log.error('[ASR] MicroVM ASR session gave up; Amazon Transcribe takes over for the rest of this meeting');
-                    fellBack = true;
-                    break;
-                }
-                if (agent?.hasGivenUp && !agentGaveUpLogged) {
-                    log.error("[ASR LOCAL] session gave up; the assistant's audio is no longer transcribed (Nova Sonic replies are written from its own text)");
-                    agentGaveUpLogged = true;
-                }
+            } catch (error: any) {
+                log.error(`[ASR] audio stream error: ${error?.message || error}`);
             }
-        } catch (error: any) {
-            log.error(`[ASR] audio stream error: ${error?.message || error}`);
-        } finally {
+        })();
+        const stopCapture = async (): Promise<void> => {
+            capturing = false;
             this.teardownSessionProcesses();
+            await capture;
             this.engineTimeBase = Math.max(
                 this.engineTimeBase,
                 meetingSession.audioSeconds,
-                agent?.audioSeconds ?? 0,
+                agentSession?.audioSeconds ?? 0,
             );
+        };
+
+        this.microvmStarting = true;
+        try {
+            // Under the lease lock, so a MicroVM the consent listener is acquiring
+            // at this moment is waited for and taken over, never acquired twice.
+            const { lease, handedOver } = await this.withLeaseLock(async () => {
+                // The MicroVM that listened for spoken consent replies, when there
+                // is one: it is this meeting's, and its listening session is closing.
+                const pending = this.pendingLease;
+                this.pendingLease = null;
+                const acquired = pending ?? (await acquireLease(callId)) ?? null;
+                if (acquired && this.isTranscribing) {
+                    this.microvmLease = acquired;
+                }
+                return { lease: acquired, handedOver: pending !== null };
+            });
+            if (!lease) {
+                // Amazon Transcribe takes over. The audio captured meanwhile is in
+                // the recording, so its clock starts after it.
+                await stopCapture();
+                await this.finishMicrovmSessions();
+                this.transcribeTimeOffsetSeconds = Math.max(this.transcribeTimeOffsetSeconds, this.engineTimeBase);
+                return false;
+            }
+            if (handedOver) {
+                log.info('[ASR] transcribing on the MicroVM that listened for spoken consent replies');
+            }
+            for (const session of sessions) {
+                session.updateLease(lease);
+            }
+            const agentReady = agentSession ? agentSession.start() : Promise.resolve(true);
+            const meetingReady = await meetingSession.start();
+            if (!this.isTranscribing) {
+                // The meeting ended while the MicroVM was acquired or started. Its
+                // capture has stopped; what the sessions held went to the engine as
+                // they connected, and finishing them flushes the rows for it.
+                await agentReady;
+                log.info(
+                    `[ASR] the meeting ended while the MicroVM was starting; finishing the ${meetingSession.audioSeconds.toFixed(1)}s of audio captured meanwhile`,
+                );
+                await capture;
+                await this.finishMicrovmSessions();
+                await this.releaseMicrovm(meetingSession);
+                return true;
+            }
+            if (!meetingReady) {
+                log.error('[ASR] MicroVM ASR session never became ready');
+                await stopCapture();
+                // Finish first, or the sessions keep reconnecting against a released MicroVM.
+                await this.finishMicrovmSessions();
+                await this.releaseMicrovm(meetingSession);
+                this.transcribeTimeOffsetSeconds = Math.max(this.transcribeTimeOffsetSeconds, this.engineTimeBase);
+                return false;
+            }
+            void agentReady.then((ready) => {
+                if (!ready && this.agentSession === agentSession) {
+                    log.warn("[ASR LOCAL] session not ready at start; the assistant's replies appear once it connects");
+                }
+            });
+        } finally {
+            this.microvmStarting = false;
+        }
+        log.info(
+            `[ASR] MicroVM ASR active for ${callId} (speaker labels: ${meetingSession.speakerLabelsActive}, assistant channel: ${agentSession ? LOCAL_CHANNEL : 'none'})`,
+        );
+        await this.markActive();
+
+        try {
+            await capture;
+        } finally {
+            await stopCapture();
             await this.finishMicrovmSessions();
             await this.releaseMicrovm(meetingSession);
         }
@@ -1012,15 +1070,18 @@ export class TranscriptionService {
     /**
      * A meeting row: the attendee the platform showed for most of the row, or
      * with per-voice labels on, the attendee its voice id has been proven to
-     * (speaker-fusion.ts), plus the voice id.
+     * (speaker-fusion.ts), plus the voice id. A partial is named the same way
+     * from the engine's provisional label, held against flicker within its row
+     * (partial-name-hold.ts).
      */
     private handleMeetingAsrSegment(segment: AsrSegment): void {
         const lag = rosterLagSeconds();
         if (segment.session !== this.speakerFusionSession) {
             this.speakerFusion = new SpeakerFusion();
             this.speakerFusionSession = segment.session;
+            this.partialNames = new PartialNameHold();
         }
-        const attribution = this.speakerFusion.attribute({
+        const fused = this.speakerFusion.attribute({
             label: segment.speaker,
             pageName: this.rosterTimeline.speakerFor(segment.startSec, segment.endSec, lag),
             coverage: segment.isPartial
@@ -1029,6 +1090,19 @@ export class TranscriptionService {
             isPartial: segment.isPartial,
             rowId: segment.segmentId,
         });
+        let attribution = fused;
+        if (segment.isPartial) {
+            attribution = this.partialNames.hold(segment.segmentId, fused);
+        } else {
+            // Logged so how often a live row's name is corrected at its final
+            // can be counted from the VP log alone.
+            const live = this.partialNames.close(segment.segmentId);
+            if (live !== undefined && live.name !== fused.name) {
+                log.info(
+                    `[ASR] row ${segment.segmentId} renamed at its final: ${live.name} (${live.source}) -> ${fused.name} (${fused.source})`,
+                );
+            }
+        }
         const speaker = attribution.speaker;
         if (!segment.isPartial) {
             // A spoken consent reply or objection, attributed to the attendee
@@ -1038,7 +1112,7 @@ export class TranscriptionService {
             // partials opened.
             noteSpokenUtterance({ speaker: attribution.name, text: segment.text });
         }
-        sendAsrTranscriptSegment({
+        this.trackSegmentSend(sendAsrTranscriptSegment({
             channel: REMOTE_CHANNEL,
             segmentId: segment.segmentId,
             startTime: segment.startSec,
@@ -1049,7 +1123,7 @@ export class TranscriptionService {
             languageCode: segment.languageCode,
         }).catch((error) => {
             log.error('Failed to send transcript to Kinesis:', error);
-        });
+        }));
 
         // Wake-phrase detection works on the text alone; the engine sends no word
         // timings on this path, so the caption log (which needs them) is skipped.
@@ -1061,7 +1135,7 @@ export class TranscriptionService {
 
     /** The assistant's own voice from its own session: labelled as the VP, never diarized, never a wake phrase. */
     private handleAgentAsrSegment(segment: AsrSegment): void {
-        sendAsrTranscriptSegment({
+        this.trackSegmentSend(sendAsrTranscriptSegment({
             channel: LOCAL_CHANNEL,
             segmentId: segment.segmentId,
             startTime: segment.startSec,
@@ -1072,7 +1146,7 @@ export class TranscriptionService {
             languageCode: segment.languageCode,
         }).catch((error) => {
             log.error('Failed to send transcript to Kinesis:', error);
-        });
+        }));
     }
 
     private spawnPcmCapture(source: string, label: string): ChildProcess {
@@ -1358,12 +1432,20 @@ export class TranscriptionService {
 
         // Flush the engine's tail utterance now; the run loop's own teardown releases
         // the MicroVM once the capture process above has ended its audio stream.
-        await this.finishMicrovmSessions();
+        // A run still acquiring or starting its MicroVM is left to finish its
+        // sessions itself, and waited for longer: a session finished before it
+        // connects drops the audio it holds, and the run sends that audio and
+        // finishes it, so those rows are written before the END event below.
+        const starting = this.microvmStarting;
+        if (!starting) {
+            await this.finishMicrovmSessions();
+        }
         const run = this.microvmRun;
         if (run) {
+            const waitMs = starting ? ASR_STOP_STARTING_WAIT_MS : ASR_STOP_RELEASE_TIMEOUT_MS;
             await Promise.race([
                 run.catch(() => false),
-                new Promise<void>((resolve) => setTimeout(resolve, ASR_STOP_RELEASE_TIMEOUT_MS).unref()),
+                new Promise<void>((resolve) => setTimeout(resolve, waitMs).unref()),
             ]);
         }
 
@@ -1377,6 +1459,10 @@ export class TranscriptionService {
             }
         }
 
+        // After the rows already on their way, the last utterance's final among
+        // them: the summary is made from the transcript when END arrives.
+        await this.awaitSegmentSends();
+
         // Send end meeting event to Kinesis
         try {
             await sendEndMeeting();
@@ -1387,6 +1473,33 @@ export class TranscriptionService {
                 log.error('Failed to send end meeting event:', error);
             }
         }
+    }
+
+    /**
+     * Keep a transcript row's send until it completes. Records for one meeting
+     * share a partition key, but two puts in flight at once can still land in
+     * either order, so a final sent just before the END event could otherwise
+     * land after it, where the end-of-meeting summary does not see it.
+     */
+    private trackSegmentSend(send: Promise<void>): void {
+        this.segmentSends.add(send);
+        void send.finally(() => this.segmentSends.delete(send));
+    }
+
+    /** Wait, bounded, for every transcript row already on its way to Kinesis. */
+    private async awaitSegmentSends(timeoutMs = SEGMENT_SEND_DRAIN_TIMEOUT_MS): Promise<void> {
+        if (this.segmentSends.size === 0) {
+            return;
+        }
+        let timer: NodeJS.Timeout | undefined;
+        await Promise.race([
+            Promise.all([...this.segmentSends]),
+            new Promise<void>((resolve) => {
+                timer = setTimeout(resolve, timeoutMs);
+                timer.unref();
+            }),
+        ]);
+        clearTimeout(timer);
     }
 
     /** The latest participant other than the VP the platform showed speaking, or "none". */
@@ -1662,12 +1775,14 @@ export class TranscriptionService {
     // Wake phrase detection methods
     private detectWakePhrase(text: string): boolean {
         // Remove all punctuation and normalize whitespace
-        const normalized = text.toLowerCase()
+        // "Okay Alex" is how a recogniser writes the spoken "OK Alex"
+        // (stop-request.ts foldWakeSpellings), so both sides are folded.
+        const normalized = foldWakeSpellings(text.toLowerCase()
             .replace(/[,.\?!;:]/g, ' ')  // Replace punctuation with spaces
             .replace(/\s+/g, ' ')         // Normalize multiple spaces
-            .trim();
-        
-        return this.wakePhrases.some(phrase => normalized.includes(phrase));
+            .trim());
+
+        return this.wakePhrases.some(phrase => normalized.includes(foldWakeSpellings(phrase)));
     }
 
     private async handleWakePhraseDetected(detectionTime: number): Promise<void> {
@@ -1686,6 +1801,11 @@ export class TranscriptionService {
             .join(' ');
         
         log.info(`🎤 Wake phrase detected — activating immediately with ${contextTranscript.length} characters of context`);
+        // How long the session had been warming before the question was
+        // complete: the time from the partial that first carried the wake
+        // phrase (and started preConnect) to this finalized segment. 0 means
+        // the wake phrase was first seen in the final, so nothing was warmed.
+        log.info(`[wake] action=activate preconnect_lead_ms=${Math.max(0, Date.now() - detectionTime)}`);
         log.debug('🎤 Wake phrase context:', contextTranscript);
         
         // Activate voice assistant with context (connection already pre-warmed).
@@ -1893,7 +2013,7 @@ export class TranscriptionService {
         const speaker = this.vpName();
         log.info(`🌐 Assistant turn written to the transcript (${start.toFixed(2)}-${end.toFixed(2)}s, ${text.length} characters)`);
         log.debug(`🌐 Assistant turn text: "${text}"`);
-        sendAsrTranscriptSegment({
+        this.trackSegmentSend(sendAsrTranscriptSegment({
             channel: LOCAL_CHANNEL,
             segmentId: `assistant-${this.assistantRows}-${start.toFixed(3)}`,
             startTime: start,
@@ -1903,7 +2023,7 @@ export class TranscriptionService {
             speaker,
         }).catch((error) => {
             log.error('Failed to send assistant turn to Kinesis:', error);
-        });
+        }));
     }
 
     /** The VP's own names in the meeting roster. */
@@ -1934,9 +2054,9 @@ export class TranscriptionService {
         if (!segment) {
             return 0;
         }
-        sendAsrTranscriptSegment(segment).catch((error) => {
+        this.trackSegmentSend(sendAsrTranscriptSegment(segment).catch((error) => {
             log.error('Failed to send assistant transcript to Kinesis:', error);
-        });
+        }));
         return segment.endTime;
     }
 

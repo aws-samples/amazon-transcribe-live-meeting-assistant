@@ -12,8 +12,10 @@ title: "Virtual Participant"
   - [Cost of voice separation](#cost-of-voice-separation)
 - [How Speaker Names Are Assigned](#how-speaker-names-are-assigned)
   - [Naming rows from the voice as well](#naming-rows-from-the-voice-as-well)
+  - [Live rows](#live-rows)
 - [Supported Platforms](#supported-platforms)
   - [Google Meet](#google-meet)
+  - [Zoom passcodes and join links](#zoom-passcodes-and-join-links)
 - [Joining a Meeting](#joining-a-meeting)
   - [Reviewing the launch settings](#reviewing-the-launch-settings)
 - [Status Lifecycle](#status-lifecycle)
@@ -308,6 +310,14 @@ platform's name plus its voice id, so one voice could appear under two names. Th
 Speakers panel then counted those rows as a second voice of the wrong person,
 which could push a one-person name towards **Several people**.
 
+So a stored speaker is either `Name (spk_N)` or the bare `Name`, and both are
+intended. Every reader shows the two the same way while the name is shown as one
+person: the transcript, its chips and the page header, the Speakers panel, the
+downloads, the summary and agenda prompts, and the Meeting Assistant all read
+`Bob Strahan` for both. The meeting page counts a name's bare-name rows as that
+name's lines, not as a voice of their own: they are not listed as a second voice
+in the Speakers panel, and the speaker dialog does not offer to combine them.
+
 **What it does on a real meeting.** The thresholds were chosen by replaying a
 58-minute, two-person Zoom meeting (web client, on-demand engine, 415 rows)
 through this code. The platform's speaker changes and the rows' times were taken
@@ -352,6 +362,75 @@ platform's name. To see how a meeting was named, compare its rows' voice ids wit
 their names: a voice id that appears under one name throughout, and names that
 change at the voice changes, mean the voices were proven.
 
+### Live rows
+
+A row is shown live, as partial results, while the person is still speaking, and its
+final replaces it when the engine closes the row. On the
+[on-demand engine](microvm-asr.md) with voice separation on, the Virtual Participant asks
+the engine for a provisional voice label on each partial too. The label is read from the
+most recent second of the row's own audio (see
+[Partials name nobody](microvm-asr.md#partials-name-nobody)). Each partial is then named
+the same way as a final:
+
+- **When the partial's voice is proven,** the live row takes that voice's attendee at
+  once, whatever the platform shows at that moment. A reply that begins while Zoom still
+  shows the previous speaker is named after the person replying from its first partials,
+  rather than only when its final arrives.
+- **Before the voice is proven,** or when a partial has no label yet (the first fraction
+  of a second of a row, an engine that does not send one, or Amazon Transcribe, which
+  never labels partials), the live row is named by the platform as before.
+- **No flicker.** A live row keeps the name it shows until a different name is
+  confirmed. A proven voice's name replaces a platform name at once. Any other change
+  needs two partials in a row (about a second) to agree on it, so a single reading, such
+  as a backchannel "mm-hmm" or a diarizer blip, never renames the row, and a row cannot
+  go back and forth between two names on single readings.
+- **The final decides.** The final is named exactly as described in
+  [Naming rows from the voice as well](#naming-rows-from-the-voice-as-well), and it is
+  the row that is stored. Partials add nothing to a voice's count. When the final's name
+  differs from the name its live row last showed, the Virtual Participant logs
+  `[ASR] row … renamed at its final: <live name> (<source>) -> <final name> (<source>)`,
+  so how often it happens can be counted from the log.
+
+**What it does on a real meeting.** This was replayed on a 33-minute, three-person Zoom
+meeting (web client, on-demand engine, voice separation on), whose log records the time
+and text of every partial and every change of active speaker. The log does not record
+the name each partial was sent with. On the shipped code that name is the platform's
+majority over the row so far, which the replay recomputes. The replay compares each
+partial's name with the name of the final row that covers the words being spoken at that
+moment, which is the name the reader sees once the row is corrected. The voice labels
+the engine would have sent on the partials are not in the log either. They are estimated
+from the finals' labels, which come from the same diarizer frames, read 1 s behind the
+partial, as the engine's refresh allows, and named after each voice's proven attendee.
+Every voice in this meeting was proven early, so the estimate leaves out the platform
+fallback that would apply before a voice is proven.
+
+| Live-row naming | Time a live row showed a name other than the corrected one | Name changes on live rows | Changes back to a name already left |
+|---|---|---|---|
+| Platform indicator (before this change) | 146.8 s of 1,412.9 s | 31 | 3 |
+| Voice when proven, no hold | 58.6 s | 50 | 18 |
+| Voice when proven, with the hold described above | 66.3 s | 28 | 4 |
+
+Of the 157 live rows, 116 were spoken by one voice. On the platform indicator, 5 of those
+were still showing the wrong name when their final arrived, against none with the voice.
+The other 41 were closed by the engine as one utterance spoken by two or more voices, and
+split at the final. Those rows are corrected at their final whatever the live name was,
+because the final gives the row's own place in the transcript to the first voice and puts
+each later voice's words on a new row. A live row follows the voice currently speaking,
+so on those rows the change at the final goes the other way. That case is what was
+reported in this meeting: an attendee's reply was shown under the previous speaker's name
+until the end of the utterance. With the voice, his name would have appeared 2.1 s into
+his 4.7 s reply; the platform's majority reached him only after he had finished. The row
+would still have been split when it closed. Closing a row as
+soon as the voice changes, rather than at the end of the utterance, is what would remove
+that correction, and the on-demand engine does not do this with the Sortformer diarizer.
+
+With the engine's labels 0.4 s behind instead of 1 s, the wrong-name time is 58.3 s; at
+2 s behind it is 111.9 s, with 46 name changes, which is why the engine refreshes its
+labels for partials about once a second. All of this comes from one meeting on one
+platform, with an estimate of the partials' labels rather than the labels themselves. It
+has not run in a live meeting, and what it costs the engine has not been measured (see
+[Partials name nobody](microvm-asr.md#partials-name-nobody)).
+
 ## Supported Platforms
 
 - Zoom
@@ -362,13 +441,13 @@ change at the voice changes, mean the voices were proven.
 
 ### Google Meet
 
-The VP joins a Google Meet meeting as a guest from its browser, without a Google account, under its display name (`LMA (<your user name>)` by default). On the create form choose **Google Meet** and enter the meeting code (`abc-defg-hij`) or paste the meeting link (`https://meet.google.com/abc-defg-hij`); Meet meetings have no password, so the form does not ask for one, and a link is stored as its code. A `meet.google.com/lookup/<name>` link is not accepted: it uses a meeting nickname, which Google lets only signed-in members of the organiser's Google Workspace use, and the VP joins as a guest, so enter the meeting's code instead. Pasting a Meet calendar invitation into **Paste Invitation** fills the form in the same way. The `lma vp create --platform GOOGLE_MEET` command, the SDK, and the meeting assistant's `start_meeting_now` and `schedule_meeting` tools accept Meet too.
+The VP joins a Google Meet meeting as a guest from its browser, without a Google account, under its display name (`LMA (<your user name>)` by default, set on the Configuration page; see [More than one LMA in a meeting](#more-than-one-lma-in-a-meeting)). On the create form choose **Google Meet** and enter the meeting code (`abc-defg-hij`) or paste the meeting link (`https://meet.google.com/abc-defg-hij`); Meet meetings have no password, so the form does not ask for one, and a link is stored as its code. A `meet.google.com/lookup/<name>` link is not accepted: it uses a meeting nickname, which Google lets only signed-in members of the organiser's Google Workspace use, and the VP joins as a guest, so enter the meeting's code instead. Pasting a Meet calendar invitation into **Paste Invitation** fills the form in the same way. The `lma vp create --platform GOOGLE_MEET` command, the SDK, and the meeting assistant's `start_meeting_now` and `schedule_meeting` tools accept Meet too.
 
 On the pre-join screen the VP types its name under *What's your name?*, turns the microphone off (unless a voice assistant needs it) and the camera off (unless the Simli avatar is its camera), and presses **Ask to join**, or **Join now** when Meet lets it straight in. It then waits, for up to five minutes, until it is in the meeting, posts its introduction in the meeting chat (*In-call messages*) and starts transcribing.
 
 **What the meeting's organiser has to allow.**
 
-- **Guests from a browser.** Meet has to accept a guest who is not signed in to a Google account. Google offers this for meetings organised from a Google Workspace account whose administrator allows participants from outside the organisation and without a Google account; a meeting organised from a personal Google account may not accept such guests at all. When Meet does not accept the VP, it shows *"You can't join this video call"* before any name field. The VP then reloads the page, up to four times, after pauses of 4, 8, 15 and 20 seconds (about 50 seconds in all, plus the page loads), and clears the browser's Google cookies before the second and later reloads. If Meet still refuses it, the VP stops with **FAILED** and the detail *"Google Meet did not let the participant join"* (`endTrigger` `pre-join:meet-refused`).
+- **Guests from a browser.** Meet has to accept a guest who is not signed in to a Google account. Google offers this for meetings organised from a Google Workspace account whose administrator allows participants from outside the organisation and without a Google account; a meeting organised from a personal Google account may not accept such guests at all. When Meet does not accept the VP, it shows *"You can't join this video call"*, either before any name field or a moment after the VP clicks **Join now** / **Ask to join**. The VP then reloads the page (and, after a refusal at the join click, enters its name and clicks join again), up to four times in all for the join, after pauses of 4, 8, 15 and 20 seconds (about 50 seconds in all, plus the page loads), and clears the browser's Google cookies before the second and later reloads. If Meet still refuses it, the VP stops with **FAILED** and the detail *"Google Meet did not let the participant join"* (`endTrigger` `pre-join:meet-refused`).
 - **Being let in.** Somebody in the meeting has to admit the VP when it asks to join, unless the meeting lets guests in without asking. With a Google Workspace organiser, setting the meeting's **Meeting access** to **Open** is meant to let anyone with the link join without being admitted. In live attempts a guest with no Google account joined an Open meeting without being admitted. A request that is declined ends the join with `pre-join:meet-denied`, and one that nobody answers within five minutes with `pre-join:not-admitted`.
 - **Chat.** The chat commands (`LMA leave`, `LMA pause` and the rest) and the introduction need the meeting chat. If the organiser has turned chat off for participants, the VP posts nothing and cannot be dismissed from the chat; remove it from the meeting from Meet's People panel instead, or end it from LMA.
 
@@ -381,6 +460,19 @@ What has been observed in live attempts, from a browser on an Amazon EC2 host an
 - **Meeting consent:** Notify, both Opt-in rules and objections are offered. A consent typed in the chat is recorded under the sender the VP reads from the chat, as on Zoom and Chime, and one said aloud under the participant the VP shows speaking. Neither reading has been confirmed in a live Meet meeting yet (see the speaker names above); see [Meeting Consent](meeting-consent.md#what-each-platform-supports).
 - **Screen-share key frames:** key frames are judged only while a participant tile shows a presentation ("(Presentation)" or "is presenting"), so the camera grid is not kept when nobody presents. See [Screen-share signal per platform](meeting-video.md#screen-share-signal-per-platform).
 - The Simli avatar has not been tested on Meet. Joining with a Google account signed in to the VP's browser profile is not supported; the VP joins as a guest.
+
+### Zoom passcodes and join links
+
+A Zoom meeting can be given to the VP in two ways: as the numeric meeting ID with the meeting passcode, or as the meeting's full join link.
+
+- **Meeting ID and passcode.** The passcode is the one the invitation text shows, for example `Passcode: 1234 5678`. Zoom limits a passcode to 10 characters ("By default, a passcode can only have a maximum length of 10 characters", in the `password` field of Zoom's [Create a meeting](https://developers.zoom.us/docs/api/meetings/) API reference). The VP removes the grouping spaces from a numeric passcode and types it into the passcode box on Zoom's join screen.
+- **Join link.** For Zoom, the meeting ID may be the full join link, such as `https://us05web.zoom.us/j/81234567890?pwd=...`, in the create form, `lma vp create`, the SDK, or the meeting assistant's `start_meeting_now` and `schedule_meeting` tools. The VP reads the meeting number and the link's `pwd` value from links of the forms `/j/<number>`, `/wc/<number>/join` and `/wc/join/<number>` on `zoom.us` or any of its subdomains. A personal link (`zoom.us/my/<name>`) does not carry the meeting number, so it cannot be used; give the meeting ID and passcode instead. If a passcode is also given, the VP uses the passcode.
+
+The `pwd` value of a join link is not the passcode: it is an encoded form of it, usually 32 characters ending in `.1`, and the passcode box refuses it. A meeting password that is longer than 10 characters, or ends in a period followed by digits, is therefore treated as a link's `pwd` value. The VP's web-client join opens the meeting at `/wc/<number>/join?pwd=<value>`, as the link does, and does not type the value. If Zoom still asks for a passcode, for example because the value was cut off, the VP sets `MANUAL_ACTION_REQUIRED` with the message *"The meeting password looks like the pwd value from a Zoom link and Zoom did not accept it; enter the meeting passcode from the invitation and select Join."* Enter the passcode and select **Join** in the live view; if nobody does within five minutes, the join ends with `pre-join:passcode-not-entered`.
+
+The meeting assistant's `start_meeting_now` and `schedule_meeting` tools check a Zoom meeting before creating the VP. A password longer than 10 characters is refused unless it has the shape of a whole `pwd` value (at least 30 letters and digits, then a period and digits, the shape seen on Zoom links) or the meeting ID is a join link with its own `pwd` value, and a meeting ID that is a link must be a Zoom join link of one of the forms above.
+
+The Zoom Meeting SDK join (used when Zoom Meeting SDK credentials are configured) passes the password to the SDK unchanged. Whether the SDK accepts a link's `pwd` value in place of the passcode has not been tested, so give the SDK path the passcode from the invitation.
 
 ## Joining a Meeting
 
@@ -438,7 +530,7 @@ Most values are one of these fixed strings:
 
 | Group | Values |
 | --- | --- |
-| Never got in | `pre-join:not-admitted`, `pre-join:no-join-button`, `pre-join:no-name-input`, `pre-join:goto-failed`, `pre-join:ai-error-screen`, `pre-join:meet-refused`, `pre-join:meet-denied`, `pre-join:meet-invalid-code`, `pre-join:meet-ended`, `acs-not-admitted`, `sdk-not-admitted`, `enterprise-login-timeout` |
+| Never got in | `pre-join:not-admitted`, `pre-join:no-join-button`, `pre-join:no-name-input`, `pre-join:goto-failed`, `pre-join:ai-error-screen`, `pre-join:meet-refused`, `pre-join:meet-denied`, `pre-join:meet-invalid-code`, `pre-join:meet-ended`, `pre-join:passcode-not-entered`, `acs-not-admitted`, `sdk-not-admitted`, `enterprise-login-timeout` |
 | Asked to leave in chat | `chat` |
 | Left after a participant objected to recording ([Meeting Consent](meeting-consent.md#objections)) | `consent-objection` |
 | The meeting ended | `post-meeting-screen`, `meeting-ended-text`, `meet-ended-screen`, `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |
@@ -507,7 +599,8 @@ The banner is dismissible — dismissed alerts are remembered in `localStorage` 
 Every platform handler (Zoom, Teams, Webex, Chime, Google Meet) wraps its hard-coded CSS selectors in an AI fallback resolver. When a primary selector misses (because the meeting platform shipped a UI change), the resolver asks Claude (Bedrock, vision-capable) to find the right element by reading a compact DOM summary plus a screenshot of the current page. Successful resolutions are cached in a shared `DomSelectorCache` DynamoDB table (30-day TTL on `lastUsedAt`) so the cost is paid only once per platform UI change.
 
 The same resolver classifies unknown popup dialogs:
-- `CONSENT` / `RECORDING_NOTICE` → auto-clicked by the VP.
+- `CONSENT` / `RECORDING_NOTICE` → auto-clicked by the VP. It never clicks a button that would join without meeting audio (for example Teams' "Continue without audio or video"). It escalates a camera/microphone dialog to `MANUAL_ACTION_REQUIRED` when it has no safe button to click (no button, a button that would join without audio or has no label, or a failed click). Any other notice without a usable button is left alone unless the model says a human is needed, as before.
+  - On a camera/microphone dialog, the manual-action message tells you not to choose "Continue without audio or video": the VP would stay in the meeting but capture no audio, so there would be no transcript and no recording. The VP grants camera and microphone to the meeting sites at launch, so this dialog normally does not appear.
 - `CAPTCHA` / `LOGIN_REQUIRED` / `SSO_REDIRECT` / `BLOCKED` → escalated to `MANUAL_ACTION_REQUIRED` (see above) so a human can solve it via the live VNC viewer.
 
 Disable the AI fallback by setting `BedrockDomResolverModelId` to an empty string at deploy time — the VP reverts to hardcoded-selector-only behavior.
@@ -799,10 +892,10 @@ In addition to the audio recording, the Virtual Participant can capture the meet
 
 ## Transcription Engine
 
-A Virtual Participant is transcribed by the [ASR MicroVM engine](microvm-asr.md) by
-default, wherever that engine is deployed (`EnableMicrovmAsr=true`, the default, in a
-Region with AWS Lambda MicroVMs), and by Amazon Transcribe otherwise, when an admin has
-chosen Amazon Transcribe for Virtual Participants, or when a MicroVM cannot be
+A Virtual Participant is transcribed by Amazon Transcribe by default. Where the
+[ASR MicroVM engine](microvm-asr.md) is deployed (`EnableMicrovmAsr=true`, the default,
+in a Region with AWS Lambda MicroVMs), an admin can move Virtual Participants onto it;
+a VP on that engine falls back to Amazon Transcribe when a MicroVM cannot be
 acquired. On Amazon Transcribe, with a voice assistant
 configured, the VP sends Amazon Transcribe one stream with two channels, with channel
 identification on: the meeting's participants on the first channel and the assistant's
@@ -830,9 +923,11 @@ On a deployment with the ASR MicroVM engine the same section also shows the engi
 choices:
 
 - **Virtual Participants: engine** chooses the engine for every VP that starts after the
-  change: the ASR MicroVM engine (the default) or Amazon Transcribe. On the MicroVM
+  change: Amazon Transcribe (the default) or the ASR MicroVM engine. On the MicroVM
   engine the VP acquires and releases its own MicroVM, and falls back to Amazon
-  Transcribe when none can be acquired.
+  Transcribe when none can be acquired. The VP captures and records the meeting while
+  the MicroVM launches and sends that audio to it when it connects; see
+  [While the MicroVM starts](microvm-asr.md#while-the-microvm-starts).
 - **The voice assistant is its own channel.** With the assistant enabled, its speech is
   transcribed from a second engine session on the same MicroVM and appears on the `LOCAL`
   channel under the VP's own name, never diarized, exactly as Stream Audio separates the
@@ -858,32 +953,37 @@ Anyone in the meeting can control the VP by typing one of these commands in the 
 | `Goodbye LMA`, `bye LMA` | Same as above. |
 | `LMA pause` | Stops transcription and recording without leaving the meeting. The audio recording keeps the paused time as silence, so it stays in step with the transcript. |
 | `LMA start` | Resumes a paused session. |
+| `LMA mute` | Silences the voice assistant at once, and keeps it silent — a wake phrase does not bring it back — until `LMA unmute`. Transcription carries on. Also `LMA quiet`, `LMA be quiet`, `LMA silence`, `LMA stop talking`, `LMA hush`. Needs a voice assistant; see [Muting the Assistant from Chat](voice-assistant.md#muting-the-assistant-from-chat). |
+| `LMA unmute` | Brings a muted voice assistant back (also after a spoken "Hey Alex, stop"). Also `LMA resume`, `LMA speak`. This does not resume a paused transcript; that is `LMA start`, and the reply says so while the transcript is paused. |
 | `LMA help` | The VP posts the list of chat commands in the meeting chat. |
 | `LMA ask <question>`, `@LMA <question>`, `LMA <question>?` | The meeting assistant answers the question in the meeting chat, using the meeting's transcript. See [Asking the Meeting Assistant from Chat](#asking-the-meeting-assistant-from-chat). |
 | `I consent`, `LMA consent` / `I object`, `LMA no consent` | In a meeting whose consent mode is Notify or Opt-in, a reply to the consent notice. See [Meeting Consent](#meeting-consent). |
 
-When a Nova Sonic voice assistant is configured, the assistant-mode commands (`LMA translate`, `LMA translate <language>`, `LMA assist`, `LMA listen`, `LMA always`, `LMA wake`) also work, and `LMA help` lists them, along with the spoken forms: the wake phrase plus a mode ("Hey Alex, switch to translator mode") and "stop translating", which leaves translator mode and needs no wake phrase; see [Changing Mode During a Meeting](voice-assistant.md#changing-mode-during-a-meeting). With no voice assistant, or with ElevenLabs, which cannot change mode during a meeting, `LMA help` leaves them out.
+When a Nova Sonic voice assistant is configured, the assistant-mode commands (`LMA translate`, `LMA translate <language>`, `LMA assist`, `LMA listen`, `LMA always`, `LMA wake`) also work, and `LMA help` lists them, along with the spoken forms: the wake phrase plus a mode ("Hey Alex, switch to translator mode") and "stop translating", which leaves translator mode and needs no wake phrase; see [Changing Mode During a Meeting](voice-assistant.md#changing-mode-during-a-meeting). With no voice assistant, or with ElevenLabs, which cannot change mode during a meeting, `LMA help` leaves them out. `LMA mute` and `LMA unmute` work with either provider and are listed whenever a voice assistant is running.
+
+Every command is answered in the chat, including one that changed nothing ("the voice assistant is already muted"), so nobody is left retyping a command into silence. Note that `LMA stop` on its own is a dismissal and removes the VP from the meeting; to silence only the voice assistant, type `LMA mute` (or `LMA stop talking`).
 
 Notes:
 
 - Every command requires the literal token `LMA` in the message. For the dismissal commands that means bare words like `END` or `LEAVE` are ignored so that prose like *"the meeting will end at 3pm"* or *"I'll leave at 3"* never trips a false dismissal. The `LMA` and verb tokens are matched case-insensitively and word-bounded (so `endless` or `ENDPOINT` don't match either).
 - When the chat platform exposes the sender name (Zoom, Chime, Webex, Google Meet), the goodbye message acknowledges who asked the VP to leave: *"Thanks Alice — I'll head out now."*
 - The default introduction message tells participants to type `LMA leave` to dismiss the bot and `LMA help` to see the other commands, and the name to add when there is more than one LMA in the meeting (see [More than one LMA in a meeting](#more-than-one-lma-in-a-meeting)). Customize via the `IntroMessage` CloudFormation parameter of the Virtual Participant stack or the `INTRO_MESSAGE` env var; a customized message is used as it is. In it, `{LMA_USER}` is replaced by the name of the user who started the VP, and `{LMA_HANDLE}` by the name to add after `LMA` to address this VP.
+- While `LMA pause` is in effect, the meeting's page in LMA shows a warning above its tabs that transcription is paused, since when, by whom when the chat shows the sender (Zoom, Chime, Webex and Google Meet, and the Zoom and Teams SDK joins; not the Teams web client), and that `LMA start` in the meeting chat resumes it; see [Web UI Guide › Meeting header](web-ui-guide.md#meeting-header). The VP records each pause and resume on the meeting record as it answers the command; if that write is lost, the command still takes effect and only the warning is missing. Consent withholding capture has its own warning and is not shown as a pause.
 - `LMA pause`, `LMA start` and `LMA help` must be the whole chat message: the `LMA` addressee (or `@LMA`, before or after the command) plus the command word, matched case-insensitively with punctuation ignored, so *"@LMA, pause!"* and *"start LMA"* count as the command. A bare `PAUSE` or `START` without the addressee is ordinary chat, as is a message that merely contains the command — *"LMA PAUSED"*, *"please LMA pause now"*, or an introduction message that explains the commands.
-- The help reply is posted as a few single-line chat messages, listing each command in one canonical form and how to address this VP by name. It is answered whether or not transcription is paused.
+- The help reply is posted as one to four single-line chat messages, listing each command in one canonical form: the general commands, then the voice-assistant modes and the mute commands when a voice assistant is running. How to address this VP by name is added only while the VP knows of another LMA VP in the meeting, since in a meeting with one VP that line is only more chat. It is answered whether or not transcription is paused. Apart from the help reply, the VP posts its introduction and the "started" status when it joins, the answer to each command, consent notices, and its goodbye; it does not post what the voice assistant says.
 - On the Zoom browser join the VP reads the chat from Zoom's chat panel, which Zoom closes by itself, for one when someone starts sharing their screen. The VP reopens the panel within a few seconds whenever Zoom's toolbar shows it closed, and then reads the messages sent while it was closed; a command typed while the panel was closed is therefore acted on a few seconds late rather than missed. It reads the messages already in the panel when it starts listening as sent before it joined and does not act on them, which matters on a meeting whose chat continues in a Team Chat group chat (*Meeting Group Chat*), where the panel can hold messages from earlier occurrences of the meeting.
 
 ### More than one LMA in a meeting
 
 When two or more people each invite their LMA Virtual Participant to the same meeting, `LMA leave` is addressed to all of them. So each VP acts on a chat command, a question, or a consent reply addressed to LMA only when it is addressed to that VP by name, or when it is the only LMA VP it knows to be in the meeting:
 
-- **By name.** A VP's display name is the deployment's LMA identity with its user filled in, `LMA (<user>)` by default. Typing or mentioning that name addresses the VP: *"@LMA (Bob Strahan) leave"*, *"LMA (strahanr@example.com) summarize the meeting"*. So does `LMA` followed by the part in parentheses, or its first word (the user's first name, or the part of an email address before the `@`): *"LMA Bob leave"*, *"@LMA strahanr help"*, *"LMA (Bob) what was decided?"*. The rest of the message is then read as if it had been typed after a bare `LMA`, so every command, `LMA ask`, the bare question form and `LMA consent` work the same way. A first word that is itself a command or a question word (a user called "Help Desk") is not used as a short name; the name in parentheses still works. When several VPs could match, the longest name wins, so with VPs for Bob Strahan and Bob Smith in one meeting *"LMA Bob Smith leave"* reaches only Bob Smith's.
+- **By name.** A VP's display name is the **Display name** setting in the Virtual Participant section of the [Configuration page](configuration-guide.md), with `{LMA_USER}` replaced by the name of the user who started the VP: `LMA ({LMA_USER})` by default, which gives `LMA (<user>)`. An administrator can change it there, in the active profile, without a stack update; the change applies to the next VP to start. Keep `LMA` as its first word and keep `{LMA_USER}` in it, for the reasons below. Typing or mentioning that name addresses the VP: *"@LMA (Bob Strahan) leave"*, *"LMA (strahanr@example.com) summarize the meeting"*. So does `LMA` followed by the part in parentheses, or its first word (the user's first name, or the part of an email address before the `@`): *"LMA Bob leave"*, *"@LMA strahanr help"*, *"LMA (Bob) what was decided?"*. The rest of the message is then read as if it had been typed after a bare `LMA`, so every command, `LMA ask`, the bare question form and `LMA consent` work the same way. A first word that is itself a command or a question word (a user called "Help Desk") is not used as a short name; the name in parentheses still works. When several VPs could match, the longest name wins, so with VPs for Bob Strahan and Bob Smith in one meeting *"LMA Bob Smith leave"* reaches only Bob Smith's.
 - **A short name two VPs share.** With those two VPs, *"LMA Bob leave"* and *"LMA (Bob) leave"* could mean either, so neither acts on them. Each VP's introduction and help reply then give its whole name in parentheses instead, *"LMA (Bob Strahan) leave"*, which reaches only that VP. Two VPs with the same display name cannot be told apart at all.
 - **The bare `LMA`.** `LMA leave`, `@LMA help` and the like are acted on as before when the VP knows of no other LMA VP in the meeting. When it knows of one or more, it does nothing with them — it does not post the help either — since it cannot tell which VP was meant.
 - **Another VP's name.** A message addressed to another VP by its name, its short name, or any name in parentheses after `LMA` that is not this VP's is left to that VP.
 - **Not addressed to LMA.** A consent reply that does not name LMA (*"I agree"*) is read by every VP, as before, and ordinary chat is unaffected.
 
-The introduction message and the help reply say which name to add. A VP knows another one is in the meeting from a display name whose first word is `LMA`: a chat sender (every VP posts its introduction when it joins), a name the platform shows as speaking, a Google Meet participant tile, or the call's participant list on the Teams Azure Communication Services join, which also shows when one has left. On the other joins, a VP is taken to have left when it posts its exit message (this deployment's, or the default *"Live Meeting Assistant has left the room."*, or the *"Thanks <name> — I'll head out now."* it posts to whoever asked it to leave), or when it has not been seen for 10 minutes. Each chat message it posts, each time the platform shows it as speaking, and on Google Meet its tile (read every second) count as seeing it. So a VP that was removed from the meeting or stopped without posting its exit message stops counting after at most 10 minutes, and the bare `LMA` is answered again. The cost is on the Zoom and Teams browser joins, where a VP with no voice assistant that stays quiet in the chat is seen only once, when it posts its introduction: 10 minutes later it is no longer counted, and both VPs answer a bare `LMA` again, as they would without this feature. Address VPs by name to avoid that. A VP that has not yet appeared in any of these ways is not counted, so a VP that joins after another may answer a bare `LMA` until it has seen the first one; address VPs by name when there are several. A VP whose display name does not start with `LMA` (a customized identity) cannot be told from a person by its name. Messages from another LMA VP are never acted on. On Microsoft Teams a mention shows only the mentioned name, without the `@`; both forms work, as does Zoom's `@` mention.
+The introduction message and the help reply say which name to add. A VP knows another one is in the meeting from a display name whose first word is `LMA`: a chat sender (every VP posts its introduction when it joins), a name the platform shows as speaking, a Google Meet participant tile, or the call's participant list on the Teams Azure Communication Services join, which also shows when one has left. On the other joins, a VP is taken to have left when it posts its exit message (this deployment's, or the default *"Live Meeting Assistant has left the room."*, or the *"Thanks <name> — I'll head out now."* it posts to whoever asked it to leave), or when it has not been seen for 10 minutes. Each chat message it posts, each time the platform shows it as speaking, and on Google Meet its tile (read every second) count as seeing it. So a VP that was removed from the meeting or stopped without posting its exit message stops counting after at most 10 minutes, and the bare `LMA` is answered again. The cost is on the Zoom and Teams browser joins, where a VP with no voice assistant that stays quiet in the chat is seen only once, when it posts its introduction: 10 minutes later it is no longer counted, and both VPs answer a bare `LMA` again, as they would without this feature. Address VPs by name to avoid that. A VP that has not yet appeared in any of these ways is not counted, so a VP that joins after another may answer a bare `LMA` until it has seen the first one; address VPs by name when there are several. A VP whose display name does not start with `LMA` (a customized display name) cannot be told from a person by its name. Messages from another LMA VP are never acted on. On Microsoft Teams a mention shows only the mentioned name, without the `@`; both forms work, as does Zoom's `@` mention.
 
 ### Asking the Meeting Assistant from Chat
 
@@ -1021,10 +1121,14 @@ meeting after an objection. With mode Off it behaves as before, apart from a
 short read of its own row before joining, where a per-meeting choice is stored;
 see [Choosing the mode for one meeting](meeting-consent.md#choosing-the-mode-for-one-meeting).
 
-A reply is the whole chat message, as for the commands above: the configured
-consent and objection phrases (by default *"I consent"*, *"I agree"*, *"I
-accept"*, and *"I object"*, *"I do not consent"*, *"stop recording"* and
-others), or `LMA consent`, `LMA no consent` and `LMA object`. Said aloud, a
+A consent reply is the whole chat message, as for the commands above: one of
+the configured consent phrases (by default *"I consent"*, *"I agree"*, *"I
+accept"*) or `LMA consent`. An objection is one of the configured objection
+phrases (by default *"I object"*, *"I do not consent"*, *"stop recording"* and
+others), `LMA no consent` or `LMA object`, or a chat message of up to 200
+characters that contains an objection phrase outside quotation marks (*"I
+object to this meeting being recorded"*); see
+[Replies in the chat](meeting-consent.md#replies-in-the-chat). Said aloud, a
 reply counts only when it is addressed to LMA: *"LMA, I consent"* or *"LMA
 consent"*, and *"LMA, I object"* or *"LMA, please stop recording"*. Which platforms
 support which rule, how the participants present are counted, and what is

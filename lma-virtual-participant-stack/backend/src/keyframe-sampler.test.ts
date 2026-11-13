@@ -9,7 +9,12 @@ import {
     KeyframeSampler,
     KeyframeSamplerIo,
     KeyframeSamplerOptions,
+    BUSY_GAP_MS,
+    HOLD_MS,
+    MAX_BUSY_WAIT_MS,
     SAMPLE_BYTES,
+    SHARE_THRESHOLDS,
+    STRICT_THRESHOLDS,
     frameIdFor,
     keyframeKeys,
     posixifyFilename,
@@ -145,9 +150,19 @@ test('no two frames are announced within one second on the transcript clock, eve
     await h.feed(flat(60), 6);
     assert.equal(h.frames.length, 1, 'a frame stamped at the same transcript time as the last is not announced');
     clock = 60;
-    await h.feed(flat(120), 6);
+    // Six seconds after the change before it, so the screen counts as busy and
+    // the picture holds still for the longer settle.
+    await h.feed(flat(120), 8);
     assert.equal(h.frames.length, 2);
     assert.ok(h.frames[1].Timestamp - h.frames[0].Timestamp >= 1);
+});
+
+test('the busy-screen settle is on by default, with and without a share signal', () => {
+    assert.equal(SHARE_THRESHOLDS.busySettleMs, 6000);
+    assert.equal(STRICT_THRESHOLDS.busySettleMs, 6000);
+    assert.equal(BUSY_GAP_MS, 10_000);
+    assert.equal(MAX_BUSY_WAIT_MS, 30_000);
+    assert.equal(HOLD_MS, 15_000);
 });
 
 test('ids sort in time order and keys follow the deletion prefix rule', () => {

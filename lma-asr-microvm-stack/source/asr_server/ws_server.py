@@ -54,9 +54,11 @@ import logging
 import os
 import resource
 import sys
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import NamedTuple, Protocol
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
@@ -89,6 +91,7 @@ from asr_server.offline_recognizer import (
 )
 from asr_server.protocol_adapter import ProtocolAdapter, WireMessage
 from asr_server.recognizer import (
+    DEFAULT_MODEL_DIR,
     EnrolledVoiceSeed,
     Recognizer,
     RecognizerEngine,
@@ -99,6 +102,7 @@ from asr_server.recognizer import (
 )
 from asr_server.sortformer import SortformerEngine, create_sortformer_engine, sortformer_enabled
 from asr_server.two_pass import create_two_pass_engine, preview_model_dir
+from asr_server.warmup import WARM_DECODE_SECONDS, warm_decode_pcm
 
 __all__ = [
     "DEFAULT_PORT",
@@ -565,12 +569,13 @@ class AsrSession:
             # read against. ``$ASR_ENGINE`` selects which engine's model is baked per image
             # (streaming default / accurate) — logging it disambiguates recognizer behaviour.
             _LOG.info(
-                "session %s start: sample_rate=%d interim_results=%s engine=%s "
+                "session %s start: sample_rate=%d interim_results=%s engine=%s bundle=%s "
                 "word_timestamps=%s endpointing_ms=%s diarize=%s max_speakers=%s",
                 self._session_id,
                 config.sample_rate,
                 config.interim_results,
                 os.environ.get("ASR_ENGINE", "streaming"),
+                os.environ.get("ASR_BUNDLE_ID", "unknown"),
                 config.word_timestamps,
                 config.endpointing_ms,
                 config.diarize,
@@ -607,6 +612,7 @@ class AsrSession:
                     live_turn_cut=config.live_turn_cut,
                     turn_cut_interval_ms=config.turn_cut_interval_ms,
                     max_open_segment_ms=config.max_open_segment_ms,
+                    partial_speakers=config.partial_speakers,
                     # Voices a person consented to enroll, so their speech is
                     # labelled with their name from the first word rather than
                     # spk_0 until something names it.
@@ -829,6 +835,7 @@ class AsrSession:
                     continue
                 frame_config, ended = _classify_first_text(frame)
                 if ended:
+                    self._log_end_of_stream()
                     return True
                 # A second ``config`` mid-stream is ignored (config is negotiated
                 # once at open, R2.1); genuinely bad text raised above already.
@@ -842,6 +849,24 @@ class AsrSession:
             await self._send_error(exc.code, exc.message)
             self._fatal = True
             return False
+
+    def _log_end_of_stream(self) -> None:
+        """Log, at INFO, how much audio is still to decode when the client ends the stream.
+
+        Everything queued is decoded, and the utterance still open is closed as a
+        ``final``, before ``termination`` is sent; the client waits for that. This
+        line, with the session summary that follows ``termination``, shows how long
+        the end of a stream took and how much work it found waiting.
+        """
+        bytes_per_second = _BYTES_PER_SAMPLE * self._sample_rate
+        _LOG.info(
+            "session %s eos: %.1fs of audio received, %.1fs decoded, %d frame(s) queued; "
+            "decoding the rest and closing the open utterance",
+            self._session_id,
+            self._bytes_queued / bytes_per_second,
+            self._audio_bytes / bytes_per_second,
+            self._queue.qsize(),
+        )
 
     async def _enqueue(self, pcm: bytes) -> None:
         """Hand one PCM frame to the bounded queue, applying backpressure (R7).
@@ -1227,6 +1252,84 @@ async def _report_load(reporter: LoadReporter, interval_s: float) -> None:
             _LOG.info(line)
 
 
+# The hook server (asr_microvm/hook_server.py) asks for the warm-up decode over a
+# pair of pipes it creates when it starts this process: "<read fd>,<write fd>". Not
+# a socket, so nothing outside the MicroVM can ask for one.
+WARM_CONTROL_ENV = "ASR_WARM_CONTROL_FDS"
+
+
+def run_warm_up(engine: RecognizerEngine) -> dict[str, object]:
+    """Decode the warm-up audio once on every model the engine holds.
+
+    Run before the snapshot (from ``/ready``) and again from ``/validate``, so the
+    offline model's weights are resident and its buffers sized for the longest
+    utterance, and so Lambda records those pages to prefetch on later launches.
+    """
+    seconds = float(os.environ.get("ASR_WARM_DECODE_S", str(WARM_DECODE_SECONDS)))
+    model_dir = Path(os.environ.get("ASR_MODEL_DIR", DEFAULT_MODEL_DIR))
+    pcm, origin = warm_decode_pcm(seconds, wav=model_dir / "test_wavs" / "warm.wav")
+    started = time.perf_counter()
+    decodes = engine.warm_up(pcm)
+    elapsed = time.perf_counter() - started
+    _LOG.info(
+        "warm-up decode: %d decode(s) of %s in %.2fs, rss=%.0fMB",
+        decodes,
+        origin,
+        elapsed,
+        _read_rss_mb().current_mb,
+    )
+    return {"ok": True, "decodes": decodes, "seconds": round(elapsed, 3), "audio": origin}
+
+
+def serve_warm_requests(
+    engine: RecognizerEngine,
+    request_fd: int,
+    reply_fd: int,
+    warm: Callable[[RecognizerEngine], dict[str, object]] = run_warm_up,
+) -> None:
+    """Answer ``warm <id>`` lines on ``request_fd`` with one JSON line each on ``reply_fd``.
+
+    Returns when the request pipe closes. A failed warm-up is reported, not raised,
+    so the hook can retry it.
+    """
+    with os.fdopen(request_fd, "r", encoding="utf-8") as requests, os.fdopen(
+        reply_fd, "w", encoding="utf-8"
+    ) as replies:
+        for line in requests:
+            parts = line.split()
+            request_id = parts[1] if len(parts) == 2 else ""
+            if not parts or parts[0] != "warm":
+                reply: dict[str, object] = {"ok": False, "error": "unknown request"}
+            else:
+                try:
+                    reply = warm(engine)
+                except Exception as exc:  # noqa: BLE001 - reported to the hook, which retries
+                    _LOG.exception("warm-up decode failed")
+                    reply = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            replies.write(json.dumps({"id": request_id, **reply}) + "\n")
+            replies.flush()
+
+
+def start_warm_control(engine: RecognizerEngine) -> threading.Thread | None:
+    """Serve warm-up requests from the hook server, when it passed its pipes."""
+    value = os.environ.get(WARM_CONTROL_ENV, "")
+    if not value:
+        return None
+    try:
+        request_fd, reply_fd = (int(part) for part in value.split(","))
+    except ValueError:
+        _LOG.warning("ignoring %s=%r: expected '<read fd>,<write fd>'", WARM_CONTROL_ENV, value)
+        return None
+    thread = threading.Thread(
+        target=serve_warm_requests,
+        args=(engine, request_fd, reply_fd),
+        name="asr-warm-control",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
 async def serve_asr(
     server_config: ServerConfig | None = None,
     engine_factory: EngineFactory = _default_engine_factory,
@@ -1284,6 +1387,7 @@ async def serve_asr(
         floor.peak_mb,
     )
 
+    start_warm_control(engine)
     reporter = LoadReporter()
     interval_s = float(os.environ.get("ASR_LOAD_LOG_INTERVAL_S", "60"))
 
