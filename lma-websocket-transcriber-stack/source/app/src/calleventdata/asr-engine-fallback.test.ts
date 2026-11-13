@@ -45,7 +45,7 @@ const meeting = (fields: Partial<CallMetaData> = {}): CallMetaData =>
 test('a MicroVM engine choice uses Amazon Transcribe where no ASR launcher is deployed', () => {
     const { server, lines } = recordingServer();
     assert.equal(resolveAsrEngine(meeting(), server, MICROVM_CHOSEN), 'transcribe');
-    // Expected on every meeting of such a deployment, so not a warning.
+    // Expected whenever a saved switch asks for an engine the deployment does not have, so not a warning.
     assert.deepEqual(
         lines.map((line) => line.level),
         ['info']
