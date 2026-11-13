@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { normalizeChatText } from './chat-text.js';
 import { addressingVpHandle } from './vp-handle.js';
 import { normalizeMeetingPassword } from './meeting-password.js';
-import { resolveZoomMeeting } from './zoom-join-link.js';
+import { parseZoomJoinLink, resolveZoomMeeting } from './zoom-join-link.js';
 import { registerSecretValue } from './logger.js';
 
 export interface MeetingInvite {
@@ -136,6 +136,10 @@ class DetailsManager {
     // pwd value unless a passcode was given too (zoom-join-link.ts). The pwd
     // value came in MEETING_ID, which the logger does not treat as a secret.
     if (meetingPlatform.toUpperCase() === 'ZOOM') {
+      // The link's own pwd is a secret whether or not it becomes the password
+      // (a separately given passcode wins over it).
+      const linkPwd = parseZoomJoinLink(meetingId)?.pwd;
+      if (linkPwd) registerSecretValue(linkPwd);
       ({ meetingId, meetingPassword } = resolveZoomMeeting(meetingId, meetingPassword));
       registerSecretValue(meetingPassword);
     }
