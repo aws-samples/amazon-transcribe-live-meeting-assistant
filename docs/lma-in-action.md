@@ -13,4 +13,4 @@ A one-page, illustrated tour of what Live Meeting Assistant does during and afte
 
 Source: [`docs/lma-in-action.html`](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/blob/main/docs/lma-in-action.html). The screenshots are in [`images/lma-in-action/`](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/tree/main/images/lma-in-action), taken from a test deployment with synthetic meetings and voices.
 
-To see the same features in motion, watch the [demo videos](demo-videos.md).
+To see the same features in motion, watch the [demo videos](demo-videos.md), including a seven-minute introduction for new users, a walkthrough of meeting consent for compliance teams, and the meeting assistant coaching a requirements workshop.
