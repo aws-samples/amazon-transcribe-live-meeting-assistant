@@ -33,6 +33,7 @@ import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
 import createUploadMeeting from '../../graphql/queries/createUploadMeeting';
+import { uploadErrorMessage, uploadLanguageLabel } from './upload-language';
 import useTranscriberSocket from '../../hooks/use-transcriber-socket';
 import { toStreamingFrame } from '../common/streaming-frame';
 import ConsentStep from './ConsentStep';
@@ -224,6 +225,8 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState(null);
   const [uploadedCallId, setUploadedCallId] = useState('');
+  // The language createUploadMeeting says the recording is transcribed in.
+  const [uploadedLanguage, setUploadedLanguage] = useState(null);
   const uploadXhrRef = useRef(null);
 
   useEffect(() => {
@@ -645,6 +648,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     setUploadProgress(0);
     setUploadError(null);
     setUploadedCallId('');
+    setUploadedLanguage(null);
     setUploadPhase(UPLOAD_PHASE.IDLE);
   };
 
@@ -666,6 +670,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     setUploadError(null);
     setUploadProgress(0);
     setUploadedCallId('');
+    setUploadedLanguage(null);
 
     const file = uploadFiles[0];
     if (!file) {
@@ -712,11 +717,12 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
 
       // 3. Hand off to the backend pipeline.
       setUploadedCallId(result.callId);
+      setUploadedLanguage(result.transcriptionLanguage || null);
       setUploadProgress(100);
       setUploadPhase(UPLOAD_PHASE.DONE);
     } catch (err) {
       console.error('Upload failed:', err);
-      setUploadError(err.message || String(err));
+      setUploadError(uploadErrorMessage(err));
       setUploadPhase(UPLOAD_PHASE.ERROR);
     }
   };
@@ -1114,6 +1120,11 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
                         <span>
                           Meeting ID: <code>{uploadedCallId}</code>
                         </span>
+                        {uploadLanguageLabel(uploadedLanguage) && (
+                          <span data-testid="upload-language">
+                            Transcription language: {uploadLanguageLabel(uploadedLanguage)}
+                          </span>
+                        )}
                         <Link href={`#/calls/${encodeURIComponent(uploadedCallId)}`} external>
                           Open meeting detail page
                         </Link>

@@ -648,6 +648,53 @@ def test_configuration_readers_are_ordered_behind_the_seeder(resources: dict):
     assert len(readers) >= 2, f"only found {len(readers)} functions reading the config table"
 
 
+def test_the_web_ui_is_built_after_the_graphql_schema(resources: dict):
+    """The UI's queries name fields the schema in the same update adds, and AppSync
+    refuses a query that names a field its schema lacks. Ordering the UI build
+    behind the schema keeps an update from serving a page whose queries fail."""
+    assert resources["AppSyncSchema"]["Type"] == "AWS::AppSync::GraphQLSchema"
+    assert "Condition" not in resources["AppSyncSchema"]
+    build = resources["CodeBuildRun"]
+    assert build["Properties"]["BuildProjectName"] == {"Ref": "LMAUICodeBuildProject"}
+    declared = build.get("DependsOn")
+    declared = [declared] if isinstance(declared, str) else (declared or [])
+    assert "AppSyncSchema" in declared
+
+
+def test_the_upload_initiator_can_read_the_transcription_section(resources: dict):
+    """An upload follows the Configuration page's Amazon Transcribe language, read
+    by the initiator when the upload starts. Without the table name the function
+    uses the shipped en-US; without the layer it cannot import; without the grant
+    every upload is refused because the settings cannot be read."""
+    function = resources["UploadMeetingInitiatorFunction"]
+    properties = function["Properties"]
+    assert properties["Environment"]["Variables"]["CONFIGURATION_TABLE_NAME"] == {
+        "Ref": "ConfigurationTable"
+    }
+    assert {"Ref": "ConfigurationPythonLayer"} in properties["Layers"]
+    role = resources[properties["Role"]["Fn::GetAtt"].split(".")[0]]
+    statements = [
+        statement
+        for policy in role["Properties"]["Policies"]
+        for statement in policy["PolicyDocument"]["Statement"]
+    ]
+    readers = [
+        statement
+        for statement in statements
+        if statement.get("Resource") == {"Fn::GetAtt": "ConfigurationTable.Arn"}
+    ]
+    assert [statement["Action"] for statement in readers] == [["dynamodb:GetItem"]]
+    kms = [
+        statement
+        for statement in statements
+        if "kms:Decrypt" in statement.get("Action", [])
+        and statement.get("Resource") == {"Ref": "CustomerManagedEncryptionKeyArn"}
+    ]
+    assert kms, "the configuration table is encrypted with the stack's key"
+    via = json.dumps(kms[0].get("Condition"))
+    assert "dynamodb." in via
+
+
 def test_the_asr_engine_resolvers_exist_without_the_on_demand_engine(resources: dict):
     """getAsrConfig is how a Virtual Participant reads its voice separation switch.
 

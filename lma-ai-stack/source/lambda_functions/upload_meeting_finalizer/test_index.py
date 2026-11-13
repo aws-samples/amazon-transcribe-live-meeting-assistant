@@ -34,6 +34,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -216,9 +217,16 @@ class FakeS3:
 class FakeTranscribe:
     """Answers GetTranscriptionJob with a chosen tag set."""
 
-    def __init__(self, tags: list | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        tags: list | None = None,
+        error: Exception | None = None,
+        job: dict | None = None,
+    ) -> None:
         self.tags = OUR_TAGS if tags is None else tags
         self.error = error
+        # Further TranscriptionJob fields, such as the identified language.
+        self.job = job or {}
         self.calls: list[str] = []
 
     def get_transcription_job(self, TranscriptionJobName):  # noqa: N803
@@ -229,6 +237,7 @@ class FakeTranscribe:
             "TranscriptionJob": {
                 "TranscriptionJobName": TranscriptionJobName,
                 "Tags": self.tags,
+                **self.job,
             }
         }
 
@@ -441,8 +450,8 @@ def test_a_segment_event_matches_what_the_live_transcriber_emits(h) -> None:
 
 
 def test_a_segment_from_a_fixed_language_job_carries_no_language(h) -> None:
-    """Upload Audio runs its jobs in one fixed language, whose output names no
-    language per word, so no segment claims one was identified."""
+    """A job run in one fixed language names no language per word, so no segment
+    claims one was identified."""
     h.run()
     assert all("LanguageCode" not in seg for seg in h.kinesis.of_type("ADD_TRANSCRIPT_SEGMENT"))
 
@@ -982,6 +991,10 @@ def test_a_row_written_by_stage_one_finalizes_end_to_end(monkeypatch) -> None:
 
     monkeypatch.setattr(initiator, "job_table", CapturingTable())
     monkeypatch.setattr(initiator, "s3_client", StubS3())
+    # Nothing saved in the Transcription section: the shipped en-US applies.
+    monkeypatch.setattr(
+        initiator, "_STORE", SimpleNamespace(get_section=lambda _: SimpleNamespace(values={}))
+    )
     created = initiator.lambda_handler(
         {
             "info": {"fieldName": "createUploadMeeting"},
@@ -1038,3 +1051,249 @@ def test_a_row_written_by_stage_one_finalizes_end_to_end(monkeypatch) -> None:
     assert harness.kinesis.only("END")["AgentId"] == "carol@example.com"
     assert harness.table.final["Status"] == "COMPLETED"
     assert harness.table.final["SegmentCount"] == 2
+
+
+# ---------------------------------------------------------------------------
+# The identified language, for an upload that asked Transcribe to identify it
+# ---------------------------------------------------------------------------
+
+
+def identifying(monkeypatch, mode: str, job: dict, transcript: dict | None = None) -> Harness:
+    """A finalizer for an upload Stage 1 set to identify its language."""
+    harness = Harness(
+        monkeypatch,
+        job_row(
+            LanguageIdentification=mode,
+            LanguageOptions=["de-DE", "ja-JP", "es-US"],
+            LanguageSource="CONFIGURATION",
+        ),
+        transcript,
+    )
+    harness.transcribe.job = job
+    return harness
+
+
+def segment_languages(harness: Harness) -> list:
+    return [seg.get("LanguageCode") for seg in harness.kinesis.of_type("ADD_TRANSCRIPT_SEGMENT")]
+
+
+#: A multiple-language identification output: a language per word.
+MULTI_LANGUAGE_TRANSCRIPT = {
+    "results": {
+        "items": [
+            {"id": 0, "language_code": "de-DE"},
+            {"id": 1, "language_code": "de-DE"},
+            {"id": 2, "language_code": "es-US"},
+        ],
+        "audio_segments": [
+            {"transcript": "guten Morgen", "start_time": 0, "end_time": 1, "items": [0, 1]},
+            {"transcript": "hola", "start_time": 1, "end_time": 2, "items": [2]},
+        ],
+    }
+}
+
+
+def test_single_language_identification_gives_every_segment_the_identified_language(
+    monkeypatch,
+) -> None:
+    """Its output names no language per word, so each segment takes the job's;
+    that is how the language reaches the meeting's DetectedLanguages."""
+    h = identifying(monkeypatch, "identify-language", {"LanguageCode": "ja-JP"})
+    h.run()
+    assert segment_languages(h) == ["ja-JP", "ja-JP"]
+
+
+def test_the_glued_segment_takes_the_identified_language_too(monkeypatch) -> None:
+    transcript = {"results": {"transcripts": [{"transcript": "Konnichiwa."}]}}
+    h = identifying(monkeypatch, "identify-language", {"LanguageCode": "ja-JP"}, transcript)
+    h.run()
+    assert segment_languages(h) == ["ja-JP"]
+
+
+def test_multiple_language_identification_takes_each_segments_language_from_its_words(
+    monkeypatch,
+) -> None:
+    h = identifying(
+        monkeypatch,
+        "identify-multiple-languages",
+        {
+            "LanguageCodes": [
+                {"LanguageCode": "es-US", "DurationInSeconds": 1.0},
+                {"LanguageCode": "de-DE", "DurationInSeconds": 2.0},
+            ]
+        },
+        MULTI_LANGUAGE_TRANSCRIPT,
+    )
+    h.run()
+    assert segment_languages(h) == ["de-DE", "es-US"]
+
+
+@pytest.mark.parametrize("mode", ["identify-language", "identify-multiple-languages"])
+def test_the_meetings_transcription_language_stays_the_identify_mode(monkeypatch, mode) -> None:
+    """TranscriptionLanguage says how the meeting was transcribed, as START
+    recorded it; the languages heard are its DetectedLanguages, kept apart."""
+    h = identifying(monkeypatch, mode, {"LanguageCode": "ja-JP"}, MULTI_LANGUAGE_TRANSCRIPT)
+    h.run()
+    assert "UPDATE_CAPTURE_CONTEXT" not in h.kinesis.event_types
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"LanguageCode": "it-IT", "LanguageSource": "CONFIGURATION"},
+        {"LanguageCode": "it-IT", "LanguageSource": "REQUEST"},
+        {},
+    ],
+    ids=["configured", "requested", "legacy-row"],
+)
+def test_an_upload_that_named_its_language_detects_none(monkeypatch, row) -> None:
+    """As for a streaming meeting in a fixed language, the language setting
+    already names it."""
+    h = Harness(monkeypatch, job_row(**row))
+    h.transcribe.job = {"LanguageCode": "it-IT"}
+    h.run()
+    assert segment_languages(h) == [None, None]
+    assert "UPDATE_CAPTURE_CONTEXT" not in h.kinesis.event_types
+
+
+def test_a_job_that_reports_no_language_gives_segments_none(monkeypatch) -> None:
+    h = identifying(monkeypatch, "identify-language", {})
+    h.run()
+    assert segment_languages(h) == [None, None]
+
+
+@pytest.mark.parametrize(
+    ("mode", "job", "expected"),
+    [
+        ("identify-language", {"LanguageCode": " pt-BR "}, "pt-BR"),
+        ("identify-language", {"LanguageCode": ""}, None),
+        ("identify-language", {}, None),
+        (
+            "identify-multiple-languages",
+            {"LanguageCodes": [{"LanguageCode": "hi-IN"}], "LanguageCode": "hi-IN"},
+            None,
+        ),
+        ("", {"LanguageCode": "fr-FR"}, None),
+    ],
+    ids=["single", "blank", "missing", "multiple", "fixed-language"],
+)
+def test_only_single_language_identification_names_a_language_for_the_whole_job(
+    mode, job, expected
+) -> None:
+    assert index.identified_language({"LanguageIdentification": mode}, job) == expected
+
+
+def test_the_single_language_mode_is_one_stage_one_records() -> None:
+    assert index.SINGLE_LANGUAGE_IDENTIFICATION in initiator.IDENTIFY_MODES
+
+
+class _StartedJobs:
+    """Stage 2's Transcribe client: keeps the StartTranscriptionJob parameters."""
+
+    def __init__(self) -> None:
+        self.params: dict = {}
+
+    def start_transcription_job(self, **params):
+        self.params = params
+        return {}
+
+
+@pytest.mark.parametrize(
+    ("settings", "parameter", "identified", "transcript", "languages"),
+    [
+        (
+            {"languageCode": "identify-language", "languageOptions": "pt-BR, it-IT"},
+            "IdentifyLanguage",
+            {"LanguageCode": "it-IT", "IdentifiedLanguageScore": 0.98},
+            None,
+            ["it-IT", "it-IT"],
+        ),
+        (
+            {"languageCode": "identify-multiple-languages", "languageOptions": "de-DE,es-US,hi-IN"},
+            "IdentifyMultipleLanguages",
+            {
+                "LanguageCodes": [
+                    {"LanguageCode": "es-US", "DurationInSeconds": 12.0},
+                    {"LanguageCode": "de-DE", "DurationInSeconds": 40.5},
+                ]
+            },
+            MULTI_LANGUAGE_TRANSCRIPT,
+            ["de-DE", "es-US"],
+        ),
+    ],
+    ids=["identify", "identify-multiple"],
+)
+def test_language_identification_carries_from_the_settings_to_the_segments(
+    monkeypatch, settings, parameter, identified, transcript, languages
+) -> None:
+    """All three stages, with only the AWS clients faked: the identify mode Stage 1
+    reads from the Configuration page is the job Stage 2 starts and the meeting's
+    TranscriptionLanguage, and the languages that job identifies are given to the
+    segments this stage emits."""
+    # Stage 1: the Configuration page's settings, read when the upload starts.
+    written: list[dict] = []
+    monkeypatch.setattr(
+        initiator,
+        "job_table",
+        SimpleNamespace(put_item=lambda Item, ConditionExpression=None: written.append(Item)),  # noqa: N803
+    )
+    monkeypatch.setattr(
+        initiator,
+        "s3_client",
+        SimpleNamespace(generate_presigned_url=lambda *a, **k: "https://example.invalid/presigned"),
+    )
+    monkeypatch.setattr(
+        initiator, "_STORE", SimpleNamespace(get_section=lambda _: SimpleNamespace(values=settings))
+    )
+    created = initiator.lambda_handler(
+        {
+            "info": {"fieldName": "createUploadMeeting"},
+            "identity": {"username": "dana@example.com", "groups": []},
+            "arguments": {
+                "input": {
+                    "meetingTopic": "Roadmap",
+                    "localSpeakerName": "dana@example.com",
+                    "filename": "roadmap.mp3",
+                    "contentType": "audio/mpeg",
+                    "enableDiarization": True,
+                    "maxSpeakers": 3,
+                }
+            },
+        },
+        None,
+    )
+    row = written[0]
+    call_id = created["callId"]
+    assert created["transcriptionLanguage"] == settings["languageCode"]
+
+    # Stage 2: the file lands and the job starts.
+    stage_two_stream = FakeKinesis()
+    started = _StartedJobs()
+    monkeypatch.setattr(processor, "job_table", FakeTable(row))
+    monkeypatch.setattr(processor, "kinesis_client", stage_two_stream)
+    monkeypatch.setattr(processor, "transcribe_client", started)
+    processor.lambda_handler(
+        {
+            "Records": [
+                {
+                    "s3": {
+                        "bucket": {"name": BUCKET},
+                        "object": {"key": created["uploadKey"], "size": 1024},
+                    }
+                }
+            ]
+        },
+        None,
+    )
+    assert started.params[parameter] is True
+    assert started.params["LanguageOptions"] == row["LanguageOptions"]
+    assert "LanguageCode" not in started.params
+    assert started.params["Settings"]["ShowSpeakerLabels"] is True
+    assert stage_two_stream.only("START")["TranscriptionLanguage"] == settings["languageCode"]
+
+    # Stage 3: the job completes, reporting what it identified.
+    harness = Harness(monkeypatch, row, transcript)
+    harness.transcribe.job = {**started.params, **identified}
+    harness.run(eventbridge_event(name=call_id))
+    assert segment_languages(harness) == languages
+    assert "UPDATE_CAPTURE_CONTEXT" not in harness.kinesis.event_types

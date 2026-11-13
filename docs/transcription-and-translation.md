@@ -394,11 +394,14 @@ language with the transcript:
 A meeting Amazon Transcribe transcribes in one fixed language has no detected
 languages: Amazon Transcribe names a language only when it identifies one, and
 the configured language is already shown as **Transcription language**. Upload
-Audio runs its Amazon Transcribe batch jobs in one fixed language, so an uploaded
-recording has none today; a batch transcript that names a language per word, as
-one from multiple-language identification does, gives each segment the language
-most of its words were identified in. Segments stored before this was recorded
-carry no language.
+Audio follows the same language setting with its Amazon Transcribe batch jobs,
+and an uploaded recording keeps the identify mode as its **Transcription
+language** like a streaming meeting does. With `identify-language`, every
+segment of the recording takes the one language the job identified. With
+`identify-multiple-languages`, the batch transcript names a language per word,
+and each segment takes the language most of its words were identified in. An
+upload in a fixed language has no detected languages. Segments stored before
+this was recorded carry no language.
 
 #### On the ASR MicroVM engine
 

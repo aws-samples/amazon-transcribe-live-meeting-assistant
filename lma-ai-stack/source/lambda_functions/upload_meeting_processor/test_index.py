@@ -33,6 +33,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -53,6 +54,8 @@ os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 HERE = Path(__file__).resolve().parent
 INITIATOR_DIR = HERE.parent / "upload_meeting_initiator"
+# Stage 1 reads the configuration through the layer the deployed function gets.
+sys.path.insert(0, str(HERE.parents[1] / "lambda_layers" / "configuration_layer"))
 
 
 def _load_by_path(name: str, path: Path):
@@ -650,14 +653,87 @@ def test_the_language_the_user_chose_is_used(env, monkeypatch) -> None:
     _, _, transcribe = env
     index.lambda_handler(s3_event(), None)
     assert transcribe.params["LanguageCode"] == "es-US"
+    assert "IdentifyLanguage" not in transcribe.params
+    assert "IdentifyMultipleLanguages" not in transcribe.params
+    assert "LanguageOptions" not in transcribe.params
 
 
-def test_the_language_defaults_when_the_row_does_not_name_one(env) -> None:
-    """LanguageCode is optional in the mutation, but required by Transcribe."""
+def test_a_row_from_before_uploads_followed_the_settings_runs_in_en_us(env) -> None:
+    """A row Stage 1 wrote before the language was recorded names none, and
+    Transcribe needs one: such an upload runs in en-US, as it would have then."""
+    _, kinesis, transcribe = env
+    index.lambda_handler(s3_event(), None)
+    assert index.LEGACY_LANGUAGE_CODE == "en-US"
+    assert transcribe.params["LanguageCode"] == "en-US"
+    assert kinesis.payloads[0]["TranscriptionLanguage"] == "en-US"
+
+
+@pytest.mark.parametrize(
+    ("mode", "parameter"),
+    [
+        ("identify-language", "IdentifyLanguage"),
+        ("identify-multiple-languages", "IdentifyMultipleLanguages"),
+    ],
+)
+def test_an_identify_mode_asks_transcribe_to_identify_among_the_options(
+    env, monkeypatch, mode, parameter
+) -> None:
+    """Exactly one of LanguageCode, IdentifyLanguage and IdentifyMultipleLanguages,
+    or Transcribe refuses the job."""
+    monkeypatch.setattr(
+        index,
+        "job_table",
+        FakeTable(
+            job_row(
+                LanguageIdentification=mode,
+                LanguageOptions=["de-DE", "ja-JP", "pt-BR"],
+                LanguageSource="CONFIGURATION",
+            )
+        ),
+    )
+    _, kinesis, transcribe = env
+    index.lambda_handler(s3_event(), None)
+    assert transcribe.params[parameter] is True
+    assert transcribe.params["LanguageOptions"] == ["de-DE", "ja-JP", "pt-BR"]
+    sent = {"LanguageCode", "IdentifyLanguage", "IdentifyMultipleLanguages"} & set(
+        transcribe.params
+    )
+    assert sent == {parameter}
+    # The identify mode stays the meeting's Transcription language; the languages
+    # heard reach DetectedLanguages through the segments Stage 3 writes.
+    assert kinesis.payloads[0]["TranscriptionLanguage"] == mode
+
+
+@pytest.mark.parametrize("mode", ["identify-language", "identify-multiple-languages"])
+def test_speaker_labels_are_requested_with_language_identification(env, monkeypatch, mode) -> None:
+    monkeypatch.setattr(
+        index,
+        "job_table",
+        FakeTable(
+            job_row(
+                EnableDiarization=True,
+                MaxSpeakers=6,
+                LanguageIdentification=mode,
+                LanguageOptions=["en-AU", "zh-CN"],
+            )
+        ),
+    )
+    _, kinesis, transcribe = env
+    index.lambda_handler(s3_event(), None)
+    assert transcribe.params["Settings"] == {"ShowSpeakerLabels": True, "MaxSpeakerLabels": 6}
+    assert kinesis.payloads[0]["SpeakerSeparation"] == "REMOTE"
+
+
+def test_an_unknown_identify_mode_falls_back_to_the_recorded_language(env, monkeypatch) -> None:
+    monkeypatch.setattr(
+        index,
+        "job_table",
+        FakeTable(job_row(LanguageIdentification="guess", LanguageCode="it-IT")),
+    )
     _, _, transcribe = env
     index.lambda_handler(s3_event(), None)
-    assert index.DEFAULT_LANGUAGE_CODE == "en-US"
-    assert transcribe.params["LanguageCode"] == "en-US"
+    assert transcribe.params["LanguageCode"] == "it-IT"
+    assert "LanguageOptions" not in transcribe.params
 
 
 def test_the_media_format_stage_one_recorded_is_passed_to_transcribe(env, monkeypatch) -> None:
@@ -852,3 +928,80 @@ def test_both_stages_hold_the_same_list_of_media_formats() -> None:
     """The two Lambdas deploy separately, so each keeps its own copy of the list;
     a format Stage 1 records that Stage 2 does not know would be silently dropped."""
     assert index.SUPPORTED_MEDIA_FORMATS == initiator.SUPPORTED_MEDIA_FORMATS
+
+
+@pytest.mark.parametrize(
+    ("settings", "expected"),
+    [
+        ({"languageCode": "fr-CA"}, {"LanguageCode": "fr-CA"}),
+        (
+            {"languageCode": "identify-language", "languageOptions": "hi-IN, th-TH"},
+            {"IdentifyLanguage": True, "LanguageOptions": ["hi-IN", "th-TH"]},
+        ),
+        (
+            {"languageCode": "identify-multiple-languages", "languageOptions": "es-US,en-GB"},
+            {"IdentifyMultipleLanguages": True, "LanguageOptions": ["es-US", "en-GB"]},
+        ),
+    ],
+    ids=["specific", "identify", "identify-multiple"],
+)
+def test_the_language_stage_one_read_from_the_settings_reaches_transcribe(
+    monkeypatch, settings, expected
+) -> None:
+    """The Configuration page's language, as Stage 1 records it, is the language
+    this stage starts the job in."""
+    written: list[dict] = []
+
+    class CapturingTable:
+        def put_item(self, Item, ConditionExpression=None):  # noqa: N803
+            written.append(Item)
+            return {}
+
+    class StubS3:
+        def generate_presigned_url(self, *args, **kwargs):
+            return "https://example.invalid/presigned"
+
+    class SettingsStore:
+        def get_section(self, name):
+            return SimpleNamespace(values=settings)
+
+    monkeypatch.setattr(initiator, "job_table", CapturingTable())
+    monkeypatch.setattr(initiator, "s3_client", StubS3())
+    monkeypatch.setattr(initiator, "_STORE", SettingsStore())
+    created = initiator.lambda_handler(
+        {
+            "info": {"fieldName": "createUploadMeeting"},
+            "identity": {"username": "carol@example.com", "groups": []},
+            "arguments": {
+                "input": {
+                    "meetingTopic": "Planning",
+                    "agentId": "carol@example.com",
+                    "filename": "planning.wav",
+                    "contentType": "audio/wav",
+                    "enableDiarization": True,
+                }
+            },
+        },
+        None,
+    )
+
+    transcribe = FakeTranscribe()
+    kinesis = FakeKinesis()
+    monkeypatch.setattr(index, "job_table", FakeTable(written[0]))
+    monkeypatch.setattr(index, "kinesis_client", kinesis)
+    monkeypatch.setattr(index, "transcribe_client", transcribe)
+    index.lambda_handler(s3_event(key=created["uploadKey"]), None)
+
+    language = {
+        name: transcribe.params[name]
+        for name in (
+            "LanguageCode",
+            "IdentifyLanguage",
+            "IdentifyMultipleLanguages",
+            "LanguageOptions",
+        )
+        if name in transcribe.params
+    }
+    assert language == expected
+    assert kinesis.payloads[0]["TranscriptionLanguage"] == created["transcriptionLanguage"]
+    assert transcribe.params["Settings"]["ShowSpeakerLabels"] is True

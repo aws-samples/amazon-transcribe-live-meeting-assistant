@@ -11,6 +11,7 @@ title: "Upload Audio"
 - [Supported File Formats](#supported-file-formats)
 - [Step-by-Step Walkthrough](#step-by-step-walkthrough)
 - [Speaker Diarization](#speaker-diarization)
+- [Transcription Language](#transcription-language)
 - [What Happens After the Upload](#what-happens-after-the-upload)
 - [Limits & Best Practices](#limits--best-practices)
 - [Troubleshooting](#troubleshooting)
@@ -80,11 +81,12 @@ picker; no drag-and-drop of URLs and no cloud-storage browsing.
    - *Upload complete. Transcription will begin shortly.* — hand-off to the
      backend pipeline.
 
-6. Once the upload finishes, a green alert appears with the **Meeting ID** and
-   a link **Open meeting detail page**. Initially the status is *In progress*
-   while Transcribe runs; when the batch job finishes (typically a few seconds
-   for short clips, a few minutes for long recordings), the status flips to
-   *Ended* and the transcript + summary render on the detail page.
+6. Once the upload finishes, a green alert appears with the **Meeting ID**, the
+   transcription language, and a link **Open meeting detail page**. Initially
+   the status is *In progress* while Transcribe runs; when the batch job
+   finishes (typically a few seconds for short clips, a few minutes for long
+   recordings), the status flips to *Ended* and the transcript + summary render
+   on the detail page.
 
 ## Speaker Diarization
 
@@ -98,6 +100,60 @@ On the meeting detail page, the transcript lines are labelled with those
 speaker IDs. Every speaker in an uploaded recording is on the `REMOTE` channel,
 since an upload has no local microphone; the `spk_N` label is what tells the
 speakers apart.
+
+Diarization is requested with every language setting, including language
+identification. Amazon Transcribe documents that
+[batch language identification can be combined with any other feature](https://docs.aws.amazon.com/transcribe/latest/dg/lang-id-batch.html#lang-id-batch-features);
+an upload with language identification and diarization together has not been
+run against a deployment.
+
+## Transcription Language
+
+An upload is transcribed in the language set in the Amazon Transcribe section
+of the Configuration page, the same setting that streaming meetings and Virtual
+Participants use. Uploads always run as Amazon Transcribe batch jobs: the ASR
+MicroVM engine (`EnableMicrovmAsr`, on by default) is not used for uploads, even
+on a deployment where it transcribes the streaming meetings. The settings are read
+when the upload starts. A change saved later applies to the next upload, and an
+upload already started keeps the language it started with.
+
+| Amazon Transcribe › Language | What the upload uses |
+| ---------------------------- | -------------------- |
+| A language, such as `ja-JP` | That language |
+| `identify-language` | Amazon Transcribe identifies the one language of the recording among the **Language options** |
+| `identify-multiple-languages` | Amazon Transcribe identifies every language spoken in the recording among the **Language options** |
+
+When the upload starts, it is refused with the reason shown on the page if the
+settings combine options an upload cannot use. With language identification,
+an upload needs:
+
+- **Language options** with at least two languages, at most one dialect of each
+  language (for example not both `en-US` and `en-GB`). Batch language
+  identification does not accept a single candidate language.
+- No **Custom vocabulary** and no **Custom language model**.
+
+**Preferred language** does not apply to uploads: batch transcription has no
+preferred language. **Redact personal information**, **Custom vocabulary** and
+**Custom language model** are not applied to uploads.
+
+The **Upload complete** message names the language, for example
+*Transcription language: Japanese (Japan), ja-JP*. The **Details** tab of the meeting
+shows the same language setting. With language identification it reads
+*Identified by Amazon Transcribe (one language)* or *(several languages)*, and
+once the job finishes, the languages Amazon Transcribe identified are listed
+under **Detected languages**, as for a streaming meeting. With
+`identify-language` every transcript line is in the one language identified;
+with `identify-multiple-languages` each line takes the language most of its
+words were identified in, and lines are marked with a language code when more
+than one language was heard.
+
+A client of the `createUploadMeeting` GraphQL mutation can set `languageCode`
+to a language code such as `de-DE`: any language Amazon Transcribe batch
+transcription supports, including ones the Configuration page does not offer.
+A code it does not support is refused when the upload starts. That language is
+used, and the Configuration page's settings are neither read nor checked. The response's
+`transcriptionLanguage` is the applied language: a language code, or
+`identify-language` / `identify-multiple-languages`.
 
 ## What Happens After the Upload
 
@@ -135,9 +191,10 @@ API instead of the streaming API.
 - **Presigned URL TTL: 15 minutes.** Start the upload promptly after clicking
   the button; for very large files on slow networks, consider splitting or
   re-running.
-- **Language:** the language chosen for the upload, or `en-US` when none is
-  chosen. An upload does not follow the language set for streaming meetings in
-  **Amazon Transcribe › Language** on the Configuration page.
+- **Language:** the language set in **Amazon Transcribe › Language** on the
+  Configuration page when the upload starts, or language identification among
+  the **Language options** (at least two) when it is set to identify the
+  language.
 - **Pending uploads expire after 7 days.** Files left in
   `lma-uploads-pending/` are auto-cleaned by an S3 lifecycle rule, so a
   failed or abandoned upload will not accumulate storage cost.

@@ -267,6 +267,9 @@ input CreateUploadMeetingInput {
 	fileSize: Float
 	enableDiarization: Boolean
 	maxSpeakers: Int
+	# The language to transcribe in, such as en-US. Left out, the upload follows
+	# the Configuration page's Amazon Transcribe language (or its language
+	# identification); set, it wins and the settings are not checked.
 	languageCode: String
 	meetingDateTime: AWSDateTime
 }
@@ -278,6 +281,10 @@ type CreateUploadMeetingOutput {
 	uploadKey: String!
 	contentType: String!
 	expiresInSeconds: Int!
+	# The language the recording is transcribed in: a language code, or
+	# identify-language / identify-multiple-languages when Amazon Transcribe
+	# identifies it from the Configuration page's language options.
+	transcriptionLanguage: String
 }
 
 interface DynamoDbBase {

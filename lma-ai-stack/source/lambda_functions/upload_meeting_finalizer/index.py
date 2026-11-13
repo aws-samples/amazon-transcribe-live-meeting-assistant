@@ -118,6 +118,25 @@ def meter_batch_job(call_id: str, transcript_json: dict) -> None:
     )
 
 
+#: The LanguageIdentification Stage 1 records for single-language identification.
+SINGLE_LANGUAGE_IDENTIFICATION = "identify-language"
+
+
+def identified_language(job: dict, transcription_job: dict) -> str | None:
+    """The one language Transcribe identified for the whole recording, or None.
+
+    Only single-language identification names one language for the whole job
+    (``TranscriptionJob.LanguageCode``), and its output names none per word, so
+    every segment is given it. Multiple-language identification names a language
+    per word, which ``_segment_language`` reads for each segment. None for an
+    upload that named its language: the meeting's TranscriptionLanguage already
+    says which, as for a streaming meeting in a fixed language.
+    """
+    if (job.get("LanguageIdentification") or "").strip() != SINGLE_LANGUAGE_IDENTIFICATION:
+        return None
+    return _language(transcription_job.get("LanguageCode"))
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -173,6 +192,7 @@ def _fetch_transcript_json(bucket: str, key: str) -> dict:
 def _build_segments(
     transcript_json: dict,
     enable_diarization: bool,
+    job_language: str | None = None,
 ) -> list[dict]:
     """Turn a Transcribe output JSON into a list of segment dicts in the shape
     ``call_event_processor`` consumes.
@@ -181,6 +201,10 @@ def _build_segments(
     sentence-like chunks. With diarization enabled each chunk carries a
     ``speaker_label`` (e.g. ``spk_0``). Falls back to a single glued segment
     from ``results.transcripts[]`` if ``audio_segments`` is absent.
+
+    ``job_language`` is the language single-language identification found for
+    the whole recording; a segment whose output names no language of its own
+    is given it as ``LanguageCode``.
     """
     results = transcript_json.get("results") or {}
     audio_segments = results.get("audio_segments") or []
@@ -190,15 +214,16 @@ def _build_segments(
         text = " ".join(t.get("transcript", "") for t in transcripts).strip()
         if not text:
             return []
-        return [
-            {
-                "SegmentId": "seg-0",
-                "Transcript": text,
-                "StartTime": 0.0,
-                "EndTime": 0.0,
-                "Speaker": "spk_0",
-            }
-        ]
+        segment = {
+            "SegmentId": "seg-0",
+            "Transcript": text,
+            "StartTime": 0.0,
+            "EndTime": 0.0,
+            "Speaker": "spk_0",
+        }
+        if job_language:
+            segment["LanguageCode"] = job_language
+        return [segment]
 
     items_by_id = _items_by_id(results)
     segments = []
@@ -222,7 +247,7 @@ def _build_segments(
             "EndTime": end,
             "Speaker": speaker_label,
         }
-        language_code = _segment_language(seg, items_by_id)
+        language_code = _segment_language(seg, items_by_id) or job_language
         if language_code:
             segment["LanguageCode"] = language_code
         segments.append(segment)
@@ -248,9 +273,10 @@ def _segment_language(seg: dict, items_by_id: dict) -> str | None:
     Only a job run with multiple-language identification names a language per
     word (``results.items[].language_code``); an utterance (``audio_segments``)
     lists the ids of its words, and takes the language most of them are in. A
-    ``language_code`` on the utterance itself is used first. A job run in one
-    fixed language -- which is how Upload Audio starts its jobs today -- names
-    none, and the segment then carries no language.
+    ``language_code`` on the utterance itself is used first. A job run in a
+    fixed language or with single-language identification names none here; for
+    single-language identification the caller gives the segment the job's
+    identified language instead, and in a fixed language it carries none.
     """
     own = _language(seg.get("language_code"))
     if own:
@@ -380,7 +406,13 @@ def lambda_handler(event, context):  # noqa: ARG001
         _emit_end_event(job, call_id)
         return {"ok": False, "reason": str(err)}
 
-    segments = _build_segments(transcript_json, enable_diarization)
+    # The meeting's TranscriptionLanguage stays the identify mode START recorded;
+    # the languages heard reach its DetectedLanguages through each segment's
+    # LanguageCode, as they do for a streaming meeting.
+    language = identified_language(job, tj)
+    if language:
+        logger.info("Transcribe identified %s for %s", language, call_id)
+    segments = _build_segments(transcript_json, enable_diarization, language)
     logger.info("Emitting %d transcript segment(s) for %s", len(segments), call_id)
     meter_batch_job(call_id, transcript_json)
 

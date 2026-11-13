@@ -59,7 +59,14 @@ CALL_DATA_STREAM_NAME = os.environ["CALL_DATA_STREAM_NAME"]
 S3_BUCKET_NAME = os.environ["S3_BUCKET_NAME"]
 UPLOADS_PENDING_PREFIX = os.environ.get("UPLOADS_PENDING_PREFIX", "lma-uploads-pending/")
 TRANSCRIPTS_PREFIX = os.environ.get("TRANSCRIPTS_PREFIX", "lma-transcripts/")
-DEFAULT_LANGUAGE_CODE = os.environ.get("DEFAULT_LANGUAGE_CODE", "en-US")
+#: The language of an upload whose UploadJob row names none: one started before
+#: uploads followed the Configuration page's language.
+LEGACY_LANGUAGE_CODE = "en-US"
+#: Each identify mode Stage 1 records, as its StartTranscriptionJob parameter.
+IDENTIFY_PARAMETERS = {
+    "identify-language": "IdentifyLanguage",
+    "identify-multiple-languages": "IdentifyMultipleLanguages",
+}
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 # The stack's customer-managed key. Amazon Transcribe encrypts the transcript it
 # writes with SSE-S3 unless the job names a key, so the job names this one and
@@ -141,9 +148,35 @@ def _mark_job(call_id: str, status: str, extra: dict | None = None) -> None:
         logger.error("DDB update_item failed for %s: %s", pk, err)
 
 
-def _language_code(job: dict) -> str:
-    """The language the upload's Transcribe job runs in."""
-    return (job.get("LanguageCode") or DEFAULT_LANGUAGE_CODE).strip()
+def _language_settings(job: dict) -> dict[str, Any]:
+    """The StartTranscriptionJob language parameters for the upload.
+
+    Stage 1 records them when the upload starts: ``LanguageCode``, or
+    ``LanguageIdentification`` (identify-language / identify-multiple-languages)
+    with ``LanguageOptions``. A row written before uploads followed the
+    Configuration page's language may name neither; it runs in en-US, as it would
+    have then.
+    """
+    mode = (job.get("LanguageIdentification") or "").strip()
+    if mode in IDENTIFY_PARAMETERS:
+        return {
+            IDENTIFY_PARAMETERS[mode]: True,
+            "LanguageOptions": [str(code).strip() for code in job.get("LanguageOptions") or []],
+        }
+    return {"LanguageCode": (job.get("LanguageCode") or LEGACY_LANGUAGE_CODE).strip()}
+
+
+def _transcription_language(job: dict) -> str:
+    """The meeting's TranscriptionLanguage: the language code, or the identify mode.
+
+    The meeting's TranscriptionLanguage keeps the identify mode, as for a
+    streaming meeting; Stage 3 lists the identified languages as its
+    DetectedLanguages through each segment's LanguageCode.
+    """
+    mode = (job.get("LanguageIdentification") or "").strip()
+    if mode in IDENTIFY_PARAMETERS:
+        return mode
+    return _language_settings(job)["LanguageCode"]
 
 
 def _emit_start_event(job: dict) -> None:
@@ -172,7 +205,7 @@ def _emit_start_event(job: dict) -> None:
         # file, whose transcript is all on the REMOTE channel.
         "CaptureSource": "UPLOAD",
         "TranscriptionEngine": "TRANSCRIBE",
-        "TranscriptionLanguage": _language_code(job),
+        "TranscriptionLanguage": _transcription_language(job),
         "SpeakerSeparation": "REMOTE" if job.get("EnableDiarization") else "NONE",
     }
     logger.info("Emitting START to Kinesis: %s", json.dumps(start_event, default=str))
@@ -203,11 +236,9 @@ def _start_transcription_job(job: dict) -> str:
         settings["ShowSpeakerLabels"] = True
         settings["MaxSpeakerLabels"] = max_speakers
 
-    language_code = _language_code(job)
-
     params: dict[str, Any] = {
         "TranscriptionJobName": call_id,
-        "LanguageCode": language_code,
+        **_language_settings(job),
         "Media": {"MediaFileUri": media_file_uri},
         "OutputBucketName": bucket,
         "OutputKey": f"{TRANSCRIPTS_PREFIX}{call_id}.transcribe.json",

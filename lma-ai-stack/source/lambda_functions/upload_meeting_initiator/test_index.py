@@ -24,11 +24,13 @@ per test replace those handles entirely.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
@@ -47,6 +49,15 @@ os.environ["EVENT_SOURCING_TABLE"] = TABLE
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 HERE = Path(__file__).resolve().parent
+# The configuration layer, which the deployed function gets as a Lambda layer.
+sys.path.insert(0, str(HERE.parents[1] / "lambda_layers" / "configuration_layer"))
+# The cases the upload's combination check is held to, shared with lma_config's
+# tests and the WebSocket transcriber's.
+COMBINATIONS = json.loads(
+    (HERE.parents[3] / "test-fixtures" / "transcribe-option-combinations.json").read_text(
+        encoding="utf-8"
+    )
+)["cases"]
 
 
 def _load_by_path(name: str, path: Path):
@@ -66,6 +77,7 @@ def _load_by_path(name: str, path: Path):
 with mock.patch("boto3.client"), mock.patch("boto3.resource"):
     index = _load_by_path("upload_meeting_initiator_index", HERE / "index.py")
 
+from lma_config import section_schema  # noqa: E402  (the layer path is set above)
 
 # The instant every test observes, so timestamp and TTL arithmetic can be asserted
 # as exact values instead of as a tolerance window.
@@ -127,15 +139,42 @@ def conditional_check_failed() -> ClientError:
     )
 
 
+class FakeStore:
+    """The configuration store: the Transcription section's saved values."""
+
+    def __init__(self, values: dict | None = None, error: Exception | None = None) -> None:
+        self.values = dict(values or {})
+        self.error = error
+        self.reads = 0
+
+    def get_section(self, name):
+        assert name == "transcription"
+        self.reads += 1
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(values=dict(self.values))
+
+
 @pytest.fixture(name="env")
 def env_fixture(monkeypatch: pytest.MonkeyPatch):
-    """Install the fakes and the frozen clock, and hand both back to the test."""
+    """Install the fakes and the frozen clock, and hand both back to the test.
+
+    The Transcription section holds nothing, so the shipped defaults (en-US) apply.
+    """
     table = FakeTable()
     s3_client = FakeS3()
     monkeypatch.setattr(index, "job_table", table)
     monkeypatch.setattr(index, "s3_client", s3_client)
     monkeypatch.setattr(index, "datetime", _FrozenDatetime)
+    monkeypatch.setattr(index, "_STORE", FakeStore())
     return table, s3_client
+
+
+def configure(monkeypatch: pytest.MonkeyPatch, **values) -> FakeStore:
+    """Save these Transcription settings on the Configuration page."""
+    store = FakeStore(values)
+    monkeypatch.setattr(index, "_STORE", store)
+    return store
 
 
 def make_event(identity: dict | None = None, field_name: str = "createUploadMeeting", **overrides):
@@ -223,6 +262,7 @@ def test_the_response_carries_exactly_the_fields_the_ui_needs(env) -> None:
         "uploadKey",
         "contentType",
         "expiresInSeconds",
+        "transcriptionLanguage",
     }
     assert result["uploadUrl"] == PRESIGNED_URL
     assert result["uploadBucket"] == BUCKET
@@ -537,6 +577,7 @@ def test_the_row_carries_every_field_the_later_stages_read(env) -> None:
         "EnableDiarization": True,
         "MaxSpeakers": 6,
         "LanguageCode": "es-US",
+        "LanguageSource": "REQUEST",
         "MeetingDateTime": "2025-01-01T10:00:00Z",
         "PendingObjectBucket": BUCKET,
         "PendingObjectKey": f"lma-uploads-pending/{call_id}/recording.mp3",
@@ -553,8 +594,10 @@ def test_optional_fields_are_left_out_rather_than_stored_as_null(env) -> None:
     invoke()
     item = table.item
     assert "FileSize" not in item
-    assert "LanguageCode" not in item
     assert "MeetingDateTime" not in item
+    # A specific language: no identification fields.
+    assert "LanguageIdentification" not in item
+    assert "LanguageOptions" not in item
     assert [k for k, v in item.items() if v is None] == []
 
 
@@ -701,9 +744,9 @@ def test_presigned_urls_are_signed_with_sigv4(env) -> None:
         ({"maxSpeakers": 31}, "maxSpeakers must be between 2 and 30"),
         ({"maxSpeakers": "many"}, "maxSpeakers must be an integer"),
         ({"meetingDateTime": "last tuesday"}, "ISO-8601"),
-        ({"languageCode": "e"}, "BCP-47"),
-        ({"languageCode": "en_US"}, "BCP-47"),
-        ({"languageCode": "english!"}, "BCP-47"),
+        ({"languageCode": "e"}, "is not a language Amazon Transcribe can transcribe"),
+        ({"languageCode": "en_US"}, "is not a language Amazon Transcribe can transcribe"),
+        ({"languageCode": "english!"}, "is not a language Amazon Transcribe can transcribe"),
     ],
 )
 def test_malformed_input_is_rejected_before_anything_is_written(env, overrides, message) -> None:
@@ -812,3 +855,190 @@ def test_a_local_speaker_name_is_required_under_one_name_or_the_other(env) -> No
     with pytest.raises(index.ValidationError, match=r"localSpeakerName \(or agentId\) is required"):
         invoke(localSpeakerName=None, agentId="  ")
     assert table.calls == []
+
+
+# ---------------------------------------------------------------------------
+# The transcription language: the Configuration page's Amazon Transcribe settings
+# ---------------------------------------------------------------------------
+
+_LANGUAGE_ENUM = section_schema("transcription")["properties"]["languageCode"]["enum"]
+SPECIFIC_LANGUAGES = [code for code in _LANGUAGE_ENUM if code not in index.IDENTIFY_MODES]
+
+
+def test_with_nothing_saved_an_upload_is_transcribed_in_the_shipped_en_us(env) -> None:
+    """A deployment that never changed the setting gets the result it gets today."""
+    table, _ = env
+    result = invoke()
+    assert result["transcriptionLanguage"] == "en-US"
+    assert table.item["LanguageCode"] == "en-US"
+    assert table.item["LanguageSource"] == "CONFIGURATION"
+
+
+@pytest.mark.parametrize("language_code", SPECIFIC_LANGUAGES)
+def test_an_upload_is_transcribed_in_the_configured_language(
+    env, monkeypatch, language_code
+) -> None:
+    table, _ = env
+    configure(monkeypatch, languageCode=language_code)
+    result = invoke()
+    assert result["transcriptionLanguage"] == language_code
+    item = table.item
+    assert item["LanguageCode"] == language_code
+    assert item["LanguageSource"] == "CONFIGURATION"
+    assert "LanguageIdentification" not in item
+    assert "LanguageOptions" not in item
+
+
+@pytest.mark.parametrize("mode", index.IDENTIFY_MODES)
+def test_an_identify_mode_records_the_language_options_as_candidates(
+    env, monkeypatch, mode
+) -> None:
+    table, _ = env
+    configure(monkeypatch, languageCode=mode, languageOptions=" ja-JP, es-US ,fr-CA")
+    result = invoke()
+    assert result["transcriptionLanguage"] == mode
+    item = table.item
+    assert item["LanguageIdentification"] == mode
+    assert item["LanguageOptions"] == ["ja-JP", "es-US", "fr-CA"]
+    assert item["LanguageSource"] == "CONFIGURATION"
+    assert "LanguageCode" not in item
+
+
+def test_the_preferred_language_does_not_apply_to_an_upload(env, monkeypatch) -> None:
+    """Batch jobs have no preferred language, so one outside the options is not refused."""
+    table, _ = env
+    configure(
+        monkeypatch,
+        languageCode="identify-language",
+        languageOptions="de-DE, it-IT",
+        preferredLanguage="pt-BR",
+    )
+    invoke()
+    assert table.item["LanguageOptions"] == ["de-DE", "it-IT"]
+    assert "PreferredLanguage" not in table.item
+
+
+@pytest.mark.parametrize("mode", index.IDENTIFY_MODES)
+def test_speaker_diarization_is_kept_with_language_identification(env, monkeypatch, mode) -> None:
+    table, _ = env
+    configure(monkeypatch, languageCode=mode, languageOptions="hi-IN, th-TH")
+    invoke(enableDiarization=True, maxSpeakers=5)
+    assert table.item["EnableDiarization"] is True
+    assert table.item["MaxSpeakers"] == 5
+    assert table.item["LanguageIdentification"] == mode
+
+
+_REFUSED = [case for case in COMBINATIONS if case["upload"]]
+
+
+@pytest.mark.parametrize("case", _REFUSED, ids=[case["name"] for case in _REFUSED])
+def test_settings_an_upload_cannot_use_are_refused_when_it_starts(env, monkeypatch, case) -> None:
+    table, s3_client = env
+    configure(monkeypatch, **case["options"])
+    with pytest.raises(index.ValidationError) as raised:
+        invoke()
+    assert str(raised.value) == (
+        "The Amazon Transcribe settings on the Configuration page cannot be used for an "
+        f"upload: {case['upload']}"
+    )
+    assert table.calls == []
+    assert s3_client.calls == []
+
+
+@pytest.mark.parametrize("language_code", ["es-US", "zh-CN"])
+def test_a_requested_language_wins_and_skips_the_settings(env, monkeypatch, language_code) -> None:
+    """An API caller that sets languageCode keeps working, even where the settings
+    would refuse an upload; the settings are not read at all."""
+    table, _ = env
+    store = configure(monkeypatch, languageCode="identify-language", languageOptions="")
+    result = invoke(languageCode=language_code)
+    assert result["transcriptionLanguage"] == language_code
+    assert table.item["LanguageCode"] == language_code
+    assert table.item["LanguageSource"] == "REQUEST"
+    assert store.reads == 0
+
+
+def test_settings_are_read_for_every_upload(env, monkeypatch) -> None:
+    """A change saved between two uploads applies to the second."""
+    table, _ = env
+    store = configure(monkeypatch, languageCode="fr-FR")
+    invoke()
+    store.values["languageCode"] = "it-IT"
+    invoke()
+    assert [call["Item"]["LanguageCode"] for call in table.calls] == ["fr-FR", "it-IT"]
+    assert store.reads == 2
+
+
+def test_a_value_no_longer_offered_is_the_shipped_default(env, monkeypatch) -> None:
+    table, _ = env
+    configure(monkeypatch, languageCode="xx-XX")
+    assert invoke()["transcriptionLanguage"] == "en-US"
+    assert table.item["LanguageCode"] == "en-US"
+
+
+def test_unreadable_settings_refuse_the_upload(env, monkeypatch) -> None:
+    """Refused rather than transcribed in a language the deployment may not use."""
+    table, s3_client = env
+    throttled = ClientError({"Error": {"Code": "Throttling", "Message": "slow"}}, "GetItem")
+    monkeypatch.setattr(index, "_STORE", FakeStore(error=throttled))
+    with pytest.raises(index.ConfigurationUnavailableError, match="try the upload again"):
+        invoke()
+    assert table.calls == []
+    assert s3_client.calls == []
+
+
+def test_without_a_configuration_table_the_shipped_defaults_apply(env, monkeypatch) -> None:
+    table, _ = env
+    monkeypatch.setattr(index, "_STORE", None)
+    monkeypatch.delenv("CONFIGURATION_TABLE_NAME", raising=False)
+    assert invoke()["transcriptionLanguage"] == "en-US"
+    assert table.item["LanguageCode"] == "en-US"
+
+
+# ---------------------------------------------------------------------------
+# A requested languageCode: one Amazon Transcribe batch jobs accept
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "language_code",
+    ["zz-ZZ", "en-us", "xx", "identify-language", "en-US, es-US"],
+    ids=["unknown", "wrong-case", "no-region", "identify-mode", "list"],
+)
+def test_a_language_transcribe_does_not_accept_is_refused_before_any_url(
+    env, monkeypatch, language_code
+) -> None:
+    """StartTranscriptionJob would refuse it after the file is uploaded, and the
+    meeting would never end; it is refused before a row or a URL exists."""
+    table, s3_client = env
+    store = configure(monkeypatch, languageCode="ja-JP")
+    with pytest.raises(index.ValidationError, match="is not a language Amazon Transcribe"):
+        invoke(languageCode=language_code)
+    assert table.calls == []
+    assert s3_client.calls == []
+    assert store.reads == 0
+
+
+@pytest.mark.parametrize("language_code", ["nl-NL", "ar-SA", "sv-SE"])
+def test_a_batch_language_the_configuration_page_does_not_offer_is_accepted(
+    env, language_code
+) -> None:
+    """API callers may name any language batch transcription supports, not only the
+    streaming languages the Configuration page lists."""
+    table, _ = env
+    assert invoke(languageCode=language_code)["transcriptionLanguage"] == language_code
+    assert table.item["LanguageCode"] == language_code
+    assert table.item["LanguageSource"] == "REQUEST"
+
+
+def test_every_language_the_configuration_page_offers_is_a_batch_language() -> None:
+    """Otherwise a setting the page accepts would start a job Transcribe refuses."""
+    assert set(SPECIFIC_LANGUAGES) <= index.BATCH_LANGUAGE_CODES
+
+
+def test_the_accepted_languages_come_from_the_transcribe_service_model() -> None:
+    import botocore.session
+
+    model = botocore.session.get_session().get_service_model("transcribe")
+    assert index.BATCH_LANGUAGE_CODES == frozenset(model.shape_for("LanguageCode").enum)
+    assert len(index.BATCH_LANGUAGE_CODES) > len(SPECIFIC_LANGUAGES)
