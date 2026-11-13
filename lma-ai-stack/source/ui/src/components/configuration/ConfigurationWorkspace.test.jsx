@@ -1064,6 +1064,11 @@ describe('the profile list', () => {
     await waitFor(() => expect(toggle.getAttribute('aria-expanded')).toBe('false'));
   });
 
+  it('shows the profile list when the profile named in the link does not exist', async () => {
+    renderEditor({ route: '/configuration/settings?profile=typo' });
+    await waitFor(async () => expect((await profilesToggle()).getAttribute('aria-expanded')).toBe('true'));
+  });
+
   it('shows the profile list when there is no profile open in the editor', async () => {
     profilesMock.mockReset();
     profilesMock.mockRejectedValue(new Error('offline'));

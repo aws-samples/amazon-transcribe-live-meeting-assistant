@@ -694,7 +694,7 @@ const ConfigurationEditor = ({
       <SpaceBetween size="l">
         {doc && !doc.exists && (
           <Alert type="error" header={`There is no configuration profile named ${profile}`}>
-            Open another profile from the list above.
+            Open another profile from Configuration Profiles above.
           </Alert>
         )}
 

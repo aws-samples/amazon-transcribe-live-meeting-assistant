@@ -368,7 +368,10 @@ export const ConfigurationWorkspaceContent = () => {
         headerText="Configuration Profiles"
         headerCounter={profilesLoading ? undefined : `(${profiles.length})`}
         headerDescription="Select profiles to compare, activate or delete them; open one by its name."
-        expanded={tableOpen || (!profile && !profilesLoading)}
+        // Shown open, whatever the heading was last set to, while there is no
+        // profile to edit: none is open, or the open one is not in the list (a
+        // link naming a profile that does not exist), so the list is the way on.
+        expanded={tableOpen || (!profilesLoading && (!profile || !profiles.some((entry) => entry.name === profile)))}
         onChange={({ detail }) => setTableOpen(detail.expanded)}
       >
         <ProfilesTable
