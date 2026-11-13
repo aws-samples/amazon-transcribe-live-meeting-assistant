@@ -4,6 +4,7 @@ import './stack-settings.js';
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeChatText } from './chat-text.js';
 import { addressingVpHandle } from './vp-handle.js';
+import { normalizeMeetingPassword } from './meeting-password.js';
 
 export interface MeetingInvite {
   meetingId: string;
@@ -127,7 +128,8 @@ class DetailsManager {
     // Initialize from environment variables
     const meetingPlatform = (process.env.MEETING_PLATFORM as 'Chime' | 'Zoom' | 'Teams' | 'Webex' | 'CHIME' | 'ZOOM' | 'TEAMS' | 'WEBEX' | 'GOOGLE_MEET') || 'Chime';
     const meetingId = process.env.MEETING_ID || '';
-    const meetingPassword = process.env.MEETING_PASSWORD || '';
+    // Grouping spaces removed from a numeric Zoom passcode: see meeting-password.ts.
+    const meetingPassword = normalizeMeetingPassword(process.env.MEETING_PASSWORD, meetingPlatform);
     const meetingName = process.env.MEETING_NAME || 'LMA Meeting';
     const meetingTime = parseInt(process.env.MEETING_TIME || '0');
     const userName = process.env.LMA_USER || 'LMA User';
