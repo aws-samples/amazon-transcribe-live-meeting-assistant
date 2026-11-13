@@ -376,6 +376,14 @@ export class MeetingConsentFlow {
 
     private settingsRead: ConsentSettings | null = null;
 
+    /**
+     * The Meeting Consent section's Keep evidence screenshots, as the consent
+     * API answers it; null until read. The resolver deletes an image once its
+     * check is stored when this is off, so an image that is not checked would
+     * otherwise be kept: see captureEvidence.
+     */
+    private keepEvidenceScreenshots: boolean | null = null;
+
     private noticeRepostTimer: ReturnType<typeof setTimeout> | null = null;
 
     private rosterSyncTimer: ReturnType<typeof setTimeout> | null = null;
@@ -622,6 +630,7 @@ export class MeetingConsentFlow {
             const phrases = state.settings;
             if (phrases?.ConsentPhrases?.length) this.settings = { ...this.settings, consentPhrases: phrases.ConsentPhrases };
             if (phrases?.ObjectionPhrases?.length) this.settings = { ...this.settings, objectionPhrases: phrases.ObjectionPhrases };
+            if (typeof phrases?.KeepEvidenceScreenshots === 'boolean') this.keepEvidenceScreenshots = phrases.KeepEvidenceScreenshots;
         } catch (error) {
             log.warn(`[consent] could not read the consent settings back; using the configuration's phrases: ${String(error)}`);
         }
@@ -775,10 +784,10 @@ export class MeetingConsentFlow {
             const name = event.ParticipantName || 'A participant';
             log.always(`[consent] objection recorded for ${JSON.stringify(name)} (source ${event.Source})`);
             await this.say([`An objection for ${name} was recorded in LMA. Live Meeting Assistant has stopped recording and transcribing.`]);
-            this.queueEvidence(`after an objection for ${name} was recorded in LMA`);
+            this.queueEvidence(`after an objection for ${name} was recorded in LMA`, false);
         }
         if (record.Status === 'granted' && previous?.Status !== 'granted' && this.noticePosted) {
-            this.queueEvidence(this.plan.mode === 'notify' ? 'after the notice was posted' : 'when consent was granted');
+            this.queueEvidence(grantEvidenceNote(record, this.plan.mode));
         }
     }
 
@@ -843,7 +852,9 @@ export class MeetingConsentFlow {
         }
         const waiting = waitingFor(record);
         // Where the chat shows no sender, consent can only be given aloud.
-        const aloud = this.io?.sendersHidden ? ' On this meeting platform consent is given aloud ("LMA, I consent"), not in the chat.' : '';
+        const aloud = this.io?.sendersHidden
+            ? ` On this meeting platform consent is given aloud ("LMA, ${this.settings.consentPhrases[0] || 'I consent'}"), not in the chat.`
+            : '';
         if (waiting.length === 0) return `Waiting for consent: no participants are listed yet.${aloud}`;
         return `Waiting for consent: ${waiting.length} of ${(record.Participants ?? []).length} participants present have not consented yet.${aloud}`;
     }
@@ -1080,21 +1091,33 @@ export class MeetingConsentFlow {
         this.syncListening();
         await this.stopVideo();
         await this.writeDetail('Not recording: a participant objected to recording.');
-        const consentPhrase = this.settings.consentPhrases[0] || 'I consent';
         // A sender the platform did not show cannot withdraw by replying (a
         // consent needs a sender), so no such way is offered to them.
-        const resume = name === UNKNOWN_SENDER ? '' : ` If ${name} replies "${consentPhrase}", it can continue.`;
+        const resume = name === UNKNOWN_SENDER ? '' : ` ${this.resumeLine(name)}`;
         await this.say([
             `${name} objected. Live Meeting Assistant has stopped recording and transcribing this meeting.` +
                 (leave ? ' It will now leave the meeting.' : resume),
         ]);
         await this.recordEvent(event, true);
-        const evidence = this.queueEvidence(`when ${name} objected`);
+        const evidence = this.queueEvidence(`when ${name} objected`, event.Source !== 'voice');
         if (leaveNow && this.io) {
             await Promise.race([evidence, this.sleep(30_000)]);
             await this.say(this.deps.exitMessages());
             this.io.leave(name);
         }
+    }
+
+    /**
+     * How the objector can let capture continue, in the forms this VP reads: a
+     * reply said aloud counts only when addressed to LMA, so where spoken
+     * replies are read the spoken form is given with the "LMA" addressee, and
+     * where the platform shows no chat sender only that form is offered.
+     */
+    private resumeLine(name: string): string {
+        const phrase = this.settings.consentPhrases[0] || 'I consent';
+        if (!this.readsSpokenReplies) return `If ${name} replies "${phrase}", it can continue.`;
+        if (this.io?.sendersHidden) return `If ${name} says "LMA, ${phrase}" aloud, it can continue.`;
+        return `If ${name} types "${phrase}" in the chat or says "LMA, ${phrase}", it can continue.`;
     }
 
     /**
@@ -1238,8 +1261,15 @@ export class MeetingConsentFlow {
 
     // ─── Evidence ────────────────────────────────────────────────────────────
 
-    private queueEvidence(note: string): Promise<unknown> {
-        const run = (): Promise<void> => this.captureEvidence(note);
+    /**
+     * Screenshots of the chat and the participant list, noted as taken `note`.
+     * `check` asks for the vision-model check of the chat screenshot: off for
+     * an objection that was not made in the chat (recorded in LMA, or said
+     * aloud), which the chat cannot show, so a check of it would report the
+     * chat alone. Such an image can still be checked from the meeting page.
+     */
+    private queueEvidence(note: string, check = true): Promise<unknown> {
+        const run = (): Promise<void> => this.captureEvidence(note, check);
         const next = this.evidenceChain.then(run, run);
         this.evidenceChain = next;
         return next;
@@ -1251,8 +1281,22 @@ export class MeetingConsentFlow {
         await this.apiChain;
     }
 
-    private async captureEvidence(note: string): Promise<void> {
+    /**
+     * Whether an image that will not be checked may be stored. Only where the
+     * deployment keeps evidence screenshots: where it does not, an image is
+     * deleted once its check is stored, and one that is never checked would
+     * outlive that. Not when the setting could not be read.
+     */
+    private get keepsUncheckedEvidence(): boolean {
+        return this.keepEvidenceScreenshots === true;
+    }
+
+    private async captureEvidence(note: string, check: boolean): Promise<void> {
         if (!this.io?.screenshots || !this.started) return;
+        if (!check && !this.keepsUncheckedEvidence) {
+            log.info(`[consent] no screenshot ${note}: evidence screenshots are kept only until checked, and these would not be`);
+            return;
+        }
         if (this.evidenceUsed >= MAX_EVIDENCE_IMAGES) {
             log.info(`[consent] no screenshot ${note}: this meeting already has ${MAX_EVIDENCE_IMAGES}`);
             return;
@@ -1266,6 +1310,10 @@ export class MeetingConsentFlow {
         }
         for (const shot of shots) {
             if (this.evidenceUsed >= MAX_EVIDENCE_IMAGES) break;
+            // The check reads a chat for the notice and the replies; a
+            // participant list alone would always come back inconclusive.
+            const checked = check && shot.view !== 'participants';
+            if (!checked && !this.keepsUncheckedEvidence) continue;
             const key = consentEvidenceKey(this.deps.callId(), Date.parse(shot.capturedAt) || this.clock(), shot.view);
             try {
                 await this.deps.upload(key, shot.image);
@@ -1278,9 +1326,7 @@ export class MeetingConsentFlow {
             const record = await this.callApi((api) => api.addEvidence({ S3Key: key, CapturedAt: shot.capturedAt, Note: `${what} ${note}` }));
             const evidenceId = record?.Evidence?.find((entry) => entry.S3Key === key)?.EvidenceId;
             log.info(`[consent] evidence stored: ${key}${evidenceId ? ` (${evidenceId})` : ''}`);
-            // The check reads a chat for the notice and the replies; a
-            // participant list alone would always come back inconclusive.
-            if (evidenceId && shot.view !== 'participants' && this.api) {
+            if (checked && evidenceId && this.api) {
                 void this.api.verifyEvidence(evidenceId);
             }
         }
@@ -1302,6 +1348,26 @@ export function latestDecisions(record: ConsentRecord): Map<string, string> {
         if (name && (event.Decision === 'consent' || event.Decision === 'objection')) latest.set(name, event.Decision);
     }
     return latest;
+}
+
+/**
+ * What the screenshots taken when the record becomes granted were taken for.
+ * After an objection, capture resumes on a consent: the latest one recorded
+ * after the latest objection names the event ("when Bo Chen consented").
+ * Otherwise the first grant: in notify, the notice being posted.
+ */
+export function grantEvidenceNote(record: ConsentRecord, mode: PlannedMode): string {
+    const events = (record.Events ?? []).filter((event) => event.Source !== 'attestation');
+    let lastObjection = -1;
+    events.forEach((event, index) => {
+        if (event.Decision === 'objection') lastObjection = index;
+    });
+    if (lastObjection >= 0) {
+        const consents = events.slice(lastObjection + 1).filter((event) => event.Decision === 'consent' && event.ParticipantName);
+        const who = consents.length ? consents[consents.length - 1].ParticipantName : null;
+        return who ? `when ${who} consented` : 'when recording resumed';
+    }
+    return mode === 'notify' ? 'after the notice was posted' : 'when consent was granted';
 }
 
 /** Whether a display name reads as one of the participant list's placeholders, or the unknown sender. */

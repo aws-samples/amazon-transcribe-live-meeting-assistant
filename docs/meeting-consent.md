@@ -152,7 +152,7 @@ the `ConfigurationPreset` stack parameter; see
 | Consent phrases | Comma-separated phrases read as consent | I consent, I agree, I accept |
 | Objection phrases | Comma-separated phrases read as an objection | I object, I do not consent, I don't consent, I do not agree, I don't agree, do not record, don't record, stop recording |
 | Allow a different choice per meeting | Whether a meeting may be started with another mode, rule or notice | On |
-| Keep evidence screenshots | Whether evidence images stay with the meeting, or are deleted once checked | On |
+| Keep evidence screenshots | Whether evidence images stay with the meeting. Off: each image is deleted once its check is stored, and the Virtual Participant stores only images it has checked automatically, so it keeps no participant-list screenshots and none for objections recorded in LMA or said aloud (see [Evidence screenshots](#evidence-screenshots)) | On |
 | Evidence check model | The Amazon Bedrock vision model that checks evidence images; see [Checking evidence with a vision model](#checking-evidence-with-a-vision-model) | Amazon Nova Lite |
 | Streaming clients without a consent step | What the WebSocket transcriber does, in Notify or Opt-in, with a meeting from a client that shows no consent step: **Accept with a warning** (captured as before, with no consent record, and a warning logged) or **Refuse** (not recorded or transcribed, and the client is told why). See [Clients without a consent step](#clients-without-a-consent-step) | Accept with a warning |
 | Virtual Participant leaves after an objection | Whether a Virtual Participant leaves the meeting after a participant objects, in the chat or aloud, rather than staying in it without recording | Off |
@@ -195,9 +195,10 @@ on its **Details** tab. It shows:
   listed or replied, each with their latest reply (*Consented*, *Objected* or
   *No reply*);
 - the owner's **attestation**, when there is one;
-- the **evidence** images as thumbnails, each with the vision model's verdict,
-  confidence and summary when it has been checked; selecting one opens it full
-  size;
+- the **evidence** images as thumbnails, each with what it was taken for and,
+  when it has been checked, the vision model's verdict (shown as *Image check:*,
+  because it reports what that image shows, which can differ from the record's
+  status), confidence and summary; selecting one opens it full size;
 - a **timeline** of everything, oldest first: consent started, notices posted,
   replies and attestations, and each change of status with its reason. Replies
   are placed by when LMA recorded them, the order the status is decided in.
@@ -235,7 +236,11 @@ The summary's downloads and its copy to the clipboard, under **Download** in
 the meeting page's header, add the consent record after the summary: the
 mode, rule and status, whether capture was allowed at the time of the download,
 the notice, the attestation, each participant's latest reply, the timeline, and
-each evidence image's check, followed by the note that the record is supporting
+each evidence image, described by its note with when it was captured and its
+image check (*"- Meeting chat when Bo Chen objected (screenshot captured
+2026-11-02T10:02:30.000Z). Image check: Objection found (model
+amazon.nova-lite-v1:0, confidence 0.9)"*, or *"Image check: not run"*),
+followed by the note that the record is supporting
 evidence and not a legal determination. A meeting without a consent record
 downloads as before. The email link carries the summary only.
 
@@ -404,7 +409,15 @@ and while capture is still stopped by the first, is acted on and recorded once.
   VP stays, and listens for spoken replies while capture is stopped. Each
   participant's latest reply is the one that counts, so if the objector later
   replies with consent, in the chat or aloud, capture resumes, as the
-  acknowledgement says. The transcript and the audio recording resume; the screen recording does
+  acknowledgement says. Its last sentence gives the forms of reply this VP
+  reads, with the deployment's first consent phrase: *"If <name> types "I
+  consent" in the chat or says "LMA, I consent", it can continue."* where
+  spoken replies are read, because a reply said aloud counts only when it is
+  addressed to LMA; *"If <name> says "LMA, I consent" aloud, it can
+  continue."* on the Teams browser join, which shows no chat senders; and *"If
+  <name> replies "I consent", it can continue."* where spoken replies are not
+  read. An objection with no sender gets no such sentence, because a consent
+  needs a sender. The transcript and the audio recording resume; the screen recording does
   not. It stops for the rest of the meeting the first time capture is withheld
   after it started, and what it recorded until then is kept on the meeting as
   usual.
@@ -621,11 +634,40 @@ participant list, takes a second one, and puts the chat back. The screenshots
 are taken from the meeting page itself, so nothing open in the live view covers
 them. Each is a JPEG stored in the recordings bucket under
 `lma-consent-evidence/<meeting>/` and added to the record with
-`addMeetingConsentEvidence`, with a note of what it shows and when
-(*"Meeting chat when Bo Chen objected"*). For each chat screenshot the VP then
+`addMeetingConsentEvidence`, with a note of what it shows and the event it was
+taken for: *"Meeting chat after the notice was posted"* (notify) or *"… when
+consent was granted"* (opt-in) when the status becomes `granted` with no objection on the record;
+*"Meeting chat when Bo Chen objected"*; *"… after an objection for Bo Chen was
+recorded in LMA"*; and, when capture resumes after an objection, *"Meeting chat
+when Bo Chen consented"*, naming the latest participant to consent after the
+latest objection on the record. For each chat screenshot the VP then
 asks for the vision-model check (`verifyMeetingConsentEvidence`) without
 waiting for it; a participant list on its own is not checked, because the check
-reads a chat for the notice and the replies. Neither the screenshots nor the
+reads a chat for the notice and the replies. Nor are the screenshots taken for
+an objection that was not made in the chat: one recorded in LMA (**Record an
+objection**, or `recordMeetingConsentEvent` through the API) or one said aloud.
+Such an objection never appears in the chat as a participant's reply, and LMA's
+own announcement of it is not read as one, so a check of that chat could only
+report what else the chat shows, such as an earlier consent. With **Keep
+evidence screenshots** on, those images are kept and listed like the others,
+and the owner or an Admin can still check them with **Check with model**.
+
+With **Keep evidence screenshots** off, the VP stores only the screenshots it
+asks to have checked: the chat screenshot (or, where the chat and the
+participant list are on screen together, the one screenshot of both) after the
+notice, when consent is granted or
+resumes, and when an objection is typed in the chat. It stores no participant
+list screenshot, and nothing for an objection recorded in LMA or said aloud,
+because each image is deleted once its check is stored and these would never
+be checked. Each stored image is deleted after its automatic check, and the
+entry keeps the check, so the meeting page shows it as deleted after its check
+and offers no **Check with model**. A manual check started on the meeting page
+just before the automatic check deleted the image fails, and the entry then
+shows the same deleted state. The VP reads the setting from the consent API
+when consent starts; if it cannot, it treats the setting as off. An image whose
+automatic check fails, or that was uploaded but could not be added to the
+record, stays until the meeting is deleted or the lifecycle rule removes it.
+Neither the screenshots nor the
 check ever hold up the meeting: a failure is logged and the meeting carries on.
 A VP keeps at most 24 images per meeting, below the record's 30, and takes no
 more after that. Before leaving after an objection it waits up to 30 seconds for
@@ -904,8 +946,12 @@ From that answer LMA draws a **verdict**, the same way whichever model answered:
 | `inconclusive` | Anything else, including an answer that could not be read. For the each-participant rule, the participants with no visible consent are listed (`MissingParticipants`). |
 
 The result is stored on the evidence entry as `Verification`, with the model's
-id, when the check ran, who ran it and the tokens it used. It is supporting
-evidence only: **it never changes the meeting's consent status**, which follows
+id, when the check ran, who ran it and the tokens it used. The verdict
+describes that one image, not the meeting: an earlier reply scrolled out of
+view, or an objection made outside the chat, is not in it, and when a
+participant's replies are both visible the verdict does not apply the record's
+rule that their latest reply counts. The meeting page and the summary download
+show it as the *image check*. It is supporting evidence only: **it never changes the meeting's consent status**, which follows
 only from the replies and attestations recorded on the meeting. A check that
 finds an objection nobody recorded is for a person to look at — the owner can
 record the objection — and a check that supports consent does not grant it.
@@ -942,7 +988,9 @@ results from them, and choose a larger model if the default reads them poorly.
 **Keeping or deleting the image.** With **Keep evidence screenshots** on (the
 default), the image stays with the meeting until the meeting is deleted. With it
 off, the image is deleted as soon as its check is stored, and the entry keeps
-the check and `ImageDeletedAt`; such an entry cannot be checked again. If the
+the check and `ImageDeletedAt`; such an entry cannot be checked again. The
+Virtual Participant then stores only images it has checked automatically (see
+[Evidence screenshots](#evidence-screenshots)). If the
 deletion fails, the check is still stored and the image is left for the
 meeting's deletion or the lifecycle rule to remove. If the image is deleted but
 `ImageDeletedAt` cannot be recorded, the failure is logged with the evidence
