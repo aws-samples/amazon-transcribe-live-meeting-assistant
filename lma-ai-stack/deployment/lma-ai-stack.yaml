@@ -4059,7 +4059,7 @@ Resources:
                 Action:
                   - dynamodb:GetItem
                 Resource: !GetAtt ConfigurationTable.Arn
-              # The EventSourcing table is encrypted with a customer-managed KMS key.
+              # The EventSourcing and Configuration tables are encrypted with a customer-managed KMS key.
               - Effect: Allow
                 Action:
                   - kms:Decrypt
