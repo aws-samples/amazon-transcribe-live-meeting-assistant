@@ -80,12 +80,11 @@ test('objections are looked for first', () => {
     assert.equal(classify('LMA no consent'), 'objection');
 });
 
-test('a sentence that merely contains a phrase is ordinary chat', () => {
+test('a sentence that merely contains a consent phrase is ordinary chat', () => {
     for (const message of [
         "I agree with Bo's point",
-        "I don't agree with the roadmap",
-        'please do not record the demo twice',
         'I consent to the budget',
+        'I accept the action item',
         'LMA consent is a good feature',
         'Reply "I consent" to agree, or "I object" to decline.',
         '',
@@ -93,6 +92,40 @@ test('a sentence that merely contains a phrase is ordinary chat', () => {
     ]) {
         assert.equal(classify(message), null, message);
     }
+});
+
+test('an unaddressed sentence containing an objection phrase is an objection', () => {
+    for (const message of [
+        'I object to this meeting being recorded',
+        'i object to this meeting being recorded.',
+        'Please stop recording now',
+        "Sorry, but I don't consent to that.",
+        'I do not agree to being transcribed',
+        "I don't agree with the roadmap",
+        'please do not record the demo twice',
+    ]) {
+        assert.equal(classify(message), 'objection', message);
+    }
+});
+
+test('an objection phrase counts only as whole words', () => {
+    assert.equal(classify('I objected to the timeline last week'), null);
+    assert.equal(classify('the stop recordings folder is shared'), null);
+});
+
+test('an unaddressed sentence containing a consent phrase is not consent', () => {
+    assert.equal(classify('I agree with Sam that the demo went well'), null);
+    assert.equal(classify('I consent to the new budget'), null);
+});
+
+test('an unaddressed message naming both a consent and an objection phrase is not an objection', () => {
+    assert.equal(classify('Reply "I consent" to agree, or "I object" to decline.'), null);
+});
+
+test('a long notice quoting the phrases is not an objection', () => {
+    const notice = `${'Ana is using a meeting assistant to take notes on this call, '.repeat(3)}if you do not agree, reply "I object".`;
+    assert.ok(notice.length > 200);
+    assert.equal(classify(notice), null);
 });
 
 test('a message addressed to LMA that contains an objection phrase is an objection', () => {

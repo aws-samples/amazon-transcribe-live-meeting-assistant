@@ -11,17 +11,24 @@
  * A reply is matched as the whole message, as the VP's chat commands are
  * (details.ts `matchesChatCommand`): case, punctuation and spacing are ignored,
  * and an "LMA" addressee may stand anywhere in it. So "I consent", "i consent!"
- * and "LMA, I consent" are consent, and "I agree with Bo's point" or "don't
- * record the demo twice" are ordinary chat. That is stricter than the reply
+ * and "LMA, I consent" are consent, and "I agree with Bo's point" is ordinary
+ * chat. That is stricter than the reply
  * classifier in the configuration layer (lma_consent.classify_reply), which
  * looks for a phrase anywhere in a reply: a meeting chat is full of sentences
  * that contain "I agree" or "I don't agree" without being about the recording.
  *
- * One exception, in the direction of stopping: a message addressed to LMA that
- * contains an objection phrase anywhere ("LMA, please stop recording now",
- * "@LMA I object to being recorded") is an objection. Addressing LMA is what
- * says the sentence is about LMA. An `LMA ask` question is the exception to the
- * exception: it is a question for the meeting assistant, whatever it mentions.
+ * One exception, in the direction of stopping: a message of up to a sentence's
+ * length that contains an objection phrase as whole words ("LMA, please stop
+ * recording now", "I object to this meeting being recorded") is an objection,
+ * addressed to LMA or not. Reading more messages as objections can only stop
+ * capture, never start it. Consent is never read that way, because reading "I
+ * agree with Bo's point" as consent would start it. Three kinds of message
+ * that mention an objection phrase are still not objections: a longer one,
+ * which explains the phrases rather than using them (another bot's notice); an
+ * unaddressed one that also contains a consent phrase, which is the same kind
+ * of explanation ('Reply "I consent" to agree, or "I object" to decline.'); and
+ * an `LMA ask` question, which is a question for the meeting assistant,
+ * whatever it mentions.
  *
  * Besides the configured phrases, "LMA consent" is always consent and "LMA no
  * consent" and "LMA object" are always objections, so a participant can reply
@@ -43,10 +50,8 @@ export const BUILT_IN_CONSENT_PHRASES: readonly string[] = ['consent'];
 /** Always an objection when addressed to LMA, whatever is configured. */
 export const BUILT_IN_OBJECTION_PHRASES: readonly string[] = ['no consent', 'object'];
 
-/** Longest message read as a reply when it is not addressed to LMA. */
-const MAX_UNADDRESSED_REPLY_LENGTH = 120;
-/** Longest message addressed to LMA that is searched for an objection phrase. */
-const MAX_ADDRESSED_SENTENCE_LENGTH = 200;
+/** Longest message that is searched for an objection phrase anywhere in it. */
+const MAX_OBJECTION_SENTENCE_LENGTH = 200;
 
 /**
  * Text as replies are compared: Unicode-normalised, lower-cased, and every run
@@ -94,18 +99,17 @@ export function classifyChatReply(
     const objections = objectionPhrases.map(normalizeReplyText).filter(Boolean);
     const consents = consentPhrases.map(normalizeReplyText).filter(Boolean);
 
+    // The contains test is held to a sentence's length, so a long message
+    // that merely explains the phrases (another bot's notice, say) is not
+    // read as somebody objecting.
+    const sentence = message.trim().length <= MAX_OBJECTION_SENTENCE_LENGTH;
+
     if (addressed) {
-        // The contains test is held to a sentence's length, so a long message
-        // that merely explains the phrases (another bot's notice, say) is not
-        // read as somebody objecting.
         // Nor is a question for the meeting assistant ("LMA ask what do we
         // say if a client asks us to stop recording?"), which is answered as
         // one: only the exact forms are objections there.
         const question = rest === 'ask' || rest.startsWith('ask ');
-        const contained =
-            !question &&
-            message.trim().length <= MAX_ADDRESSED_SENTENCE_LENGTH &&
-            objections.some((phrase) => containsPhrase(rest, phrase));
+        const contained = !question && sentence && objections.some((phrase) => containsPhrase(rest, phrase));
         if (BUILT_IN_OBJECTION_PHRASES.includes(rest) || objections.includes(rest) || contained) {
             return 'objection';
         }
@@ -114,9 +118,18 @@ export function classifyChatReply(
         }
         return null;
     }
-    if (message.trim().length > MAX_UNADDRESSED_REPLY_LENGTH) return null;
     if (objections.includes(whole)) return 'objection';
     if (consents.includes(whole)) return 'consent';
+    // Unaddressed, a sentence that contains an objection phrase is an
+    // objection, unless it also contains a consent phrase: a message naming
+    // both is telling people how to reply, not replying. Consent stays exact.
+    if (
+        sentence &&
+        objections.some((phrase) => containsPhrase(whole, phrase)) &&
+        !consents.some((phrase) => containsPhrase(whole, phrase))
+    ) {
+        return 'objection';
+    }
     return null;
 }
 
