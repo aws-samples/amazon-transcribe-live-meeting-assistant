@@ -206,7 +206,13 @@ marks the active one, and the one open in the editor below it; the page opens th
 active profile by default, and the address names the profile open
 (`#/configuration/settings?profile=trial`), so a link can open another. Choose a
 profile's name to open it in the editor; if the editor holds unsaved changes, the
-page asks first. The list can be collapsed to give the editor more room.
+page asks first. The list starts collapsed, to give the editor the room; select
+its heading to expand it. It is shown expanded when no profile is open in the
+editor, for example when the profiles could not be read.
+
+The editor's header, with **Revisions…**, **Actions**, **Discard changes** and
+**Save changes**, stays at the top of the window, below the navigation bar, as
+you scroll down through the settings.
 
 Select profiles in the list to act on them:
 

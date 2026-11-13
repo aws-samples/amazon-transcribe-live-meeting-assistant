@@ -24,3 +24,27 @@
   font-family: Monaco, Menlo, Consolas, 'Courier New', monospace;
   font-size: 13px;
 }
+
+/* The editor's header, which holds Save changes, stays in view while the page
+   scrolls: sticky below the application's top navigation, whose height
+   ConfigurationEditor.jsx measures into --lma-config-header-top. Opaque, in
+   the page's own background, so the settings do not show through it. Its
+   z-index is below the application layout's panels and the top navigation
+   (830 and up) and the dialogs, which open over it. */
+.lma-config-editor-header {
+  position: sticky;
+  top: var(--lma-config-header-top, 0px);
+  z-index: 800;
+  background-color: #ffffff;
+  padding-block: 8px;
+  margin-block-end: 12px;
+}
+
+.awsui-dark-mode .lma-config-editor-header {
+  background-color: #161d26;
+}
+
+/* A section a link brings into view starts below the sticky header. */
+.lma-config-editor [id^='configuration-section-'] {
+  scroll-margin-top: calc(var(--lma-config-header-top, 0px) + var(--lma-config-header-height, 0px) + 12px);
+}
