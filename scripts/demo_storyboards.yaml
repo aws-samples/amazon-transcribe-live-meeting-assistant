@@ -147,14 +147,9 @@ storyboards:
           Two people shared one conference-room microphone. LMA told their voices apart and, when the meeting ended, named each from the words where they introduced themselves. The names in the header open the Speakers panel.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'The agenda and chapters'
+      - label: 'The agenda and chapters; the summary in sections'
         say: >-
-          The Transcript tab now starts with the agenda from the invitation, and the recording's seek bar is marked with labelled chapters.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'The summary in sections'
-        say: >-
-          The summary comes in sections we can fold and jump between, with the decisions, action items, chapters, and the links shared in the meeting chat.
+          The Transcript tab now starts with the agenda from the invitation, and the recording's seek bar is marked with labelled chapters. The summary comes in sections we can fold and jump between, with the decisions, action items, chapters, and the links shared in the meeting chat.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'The shared screen'
@@ -162,14 +157,9 @@ storyboards:
           When someone shares their screen, LMA keeps a key frame of each new slide, with its title and text, and the slides can be exported as a PDF.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'What it cost'
+      - label: 'What it cost; prices you control'
         say: >-
-          Each meeting shows an estimated cost, itemised by service, with the source of every unit price.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Prices you control'
-        say: >-
-          Administrators can see and change every price on the new Meeting Cost Prices page, to match their own rates.
+          Each meeting shows an estimated cost, itemised by service, with the source of every unit price. Administrators can see and change every price on the new Meeting Cost Prices page, to match their own rates.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'Retention you control'
@@ -177,14 +167,9 @@ storyboards:
           Transcripts are kept only as long as you choose: for the days you set, or deleted as soon as the summary is written, immediately or after a short delay. The summary, recording and consent record stay.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'The participant''s name'
+      - label: 'The participant''s name; share it'
         say: >-
-          The name the Virtual Participant joins meetings under is now a setting too, with the name of the person who started it filled in.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Share it'
-        say: >-
-          One Download menu exports the summary or the transcript to Markdown, Word, plain text or Excel, or copies it to the clipboard.
+          The name the Virtual Participant joins meetings under is now a setting too, with the name of the person who started it filled in. One Download menu exports the summary or the transcript to Markdown, Word, plain text or Excel, or copies it to the clipboard.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'Configuration, for administrators'
@@ -296,14 +281,9 @@ storyboards:
           Each line of the transcript can play the recording from that moment, and as it plays, the transcript keeps up, highlighting the line being spoken.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Search the transcript'
+      - label: 'Search the transcript; filter by speaker'
         say: >-
-          Searching the transcript finds every mention, highlighted where it was said, and we step from one match to the next with the arrows beside the search box.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Filter by speaker'
-        say: >-
-          Speaker filters narrow the transcript to one person. Here, only what Marcus said.
+          Searching the transcript finds every mention, highlighted where it was said, and we step from one match to the next with the arrows beside the search box. Speaker filters narrow the transcript to one person. Here, only what Marcus said.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'Translate as you read'
@@ -321,14 +301,9 @@ storyboards:
           If someone asks LMA to regenerate the summary, it stops to ask first, because regenerating would replace the hand edit. We keep our version.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'AGENDA CHECK'
+      - label: 'AGENDA CHECK; download'
         say: >-
-          The meeting assistant's AGENDA CHECK goes item by item through the agenda: what was covered, what is still open, and where in the meeting each one came up.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Download'
-        say: >-
-          One Download menu exports the summary or the transcript as Markdown, Word, plain text or Excel, or copies it to the clipboard.
+          The meeting assistant's AGENDA CHECK goes item by item through the agenda: what was covered, what is still open, and where in the meeting each one came up. One Download menu exports the summary or the transcript as Markdown, Word, plain text or Excel, or copies it to the clipboard.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'Share with a colleague'
@@ -537,14 +512,9 @@ storyboards:
           The model lists offer the latest Claude models, and each feature can use its own: one for summaries and meeting insights, another for the meeting assistant.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Troubleshooting agent'
+      - label: 'Troubleshooting agent; the cause, with its evidence'
         say: >-
-          When something fails, the Troubleshooting page asks an agent that reads the deployment's own logs and records. Here we ask why a Virtual Participant could not join a meeting.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'The cause, with its evidence'
-        say: >-
-          It answers with the root cause, here that Google Meet refused the join, the evidence it rests on, and what to do next.
+          When something fails, the Troubleshooting page asks an agent that reads the deployment's own logs and records. Here we ask why a Virtual Participant could not join a meeting. It answers with the root cause, here that Google Meet refused the join, the evidence it rests on, and what to do next.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
     closing: >-
@@ -573,14 +543,9 @@ storyboards:
       - 'Live: a Google Meet with open access and a silent guest keeping it open; VP launched in the first chapter (consent Notify); scripted guest Conference Room 4 playing a synthetic two-voice meeting and typing a chat question; Tavily web search; DeepWiki connected as a custom MCP server'
       - 'Finished meetings: Mobile app planning and Quarterly business review (synthetic slides); concept slides'
     chapters:
-      - label: 'Invite LMA to the meeting'
+      - label: 'Invite LMA to the meeting; every meeting, online or in the room'
         say: >-
-          We invite LMA to a meeting by pasting its invitation. LMA reads the meeting's name, its link and its agenda, and joins as a participant. Here it is Google Meet; it works the same way in Zoom, Microsoft Teams, Webex and Amazon Chime.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Every meeting, online or in the room'
-        say: >-
-          LMA joins online meetings on every major platform. People can also stream a meeting from their browser, the Chrome extension or the desktop app, or upload a recording. In hybrid meetings, several people sharing one conference-room microphone are told apart and named. And with the voice assistant turned on, anyone in the meeting can ask a question out loud and hear the answer spoken, with an optional avatar on camera.
+          We invite LMA to a meeting by pasting its invitation. LMA reads the meeting's name, its link and its agenda, and joins as a participant. Here it is Google Meet; it works the same way in Zoom, Microsoft Teams, Webex and Amazon Chime. LMA joins online meetings on every major platform. People can also stream a meeting from their browser, the Chrome extension or the desktop app, or upload a recording. In hybrid meetings, several people sharing one conference-room microphone are told apart and named. And with the voice assistant turned on, anyone in the meeting can ask a question out loud and hear the answer spoken, with an optional avatar on camera.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'Speech recognition on your terms'
@@ -588,109 +553,44 @@ storyboards:
           LMA transcribes with its own speech engine by default: open speech models on AWS Lambda MicroVMs, one per meeting, that give text and speaker labels together. Amazon Transcribe is the alternative, chosen for each kind of meeting, with personal information redaction and custom vocabularies.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Informed consent'
+      - label: 'Informed consent; a live transcript'
         say: >-
-          The moment it joins, LMA tells everyone in the meeting chat that the meeting is being recorded and transcribed, who invited it, and how to object. An objection stops recording, and a deployment can require everyone to opt in first.
+          The moment it joins, LMA tells everyone in the meeting chat that the meeting is being recorded and transcribed, who invited it, and how to object. An objection stops recording, and a deployment can require everyone to opt in first. On LMA's own page, the transcript appears as people speak. Two people share one conference-room microphone, and LMA tells their voices apart. The header shows the meeting in progress, with consent granted and an estimated cost so far.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'A live transcript'
+      - label: 'In any language; ask the assistant during the meeting; answers in seconds'
         say: >-
-          On LMA's own page, the transcript appears as people speak. Two people share one conference-room microphone, and LMA tells their voices apart. The header shows the meeting in progress, with consent granted and an estimated cost so far.
+          Anyone following along can translate the transcript live, into the language they read best, here Spanish. Each line keeps its speaker and time, and the original stays as it was said. This is where LMA goes beyond notes. While the meeting is still going, we ask the assistant which decisions are still open, and who owns them. It reads everything said so far and answers in seconds: whether offline sync blocks the launch is still to be decided, and nobody has been assigned to write up the trade-offs. The app store submission, though, is settled: Marcus's team owns it, by March the tenth.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'In any language'
+      - label: 'Search the web, mid-meeting; an answer with sources; quick actions'
         say: >-
-          Anyone following along can translate the transcript live, into the language they read best, here Spanish. Each line keeps its speaker and time, and the original stays as it was said.
+          The assistant can reach outside the meeting too. Offline sync just came up, so we ask it to search the web for current best practices. It searches the web and brings back a short, practical answer, with the sources it used, without anyone leaving the meeting. Quick actions ask the most useful questions with a single button: the action items, a fact check of what was just said, how the meeting is doing against its agenda, or, as here, which points are still unclear and should be settled before the meeting ends.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Ask the assistant during the meeting'
+      - label: 'What is still unclear; ask LMA in the meeting chat; kept in the transcript'
         say: >-
-          This is where LMA goes beyond notes. While the meeting is still going, we ask the assistant which decisions are still open, and who owns them.
+          It lists what is still open or ambiguous, each with the time it came up: for example, how much margin the March tenth submission really leaves, and that the second support hire waits on a budget meeting with no date. Participants can ask too, without leaving the meeting. Someone types a question for LMA in the meeting chat, and LMA posts the answer back there within seconds. Both the question and the answer are kept in the transcript, under the name of whoever asked.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Answers in seconds'
+      - label: 'Connect it to your own systems; add a connector'
         say: >-
-          It reads everything said so far and answers in seconds: whether offline sync blocks the launch is still to be decided, and nobody has been assigned to write up the trade-offs. The app store submission, though, is settled: Marcus's team owns it, by March the tenth.
+          The assistant is extensible. Besides its built-in tools, it can call any MCP server: a CRM such as Salesforce, internal APIs, ticketing systems or knowledge bases. Connectors are added on the MCP Servers page, from the public MCP registry, where Salesforce servers are listed, or by entering your own endpoint. Here, DeepWiki is already connected, and the assistant can use it in any meeting.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Search the web, mid-meeting'
+      - label: 'After the meeting; speakers named for you; what was shown on screen'
         say: >-
-          The assistant can reach outside the meeting too. Offline sync just came up, so we ask it to search the web for current best practices.
+          When a meeting ends, LMA writes the summary in sections, with the decisions, action items, chapters and the links shared in the chat. Here is the planning meeting we held earlier. LMA named the two voices from the conference room after the people themselves, from the words where they introduced themselves. When someone shares their screen, LMA keeps a searchable key frame of every slide, with its title and the text on it.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'An answer with sources'
+      - label: 'Ask across all your meetings; consent and retention you can audit'
         say: >-
-          It searches the web and brings back a short, practical answer, with the sources it used, without anyone leaving the meeting.
+          Questions are not limited to one meeting. The Meetings Query Tool searches every meeting you have access to, and answers from their transcripts and summaries, here what has been decided about the launch, and what is still open. For the people responsible for privacy, every meeting keeps an auditable consent record. Transcripts are kept only for the days you set, or deleted as soon as the summary is written, and you choose where AI processing may happen. LMA encrypts recordings with your key and keeps meeting content out of its logs.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'One-click quick actions'
+      - label: 'Bring meetings into your AI agents; what each meeting costs; built for administrators'
         say: >-
-          Quick actions ask the most useful questions in one click: the action items, a fact check of what was just said, how the meeting is doing against its agenda, or, as here, which points are still unclear and should be settled before the meeting ends.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'What is still unclear'
-        say: >-
-          It lists what is still open or ambiguous, each with the time it came up: for example, how much margin the March tenth submission really leaves, and that the second support hire waits on a budget meeting with no date.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Ask LMA in the meeting chat'
-        say: >-
-          Participants can ask too, without leaving the meeting. Someone types a question for LMA in the meeting chat, and LMA posts the answer back there within seconds.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Kept in the transcript'
-        say: >-
-          Both the question and the answer are kept in the transcript, under the name of whoever asked.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Connect it to your own systems'
-        say: >-
-          The assistant is extensible. Besides its built-in tools, it can call any MCP server: a CRM such as Salesforce, internal APIs, ticketing systems or knowledge bases.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Add a connector'
-        say: >-
-          Connectors are added on the MCP Servers page, from the public MCP registry, where Salesforce servers are listed, or by entering your own endpoint. Here, DeepWiki is already connected, and the assistant can use it in any meeting.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'After the meeting'
-        say: >-
-          When a meeting ends, LMA writes the summary in sections, with the decisions, action items, chapters and the links shared in the chat. Here is the planning meeting we held earlier.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Speakers named for you'
-        say: >-
-          LMA named the two voices from the conference room after the people themselves, from the words where they introduced themselves.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'What was shown on screen'
-        say: >-
-          When someone shares their screen, LMA keeps a searchable key frame of every slide, with its title and the text on it.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Ask across all your meetings'
-        say: >-
-          Questions are not limited to one meeting. The Meetings Query Tool searches every meeting you have access to, and answers from their transcripts and summaries, here what has been decided about the launch, and what is still open.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Consent and retention you can audit'
-        say: >-
-          For the people responsible for privacy, every meeting keeps an auditable consent record. Transcripts are kept only for the days you set, or deleted as soon as the summary is written, and you choose where AI processing may happen. LMA encrypts recordings with your key and keeps meeting content out of its logs.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Bring meetings into your AI agents'
-        say: >-
-          LMA is also an MCP server itself. AI agents such as Amazon Quick, Claude Desktop or your own can search your meetings, read transcripts and summaries, and even send LMA into a meeting, with each user seeing only their own meetings.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'What each meeting costs'
-        say: >-
-          Every meeting carries an estimated cost, itemised by service, so you can see what LMA spends and where.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Built for administrators'
-        say: >-
-          Administrators manage every setting as named configuration profiles, with presets for consent, retention and privacy. And when something goes wrong, a troubleshooting agent reads the deployment's own logs and explains the cause.
+          LMA is also an MCP server itself. AI agents such as Amazon Quick, Claude Desktop or your own can search your meetings, read transcripts and summaries, and even send LMA into a meeting, with each user seeing only their own meetings. Every meeting carries an estimated cost, itemised by service, so you can see what LMA spends and where. Administrators manage every setting as named configuration profiles, with presets for consent, retention and privacy. And when something goes wrong, a troubleshooting agent reads the deployment's own logs and explains the cause.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
     closing: >-
@@ -725,14 +625,9 @@ storyboards:
           Recording and transcription rules differ between countries, states and organizations: some require every participant to agree, some only one. LMA does not decide which rules apply. You choose the policy, with whoever advises your organization, and LMA applies it and keeps the evidence of what was said and agreed. That record is supporting evidence, not a legal determination.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Three consent modes'
+      - label: 'Three consent modes; the words participants see'
         say: >-
-          Consent is set on the Configuration page, in the Meeting Consent section. Off records as LMA always has. Notify tells participants the meeting is recorded and how to object, and any objection stops recording. Opt-in records nothing until consent is given: by every participant, or by the meeting owner confirming that everyone agreed.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'The words participants see'
-        say: >-
-          The notice and the consent request are yours to word, with placeholders for who is using LMA and the meeting's name. The phrases that count as consent, and as an objection, are listed too, and objections are always looked for first.
+          Consent is set on the Configuration page, in the Meeting Consent section. Off records as LMA always has. Notify tells participants the meeting is recorded and how to object, and any objection stops recording. Opt-in records nothing until consent is given: by every participant, or by the meeting owner confirming that everyone agreed. The notice and the consent request are yours to word, with placeholders for who is using LMA and the meeting's name. The phrases that count as consent, and as an objection, are listed too, and objections are always looked for first.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'What happens around consent'
@@ -750,44 +645,14 @@ storyboards:
           Now in a real meeting. We invite LMA to a vendor security review on Google Meet, and for this meeting we choose opt-in, with the owner confirming that everyone agreed. The other choices are listed here too: the deployment's own setting, off, notify, and opt-in with every participant consenting. LMA reads the meeting's name, link and agenda from the invitation we pasted.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Nothing is recorded yet'
+      - label: 'Nothing is recorded yet; waiting for consent; the owner confirms'
         say: >-
-          LMA joins and posts the consent request in the meeting chat, with the phrases to reply. Until consent is given, nothing is recorded or transcribed.
+          LMA joins and posts the consent request in the meeting chat, with the phrases to reply. Until consent is given, nothing is recorded or transcribed. On the meeting's page, consent is pending, and recording and transcription are withheld. A participant has replied in the chat that they consent, and LMA keeps that reply as evidence. Under this rule, recording starts when the meeting's owner confirms in LMA that everyone agreed. We say how they agreed, here out loud at the start of the call, and add a statement in our own words. The attestation is recorded under our name, with the time.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Waiting for consent'
+      - label: 'Consent granted; in the meeting; an objection stops recording; recorded as an objection; consent again'
         say: >-
-          On the meeting's page, consent is pending, and recording and transcription are withheld. A participant has replied in the chat that they consent, and LMA keeps that reply as evidence.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'The owner confirms'
-        say: >-
-          Under this rule, recording starts when the meeting's owner confirms in LMA that everyone agreed. We say how they agreed, here out loud at the start of the call, and add a statement in our own words. The attestation is recorded under our name, with the time.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Consent granted'
-        say: >-
-          The record now shows consent granted, and recording and transcription allowed.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'In the meeting'
-        say: >-
-          In the meeting, LMA announces that the owner confirmed, and starts recording.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'An objection stops recording'
-        say: >-
-          Now a participant types I object. LMA stops recording and transcribing at once, says so in the chat, and tells the participant how to continue if they change their mind.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Recorded as an objection'
-        say: >-
-          The meeting's record shows the objection, and recording and transcription withheld.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Consent again'
-        say: >-
-          When the participant replies I consent, their latest reply is the one that counts, and recording resumes.
+          The record now shows consent granted, and recording and transcription allowed. In the meeting, LMA announces that the owner confirmed, and starts recording. Now a participant types I object. LMA stops recording and transcribing at once, says so in the chat, and tells the participant how to continue if they change their mind. The meeting's record shows the objection, and recording and transcription withheld. When the participant replies I consent, their latest reply is the one that counts, and recording resumes.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'The consent record'
@@ -795,29 +660,14 @@ storyboards:
           The consent record is the audit trail. It holds the mode and rule, the notice exactly as posted, each participant's latest reply, the owner's attestation, evidence screenshots of the chat, each checked by a vision model with its verdict and confidence, and a timeline of every notice, reply and change of status, with the reason. It is kept with the meeting, included in the summary download, and deleted with the meeting.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Stream Audio and the Desktop Capture App'
+      - label: 'Stream Audio and the Desktop Capture App; an attestation from Stream Audio; an objection during a stream'
         say: >-
-          When people capture a meeting from their own device, with Stream Audio or the Desktop Capture App, the consent step is theirs. They copy the notice into the meeting, confirm how everyone was told, or that everyone agreed, and can attach a frame of the meeting as evidence. During the stream, Participant objected stops it.
+          When people capture a meeting from their own device, with Stream Audio or the Desktop Capture App, the consent step is theirs. They copy the notice into the meeting, confirm how everyone was told, or that everyone agreed, and can attach a frame of the meeting as evidence. During the stream, Participant objected stops it. This supplier call was streamed under opt-in. Its record shows the owner's confirmation and how everyone agreed, and the evidence image, which the vision model read as supporting consent. In this support call, a participant objected part-way through. The record shows the objection, and capture stopped from that moment.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'An attestation from Stream Audio'
+      - label: 'Profiles for different jurisdictions; one policy at a time'
         say: >-
-          This supplier call was streamed under opt-in. Its record shows the owner's confirmation and how everyone agreed, and the evidence image, which the vision model read as supporting consent.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'An objection during a stream'
-        say: >-
-          In this support call, a participant objected part-way through. The record shows the objection, and capture stopped from that moment.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Profiles for different jurisdictions'
-        say: >-
-          Different places and teams need different policies, so each can be kept as its own configuration profile. Here, all-party-consent, for places where every participant must agree: opt-in, no audio recording, personal information redacted, and the transcript deleted after the summary. One-party-notify, where notifying participants is enough. And notify-in-geography, which also keeps AI processing in this deployment's geography. Comparing them shows only what differs.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'One policy at a time'
-        say: >-
-          One profile is active at a time, and every new meeting uses it. Organizations with several jurisdictions run a deployment for each, and copy profiles between them by export and import. A meeting can still choose a stricter mode than the active profile's.
+          Different places and teams need different policies, so each can be kept as its own configuration profile. Here, all-party-consent, for places where every participant must agree: opt-in, no audio recording, personal information redacted, and the transcript deleted after the summary. One-party-notify, where notifying participants is enough. And notify-in-geography, which also keeps AI processing in this deployment's geography. Comparing them shows only what differs. One profile is active at a time, and every new meeting uses it. Organizations with several jurisdictions run a deployment for each, and copy profiles between them by export and import. A meeting can still choose a stricter mode than the active profile's.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
     closing: >-
@@ -850,34 +700,19 @@ storyboards:
           Dana Ortiz, lead business analyst at Brightpath Software, is meeting Sam Patel and Grace Kim of Northwind Logistics in their board room, to gather the requirements for a new returns processing application. The room joins a Google Meet, and Dana brings LMA.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Invite LMA, with the agenda'
+      - label: 'Invite LMA, with the agenda; consent first'
         say: >-
-          Dana invited LMA by pasting the meeting invitation. The participant's page shows what LMA read from it: the meeting's name, its link, and the five agenda items, which it keeps track of during the meeting.
+          Dana invited LMA by pasting the meeting invitation. The participant's page shows what LMA read from it: the meeting's name, its link, and the five agenda items, which it keeps track of during the meeting. As soon as it joins, LMA tells everyone in the meeting chat that the meeting is recorded and transcribed, who invited it, and how to object. Any objection stops recording.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Consent first'
+      - label: 'Three voices, one microphone; check the facts'
         say: >-
-          As soon as it joins, LMA tells everyone in the meeting chat that the meeting is recorded and transcribed, who invited it, and how to object. Any objection stops recording.
+          On Dana's screen, the transcript fills in as people speak. Three people share the board room's microphone, and LMA tells their voices apart. Sam has just quoted the maximum GDPR fine as two percent of turnover. Dana asks LMA to fact-check the recent statements.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Three voices, one microphone'
+      - label: 'The fact check; catch what is vague'
         say: >-
-          On Dana's screen, the transcript fills in as people speak. Three people share the board room's microphone, and LMA tells their voices apart.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Check the facts'
-        say: >-
-          Sam has just quoted the maximum GDPR fine as two percent of turnover. Dana asks LMA to fact-check the recent statements.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'The fact check'
-        say: >-
-          LMA marks the statement as incorrect: two percent is only the lower tier of GDPR fines, and the maximum is higher, up to four percent of global annual turnover. It also says which claims it cannot verify from outside, such as the five-day refund time, so the team can confirm them.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Catch what is vague'
-        say: >-
-          The requirements so far include: it needs to be fast, it has to handle a lot of returns, and it must integrate with our systems. CLARITY CHECK lists what is still too vague to build from.
+          LMA marks the statement as incorrect: two percent is only the lower tier of GDPR fines, and the maximum is higher, up to four percent of global annual turnover. It also says which claims it cannot verify from outside, such as the five-day refund time, so the team can confirm them. The requirements so far include: it needs to be fast, it has to handle a lot of returns, and it must integrate with our systems. CLARITY CHECK lists what is still too vague to build from.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'What is still unclear'
@@ -885,44 +720,24 @@ storyboards:
           It lists the points that are still too vague to build from, each with the time it came up: no retention period for the damage photos, the GDPR figure, which systems to integrate, when a driver takes a photo, and a lot of returns with no numbers. Security, scale and the timeline are still to come.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Ask the right questions'
+      - label: 'Ask the right questions; the questions to ask'
         say: >-
-          Dana pauses to check her notes, and asks LMA which important questions she has not asked yet.
+          Dana pauses to check her notes, and asks LMA which important questions she has not asked yet. LMA lists the questions still to ask, grouped by topic: which systems exactly to integrate with, how people sign in, which compliance rules apply and how long photos may be kept, how many returns a day and at the holiday peak, the response time and uptime needed, and the go-live date and pilot.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'The questions to ask'
+      - label: 'Dana follows up; agenda coverage'
         say: >-
-          LMA lists the questions still to ask, grouped by topic: which systems exactly to integrate with, how people sign in, which compliance rules apply and how long photos may be kept, how many returns a day and at the holiday peak, the response time and uptime needed, and the go-live date and pilot.
+          Dana asks those questions, and the answers are specific: about three thousand returns a day and fifteen thousand at the January peak, scans in under two seconds, offline use on rural routes, the systems to integrate, and single sign-on with multi-factor authentication. Near the end, AGENDA CHECK goes through the agenda item by item, with the times each came up: business goals and users covered, security and scale covered apart from compliance beyond GDPR and how long photos are kept, and the timeline just started, with Dana's question not yet answered.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Dana follows up'
+      - label: 'Log the actions; follow-ups without an owner or a date'
         say: >-
-          Dana asks those questions, and the answers are specific: about three thousand returns a day and fifteen thousand at the January peak, scans in under two seconds, offline use on rural routes, the systems to integrate, and single sign-on with multi-factor authentication.
+          As the meeting closes, MISSING ACTION OWNER or ETA lists the follow-ups that lack an owner or a date. It finds the gaps: nobody owns confirming the photo retention period with legal, the prototype has no date, the paper forms are due only by Friday, and the draft specification next week, both worth turning into calendar dates.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Agenda coverage'
+      - label: 'The summary; a draft specification'
         say: >-
-          Near the end, AGENDA CHECK goes through the agenda item by item, with the times each came up: business goals and users covered, security and scale covered apart from compliance beyond GDPR and how long photos are kept, and the timeline just started, with Dana's question not yet answered.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Log the actions'
-        say: >-
-          As the meeting closes, MISSING ACTION OWNER or ETA lists the follow-ups that lack an owner or a date.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Follow-ups without an owner or a date'
-        say: >-
-          It finds the gaps: nobody owns confirming the photo retention period with legal, the prototype has no date, the paper forms are due only by Friday, and the draft specification next week, both worth turning into calendar dates.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'The summary'
-        say: >-
-          When the meeting ends, LMA writes the summary in sections, with the decisions, the requirements discussed, and the action items, each with its owner and date where one was given.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'A draft specification'
-        say: >-
-          Finally, Dana asks LMA to turn the meeting into a requirements specification.
+          When the meeting ends, LMA writes the summary in sections, with the decisions, the requirements discussed, and the action items, each with its owner and date where one was given. Finally, Dana asks LMA to turn the meeting into a requirements specification.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'Ready to refine and send'
