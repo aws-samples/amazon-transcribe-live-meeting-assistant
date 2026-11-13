@@ -159,6 +159,35 @@
         {"channel": "REMOTE", "speaker": "Bob Strahan (spk_1)", "start": 5, "transcript": "Can you hear me?"}
       ],
       "keys": ["REMOTE#Bob Strahan (spk_0)", "REMOTE#Bob Strahan (spk_1)"]
+    },
+    {
+      "name": "a Virtual Participant meeting's conference room voices need names",
+      "captureSource": "VIRTUAL_PARTICIPANT",
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Northwind Board Room (spk_0)", "start": 0, "transcript": "Hi, I'm Grace"},
+        {"channel": "REMOTE", "speaker": "Northwind Board Room (spk_1)", "start": 5, "transcript": "And I'm Sam"}
+      ],
+      "keys": ["REMOTE#Northwind Board Room (spk_0)", "REMOTE#Northwind Board Room (spk_1)"]
+    },
+    {
+      "name": "a Virtual Participant attendee shown as several people needs names",
+      "captureSource": "VIRTUAL_PARTICIPANT",
+      "identities": {"speakerModes": {"REMOTE#Bob Strahan": {"mode": "several"}}},
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_0)", "start": 0, "transcript": "Hi, I'm Grace"},
+        {"channel": "REMOTE", "speaker": "Bob Strahan (spk_1)", "start": 5, "transcript": "And I'm Sam"}
+      ],
+      "keys": ["REMOTE#Bob Strahan (spk_0)", "REMOTE#Bob Strahan (spk_1)"]
+    },
+    {
+      "name": "a conference room shown as one person is already named",
+      "captureSource": "VIRTUAL_PARTICIPANT",
+      "identities": {"speakerModes": {"REMOTE#Conference Room 4": {"mode": "one"}}},
+      "segments": [
+        {"channel": "REMOTE", "speaker": "Conference Room 4 (spk_0)", "start": 0, "transcript": "Hi, I'm Grace"},
+        {"channel": "REMOTE", "speaker": "Conference Room 4 (spk_1)", "start": 5, "transcript": "And I'm Sam"}
+      ],
+      "keys": []
     }
   ]
 }

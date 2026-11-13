@@ -38,7 +38,7 @@
 import { canonicalChannel, canonicalKeyed, isSpeechChannel, REMOTE_CHANNEL } from './channels';
 import { DEFAULT_DESKTOP_SYSTEM_LABEL, DEFAULT_LOCAL_SPEAKER_NAME, DEFAULT_OTHER_SPEAKER_NAME } from './constants';
 import { groupKey, groupOfKey, own, resolveMergeTarget, speakerKey } from './speaker-keys';
-import { ONE_PERSON, resolveInGroup, SEVERAL_PEOPLE, speakerGroups } from './speaker-modes';
+import { looksLikeRoom, ONE_PERSON, resolveInGroup, SEVERAL_PEOPLE, speakerGroups } from './speaker-modes';
 import { splitDiarizationLabel } from './utilities';
 
 export { resolveMergeTarget, speakerKey, speakerGroups };
@@ -211,14 +211,32 @@ export const isVirtualParticipantCapture = (captureSource) =>
  * voices need naming like any placeholder.
  *
  * A meeting whose record says the Virtual Participant captured it
- * (`captureSource`, the meeting's CaptureSource) has none: its names are
- * meeting-roster names, so one attendee whose voice separation split in two is
- * still one named attendee, even when nobody else spoke. A meeting with no
+ * (`captureSource`, the meeting's CaptureSource) has none of those: its names
+ * are meeting-roster names, so one attendee whose voice separation split in two
+ * is still one named attendee, even when nobody else spoke. Its names shown as
+ * several people -- a conference room, or one somebody switched to Several
+ * people (`identities.speakerModes`) -- are open instead. A meeting with no
  * CaptureSource (recorded before the field existed) keeps the structural test.
  * The resolver's channel_label_bases applies the same rules.
  */
-const channelLabelBases = (segments, captureSource) => {
-  if (isVirtualParticipantCapture(captureSource)) return new Set();
+const roomsShownAsSeveral = (segments, identities) => {
+  const modes = identities?.speakerModes ?? {};
+  const out = new Set();
+  (segments ?? []).forEach((segment) => {
+    if (segment.isPartial || !isNameable(segment) || !`${segment.transcript ?? ''}`.trim()) return;
+    const { base, suffix } = splitDiarizationLabel(segment.speaker);
+    if (!suffix.trim()) return;
+    const key = `${canonicalChannel(segment.channel)}#${base}`;
+    const chosen = own(modes, key);
+    const mode = chosen && typeof chosen === 'object' ? chosen.mode : undefined;
+    const several = mode === ONE_PERSON || mode === SEVERAL_PEOPLE ? mode === SEVERAL_PEOPLE : looksLikeRoom(base);
+    if (several) out.add(key);
+  });
+  return out;
+};
+
+const channelLabelBases = (segments, captureSource, identities) => {
+  if (isVirtualParticipantCapture(captureSource)) return roomsShownAsSeveral(segments, identities);
   const bases = {};
   const voiceIds = {};
   (segments ?? []).forEach((segment) => {
@@ -264,7 +282,7 @@ export const nameableVoiceKeys = (segments, identities, { captureSource } = {}) 
   const spoken = (segments ?? []).filter(
     (segment) => !segment.isPartial && isNameable(segment) && `${segment.transcript ?? ''}`.trim(),
   );
-  const labels = channelLabelBases(spoken, captureSource);
+  const labels = channelLabelBases(spoken, captureSource, map);
   const keys = [];
   [...spoken]
     .sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0))
@@ -302,7 +320,7 @@ export const buildSpeakerRoster = (segments, identities, fallbackName, { capture
   // placeholder for a local-channel voice would disagree with the transcript
   // beside it.
   const fallbackFor = (channel) => (canonicalChannel(channel) === REMOTE_CHANNEL ? fallbackName : undefined);
-  const labels = channelLabelBases(segments, captureSource);
+  const labels = channelLabelBases(segments, captureSource, map);
   // Whether a voice is waiting for a name -- what the panel's automatic passes
   // and unnamed count act on. Distinct from `generic` below, which only decides
   // whether the Stream Audio participant name substitutes in the display.
