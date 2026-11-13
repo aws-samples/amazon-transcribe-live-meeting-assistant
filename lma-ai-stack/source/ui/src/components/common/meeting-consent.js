@@ -53,6 +53,25 @@ export const VERDICT_LABELS = {
   inconclusive: 'Inconclusive',
 };
 
+/**
+ * Whether an evidence image is a participant list on its own. The Virtual
+ * Participant never asks for these to be checked automatically: the check reads
+ * a chat for the notice and the replies. Told by the view in the key the VP
+ * stores it under (`…-participants-….jpg`) or by its note.
+ */
+export const isParticipantListEvidence = (item) =>
+  !!item && (/-participants-[^/]*$/.test(item.S3Key || '') || /^Participant list\b/.test(item.Note || ''));
+
+/** What an image with no check says instead of a verdict. */
+export const uncheckedEvidenceLabel = (item) =>
+  isParticipantListEvidence(item) ? 'Not checked: participant lists are kept as a record' : 'Image check: not run';
+
+/** "Consented aloud or in LMA, so not expected in this image: Bo Chen", or '' when nobody. */
+export const consentedOutsideChatLabel = (verification) => {
+  const names = (verification && verification.ConsentedOutsideChat) || [];
+  return names.length ? `Consented aloud or in LMA, so not expected in this image: ${names.join(', ')}` : '';
+};
+
 /** The Cloudscape Badge color for a verifier verdict. */
 export const verdictColor = (verdict) => ({ supports_consent: 'green', objection_found: 'red' }[verdict] || 'grey');
 
@@ -249,16 +268,17 @@ export const consentAsText = (consent) => {
   if (evidence.length) {
     lines.push('', 'Evidence:');
     evidence.forEach((item) => {
+      const outside = consentedOutsideChatLabel(item.Verification);
       const check = item.Verification
-        ? `${VERDICT_LABELS[item.Verification.Verdict] || item.Verification.Verdict} (model ${
+        ? `Image check: ${VERDICT_LABELS[item.Verification.Verdict] || item.Verification.Verdict} (model ${
             item.Verification.ModelId
-          }, confidence ${item.Verification.Confidence})`
-        : 'not run';
+          }, confidence ${item.Verification.Confidence})${outside ? `. ${outside}` : ''}`
+        : uncheckedEvidenceLabel(item);
       // What the image shows, from its note, then when it was captured; the
       // check reports what the image shows, which can differ from the status.
       const captured = `${item.Kind || 'screenshot'} captured ${item.CapturedAt || 'at an unknown time'}`;
       const note = (item.Note || '').replace(/\s+/g, ' ').trim();
-      lines.push(`- ${note ? `${note} (${captured})` : captured}. Image check: ${check}`);
+      lines.push(`- ${note ? `${note} (${captured})` : captured}. ${check}`);
     });
   }
   lines.push(

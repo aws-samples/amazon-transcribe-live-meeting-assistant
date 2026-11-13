@@ -125,6 +125,58 @@ def test_the_missing_participants_are_listed_only_for_each_participant() -> None
         assert pure.verdict(parsed, mode, rule, PARTICIPANTS)["MissingParticipants"] == []
 
 
+def test_only_the_participants_who_consented_in_the_chat_are_looked_for() -> None:
+    # Ana consented in the chat and is visible; Bo consented aloud, so the chat
+    # cannot show it: the image supports consent and Bo is listed as not expected.
+    parsed = pure.parse_answer(
+        answer(replies=[{"name": "Ana Silva", "text": "I consent", "decision": "consent"}])
+    )
+    judged = pure.verdict(parsed, "opt_in", "each_participant", PARTICIPANTS, ["bo chen"])
+    assert judged["Verdict"] == "supports_consent"
+    assert judged["MissingParticipants"] == []
+    assert judged["ConsentedOutsideChat"] == ["Bo Chen"]
+    # Ana's chat consent is still looked for.
+    nothing = pure.parse_answer(answer(replies=[]))
+    judged = pure.verdict(nothing, "opt_in", "each_participant", PARTICIPANTS, ["Bo Chen"])
+    assert judged["Verdict"] == "inconclusive"
+    assert judged["MissingParticipants"] == ["Ana Silva"]
+
+
+def test_everyone_consenting_aloud_needs_only_the_notice_and_no_objection() -> None:
+    parsed = pure.parse_answer(answer(replies=[]))
+    judged = pure.verdict(parsed, "opt_in", "each_participant", PARTICIPANTS, PARTICIPANTS)
+    assert judged["Verdict"] == "supports_consent"
+    assert judged["ConsentedOutsideChat"] == PARTICIPANTS
+    objected = pure.parse_answer(answer(anyObjection=True, replies=[]))
+    assert (
+        pure.verdict(objected, "opt_in", "each_participant", PARTICIPANTS, PARTICIPANTS)["Verdict"]
+        == "objection_found"
+    )
+    hidden = pure.parse_answer(answer(noticeVisible=False, replies=[]))
+    assert (
+        pure.verdict(hidden, "opt_in", "each_participant", PARTICIPANTS, PARTICIPANTS)["Verdict"]
+        == "inconclusive"
+    )
+
+
+def test_consent_outside_the_chat_is_listed_only_for_each_participant() -> None:
+    parsed = pure.parse_answer(answer(replies=[]))
+    for mode, rule in (("notify", None), ("opt_in", "owner_attests")):
+        assert (
+            pure.verdict(parsed, mode, rule, PARTICIPANTS, ["Bo Chen"])["ConsentedOutsideChat"]
+            == []
+        )
+
+
+def test_the_prompt_names_the_participants_who_consented_outside_the_chat() -> None:
+    prompt = pure.build_prompt(
+        "Notice", "opt_in", ["Ana", "Bo"], ["I consent"], ["I object"], [], ["Bo"]
+    )
+    assert "consented aloud or in LMA, not in the chat" in prompt
+    assert prompt.count('"Bo"') == 2
+    assert "consented aloud" not in pure.build_prompt("Notice", "opt_in", ["Ana"], [], [])
+
+
 def test_each_participant_with_nobody_listed_is_inconclusive() -> None:
     parsed = pure.parse_answer(answer())
     assert pure.verdict(parsed, "opt_in", "each_participant", [])["Verdict"] == "inconclusive"

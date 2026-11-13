@@ -167,7 +167,41 @@ describe('meeting-consent', () => {
         'Image check: Objection found (model amazon.nova-lite-v1:0, confidence 0.9)',
     );
     expect(text).toContain(
-      '- Participant list when Bo Chen objected (screenshot captured 2026-11-02T10:02:31.000Z). Image check: not run',
+      '- Participant list when Bo Chen objected (screenshot captured 2026-11-02T10:02:31.000Z). ' +
+        'Not checked: participant lists are kept as a record',
+    );
+  });
+
+  it('says a chat image with no check was not run, and names consent given outside the chat', () => {
+    const text = consentAsText({
+      ...CONSENT,
+      Evidence: [
+        { EvidenceId: 'e3', Kind: 'screenshot', CapturedAt: 'x', Note: 'Meeting chat when Bo Chen consented' },
+        {
+          EvidenceId: 'e4',
+          Kind: 'screenshot',
+          CapturedAt: 'y',
+          S3Key: 'lma-consent-evidence/m1/2026-11-02T10-02-31-000Z-participants-abc123.jpg',
+        },
+        {
+          EvidenceId: 'e5',
+          Kind: 'screenshot',
+          CapturedAt: 'z',
+          Note: 'Meeting chat when Jeremy Feldman consented',
+          Verification: {
+            Verdict: 'supports_consent',
+            ModelId: 'm',
+            Confidence: 0.8,
+            ConsentedOutsideChat: ['Bo Chen'],
+          },
+        },
+      ],
+    });
+    expect(text).toContain('- Meeting chat when Bo Chen consented (screenshot captured x). Image check: not run');
+    expect(text).toContain('- screenshot captured y. Not checked: participant lists are kept as a record');
+    expect(text).toContain(
+      'Image check: Supports consent (model m, confidence 0.8). ' +
+        'Consented aloud or in LMA, so not expected in this image: Bo Chen',
     );
   });
 

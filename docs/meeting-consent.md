@@ -222,7 +222,13 @@ on its **Details** tab. It shows:
 - the **evidence** images as thumbnails, each with what it was taken for and,
   when it has been checked, the vision model's verdict (shown as *Image check:*,
   because it reports what that image shows, which can differ from the record's
-  status), confidence and summary; selecting one opens it full size;
+  status), confidence and summary, the participants with no visible consent,
+  and those whose consent was said aloud or entered in LMA and so is not
+  expected in the image (*"Consented aloud or in LMA, so not expected in this
+  image: Bo Chen"*); a chat image not checked yet says *Image check: not run*,
+  and a participant-list image, which is never checked automatically, says
+  *"Not checked: participant lists are kept as a record"*. Selecting one opens
+  it full size;
 - a **timeline** of everything, oldest first: consent started, notices posted,
   replies and attestations, and each change of status with its reason. Replies
   are placed by when LMA recorded them, the order the status is decided in.
@@ -264,7 +270,8 @@ seats not yet identified counted on one line, as on the page), the timeline, and
 each evidence image, described by its note with when it was captured and its
 image check (*"- Meeting chat when Bo Chen objected (screenshot captured
 2026-11-02T10:02:30.000Z). Image check: Objection found (model
-amazon.nova-lite-v1:0, confidence 0.9)"*, or *"Image check: not run"*),
+amazon.nova-lite-v1:0, confidence 0.9)"*, *"Image check: not run"*, or, for
+a participant list, *"Not checked: participant lists are kept as a record"*),
 followed by the note that the record is supporting
 evidence and not a legal determination. A meeting without a consent record
 downloads as before. The email link carries the summary only.
@@ -736,15 +743,20 @@ are taken from the meeting page itself, so nothing open in the live view covers
 them. Each is a JPEG stored in the recordings bucket under
 `lma-consent-evidence/<meeting>/` and added to the record with
 `addMeetingConsentEvidence`, with a note of what it shows and the event it was
-taken for: *"Meeting chat after the notice was posted"* (notify) or *"… when
-consent was granted"* (opt-in) when the status becomes `granted` with no objection on the record;
+taken for: *"Meeting chat after the notice was posted"* (notify) when the
+status becomes `granted` with no objection on the record; in opt-in under the
+each-participant rule, *"Meeting chat when Jeremy Feldman consented"*, naming
+the participant whose consent completed it, both the first time and when it is
+granted again after a newcomer consented; *"… when consent was granted"* under
+the owner-attests rule, where the owner's attestation grants it;
 *"Meeting chat when Bo Chen objected"*; *"… after an objection for Bo Chen was
 recorded in LMA"*; and, when capture resumes after an objection, *"Meeting chat
 when Bo Chen consented"*, naming the latest participant to consent after the
 latest objection on the record. For each chat screenshot the VP then
 asks for the vision-model check (`verifyMeetingConsentEvidence`) without
 waiting for it; a participant list on its own is not checked, because the check
-reads a chat for the notice and the replies. Nor are the screenshots taken for
+reads a chat for the notice and the replies, and the meeting page and the
+download show it as *"Not checked: participant lists are kept as a record"*. Nor are the screenshots taken for
 an objection that was not made in the chat: one recorded in LMA (**Record an
 objection**, or `recordMeetingConsentEvent` through the API) or one said aloud.
 Such an objection never appears in the chat as a participant's reply, and LMA's
@@ -1014,8 +1026,10 @@ equal, or copy the images elsewhere before they expire.
 An evidence screenshot — typically the meeting chat after the request was
 posted — can be checked by an Amazon Bedrock vision model with
 `verifyMeetingConsentEvidence`. The model is shown the image with the notice
-that was posted, the meeting's mode, the consent and objection phrases and the
-participants listed as present, and asked to report what the picture shows:
+that was posted, the meeting's mode, the consent and objection phrases, the
+participants listed as present and, among them, those whose latest reply is a
+consent said aloud or entered in LMA (source `voice` or `ui`), which the chat
+cannot show, and asked to report what the picture shows:
 
 - whether the notice is visible, and whether it says the same as the notice
   posted;
@@ -1043,8 +1057,20 @@ From that answer LMA draws a **verdict**, the same way whichever model answered:
 | Verdict | When |
 |---|---|
 | `objection_found` | The model reported an objection, or a visible reply reads as one. Reported whatever the model's confidence. |
-| `supports_consent` | The notice is visible, nobody objected, the model's confidence is at least 0.5, and — for the opt-in rule **Each participant consents** — every participant listed as present has a visible reply reading as consent. |
+| `supports_consent` | The notice is visible, nobody objected, the model's confidence is at least 0.5, and — for the opt-in rule **Each participant consents** — every participant listed as present whose consent is expected in the chat has a visible reply reading as consent. |
 | `inconclusive` | Anything else, including an answer that could not be read. For the each-participant rule, the participants with no visible consent are listed (`MissingParticipants`). |
+
+Under the each-participant rule the image is judged only against the
+participants whose consent belongs in the chat. A participant whose latest reply
+is a consent said aloud or entered in LMA is not looked for in the image, and is
+listed on the result as `ConsentedOutsideChat` so that a reader sees why; so a
+chat image of a meeting where Ana consented in the chat and Bo said *"LMA, I
+consent"* supports consent when it shows Ana's reply. Everyone else listed is
+looked for, including participants who have not replied yet and those whose
+latest reply is an objection. When every participant consented outside the
+chat, the image supports consent when it shows the notice and no objection.
+The list is taken from the record when the check runs, whether the Virtual
+Participant asked for it or somebody chose **Check with model**.
 
 The result is stored on the evidence entry as `Verification`, with the model's
 id, when the check ran, who ran it and the tokens it used. The verdict
@@ -1158,7 +1184,7 @@ fragment ConsentRecord on MeetingConsent {
   Evidence {
     EvidenceId Kind S3Key CapturedAt AddedAt Note SignedUrl ImageDeletedAt
     Verification {
-      Verdict MissingParticipants Readable NoticeVisible NoticeMatches
+      Verdict MissingParticipants ConsentedOutsideChat Readable NoticeVisible NoticeMatches
       Replies { Name Text Decision }
       AnyObjection Confidence Summary ModelId VerifiedAt VerifiedBy InputTokens OutputTokens
     }

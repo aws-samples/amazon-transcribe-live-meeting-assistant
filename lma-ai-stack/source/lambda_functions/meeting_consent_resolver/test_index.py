@@ -640,6 +640,26 @@ def test_a_check_is_stored_on_the_evidence_and_leaves_the_status(dynamo, monkeyp
     assert sent["ModelId"] == "amazon.nova-lite-v1:0"
     assert sent["ObjectionPhrases"][0] == "I object"
     assert sent["LmaMessages"] == []
+    assert sent["ConsentedOutsideChat"] == []
+
+
+def test_a_check_is_sent_the_participants_who_consented_outside_the_chat(
+    dynamo, monkeypatch
+) -> None:
+    verifier = FakeLambda(VERIFIED)
+    evidence_id = evidence_meeting(monkeypatch, verifier)
+    call("setMeetingConsentParticipants", BACKEND, Participants=["Ana", "Bo"])
+    for name, source in (("Ana", "chat"), ("Bo", "voice")):
+        call(
+            "recordMeetingConsentEvent",
+            BACKEND,
+            ParticipantName=name,
+            Decision="consent",
+            Source=source,
+        )
+    call("verifyMeetingConsentEvidence", user(OWNER), EvidenceId=evidence_id)
+    assert verifier.payloads[0]["Participants"] == ["Ana", "Bo"]
+    assert verifier.payloads[0]["ConsentedOutsideChat"] == ["Bo"]
 
 
 def test_a_check_is_sent_the_notices_as_posted(dynamo, monkeypatch) -> None:

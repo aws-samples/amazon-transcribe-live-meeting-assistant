@@ -151,6 +151,31 @@ describe('ConsentPanel', () => {
     expect(screen.getByText('Check again')).toBeInTheDocument();
   });
 
+  it('says a participant list is kept as a record, and who consented outside the chat', () => {
+    const consent = {
+      ...CONSENT,
+      Evidence: [
+        { EvidenceId: 'p1', Kind: 'screenshot', CapturedAt: 'x', Note: 'Participant list when Bo Chen consented' },
+        {
+          EvidenceId: 'c1',
+          Kind: 'screenshot',
+          CapturedAt: 'y',
+          Note: 'Meeting chat when Bo Chen consented',
+          Verification: {
+            Verdict: 'supports_consent',
+            ModelId: 'm',
+            Confidence: 0.8,
+            ConsentedOutsideChat: ['Bo Chen'],
+          },
+        },
+      ],
+    };
+    render(<ConsentPanel state={stateWith({ consent })} />);
+    expect(screen.getByText('Not checked: participant lists are kept as a record')).toBeInTheDocument();
+    expect(screen.queryByText('Image check: not run')).not.toBeInTheDocument();
+    expect(screen.getByText('Consented aloud or in LMA, so not expected in this image: Bo Chen')).toBeInTheDocument();
+  });
+
   it('says when an image was deleted after its check', () => {
     const deleted = { ...CONSENT, Evidence: [{ EvidenceId: 'e1', ImageDeletedAt: '2026-11-02T10:03:00.000Z' }] };
     render(<ConsentPanel state={stateWith({ consent: deleted })} canEdit isOwner />);

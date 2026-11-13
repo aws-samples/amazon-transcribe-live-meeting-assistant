@@ -40,8 +40,10 @@ import {
   STATUS_LABELS,
   VERDICT_LABELS,
   buildTimeline,
+  consentedOutsideChatLabel,
   participantRows,
   statusIndicatorType,
+  uncheckedEvidenceLabel,
   unidentifiedLabel,
   unidentifiedPresentCount,
   verdictColor,
@@ -125,10 +127,15 @@ const EvidenceItem = ({ item, onVerify, canVerify }) => {
             {(verification.MissingParticipants || []).length > 0 && (
               <Box fontSize="body-s">{`No visible consent from: ${verification.MissingParticipants.join(', ')}`}</Box>
             )}
+            {consentedOutsideChatLabel(verification) && (
+              <Box fontSize="body-s" color="text-body-secondary">
+                {consentedOutsideChatLabel(verification)}
+              </Box>
+            )}
           </SpaceBetween>
         ) : (
           <Box fontSize="body-s" color="text-status-inactive">
-            Image check: not run
+            {uncheckedEvidenceLabel(item)}
           </Box>
         )}
         {canVerify && !item.ImageDeletedAt && (

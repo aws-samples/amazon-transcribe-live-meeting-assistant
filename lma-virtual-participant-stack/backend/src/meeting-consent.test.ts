@@ -1430,7 +1430,18 @@ test('the screenshots taken when the record is granted are noted for the event t
         Events: events.map(([ParticipantName, Decision, Source]) => ({ ParticipantName, Decision, Source: Source ?? 'chat' })),
     });
     assert.equal(grantEvidenceNote(record([]), 'notify'), 'after the notice was posted');
-    assert.equal(grantEvidenceNote(record([['Bo Chen', 'consent']]), 'opt_in'), 'when consent was granted');
+    // Opt-in: the consent that completed the grant, first or again after a newcomer consented.
+    assert.equal(grantEvidenceNote(record([['Bo Chen', 'consent']]), 'opt_in'), 'when Bo Chen consented');
+    assert.equal(
+        grantEvidenceNote(record([['Bo Chen', 'consent'], ['Jeremy Feldman', 'consent', 'voice']]), 'opt_in'),
+        'when Jeremy Feldman consented',
+    );
+    // Owner attests: the attestation granted it, not a participant's reply.
+    assert.equal(
+        grantEvidenceNote({ ...record([['Bo Chen', 'consent'], ['Ana Silva', 'consent', 'attestation']]), Rule: 'owner_attests' }, 'opt_in'),
+        'when consent was granted',
+    );
+    assert.equal(grantEvidenceNote(record([]), 'opt_in'), 'when consent was granted');
     assert.equal(
         grantEvidenceNote(record([['Bo Chen', 'objection'], ['Cy Diaz', 'consent'], ['Bo Chen', 'consent', 'voice']]), 'notify'),
         'when Bo Chen consented',

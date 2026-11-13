@@ -1387,7 +1387,11 @@ export function latestDecisions(record: ConsentRecord): Map<string, string> {
  * What the screenshots taken when the record becomes granted were taken for.
  * After an objection, capture resumes on a consent: the latest one recorded
  * after the latest objection names the event ("when Bo Chen consented").
- * Otherwise the first grant: in notify, the notice being posted.
+ * Otherwise, in notify, the notice being posted; in opt-in under the
+ * each-participant rule, the latest consent on the record, which is the one
+ * that completed it, whether it is the first grant or a grant again after a
+ * newcomer consented ("when Jeremy Feldman consented"); and under the
+ * owner-attests rule, where the owner's attestation grants it, the grant.
  */
 export function grantEvidenceNote(record: ConsentRecord, mode: PlannedMode): string {
     const events = (record.Events ?? []).filter((event) => event.Source !== 'attestation');
@@ -1400,7 +1404,13 @@ export function grantEvidenceNote(record: ConsentRecord, mode: PlannedMode): str
         const who = consents.length ? consents[consents.length - 1].ParticipantName : null;
         return who ? `when ${who} consented` : 'when recording resumed';
     }
-    return mode === 'notify' ? 'after the notice was posted' : 'when consent was granted';
+    if (mode === 'notify') return 'after the notice was posted';
+    if (record.Rule !== 'owner_attests') {
+        const consents = events.filter((event) => event.Decision === 'consent' && event.ParticipantName);
+        const who = consents.length ? consents[consents.length - 1].ParticipantName : null;
+        if (who) return `when ${who} consented`;
+    }
+    return 'when consent was granted';
 }
 
 /** Whether a display name reads as one of the participant list's placeholders, or the unknown sender. */
