@@ -24,7 +24,7 @@ An introduction to LMA for new viewers, and why it is much more than a note take
 
 **Duration**: ~7 minutes
 
-https://github.com/user-attachments/assets/b614e51f-f83c-4455-a0a2-e4dc7477a42a
+https://github.com/user-attachments/assets/f5b3cc27-a0a5-4315-9e5b-41652f3d6d2d
 
 **Related Documentation**: [Quick Start Guide](./quick-start-guide.md), [MCP Servers](./mcp-servers.md), [Amazon Quick MCP Setup](./amazon-quick-mcp-setup.md), [Meeting Consent](./meeting-consent.md), [On-demand ASR](./microvm-asr.md)
 
@@ -33,7 +33,7 @@ For compliance, privacy and legal teams. The three consent modes (off, notify, o
 
 **Duration**: ~7 minutes
 
-https://github.com/user-attachments/assets/a7286689-9da7-4990-8275-2f9a6173cab2
+https://github.com/user-attachments/assets/eb710e2f-f44c-49dd-917d-d32330fd65dc
 
 **Related Documentation**: [Meeting Consent](./meeting-consent.md), [Privacy and Data Handling Controls](./privacy-and-data-handling.md), [Configuration Guide](./configuration-guide.md#configuration-presets)
 
@@ -42,7 +42,7 @@ A software vendor gathers requirements from a customer in a Google Meet, three p
 
 **Duration**: ~5 minutes
 
-https://github.com/user-attachments/assets/09c04754-b333-43d7-a270-a21ef0a41362
+https://github.com/user-attachments/assets/dc00b633-0ddd-4039-be4b-abef1555d797
 
 **Related Documentation**: [Meeting Assistant](./meeting-assistant.md), [Virtual Participant](./virtual-participant.md)
 
@@ -62,7 +62,7 @@ A tour of the 0.4.0 release following one meeting from its invitation to its sha
 
 **Duration**: ~4 minutes
 
-https://github.com/user-attachments/assets/4dc2cebf-cd59-4f7f-bec8-dcd49e9bca16
+https://github.com/user-attachments/assets/3eacd270-6584-477b-905c-8605e0cccd63
 
 **Related Documentation**: [Meeting Consent](./meeting-consent.md), [Transcript Deletion](./transcript-deletion.md), [Virtual Participant](./virtual-participant.md), [Meeting Cost Estimate](./meeting-cost-estimate.md)
 
@@ -71,7 +71,7 @@ Scheduling a Virtual Participant for later and editing it before it starts, then
 
 **Duration**: ~2 minutes
 
-https://github.com/user-attachments/assets/4cc41a01-eb5a-4a17-b6d5-609070e4f6e0
+https://github.com/user-attachments/assets/3086d7ac-2de2-47ee-9c7d-a3f0394b5b4d
 
 **Related Documentation**: [Virtual Participant](./virtual-participant.md)
 
@@ -80,7 +80,7 @@ A tour of the meeting page: the compact header and tabs, the itemised cost estim
 
 **Duration**: ~3 minutes
 
-https://github.com/user-attachments/assets/40459589-92ca-4a0a-8d1e-1db1b529ccb6
+https://github.com/user-attachments/assets/2a3f2678-7dcc-4bd4-9fea-045ef02a6e5c
 
 **Related Documentation**: [Web UI Guide](./web-ui-guide.md#meeting-detail-page)
 
@@ -89,7 +89,7 @@ How LMA tells apart and names several people sharing one microphone, with the wo
 
 **Duration**: ~2 minutes
 
-https://github.com/user-attachments/assets/c08dd919-5f02-4fee-b9f5-f73c15b97b04
+https://github.com/user-attachments/assets/5dde83b5-482d-49bd-9774-5465b78565d1
 
 **Related Documentation**: [Web UI Guide](./web-ui-guide.md#meeting-detail-page), [Voice Enrollment](./voice-enrollment.md), [Meeting Video and Key Frames](./meeting-video.md)
 
@@ -98,7 +98,7 @@ The MISSING ACTION OWNER or ETA quick action, the Claude Haiku 5.5 default with 
 
 **Duration**: ~2 minutes
 
-https://github.com/user-attachments/assets/05f371ca-669b-4739-877c-6c127dab3e0c
+https://github.com/user-attachments/assets/cd8a7d9d-15f3-4c2a-a946-0b50f790793d
 
 **Related Documentation**: [Meeting Consent](./meeting-consent.md), [Transcript Deletion](./transcript-deletion.md)
 
@@ -107,7 +107,7 @@ The View / Edit Configuration page: named profiles and Managed presets, Form, YA
 
 **Duration**: ~3 minutes
 
-https://github.com/user-attachments/assets/22d3a989-ae6a-44c8-b9e4-5734501f9ed0
+https://github.com/user-attachments/assets/0703d007-3429-4a4b-b354-628f7dc8f794
 
 **Related Documentation**: [Configuration Guide](./configuration-guide.md#configuration-profiles), [Meeting Cost Estimate](./meeting-cost-estimate.md)
 
