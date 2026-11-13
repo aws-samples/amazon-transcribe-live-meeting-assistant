@@ -606,9 +606,19 @@ export default class Zoom {
         return this.chatInputVisible(page);
     }
 
-    private async sendMessages(page: Page, messages: string[]): Promise<void> {
+    /** Posts chat messages; true when every one was entered and sent. Never throws. */
+    private async sendMessages(page: Page, messages: string[]): Promise<boolean> {
         // So the meeting chat capture knows these when it reads them back.
         noteSentChat(messages);
+        try {
+            return await this.sendMessagesNow(page, messages);
+        } catch (e) {
+            log.warn('sendMessages failed (non-fatal — VP remains in meeting):', e);
+            return false;
+        }
+    }
+
+    private async sendMessagesNow(page: Page, messages: string[]): Promise<boolean> {
         // Make sure the panel is open, but never toggle a panel that's already
         // open (see openChatPanel — the toolbar button is a toggle).
         if (!(await this.chatInputVisible(page))) {
@@ -629,7 +639,7 @@ export default class Zoom {
         );
         if (!found) {
             log.warn('Could not locate chat message input — aborting sendMessages');
-            return;
+            return false;
         }
         for (const message of messages) {
             // Insert the whole message in ONE shot rather than simulating
@@ -667,6 +677,7 @@ export default class Zoom {
             await page.keyboard.press('Enter');
             await new Promise((r) => setTimeout(r, 50));
         }
+        return true;
     }
 
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {

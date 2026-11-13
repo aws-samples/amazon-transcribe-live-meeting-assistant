@@ -436,12 +436,12 @@ export function startChatAnswer(
     parsed: ChatQuestion,
     sender: string | null | undefined,
     platform: ChatPlatform,
-    send: (messages: string[], answered: boolean) => Promise<void>,
+    send: (messages: string[], answered: boolean) => Promise<unknown>,
     answerer: ChatAnswerer = meetingAnswerer,
 ): Promise<void> {
     log.info(`[chat-ask] question platform=${platform} explicit=${parsed.explicit} chars=${parsed.question.length}`);
     return answerer
         .respond(parsed, sender, platform)
-        .then((reply) => (reply.messages.length ? send(reply.messages, reply.answered) : undefined))
+        .then((reply) => (reply.messages.length ? send(reply.messages, reply.answered).then(() => undefined) : undefined))
         .catch((error) => log.warn('[chat-ask] could not post the answer:', error));
 }

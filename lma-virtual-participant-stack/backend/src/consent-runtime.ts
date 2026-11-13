@@ -165,7 +165,8 @@ export async function prepareMeetingConsent(): Promise<{ holdCapture: boolean; d
 export function attachMeetingConsent(
     page: Page,
     options: {
-        send: (messages: string[]) => Promise<void>;
+        /** Posts in the meeting chat; true only when every message was posted. Never throws. */
+        send: (messages: string[]) => Promise<boolean>;
         leave: (objector: string) => void;
         panels?: EvidencePanels;
         readRoster?: () => Promise<string[] | null>;

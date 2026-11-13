@@ -419,6 +419,16 @@ recorded as posted and nobody has objected, the status is `granted`, and the VP
 keeps screenshots as evidence (see [Evidence screenshots](#evidence-screenshots)).
 When somebody joins later, the notice is posted again, at most once a minute.
 
+The VP records the notice as posted only once the platform reports that every
+message of it, the reply line included, is in the chat. When it is not (the
+chat pane is closed and cannot be reopened, the compose box cannot be found, or
+Teams shows the message as failed to send), the VP logs a warning, does not
+record the notice, and posts it again every 30 seconds, up to 40 attempts
+(about 20 minutes), until it is in the chat. A notice re-posted for somebody
+who joined is handled the same way. In notify this keeps the status `pending`,
+which still allows capture, until participants can actually see the notice; in
+opt-in, capture stays withheld as it would anyway.
+
 ### Opt-in
 
 An opt-in meeting starts with capture withheld: the VP joins, but writes no
@@ -721,7 +731,7 @@ identities are never listed.
 | Chime | Shown | Read, under the active speaker | Count | Yes | The chat and the attendee list are on screen together, so one screenshot has both |
 | Zoom (browser) | Shown | Read, under the active speaker | Count | Yes | The participants pane is opened, shot and closed again |
 | Zoom (Meeting SDK) | Shown | Read, under the active speaker | Count | Yes | One screenshot of LMA's SDK page |
-| Teams (browser) | **Not shown** | Read, under the active speaker | Count | Yes, **aloud only** ("LMA, I consent"): a typed consent cannot be attributed, so not with **Read spoken replies** off | The People pane is opened and shot, then the chat reopened |
+| Teams (browser) | **Not shown** | Read, under the active speaker | Count | Yes, **aloud only** ("LMA, I consent"): a typed consent cannot be attributed, so not with **Read spoken replies** off | The People pane is opened and shot, then the chat reopened (through the toolbar's **More** menu on the anonymous join, which has no chat button) |
 | Teams (Azure Communication Services) | Shown | Read, under the active speaker | Names | Yes | One screenshot of LMA's SDK page |
 | Webex (browser) | Shown | Read, under the active speaker | **None** | **No**: see [Who is present](#who-is-present) | The participants panel is opened, shot and closed again |
 | Google Meet (browser) | Shown (read from the message group's header) | Read, under the speaking tile | Count | Yes | The People panel is opened and shot, then the chat reopened |
