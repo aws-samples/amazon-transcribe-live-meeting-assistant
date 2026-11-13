@@ -225,7 +225,7 @@ const main = async (): Promise<void> => {
         log.info('*** LOCAL TEST MODE - Skipping ALB registration and AppSync updates ***');
     }
     log.info(`Meeting Platform: ${details.invite.meetingPlatform}`);
-    log.info(`Meeting ID: ${details.invite.meetingId}`);
+    log.info(`Meeting ID: ${/:\/\//.test(details.invite.meetingId) ? `<link:${details.invite.meetingId.split('://')[1].split(/[/?#]/)[0]}>` : details.invite.meetingId}`);
     log.info(`Meeting Name: ${details.invite.meetingName}`);
     log.info(`LMA User: ${details.lmaUser}`);
     

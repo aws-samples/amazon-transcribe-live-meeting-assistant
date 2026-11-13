@@ -10,12 +10,13 @@
  * apart from a person's.
  *
  * The display name is the deployment's LMA identity with the owner filled in,
- * `LMA ({LMA_USER})` by default: "LMA (Bob Strahan)", or "LMA
- * (strahanr@example.com)" when the owner is known by an email address. Its
- * handles are the part in parentheses, and the first word of it (the owner's
- * first name, or the local part of the email address), so "LMA (Bob Strahan)"
- * answers to "LMA Bob" and "LMA Bob Strahan", and "LMA (strahanr@example.com)"
- * to "LMA strahanr". A short handle that is also a chat command or question word
+ * `LMA - {LMA_USER}` by default: "LMA - Bob Strahan", or "LMA -
+ * strahanr@example.com" when the owner is known by an email address. A profile
+ * may still hold the earlier default, `LMA ({LMA_USER})`: "LMA (Bob Strahan)".
+ * Its handles are the owner part (after "LMA -", or in parentheses), and the
+ * first word of it (the owner's first name, or the local part of the email
+ * address), so either form for Bob answers to "LMA Bob" and "LMA Bob Strahan",
+ * and either form for the email address to "LMA strahanr". A short handle that is also a chat command or question word
  * ("LMA (Help Desk)") is not used, since "LMA help" has to stay the command.
  *
  * Pure and dependency-free apart from the shared text normalisation, so
@@ -58,16 +59,22 @@ function parenthesised(displayName: string): string | null {
 }
 
 /**
+ * "LMA", then the separator a display name may put after it (" - ", ": ",
+ * spaces), then the rest, which is who the name is for.
+ */
+const LMA_THEN_OWNER = /^@?lma(?![\p{L}\p{N}])[\s\-–—:|,.]*(.*)$/iu;
+
+/**
  * Who the display name is for: the part in parentheses, or for a name of the
- * form "LMA <owner>" the words after "LMA". Null for a name that names nobody
- * ("LMA", or a custom identity such as "Acme Notes").
+ * form "LMA <owner>" or "LMA - <owner>" the text after "LMA" and the
+ * separator, as written. Null for a name that names nobody ("LMA", or a
+ * custom identity such as "Acme Notes").
  */
 function ownerPart(displayName: string): string | null {
     const inner = parenthesised(displayName);
     if (inner) return inner;
-    const words = normalizeChatText(cleanChatSpacing(displayName)).split(' ').filter(Boolean);
-    if (words[0] === 'lma' && words.length > 1) return words.slice(1).join(' ');
-    return null;
+    const rest = LMA_THEN_OWNER.exec(cleanChatSpacing(displayName).trim())?.[1]?.trim();
+    return rest && normalizeChatText(rest) ? rest : null;
 }
 
 /**

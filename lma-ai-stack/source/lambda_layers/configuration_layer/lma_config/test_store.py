@@ -1273,3 +1273,38 @@ def test_the_merge_does_not_mutate_either_input() -> None:
     deep_merge(base, overlay)
     assert base == {"a": {"x": 1}}
     assert overlay == {"a": {"y": 2}}
+
+
+# ── a value saved before its schema narrowed ───────────────────────────────
+
+
+def test_a_stored_value_the_schema_now_refuses_still_reads_but_cannot_be_saved_again() -> None:
+    """The Display name setting is restricted to what Teams accepts in a name.
+
+    A profile that saved the earlier default `LMA ({LMA_USER})` keeps it: the
+    value is read as stored, so a Virtual Participant still starts under it. A
+    save of that section is checked, so it goes through once the name is edited.
+    """
+    store, _dynamo, _ = build()
+    store.write_default({"virtual_participant": {"displayName": "LMA - {LMA_USER}"}})
+    store.seed_profile("custom", {"virtual_participant": {"displayName": "LMA ({LMA_USER})"}})
+    store.set_active_profile("custom", only_if_absent=True)
+
+    assert store.get_section("virtual_participant").values["displayName"] == "LMA ({LMA_USER})"
+    with pytest.raises(InvalidConfiguration):
+        store.write_section(
+            "custom",
+            "virtual_participant",
+            {"displayName": "LMA ({LMA_USER})"},
+            updated_by="admin@example.com",
+            expected_version=None,
+        )
+    store.write_section(
+        "custom",
+        "virtual_participant",
+        {"displayName": "LMA - {LMA_USER}"},
+        updated_by="admin@example.com",
+        expected_version=None,
+    )
+    store.invalidate()
+    assert store.get_section("virtual_participant").values["displayName"] == "LMA - {LMA_USER}"

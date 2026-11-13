@@ -286,14 +286,21 @@ export type AttendeeDecision =
 
 /**
  * Teams' pre-join display-name field validates against a fixed character set —
- * "letters, numbers, spaces, and these symbols: - ' . _ @" — and the default
- * identity template `LMA ({LMA_USER})` fails it on the parentheses, blocking
- * the join. Rewrite `LMA (user)` as `LMA - user` and strip anything else the
- * field would reject. Teams-only: chat messages and every other platform
- * accept the parenthesised form, so the identity itself is left alone.
+ * "letters, numbers, spaces, and these symbols: - ' . _ @" — and a name with
+ * anything else in it blocks the join. The Display name setting is restricted
+ * to that set (its schema in lma_config/schemas/virtual_participant.json), and
+ * its default `LMA - {LMA_USER}` passes, so a configured name is shown on
+ * Teams as it is on every other platform. What this still has to clean is the
+ * user name filled in for `{LMA_USER}` ("Strahan, Bob", "José"), and a name
+ * saved before the restriction, such as the earlier default
+ * `LMA ({LMA_USER})`: `LMA (user)` becomes `LMA - user`, an accented letter
+ * loses its accent, and anything else the field would reject is removed.
+ * Teams-only: chat messages and every other platform accept those characters.
  */
 export function sanitizeTeamsDisplayName(name: string): string {
     const cleaned = name
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
         .replace(/\s*\(/g, ' - ')
         .replace(/\)/g, '')
         // eslint-disable-next-line no-useless-escape

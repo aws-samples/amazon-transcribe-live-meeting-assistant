@@ -15,11 +15,11 @@
       "order": 0,
       "type": "string",
       "title": "Display name",
-      "description": "The name the Virtual Participant joins a meeting under and posts to the meeting chat as. {LMA_USER} is replaced by the name of the LMA user who started it, so the default gives each user's Virtual Participant its own name, such as LMA (Jane Doe). Keep the first word LMA: participants address a Virtual Participant by its name (LMA Jane leave), and Virtual Participants in the same meeting recognise each other by a name that starts with LMA. Without {LMA_USER}, every user's Virtual Participant has the same name, and two of them in one meeting cannot be addressed separately.",
-      "examples": ["LMA ({LMA_USER})", "LMA Notetaker ({LMA_USER})"],
+      "description": "The name the Virtual Participant joins a meeting under and posts to the meeting chat as. {LMA_USER} is replaced by the name of the LMA user who started it, so the default gives each user's Virtual Participant its own name, such as LMA - Jane Doe. Use only letters A-Z and a-z, digits, spaces and the characters - ' . _ @, and start with a letter or digit: Microsoft Teams accepts only these characters in a guest's name, so a name made of them is shown the same on every platform. {LMA_USER} may appear anywhere after the first character; on Teams only, a character of the user's name that Teams does not accept loses its accent or is left out. Keep the first word LMA: participants address a Virtual Participant by its name (LMA Jane leave), and Virtual Participants in the same meeting recognise each other by a name that starts with LMA. Without {LMA_USER}, every user's Virtual Participant has the same name, and two of them in one meeting cannot be addressed separately.",
+      "examples": ["LMA - {LMA_USER}", "LMA Notetaker - {LMA_USER}"],
       "minLength": 1,
       "maxLength": 128,
-      "pattern": "[^ \\t\\r\\n]"
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9 '._@-]|\\{LMA_USER\\})*$"
     },
     "voiceAssistantProvider": {
       "order": 1,

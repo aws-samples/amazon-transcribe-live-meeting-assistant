@@ -111,7 +111,7 @@
   "virtual_participant": {
     "displayName": {
       "type": "string",
-      "default": "LMA ({LMA_USER})",
+      "default": "LMA - {LMA_USER}",
       "formerParameter": "LMAIdentity"
     },
     "voiceAssistantProvider": {

@@ -10,10 +10,24 @@ import test from 'node:test';
 import { sanitizeTeamsDisplayName } from './teams.js';
 
 // Teams' pre-join name field allows exactly: letters, numbers, spaces,
-// and - ' . _ @ — the default identity template `LMA ({LMA_USER})` fails
-// it on the parentheses and the join is blocked at the name screen.
+// and - ' . _ @ — the earlier default identity template `LMA ({LMA_USER})`
+// fails it on the parentheses and the join is blocked at the name screen. The
+// default is now `LMA - {LMA_USER}`, which Teams accepts as it is, so the name
+// shown on Teams is the configured one; what is still cleaned is the user name
+// filled in for {LMA_USER}, and a name a profile saved under the earlier default.
 
-test('the default parenthesised identity becomes a form Teams accepts', () => {
+test('the default display name is shown on Teams unchanged', () => {
+    for (const name of ['LMA - Bob Strahan', 'LMA - strahanr@example.com', "LMA - Mary O'Brien", 'LMA Notetaker - a.b_c']) {
+        assert.equal(sanitizeTeamsDisplayName(name), name);
+    }
+});
+
+test('a user name Teams would refuse is cleaned inside the default', () => {
+    assert.equal(sanitizeTeamsDisplayName('LMA - Strahan, Bob'), 'LMA - Strahan Bob');
+    assert.equal(sanitizeTeamsDisplayName('LMA - José Müller'), 'LMA - Jose Muller');
+});
+
+test('the earlier parenthesised default becomes a form Teams accepts', () => {
     assert.equal(
         sanitizeTeamsDisplayName('LMA (jeremykf@amazon.com)'),
         'LMA - jeremykf@amazon.com',

@@ -93,6 +93,28 @@ def test_no_pattern_uses_a_class_escape_the_two_languages_read_differently(name)
         assert escape not in text, f"{name} uses {escape}"
 
 
+DISPLAY_NAME_VALUES = AI_STACK.parent / "test-fixtures" / "display-name-values.json"
+
+
+def test_the_display_name_accepts_only_what_teams_shows_and_the_placeholder():
+    """The table the web UI's copy of the validator runs too."""
+    table = json.loads(DISPLAY_NAME_VALUES.read_text())
+    display_name = schema.section_schema("virtual_participant")["properties"]["displayName"]
+    for value in table["accepted"]:
+        assert schema.check(display_name, value) == [], value
+    for value in table["refused"]:
+        assert schema.check(display_name, value), value
+
+
+def test_the_shipped_display_name_and_its_examples_pass_the_schema():
+    display_name = schema.section_schema("virtual_participant")["properties"]["displayName"]
+    defaults = json.loads((Path(schema.__file__).parent / "setting_defaults.json").read_text())
+    shipped = defaults["virtual_participant"]["displayName"]["default"]
+    assert shipped == "LMA - {LMA_USER}"
+    for value in [shipped, *display_name["examples"]]:
+        assert schema.check(display_name, value) == [], value
+
+
 def test_the_chat_buttons_are_the_one_section_a_profile_replaces_whole():
     replaced = {
         name

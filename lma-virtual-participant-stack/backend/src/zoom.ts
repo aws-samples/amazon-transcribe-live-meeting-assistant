@@ -29,6 +29,7 @@ import {
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 import { zoomPasswordKind, zoomWebJoinUrl } from './meeting-password.js';
+import { applyZoomPersonalLink, zoomSaysMeetingDoesNotExist } from './zoom-join-link.js';
 import { humanClick, humanType } from './prejoin-actions.js';
 import {
     fetchZoomCredentials,
@@ -274,6 +275,24 @@ export default class Zoom {
      * buttons, the speaker/gallery video containers) AND that prejoin controls
      * are gone. Any positive in-meeting signal counts.
      */
+    /**
+     * End the join when Zoom shows that the meeting does not exist (an
+     * invalid meeting ID, error 3001). A personal meeting link whose name
+     * Zoom does not know still resolves to a meeting number, so this is where
+     * such a link is found out. Throws the error the missing name field
+     * already throws, which the container reports as "Invalid meeting ID"
+     * (`error:meeting-not-found`).
+     */
+    private async throwIfMeetingDoesNotExist(page: Page): Promise<void> {
+        const text = await page
+            .evaluate(() => (document.body?.innerText || '').slice(0, 20000))
+            .catch(() => '');
+        if (zoomSaysMeetingDoesNotExist(text)) {
+            log.warn('[zoom] Zoom says the meeting does not exist.');
+            throw new Error('Meeting not found or invalid meeting ID');
+        }
+    }
+
     private async isInMeeting(page: Page): Promise<boolean> {
         return page
             .evaluate(() => {
@@ -735,6 +754,17 @@ export default class Zoom {
         // A signed-in session joins far more reliably (the "We detected
         // you may be a bot. ... sign in to join the meeting" guest block
         // becomes rare) and lets the VP join meetings that disallow guests.
+        // A personal meeting link (/my/<name>) does not carry the meeting
+        // number the web client is opened with. Zoom's redirect for it does:
+        // resolve it first, so a link Zoom does not resolve ends the join
+        // here with a clear reason rather than on a page that is not found.
+        if (details.invite.zoomPersonalLink) {
+            await substep('Looking up the personal meeting link…');
+            if (!(await applyZoomPersonalLink(details.invite))) {
+                return { reason: 'never-joined', trigger: 'pre-join:zoom-link-unresolved' };
+            }
+        }
+
         const zoomCredentialsSecretName = (process.env.ZOOM_CREDENTIALS_SECRET_NAME || '').trim();
         let signedInToZoom = false;
         if (zoomCredentialsSecretName) {
@@ -996,7 +1026,7 @@ export default class Zoom {
             // app.zoom.us/signin → /wc/<id>/join and re-renders the form, so
             // filling it too early loses the input. See waitForPrejoinReady.
             await substep('Loading the meeting join screen…');
-            await this.waitForPrejoinReady(page);
+            if (!(await this.waitForPrejoinReady(page))) await this.throwIfMeetingDoesNotExist(page);
 
             // A non-empty meetingPassword doesn't guarantee Zoom renders
             // #input-for-pwd — Personal Meeting Rooms and passcode-disabled
@@ -1351,6 +1381,7 @@ export default class Zoom {
             } catch {
                 /* ignore — page may be navigating */
             }
+            await this.throwIfMeetingDoesNotExist(page);
             // Heuristic still says "not in". Ask Claude what screen we're really
             // on every AI_CHECK_INTERVAL_MS so a class-rename can't strand us.
             if (isResolverEnabled() && Date.now() - lastAiCheck > AI_CHECK_INTERVAL_MS) {

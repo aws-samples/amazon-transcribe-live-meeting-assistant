@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { normalizeChatText } from './chat-text.js';
 import { addressingVpHandle } from './vp-handle.js';
 import { normalizeMeetingPassword } from './meeting-password.js';
-import { parseZoomJoinLink, resolveZoomMeeting } from './zoom-join-link.js';
+import { parseZoomJoinLink, parseZoomPersonalLink, resolveZoomMeeting, type ZoomPersonalLink } from './zoom-join-link.js';
 import { registerSecretValue } from './logger.js';
 
 export interface MeetingInvite {
@@ -19,6 +19,12 @@ export interface MeetingInvite {
   scheduleId?: string;
   userName: string;
   virtualParticipantId?: string;
+  /**
+   * A Zoom personal meeting link given as the meeting ID. The Zoom handlers
+   * resolve it to its meeting number before joining (zoom-join-link.ts
+   * `resolveZoomPersonalLink`), and replace meetingId with that number.
+   */
+  zoomPersonalLink?: ZoomPersonalLink;
 }
 
 export interface Speaker {
@@ -132,16 +138,19 @@ class DetailsManager {
     let meetingId = process.env.MEETING_ID || '';
     // Grouping spaces removed from a numeric Zoom passcode: see meeting-password.ts.
     let meetingPassword = normalizeMeetingPassword(process.env.MEETING_PASSWORD, meetingPlatform);
+    let zoomPersonalLink: ZoomPersonalLink | undefined;
     // A Zoom join link given as the meeting ID: its meeting number, and its
     // pwd value unless a passcode was given too (zoom-join-link.ts). The pwd
     // value came in MEETING_ID, which the logger does not treat as a secret.
     if (meetingPlatform.toUpperCase() === 'ZOOM') {
       // The link's own pwd is a secret whether or not it becomes the password
       // (a separately given passcode wins over it).
-      const linkPwd = parseZoomJoinLink(meetingId)?.pwd;
+      const personalLink = parseZoomPersonalLink(meetingId);
+      const linkPwd = parseZoomJoinLink(meetingId)?.pwd ?? personalLink?.pwd;
       if (linkPwd) registerSecretValue(linkPwd);
       ({ meetingId, meetingPassword } = resolveZoomMeeting(meetingId, meetingPassword));
       registerSecretValue(meetingPassword);
+      if (personalLink) zoomPersonalLink = personalLink;
     }
     const meetingName = process.env.MEETING_NAME || 'LMA Meeting';
     const meetingTime = parseInt(process.env.MEETING_TIME || '0');
@@ -149,7 +158,7 @@ class DetailsManager {
     const virtualParticipantId = process.env.VIRTUAL_PARTICIPANT_ID || uuidv4();
 
     // LMA Configuration
-    const lmaIdentity = process.env.LMA_IDENTITY || 'LMA ({LMA_USER})';
+    const lmaIdentity = process.env.LMA_IDENTITY || 'LMA - {LMA_USER}';
     const lmaUser = userName;
 
     // Replace the {LMA_USER} placeholder in messages, and {LMA_HANDLE} with
@@ -194,6 +203,7 @@ class DetailsManager {
         meetingTime,
         userName,
         virtualParticipantId,
+        ...(zoomPersonalLink ? { zoomPersonalLink } : {}),
       },
 
       zoomMethod,
@@ -525,6 +535,8 @@ const NEVER_JOINED_DETAIL: Readonly<Record<string, string>> = {
   'pre-join:meet-denied': 'Someone in the Google Meet meeting declined the request to join.',
   'pre-join:meet-invalid-code': 'Not a Google Meet meeting code or link, or Google Meet does not know the meeting.',
   'pre-join:meet-ended': 'The Google Meet meeting had already ended.',
+  'pre-join:zoom-link-unresolved':
+    'Zoom did not resolve this personal meeting link; create the Virtual Participant with the meeting ID and passcode instead.',
 };
 
 /**

@@ -126,6 +126,13 @@ describe('schema-validation', () => {
     ).toEqual([]);
   });
 
+  it('accepts for the Display name only what Teams shows and the placeholder, as the server does', () => {
+    const table = JSON.parse(readFileSync(join(AI_STACK, '..', 'test-fixtures', 'display-name-values.json'), 'utf8'));
+    const { displayName } = SCHEMAS.virtual_participant.properties;
+    table.accepted.forEach((value) => expect(check(displayName, value), value).toEqual([]));
+    table.refused.forEach((value) => expect(check(displayName, value).length, value).toBeGreaterThan(0));
+  });
+
   it('compares as JSON does', () => {
     expect(deepEqual({ a: [1, { b: 2 }] }, { a: [1, { b: 2 }] })).toBe(true);
     expect(deepEqual({ a: 1 }, { a: 1, b: undefined })).toBe(false);

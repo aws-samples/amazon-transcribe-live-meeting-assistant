@@ -308,7 +308,8 @@ MCP_TOOLS = [
                         "Meeting ID (numeric ID only; for Google Meet the meeting code, e.g. "
                         "abc-defg-hij). For Zoom, the full join link from the invitation (for "
                         "example https://us05web.zoom.us/j/81234567890?pwd=...) may be passed "
-                        "instead of the ID and passcode, and is the most reliable option."
+                        "instead of the ID and passcode, and is the most reliable option; a "
+                        "personal meeting link (https://<name>.zoom.us/my/<room>) works too."
                     ),
                 },
                 "scheduledTime": {"type": "string", "description": "ISO 8601 datetime"},
@@ -360,7 +361,8 @@ MCP_TOOLS = [
                         "Meeting ID (numeric ID only; for Google Meet the meeting code, e.g. "
                         "abc-defg-hij). For Zoom, the full join link from the invitation (for "
                         "example https://us05web.zoom.us/j/81234567890?pwd=...) may be passed "
-                        "instead of the ID and passcode, and is the most reliable option."
+                        "instead of the ID and passcode, and is the most reliable option; a "
+                        "personal meeting link (https://<name>.zoom.us/my/<room>) works too."
                     ),
                 },
                 "meetingPassword": {

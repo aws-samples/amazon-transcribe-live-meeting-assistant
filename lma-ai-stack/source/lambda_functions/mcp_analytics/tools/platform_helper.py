@@ -85,15 +85,20 @@ _ZOOM_PATHS = (
     re.compile(r"^/wc/(\d+)(?:/join)?/?$"),
     re.compile(r"^/wc/join/(\d+)/?$"),
 )
+# /my/<name>, a personal meeting link. It carries no meeting number; the
+# Virtual Participant finds it from the redirect Zoom answers the link with
+# (zoom-join-link.ts parseZoomPersonalLink).
+_ZOOM_PERSONAL_PATH = re.compile(r"^/my/[^/]+/?$")
 
 ZOOM_PASSWORD_LOOKS_LIKE_LINK_VALUE = (
     "This looks like the pwd value from a Zoom join link, possibly cut off. Pass the "
     "passcode shown in the invitation text, or the full join link as meetingId."
 )
 ZOOM_LINK_NOT_READ = (
-    "For Zoom, meetingId must be the numeric meeting ID or a full zoom.us join link "
-    "(https://<name>.zoom.us/j/<number>?pwd=...). A personal link (zoom.us/my/<name>) "
-    "cannot be used; pass the meeting ID and passcode from the invitation instead."
+    "For Zoom, meetingId must be the numeric meeting ID, a full zoom.us join link "
+    "(https://<name>.zoom.us/j/<number>?pwd=...), or a personal meeting link "
+    "(https://<name>.zoom.us/my/<room>); otherwise pass the meeting ID and passcode "
+    "from the invitation."
 )
 
 
@@ -118,11 +123,24 @@ def zoom_link_parts(meeting_id: Optional[str]) -> Optional[Tuple[str, Optional[s
     return None
 
 
+def zoom_personal_link_pwd(meeting_id: Optional[str]) -> Optional[Tuple[str, Optional[str]]]:
+    """For a Zoom personal meeting link, ("", its pwd value or None); None if it is not one."""
+    text = (meeting_id or "").strip()
+    if not re.match(r"^https?://", text, re.IGNORECASE):
+        return None
+    parts = urlsplit(text)
+    if not _ZOOM_HOST.match(parts.hostname or "") or not _ZOOM_PERSONAL_PATH.match(parts.path):
+        return None
+    pwd = (parse_qs(parts.query).get("pwd") or [""])[0].strip()
+    return "", (pwd or None)
+
+
 def check_zoom_meeting(meeting_id: str, meeting_password: Optional[str]) -> None:
     """Refuse a Zoom meeting ID or password the Virtual Participant cannot join with.
 
     A meeting ID that is a link must be a zoom.us join link the Virtual
-    Participant reads. A password is accepted when it is a passcode (at most
+    Participant reads, or a personal meeting link, which it resolves to the
+    meeting number before joining. A password is accepted when it is a passcode (at most
     ZOOM_PASSCODE_MAX_LENGTH characters, measured as the Virtual Participant
     enters it, without the grouping spaces of a numeric passcode) or a complete
     link pwd value, which the Virtual Participant puts on the join URL. Any
@@ -131,7 +149,7 @@ def check_zoom_meeting(meeting_id: str, meeting_password: Optional[str]) -> None
     """
     link = None
     if re.match(r"^https?://", meeting_id or "", re.IGNORECASE):
-        link = zoom_link_parts(meeting_id)
+        link = zoom_link_parts(meeting_id) or zoom_personal_link_pwd(meeting_id)
         if link is None:
             raise ValueError(ZOOM_LINK_NOT_READ)
     password = (meeting_password or "").strip()
