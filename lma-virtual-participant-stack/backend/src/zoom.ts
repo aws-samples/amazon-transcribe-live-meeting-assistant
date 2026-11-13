@@ -450,23 +450,33 @@ export default class Zoom {
         const joinedAt = Date.now();
         let stopped = false;
         let timer: NodeJS.Timeout | undefined;
+        // Each distinct miss or failure is logged once, not on every check.
+        const reported = new Set<string>();
+        const reportOnce = (line: string): void => {
+            if (reported.has(line) || reported.size >= 50) return;
+            reported.add(line);
+            log.info(line);
+        };
         const tick = async (): Promise<void> => {
             if (stopped || page.isClosed()) return;
             // Bounded like safeEvaluate: a CDP evaluate can hang, and the next
             // check must still be scheduled.
             let to: NodeJS.Timeout | undefined;
             try {
-                const dismissed = await Promise.race([
+                const result = await Promise.race([
                     page.evaluate(dismissZoomOverlaysInPage, ZOOM_OVERLAY_SPEC),
                     new Promise<never>((_, reject) => {
                         to = setTimeout(() => reject(new Error('timed out after 5000ms')), 5000);
                     }),
                 ]);
-                for (const d of dismissed) {
+                for (const d of result.dismissed) {
                     log.info(`[zoom-overlays] dismissed a Zoom notice ("${d.notice}") with "${d.button}"`);
                 }
+                for (const m of result.missed) {
+                    reportOnce(`[zoom-overlays] Zoom notice left on screen ("${m.notice}"); controls near it: ${m.controls}`);
+                }
             } catch (err: any) {
-                if (!page.isClosed()) log.debug(`[zoom-overlays] check failed: ${err?.message ?? err}`);
+                if (!page.isClosed()) reportOnce(`[zoom-overlays] check failed: ${err?.message ?? err}`);
             } finally {
                 if (to) clearTimeout(to);
             }
