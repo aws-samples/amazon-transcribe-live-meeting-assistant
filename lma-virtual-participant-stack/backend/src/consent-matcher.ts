@@ -8,34 +8,44 @@
  * Reading a meeting chat message as a consent reply, and the other pure rules
  * of the Virtual Participant's consent flow that need no AWS and no page.
  *
- * A consent reply is matched as the whole message, as the VP's chat commands
- * are (details.ts `matchesChatCommand`): case, punctuation and spacing are
- * ignored, and an "LMA" addressee may stand anywhere in it. So "I consent", "i
- * consent!" and "LMA, I consent" are consent, and "I agree with Bo's point" is
- * ordinary chat. That is stricter than the reply classifier in the
- * configuration layer (lma_consent.classify_reply), which looks for a phrase
- * anywhere in a reply: a meeting chat is full of sentences that contain "I
- * agree" without being about the recording, and reading one as consent would
- * start capture.
+ * Consent is either the whole message or "LMA" followed at once by a consent
+ * phrase somewhere in it. Case, punctuation and spacing are ignored, as for
+ * the VP's chat commands (details.ts `matchesChatCommand`).
+ *
+ * - The whole message: a consent phrase and nothing else, with an "LMA"
+ *   addressee anywhere or none ("I consent", "i consent!", "I agree, LMA").
+ * - Contained: "LMA" immediately followed by a consent phrase, or by the
+ *   built-in "consent", anywhere in a message of up to a sentence's length
+ *   ("...so that's the plan. LMA, I consent.", "sounds good, LMA I agree").
+ *   "LMA" with anything else between it and the phrase ("LMA, what do you
+ *   think? I consent") is not consent, and nor is a sentence that contains a
+ *   consent phrase without "LMA" just before it ("I agree with Bo's point"):
+ *   a meeting chat is full of sentences that contain "I agree" without being
+ *   about the recording, and reading one as consent would start capture.
+ *   That is stricter than the reply classifier in the configuration layer
+ *   (lma_consent.classify_reply), which looks for a phrase anywhere.
  *
  * An objection may also be part of a sentence, in the direction of stopping: a
  * message of up to a sentence's length that contains an objection phrase as
  * whole words ("LMA, please stop recording now", "I object to this meeting
  * being recorded", "I agree with Sam, but I don't consent to being recorded")
  * is an objection, addressed to LMA or not. Reading more messages as
- * objections can only stop capture, never start it. Only the text outside
- * quotation marks is searched, so a phrase quoted to tell people how to reply
- * ('If you do not agree, reply "I object".') is not an objection, while the
- * phrase typed on its own, quoted or not, still is. Two kinds of message are
- * not searched at all: a longer one, which explains the phrases rather than
- * using them (another bot's notice), and an `LMA ask` question, which is a
- * question for the meeting assistant, whatever it mentions.
+ * objections can only stop capture, never start it.
+ *
+ * Both contained readings search only the text outside quotation marks, so a
+ * phrase quoted to tell people how to reply ('Type or say "LMA, I consent" or
+ * "LMA, I object".', another LMA's notice) is neither, while the reply typed
+ * on its own, quoted or not, still is. Two kinds of message are not searched
+ * at all: a longer one, which explains the phrases rather than using them
+ * (another bot's notice), and an `LMA ask` question, which is a question for
+ * the meeting assistant, whatever it mentions.
  *
  * Besides the configured phrases, "LMA consent" is always consent and "LMA no
  * consent" and "LMA object" are always objections, so a participant can reply
  * in a form that cannot be mistaken for conversation whatever the deployment
  * configured. Objections are looked for first, so "LMA I do not consent" is an
- * objection although it contains "consent".
+ * objection although it contains "consent", and so is a message that contains
+ * both an objection and "LMA, I consent".
  */
 
 export type ConsentDecision = 'consent' | 'objection';
@@ -51,8 +61,11 @@ export const BUILT_IN_CONSENT_PHRASES: readonly string[] = ['consent'];
 /** Always an objection when addressed to LMA, whatever is configured. */
 export const BUILT_IN_OBJECTION_PHRASES: readonly string[] = ['no consent', 'object'];
 
-/** Longest message that is searched for an objection phrase anywhere in it. */
-const MAX_OBJECTION_SENTENCE_LENGTH = 200;
+/**
+ * Longest message that is searched for an objection phrase, or for "LMA" and
+ * a consent phrase, anywhere in it.
+ */
+export const MAX_CONTAINED_REPLY_LENGTH = 200;
 
 /**
  * Text as replies are compared: Unicode-normalised, lower-cased, and every run
@@ -87,6 +100,22 @@ function containsPhrase(words: string, phrase: string): boolean {
     return phrase.length > 0 && ` ${words} `.includes(` ${phrase} `);
 }
 
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Whether `text` (lower-cased, quotes removed) holds "LMA" followed at once by
+ * `phrase` (already normalised) with nothing but the end of the text or a
+ * clause-ending mark (. ! ? , ; :) after it, ignoring spacing and punctuation
+ * between the words.
+ */
+function endsClauseAfterLma(text: string, phrase: string): boolean {
+    const words = phrase.split(' ').filter(Boolean).map(escapeRegExp);
+    if (words.length === 0) return false;
+    const gap = '[^\\p{L}\\p{N}]+';
+    const pattern = new RegExp(`(?:^|[^\\p{L}\\p{N}])lma${gap}${words.join(gap)}\\s*(?:[.!?,;:]|$)`, 'u');
+    return pattern.test(text.trim());
+}
+
 /**
  * `consent`, `objection` or null for one chat message.
  *
@@ -108,38 +137,45 @@ export function classifyChatReply(
     const objections = objectionPhrases.map(normalizeReplyText).filter(Boolean);
     const consents = consentPhrases.map(normalizeReplyText).filter(Boolean);
 
-    // The contains test is held to a sentence's length, so a long message
+    // The contains tests are held to a sentence's length, so a long message
     // that merely explains the phrases (another bot's notice, say) is not
-    // read as somebody objecting. It searches only the text outside quotation
-    // marks, so a phrase quoted to tell people how to reply ('reply "I
-    // object" to decline') is not read as one either.
-    const unquoted =
-        message.trim().length <= MAX_OBJECTION_SENTENCE_LENGTH
-            ? normalizeReplyText(message.replace(QUOTED, ' '))
-                  .split(' ')
-                  .filter((token) => token !== 'lma')
-                  .join(' ')
-            : '';
-    const contained = objections.some((phrase) => containsPhrase(unquoted, phrase));
+    // read as a reply. They search only the text outside quotation marks, so
+    // a phrase quoted to tell people how to reply ('type or say "LMA, I
+    // consent"') is not read as one either.
+    const rawUnquoted = message.replace(QUOTED, ' ').normalize('NFKC').toLowerCase();
+    const unquoted = message.trim().length <= MAX_CONTAINED_REPLY_LENGTH ? normalizeReplyText(rawUnquoted) : '';
+    const unaddressed = unquoted
+        .split(' ')
+        .filter((token) => token !== 'lma')
+        .join(' ');
+    const containedObjection = objections.some((phrase) => containsPhrase(unaddressed, phrase));
+    // "LMA" and then at once a consent phrase that ends its clause (the end of
+    // the message, or . ! ? , ; :), anywhere outside quotes: "...the plan.
+    // LMA, I consent." and "LMA I agree, let's go on" are consent, while
+    // "LMA, I agree with Ana that ..." and "LMA consent is a good feature",
+    // which talk about something, are not.
+    const containedConsent =
+        unquoted !== '' &&
+        [...BUILT_IN_CONSENT_PHRASES, ...consents].some((phrase) => endsClauseAfterLma(rawUnquoted, phrase));
 
     if (addressed) {
         // Nor is a question for the meeting assistant ("LMA ask what do we
         // say if a client asks us to stop recording?"), which is answered as
-        // one: only the exact forms are objections there.
-        const question = rest === 'ask' || rest.startsWith('ask ');
-        if (BUILT_IN_OBJECTION_PHRASES.includes(rest) || objections.includes(rest) || (contained && !question)) {
+        // one: only the exact forms are replies there.
+        const question = rest === 'ask' || rest.startsWith('ask ') || containsPhrase(unquoted, 'lma ask');
+        if (BUILT_IN_OBJECTION_PHRASES.includes(rest) || objections.includes(rest) || (containedObjection && !question)) {
             return 'objection';
         }
-        if (BUILT_IN_CONSENT_PHRASES.includes(rest) || consents.includes(rest)) {
+        if (BUILT_IN_CONSENT_PHRASES.includes(rest) || consents.includes(rest) || (containedConsent && !question)) {
             return 'consent';
         }
         return null;
     }
     // Unaddressed, a sentence that contains an objection phrase is an
-    // objection too. Consent stays exact.
+    // objection too. Consent is the whole message only.
     if (objections.includes(whole)) return 'objection';
     if (consents.includes(whole)) return 'consent';
-    if (contained) return 'objection';
+    if (containedObjection) return 'objection';
     return null;
 }
 
@@ -150,10 +186,12 @@ export function classifyChatReply(
  * "I don't agree" in conversation far more often than they type them, so the
  * unaddressed sentence that is an objection in the chat is ordinary speech.
  * Addressed, it is read as an addressed chat message is
- * (classifyChatReply): "LMA consent", or LMA plus a consent phrase and nothing
- * else ("LMA, I consent"), is consent; "LMA object", "LMA no consent", LMA plus
- * an objection phrase, or an addressed sentence of up to 200 characters that
- * contains an objection phrase, is an objection. A bare phrase is not.
+ * (classifyChatReply): "LMA consent", LMA plus a consent phrase and nothing
+ * else ("I agree, LMA"), or "LMA" followed at once by a consent phrase in an
+ * utterance of up to 200 characters ("so that's the plan. LMA, I consent."),
+ * is consent; "LMA object", "LMA no consent", LMA plus an objection phrase,
+ * or an addressed sentence of up to 200 characters that contains an
+ * objection phrase, is an objection. A bare phrase is not.
  *
  * Speech recognition often writes "LMA" as its letters ("L M A", "L.M.A."),
  * so a run of those three single letters is read as "LMA" before matching.

@@ -119,6 +119,19 @@ def event(**overrides):
     return base
 
 
+def test_consent_outside_the_chat_reaches_the_prompt_and_the_result(fakes) -> None:
+    _s3, bedrock, _metering = fakes
+    result = index.handler(
+        event(Mode="opt_in", Rule="each_participant", ConsentedOutsideChat=["Bo Chen"]), None
+    )
+    assert result["Verification"]["ConsentedOutsideChat"] == ["Bo Chen"]
+    prompt = bedrock.calls[0]["messages"][0]["content"][1]["text"]
+    assert (
+        'consented aloud or in LMA, not in the chat, so no reply from them is expected in the screenshot: "Bo Chen"'
+        in prompt
+    )
+
+
 def test_a_check_returns_the_verdict_and_meters_the_call(fakes) -> None:
     _s3, bedrock, metering = fakes
     result = index.handler(event(), None)

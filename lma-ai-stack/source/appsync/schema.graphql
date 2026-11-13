@@ -1256,6 +1256,9 @@ type MeetingConsentVerification @aws_cognito_user_pools
 	Verdict: String
 	# The participants listed as present with no visible reply reading as consent.
 	MissingParticipants: [String]
+	# The participants listed as present whose consent was said aloud or entered
+	# in LMA, so it is not expected in a chat image.
+	ConsentedOutsideChat: [String]
 	# Whether the model's answer could be read at all.
 	Readable: Boolean
 	NoticeVisible: Boolean

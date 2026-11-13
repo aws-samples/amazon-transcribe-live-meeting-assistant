@@ -40,8 +40,12 @@ import {
   STATUS_LABELS,
   VERDICT_LABELS,
   buildTimeline,
+  consentedOutsideChatLabel,
   participantRows,
   statusIndicatorType,
+  uncheckedEvidenceLabel,
+  unidentifiedLabel,
+  unidentifiedPresentCount,
   verdictColor,
 } from '../common/meeting-consent';
 
@@ -123,10 +127,15 @@ const EvidenceItem = ({ item, onVerify, canVerify }) => {
             {(verification.MissingParticipants || []).length > 0 && (
               <Box fontSize="body-s">{`No visible consent from: ${verification.MissingParticipants.join(', ')}`}</Box>
             )}
+            {consentedOutsideChatLabel(verification) && (
+              <Box fontSize="body-s" color="text-body-secondary">
+                {consentedOutsideChatLabel(verification)}
+              </Box>
+            )}
           </SpaceBetween>
         ) : (
           <Box fontSize="body-s" color="text-status-inactive">
-            Image check: not run
+            {uncheckedEvidenceLabel(item)}
           </Box>
         )}
         {canVerify && !item.ImageDeletedAt && (
@@ -270,6 +279,7 @@ const ConsentPanel = ({ state, canEdit = false, isOwner = false, isAdmin = false
   }
 
   const rows = participantRows(consent);
+  const unidentified = unidentifiedPresentCount(consent);
   const timeline = buildTimeline(consent);
   const evidence = consent.Evidence || [];
   const attestation = consent.Attestation;
@@ -337,7 +347,7 @@ const ConsentPanel = ({ state, canEdit = false, isOwner = false, isAdmin = false
           </div>
         )}
 
-        {rows.length > 0 && (
+        {(rows.length > 0 || unidentified > 0) && (
           <div>
             <Box variant="awsui-key-label">Participants</Box>
             <SpaceBetween size="xxs">
@@ -352,6 +362,8 @@ const ConsentPanel = ({ state, canEdit = false, isOwner = false, isAdmin = false
                   )}
                 </SpaceBetween>
               ))}
+              {/* Seats counted on a platform that gives only a count, not people. */}
+              {unidentified > 0 && <Box color="text-body-secondary">{unidentifiedLabel(unidentified)}</Box>}
             </SpaceBetween>
           </div>
         )}

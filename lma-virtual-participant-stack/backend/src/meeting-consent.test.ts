@@ -550,7 +550,7 @@ test('where spoken replies are read, the objection acknowledgement gives the typ
     assert.ok(
         h.chat.includes(
             'Bo Chen objected. Live Meeting Assistant has stopped recording and transcribing this meeting. ' +
-                'If Bo Chen types "I agree" in the chat or says "LMA, I agree", it can continue.',
+                'If Bo Chen types or says "LMA, I agree", it can continue.',
         ),
         h.chat.join('\n'),
     );
@@ -563,10 +563,21 @@ test('where spoken replies are not read, the objection acknowledgement gives the
     assert.ok(
         h.chat.includes(
             'Bo Chen objected. Live Meeting Assistant has stopped recording and transcribing this meeting. ' +
-                'If Bo Chen replies "I consent", it can continue.',
+                'If Bo Chen types "LMA, I consent" in this chat, it can continue.',
         ),
         h.chat.join('\n'),
     );
+});
+
+test('where the platform shows no chat sender, the notice and LMA help give the spoken reply only', async () => {
+    const h = await harness({ deployment: { mode: 'opt_in', consentRule: 'each_participant' }, sendersHidden: true });
+    assert.ok(h.chat.includes('Say "LMA, I consent" or "LMA, I object".'), h.chat.join('\n'));
+    assert.ok(!h.chat.some((m) => m.startsWith('Type or say')));
+    assert.equal(
+        consentHelpLine(),
+        'Meeting consent: say "LMA, I consent" to agree to recording and transcription, or "LMA, I object" to object.',
+    );
+    h.flow.stop();
 });
 
 test('where the platform shows no chat sender, the objection acknowledgement gives the spoken consent only', async () => {
@@ -574,7 +585,7 @@ test('where the platform shows no chat sender, the objection acknowledgement giv
     assert.equal(h.flow.handleSpeech('Bo Chen', 'LMA, I object'), 'objection');
     await h.settle();
     assert.ok(
-        h.chat.some((m) => m.startsWith('Bo Chen objected.') && m.endsWith('If Bo Chen says "LMA, I consent" aloud, it can continue.')),
+        h.chat.some((m) => m.startsWith('Bo Chen objected.') && m.endsWith('If Bo Chen says "LMA, I consent", it can continue.')),
         h.chat.join('\n'),
     );
 });
@@ -706,6 +717,32 @@ test('the VP never reads its own messages as replies', async () => {
     for (const message of h.chat) assert.equal(await h.flow.handleChat(null, message), false, message);
     assert.equal(await h.flow.handleChat('LMA (Ana Silva)', 'I object'), false);
     assert.equal(h.capture.on, true);
+});
+
+test("another LMA's reply line and help line, which quote the replies, are not replies", async () => {
+    const h = await harness({ deployment: OPT_IN_EACH });
+    for (const message of [
+        'Type or say "LMA, I consent" or "LMA, I object".',
+        'Say "LMA, I consent" or "LMA, I object".',
+        'Meeting consent: type or say "LMA, I consent" to agree to recording and transcription, or "LMA, I object" to object.',
+    ]) {
+        assert.equal(await h.flow.handleChat('LMA (Bo Chen)', message), false, message);
+        assert.equal(await h.flow.handleChat('Cy Diaz', message), false, message);
+    }
+    assert.deepEqual(h.api.events, []);
+    h.flow.stop();
+});
+
+test('a chat message ending in LMA and a consent phrase is recorded as consent', async () => {
+    const h = await harness({ deployment: OPT_IN_EACH });
+    h.flow.noteAttendeeCount(2); // the VP and Bo
+    assert.equal(await h.flow.handleChat('Bo Chen', "OK, so that's the plan. LMA, I consent."), true);
+    await h.flow.syncRoster();
+    await h.settle();
+    const event = h.api.events[h.api.events.length - 1];
+    assert.deepEqual([event.ParticipantName, event.Decision, event.Source], ['Bo Chen', 'consent', 'chat']);
+    assert.equal(h.capture.on, true);
+    h.flow.stop();
 });
 
 // ─── Opt-in, each participant ───────────────────────────────────────────────
@@ -1192,9 +1229,13 @@ test('a VP that leaves after an objection does not start listening', async () =>
     h.flow.stop();
 });
 
-test('every notice says replies may be typed in the chat or said aloud', async () => {
+test('every notice is followed by one line giving the typed and spoken reply in one form', async () => {
     const h = await harness({ deployment: { mode: 'notify' } });
-    assert.ok(h.chat.includes('Replies may be typed in this chat, or said aloud starting with "LMA": say "LMA, I consent" or "LMA, I object".'));
+    assert.ok(h.chat.includes('Type or say "LMA, I consent" or "LMA, I object".'), h.chat.join('\n'));
+    // The notice as the record holds it, then the line; and the line is what was recorded as posted.
+    const notice = h.chat.indexOf('Reply "I object" to stop it.');
+    assert.ok(notice >= 0 && h.chat[notice + 1] === 'Type or say "LMA, I consent" or "LMA, I object".', h.chat.join('\n'));
+    assert.ok(h.api.noticeTexts.some((text) => text.endsWith('Type or say "LMA, I consent" or "LMA, I object".')));
     assert.ok(!h.chat.some((m) => /takes effect when .* records it in LMA/.test(m)));
     h.flow.stop();
 });
@@ -1345,9 +1386,18 @@ test('with Read spoken replies off, no listener is started and no audio is sent'
     assert.deepEqual(opened, []);
     assert.equal(captured, 0, 'no meeting audio captured for listening');
     assert.deepEqual(h.api.events, [], 'a spoken objection is not read');
-    assert.ok(h.chat.includes('Live Meeting Assistant reads replies in this chat; an objection made out loud takes effect when Ana Silva records it in LMA.'));
-    assert.ok(!h.chat.some((m) => m.includes('said aloud')));
-    assert.ok(!consentHelpLine().includes('said aloud'), 'LMA help names the chat only');
+    assert.ok(
+        h.chat.includes(
+            'Type "LMA, I consent" or "LMA, I object" in this chat. An objection made out loud takes effect when Ana Silva records it in LMA.',
+        ),
+        h.chat.join('\n'),
+    );
+    assert.ok(!h.chat.some((m) => m.includes('Type or say')));
+    assert.equal(
+        consentHelpLine(),
+        'Meeting consent: type in this chat "LMA, I consent" to agree to recording and transcription, or "LMA, I object" to object.',
+        'LMA help names the chat only',
+    );
     h.flow.stop();
 });
 
@@ -1363,7 +1413,7 @@ test('with Read spoken replies on, the flow listens while consent is awaited and
     const h = await harness({ deployment: { ...OPT_IN_EACH, readSpokenReplies: true } });
     assert.equal(h.flow.readsSpokenReplies, true);
     assert.equal(h.capture.listening, true);
-    assert.ok(consentHelpLine().includes('typed here or said aloud'));
+    assert.ok(consentHelpLine().includes('type or say "LMA, I consent"'), consentHelpLine());
     h.flow.stop();
 });
 
@@ -1380,7 +1430,18 @@ test('the screenshots taken when the record is granted are noted for the event t
         Events: events.map(([ParticipantName, Decision, Source]) => ({ ParticipantName, Decision, Source: Source ?? 'chat' })),
     });
     assert.equal(grantEvidenceNote(record([]), 'notify'), 'after the notice was posted');
-    assert.equal(grantEvidenceNote(record([['Bo Chen', 'consent']]), 'opt_in'), 'when consent was granted');
+    // Opt-in: the consent that completed the grant, first or again after a newcomer consented.
+    assert.equal(grantEvidenceNote(record([['Bo Chen', 'consent']]), 'opt_in'), 'when Bo Chen consented');
+    assert.equal(
+        grantEvidenceNote(record([['Bo Chen', 'consent'], ['Jeremy Feldman', 'consent', 'voice']]), 'opt_in'),
+        'when Jeremy Feldman consented',
+    );
+    // Owner attests: the attestation granted it, not a participant's reply.
+    assert.equal(
+        grantEvidenceNote({ ...record([['Bo Chen', 'consent'], ['Ana Silva', 'consent', 'attestation']]), Rule: 'owner_attests' }, 'opt_in'),
+        'when consent was granted',
+    );
+    assert.equal(grantEvidenceNote(record([]), 'opt_in'), 'when consent was granted');
     assert.equal(
         grantEvidenceNote(record([['Bo Chen', 'objection'], ['Cy Diaz', 'consent'], ['Bo Chen', 'consent', 'voice']]), 'notify'),
         'when Bo Chen consented',

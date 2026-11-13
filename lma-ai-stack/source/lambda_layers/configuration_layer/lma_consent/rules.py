@@ -81,6 +81,9 @@ NOTICE_CHANNELS: Tuple[str, ...] = ("chat", "voice", "banner", "invite")
 ATTESTATION_METHODS: Tuple[str, ...] = ("verbal", "chat", "invite_terms")
 
 #: The deployment settings when the configuration section holds nothing. The
+#: notice texts carry no reply instruction: each capture client adds its own
+#: (the Virtual Participant posts a line giving the "LMA, <phrase>" form after
+#: the notice), so a customised text is posted as written. The
 #: seeder's shipped defaults (configuration_seeder/defaults/MeetingConsent.json)
 #: carry the same values; a test holds the two together.
 DEFAULT_SETTINGS: Dict[str, Any] = {
@@ -88,13 +91,11 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "consentRule": RULE_EACH_PARTICIPANT,
     "notifyNoticeText": (
         "{LMA_USER} is using Live Meeting Assistant to record and transcribe this meeting "
-        '({meeting}). If you do not agree, reply "{objection_phrase}" in the chat or say '
-        "so, and recording and transcription will stop."
+        "({meeting}). If you do not agree, say so, and recording and transcription will stop."
     ),
     "optInNoticeText": (
         "{LMA_USER} would like to record and transcribe this meeting ({meeting}) with Live "
-        "Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed. "
-        'Reply "{consent_phrase}" to agree, or "{objection_phrase}" to decline.'
+        "Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed."
     ),
     "consentPhrases": "I consent, I agree, I accept",
     "objectionPhrases": (
@@ -295,6 +296,32 @@ def latest_decisions(events: Sequence[Mapping[str, Any]]) -> Dict[str, str]:
     return latest
 
 
+def consented_outside_chat(record: Optional[Mapping[str, Any]]) -> List[str]:
+    """The participants listed as present whose latest reply is a consent not given in the chat.
+
+    A consent said aloud (``voice``) or entered in LMA (``ui``) is not in the
+    meeting chat, so a check of a chat screenshot does not expect to see it.
+    Participants with no reply, or whose latest reply is an objection or a
+    consent typed in the chat, are not listed. Names as the record lists them.
+    """
+    if not record:
+        return []
+    latest: Dict[str, Tuple[str, Any]] = {}
+    for event in record.get("Events") or []:
+        if event.get("Source") == SOURCE_ATTESTATION:
+            continue
+        name = normalize_name(event.get("ParticipantName"))
+        decision = event.get("Decision")
+        if name and decision in DECISIONS:
+            latest[name] = (decision, event.get("Source"))
+    listed: List[str] = []
+    for name in record.get("Participants") or []:
+        decision, source = latest.get(normalize_name(name), (None, None))
+        if decision == DECISION_CONSENT and source != "chat" and name not in listed:
+            listed.append(name)
+    return listed
+
+
 def _deciding_positions(events: Sequence[Mapping[str, Any]]) -> set:
     """Each participant's latest reply and the latest attestation entry."""
     keep, seen = set(), set()
@@ -416,6 +443,7 @@ def fit_to_budget(record: Dict[str, Any], limit: int = MAX_RECORD_BYTES) -> Dict
         if isinstance(verification, dict):
             verification["Replies"] = []
             verification["MissingParticipants"] = []
+            verification["ConsentedOutsideChat"] = []
     if record_size(record) <= limit:
         return record
     # 7. The replies kept, down to who, how, where and when.

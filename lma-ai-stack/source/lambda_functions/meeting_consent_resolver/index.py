@@ -861,6 +861,9 @@ def verify_meeting_consent_evidence(caller: Mapping[str, Any], data: Mapping[str
             "Mode": record.get("Mode"),
             "Rule": record.get("Rule"),
             "Participants": record.get("Participants") or [],
+            # Consent said aloud or entered in LMA is not in the chat, so the
+            # check of a chat image does not expect it there.
+            "ConsentedOutsideChat": consent.consented_outside_chat(record),
             "ConsentPhrases": settings["consentPhrases"],
             "ObjectionPhrases": settings["objectionPhrases"],
             "ModelId": settings["verifierModelId"],

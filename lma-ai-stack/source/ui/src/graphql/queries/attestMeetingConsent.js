@@ -62,6 +62,7 @@ export default /* GraphQL */ `
           Verification {
             Verdict
             MissingParticipants
+            ConsentedOutsideChat
             Readable
             NoticeVisible
             NoticeMatches
