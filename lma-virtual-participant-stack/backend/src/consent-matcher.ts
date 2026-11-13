@@ -100,6 +100,22 @@ function containsPhrase(words: string, phrase: string): boolean {
     return phrase.length > 0 && ` ${words} `.includes(` ${phrase} `);
 }
 
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Whether `text` (lower-cased, quotes removed) holds "LMA" followed at once by
+ * `phrase` (already normalised) with nothing but the end of the text or a
+ * clause-ending mark (. ! ? , ; :) after it, ignoring spacing and punctuation
+ * between the words.
+ */
+function endsClauseAfterLma(text: string, phrase: string): boolean {
+    const words = phrase.split(' ').filter(Boolean).map(escapeRegExp);
+    if (words.length === 0) return false;
+    const gap = '[^\\p{L}\\p{N}]+';
+    const pattern = new RegExp(`(?:^|[^\\p{L}\\p{N}])lma${gap}${words.join(gap)}\\s*(?:[.!?,;:]|$)`, 'u');
+    return pattern.test(text.trim());
+}
+
 /**
  * `consent`, `objection` or null for one chat message.
  *
@@ -126,23 +142,27 @@ export function classifyChatReply(
     // read as a reply. They search only the text outside quotation marks, so
     // a phrase quoted to tell people how to reply ('type or say "LMA, I
     // consent"') is not read as one either.
-    const unquoted =
-        message.trim().length <= MAX_CONTAINED_REPLY_LENGTH ? normalizeReplyText(message.replace(QUOTED, ' ')) : '';
+    const rawUnquoted = message.replace(QUOTED, ' ').normalize('NFKC').toLowerCase();
+    const unquoted = message.trim().length <= MAX_CONTAINED_REPLY_LENGTH ? normalizeReplyText(rawUnquoted) : '';
     const unaddressed = unquoted
         .split(' ')
         .filter((token) => token !== 'lma')
         .join(' ');
     const containedObjection = objections.some((phrase) => containsPhrase(unaddressed, phrase));
-    // "LMA" and then at once a consent phrase, anywhere outside quotes.
-    const containedConsent = [...BUILT_IN_CONSENT_PHRASES, ...consents].some((phrase) =>
-        containsPhrase(unquoted, `lma ${phrase}`),
-    );
+    // "LMA" and then at once a consent phrase that ends its clause (the end of
+    // the message, or . ! ? , ; :), anywhere outside quotes: "...the plan.
+    // LMA, I consent." and "LMA I agree, let's go on" are consent, while
+    // "LMA, I agree with Ana that ..." and "LMA consent is a good feature",
+    // which talk about something, are not.
+    const containedConsent =
+        unquoted !== '' &&
+        [...BUILT_IN_CONSENT_PHRASES, ...consents].some((phrase) => endsClauseAfterLma(rawUnquoted, phrase));
 
     if (addressed) {
         // Nor is a question for the meeting assistant ("LMA ask what do we
         // say if a client asks us to stop recording?"), which is answered as
         // one: only the exact forms are replies there.
-        const question = rest === 'ask' || rest.startsWith('ask ');
+        const question = rest === 'ask' || rest.startsWith('ask ') || containsPhrase(unquoted, 'lma ask');
         if (BUILT_IN_OBJECTION_PHRASES.includes(rest) || objections.includes(rest) || (containedObjection && !question)) {
             return 'objection';
         }

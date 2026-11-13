@@ -511,12 +511,16 @@ objection can only stop capture, never start it.
 - **Consent** is a message that is one of the consent phrases and nothing else
   (*"I consent"*, *"i agree!"*, *"I accept, LMA"*), or a message of up to 200
   characters in which `LMA` is followed at once by a consent phrase or by
-  `consent`, anywhere in it: *"…so that's the plan. LMA, I consent."*, *"Sounds
-  good, LMA I agree, let's go on"*, *"LMA, I agree with the plan"*. Punctuation
-  and spacing between `LMA` and the phrase do not matter. A consent phrase
-  without `LMA` just before it is not consent: *"I agree with Bo's point"* is
-  ordinary chat, and so is *"LMA, what do you think? I consent"*, where other
-  words stand between them. A bare *"I consent"* is still consent, so a
+  `consent`, and the phrase ends its clause (the end of the message, or `.`,
+  `!`, `?`, `,`, `;` or `:` after it), anywhere in it: *"…so that's the plan.
+  LMA, I consent."*, *"Sounds good, LMA I agree, let's go on"*. Punctuation and
+  spacing between `LMA` and the phrase do not matter. A phrase that runs on
+  into a longer clause is about something else and is not consent: *"LMA, I
+  agree with the plan"*, *"LMA consent is a good feature"*. Nor is a consent
+  phrase without `LMA` just before it: *"I agree with Bo's point"* is ordinary
+  chat, and so is *"LMA, what do you think? I consent"*, where other words
+  stand between them. A message that contains `LMA ask` anywhere is a
+  question for the meeting assistant and is not read as consent. A bare *"I consent"* is still consent, so a
   participant who does not use the `LMA` form is still heard.
 - **An objection** is a message that is one of the objection phrases (*"I
   object"*, *"Stop recording."*), `LMA no consent` or `LMA object`, or a message

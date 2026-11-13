@@ -118,14 +118,27 @@ test('LMA followed at once by a consent phrase anywhere in a message is consent'
     for (const message of [
         "...so that's the plan. LMA, I consent.",
         'Sounds good, LMA I agree, let us go on',
-        'LMA, I agree with the plan',
         'ok LMA: I accept!',
         'Fine by me. LMA consent',
-        'LMA consent is a good feature',
         'hello LMA, LMA I consent',
+        'LMA I agree; next topic',
     ]) {
         assert.equal(classify(message), 'consent', message);
     }
+});
+
+test('LMA and a consent phrase that goes on into a longer clause is not consent', () => {
+    for (const message of [
+        'LMA, I agree with the plan',
+        'LMA consent is a good feature',
+        'How does the LMA consent mode work on Teams?',
+        'LMA, I agree with Ana that we should not record this part',
+        'Quick one: LMA ask whether I should say LMA I agree',
+    ]) {
+        assert.equal(classify(message), null, message);
+    }
+    assert.equal(classifySpoken('so LMA consent mode is on for this call'), null);
+    assert.equal(classifySpoken('ok that is settled. L M A, I agree.'), 'consent');
 });
 
 test('a consent phrase not immediately after LMA is not consent', () => {
