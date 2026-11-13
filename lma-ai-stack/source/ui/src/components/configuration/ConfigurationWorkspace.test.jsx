@@ -273,7 +273,7 @@ describe('the editor', () => {
     expect(within(transcribeOnly).queryByText('Virtual Participants')).toBeNull();
     expect(within(transcribeOnly).queryByText('Stream Audio, Chrome extension and Desktop Capture')).toBeNull();
     expect(within(transcribeOnly).getByText('Every meeting is transcribed by Amazon Transcribe')).toBeTruthy();
-    expect(within(transcribeOnly).queryByText('The ASR MicroVM engine is the default')).toBeNull();
+    expect(within(transcribeOnly).queryByText('Amazon Transcribe is the default engine')).toBeNull();
     unmount();
 
     renderEditor({ settings: { AsrEngineAvailable: 'true' } });
@@ -282,7 +282,7 @@ describe('the editor', () => {
     expect(within(withEngine).getByText('Virtual Participants')).toBeTruthy();
     expect(within(withEngine).getByText('Stream Audio, Chrome extension and Desktop Capture')).toBeTruthy();
     expect(within(withEngine).getByText('Virtual Participant voice separation')).toBeTruthy();
-    expect(within(withEngine).getByText('The ASR MicroVM engine is the default')).toBeTruthy();
+    expect(within(withEngine).getByText('Amazon Transcribe is the default engine')).toBeTruthy();
     expect(within(withEngine).queryByText('Every meeting is transcribed by Amazon Transcribe')).toBeNull();
   });
 

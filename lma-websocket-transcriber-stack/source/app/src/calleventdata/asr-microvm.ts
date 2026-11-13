@@ -388,9 +388,9 @@ export const resolveAsrEngine = (
         }
     };
     if (!isMicrovmAsrConfigured()) {
-        // The shipped default selects the MicroVM engine, so on a deployment
+        // A switch or client asked for the MicroVM engine on a deployment
         // without it (EnableMicrovmAsr=false, or a Region without Lambda
-        // MicroVMs) every meeting arrives here: that is the expected fallback.
+        // MicroVMs): the expected fallback.
         report(
             `[ASR]: [${callMetaData.callId}] - MicroVM ASR was requested but this deployment has no ASR launcher configured; using Amazon Transcribe.`
         );

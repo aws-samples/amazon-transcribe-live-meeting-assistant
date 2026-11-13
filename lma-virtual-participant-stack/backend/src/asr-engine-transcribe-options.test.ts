@@ -25,7 +25,7 @@ import test from 'node:test';
 const { resolveVpAsrEngine, vpTranscribeOnlySettings } = await import('./asr-microvm-client.js');
 const { isMicrovmLanguage, parseBundleLanguages } = await import('./configuration-store.js');
 
-const SHIPPED_DEFAULT = { virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: true };
+const MICROVM_CHOSEN = { virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: true };
 const PLAIN = {
     languageCode: 'en-US',
     contentRedactionEnabled: false,
@@ -34,9 +34,9 @@ const PLAIN = {
 };
 
 test('a VP with no Amazon Transcribe-only option uses the MicroVM engine', () => {
-    assert.equal(resolveVpAsrEngine(SHIPPED_DEFAULT, undefined, PLAIN), 'microvm');
+    assert.equal(resolveVpAsrEngine(MICROVM_CHOSEN, undefined, PLAIN), 'microvm');
     // And with the options read from an environment that sets none.
-    assert.equal(resolveVpAsrEngine(SHIPPED_DEFAULT, undefined), 'microvm');
+    assert.equal(resolveVpAsrEngine(MICROVM_CHOSEN, undefined), 'microvm');
 });
 
 const TRANSCRIBE_ONLY: Array<[string, Partial<typeof PLAIN>]> = [
@@ -52,28 +52,28 @@ const TRANSCRIBE_ONLY: Array<[string, Partial<typeof PLAIN>]> = [
 
 for (const languageCode of ['en-US', 'en-GB', 'en-AU']) {
     test(`a VP in English (${languageCode}) uses the MicroVM engine`, () => {
-        assert.equal(resolveVpAsrEngine(SHIPPED_DEFAULT, undefined, { ...PLAIN, languageCode }), 'microvm');
+        assert.equal(resolveVpAsrEngine(MICROVM_CHOSEN, undefined, { ...PLAIN, languageCode }), 'microvm');
     });
 }
 
 test("a VP whose environment names a language other than English stays on Amazon Transcribe", () => {
     assert.equal(
-        resolveVpAsrEngine(SHIPPED_DEFAULT, undefined, vpTranscribeOnlySettings({ TRANSCRIBE_LANGUAGE_CODE: 'fr-FR' })),
+        resolveVpAsrEngine(MICROVM_CHOSEN, undefined, vpTranscribeOnlySettings({ TRANSCRIBE_LANGUAGE_CODE: 'fr-FR' })),
         'transcribe',
     );
 });
 
 for (const [name, options] of TRANSCRIBE_ONLY) {
     test(`a VP using ${name} stays on Amazon Transcribe`, () => {
-        assert.equal(resolveVpAsrEngine(SHIPPED_DEFAULT, undefined, { ...PLAIN, ...options }), 'transcribe');
+        assert.equal(resolveVpAsrEngine(MICROVM_CHOSEN, undefined, { ...PLAIN, ...options }), 'transcribe');
     });
 }
 
 test('a per-VP MicroVM override does not override an Amazon Transcribe-only option', () => {
-    assert.equal(resolveVpAsrEngine(SHIPPED_DEFAULT, 'microvm', { ...PLAIN, contentRedactionEnabled: true }), 'transcribe');
+    assert.equal(resolveVpAsrEngine(MICROVM_CHOSEN, 'microvm', { ...PLAIN, contentRedactionEnabled: true }), 'transcribe');
     // Without one, the override still wins over the deployment switch.
     assert.equal(
-        resolveVpAsrEngine({ ...SHIPPED_DEFAULT, virtualParticipantEngineMicrovm: false }, 'microvm', PLAIN),
+        resolveVpAsrEngine({ ...MICROVM_CHOSEN, virtualParticipantEngineMicrovm: false }, 'microvm', PLAIN),
         'microvm',
     );
 });
@@ -93,7 +93,7 @@ test("the VP's options are read from the environment the Configuration page's va
         'identify-language',
     );
     assert.equal(
-        resolveVpAsrEngine(SHIPPED_DEFAULT, undefined, vpTranscribeOnlySettings({ CUSTOM_VOCABULARY_NAME: 'v' })),
+        resolveVpAsrEngine(MICROVM_CHOSEN, undefined, vpTranscribeOnlySettings({ CUSTOM_VOCABULARY_NAME: 'v' })),
         'transcribe',
     );
 });
@@ -105,7 +105,7 @@ const PARAKEET_V3_BUNDLE = parseBundleLanguages('bg,cs,da,de,en,es,et,fi,fr,hr,h
 for (const languageCode of ['es-US', 'es-ES', 'de-DE', 'fr-FR', 'pt-BR']) {
     test(`a VP in ${languageCode} uses the MicroVM engine when the deployed bundle transcribes it`, () => {
         assert.equal(
-            resolveVpAsrEngine(SHIPPED_DEFAULT, undefined, { ...PLAIN, languageCode }, PARAKEET_V3_BUNDLE),
+            resolveVpAsrEngine(MICROVM_CHOSEN, undefined, { ...PLAIN, languageCode }, PARAKEET_V3_BUNDLE),
             'microvm',
         );
     });
@@ -113,7 +113,7 @@ for (const languageCode of ['es-US', 'es-ES', 'de-DE', 'fr-FR', 'pt-BR']) {
 
 test('a VP in a language the deployed bundle does not transcribe stays on Amazon Transcribe', () => {
     assert.equal(
-        resolveVpAsrEngine(SHIPPED_DEFAULT, undefined, { ...PLAIN, languageCode: 'ja-JP' }, PARAKEET_V3_BUNDLE),
+        resolveVpAsrEngine(MICROVM_CHOSEN, undefined, { ...PLAIN, languageCode: 'ja-JP' }, PARAKEET_V3_BUNDLE),
         'transcribe',
     );
 });
@@ -121,7 +121,7 @@ test('a VP in a language the deployed bundle does not transcribe stays on Amazon
 test('a VP using language identification stays on Amazon Transcribe whatever the bundle transcribes', () => {
     for (const languageCode of ['identify-language', 'identify-multiple-languages']) {
         assert.equal(
-            resolveVpAsrEngine(SHIPPED_DEFAULT, undefined, { ...PLAIN, languageCode }, PARAKEET_V3_BUNDLE),
+            resolveVpAsrEngine(MICROVM_CHOSEN, undefined, { ...PLAIN, languageCode }, PARAKEET_V3_BUNDLE),
             'transcribe',
         );
     }
@@ -130,8 +130,8 @@ test('a VP using language identification stays on Amazon Transcribe whatever the
 test("the VP's bundle list is read from ASR_MODEL_LANGUAGES", () => {
     process.env.ASR_MODEL_LANGUAGES = 'en,es';
     try {
-        assert.equal(resolveVpAsrEngine(SHIPPED_DEFAULT, undefined, { ...PLAIN, languageCode: 'es-US' }), 'microvm');
-        assert.equal(resolveVpAsrEngine(SHIPPED_DEFAULT, undefined, { ...PLAIN, languageCode: 'de-DE' }), 'transcribe');
+        assert.equal(resolveVpAsrEngine(MICROVM_CHOSEN, undefined, { ...PLAIN, languageCode: 'es-US' }), 'microvm');
+        assert.equal(resolveVpAsrEngine(MICROVM_CHOSEN, undefined, { ...PLAIN, languageCode: 'de-DE' }), 'transcribe');
     } finally {
         delete process.env.ASR_MODEL_LANGUAGES;
     }
