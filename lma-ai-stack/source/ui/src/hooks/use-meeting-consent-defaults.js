@@ -22,6 +22,9 @@ const logger = new ConsoleLogger('useMeetingConsentDefaults');
 const useMeetingConsentDefaults = (enabled, { client } = {}) => {
   const [defaults, setDefaults] = useState(null);
   useEffect(() => {
+    // Forget the last answer, so a reopened form does not act on it while the
+    // new read is in flight.
+    setDefaults(null);
     if (!enabled) return undefined;
     let cancelled = false;
     const read = async () => {
