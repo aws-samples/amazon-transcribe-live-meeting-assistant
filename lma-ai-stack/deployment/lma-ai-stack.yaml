@@ -11304,7 +11304,8 @@ Resources:
                           join link from the invitation (for example
                           https://us05web.zoom.us/j/81234567890?pwd=...) may be
                           passed instead of the ID and passcode, and is the
-                          most reliable option.
+                          most reliable option; a personal meeting link
+                          (https://<name>.zoom.us/my/<room>) works too.
                       scheduledTime:
                         Type: string
                         Description: "ISO 8601 datetime when meeting should start"
@@ -11356,7 +11357,8 @@ Resources:
                           join link from the invitation (for example
                           https://us05web.zoom.us/j/81234567890?pwd=...) may be
                           passed instead of the ID and passcode, and is the
-                          most reliable option.
+                          most reliable option; a personal meeting link
+                          (https://<name>.zoom.us/my/<room>) works too.
                       meetingPassword:
                         Type: string
                         Description: >-
