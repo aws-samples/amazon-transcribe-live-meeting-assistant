@@ -173,10 +173,14 @@ export function attachMeetingConsent(
         screenshots?: () => Promise<EvidenceShot[]>;
         readRoster?: () => Promise<string[] | null>;
         sendersHidden?: boolean;
+        chatMayClose?: boolean;
+        chatTurnedOff?: () => boolean;
     },
 ): void {
     meetingConsent.attach({
         sendersHidden: options.sendersHidden,
+        chatMayClose: options.chatMayClose,
+        chatTurnedOff: options.chatTurnedOff,
         sendMessages: options.send,
         screenshots: options.screenshots ?? (() => captureMeetingPanels(page, options.panels)),
         readRoster: options.readRoster,

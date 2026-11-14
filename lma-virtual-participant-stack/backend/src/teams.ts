@@ -26,10 +26,13 @@ import {
     chatWatchAction,
     AsyncLock,
     composerHoldsMessage,
+    introForChatlessClient,
     isChatPaneButton,
+    isLightMeetingsUrl,
     isComposeBox,
     isSendButton,
     PostTargetInfo,
+    TEAMS_CHAT_TURNED_OFF_SELECTOR,
     TEAMS_CHAT_WATCH_MS,
     TEAMS_FAILED_MESSAGE_RETRY_SELECTOR,
 } from './teams-chat-pane.js';
@@ -518,6 +521,9 @@ export default class Teams {
     /** The meeting has ended; the chat watch stops. */
     private meetingOver = false;
 
+    /** Teams shows "Chat is turned off for this meeting" in place of the compose box. */
+    private chatTurnedOff = false;
+
     /**
      * Held by each post, each set of consent evidence screenshots and each
      * chat-watch check, so they never act on the chat pane at the same time
@@ -816,7 +822,15 @@ export default class Teams {
 
     private async sendMessagesNow(page: Page, messages: string[]): Promise<boolean> {
         let all = true;
+        // The light-meetings composer reads back empty after a paste that did
+        // land (seen in a live meeting: the messages were posted), so there an
+        // empty readback is submitted rather than taken as a failed post.
+        const emptyReadbackPosts = isLightMeetingsUrl(page.url());
         try {
+            if (this.chatTurnedOff || (await this.chatShownTurnedOff(page))) {
+                log.info(`[teams-chat] the meeting chat is turned off for the VP; ${messages.length} message(s) not posted.`);
+                return false;
+            }
             if (!(await this.restoreChat(page))) {
                 log.warn(`[teams-chat] the chat compose box is not on screen; ${messages.length} message(s) not posted.`);
                 return false;
@@ -911,7 +925,9 @@ export default class Teams {
                     .catch(() => '');
                 const ok = composerHoldsMessage(typed, message);
                 log.info(`Composer content after insert: ${typed.length} characters (matches=${ok}).`);
-                if (!ok) {
+                if (!ok && typed.length === 0 && emptyReadbackPosts) {
+                    log.info('[teams-chat] the compose box reads empty on the light-meetings client, where a pasted message reads so too; submitting it.');
+                } else if (!ok) {
                     // An empty (or wrong) compose box is not a post: it is not
                     // submitted, and the batch is reported as not posted, so
                     // the consent flow posts its notice again rather than
@@ -959,11 +975,34 @@ export default class Teams {
                 all = false;
                 log.warn(`[teams-chat] ${failedNow} message(s) show as failed to send.`);
             }
+            if (await this.chatShownTurnedOff(page)) {
+                // Turned off while posting: what was submitted after it went nowhere.
+                all = false;
+                log.warn('[teams-chat] the meeting chat was turned off for the VP while posting; the batch is reported as not posted.');
+            }
             return all;
         } catch (e) {
             log.warn('sendMessages failed (non-fatal — VP remains in meeting):', e);
             return false;
         }
+    }
+
+    /**
+     * Whether Teams shows "Chat is turned off for this meeting" in place of the
+     * compose box; remembered once it does, as the VP cannot turn it back on.
+     */
+    private async chatShownTurnedOff(page: Page): Promise<boolean> {
+        if (this.chatTurnedOff) return true;
+        const shown = await page
+            .locator(TEAMS_CHAT_TURNED_OFF_SELECTOR)
+            .count()
+            .then((n) => n > 0)
+            .catch(() => false);
+        if (shown) {
+            this.chatTurnedOff = true;
+            log.always('[teams-chat] Teams shows "Chat is turned off for this meeting": the VP cannot post or read chat messages for the rest of the meeting.');
+        }
+        return shown;
     }
 
     // Click the chat "Send" button. The anon light-meetings client does NOT
@@ -1575,7 +1614,41 @@ export default class Teams {
 
         await substep('In the meeting — posting introduction message…');
         log.info("Sending introduction messages.");
-        await this.sendMessages(page, details.introMessages);
+        // On the anonymous light-meetings client the chat can be turned off
+        // for a guest moments after it is admitted, so the introduction gives
+        // no chat commands there.
+        await this.sendMessages(
+            page,
+            isLightMeetingsUrl(page.url()) ? introForChatlessClient(details.introMessages) : details.introMessages,
+        );
+        // Right after the introduction, so the consent notice is posted while
+        // the chat is still open to the VP (see TEAMS_CHAT_TURNED_OFF_SELECTOR).
+        // The meeting consent flow, when the meeting runs one (meeting-consent.ts).
+        // The evidence here is the chat screenshot only. Opening the People
+        // pane for a participant-list screenshot would put it in the chat's
+        // place, and on the anonymous client the chat does not come back when
+        // the People pane is closed, so the participant list is not shown. The
+        // participant count the consent flow uses comes from the roster badge,
+        // not from that screenshot.
+        attachMeetingConsent(page, {
+            send: (messages) => this.sendMessages(page, messages),
+            // The chat rows this handler reads carry no sender (see handleIncomingMessage).
+            sendersHidden: true,
+            chatMayClose: isLightMeetingsUrl(page.url()),
+            chatTurnedOff: () => this.chatTurnedOff,
+            // Taken while no post is being typed, and a post waits for them.
+            screenshots: () => this.chatLock.run(() => captureMeetingPanels(page, {
+                showParticipants: async () => {
+                    log.info('[consent] no participant-list screenshot on the Teams browser join: opening the People pane would close the chat, which the VP cannot reopen there.');
+                    return false;
+                },
+            })),
+            leave: (objector) => {
+                details.start = false;
+                this.requestEnd({ reason: 'consent-objection', trigger: 'consent-objection', requestedBy: objector });
+            },
+        });
+
         await substep('In the meeting — listening for participants and transcript…');
 
         // Switch to speaker view — best-effort and SHORT-timed. This is a
@@ -2114,30 +2187,6 @@ export default class Teams {
             // but the meeting still works.
             log.warn('In-meeting monitoring setup failed (non-fatal — VP remains in meeting):', e);
         }
-
-        // The meeting consent flow, when the meeting runs one (meeting-consent.ts).
-        // The evidence here is the chat screenshot only. Opening the People
-        // pane for a participant-list screenshot would put it in the chat's
-        // place, and on the anonymous client the chat does not come back when
-        // the People pane is closed, so the participant list is not shown. The
-        // participant count the consent flow uses comes from the roster badge,
-        // not from that screenshot.
-        attachMeetingConsent(page, {
-            send: (messages) => this.sendMessages(page, messages),
-            // The chat rows this handler reads carry no sender (see handleIncomingMessage).
-            sendersHidden: true,
-            // Taken while no post is being typed, and a post waits for them.
-            screenshots: () => this.chatLock.run(() => captureMeetingPanels(page, {
-                showParticipants: async () => {
-                    log.info('[consent] no participant-list screenshot on the Teams browser join: opening the People pane would close the chat, which the VP cannot reopen there.');
-                    return false;
-                },
-            })),
-            leave: (objector) => {
-                details.start = false;
-                this.requestEnd({ reason: 'consent-objection', trigger: 'consent-objection', requestedBy: objector });
-            },
-        });
 
         // Start transcription if enabled (LMA behavior). This is the actual
         // point of the VP, so it runs regardless of any best-effort chat /
