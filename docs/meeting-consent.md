@@ -731,7 +731,7 @@ identities are never listed.
 | Chime | Shown | Read, under the active speaker | Count | Yes | The chat and the attendee list are on screen together, so one screenshot has both |
 | Zoom (browser) | Shown | Read, under the active speaker | Count | Yes | The participants pane is opened, shot and closed again |
 | Zoom (Meeting SDK) | Shown | Read, under the active speaker | Count | Yes | One screenshot of LMA's SDK page |
-| Teams (browser) | **Not shown** | Read, under the active speaker | Count | Yes, **aloud only** ("LMA, I consent"): a typed consent cannot be attributed, so not with **Read spoken replies** off | The People pane is opened and shot, then the chat reopened (through the toolbar's **More** menu on the anonymous join, which has no chat button) |
+| Teams (browser) | **Not shown** | Read, under the active speaker | Count | Yes, **aloud only** ("LMA, I consent"): a typed consent cannot be attributed, so not with **Read spoken replies** off | **Chat only**: the People pane is not opened, because on the anonymous join it takes the chat's place and the chat cannot be brought back, so there is no participant-list screenshot (the participant count still comes from the roster badge) |
 | Teams (Azure Communication Services) | Shown | Read, under the active speaker | Names | Yes | One screenshot of LMA's SDK page |
 | Webex (browser) | Shown | Read, under the active speaker | **None** | **No**: see [Who is present](#who-is-present) | The participants panel is opened, shot and closed again |
 | Google Meet (browser) | Shown (read from the message group's header) | Read, under the speaking tile | Count | Yes | The People panel is opened and shot, then the chat reopened |
@@ -752,7 +752,8 @@ owner-attests rule on Meet where that matters.
 When the meeting's status becomes `granted` (in notify, once the notice is
 recorded as posted), and on every objection, the VP takes a screenshot of the
 meeting page with the chat open, then, where the platform allows it, opens the
-participant list, takes a second one, and puts the chat back. The screenshots
+participant list, takes a second one, and puts the chat back (not on the Teams
+browser join, where the chat screenshot is the only one). The screenshots
 are taken from the meeting page itself, so nothing open in the live view covers
 them. Each is a JPEG stored in the recordings bucket under
 `lma-consent-evidence/<meeting>/` and added to the record with
