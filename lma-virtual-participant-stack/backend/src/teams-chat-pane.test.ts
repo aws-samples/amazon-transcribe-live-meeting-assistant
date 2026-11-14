@@ -277,6 +277,11 @@ test('a message that is only a chat command is left out; the removal line is sai
     ]);
 });
 
+test('a quoted "LMA" that gives no command is kept in the light-meetings introduction', () => {
+    const intro = ['I\'m "LMA", a note-taker for Ana.'];
+    assert.deepEqual(introForChatlessClient(intro), intro);
+});
+
 test('the light-meetings client is told apart by its URL', () => {
     assert.equal(isLightMeetingsUrl('https://teams.microsoft.com/light-meetings/launch?lightExperience=true'), true);
     assert.equal(isLightMeetingsUrl('https://teams.microsoft.com/v2/?meetingjoin=true'), false);
@@ -299,4 +304,5 @@ test('teams.ts posts nothing once the chat is shown as turned off, and submits a
     assert.match(send, /if \(this\.chatTurnedOff \|\| \(await this\.chatShownTurnedOff\(page\)\)\)/);
     assert.match(send, /!ok && typed\.length === 0 && emptyReadbackPosts/);
     assert.match(send, /const emptyReadbackPosts = isLightMeetingsUrl\(page\.url\(\)\)/);
+    assert.match(send, /const pasteUnseen = pasted && afterPaste\.length === 0 && emptyReadbackPosts;\s+if \(pasteUnseen\)/, 'a pasted message is not typed again where it cannot be read back');
 });

@@ -904,7 +904,12 @@ export default class Teams {
                     const afterPaste = await found.element
                         .evaluate((el) => ((el as HTMLElement).innerText || el.textContent || '').trim())
                         .catch(() => '');
-                    if (!pasted || !composerHoldsMessage(afterPaste, message)) {
+                    // On light-meetings a paste that landed reads back empty too, so
+                    // typing it again there would put the message in twice.
+                    const pasteUnseen = pasted && afterPaste.length === 0 && emptyReadbackPosts;
+                    if (pasteUnseen) {
+                        log.info('[teams-chat] the pasted message cannot be read back on the light-meetings client; not typing it again.');
+                    } else if (!pasted || !composerHoldsMessage(afterPaste, message)) {
                         // Keystrokes go wherever the focus is, and a space or
                         // Enter on a focused toolbar button presses it, so they
                         // are typed only into the focused compose box.

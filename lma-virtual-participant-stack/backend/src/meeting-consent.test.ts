@@ -1252,9 +1252,8 @@ test('evidence stops at the per-meeting budget', async () => {
 
 test('the notice is posted before the meeting record and its consent are started, and recorded once they are', async () => {
     let chatAtCreate = -1;
-    let chat: string[] = [];
+    const chat: string[] = [];
     const h = await harness({ deployment: OPT_IN_EACH, chat, onCreateMeeting: () => (chatAtCreate = chat.length) });
-    chat = h.chat;
     assert.ok(chatAtCreate > 0, 'the notice was in the chat when the START event was sent');
     assert.ok(h.chat[0].includes('Nothing is recorded or transcribed until everyone has agreed.'), h.chat.join('\n'));
     assert.equal(h.api.calls.filter((c) => c === 'recordNotice').length, 1, 'recorded once consent started');
