@@ -207,6 +207,19 @@ test('a JOINING sub-step writes no status', async () => {
   assert.deepEqual(Object.keys(input).sort(), ['errorMessage', 'id']);
 });
 
+test('the join method is written on its own: no status, and the detail line is left alone', async () => {
+  // The detail line is cleared on JOINED and ACTIVE and rewritten by the
+  // consent flow, so the join method has a field of its own that nothing else
+  // writes or clears.
+  const { manager, sent } = harness({ id: VP_ID, status: VP_STATUS.JOINED });
+  await manager.setJoinMethod('browser:acs-refused:5723');
+  const found = mutations(sent);
+  assert.equal(found.length, 1);
+  assert.deepEqual(found[0].variables.input, { id: VP_ID, joinMethod: 'browser:acs-refused:5723' });
+  // Selected by this mutation, which is what delivers it to the page's subscription.
+  assert.match(found[0].query, /^\s+joinMethod$/m);
+});
+
 test('a failure writes its message and does not clear it', async () => {
   const { manager, sent } = harness();
   await manager.setFailed('Wrong meeting password');
@@ -422,7 +435,7 @@ test('every mutation selects at least the fields the UI subscribes to', () => {
   assert.deepEqual(missing, [], 'SUBSCRIBED_FIELDS does not cover the subscription');
 
   const mutations = source.split('mutation UpdateVirtualParticipant').slice(1);
-  assert.equal(mutations.length, 7, 'the mutation count in this test needs updating');
+  assert.equal(mutations.length, 8, 'the mutation count in this test needs updating');
   for (const [index, mutation] of mutations.entries()) {
     const selection = mutation.slice(0, mutation.indexOf('`;'));
     assert.ok(

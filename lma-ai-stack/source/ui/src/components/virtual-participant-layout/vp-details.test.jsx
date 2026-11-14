@@ -7,7 +7,7 @@ import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
-import { mergeVpUpdate, vpOwner } from './vp-details';
+import { describeJoinMethod, mergeVpUpdate, vpOwner } from './vp-details';
 import { ConnectionDetails } from './VirtualParticipantDetails';
 
 // VirtualParticipantDetails.jsx calls generateClient() / ConsoleLogger at module load.
@@ -94,5 +94,32 @@ describe('the Owner field on the detail page', () => {
   it('shows the owner from Owner when the lowercase field is absent', () => {
     render(<ConnectionDetails vpDetails={{ ...CREATED, owner: null }} />);
     expect(screen.getByText('alex@example.com')).toBeTruthy();
+  });
+});
+
+describe('the join method on the detail page', () => {
+  it('describes each value the Virtual Participant writes', () => {
+    expect(describeJoinMethod('acs')).toBe('Azure Communication Services');
+    expect(describeJoinMethod('browser')).toBe('Browser');
+    expect(describeJoinMethod('browser:acs-refused:5723')).toBe(
+      'Browser, after Teams refused the Azure Communication Services join (subCode 5723)',
+    );
+    expect(describeJoinMethod(null)).toBeNull();
+    expect(describeJoinMethod('')).toBeNull();
+  });
+
+  it('keeps the join method when a later status write does not carry it', () => {
+    const joined = mergeVpUpdate(CREATED, { id: 'vp-1', joinMethod: 'browser:acs-refused:5723' });
+    const next = mergeVpUpdate(joined, { ...STATUS_WRITE, status: 'ACTIVE', joinMethod: null });
+    expect(next.joinMethod).toBe('browser:acs-refused:5723');
+  });
+
+  it('shows the join method once recorded, and nothing before', () => {
+    const { unmount } = render(<ConnectionDetails vpDetails={CREATED} />);
+    expect(screen.queryByText('Join method')).toBeNull();
+    unmount();
+    render(<ConnectionDetails vpDetails={{ ...CREATED, meetingPlatform: 'TEAMS', joinMethod: 'acs' }} />);
+    expect(screen.getByText('Join method')).toBeTruthy();
+    expect(screen.getByText('Azure Communication Services')).toBeTruthy();
   });
 });

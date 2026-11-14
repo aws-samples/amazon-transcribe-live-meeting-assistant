@@ -9825,6 +9825,14 @@ Resources:
             $util.qr( $expValues.put(":endTrigger", $util.dynamodb.toDynamoDB($ctx.args.input.endTrigger)) )
         #end
 
+        ## How the VP joined (Teams: "acs", "browser", or **
+        ## "browser:acs-refused:<subCode>"), written once after admission. **
+        #if( !$util.isNullOrBlank($ctx.args.input.joinMethod) )
+            $util.qr( $expSet.put("#joinMethod", ":joinMethod") )
+            $util.qr( $expNames.put("#joinMethod", "joinMethod") )
+            $util.qr( $expValues.put(":joinMethod", $util.dynamodb.toDynamoDB($ctx.args.input.joinMethod)) )
+        #end
+
         ## Build the update expression. updatedAt is always set, so the SET **
         ## clause is never empty; REMOVE is appended only when something is **
         ## actually being cleared. No attribute can appear in both clauses -- **

@@ -31,7 +31,7 @@ import LaunchSettings from './LaunchSettings';
 import EditScheduledVirtualParticipant from './EditScheduledVirtualParticipant';
 import { canEditScheduled, editWindowOpen } from './scheduled-edit';
 import { canManageVirtualParticipant } from './vp-access';
-import { mergeVpUpdate, vpOwner } from './vp-details';
+import { describeJoinMethod, mergeVpUpdate, vpOwner } from './vp-details';
 
 const client = generateClient();
 // VNC WebSocket URL is published by the backend in the vncEndpoint field
@@ -68,6 +68,7 @@ const getVirtualParticipant = `
       scheduledTimeZone
       useStoredZoomAccount
       hasMeetingPassword
+      joinMethod
     }
   }
 `;
@@ -92,6 +93,7 @@ const onUpdateVirtualParticipantDetailed = `
       manualActionTimeoutSeconds
       manualActionStartTime
       userAcknowledgedFailure
+      joinMethod
     }
   }
 `;
@@ -383,6 +385,18 @@ export const ConnectionDetails = ({ vpDetails }) => {
         <div>{vpDetails.meetingPlatform}</div>
       </SpaceBetween>
 
+      {/* Which join got the Virtual Participant in, once it has been
+          admitted: for Teams, Azure Communication Services or the browser,
+          and whether the browser join took over from a refused ACS join. */}
+      {describeJoinMethod(vpDetails.joinMethod) && (
+        <SpaceBetween size="xs">
+          <Box color="text-label" fontWeight="bold">
+            Join method
+          </Box>
+          <div>{describeJoinMethod(vpDetails.joinMethod)}</div>
+        </SpaceBetween>
+      )}
+
       <SpaceBetween size="xs">
         <Box color="text-label" fontWeight="bold">
           Meeting ID
@@ -430,6 +444,7 @@ ConnectionDetails.propTypes = {
     meetingId: PropTypes.string,
     owner: PropTypes.string,
     Owner: PropTypes.string,
+    joinMethod: PropTypes.string,
   }).isRequired,
 };
 

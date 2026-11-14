@@ -5,6 +5,13 @@ import Zoom from './zoom.js';
 import ZoomSdk from './zoom-sdk.js';
 import Teams from './teams.js';
 import TeamsSdk from './teams-sdk.js';
+import {
+    AcsJoinRefusedError,
+    acsFallbackLogLine,
+    acsFallbackSubstep,
+    noteAcsRefusal,
+    teamsSdkFallbackAllowed,
+} from './teams-join-method.js';
 import Webex from './webex.js';
 import GoogleMeet from './google-meet.js';
 import { grantMeetingMediaPermissions } from './meeting-permissions.js';
@@ -59,6 +66,10 @@ const WINDOW_HEIGHT = 1080 - 130;
 
 const isTeamsPlatform = (platform: string): boolean => platform.toUpperCase() === 'TEAMS';
 
+// The method chosen at start-up. Read before the join for the browser launch
+// flags and the warmup decision, which cannot change afterwards; when Teams
+// refuses the ACS join, details.teamsMethod becomes 'dom' (see the join below)
+// and the consumers that run after that point read it again.
 const isTeamsSdkJoin = (): boolean =>
     isTeamsPlatform(details.invite.meetingPlatform) && details.teamsMethod === 'sdk';
 
@@ -792,14 +803,24 @@ const main = async (): Promise<void> => {
         if (details.enableVideoRecording && details.recordingsBucketName) {
             try {
                 const { kinesisStreamManager } = await import('./kinesis-stream.js');
-                const probe = screenShareProbeFor(details.invite.meetingPlatform, details.teamsMethod);
+                // Whether the platform has a screen-share signal is known now;
+                // which probe reads it is decided at each sample, because the
+                // Teams one depends on the join method, and a refused ACS join
+                // hands over to the browser join after this has started.
+                const sharePlatform = details.invite.meetingPlatform;
+                const hasShareProbe = screenShareProbeFor(sharePlatform, details.teamsMethod) !== null;
                 keyframeSampler.start({
                     callId: kinesisStreamManager.currentCallId,
                     bucket: details.recordingsBucketName,
                     isLive: () => transcriptionService.transcribingLive,
                     timelineSeconds: () => transcriptionService.timelineSeconds(),
                     recordingStartedAtMs: () => videoRecorder.startedAtMs,
-                    shareActive: probe ? () => probe(page) : undefined,
+                    shareActive: hasShareProbe
+                        ? () => {
+                              const probe = screenShareProbeFor(sharePlatform, details.teamsMethod);
+                              return probe ? probe(page) : Promise.resolve(null);
+                          }
+                        : undefined,
                     emit: (frame) => kinesisStreamManager.sendVideoKeyframe(frame),
                 });
             } catch (error) {
@@ -814,10 +835,44 @@ const main = async (): Promise<void> => {
         // Race against the renderer-crash latch so an OOM crash mid-join
         // rejects here (→ catch → FAILED) instead of hanging forever on a
         // dead "Target crashed" page.evaluate.
-        exitInfo = await Promise.race([
-            meeting.initialize(page, { prepareAvatar }),
-            pageCrashLatch,
-        ]);
+        //
+        // A Teams join through Azure Communication Services hands over to the
+        // browser join, in the same meeting and on the same page, when Teams
+        // refuses it for a reason the meeting's tenant or meeting type decides
+        // (teams-join-method.ts) and the join method was chosen automatically.
+        // TeamsSdk.initialize has by then left the call, closed its embed
+        // server, deleted the ACS identity and taken its listeners off the
+        // page, in its own finally. It refuses before admission, so nothing
+        // it starts once in the meeting (media, consent, chat and speaker
+        // monitors) is running; what index.ts started above is the same for
+        // both joins, and prepareAvatar runs once.
+        const joinMeeting = async (): Promise<ExitInfo> => {
+            try {
+                return await meeting.initialize(page, { prepareAvatar });
+            } catch (error) {
+                if (
+                    !(meeting instanceof TeamsSdk) ||
+                    !(error instanceof AcsJoinRefusedError) ||
+                    !teamsSdkFallbackAllowed(process.env.MEETING_TEAMS_METHOD)
+                ) {
+                    throw error;
+                }
+                log.always(acsFallbackLogLine(error.subCode));
+                noteAcsRefusal(error.subCode);
+                if (statusManager) {
+                    await statusManager.setJoiningSubstep(acsFallbackSubstep(error.subCode));
+                }
+                // Read again by the screen-share probe above, at each sample.
+                details.teamsMethod = 'dom';
+                // Off the embed server's page, which is closed by now, before
+                // the Teams web client loads.
+                await page.goto('about:blank').catch(() => {});
+                meeting = new Teams();
+                log.info(`Teams join method: ${details.teamsMethod} (after Teams refused the ACS join)`);
+                return meeting.initialize(page, { prepareAvatar });
+            }
+        };
+        exitInfo = await Promise.race([joinMeeting(), pageCrashLatch]);
 
         const exitDetailParts = [
             `reason=${exitInfo.reason}`,

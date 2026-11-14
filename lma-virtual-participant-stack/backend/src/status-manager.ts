@@ -818,6 +818,35 @@ export class VirtualParticipantStatusManager {
     }
   }
 
+  /**
+   * Record which method joined the meeting (`joinMethod`: for Teams `acs`,
+   * `browser`, or `browser:acs-refused:<subCode>`; see teams-join-method.ts).
+   * A field of its own rather than the detail line, which the status
+   * transitions and the consent flow clear and rewrite; this one is written
+   * once, after admission, and stays. Writes no status. Best-effort.
+   *
+   * `joinMethod` is selected here and not added to SUBSCRIBED_FIELDS: this
+   * write is what delivers it to the Virtual Participant page's subscription,
+   * and keeping it out of the shared set means a container running against an
+   * API that does not have the field yet loses only this write, not every
+   * status write.
+   */
+  async setJoinMethod(joinMethod: string): Promise<void> {
+    if (this.skipProgressWrite('the join method')) return;
+    try {
+      const mutation = `
+        mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
+            joinMethod
+          }
+        }
+      `;
+      await this.signAndSendGraphQLRequest(mutation, { input: { id: this.participantId, joinMethod } });
+    } catch {
+      /* the join method is best-effort */
+    }
+  }
+
   // Admission. Clears the join sub-step detail with it (no message is
   // supplied), so the UI stops showing "Waiting to be admitted…" next to a
   // participant that is by then in the meeting.
