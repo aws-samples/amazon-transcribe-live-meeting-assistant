@@ -751,14 +751,16 @@ export class MeetingConsentFlow {
             this.earlyNoticeMode &&
             record?.Mode &&
             (record.Mode !== this.earlyNoticeMode ||
-                (record.Mode === 'opt_in' && (record.Rule ?? null) !== this.earlyNoticeRule))
+                (record.Mode === 'opt_in' && (record.Rule ?? null) !== this.earlyNoticeRule) ||
+                (!!record.NoticeText && !(this.postedNoticeText ?? '').includes(record.NoticeText)))
         ) {
-            // The notice posted at once was for the meeting's own choice, which
-            // the API refused: the meeting runs in the record's mode and rule,
-            // so its notice is posted, and recorded, instead.
+            // The notice posted at once is not the record's: the meeting's own
+            // choice was refused, so it runs in another mode or rule, or its
+            // consent was started earlier with a notice of its own. The
+            // record's notice is posted, and recorded, instead.
             log.always(
-                `[consent] the meeting runs in mode ${record.Mode}${record.Rule ? ` rule=${record.Rule}` : ''}, ` +
-                    `not the ${this.earlyNoticeMode}${this.earlyNoticeRule ? ` rule=${this.earlyNoticeRule}` : ''} its first notice was for; posting the notice again`,
+                `[consent] the meeting's record (mode ${record.Mode}${record.Rule ? ` rule=${record.Rule}` : ''}) has another notice ` +
+                    `than the one posted at once (mode ${this.earlyNoticeMode}${this.earlyNoticeRule ? ` rule=${this.earlyNoticeRule}` : ''}); posting the record's notice`,
             );
             this.noticePosted = false;
             await this.postNotice(record.NoticeText || this.localNotice(), true);

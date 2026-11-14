@@ -20,6 +20,7 @@ import { ConsentApiError } from './consent-api.js';
 import {
     CHAT_OFF_DETAIL,
     ConsentFlowDeps,
+    DEFAULT_CONSENT_SETTINGS,
     MAX_EVIDENCE_IMAGES,
     MAX_NOTICE_ATTEMPTS,
     MeetingConsentFlow,
@@ -30,7 +31,7 @@ import {
     grantEvidenceNote,
     planConsent,
 } from './meeting-consent.js';
-import { normalizeParticipantName } from './consent-matcher.js';
+import { normalizeParticipantName, renderNotice } from './consent-matcher.js';
 import { noteParticipantSeen, UNIDENTIFIED_PARTICIPANT } from './consent-roster.js';
 import { ConsentListener, HeardResult, ListenerEngines } from './consent-listener.js';
 import { kinesisStreamManager } from './kinesis-stream.js';
@@ -61,6 +62,8 @@ class FakeApi implements ConsentApi {
     verified: string[] = [];
     notCreatedFor = 0;
     refuseChoice = false;
+    /** A notice of the meeting's own, put on the record when consent starts. */
+    customNotice: string | undefined;
     private id = 0;
 
     constructor(
@@ -91,7 +94,16 @@ class FakeApi implements ConsentApi {
         this.record = {
             Mode: mode,
             Rule: mode === 'opt_in' ? input.Rule ?? this.deployment.rule : null,
-            NoticeText: mode === 'opt_in' ? 'Reply "I consent" to agree, or "I object" to decline.' : 'Reply "I object" to stop it.',
+            // Rendered from the deployment's notice text, as the resolver does,
+            // unless the meeting's consent was started with a notice of its own.
+            NoticeText:
+                this.customNotice ??
+                renderNotice(mode === 'opt_in' ? DEFAULT_CONSENT_SETTINGS.optInNoticeText : DEFAULT_CONSENT_SETTINGS.notifyNoticeText, {
+                    lmaUser: input.LmaUser ?? '',
+                    meeting: input.MeetingName ?? '',
+                    consentPhrase: 'I consent',
+                    objectionPhrase: 'I object',
+                }),
             Participants: [],
             Events: [],
             Evidence: [],
@@ -1068,7 +1080,7 @@ test('a meeting that chose Off, refused by the resolver, runs the deployment mod
     assert.deepEqual(h.api.starts.map((s) => s.Mode), ['off', undefined]);
     assert.equal(h.api.record?.Mode, 'opt_in');
     assert.equal(h.capture.on, false, 'withheld, as the deployment requires');
-    assert.ok(h.chat.some((m) => m.includes('Reply "I consent"')));
+    assert.ok(h.chat.some((m) => m.includes('Nothing is recorded or transcribed until everyone has agreed.')));
 });
 
 test('consent is started once the meeting record exists', async () => {
@@ -1111,7 +1123,7 @@ test('a notice posted before consent could start is recorded as it was posted', 
 test('notify: a notice the chat did not take is not recorded, and is posted and recorded on a later poll', async () => {
     let failing = true;
     const h = await harness({ deployment: { mode: 'notify' }, sendFails: () => failing });
-    assert.ok(!h.chat.some((m) => m.includes('to stop it')), 'nothing reached the chat');
+    assert.ok(!h.chat.some((m) => m.includes('If you do not agree, say so')), 'nothing reached the chat');
     assert.ok(!h.api.calls.includes('recordNotice'), 'not recorded as posted');
     assert.notEqual(h.api.record?.Status, 'granted', 'notify is granted only once the notice is recorded');
 
@@ -1125,7 +1137,7 @@ test('notify: a notice the chat did not take is not recorded, and is posted and 
     h.advance(NOTICE_RETRY_MS);
     await h.flow.pollOnce();
     await h.settle();
-    assert.equal(h.chat.filter((m) => m.includes('to stop it')).length, 1, 'posted once');
+    assert.equal(h.chat.filter((m) => m.includes('If you do not agree, say so')).length, 1, 'posted once');
     assert.ok(h.chat.some((m) => m.includes('"LMA, I object"')), 'with the reply line');
     assert.equal(h.api.calls.filter((c) => c === 'recordNotice').length, 1);
     assert.equal(h.api.noticeTexts[0], h.chat.join(' '), 'recorded as it was posted');
@@ -1268,9 +1280,9 @@ test("a notice posted for the meeting's own choice is posted again in the mode t
     const h = await harness({ deployment: { mode: 'notify' }, choice: { mode: 'opt_in', rule: 'owner_attests' }, api });
     assert.ok(h.chat.some((m) => m.includes('Nothing is recorded or transcribed until everyone has agreed.')), 'the first notice was for opt-in');
     assert.equal(h.api.record?.Mode, 'notify');
-    assert.ok(h.chat.some((m) => m.includes('Reply "I object" to stop it.')), "then the record's notice");
+    assert.ok(h.chat.some((m) => m.includes('If you do not agree, say so')), "then the record's notice");
     assert.equal(h.api.noticeTexts.length, 1);
-    assert.ok(h.api.noticeTexts[0].includes('Reply "I object" to stop it.'), 'the notice recorded is the one for the mode the meeting runs in');
+    assert.ok(h.api.noticeTexts[0].includes('If you do not agree, say so'), 'the notice recorded is the one for the mode the meeting runs in');
     h.flow.stop();
 });
 
@@ -1288,6 +1300,23 @@ test("a notice posted under the meeting's own opt-in rule is posted again under 
     assert.ok(h.chat.indexOf(ownerLine) > h.chat.findIndex((m) => m.includes('Nothing is recorded')), h.chat.join('\n'));
     assert.equal(h.api.noticeTexts.length, 1);
     assert.ok(h.api.noticeTexts[0].includes(ownerLine), 'the notice recorded is the one for the rule the meeting runs under');
+    h.flow.stop();
+});
+
+test("a notice posted at once is posted again as the record's notice when the meeting's consent has a notice of its own", async () => {
+    const api = new FakeApi({ mode: 'notify', rule: 'each_participant' });
+    api.customNotice = 'Ana records this sync for the minutes.';
+    const h = await harness({ deployment: { mode: 'notify' }, api });
+    assert.ok(h.chat.some((m) => m.includes('If you do not agree, say so')), 'the deployment notice went out at once');
+    assert.ok(h.chat.includes('Ana records this sync for the minutes.'), "then the record's own notice");
+    assert.equal(h.api.noticeTexts.length, 1);
+    assert.ok(h.api.noticeTexts[0].startsWith('Ana records this sync for the minutes.'), "the record's notice is the one recorded");
+    h.flow.stop();
+});
+
+test('a notice posted at once that matches the record is posted once', async () => {
+    const h = await harness({ deployment: OPT_IN_EACH });
+    assert.equal(h.chat.filter((m) => m.includes('Nothing is recorded or transcribed')).length, 1);
     h.flow.stop();
 });
 
