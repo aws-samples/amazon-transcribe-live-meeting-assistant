@@ -20,11 +20,11 @@ This page collects the demonstration videos for the Live Meeting Assistant (LMA)
 ## Overview
 
 ### Live Meeting Assistant: an AI teammate in your meetings
-An introduction to LMA for new viewers, and why it is much more than a note taker. LMA is invited to a Google Meet from a pasted invitation (the same in Zoom, Teams, Webex and Chime), posts its consent notice in the meeting chat, and transcribes live with its own speech engine, telling apart two people sharing a conference-room microphone and translating on the fly. During the meeting the assistant answers what is still open, searches the web, runs a one-click CLARITY CHECK, and replies to a question typed in the meeting chat. It extends to other systems through MCP connectors, and is itself an MCP server for agents such as Amazon Quick. Afterwards come the summary, speakers named from their introductions, key frames, questions across all meetings, the consent record, retention and cost controls, and administration.
+An introduction to LMA for new viewers, and why it is much more than a note taker. LMA is invited to a Google Meet from a pasted invitation (the same in Zoom, Teams, Webex and Chime), posts its consent notice in the meeting chat, and transcribes live with either of its two speech engines, Amazon Transcribe or its own on-demand engine, telling apart two people sharing a conference-room microphone and translating on the fly. During the meeting the assistant answers what is still open, searches the web, runs a one-button CLARITY CHECK, and replies to a question typed in the meeting chat; the voice assistant can also answer out loud or act as a live interpreter. It extends to other systems through MCP connectors, and is itself an MCP server for agents such as Amazon Quick. Afterwards come the summary, including the meeting chat and every link shared in it, the audio or video recording, speakers named from their introductions, shared slides captured with titles and descriptions, downloadable as a PDF, translated by the assistant and shown as thumbnails in the summary, questions across all meetings, the consent record, retention and cost controls, and administration.
 
-**Duration**: ~7 minutes
+**Duration**: ~8 minutes
 
-https://github.com/user-attachments/assets/f5b3cc27-a0a5-4315-9e5b-41652f3d6d2d
+https://github.com/user-attachments/assets/ccb1e079-3a9e-4e94-990a-c39043b659dd
 
 **Related Documentation**: [Quick Start Guide](./quick-start-guide.md), [MCP Servers](./mcp-servers.md), [Amazon Quick MCP Setup](./amazon-quick-mcp-setup.md), [Meeting Consent](./meeting-consent.md), [On-demand ASR](./microvm-asr.md)
 

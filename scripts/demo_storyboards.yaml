@@ -538,29 +538,25 @@ storyboards:
     hook: >-
       Live Meeting Assistant is much more than a note taker. It brings an AI assistant into the meeting itself: one that listens, answers questions while you talk, reaches out to your other systems, and keeps consent and your data under your control. It runs in your own AWS account.
     persona: Admin
-    duration_target: '7:30'
+    duration_target: '8:00'
     fixtures:
       - 'Live: a Google Meet with open access and a silent guest keeping it open; VP launched in the first chapter (consent Notify); scripted guest Conference Room 4 playing a synthetic two-voice meeting and typing a chat question; Tavily web search; DeepWiki connected as a custom MCP server'
-      - 'Finished meetings: Mobile app planning and Quarterly business review (synthetic slides); concept slides'
+      - 'The guest posts a link in the meeting chat once the conversation starts, for the summary''s chat and shared links section'
+      - 'Finished meeting Quarterly business review (synthetic slides) for the slide chapters; concept slides 1-5'
     chapters:
       - label: 'Invite LMA to the meeting; every meeting, online or in the room'
         say: >-
-          We invite LMA to a meeting by pasting its invitation. LMA reads the meeting's name, its link and its agenda, and joins as a participant. Here it is Google Meet; it works the same way in Zoom, Microsoft Teams, Webex and Amazon Chime. LMA joins online meetings on every major platform. People can also stream a meeting from their browser, the Chrome extension or the desktop app, or upload a recording. In hybrid meetings, several people sharing one conference-room microphone are told apart and named. And with the voice assistant turned on, anyone in the meeting can ask a question out loud and hear the answer spoken, with an optional avatar on camera.
+          We invite LMA to a meeting by pasting its invitation. LMA reads the meeting's name, its link and its agenda, and joins as a participant. Here it is Google Meet; it works the same way in Zoom, Microsoft Teams, Webex and Amazon Chime. LMA joins online meetings on every major platform. People can also stream a meeting from their browser, the Chrome extension or the desktop app, or upload a recording. In hybrid meetings, several people sharing one conference-room microphone are told apart and named. And with the voice assistant turned on, anyone in the meeting can ask a question out loud and hear the answer spoken, or switch it to interpreter mode, where it translates between two languages as people speak, with an optional avatar on camera.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Speech recognition on your terms'
+      - label: 'Speech recognition on your terms; informed consent; a live transcript'
         say: >-
-          LMA transcribes with its own speech engine by default: open speech models on AWS Lambda MicroVMs, one per meeting, that give text and speaker labels together. Amazon Transcribe is the alternative, chosen for each kind of meeting, with personal information redaction and custom vocabularies.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Informed consent; a live transcript'
-        say: >-
-          The moment it joins, LMA tells everyone in the meeting chat that the meeting is being recorded and transcribed, who invited it, and how to object. An objection stops recording, and a deployment can require everyone to opt in first. On LMA's own page, the transcript appears as people speak. Two people share one conference-room microphone, and LMA tells their voices apart. The header shows the meeting in progress, with consent granted and an estimated cost so far.
+          LMA offers two speech engines, and an administrator chooses one for each kind of meeting: Amazon Transcribe, fully managed, with personal information redaction and custom vocabularies; or LMA's own on-demand engine, which runs open speech models on AWS Lambda MicroVMs, one per meeting, and gives text and speaker labels together. The moment it joins, LMA tells everyone in the meeting chat that the meeting is being recorded and transcribed, who invited it, and how to object. An objection stops recording, and a deployment can require everyone to opt in first. On LMA's own page, the transcript appears as people speak. Two people share one conference-room microphone, and LMA tells their voices apart. The header shows the meeting in progress, with consent granted and an estimated cost so far.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'In any language; ask the assistant during the meeting; answers in seconds'
         say: >-
-          Anyone following along can translate the transcript live, into the language they read best, here Spanish. Each line keeps its speaker and time, and the original stays as it was said. This is where LMA goes beyond notes. While the meeting is still going, we ask the assistant which decisions are still open, and who owns them. It reads everything said so far and answers in seconds: whether offline sync blocks the launch is still to be decided, and nobody has been assigned to write up the trade-offs. The app store submission, though, is settled: Marcus's team owns it, by March the tenth.
+          Anyone following along can translate the transcript live, into the language they read best, here Spanish. Each line keeps its speaker and time, and the original stays as it was said. This is where LMA goes beyond notes. While the meeting is still going, we ask the assistant which decisions are still open, and who owns them. It reads everything said so far and answers in seconds: whether offline sync blocks the launch, and who writes up the trade-offs, are both still open with no owner named, and the second support hire waits on budget. The app store submission, though, is settled: Marcus's team owns it, by March the tenth.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'Search the web, mid-meeting; an answer with sources; quick actions'
@@ -570,27 +566,32 @@ storyboards:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'What is still unclear; ask LMA in the meeting chat; kept in the transcript'
         say: >-
-          It lists what is still open or ambiguous, each with the time it came up: for example, how much margin the March tenth submission really leaves, and that the second support hire waits on a budget meeting with no date. Participants can ask too, without leaving the meeting. Someone types a question for LMA in the meeting chat, and LMA posts the answer back there within seconds. Both the question and the answer are kept in the transcript, under the name of whoever asked.
+          It lists what is still open or ambiguous, each with the time it came up: the second support hire, waiting on a budget meeting with no date, and launch timing, where a nine-day app store review from March the tenth leaves a single day before the launch. Participants can ask too, without leaving the meeting. Someone types a question for LMA in the meeting chat, and LMA posts the answer back there within seconds. Both the question and the answer are kept in the transcript, under the name of whoever asked.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Connect it to your own systems; add a connector'
+      - label: 'Connect it to your own systems; add a connector; after the meeting; chat and links, kept'
         say: >-
-          The assistant is extensible. Besides its built-in tools, it can call any MCP server: a CRM such as Salesforce, internal APIs, ticketing systems or knowledge bases. Connectors are added on the MCP Servers page, from the public MCP registry, where Salesforce servers are listed, or by entering your own endpoint. Here, DeepWiki is already connected, and the assistant can use it in any meeting.
+          The assistant is extensible. Besides its built-in tools, it can call any MCP server: a CRM such as Salesforce, internal APIs, ticketing systems or knowledge bases. Connectors are added on the MCP Servers page, from the public MCP registry, where Salesforce servers are listed, or by entering your own endpoint. Here, DeepWiki is already connected, and the assistant can use it in any meeting. When the meeting ends, LMA writes the summary in sections: the decisions, the action items, how each agenda item was covered, and the chapters. The meeting chat is part of the record too. The summary has its own section for what was said in the chat and every link that was shared, here the beta feedback notes.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'After the meeting; speakers named for you; what was shown on screen'
+      - label: 'The recording, audio or video; speakers named for you; the slides, captured'
         say: >-
-          When a meeting ends, LMA writes the summary in sections, with the decisions, action items, chapters and the links shared in the chat. Here is the planning meeting we held earlier. LMA named the two voices from the conference room after the people themselves, from the words where they introduced themselves. When someone shares their screen, LMA keeps a searchable key frame of every slide, with its title and the text on it.
+          LMA keeps the recording, audio only or with video of the meeting screen, and it plays from any line of the transcript. LMA named the two voices from the conference room after the people themselves, from the words where they introduced themselves. When someone presents, LMA captures each slide as a key frame, gives it a short title, reads its text, and describes it, so a meeting can be searched by what was shown as well as what was said. The slides can be downloaded as a PDF.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Ask across all your meetings; consent and retention you can audit'
+      - label: 'Ask about the slides; slides in the summary; ask across all your meetings'
         say: >-
-          Questions are not limited to one meeting. The Meetings Query Tool searches every meeting you have access to, and answers from their transcripts and summaries, here what has been decided about the launch, and what is still open. For the people responsible for privacy, every meeting keeps an auditable consent record. Transcripts are kept only for the days you set, or deleted as soon as the summary is written, and you choose where AI processing may happen. LMA encrypts recordings with your key and keeps meeting content out of its logs.
+          The assistant can read the slides too, during the meeting or after: describe a slide, compare two, or, as here, translate one into German. And the summary has a section for what was shown on screen, slide by slide, with a thumbnail of each. Questions are not limited to one meeting. The Meetings Query Tool searches every meeting you have access to, and answers from their transcripts and summaries, here what has been decided about the launch, and what is still open.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Bring meetings into your AI agents; what each meeting costs; built for administrators'
+      - label: 'Consent and retention you can audit; bring meetings into your AI agents'
         say: >-
-          LMA is also an MCP server itself. AI agents such as Amazon Quick, Claude Desktop or your own can search your meetings, read transcripts and summaries, and even send LMA into a meeting, with each user seeing only their own meetings. Every meeting carries an estimated cost, itemised by service, so you can see what LMA spends and where. Administrators manage every setting as named configuration profiles, with presets for consent, retention and privacy. And when something goes wrong, a troubleshooting agent reads the deployment's own logs and explains the cause.
+          For the people responsible for privacy, every meeting keeps an auditable consent record. Transcripts are kept only for the days you set, or deleted as soon as the summary is written, and you choose where AI processing may happen. LMA encrypts recordings with your key and keeps meeting content out of its logs. LMA is also an MCP server itself. AI agents such as Amazon Quick, Claude Desktop or your own can search your meetings, read transcripts and summaries, and even send LMA into a meeting, with each user seeing only their own meetings.
+        do:
+          - 'Perform the steps the narration describes, on the fixtures above.'
+      - label: 'What each meeting costs; built for administrators'
+        say: >-
+          Every meeting carries an estimated cost, itemised by service, so you can see what LMA spends and where. Administrators manage every setting as named configuration profiles, with presets for consent, retention and privacy. And when something goes wrong, a troubleshooting agent reads the deployment's own logs and explains the cause.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
     closing: >-
