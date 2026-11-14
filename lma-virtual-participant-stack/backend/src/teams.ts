@@ -1585,6 +1585,14 @@ export default class Teams {
         // light-meetings anon client, so a hard waitForSelector here would block
         // the intro + transcription for up to waitingTimeout (5 min) or throw
         // and abort an otherwise-successful join. Try briefly, then move on.
+        // On the anonymous light-meetings client the View panel opens in the
+        // side rail in place of the chat, and that client offers no way to
+        // bring the chat back (no chat button; its More menu has no Chat
+        // item), so the VP would stop reading and posting the chat. There the
+        // view is left as Teams sets it.
+        if (/light-meetings/i.test(page.url())) {
+            log.info('Speaker view not selected on the light-meetings client: its View panel would replace the chat.');
+        } else {
         log.info("Opening view panel (best-effort).");
         try {
             const viewPanelElement = await page.waitForSelector("#custom-view-button", {
@@ -1598,6 +1606,7 @@ export default class Teams {
             await speakerViewElement?.click({ timeout: POSITIONAL_CLICK_TIMEOUT_MS });
         } catch {
             log.info("View/speaker-view controls not found (likely light-meetings client) — skipping.");
+        }
         }
 
         // All the in-meeting monitoring wiring below (attendee/speaker/message
