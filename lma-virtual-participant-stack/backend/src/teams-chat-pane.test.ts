@@ -238,3 +238,11 @@ test('keystrokes and Enter go only to the focused compose box', () => {
     assert.match(now, /if \(await this\.composerFocused\(found\.element\)\) \{\s+log\.info\(`Paste insert did not land[^\n]*\n\s+await page\.keyboard\.type\(message/);
     assert.match(source, /if \(await this\.composerFocused\(element\)\) \{\s+await page\.keyboard\.press\('Enter'\);/);
 });
+
+test('the light-meetings join does not open the View panel, which would replace the chat', () => {
+    const source = readFileSync(new URL('../src/teams.ts', import.meta.url), 'utf8');
+    const at = source.indexOf('Opening view panel (best-effort).');
+    assert.ok(at > 0);
+    const guard = source.lastIndexOf('/light-meetings/i.test(page.url())', at);
+    assert.ok(guard > 0 && at - guard < 600, 'the View panel step is skipped on light-meetings');
+});
