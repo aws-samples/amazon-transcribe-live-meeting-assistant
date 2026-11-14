@@ -394,6 +394,9 @@ export class MeetingConsentFlow {
     /** The mode of the notice posted before consent started (see begin); null when none was. */
     private earlyNoticeMode: ConsentMode | null = null;
 
+    /** The opt-in rule of that notice, which decides whether it carries the owner-attests line. */
+    private earlyNoticeRule: ConsentRule | null = null;
+
     /** The platform showed the chat as turned off for the VP: nothing more is posted there. */
     private chatOff = false;
 
@@ -591,6 +594,7 @@ export class MeetingConsentFlow {
         // (afterStart). A mode that is not known yet posts nothing.
         if ((this.plan.mode === 'notify' || this.plan.mode === 'opt_in') && !this.offChoicePending && !this.choiceUnread) {
             this.earlyNoticeMode = this.plan.mode;
+            this.earlyNoticeRule = this.plan.rule;
             await this.postNotice(this.localNotice(), false);
         }
         if (this.held) {
@@ -729,11 +733,19 @@ export class MeetingConsentFlow {
             // Also when an earlier attempt could not be posted: this one is
             // recorded if it is posted, and tried again if it is not.
             await this.postNotice(record?.NoticeText || this.localNotice(), true);
-        } else if (this.earlyNoticeMode && record?.Mode && record.Mode !== this.earlyNoticeMode) {
+        } else if (
+            this.earlyNoticeMode &&
+            record?.Mode &&
+            (record.Mode !== this.earlyNoticeMode ||
+                (record.Mode === 'opt_in' && (record.Rule ?? null) !== this.earlyNoticeRule))
+        ) {
             // The notice posted at once was for the meeting's own choice, which
-            // the API refused: the meeting runs in the record's mode, so its
-            // notice is posted, and recorded, instead.
-            log.always(`[consent] the meeting runs in mode ${record.Mode}, not the ${this.earlyNoticeMode} its first notice was for; posting the notice again`);
+            // the API refused: the meeting runs in the record's mode and rule,
+            // so its notice is posted, and recorded, instead.
+            log.always(
+                `[consent] the meeting runs in mode ${record.Mode}${record.Rule ? ` rule=${record.Rule}` : ''}, ` +
+                    `not the ${this.earlyNoticeMode}${this.earlyNoticeRule ? ` rule=${this.earlyNoticeRule}` : ''} its first notice was for; posting the notice again`,
+            );
             this.noticePosted = false;
             await this.postNotice(record.NoticeText || this.localNotice(), true);
         } else {

@@ -1274,6 +1274,23 @@ test("a notice posted for the meeting's own choice is posted again in the mode t
     h.flow.stop();
 });
 
+test("a notice posted under the meeting's own opt-in rule is posted again under the record's rule, when the choice is refused", async () => {
+    const api = new FakeApi({ mode: 'opt_in', rule: 'owner_attests' });
+    api.refuseChoice = true;
+    const h = await harness({
+        deployment: { mode: 'opt_in', consentRule: 'owner_attests' },
+        choice: { mode: 'opt_in', rule: 'each_participant' },
+        api,
+    });
+    assert.equal(h.api.record?.Rule, 'owner_attests');
+    const ownerLine = 'Recording starts when Ana Silva confirms in LMA that everyone has agreed.';
+    assert.equal(h.chat.filter((m) => m === ownerLine).length, 1, 'the second notice carries the owner-attests line');
+    assert.ok(h.chat.indexOf(ownerLine) > h.chat.findIndex((m) => m.includes('Nothing is recorded')), h.chat.join('\n'));
+    assert.equal(h.api.noticeTexts.length, 1);
+    assert.ok(h.api.noticeTexts[0].includes(ownerLine), 'the notice recorded is the one for the rule the meeting runs under');
+    h.flow.stop();
+});
+
 test('a chat the platform shows as turned off stops the notice retries, and the detail line says so', async () => {
     let attempts = 0;
     const h = await harness({

@@ -2196,7 +2196,9 @@ export default class Teams {
         // Start transcription if enabled (LMA behavior). This is the actual
         // point of the VP, so it runs regardless of any best-effort chat /
         // monitoring hiccups above.
-        if (details.start) {
+        // The consent flow, attached above, may already have released capture,
+        // which starts transcription and posts the start messages itself.
+        if (details.start && !transcriptionService.transcribing) {
             log.info(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
             transcriptionService.startTranscription();
