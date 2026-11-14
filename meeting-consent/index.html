@@ -578,6 +578,15 @@ posts the notice in the chat as soon as it is in the meeting. Once the notice is
 recorded as posted and nobody has objected, the status is <code dir="auto">granted</code>, and the VP
 keeps screenshots as evidence (see <a href="#evidence-screenshots">Evidence screenshots</a>).
 When somebody joins later, the notice is posted again, at most once a minute.</p>
+<p>The VP records the notice as posted only once the platform reports that every
+message of it, the reply line included, is in the chat. When it is not (the
+chat pane is closed and cannot be reopened, the compose box cannot be found, or
+Teams shows the message as failed to send), the VP logs a warning, does not
+record the notice, and posts it again every 30 seconds, up to 40 attempts
+(about 20 minutes), until it is in the chat. A notice re-posted for somebody
+who joined is handled the same way. In notify this keeps the status <code dir="auto">pending</code>,
+which still allows capture, until participants can actually see the notice; in
+opt-in, capture stays withheld as it would anyway.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="opt-in">Opt-in</h3><a class="sl-anchor-link" href="#opt-in"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Opt-in”</span></a></div>
 <p>An opt-in meeting starts with capture withheld: the VP joins, but writes no
 transcript and no recording, does not start the voice assistant or the screen
@@ -929,7 +938,7 @@ identities are never listed.</p>
 
 
 
-<table><thead><tr><th>Join</th><th>Chat sender</th><th>Spoken replies</th><th>Who is present</th><th>Each participant consents</th><th>Participant list screenshot</th></tr></thead><tbody><tr><td>Chime</td><td>Shown</td><td>Read, under the active speaker</td><td>Count</td><td>Yes</td><td>The chat and the attendee list are on screen together, so one screenshot has both</td></tr><tr><td>Zoom (browser)</td><td>Shown</td><td>Read, under the active speaker</td><td>Count</td><td>Yes</td><td>The participants pane is opened, shot and closed again</td></tr><tr><td>Zoom (Meeting SDK)</td><td>Shown</td><td>Read, under the active speaker</td><td>Count</td><td>Yes</td><td>One screenshot of LMA’s SDK page</td></tr><tr><td>Teams (browser)</td><td><strong>Not shown</strong></td><td>Read, under the active speaker</td><td>Count</td><td>Yes, <strong>aloud only</strong> (“LMA, I consent”): a typed consent cannot be attributed, so not with <strong>Read spoken replies</strong> off</td><td>The People pane is opened and shot, then the chat reopened</td></tr><tr><td>Teams (Azure Communication Services)</td><td>Shown</td><td>Read, under the active speaker</td><td>Names</td><td>Yes</td><td>One screenshot of LMA’s SDK page</td></tr><tr><td>Webex (browser)</td><td>Shown</td><td>Read, under the active speaker</td><td><strong>None</strong></td><td><strong>No</strong>: see <a href="#who-is-present">Who is present</a></td><td>The participants panel is opened, shot and closed again</td></tr><tr><td>Google Meet (browser)</td><td>Shown (read from the message group’s header)</td><td>Read, under the speaking tile</td><td>Count</td><td>Yes</td><td>The People panel is opened and shot, then the chat reopened</td></tr></tbody></table>
+<table><thead><tr><th>Join</th><th>Chat sender</th><th>Spoken replies</th><th>Who is present</th><th>Each participant consents</th><th>Participant list screenshot</th></tr></thead><tbody><tr><td>Chime</td><td>Shown</td><td>Read, under the active speaker</td><td>Count</td><td>Yes</td><td>The chat and the attendee list are on screen together, so one screenshot has both</td></tr><tr><td>Zoom (browser)</td><td>Shown</td><td>Read, under the active speaker</td><td>Count</td><td>Yes</td><td>The participants pane is opened, shot and closed again</td></tr><tr><td>Zoom (Meeting SDK)</td><td>Shown</td><td>Read, under the active speaker</td><td>Count</td><td>Yes</td><td>One screenshot of LMA’s SDK page</td></tr><tr><td>Teams (browser)</td><td><strong>Not shown</strong></td><td>Read, under the active speaker</td><td>Count</td><td>Yes, <strong>aloud only</strong> (“LMA, I consent”): a typed consent cannot be attributed, so not with <strong>Read spoken replies</strong> off</td><td><strong>Chat only</strong>: the People pane is not opened, because on the anonymous join it takes the chat’s place and the chat cannot be brought back, so there is no participant-list screenshot (the participant count still comes from the roster badge)</td></tr><tr><td>Teams (Azure Communication Services)</td><td>Shown</td><td>Read, under the active speaker</td><td>Names</td><td>Yes</td><td>One screenshot of LMA’s SDK page</td></tr><tr><td>Webex (browser)</td><td>Shown</td><td>Read, under the active speaker</td><td><strong>None</strong></td><td><strong>No</strong>: see <a href="#who-is-present">Who is present</a></td><td>The participants panel is opened, shot and closed again</td></tr><tr><td>Google Meet (browser)</td><td>Shown (read from the message group’s header)</td><td>Read, under the speaking tile</td><td>Count</td><td>Yes</td><td>The People panel is opened and shot, then the chat reopened</td></tr></tbody></table>
 <p>Notify, owner-attests and objections, typed or said, work on every join.
 Opening and closing panels is best effort: a button the VP cannot find means a
 chat screenshot without a participant list, never a held-up meeting. The panel
@@ -944,7 +953,8 @@ owner-attests rule on Meet where that matters.</p>
 <p>When the meeting’s status becomes <code dir="auto">granted</code> (in notify, once the notice is
 recorded as posted), and on every objection, the VP takes a screenshot of the
 meeting page with the chat open, then, where the platform allows it, opens the
-participant list, takes a second one, and puts the chat back. The screenshots
+participant list, takes a second one, and puts the chat back (not on the Teams
+browser join, where the chat screenshot is the only one). The screenshots
 are taken from the meeting page itself, so nothing open in the live view covers
 them. Each is a JPEG stored in the recordings bucket under
 <code dir="auto">lma-consent-evidence/&#x3C;meeting>/</code> and added to the record with
