@@ -9,6 +9,7 @@ import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { chatHelpMessages } from './chat-help.js';
 import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
+import { captureMeetingPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { noteSentChat } from './meeting-chat.js';
 import { meetingChat } from './meeting-chat-runtime.js';
@@ -23,6 +24,7 @@ import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js'
 import { createLogger } from './logger.js';
 import {
     chatWatchAction,
+    AsyncLock,
     isChatPaneButton,
     TEAMS_CHAT_WATCH_MS,
     TEAMS_FAILED_MESSAGE_RETRY_SELECTOR,
@@ -524,6 +526,14 @@ export default class Teams {
     /** The meeting has ended; the chat watch stops. */
     private meetingOver = false;
 
+    /**
+     * Held by each post, each set of consent evidence screenshots and each
+     * chat-watch check, so they never act on the chat pane at the same time
+     * (see AsyncLock). restoreChat, sendMessagesNow and dumpSideRail expect
+     * their caller to hold it and never take it themselves.
+     */
+    private readonly chatLock = new AsyncLock();
+
     /** The toolbar DOM has been logged because no way to the chat was found. */
     private toolbarDumped = false;
 
@@ -795,6 +805,11 @@ export default class Teams {
     // failed-message Retry button appeared while posting; the consent flow
     // records its notice as posted only then.
     private async sendMessages(page: Page, messages: string[]): Promise<boolean> {
+        // One post at a time, and never during a consent screenshot or a chat-watch check.
+        return this.chatLock.run(() => this.sendMessagesNow(page, messages));
+    }
+
+    private async sendMessagesNow(page: Page, messages: string[]): Promise<boolean> {
         // So the meeting chat capture knows these when it reads them back.
         noteSentChat(messages);
         let all = true;
@@ -1490,7 +1505,7 @@ export default class Teams {
 
         await substep('In the meeting — opening chat panel…');
         log.info("Opening chat panel.");
-        await this.restoreChat(page);
+        await this.chatLock.run(() => this.restoreChat(page));
 
         await substep('In the meeting — posting introduction message…');
         log.info("Sending introduction messages.");
@@ -1984,32 +1999,34 @@ export default class Teams {
         const watchChat = async (): Promise<void> => {
             if (page.isClosed() || this.meetingOver) return;
             try {
-                const readerInstalled = await page
-                    .evaluate(() => typeof (window as any).__lmaScrapeMessages === 'function')
-                    .catch(() => true);
-                const action = chatWatchAction({
-                    paneOpen: await this.chatInputVisible(page),
-                    readerInstalled,
-                    busy: false,
-                    closedReported,
-                });
-                if (action === 'reinstall-reader') {
-                    await installChatReader();
-                    const primed = await page
-                        .evaluate((extra) => (window as any).__lmaScrapeMessages(extra).length, aiMessageSelector)
-                        .catch(() => 0);
-                    log.warn(`[teams-chat] the chat reader was gone from the page; installed it again (${primed} message(s) already shown marked as read).`);
-                } else if (action === 'report-closed') {
-                    closedReported = true;
-                    log.warn('[teams-chat] the chat pane is closed; chat messages are not read, and posts are reported as not posted, until it is open again. The VP does not reopen it.');
-                    if (!sideRailDumped) {
-                        sideRailDumped = true;
-                        await this.dumpSideRail(page);
+                // Skipped while a post or a screenshot holds the chat pane.
+                await this.chatLock.runIfFree(async () => {
+                    const readerInstalled = await page
+                        .evaluate(() => typeof (window as any).__lmaScrapeMessages === 'function')
+                        .catch(() => true);
+                    const action = chatWatchAction({
+                        paneOpen: await this.chatInputVisible(page),
+                        readerInstalled,
+                        closedReported,
+                    });
+                    if (action === 'reinstall-reader') {
+                        await installChatReader();
+                        const primed = await page
+                            .evaluate((extra) => (window as any).__lmaScrapeMessages(extra).length, aiMessageSelector)
+                            .catch(() => 0);
+                        log.warn(`[teams-chat] the chat reader was gone from the page; installed it again (${primed} message(s) already shown marked as read).`);
+                    } else if (action === 'report-closed') {
+                        closedReported = true;
+                        log.warn('[teams-chat] the chat pane is closed; chat messages are not read, and posts are reported as not posted, until it is open again. The VP does not reopen it.');
+                        if (!sideRailDumped) {
+                            sideRailDumped = true;
+                            await this.dumpSideRail(page);
+                        }
+                    } else if (action === 'report-reopened') {
+                        closedReported = false;
+                        log.info('[teams-chat] the chat pane is open again.');
                     }
-                } else if (action === 'report-reopened') {
-                    closedReported = false;
-                    log.info('[teams-chat] the chat pane is open again.');
-                }
+                }, undefined);
             } catch (e) {
                 log.warn('[teams-chat] the chat check failed (non-fatal):', e);
             }
@@ -2034,12 +2051,13 @@ export default class Teams {
             send: (messages) => this.sendMessages(page, messages),
             // The chat rows this handler reads carry no sender (see handleIncomingMessage).
             sendersHidden: true,
-            panels: {
+            // Taken while no post is being typed, and a post waits for them.
+            screenshots: () => this.chatLock.run(() => captureMeetingPanels(page, {
                 showParticipants: async () => {
                     log.info('[consent] no participant-list screenshot on the Teams browser join: opening the People pane would close the chat, which the VP cannot reopen there.');
                     return false;
                 },
-            },
+            })),
             leave: (objector) => {
                 details.start = false;
                 this.requestEnd({ reason: 'consent-objection', trigger: 'consent-objection', requestedBy: objector });

@@ -18,7 +18,7 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { details, exitMessagesFor } from './details.js';
 import { ConfigurationStore, declareSection } from './configuration-store.js';
 import { createConsentApi, signedGraphqlSender } from './consent-api.js';
-import { captureMeetingPanels, EvidencePanels } from './consent-evidence.js';
+import { captureMeetingPanels, EvidencePanels, EvidenceShot } from './consent-evidence.js';
 import { MeetingConsentFlow, VpConsentChoice } from './meeting-consent.js';
 import { rosterLagSeconds, transcriptionService } from './scribe.js';
 import { ConsentListener } from './consent-listener.js';
@@ -169,6 +169,8 @@ export function attachMeetingConsent(
         send: (messages: string[]) => Promise<boolean>;
         leave: (objector: string) => void;
         panels?: EvidencePanels;
+        /** Takes the evidence screenshots instead of captureMeetingPanels(page, panels), when the handler must order them with its posts (Teams). */
+        screenshots?: () => Promise<EvidenceShot[]>;
         readRoster?: () => Promise<string[] | null>;
         sendersHidden?: boolean;
     },
@@ -176,7 +178,7 @@ export function attachMeetingConsent(
     meetingConsent.attach({
         sendersHidden: options.sendersHidden,
         sendMessages: options.send,
-        screenshots: () => captureMeetingPanels(page, options.panels),
+        screenshots: options.screenshots ?? (() => captureMeetingPanels(page, options.panels)),
         readRoster: options.readRoster,
         leave: options.leave,
     });

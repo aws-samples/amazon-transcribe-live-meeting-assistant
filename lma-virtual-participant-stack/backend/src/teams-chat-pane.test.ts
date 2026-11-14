@@ -12,7 +12,7 @@
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { chatWatchAction, ChatWatchState, isChatPaneButton, TEAMS_FAILED_MESSAGE_RETRY_SELECTOR } from './teams-chat-pane.js';
+import { AsyncLock, chatWatchAction, ChatWatchState, isChatPaneButton, TEAMS_FAILED_MESSAGE_RETRY_SELECTOR } from './teams-chat-pane.js';
 
 const teamsSource = (): string => readFileSync(new URL('../src/teams.ts', import.meta.url), 'utf8');
 
@@ -39,7 +39,7 @@ test('no item of an open menu is taken for the chat button, whatever its label',
 
 // ─── The chat watch ──────────────────────────────────────────────────────────
 
-const healthy: ChatWatchState = { paneOpen: true, readerInstalled: true, busy: false, closedReported: false };
+const healthy: ChatWatchState = { paneOpen: true, readerInstalled: true, closedReported: false };
 
 test('an open pane with its reader needs nothing', () => {
     assert.equal(chatWatchAction(healthy), 'none');
@@ -51,16 +51,94 @@ test('a closed pane is reported once, and again only after it has been seen open
     assert.equal(chatWatchAction({ ...healthy, paneOpen: true, closedReported: true }), 'report-reopened');
 });
 
-test('nothing is done while a post holds the pane', () => {
-    assert.equal(chatWatchAction({ ...healthy, paneOpen: false, busy: true }), 'none');
-});
-
 test('a reader removed by a reload is installed again, before anything else', () => {
     assert.equal(chatWatchAction({ ...healthy, readerInstalled: false }), 'reinstall-reader');
-    assert.equal(chatWatchAction({ ...healthy, readerInstalled: false, paneOpen: false, busy: true }), 'reinstall-reader');
+    assert.equal(chatWatchAction({ ...healthy, readerInstalled: false, paneOpen: false, closedReported: true }), 'reinstall-reader');
+});
+
+// ─── One user of the chat pane at a time ─────────────────────────────────────
+
+const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+test('work under the lock runs one at a time, in the order it asked', async () => {
+    const lock = new AsyncLock();
+    const order: string[] = [];
+    let releaseScreenshot: () => void = () => undefined;
+    const screenshot = lock.run(async () => {
+        order.push('screenshot:start');
+        await new Promise<void>((resolve) => { releaseScreenshot = resolve; });
+        order.push('screenshot:end');
+    });
+    const firstPost = lock.run(async () => { order.push('post 1'); return true; });
+    const secondPost = lock.run(async () => { order.push('post 2'); return true; });
+    await tick();
+    assert.deepEqual(order, ['screenshot:start'], 'a post waits for the screenshot to finish');
+    releaseScreenshot();
+    assert.equal(await firstPost, true);
+    assert.equal(await secondPost, true);
+    await screenshot;
+    assert.deepEqual(order, ['screenshot:start', 'screenshot:end', 'post 1', 'post 2']);
+    assert.equal(lock.busy, false);
+});
+
+test('the chat watch skips its turn while a post holds the lock, and runs once it is free', async () => {
+    const lock = new AsyncLock();
+    let finishPost: () => void = () => undefined;
+    const post = lock.run(() => new Promise<void>((resolve) => { finishPost = resolve; }));
+    let watched = 0;
+    assert.equal(await lock.runIfFree(async () => { watched += 1; return 'checked'; }, 'skipped'), 'skipped');
+    assert.equal(watched, 0);
+    finishPost();
+    await post;
+    assert.equal(await lock.runIfFree(async () => { watched += 1; return 'checked'; }, 'skipped'), 'checked');
+    assert.equal(watched, 1);
+});
+
+test('a post waits for a chat-watch check in progress', async () => {
+    const lock = new AsyncLock();
+    const order: string[] = [];
+    let finishCheck: () => void = () => undefined;
+    const check = lock.runIfFree(async () => {
+        order.push('check:start');
+        await new Promise<void>((resolve) => { finishCheck = resolve; });
+        order.push('check:end');
+    }, undefined);
+    const post = lock.run(async () => { order.push('post'); });
+    await tick();
+    assert.deepEqual(order, ['check:start']);
+    finishCheck();
+    await Promise.all([check, post]);
+    assert.deepEqual(order, ['check:start', 'check:end', 'post']);
+});
+
+test('the lock is released when the work under it throws', async () => {
+    const lock = new AsyncLock();
+    await assert.rejects(lock.run(async () => { throw new Error('page closed'); }), /page closed/);
+    assert.equal(lock.busy, false);
+    assert.equal(await lock.run(async () => 'next'), 'next');
+    const release = await lock.acquire();
+    release();
+    release();
+    assert.equal(lock.busy, false, 'a second release does not hand the lock to nobody');
 });
 
 // ─── What teams.ts does with them ────────────────────────────────────────────
+
+test('teams.ts runs posts, the consent screenshots and the chat watch under one lock', () => {
+    const source = teamsSource();
+    assert.equal((source.match(/new AsyncLock\(\)/g) ?? []).length, 1);
+    assert.match(source, /private async sendMessages\(page: Page, messages: string\[\]\): Promise<boolean> \{\s+\/\/[^\n]*\n\s+return this\.chatLock\.run\(\(\) => this\.sendMessagesNow\(page, messages\)\);/);
+    assert.match(source, /screenshots: \(\) => this\.chatLock\.run\(\(\) => captureMeetingPanels\(page, \{/);
+    assert.match(source, /await this\.chatLock\.runIfFree\(async \(\) => \{\s+const readerInstalled/);
+    // Nothing that runs under the lock takes it again (that would wait forever).
+    const now = source.slice(source.indexOf('private async sendMessagesNow('), source.indexOf('private async clickSendButton('));
+    const restore = source.slice(source.indexOf('private async restoreChat('), source.indexOf('private async chatPaneButton('));
+    for (const body of [now, restore]) {
+        assert.ok(body.length > 0);
+        assert.ok(!body.includes('chatLock') && !body.includes('this.sendMessages('), 'work under the lock takes it again');
+    }
+});
+
 
 test('teams.ts never opens the "More" menu or clicks a menu item', () => {
     const source = teamsSource();
