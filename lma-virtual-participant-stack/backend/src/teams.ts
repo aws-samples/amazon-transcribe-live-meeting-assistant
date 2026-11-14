@@ -25,7 +25,11 @@ import { createLogger } from './logger.js';
 import {
     chatWatchAction,
     AsyncLock,
+    composerHoldsMessage,
     isChatPaneButton,
+    isComposeBox,
+    isSendButton,
+    PostTargetInfo,
     TEAMS_CHAT_WATCH_MS,
     TEAMS_FAILED_MESSAGE_RETRY_SELECTOR,
 } from './teams-chat-pane.js';
@@ -805,13 +809,13 @@ export default class Teams {
     // failed-message Retry button appeared while posting; the consent flow
     // records its notice as posted only then.
     private async sendMessages(page: Page, messages: string[]): Promise<boolean> {
+        // So the meeting chat capture knows these when it reads them back.
+        noteSentChat(messages);
         // One post at a time, and never during a consent screenshot or a chat-watch check.
         return this.chatLock.run(() => this.sendMessagesNow(page, messages));
     }
 
     private async sendMessagesNow(page: Page, messages: string[]): Promise<boolean> {
-        // So the meeting chat capture knows these when it reads them back.
-        noteSentChat(messages);
         let all = true;
         try {
             if (!(await this.restoreChat(page))) {
@@ -839,7 +843,12 @@ export default class Teams {
                 return false;
             }
             log.info(`Teams chat input resolved via ${found.source} selector: ${found.selector}`);
+            if (!isComposeBox(await this.postTargetInfo(found.element))) {
+                log.warn(`[teams-chat] the element resolved as the compose box (${found.source} selector ${found.selector}) is not editable; ${messages.length} message(s) not posted.`);
+                return false;
+            }
             for (const message of messages) {
+                if (!message.trim()) continue;
                 // Focus + click the composer so the caret is inside it.
                 try {
                     await found.element.evaluate((el) => {
@@ -882,9 +891,16 @@ export default class Teams {
                     const afterPaste = await found.element
                         .evaluate((el) => ((el as HTMLElement).innerText || el.textContent || '').trim())
                         .catch(() => '');
-                    if (!pasted || !afterPaste.includes(message.slice(0, Math.min(20, message.length)))) {
-                        log.info(`Paste insert did not land (pasted=${pasted}) — typing with keystrokes.`);
-                        await page.keyboard.type(message, { delay: 0 });
+                    if (!pasted || !composerHoldsMessage(afterPaste, message)) {
+                        // Keystrokes go wherever the focus is, and a space or
+                        // Enter on a focused toolbar button presses it, so they
+                        // are typed only into the focused compose box.
+                        if (await this.composerFocused(found.element)) {
+                            log.info(`Paste insert did not land (pasted=${pasted}) — typing with keystrokes.`);
+                            await page.keyboard.type(message, { delay: 0 });
+                        } else {
+                            log.info(`Paste insert did not land (pasted=${pasted}), and the compose box does not have the focus — not typing.`);
+                        }
                     }
                 } catch (e) {
                     log.warn('Chat composer typing failed (non-fatal), skipping rest:', e);
@@ -894,27 +910,42 @@ export default class Teams {
                 const typed = await found.element
                     .evaluate((el) => ((el as HTMLElement).innerText || el.textContent || '').trim().slice(0, 120))
                     .catch(() => '');
-                const ok = typed.includes(message.slice(0, Math.min(20, message.length)));
+                const ok = composerHoldsMessage(typed, message);
                 log.info(`Composer content after insert: ${typed.length} characters (matches=${ok}).`);
+                if (!ok) {
+                    // An empty (or wrong) compose box is not a post: it is not
+                    // submitted, and the batch is reported as not posted, so
+                    // the consent flow posts its notice again rather than
+                    // recording it. Text that did land is cleared so the next
+                    // attempt starts from an empty box.
+                    log.warn(`[teams-chat] the message did not reach the compose box (${typed.length} characters there); not submitting it, and ${messages.length} message(s) reported as not posted.`);
+                    if (typed.length > 0 && (await this.composerFocused(found.element))) {
+                        await page.keyboard.press('ControlOrMeta+A').catch(() => undefined);
+                        await page.keyboard.press('Backspace').catch(() => undefined);
+                    }
+                    return false;
+                }
 
                 // Submit. Click the real Send button (primary), fall back to
-                // Enter. Then verify the composer cleared (message left the box).
+                // Enter in the focused compose box. Then verify the composer
+                // cleared (message left the box).
+                const holdsMessage = (): Promise<boolean> =>
+                    found.element
+                        .evaluate((el) => (el as HTMLElement).innerText || el.textContent || '')
+                        .then((text) => composerHoldsMessage(text, message))
+                        .catch(() => false);
                 const sent = await this.clickSendButton(page);
                 if (!sent) {
                     log.info('Send button not found — falling back to Enter key.');
-                    await page.keyboard.press('Enter');
+                    await this.pressEnterInComposer(page, found.element);
                 }
                 await new Promise((resolve) => setTimeout(resolve, 500));
-                const stillThere = await found.element
-                    .evaluate((el, text) => ((el as HTMLElement).innerText || el.textContent || '').includes((text as string).slice(0, 20)), message)
-                    .catch(() => false);
+                const stillThere = await holdsMessage();
                 if (stillThere) {
                     log.info('Composer still holds text after submit — retrying Enter once.');
-                    await page.keyboard.press('Enter');
+                    await this.pressEnterInComposer(page, found.element);
                     await new Promise((resolve) => setTimeout(resolve, 400));
-                    const stuck = await found.element
-                        .evaluate((el, text) => ((el as HTMLElement).innerText || el.textContent || '').includes((text as string).slice(0, 20)), message)
-                        .catch(() => false);
+                    const stuck = await holdsMessage();
                     if (stuck) {
                         all = false;
                         log.warn('The message is still in the composer after Enter — not posted.');
@@ -958,10 +989,46 @@ export default class Teams {
                 { maxRetries: 4, delayMs: 300 },
             );
             if (!found) return false;
+            if (found.source !== 'primary' && !isSendButton(await this.postTargetInfo(found.element))) {
+                log.warn(`[teams-chat] the resolver's Send button (${found.selector}) is not labelled Send; not clicking it.`);
+                return false;
+            }
             await humanClick(page, found.element);
             return true;
         } catch {
             return false;
+        }
+    }
+
+    // What is read of an element before a post types into it or clicks it.
+    private async postTargetInfo(element: ElementHandle<Element>): Promise<PostTargetInfo> {
+        return element
+            .evaluate((el) => ({
+                editable: (el as HTMLElement).isContentEditable,
+                role: el.getAttribute('role') || undefined,
+                aria: el.getAttribute('aria-label') || undefined,
+                title: el.getAttribute('title') || undefined,
+                tid: el.getAttribute('data-tid') || undefined,
+                name: el.getAttribute('name') || undefined,
+                text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40) || undefined,
+            }))
+            .catch(() => ({}));
+    }
+
+    // Whether the keyboard focus is in the compose box.
+    private async composerFocused(element: ElementHandle<Element>): Promise<boolean> {
+        return element
+            .evaluate((el) => !!document.activeElement && (el === document.activeElement || el.contains(document.activeElement)))
+            .catch(() => false);
+    }
+
+    // Presses Enter only while the compose box has the focus: elsewhere Enter
+    // would press whatever control is focused.
+    private async pressEnterInComposer(page: Page, element: ElementHandle<Element>): Promise<void> {
+        if (await this.composerFocused(element)) {
+            await page.keyboard.press('Enter');
+        } else {
+            log.info('[teams-chat] the compose box does not have the focus; not pressing Enter.');
         }
     }
 

@@ -50,6 +50,49 @@ export function isChatPaneButton(info: ChatButtonInfo): boolean {
     return !NOT_THE_CHAT_PANE.test(label);
 }
 
+// ─── Posting ─────────────────────────────────────────────────────────────────
+
+/** How much of the start of a message must be in the compose box before it is submitted. */
+export const COMPOSER_MATCH_PREFIX = 20;
+
+const squash = (text: string): string => text.replace(/\s+/g, ' ').trim();
+
+/**
+ * Whether the compose box holds `message`, judged by its first
+ * COMPOSER_MATCH_PREFIX characters with runs of whitespace treated as one
+ * space. An empty compose box never holds a message: teams.ts does not
+ * submit it, and reports the message as not posted.
+ */
+export function composerHoldsMessage(composerText: string, message: string): boolean {
+    const want = squash(message).slice(0, COMPOSER_MATCH_PREFIX);
+    const have = squash(composerText);
+    return want.length > 0 && have.length > 0 && have.includes(want);
+}
+
+/** What is read of an element before it is typed into or clicked as part of a post. */
+export interface PostTargetInfo {
+    /** `HTMLElement.isContentEditable`. */
+    editable?: boolean;
+    role?: string;
+    aria?: string;
+    title?: string;
+    tid?: string;
+    name?: string;
+    text?: string;
+}
+
+/** Whether an element is a compose box the VP may type into: editable text, nothing else. */
+export function isComposeBox(info: PostTargetInfo): boolean {
+    return info.editable === true || (info.role ?? '').toLowerCase() === 'textbox';
+}
+
+/** Whether an element is the chat's Send button, so a resolver's guess is clicked only when it is. */
+export function isSendButton(info: PostTargetInfo): boolean {
+    if (/^menuitem/i.test(info.role ?? '')) return false;
+    const label = `${info.aria ?? ''} ${info.title ?? ''} ${info.tid ?? ''} ${info.name ?? ''} ${info.text ?? ''}`;
+    return /send/i.test(label) && !/\b(bubbles?|settings?|view|layout)\b/i.test(label);
+}
+
 // ─── Watching the chat ───────────────────────────────────────────────────────
 
 /** How often teams.ts checks that the chat pane is open and its reader installed. */

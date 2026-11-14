@@ -12,7 +12,16 @@
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { AsyncLock, chatWatchAction, ChatWatchState, isChatPaneButton, TEAMS_FAILED_MESSAGE_RETRY_SELECTOR } from './teams-chat-pane.js';
+import {
+    AsyncLock,
+    chatWatchAction,
+    ChatWatchState,
+    composerHoldsMessage,
+    isChatPaneButton,
+    isComposeBox,
+    isSendButton,
+    TEAMS_FAILED_MESSAGE_RETRY_SELECTOR,
+} from './teams-chat-pane.js';
 
 const teamsSource = (): string => readFileSync(new URL('../src/teams.ts', import.meta.url), 'utf8');
 
@@ -35,6 +44,43 @@ test('no item of an open menu is taken for the chat button, whatever its label',
     assert.equal(isChatPaneButton({ aria: 'Chat', role: 'menuitem' }), false);
     assert.equal(isChatPaneButton({ aria: 'Chat', role: 'menuitemcheckbox' }), false);
     assert.equal(isChatPaneButton({ aria: 'Chat', inMenu: true }), false);
+});
+
+// ─── Posting ─────────────────────────────────────────────────────────────────
+
+const notice = 'This meeting is being recorded and transcribed by LMA.';
+
+test('an empty compose box does not hold the message', () => {
+    assert.equal(composerHoldsMessage('', notice), false);
+    assert.equal(composerHoldsMessage('   \n ', notice), false);
+});
+
+test('a compose box holding the start of the message holds it', () => {
+    assert.equal(composerHoldsMessage(notice, notice), true);
+    assert.equal(composerHoldsMessage(notice.slice(0, 25), notice), true);
+    // innerText breaks lines and doubles spaces where the message did not.
+    assert.equal(composerHoldsMessage('This meeting  is\nbeing recorded', 'This meeting is being recorded'), true);
+});
+
+test('a compose box holding other text, or too little of the message, does not hold it', () => {
+    assert.equal(composerHoldsMessage('Reply "LMA, I consent"', notice), false);
+    assert.equal(composerHoldsMessage('This meeting', notice), false);
+});
+
+test('a blank message is never held', () => {
+    assert.equal(composerHoldsMessage('anything', '   '), false);
+});
+
+test('only editable text is typed into, and only a Send button is clicked from a resolver guess', () => {
+    assert.equal(isComposeBox({ editable: true }), true);
+    assert.equal(isComposeBox({ role: 'textbox' }), true);
+    assert.equal(isComposeBox({ editable: false, aria: 'View' }), false);
+    assert.equal(isComposeBox({}), false);
+    assert.equal(isSendButton({ aria: 'Send' }), true);
+    assert.equal(isSendButton({ tid: 'newMessageCommands-send' }), true);
+    assert.equal(isSendButton({ aria: 'View' }), false);
+    assert.equal(isSendButton({ aria: 'More' }), false);
+    assert.equal(isSendButton({ aria: 'Send', role: 'menuitem' }), false);
 });
 
 // ─── The chat watch ──────────────────────────────────────────────────────────
@@ -127,7 +173,8 @@ test('the lock is released when the work under it throws', async () => {
 test('teams.ts runs posts, the consent screenshots and the chat watch under one lock', () => {
     const source = teamsSource();
     assert.equal((source.match(/new AsyncLock\(\)/g) ?? []).length, 1);
-    assert.match(source, /private async sendMessages\(page: Page, messages: string\[\]\): Promise<boolean> \{\s+\/\/[^\n]*\n\s+return this\.chatLock\.run\(\(\) => this\.sendMessagesNow\(page, messages\)\);/);
+    const send = source.slice(source.indexOf('private async sendMessages('), source.indexOf('private async sendMessagesNow('));
+    assert.match(send, /return this\.chatLock\.run\(\(\) => this\.sendMessagesNow\(page, messages\)\);/);
     assert.match(source, /screenshots: \(\) => this\.chatLock\.run\(\(\) => captureMeetingPanels\(page, \{/);
     assert.match(source, /await this\.chatLock\.runIfFree\(async \(\) => \{\s+const readerInstalled/);
     // Nothing that runs under the lock takes it again (that would wait forever).
@@ -169,4 +216,25 @@ test('a post with no compose box on screen reports that it was not posted', () =
     assert.match(source, /if \(!\(await this\.restoreChat\(page\)\)\) \{\s+log\.warn\(`\[teams-chat\] the chat compose box is not on screen; \$\{messages\.length\} message\(s\) not posted\.`\);\s+return false;/);
     assert.ok(source.includes('await this.markFailedMessagesSeen(page);'), 'earlier failures are set aside before posting');
     assert.ok(!source.includes('retryFailedMessages'), 'Teams Retry is not pressed, so a failed notice is not sent twice');
+});
+
+test('a message that did not reach the compose box is not submitted, and the batch is not posted', () => {
+    const source = teamsSource();
+    const now = source.slice(source.indexOf('private async sendMessagesNow('), source.indexOf('private async clickSendButton('));
+    const check = now.indexOf('const ok = composerHoldsMessage(typed, message);');
+    const refuse = now.indexOf('if (!ok) {', check);
+    const submit = now.indexOf('await this.clickSendButton(page);');
+    assert.ok(check > 0 && refuse > check && submit > refuse, 'the content check comes before the submit');
+    const block = now.slice(refuse, submit);
+    assert.match(block, /log\.warn\(/);
+    assert.match(block, /return false;\n\s+\}/);
+    assert.ok(!block.includes('clickSendButton') && !block.includes("'Enter'"), 'an empty compose box is submitted');
+});
+
+test('keystrokes and Enter go only to the focused compose box', () => {
+    const source = teamsSource();
+    const now = source.slice(source.indexOf('private async sendMessagesNow('), source.indexOf('private async clickSendButton('));
+    assert.ok(!now.includes("page.keyboard.press('Enter')"), 'Enter is pressed without a focus check');
+    assert.match(now, /if \(await this\.composerFocused\(found\.element\)\) \{\s+log\.info\(`Paste insert did not land[^\n]*\n\s+await page\.keyboard\.type\(message/);
+    assert.match(source, /if \(await this\.composerFocused\(element\)\) \{\s+await page\.keyboard\.press\('Enter'\);/);
 });
