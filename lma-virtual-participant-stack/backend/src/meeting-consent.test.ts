@@ -1315,6 +1315,22 @@ test('a chat the platform shows as turned off stops the notice retries, and the 
     h.flow.stop();
 });
 
+test('a chat turned off after the notice was posted is reported on the detail line, and nothing more is posted', async () => {
+    const h = await harness({ deployment: { mode: 'opt_in', consentRule: 'owner_attests' } });
+    assert.ok(h.chat.some((m) => m.includes('Nothing is recorded')), 'the notice was posted');
+    const posted = h.chat.length;
+    await h.flow.noteChatTurnedOff();
+    const last = h.details[h.details.length - 1];
+    assert.ok(last.startsWith('Waiting for consent') && last.endsWith(CHAT_OFF_DETAIL), last);
+    h.api.attest();
+    await h.flow.pollOnce();
+    await h.settle();
+    assert.equal(h.capture.on, true, 'the attestation still starts capture');
+    assert.equal(h.chat.length, posted, 'nothing more is posted');
+    assert.equal(h.details[h.details.length - 1], CHAT_OFF_DETAIL, 'cleared down to the chat-off line');
+    h.flow.stop();
+});
+
 test('a chat that fails without being shown as turned off is still tried again', async () => {
     let attempts = 0;
     const h = await harness({

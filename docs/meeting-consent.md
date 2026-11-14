@@ -757,7 +757,7 @@ turned off for this meeting"*. On that client:
   LMA user confirms in LMA. In a live meeting a test client posting this way
   had all three messages in the chat about four seconds after admission. On
   every other platform the notice is posted at the same point.
-- **Once the chat is turned off**, the VP logs it once, posts nothing more, and
+- **Once the chat is turned off**, which the VP looks for with its periodic check of the chat pane as well as when a post fails, it logs it once, posts nothing more, and
   does not try the notice again. A notice that was not posted before then is
   not recorded as posted, so a notify meeting stays `pending`. The VP's detail
   line on the Virtual Participants page ends with *"The meeting chat is turned

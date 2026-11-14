@@ -1940,17 +1940,15 @@ export class TranscriptionService {
         return this.rosterTimeline.coverage(startSec, endSec, rosterLagSeconds());
     }
 
-    /**
-     * Whether the meeting is being transcribed right now: transcription has
-     * started and the meeting is not paused from chat. Key frames are only
-     * sampled while this holds, so key frames cover what the transcript does.
-     */
+    /** Whether transcription has started, whether or not the meeting is paused from chat. */
     get transcribing(): boolean {
         return this.isTranscribing;
     }
 
     /**
-     * Whether the meeting is being transcribed right now (see transcribing).
+     * Whether the meeting is being transcribed right now: transcription has
+     * started and the meeting is not paused from chat. Key frames are only
+     * sampled while this holds, so key frames cover what the transcript does.
      */
     get transcribingLive(): boolean {
         return this.isTranscribing && details.start;

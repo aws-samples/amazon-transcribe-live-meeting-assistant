@@ -562,6 +562,20 @@ export class MeetingConsentFlow {
         }
     }
 
+    /**
+     * The platform now shows the chat as turned off for the VP (found by its
+     * periodic chat check, not by a failed post): nothing more is posted, and
+     * the detail line says so.
+     */
+    async noteChatTurnedOff(): Promise<void> {
+        if (this.chatOff || !this.active || !this.io) return;
+        this.chatOff = true;
+        this.noticeRetry = null;
+        this.noticeRecordWanted = false;
+        log.always('[consent] the meeting chat is turned off for the Virtual Participant; nothing more is posted there');
+        await this.writeDetail(this.baseDetail ?? null);
+    }
+
     /** The meeting is over. */
     stop(): void {
         this.stopped = true;
@@ -818,11 +832,8 @@ export class MeetingConsentFlow {
         }
         const posted = await this.say(messages);
         if (!posted && this.io?.chatTurnedOff?.()) {
-            this.chatOff = true;
-            this.noticeRetry = null;
-            this.noticeRecordWanted = false;
-            log.always('[consent] the meeting chat is turned off for the Virtual Participant; the notice was not posted, and is not tried again');
-            await this.writeDetail(this.baseDetail ?? null);
+            log.always('[consent] the notice was not posted, and is not tried again');
+            await this.noteChatTurnedOff();
             return;
         }
         if (!posted) {

@@ -2151,6 +2151,9 @@ export default class Teams {
         let sideRailDumped = false;
         const watchChat = async (): Promise<void> => {
             if (page.isClosed() || this.meetingOver) return;
+            // Teams usually turns the chat off after the notice has been
+            // posted, so it is looked for here too, not only when a post fails.
+            if (!this.chatTurnedOff && (await this.chatShownTurnedOff(page))) meetingConsent.noteChatTurnedOff();
             try {
                 // Skipped while a post or a screenshot holds the chat pane.
                 await this.chatLock.runIfFree(async () => {

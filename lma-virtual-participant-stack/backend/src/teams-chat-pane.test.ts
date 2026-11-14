@@ -304,5 +304,6 @@ test('teams.ts posts nothing once the chat is shown as turned off, and submits a
     assert.match(send, /if \(this\.chatTurnedOff \|\| \(await this\.chatShownTurnedOff\(page\)\)\)/);
     assert.match(send, /!ok && typed\.length === 0 && emptyReadbackPosts/);
     assert.match(send, /const emptyReadbackPosts = isLightMeetingsUrl\(page\.url\(\)\)/);
+    assert.match(source, /if \(!this\.chatTurnedOff && \(await this\.chatShownTurnedOff\(page\)\)\) meetingConsent\.noteChatTurnedOff\(\);/, 'the chat check looks for a chat turned off');
     assert.match(send, /const pasteUnseen = pasted && afterPaste\.length === 0 && emptyReadbackPosts;\s+if \(pasteUnseen\)/, 'a pasted message is not typed again where it cannot be read back');
 });
