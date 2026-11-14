@@ -21,6 +21,9 @@ import {
     isComposeBox,
     isSendButton,
     TEAMS_FAILED_MESSAGE_RETRY_SELECTOR,
+    CHATLESS_REMOVAL_LINE,
+    introForChatlessClient,
+    isLightMeetingsUrl,
 } from './teams-chat-pane.js';
 
 const teamsSource = (): string => readFileSync(new URL('../src/teams.ts', import.meta.url), 'utf8');
@@ -245,4 +248,63 @@ test('the light-meetings join does not open the View panel, which would replace 
     assert.ok(at > 0);
     const guard = source.lastIndexOf('/light-meetings/i.test(page.url())', at);
     assert.ok(guard > 0 && at - guard < 600, 'the View panel step is skipped on light-meetings');
+});
+
+// ─── A chat that Teams turns off ─────────────────────────────────────────────
+
+const DEFAULT_INTRO =
+    'Hello. I am an AI Live Meeting Assistant (LMA). I was invited by Ana Silva to join this call. ' +
+    'Type "LMA leave" in chat to remove me, or "LMA help" to see the other commands. ' +
+    'If there is more than one LMA here, add my name: "LMA ana leave". ' +
+    'To learn more please visit: https://amazon.com/live-meeting-assistant.';
+
+test('the light-meetings introduction gives no chat commands, and says how the VP can be removed', () => {
+    assert.deepEqual(introForChatlessClient([DEFAULT_INTRO]), [
+        'Hello. I am an AI Live Meeting Assistant (LMA). I was invited by Ana Silva to join this call. ' +
+            `${CHATLESS_REMOVAL_LINE} To learn more please visit: https://amazon.com/live-meeting-assistant.`,
+    ]);
+});
+
+test('an introduction with no chat command is posted as written on the light-meetings client', () => {
+    const intro = ['Hello from LMA.  I take notes for Ana.'];
+    assert.deepEqual(introForChatlessClient(intro), intro);
+});
+
+test('a message that is only a chat command is left out; the removal line is said once', () => {
+    assert.deepEqual(introForChatlessClient(['Hello, I am LMA.', 'Type "LMA help" in chat.', 'Or "@LMA leave".', "I'll post a summary in the chat at the end."]), [
+        'Hello, I am LMA.',
+        CHATLESS_REMOVAL_LINE,
+        "I'll post a summary in the chat at the end.",
+    ]);
+});
+
+test('a quoted "LMA" that gives no command is kept in the light-meetings introduction', () => {
+    const intro = ['I\'m "LMA", a note-taker for Ana.'];
+    assert.deepEqual(introForChatlessClient(intro), intro);
+});
+
+test('the light-meetings client is told apart by its URL', () => {
+    assert.equal(isLightMeetingsUrl('https://teams.microsoft.com/light-meetings/launch?lightExperience=true'), true);
+    assert.equal(isLightMeetingsUrl('https://teams.microsoft.com/v2/?meetingjoin=true'), false);
+    assert.equal(isLightMeetingsUrl('https://teams.live.com/light-meetings-x/'), false);
+});
+
+test('teams.ts starts the consent flow right after the introduction, and posts the chatless introduction on light-meetings', () => {
+    const source = teamsSource();
+    const intro = source.indexOf('introForChatlessClient(details.introMessages)');
+    const consent = source.indexOf('attachMeetingConsent(page, {');
+    const viewPanel = source.indexOf('Opening view panel (best-effort).');
+    assert.ok(intro > 0 && consent > intro && viewPanel > consent, 'introduction, then consent, then the rest of the in-meeting setup');
+    assert.match(source.slice(consent, consent + 1500), /chatMayClose: isLightMeetingsUrl\(page\.url\(\)\)/);
+    assert.match(source.slice(consent, consent + 1500), /chatTurnedOff: \(\) => this\.chatTurnedOff/);
+});
+
+test('teams.ts posts nothing once the chat is shown as turned off, and submits an empty readback only on light-meetings', () => {
+    const source = teamsSource();
+    const send = source.slice(source.indexOf('private async sendMessagesNow('), source.indexOf('private async chatShownTurnedOff('));
+    assert.match(send, /if \(this\.chatTurnedOff \|\| \(await this\.chatShownTurnedOff\(page\)\)\)/);
+    assert.match(send, /!ok && typed\.length === 0 && emptyReadbackPosts/);
+    assert.match(send, /const emptyReadbackPosts = isLightMeetingsUrl\(page\.url\(\)\)/);
+    assert.match(source, /if \(!this\.chatTurnedOff && \(await this\.chatShownTurnedOff\(page\)\)\) void meetingConsent\.noteChatTurnedOff\(\);/, 'the chat check looks for a chat turned off');
+    assert.match(send, /const pasteUnseen = pasted && afterPaste\.length === 0 && emptyReadbackPosts;\s+if \(pasteUnseen\)/, 'a pasted message is not typed again where it cannot be read back');
 });

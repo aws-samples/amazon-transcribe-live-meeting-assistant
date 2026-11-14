@@ -32,7 +32,7 @@ const HANDLERS = ['chime.ts', 'zoom.ts', 'zoom-sdk.ts', 'teams.ts', 'teams-sdk.t
 
 /** The handler's own "start transcription if enabled" block: the last top-level `if (details.start) {`. */
 function startBlockIndex(text: string): number {
-    const matches = [...text.matchAll(/\n\s+if \(details\.start\) \{\n[^\n]*\n[^\n]*sendMessages\([^)]*details\.startMessages/g)];
+    const matches = [...text.matchAll(/\n\s+if \(details\.start(?: && [^)]+)?\) \{\n[^\n]*\n[^\n]*sendMessages\([^)]*details\.startMessages/g)];
     assert.ok(matches.length > 0, 'no start-transcription block found');
     return matches[matches.length - 1].index as number;
 }
@@ -93,4 +93,9 @@ test("the flow's defaults are the ones the configuration seeder ships", () => {
     assert.equal(fromShipped.notifyNoticeText, shipped.notifyNoticeText);
     assert.equal(fromShipped.optInNoticeText, shipped.optInNoticeText);
     assert.equal(fromShipped.leaveOnObjection, shipped.leaveOnObjection);
+});
+
+test('the Teams handler posts the start messages only when the consent flow has not already started transcription', () => {
+    const teams = source('teams.ts');
+    assert.match(teams, /if \(details\.start && !transcriptionService\.transcribing\) \{\s+log\.info\(details\.startMessages\[0\]\);/);
 });

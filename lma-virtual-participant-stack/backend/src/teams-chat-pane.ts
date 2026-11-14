@@ -189,3 +189,60 @@ export class AsyncLock {
         };
     }
 }
+
+// ─── A chat that Teams turns off ─────────────────────────────────────────────
+
+/**
+ * Shown in place of the compose box once Teams has turned the chat off for
+ * the VP ("Chat is turned off for this meeting"). On the anonymous
+ * light-meetings client a guest's chat can be turned off shortly after it is
+ * admitted, by a setting of the meeting's organization, even when the
+ * meeting's own Meeting chat setting is On.
+ */
+export const TEAMS_CHAT_TURNED_OFF_SELECTOR = '[data-tid="compose-disabled-placeholder-text"]';
+
+/** Whether the page is the anonymous light-meetings client. */
+export function isLightMeetingsUrl(url: string): boolean {
+    return /\/light-meetings(\/|\?|$)/i.test(url);
+}
+
+/** Said in the introduction, on the light-meetings client, instead of the chat commands. */
+export const CHATLESS_REMOVAL_LINE = 'A meeting organizer can remove me from the participant list.';
+
+/**
+ * A sentence that gives an LMA chat command: one quoting LMA followed by a
+ * command ("LMA leave", "@LMA help"). A quoted "LMA" on its own is not a
+ * command, nor is a sentence that only mentions the chat.
+ */
+const CHAT_COMMAND_SENTENCE = /"@?LMA\b[\s,]+[^"\s][^"]*"/i;
+
+/**
+ * The introduction for the light-meetings client: the sentences that give a
+ * chat command are left out, as that chat may be turned off moments after
+ * the introduction is posted, and the first of them is replaced by
+ * CHATLESS_REMOVAL_LINE. Messages that give no chat command are kept as
+ * written.
+ */
+export function introForChatlessClient(messages: string[]): string[] {
+    let replaced = false;
+    const out: string[] = [];
+    for (const message of messages) {
+        const sentences = squash(message).split(/(?<=[.!?])\s+(?=\S)/);
+        const kept: string[] = [];
+        let dropped = false;
+        for (const sentence of sentences) {
+            if (!CHAT_COMMAND_SENTENCE.test(sentence)) {
+                kept.push(sentence);
+                continue;
+            }
+            dropped = true;
+            if (!replaced) {
+                kept.push(CHATLESS_REMOVAL_LINE);
+                replaced = true;
+            }
+        }
+        if (!dropped) out.push(message);
+        else if (kept.length > 0) out.push(kept.join(' '));
+    }
+    return out;
+}

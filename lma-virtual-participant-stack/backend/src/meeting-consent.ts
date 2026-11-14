@@ -236,6 +236,14 @@ export interface ConsentMeetingIo {
      * typed in the chat cannot be attributed; one said aloud can.
      */
     sendersHidden?: boolean;
+    /**
+     * The platform can turn the chat off for the VP shortly after it is
+     * admitted (the Teams anonymous light-meetings client), so the notice
+     * does not ask for replies typed in the chat.
+     */
+    chatMayClose?: boolean;
+    /** Whether the platform shows the chat as turned off for the VP now; posting there is not tried again. */
+    chatTurnedOff?(): boolean;
 }
 
 export interface ConsentFlowDeps {
@@ -284,6 +292,18 @@ export const REPLY_LINE = (consentPhrase: string, objectionPhrase: string): stri
  */
 export const SPOKEN_REPLY_LINE = (consentPhrase: string, objectionPhrase: string): string =>
     `Say "LMA, ${consentPhrase}" or "LMA, ${objectionPhrase}".`;
+
+/**
+ * Posted after every notice where spoken replies are not read and the chat
+ * may be turned off for the VP (chatMayClose): no reply can be read there,
+ * so an objection goes through the LMA user.
+ */
+export const NO_REPLY_ROUTE_LINE = (lmaUser: string): string =>
+    `If you object, tell ${lmaUser}, who can record the objection in LMA.`;
+
+/** The VP's detail line once the platform has turned the chat off for it. */
+export const CHAT_OFF_DETAIL =
+    'The meeting chat is turned off for the Virtual Participant, so it cannot post or read chat messages.';
 
 /** Posted after every notice where spoken replies are not read. */
 export const CHAT_ONLY_REPLY_LINE = (consentPhrase: string, objectionPhrase: string, lmaUser: string): string =>
@@ -371,6 +391,15 @@ export class MeetingConsentFlow {
     /** What the last notice posted said, all its messages joined. */
     private postedNoticeText: string | null = null;
 
+    /** The mode of the notice posted before consent started (see begin); null when none was. */
+    private earlyNoticeMode: ConsentMode | null = null;
+
+    /** The opt-in rule of that notice, which decides whether it carries the owner-attests line. */
+    private earlyNoticeRule: ConsentRule | null = null;
+
+    /** The platform showed the chat as turned off for the VP: nothing more is posted there. */
+    private chatOff = false;
+
     private stopped = false;
 
     private leaving = false;
@@ -400,6 +429,9 @@ export class MeetingConsentFlow {
     private lastParticipants: string | null = null;
 
     private lastDetail: string | null | undefined;
+
+    /** The detail last asked for, before CHAT_OFF_DETAIL is added to it. */
+    private baseDetail: string | null | undefined;
 
     private lastNoticeAt = 0;
 
@@ -530,6 +562,20 @@ export class MeetingConsentFlow {
         }
     }
 
+    /**
+     * The platform now shows the chat as turned off for the VP (found by its
+     * periodic chat check, not by a failed post): nothing more is posted, and
+     * the detail line says so.
+     */
+    async noteChatTurnedOff(): Promise<void> {
+        if (this.chatOff || !this.active || !this.io) return;
+        this.chatOff = true;
+        this.noticeRetry = null;
+        this.noticeRecordWanted = false;
+        log.always('[consent] the meeting chat is turned off for the Virtual Participant; nothing more is posted there');
+        await this.writeDetail(this.baseDetail ?? null);
+    }
+
     /** The meeting is over. */
     stop(): void {
         this.stopped = true;
@@ -555,6 +601,16 @@ export class MeetingConsentFlow {
         }
         // In the meeting now, so a reply said aloud can be heard.
         this.syncListening();
+        // The notice is posted at once, before the meeting record and its
+        // consent are started (several API calls, which take seconds): some
+        // platforms turn the chat off for the VP shortly after it is admitted
+        // (chatMayClose). It is recorded as posted once consent has started
+        // (afterStart). A mode that is not known yet posts nothing.
+        if ((this.plan.mode === 'notify' || this.plan.mode === 'opt_in') && !this.offChoicePending && !this.choiceUnread) {
+            this.earlyNoticeMode = this.plan.mode;
+            this.earlyNoticeRule = this.plan.rule;
+            await this.postNotice(this.localNotice(), false);
+        }
         if (this.held) {
             // The meeting record has to exist before its consent can start, and
             // a withheld meeting has not started transcription, which is what
@@ -691,6 +747,23 @@ export class MeetingConsentFlow {
             // Also when an earlier attempt could not be posted: this one is
             // recorded if it is posted, and tried again if it is not.
             await this.postNotice(record?.NoticeText || this.localNotice(), true);
+        } else if (
+            this.earlyNoticeMode &&
+            record?.Mode &&
+            (record.Mode !== this.earlyNoticeMode ||
+                (record.Mode === 'opt_in' && (record.Rule ?? null) !== this.earlyNoticeRule) ||
+                (!!record.NoticeText && !(this.postedNoticeText ?? '').includes(noticeChatMessages(record.NoticeText).join(' '))))
+        ) {
+            // The notice posted at once is not the record's: the meeting's own
+            // choice was refused, so it runs in another mode or rule, or its
+            // consent was started earlier with a notice of its own. The
+            // record's notice is posted, and recorded, instead.
+            log.always(
+                `[consent] the meeting's record (mode ${record.Mode}${record.Rule ? ` rule=${record.Rule}` : ''}) has another notice ` +
+                    `than the one posted at once (mode ${this.earlyNoticeMode}${this.earlyNoticeRule ? ` rule=${this.earlyNoticeRule}` : ''}); posting the record's notice`,
+            );
+            this.noticePosted = false;
+            await this.postNotice(record.NoticeText || this.localNotice(), true);
         } else {
             // Posted before the record could be written: record now exactly
             // what was posted, as the record is evidence of it.
@@ -734,7 +807,7 @@ export class MeetingConsentFlow {
      * be. One that was not posted is tried again by retryNoticeIfDue.
      */
     private async postNotice(notice: string, record: boolean): Promise<void> {
-        if (this.stopped) return;
+        if (this.stopped || this.chatOff) return;
         if (this.noticeInFlight) {
             if (record) this.noticeRecordWanted = true;
             return;
@@ -760,6 +833,11 @@ export class MeetingConsentFlow {
             messages.push('Recording and transcription are paused until everyone present has consented.');
         }
         const posted = await this.say(messages);
+        if (!posted && this.io?.chatTurnedOff?.()) {
+            log.always('[consent] the notice was not posted, and is not tried again');
+            await this.noteChatTurnedOff();
+            return;
+        }
         if (!posted) {
             const attempts = (this.noticeRetry?.attempts ?? 0) + 1;
             // A notice that should be recorded stays so on a later attempt.
@@ -819,6 +897,7 @@ export class MeetingConsentFlow {
     /** The line that follows every notice: how to reply, in the forms this VP reads. */
     replyLine(): string {
         const [consent, objection] = this.firstPhrases();
+        if (!this.readsSpokenReplies && this.io?.chatMayClose) return NO_REPLY_ROUTE_LINE(this.deps.lmaUser);
         if (!this.readsSpokenReplies) return CHAT_ONLY_REPLY_LINE(consent, objection, this.deps.lmaUser);
         if (this.io?.sendersHidden) return SPOKEN_REPLY_LINE(consent, objection);
         return REPLY_LINE(consent, objection);
@@ -827,7 +906,7 @@ export class MeetingConsentFlow {
     /** Posts in the chat; true when every message was posted. */
     private async say(messages: string[]): Promise<boolean> {
         const wanted = messages.filter((message) => message && message.trim());
-        if (!this.io) return false;
+        if (!this.io || this.chatOff) return false;
         if (wanted.length === 0) return true;
         for (const message of wanted) this.posted.add(normalizeReplyText(message));
         try {
@@ -983,10 +1062,13 @@ export class MeetingConsentFlow {
     }
 
     private async writeDetail(detail: string | null): Promise<void> {
-        if (detail === this.lastDetail) return;
-        this.lastDetail = detail;
+        this.baseDetail = detail;
+        // Once the chat is off the detail line says so, whatever else it says.
+        const shown = this.chatOff ? (detail ? `${detail} ${CHAT_OFF_DETAIL}` : CHAT_OFF_DETAIL) : detail;
+        if (shown === this.lastDetail) return;
+        this.lastDetail = shown;
         try {
-            await this.deps.setStatusDetail(detail);
+            await this.deps.setStatusDetail(shown);
         } catch (error) {
             log.warn(`[consent] could not write the status detail: ${String(error)}`);
         }
@@ -1352,7 +1434,7 @@ export class MeetingConsentFlow {
 
     /** Somebody joined: post the notice again, at most once a minute. */
     private scheduleNoticeRepost(): void {
-        if (!this.started || this.noticeRepostTimer || this.stopped) return;
+        if (!this.started || this.noticeRepostTimer || this.stopped || this.chatOff) return;
         const window = this.deps.noticeRepostMs ?? 60_000;
         const wait = Math.max(0, this.lastNoticeAt + window - this.clock());
         this.noticeRepostTimer = setTimeout(() => {
