@@ -515,18 +515,6 @@ export default class Teams {
             .catch(() => false);
     }
 
-    // Brings the chat compose box on screen, the one place the VP tries to:
-    // a no-op when it is already visible (the toolbar chat button is a toggle,
-    // so re-clicking would close it); otherwise, on a client whose toolbar has
-    // a chat button (isChatPaneButton), that button is clicked. The anonymous
-    // light-meetings client has none, and its "More" menu has no chat item
-    // (only settings and toggles such as "Show chat bubbles"), so that menu is
-    // never opened and there the chat is not brought back once it is closed:
-    // the VP keeps it open by never opening the People pane (see the consent
-    // panels below). A further action belongs here once it has been confirmed
-    // in a live meeting to open the chat pane. Returns whether the compose box
-    // is visible. Never throws.
-
     /** The meeting has ended; the chat watch stops. */
     private meetingOver = false;
 
@@ -541,6 +529,17 @@ export default class Teams {
     /** The toolbar DOM has been logged because no way to the chat was found. */
     private toolbarDumped = false;
 
+    // Brings the chat compose box on screen, the one place the VP tries to:
+    // a no-op when it is already visible (the toolbar chat button is a toggle,
+    // so re-clicking would close it); otherwise, on a client whose toolbar has
+    // a chat button (isChatPaneButton), that button is clicked. The anonymous
+    // light-meetings client has none, and its "More" menu has no chat item
+    // (only settings and toggles such as "Show chat bubbles"), so that menu is
+    // never opened and there the chat is not brought back once it is closed:
+    // the VP keeps it open by never opening the People pane (see the consent
+    // panels below). A further action belongs here once it has been confirmed
+    // in a live meeting to open the chat pane. Returns whether the compose box
+    // is visible. Never throws.
     private async restoreChat(page: Page): Promise<boolean> {
         try {
             if (await this.chatInputVisible(page)) return true;
