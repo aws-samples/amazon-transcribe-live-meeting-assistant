@@ -210,11 +210,11 @@ export function isLightMeetingsUrl(url: string): boolean {
 export const CHATLESS_REMOVAL_LINE = 'A meeting organizer can remove me from the participant list.';
 
 /**
- * A sentence that tells participants to type an LMA command in the chat: one
- * quoting LMA followed by a command ("LMA leave", "@LMA help"), or one that
- * mentions the chat. A quoted "LMA" on its own is not a command.
+ * A sentence that gives an LMA chat command: one quoting LMA followed by a
+ * command ("LMA leave", "@LMA help"). A quoted "LMA" on its own is not a
+ * command, nor is a sentence that only mentions the chat.
  */
-const CHAT_COMMAND_SENTENCE = /"@?LMA\b[\s,]+[^"\s][^"]*"|\bin (the |this )?chat\b/i;
+const CHAT_COMMAND_SENTENCE = /"@?LMA\b[\s,]+[^"\s][^"]*"/i;
 
 /**
  * The introduction for the light-meetings client: the sentences that give a

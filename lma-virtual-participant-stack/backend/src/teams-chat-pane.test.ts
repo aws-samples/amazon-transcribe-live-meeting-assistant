@@ -271,9 +271,10 @@ test('an introduction with no chat command is posted as written on the light-mee
 });
 
 test('a message that is only a chat command is left out; the removal line is said once', () => {
-    assert.deepEqual(introForChatlessClient(['Hello, I am LMA.', 'Type "LMA help" in chat.', 'Or "@LMA leave".']), [
+    assert.deepEqual(introForChatlessClient(['Hello, I am LMA.', 'Type "LMA help" in chat.', 'Or "@LMA leave".', "I'll post a summary in the chat at the end."]), [
         'Hello, I am LMA.',
         CHATLESS_REMOVAL_LINE,
+        "I'll post a summary in the chat at the end.",
     ]);
 });
 
@@ -304,6 +305,6 @@ test('teams.ts posts nothing once the chat is shown as turned off, and submits a
     assert.match(send, /if \(this\.chatTurnedOff \|\| \(await this\.chatShownTurnedOff\(page\)\)\)/);
     assert.match(send, /!ok && typed\.length === 0 && emptyReadbackPosts/);
     assert.match(send, /const emptyReadbackPosts = isLightMeetingsUrl\(page\.url\(\)\)/);
-    assert.match(source, /if \(!this\.chatTurnedOff && \(await this\.chatShownTurnedOff\(page\)\)\) meetingConsent\.noteChatTurnedOff\(\);/, 'the chat check looks for a chat turned off');
+    assert.match(source, /if \(!this\.chatTurnedOff && \(await this\.chatShownTurnedOff\(page\)\)\) void meetingConsent\.noteChatTurnedOff\(\);/, 'the chat check looks for a chat turned off');
     assert.match(send, /const pasteUnseen = pasted && afterPaste\.length === 0 && emptyReadbackPosts;\s+if \(pasteUnseen\)/, 'a pasted message is not typed again where it cannot be read back');
 });

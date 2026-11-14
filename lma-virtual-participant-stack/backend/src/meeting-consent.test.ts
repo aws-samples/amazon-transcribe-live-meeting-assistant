@@ -1314,6 +1314,16 @@ test("a notice posted at once is posted again as the record's notice when the me
     h.flow.stop();
 });
 
+test('a notice of the meeting\'s own that matches the deployment\'s, line breaks and all, is posted once', async () => {
+    const notice = '{LMA_USER} records this meeting ({meeting}).\n\nObject  at any time.';
+    const api = new FakeApi({ mode: 'notify', rule: 'each_participant' });
+    api.customNotice = 'Ana Silva records this meeting (Weekly sync).\n\nObject  at any time.';
+    const h = await harness({ deployment: { mode: 'notify', notifyNoticeText: notice }, api });
+    assert.equal(h.chat.filter((m) => m.includes('Ana Silva records this meeting')).length, 1, h.chat.join('\n'));
+    assert.equal(h.api.noticeTexts.length, 1);
+    h.flow.stop();
+});
+
 test('a notice posted at once that matches the record is posted once', async () => {
     const h = await harness({ deployment: OPT_IN_EACH });
     assert.equal(h.chat.filter((m) => m.includes('Nothing is recorded or transcribed')).length, 1);

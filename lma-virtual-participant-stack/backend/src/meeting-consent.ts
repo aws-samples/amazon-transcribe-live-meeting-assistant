@@ -752,7 +752,7 @@ export class MeetingConsentFlow {
             record?.Mode &&
             (record.Mode !== this.earlyNoticeMode ||
                 (record.Mode === 'opt_in' && (record.Rule ?? null) !== this.earlyNoticeRule) ||
-                (!!record.NoticeText && !(this.postedNoticeText ?? '').includes(record.NoticeText)))
+                (!!record.NoticeText && !(this.postedNoticeText ?? '').includes(noticeChatMessages(record.NoticeText).join(' '))))
         ) {
             // The notice posted at once is not the record's: the meeting's own
             // choice was refused, so it runs in another mode or rule, or its
