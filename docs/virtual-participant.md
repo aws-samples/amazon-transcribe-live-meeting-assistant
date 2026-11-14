@@ -434,7 +434,7 @@ has not run in a live meeting, and what it costs the engine has not been measure
 ## Supported Platforms
 
 - Zoom
-- Microsoft Teams
+- Microsoft Teams (from the browser through the Teams web client by default, or through Azure Communication Services when an ACS connection string is configured, falling back to the browser when the meeting's tenant refuses ACS; see [Teams ACS SDK Join](teams-acs-sdk.md))
 - Amazon Chime
 - WebEx
 - Google Meet (see [Google Meet](#google-meet) for what the meeting's organiser has to allow)
@@ -524,6 +524,8 @@ Alongside `status`, the VP record carries two fields describing the current stat
 | --- | --- |
 | `errorMessage` | The prose the UI shows under the status. It is the detail line for every status, not only failures: the reason a meeting ended on `COMPLETED` (*"Asked to leave by Jeremy."*), the current sub-step while the VP is still `JOINING` (*"Waiting to be admitted…"*), and the error on `FAILED`. |
 | `endTrigger` | The machine-readable counterpart: which branch the VP exited through, from the vocabulary below. Written on `COMPLETED` and `FAILED`, so join outcomes across many meetings can be counted with a query over the VP table instead of a search through container logs. |
+
+A third field, `joinMethod`, records how the VP joined, once it is admitted; it is shown on the Virtual Participant's page under **Connection Details → Join method** and is not cleared by later status changes. Only Teams writes it today: `acs`, `browser`, or `browser:acs-refused:<subCode>` when the browser join took over from a refused Azure Communication Services join (see [Teams ACS SDK Join › Which method joined](teams-acs-sdk.md#which-method-joined)).
 
 Reaching `JOINED`, `ACTIVE` or `COMPLETED` without a new detail to show clears `errorMessage`, so a message from earlier in the same run — a join sub-step, or an attempt that did not work out before a later one did — is not still displayed next to a VP that is in the meeting.
 

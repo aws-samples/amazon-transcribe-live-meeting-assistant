@@ -16,6 +16,7 @@ import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startTeamsSdkServer, TeamsSdkServerHandle } from './teams-sdk-server.js';
 import { createLogger } from './logger.js';
+import { ACS_FALLBACK_SUBCODES, AcsJoinRefusedError, acsRefusalFallsBack, reportTeamsJoined } from './teams-join-method.js';
 
 const log = createLogger('teams-sdk');
 
@@ -210,7 +211,18 @@ export default class TeamsSdk {
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {
         const prepareAvatar = opts.prepareAvatar ?? (async () => {});
 
-        page.on('console', (message: ConsoleMessage) => {
+        // Every listener this join puts on the shared page is taken off again
+        // in the finally below: when Teams refuses the ACS join, the browser
+        // join runs next on the same page (index.ts), and these would
+        // otherwise keep logging its traffic as [teams-sdk] and route a
+        // renderer crash to this finished join.
+        const listeners: Array<[string, (...args: any[]) => void]> = [];
+        const listen = (event: string, handler: (...args: any[]) => void): void => {
+            page.on(event as any, handler);
+            listeners.push([event, handler]);
+        };
+
+        listen('console', (message: ConsoleMessage) => {
             const text = message.text();
             if (text.includes('[LMA-TeamsSDK]')) {
                 log.info(`TeamsSDK page: ${text}`);
@@ -221,27 +233,27 @@ export default class TeamsSdk {
         // Response bodies can carry tokens/identity material, so the body dump
         // is opt-in; the join-rejection reasons we need are mapped in-page.
         const logErrorBodies = (process.env.TEAMS_SDK_DEBUG_HTTP || '').toLowerCase() === 'true';
-        page.on('response', (response) => {
+        listen('response', (response: any) => {
             const status = response.status();
             if (status >= 400) {
                 log.info(`[teams-sdk] HTTP ${status} ← ${response.url().slice(0, 300)}`);
                 if (logErrorBodies) {
                     response
                         .text()
-                        .then((body) => {
+                        .then((body: string) => {
                             if (body) log.info(`[teams-sdk] HTTP ${status} body: ${body.slice(0, 600)}`);
                         })
                         .catch(() => {});
                 }
             }
         });
-        page.on('requestfailed', (request) => {
+        listen('requestfailed', (request: any) => {
             log.warn(
                 `[teams-sdk] request FAILED (${request.failure()?.errorText ?? 'unknown'}) ← ${request.url().slice(0, 300)}`,
             );
         });
-        page.on('pageerror', (error: unknown) => log.warn('[teams-sdk] page error:', error));
-        page.on('crash', () => {
+        listen('pageerror', (error: unknown) => log.warn('[teams-sdk] page error:', error));
+        listen('crash', () => {
             log.error('[teams-sdk] page crashed (renderer crash) — ending meeting');
             this.requestEnd({ reason: 'page-closed', trigger: 'renderer-crash' });
         });
@@ -285,11 +297,17 @@ export default class TeamsSdk {
 
         this.server = await startTeamsSdkServer();
         try {
+            // An init script stays on the page for every later document, so it
+            // hands the configuration (an ACS token among it) only to the
+            // embed server's own origin, and not to the Teams web client the
+            // browser join loads into this page when it takes over.
             await page.addInitScript(
                 (cfg: any) => {
+                    if (window.location.origin !== cfg.origin) return;
                     (window as any).__lmaTeamsConfig = cfg;
                 },
                 {
+                    origin: this.server.origin,
                     token,
                     endpoint,
                     acsUserId: user.communicationUserId,
@@ -331,13 +349,23 @@ export default class TeamsSdk {
                     .catch(() => null);
                 if (!state) break;
                 if (state.error) {
+                    // A refusal the browser join may take over from (the
+                    // meeting's tenant or meeting type deciding) is thrown as
+                    // its own type; index.ts decides whether to fall back.
+                    if (acsRefusalFallsBack({ subCode: state.error.subCode })) {
+                        throw new AcsJoinRefusedError(state.error.subCode, state.error.reason || 'join refused');
+                    }
                     throw new Error(`Teams SDK join failed: ${state.error.reason || 'join failed'}`);
                 }
                 if (state.call.page === 'accessDeniedTeamsMeeting') {
                     // Avoid the words "password"/"passcode": index.ts classifies
                     // failure messages by substring and would report this as
                     // "Wrong meeting password", hiding the real diagnosis.
-                    throw new Error('Teams SDK join failed: access denied (the tenant may block anonymous joins, or the meeting ID / entry code is wrong)');
+                    // The composite shows this page for subCode 5854 only,
+                    // which its own strings describe as not being granted
+                    // entry to the call (declined from the lobby). Not a
+                    // fallback case: see acsRefusalFallsBack.
+                    throw new Error('Teams SDK join failed: access denied (Teams did not grant the participant entry to the call, for example it was declined from the lobby; subCode 5854)');
                 }
                 if (state.call.callState === 'InLobby' || state.call.page === 'lobby') {
                     if (!lobbyAnnounced) {
@@ -348,6 +376,16 @@ export default class TeamsSdk {
                 }
                 if (state.endReason) {
                     log.info(`[teams-sdk] call ended before admission (code=${state.endReason.code} subCode=${state.endReason.subCode})`);
+                    // The same refusals can arrive as callEnded alone (measured:
+                    // 403/5723 about 2 s after joinCall) when the 403 body was
+                    // not one the page recognised.
+                    if (acsRefusalFallsBack({ subCode: state.endReason.subCode })) {
+                        const subCode = state.endReason.subCode as number;
+                        throw new AcsJoinRefusedError(
+                            subCode,
+                            `Teams ended the call before admission (code=${state.endReason.code} subCode=${subCode}): ${ACS_FALLBACK_SUBCODES[subCode]}`,
+                        );
+                    }
                     return { reason: 'never-joined', trigger: 'acs-not-admitted' };
                 }
                 if (state.call.callState === 'Connected' && state.call.page === 'call') {
@@ -362,6 +400,7 @@ export default class TeamsSdk {
                 return { reason: 'never-joined', trigger: 'acs-not-admitted' };
             }
             log.info('[teams-sdk] joined meeting');
+            await reportTeamsJoined('acs');
 
             await substep('Setting up audio and video…');
             await this.setupInMeetingMedia(page);
@@ -577,6 +616,7 @@ export default class TeamsSdk {
             this.detachAgentSpeaking?.();
             this.detachAgentSpeaking = null;
             await this.leaveCall(page);
+            for (const [event, handler] of listeners) page.off(event as any, handler);
             try {
                 await this.server?.close();
             } catch { /* noop */ }

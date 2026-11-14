@@ -22,6 +22,7 @@ import { humanClick, humanType, POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-ac
 import { cameraToggleState, CameraToggleState } from './blank-camera.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 import { createLogger } from './logger.js';
+import { reportTeamsJoined } from './teams-join-method.js';
 import {
     chatWatchAction,
     AsyncLock,
@@ -1612,6 +1613,10 @@ export default class Teams {
             const statusManager = createStatusManager(details.invite.virtualParticipantId);
             await statusManager.setJoined();
         }
+        // Which Teams join got the VP in (this one, or ACS), in the log and on
+        // the VP row; it also says when this join took over from a refused
+        // ACS join (teams-join-method.ts).
+        await reportTeamsJoined('browser');
 
         await substep('In the meeting — opening chat panel…');
         log.info("Opening chat panel.");

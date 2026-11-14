@@ -34,6 +34,7 @@ const KEPT_WHEN_ABSENT = [
   'manualActionMessage',
   'manualActionTimeoutSeconds',
   'manualActionStartTime',
+  'joinMethod',
 ];
 
 /** The record after `updated`, merged over what the page held in `prev`. */
@@ -46,6 +47,24 @@ export const mergeVpUpdate = (prev, updated) => {
   if (prev?.vncReady === true) next.vncReady = true;
   else if (updated?.vncReady == null) next.vncReady = prev?.vncReady;
   return next;
+};
+
+/**
+ * How the Virtual Participant joined, in words, from the record's
+ * `joinMethod`; null when it is not recorded (other platforms, a VP that has
+ * not been admitted yet, rows written before it was recorded). The container
+ * writes `acs`, `browser`, or `browser:acs-refused:<subCode>` for Teams
+ * (lma-virtual-participant-stack/backend/src/teams-join-method.ts).
+ */
+export const describeJoinMethod = (joinMethod) => {
+  if (!joinMethod) return null;
+  if (joinMethod === 'acs') return 'Azure Communication Services';
+  if (joinMethod === 'browser') return 'Browser';
+  const refused = /^browser:acs-refused:(\d+)$/.exec(joinMethod);
+  if (refused) {
+    return `Browser, after Teams refused the Azure Communication Services join (subCode ${refused[1]})`;
+  }
+  return joinMethod;
 };
 
 /**

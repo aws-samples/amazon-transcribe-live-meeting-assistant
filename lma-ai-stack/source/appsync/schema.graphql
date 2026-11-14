@@ -588,6 +588,12 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	# code, so join outcomes can be aggregated by query rather than by
 	# grepping container logs.
 	endTrigger: String
+	# How the VP joined the meeting, written by the container once it is
+	# admitted. Teams only, for now: "acs" (Azure Communication Services),
+	# "browser", or "browser:acs-refused:<subCode>" when the browser join took
+	# over after Teams refused the ACS join (docs/teams-acs-sdk.md). Absent for
+	# other platforms and for rows written before it was recorded.
+	joinMethod: String
 	# Why the VP was ended from outside: written by endVirtualParticipant,
 	# which has carried it on the row all along without it being declared
 	# here, so it could not be read back through the API. Prose, supplied by
@@ -668,6 +674,7 @@ input UpdateVirtualParticipantInput {
 	statusBeforeManualAction: String
 	errorMessage: String
 	endTrigger: String
+	joinMethod: String
 	userAcknowledgedFailure: Boolean
 	# Clear flags. An omitted field means "leave this attribute as it is", so
 	# clearing an attribute needs a signal of its own. Setting one of these to

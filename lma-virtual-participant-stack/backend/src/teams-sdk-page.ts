@@ -342,16 +342,22 @@ function participantName(identifier: any): string {
     return '';
 }
 
-const JOIN_REJECTIONS: Array<{ pattern: RegExp; reason: string }> = [
+// The join refusals read from the 403 body, with the subCode each stands for:
+// teams-sdk.ts reads the subCode to decide whether the browser join is tried
+// instead (teams-join-method.ts), so it is carried as a number, not only in
+// the prose.
+const JOIN_REJECTIONS: Array<{ pattern: RegExp; reason: string; subCode: number }> = [
     {
         pattern: /AnonymousJoinDisabled|Anonymous Join is disabled/i,
         reason:
-            'Anonymous join is disabled for this Teams tenant by policy (subCode 5723). A tenant admin must enable "Anonymous users can join a meeting" in the Teams admin center meeting settings.',
+            "Teams refused the Azure Communication Services join: the meeting's organisation does not let external application users join (subCode 5723, AnonymousJoinDisabledDueToPolicy). The settings a tenant admin can check are listed in docs/teams-acs-sdk.md.",
+        subCode: 5723,
     },
     {
         pattern: /not allowed to create conversation|"subCode":\s*5222/i,
         reason:
             'This meeting is a personal (Teams Free / teams.live.com) meeting (subCode 5222). ACS Teams interop only supports meetings organized by a Microsoft 365 work or school account on teams.microsoft.com.',
+        subCode: 5222,
     },
 ];
 
@@ -364,7 +370,7 @@ window.fetch = async (...args: Parameters<typeof fetch>) => {
             const body = await res.clone().text();
             const match = JOIN_REJECTIONS.find((r) => r.pattern.test(body));
             if (match) {
-                w.__lmaJoinError = { reason: match.reason, detail: body.slice(0, 400) };
+                w.__lmaJoinError = { reason: match.reason, detail: body.slice(0, 400), subCode: match.subCode };
                 log(`join rejected: ${match.reason}`);
             }
         }
