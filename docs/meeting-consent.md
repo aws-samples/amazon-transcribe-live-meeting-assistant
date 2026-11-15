@@ -911,10 +911,24 @@ that objection's screenshots.
 
 - The notice is posted in the chat only, not spoken by the voice assistant, so
   a participant who cannot see the chat hears no request to reply.
-- [Spoken replies](#spoken-replies) have not been exercised in a live meeting
-  on any join or with either engine yet. How reliably a short reply is heard,
-  and how often it is attributed to the right speaker, depends on each
-  platform's speaker indicator and has not been measured.
+- [Spoken replies](#spoken-replies) have been exercised in a live meeting on
+  the Teams browser join with Amazon Transcribe only: a spoken objection and a
+  spoken consent were recorded under the speaker's name, though one of two
+  objections was not heard as one, so it had to be said again. How reliably a
+  short reply is heard on the other joins and on the ASR MicroVM engine, and how
+  often it is attributed to the right speaker, has not been measured.
+- A spoken reply is kept only as its event: the words as transcribed, the
+  speaker's name, `voice` as the source and the time. No audio of it is kept,
+  and while capture is withheld nothing else of the meeting audio is either.
+- An evidence screenshot is taken of the chat, and its check reads only what
+  the chat shows. So a reply said aloud, or one that has scrolled out of view,
+  is not in it, and the check for that screenshot then reads `inconclusive` and
+  may list the participant as missing; the event itself still records the
+  reply and how it was given. On the Teams browser join the chat screenshot
+  does not always show the latest messages.
+- With **Keep evidence screenshots** off (it is on by default) an image is
+  deleted once its check is stored, so the record keeps the check's result
+  and no image, and no participant-list screenshot is kept.
 - Spoken replies are not read while the transcript is paused with `LMA pause`
   (nothing is sent to the engine then); replies in the chat still are.
 - The screen recording does not resume once capture has been withheld after it
