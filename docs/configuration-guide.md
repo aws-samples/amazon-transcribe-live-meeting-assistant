@@ -408,8 +408,9 @@ Participant on a join that supports each-participant consent. A Virtual
 Participant on the Webex join cannot tell who is present, so it never meets the
 each-participant rule, and with a different choice per meeting turned off the
 meeting cannot move to the less strict owner-attests rule, so such a meeting is
-not transcribed. On the Teams browser join, which shows no chat sender, the rule
-is met only by consent said aloud. See
+not transcribed. On the Teams browser join the chat senders and the
+participant list are read from the Teams page, which has not yet been
+confirmed with a Virtual Participant in a live meeting. See
 [What each platform supports](meeting-consent.md#what-each-platform-supports).
 
 The Regulated notify preset keeps the Regulated preset's retention and privacy

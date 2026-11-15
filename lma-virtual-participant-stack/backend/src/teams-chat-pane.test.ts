@@ -21,12 +21,11 @@ import {
     isComposeBox,
     isSendButton,
     TEAMS_FAILED_MESSAGE_RETRY_SELECTOR,
-    CHATLESS_REMOVAL_LINE,
     CHAT_COPY_WINDOW_MS,
     ChatCopyMerger,
     shortenedPrefix,
     TEAMS_FAILED_MARKER_SETTLE_MS,
-    introForChatlessClient,
+    teamsChatSender,
     isLightMeetingsUrl,
 } from './teams-chat-pane.js';
 
@@ -210,12 +209,33 @@ test('the chat watch clicks nothing and dumps the side rail at most once', () =>
     assert.match(watch, /if \(!sideRailDumped\) \{\s+sideRailDumped = true;\s+await this\.dumpSideRail\(page\);/);
 });
 
-test('the consent evidence on the Teams browser join does not open the People pane', () => {
+test('the consent evidence opens the People pane only on light-meetings, and not once the safeguard is set', () => {
     const source = teamsSource();
     const consent = source.slice(source.indexOf('attachMeetingConsent(page, {'), source.indexOf('leave: (objector) =>'));
-    assert.match(consent, /showParticipants: async \(\) => \{\s+log\.info\('\[consent\] no participant-list screenshot on the Teams browser join/);
-    assert.match(consent, /return false;/);
-    assert.ok(!source.includes('toolbarPanels('), 'the People pane is opened for a screenshot');
+    assert.match(consent, /showParticipants: async \(\) => \{\s+if \(!lightMeetings \|\| page\.isClosed\(\)\) return false;\s+if \(this\.peopleGuard\.disabled\) \{/);
+    assert.match(consent, /const opened = await this\.openPeoplePane\(page\);/);
+    // Closed, and the chat checked, by the same code as the roster reading.
+    assert.match(consent, /restore: async \(\) => \{\s+if \(!peopleClicked\) return;\s+peopleClicked = false;\s+await this\.closePeoplePane\(page\);/);
+    assert.ok(!source.includes('toolbarPanels('), 'the People pane is opened without the safeguard');
+});
+
+test('the People pane is read only under the chat lock, when it is free, and never once the safeguard is set', () => {
+    const source = teamsSource();
+    const read = source.slice(source.indexOf('private async readPeopleRoster('));
+    const body = read.slice(0, read.indexOf('\n    }\n'));
+    assert.match(body, /if \(step === 'off'\) return null;/);
+    assert.match(body, /if \(step === 'cached'\) return this\.peopleGuard\.cached;/);
+    assert.match(body, /return this\.chatLock\.runIfFree\(async \(\) => \{/, 'never while a post or a screenshot holds the chat pane');
+    assert.match(body, /if \(opened !== 'no-button'\) await this\.closePeoplePane\(page\);/, 'what was opened is closed, and the chat checked');
+    assert.match(body, /meetingConsent\.noteAttendeeCount\(reading\.count\);/);
+    const close = source.slice(source.indexOf('private async closePeoplePane('), source.indexOf('private async readPeopleRoster('));
+    assert.match(close, /if \(verdict === 'give-up'\) \{\s+this\.peopleGuard\.disable\(\);\s+log\.always\(/);
+    assert.match(close, /void meetingConsent\.noteParticipantListLost\(\);/);
+    assert.match(close, /if \(verdict === 'chat-turned-off'\) void meetingConsent\.noteChatTurnedOff\(\);/);
+    assert.ok(!close.includes('chatLock') && !close.includes('this.sendMessages('), 'work under the lock takes it again');
+    assert.ok(!/chatLock\.run\(|this\.sendMessages\(/.test(body), 'work under the lock takes it again');
+    // The chat reader skips its turn while the People pane is open.
+    assert.match(source, /if \(this\.peoplePaneOpen\) \{\s+setTimeout\(\(\) => \{ void pollMessages\(\); \}, 1000\);\s+return;/);
 });
 
 test('a post with no compose box on screen reports that it was not posted', () => {
@@ -256,51 +276,51 @@ test('the light-meetings join does not open the View panel, which would replace 
 
 // ─── A chat that Teams turns off ─────────────────────────────────────────────
 
-const DEFAULT_INTRO =
-    'Hello. I am an AI Live Meeting Assistant (LMA). I was invited by Ana Silva to join this call. ' +
-    'Type "LMA leave" in chat to remove me, or "LMA help" to see the other commands. ' +
-    'If there is more than one LMA here, add my name: "LMA ana leave". ' +
-    'To learn more please visit: https://amazon.com/live-meeting-assistant.';
-
-test('the light-meetings introduction gives no chat commands, and says how the VP can be removed', () => {
-    assert.deepEqual(introForChatlessClient([DEFAULT_INTRO]), [
-        'Hello. I am an AI Live Meeting Assistant (LMA). I was invited by Ana Silva to join this call. ' +
-            `${CHATLESS_REMOVAL_LINE} To learn more please visit: https://amazon.com/live-meeting-assistant.`,
-    ]);
-});
-
-test('an introduction with no chat command is posted as written on the light-meetings client', () => {
-    const intro = ['Hello from LMA.  I take notes for Ana.'];
-    assert.deepEqual(introForChatlessClient(intro), intro);
-});
-
-test('a message that is only a chat command is left out; the removal line is said once', () => {
-    assert.deepEqual(introForChatlessClient(['Hello, I am LMA.', 'Type "LMA help" in chat.', 'Or "@LMA leave".', "I'll post a summary in the chat at the end."]), [
-        'Hello, I am LMA.',
-        CHATLESS_REMOVAL_LINE,
-        "I'll post a summary in the chat at the end.",
-    ]);
-});
-
-test('a quoted "LMA" that gives no command is kept in the light-meetings introduction', () => {
-    const intro = ['I\'m "LMA", a note-taker for Ana.'];
-    assert.deepEqual(introForChatlessClient(intro), intro);
-});
-
 test('the light-meetings client is told apart by its URL', () => {
     assert.equal(isLightMeetingsUrl('https://teams.microsoft.com/light-meetings/launch?lightExperience=true'), true);
     assert.equal(isLightMeetingsUrl('https://teams.microsoft.com/v2/?meetingjoin=true'), false);
     assert.equal(isLightMeetingsUrl('https://teams.live.com/light-meetings-x/'), false);
 });
 
-test('teams.ts starts the consent flow right after the introduction, and posts the chatless introduction on light-meetings', () => {
+test('teams.ts posts the configured introduction, then starts the consent flow, with senders and the People pane on light-meetings', () => {
     const source = teamsSource();
-    const intro = source.indexOf('introForChatlessClient(details.introMessages)');
+    const intro = source.indexOf('await this.sendMessages(page, details.introMessages);');
     const consent = source.indexOf('attachMeetingConsent(page, {');
     const viewPanel = source.indexOf('Opening view panel (best-effort).');
     assert.ok(intro > 0 && consent > intro && viewPanel > consent, 'introduction, then consent, then the rest of the in-meeting setup');
-    assert.match(source.slice(consent, consent + 1500), /chatMayClose: isLightMeetingsUrl\(page\.url\(\)\)/);
-    assert.match(source.slice(consent, consent + 1500), /chatTurnedOff: \(\) => this\.chatTurnedOff/);
+    assert.ok(!source.includes('introForChatlessClient'), 'the introduction is the configured one on every Teams client');
+    const attach = source.slice(consent, consent + 1500);
+    assert.match(source.slice(intro, consent), /const lightMeetings = isLightMeetingsUrl\(page\.url\(\)\);/);
+    assert.match(attach, /sendersHidden: !lightMeetings,/);
+    assert.match(attach, /readRoster: lightMeetings \? \(\) => this\.readPeopleRoster\(page\) : undefined,/);
+    assert.match(attach, /chatTurnedOff: \(\) => this\.chatTurnedOff/);
+    assert.ok(!attach.includes('chatMayClose'));
+});
+
+test('a Teams chat message has a sender only when its author came from its heading, and was not already in the chat', () => {
+    assert.equal(teamsChatSender({ author: 'Strahan, Bob', authorFromHeading: true }), 'Strahan, Bob');
+    assert.equal(teamsChatSender({ author: 'Strahan, Bob' }), null, 'a row author alone is not a sender');
+    assert.equal(teamsChatSender({ author: null, authorFromHeading: true }), null);
+    assert.equal(teamsChatSender({ author: '  ', authorFromHeading: true }), null);
+    assert.equal(teamsChatSender({ author: 'Strahan, Bob', authorFromHeading: true, history: true }), null, 'a message from before the VP got in');
+});
+
+test('the page cannot say an author came from a heading; only ChatCopyMerger does', () => {
+    const merger = new ChatCopyMerger(() => 1000);
+    const [out] = merger.merge([{ text: 'LMA, I consent', id: null, author: 'Bo', time: null, links: [], authorFromHeading: true }]);
+    assert.equal(out.author, 'Bo');
+    assert.equal(out.authorFromHeading, undefined);
+    assert.equal(teamsChatSender(out), null);
+});
+
+test('teams.ts passes the heading sender to the consent flow and the chat commands', () => {
+    const source = teamsSource();
+    const handle = source.slice(source.indexOf('private async handleIncomingMessage('), source.indexOf('private async isInMeeting('));
+    assert.match(handle, /const sender = teamsChatSender\(row\);/);
+    assert.match(handle, /await meetingConsent\.handleChat\(sender, message\)/);
+    assert.match(handle, /startChatAnswer\(chatQuestion, sender, 'teams'/);
+    assert.match(handle, /exitMessagesFor\(sender\)/);
+    assert.ok(!handle.includes('handleChat(null'), 'consent replies are passed with their sender');
 });
 
 test('teams.ts posts nothing once the chat is shown as turned off, and submits an empty readback only on light-meetings', () => {
@@ -326,13 +346,15 @@ test('a Retry button right after a post is given time to go away before the post
 // ─── Reading the chat ────────────────────────────────────────────────────────
 
 const read = (text: string, author: string | null = null) => ({ text, id: null, author, time: null, links: [] as string[] });
+/** A message whose author is the one on its heading (ChatCopyMerger). */
+const heard = (text: string, author: string) => ({ ...read(text, author), authorFromHeading: true });
 
 test('a message and the heading that repeats it with its sender are one message, under that sender', () => {
     const merger = new ChatCopyMerger(() => 1000);
     assert.deepEqual(merger.merge([read('Great evening!'), read('Great evening! by Strahan, Bob', 'Strahan, Bob')]), [
-        read('Great evening!', 'Strahan, Bob'),
+        heard('Great evening!', 'Strahan, Bob'),
     ]);
-    assert.deepEqual(merger.merge([read('testing again by Strahan, Bob', 'Strahan, Bob'), read('testing again')]), [read('testing again', 'Strahan, Bob')]);
+    assert.deepEqual(merger.merge([read('testing again by Strahan, Bob', 'Strahan, Bob'), read('testing again')]), [heard('testing again', 'Strahan, Bob')]);
 });
 
 test('a heading read after its message, or before it, does not make a second message', () => {
@@ -342,7 +364,7 @@ test('a heading read after its message, or before it, does not make a second mes
     now += 2000;
     assert.deepEqual(merger.merge([read('Hello everyone by Strahan, Bob', 'Strahan, Bob')]), []);
     now += 2000;
-    assert.deepEqual(merger.merge([read('See you by Ana Silva', 'Ana Silva')]), [read('See you', 'Ana Silva')]);
+    assert.deepEqual(merger.merge([read('See you by Ana Silva', 'Ana Silva')]), [heard('See you', 'Ana Silva')]);
     now += 2000;
     assert.deepEqual(merger.merge([read('See you')]), []);
 });
@@ -355,7 +377,7 @@ test('a message that only ends in "by" a name, and two people sending the same w
     now += 1000;
     assert.deepEqual(merger.merge([read('ok')]), [read('ok')]);
     now += CHAT_COPY_WINDOW_MS + 1;
-    assert.deepEqual(merger.merge([read('Hello everyone by Bo', 'Bo')]), [read('Hello everyone', 'Bo')], 'outside the window it is a message of its own');
+    assert.deepEqual(merger.merge([read('Hello everyone by Bo', 'Bo')]), [heard('Hello everyone', 'Bo')], 'outside the window it is a message of its own');
 });
 
 test('a sender is never taken from the text of a message', () => {
@@ -368,9 +390,9 @@ test('each copy pairs once: a repeated short message from two people keeps both,
     let now = 1000;
     const merger = new ChatCopyMerger(() => now);
     // Alice's heading read before her body; then Bob's body and heading together.
-    assert.deepEqual(merger.merge([read('ok by Alice', 'Alice')]), [read('ok', 'Alice')]);
+    assert.deepEqual(merger.merge([read('ok by Alice', 'Alice')]), [heard('ok', 'Alice')]);
     now += 2000;
-    assert.deepEqual(merger.merge([read('ok'), read('ok by Bob', 'Bob')]), [read('ok', 'Bob')], "Bob's message is kept");
+    assert.deepEqual(merger.merge([read('ok'), read('ok by Bob', 'Bob')]), [heard('ok', 'Bob')], "Bob's message is kept");
     now += 2000;
     assert.deepEqual(merger.merge([read('ok')]), [], "Alice's body, read late, is not a second message");
 });
@@ -380,7 +402,7 @@ test("a heading completes its own earlier body, not another person's in the same
     const merger = new ChatCopyMerger(() => now);
     assert.deepEqual(merger.merge([read('ok')]), [read('ok')], "Alice's body, before its heading");
     now += 2000;
-    assert.deepEqual(merger.merge([read('ok by Alice', 'Alice'), read('ok'), read('ok by Bob', 'Bob')]), [read('ok', 'Bob')]);
+    assert.deepEqual(merger.merge([read('ok by Alice', 'Alice'), read('ok'), read('ok by Bob', 'Bob')]), [heard('ok', 'Bob')]);
 });
 
 test('a heading Teams shortened matches its long message, in the same read or either order', () => {
@@ -388,7 +410,7 @@ test('a heading Teams shortened matches its long message, in the same read or ei
     const merger = new ChatCopyMerger(() => now);
     const long = 'Hope you can see me here.. this is my 2nd post..';
     const heading = read('Hope you can see me here.. this is my 2nd p... by Strahan, Bob', 'Strahan, Bob');
-    assert.deepEqual(merger.merge([heading, read(long)]), [read(long, 'Strahan, Bob')]);
+    assert.deepEqual(merger.merge([heading, read(long)]), [heard(long, 'Strahan, Bob')]);
     now += 2000;
     assert.deepEqual(merger.merge([read('Another long message that Teams will shorten')]), [read('Another long message that Teams will shorten')]);
     now += 2000;
@@ -396,7 +418,17 @@ test('a heading Teams shortened matches its long message, in the same read or ei
     now += 2000;
     assert.deepEqual(merger.merge([read('A third long message, heading read first by... by Bo', 'Bo')]), [], 'a shortened heading is not passed on');
     now += 2000;
-    assert.deepEqual(merger.merge([read('A third long message, heading read first by the reader')]), [read('A third long message, heading read first by the reader', 'Bo')]);
+    assert.deepEqual(merger.merge([read('A third long message, heading read first by the reader')]), [heard('A third long message, heading read first by the reader', 'Bo')]);
+});
+
+test('two shortened headings with the same start give their senders to the bodies in the order they were read', () => {
+    let now = 1000;
+    const merger = new ChatCopyMerger(() => now);
+    const start = 'Here is the long update for this meeting t';
+    assert.deepEqual(merger.merge([read(`${start}... by Ana`, 'Ana'), read(`${start}... by Bo`, 'Bo')]), []);
+    now += 2000;
+    assert.deepEqual(merger.merge([read(`${start}oday, part one`)]), [heard(`${start}oday, part one`, 'Ana')]);
+    assert.deepEqual(merger.merge([read(`${start}oday, part two`)]), [heard(`${start}oday, part two`, 'Bo')]);
 });
 
 test('a shortened heading whose message is never read is passed on once its wait is over', () => {
@@ -404,7 +436,7 @@ test('a shortened heading whose message is never read is passed on once its wait
     const merger = new ChatCopyMerger(() => now);
     assert.deepEqual(merger.merge([read('A long message whose body never shows u... by Bo', 'Bo')]), []);
     now += CHAT_COPY_WINDOW_MS + 1;
-    assert.deepEqual(merger.merge([]), [read('A long message whose body never shows u...', 'Bo')]);
+    assert.deepEqual(merger.merge([]), [heard('A long message whose body never shows u...', 'Bo')]);
     assert.deepEqual(merger.merge([]), [], 'once');
 });
 

@@ -133,8 +133,7 @@ cannot collect each participant's consent, so Start is refused from them (see
 and a Virtual Participant on the
 Webex join never meets the each-participant rule and cannot move to
 owner-attests, so its meeting is not transcribed (see
-[What each platform supports](#what-each-platform-supports)). On the Teams
-browser join the rule is met only by consent said aloud. Nothing is recorded or
+[What each platform supports](#what-each-platform-supports)). Nothing is recorded or
 kept before consent under Regulated; while it waits a Virtual Participant
 listens for spoken replies, so the meeting audio is processed by the
 transcription engine and only the reply events are kept, unless **Read spoken
@@ -345,7 +344,8 @@ The **Create Virtual Participant** form has a **Meeting consent** choice: the
 deployment's setting (the default), Off, Notify, Opt-in with each participant
 consenting, or Opt-in with the meeting owner attesting. The each-participant
 choice is not offered for Webex, and for Teams it carries a note that on the
-Teams browser join participants consent aloud (see
+Teams browser join who sent each chat reply and who is present are read from
+the Teams page, which has not yet been confirmed in a live meeting (see
 [What each platform supports](#what-each-platform-supports)). Any choice other
 than the deployment's is stored on the VP's row (`consentMode` and `consentRule` in
 `createVirtualParticipant`) and read by the VP when it starts, so scheduled
@@ -385,8 +385,9 @@ opt-in. While the meeting runs a consent flow, `LMA help` also gives the
 consent replies, in the same form as the notice's reply line: *"Meeting
 consent: type or say "LMA, I consent" to agree to recording and transcription,
 or "LMA, I object" to object."*, with *"type in this chat"* instead of *"type
-or say"* where spoken replies are not read, and *"say"* on the Teams browser
-join.
+or say"* where spoken replies are not read, and *"say"* where the platform
+shows no chat sender (the Teams browser join off its anonymous light-meetings
+client).
 
 ### How the Virtual Participant asks for replies
 
@@ -399,19 +400,24 @@ first consent or objection phrase. With the shipped phrases the line is:
 - *"Type "LMA, I consent" or "LMA, I object" in this chat. An objection made
   out loud takes effect when <LMA user> records it in LMA."* where **Read
   spoken replies** is off;
-- *"Say "LMA, I consent" or "LMA, I object"."* on the Teams browser join, which
-  shows no chat senders, so a typed consent cannot be attributed there (see
+- *"Say "LMA, I consent" or "LMA, I object"."* where the platform shows no
+  chat sender, so a typed consent cannot be attributed there (the Teams browser
+  join off its anonymous light-meetings client; see
   [Who is present](#who-is-present)); with **Read spoken replies** off it gets
-  the chat line above, except on Teams' anonymous (light-meetings) client,
-  where the chat can be turned off for the VP shortly after it joins (see
-  [When Teams turns the chat off](#when-teams-turns-the-chat-off)). There no
-  reply can be read, and the line is *"If you object, tell <LMA user>, who can
-  record the objection in LMA."*
+  the chat line above.
+
+On the Teams browser join, on the anonymous light-meetings client it uses,
+the VP reads each message's sender from the heading Teams shows with it, so
+the line is the same as on Zoom and Google Meet: the first one above, or the
+chat line where spoken replies are not read. A typed message whose sender the
+VP could not read (one whose text was read before its heading, for instance),
+or one already in the chat when the VP joined, is treated as one with no sender (see
+[Replies in the chat](#replies-in-the-chat)).
 
 The line is the same in notify and opt-in meetings. Every other VP message that
 says how to reply uses the same form: the acknowledgement of an objection (see
 [Objections](#objections)), the answer to a consent whose sender cannot be
-told, the detail line on the Teams browser join, and `LMA help`. The form is a
+told, the detail line where the platform shows no chat sender, and `LMA help`. The form is a
 suggestion, not a requirement: a bare *"I consent"* typed in the chat is still
 consent (see [Replies in the chat](#replies-in-the-chat)).
 
@@ -504,8 +510,9 @@ and while capture is still stopped by the first, is acted on and recorded once.
   acknowledgement says. Its last sentence gives the reply in the form of the
   notice's reply line, with the deployment's first consent phrase: *"If <name>
   types or says "LMA, I consent", it can continue."* where spoken replies are
-  read; *"If <name> says "LMA, I consent", it can continue."* on the Teams
-  browser join, which shows no chat senders; and *"If <name> types "LMA, I
+  read; *"If <name> says "LMA, I consent", it can continue."* where the
+  platform shows no chat sender (the Teams browser join off its anonymous
+  light-meetings client); and *"If <name> types "LMA, I
   consent" in this chat, it can continue."* where spoken replies are not read.
   An objection with no sender gets no such sentence, because a consent needs a
   sender. The transcript and the audio recording resume; the screen recording does
@@ -586,8 +593,8 @@ phrases are long or in another language.
 A consent reply needs a sender. One whose sender the platform does not show is
 not recorded, and under the each-participant rule it is answered with *"Live
 Meeting Assistant could not tell who sent that reply, so it was not recorded as
-consent."*, followed on the Teams browser join, which shows no chat senders, by
-*"Say "LMA, I consent" aloud instead."* (with the deployment's first consent phrase), where spoken replies are read.
+consent."*, followed where the platform shows no chat sender (the Teams
+browser join off its anonymous light-meetings client) by *"Say "LMA, I consent" aloud instead."* (with the deployment's first consent phrase), where spoken replies are read.
 An objection without a sender still stops capture, and is recorded
 for *Unidentified participant*. A sender whose display name reads as one of the
 list's placeholders (*Unidentified participant 1*) is not counted as present
@@ -696,10 +703,12 @@ The participant list the VP keeps on the record decides the each-participant
 rule, so it is never allowed to be shorter than the meeting:
 
 - **Where the platform gives a list of names** that accounts for everybody the
-  attendee count shows (the Teams join through Azure Communication Services),
-  the list is those names.
-- **Where it gives only a count** (the Chime, Zoom, Teams and Google Meet
-  browser joins, and the Zoom Meeting SDK join), the list is the names the VP
+  attendee count shows (the Teams join through Azure Communication Services,
+  and the Teams browser join from its People pane; see below), the list is
+  those names.
+- **Where it gives only a count** (the Chime, Zoom and Google Meet browser
+  joins, the Zoom Meeting SDK join, and the Teams browser join when its People
+  pane cannot be read), the list is the names the VP
   has seen since the count last went up, as the active speaker, as the speaker
   of a spoken reply, or as a chat sender, plus one
   *Unidentified participant N* for each seat no name accounts for (the meeting
@@ -716,23 +725,59 @@ rule, so it is never allowed to be shorter than the meeting:
   be shown to be everybody, so one unidentified participant is always listed
   and the each-participant rule is never met, whether replies are typed or
   said. The detail line says so. Use the owner-attests rule on Webex.
-- **Where the platform shows no chat sender** (the Teams browser join), a
-  consent typed in the chat cannot be attributed, but one said aloud
-  (*"LMA, I consent"*) can, under the name the platform shows speaking. So the
-  each-participant rule is met when every participant present has said their
-  consent while the VP could see who was speaking, and the detail line adds that
-  on this platform consent is given aloud. With **Read spoken replies** off it
-  is never met there, and the detail line says to choose the owner-attests rule
-  or turn the setting on.
+- **Where the platform shows no chat sender** (the Teams browser join when it
+  is not on Teams' anonymous light-meetings client), a consent typed in the
+  chat cannot be attributed, but one said aloud (*"LMA, I consent"*) can, under
+  the name the platform shows speaking. So the each-participant rule is met
+  when every participant present has said their consent while the VP could see
+  who was speaking, and the detail line adds that on this platform consent is
+  given aloud. With **Read spoken replies** off it is never met there, and the
+  detail line says to choose the owner-attests rule or turn the setting on.
+
+**The Teams browser join's People pane.** On Teams' anonymous light-meetings
+client the attendee-count badge the VP reads on the toolbar was missing for
+the whole of every live meeting on 2026-11-15, so the count alone would leave
+an unidentified participant listed for good. There the VP reads the
+participant list from the People pane instead: it opens the pane from the
+toolbar, reads the *"In this meeting (N)"* section (N counts the VP) and the
+display name of each participant under it, leaving out the VP itself and any
+role badge such as *Organizer*, and closes the pane again at once, normally
+within a few seconds. It does this when the consent flow asks for the list
+(every 10 seconds while the meeting runs a consent flow), but opens the pane
+at most once a minute: between readings the last list read is used. It never
+opens it while a message is being posted or an evidence screenshot taken. N is
+used as the attendee count. A list in any other shape than the one measured
+(another section header, no *"In this meeting"* section) is not used. When the
+list has fewer names than N says, the seats no name accounts for are listed as
+unidentified participants, as above. When the People button or the
+list cannot be found within about 3 seconds, the VP falls back to the count
+and the names it has seen, as above, and tries again a minute later.
+
+Because the People pane shares the side rail with the chat, every time it
+closes the VP checks that the chat compose box is still on screen. In live
+meetings on 2026-11-15 the chat stayed on screen while the People pane was
+open and after it closed, over about 14 openings, and posting kept working;
+earlier, live VPs had seen opening the People pane take the chat's place for
+the rest of the meeting. So when the compose box is gone after the pane closes
+(and Teams does not show the chat as turned off), the VP tries once to bring it
+back, with a toolbar chat button where there is one and otherwise by clicking
+the People button again. If the chat is still not back, the VP does not open
+the People pane again in that meeting, logs that once, and falls back to the
+count and the names it has seen. While each participant's consent is awaited,
+its detail line then adds that it can no longer read the participant list and
+that the owner-attests rule is the way to start recording in a meeting like
+this one.
 
 The count is the one each platform handler already reads to leave a meeting it
 is alone in: whenever the count on the page changes on the Chime and Zoom
 browser joins (plus a check every 30 seconds on Zoom), every 3 seconds on the
 two SDK joins, every 20 seconds by default on the Teams browser join (the
-Virtual Participant section's attendee poll interval), and every 20 seconds on
-the Google Meet join. One person leaving and
+Virtual Participant section's attendee poll interval) when the badge is shown,
+and every 20 seconds on the Google Meet join. On the Teams browser join the
+People pane's count is read at most once a minute. One person leaving and
 another joining between two readings leaves the count unchanged, which the VP
-cannot see; the window is as long as the interval between readings.
+cannot see; the window is as long as the interval between readings, so up to
+about a minute on the Teams browser join when the badge is not shown.
 
 The names are display names, as everywhere in the record. The VP's own
 identities are never listed.
@@ -740,39 +785,42 @@ identities are never listed.
 ### When Teams turns the chat off
 
 On Teams' anonymous (light-meetings) client, which is how the VP joins a Teams
-meeting from its browser, Teams can turn the chat off for the VP shortly after
-it is admitted. In live meetings it did so 20 to 27 seconds after admission,
-even though the meeting's own **Meeting chat** setting was **On**. The likely
-cause is a setting of the meeting's organization for anonymous participants;
-that has not been confirmed. The compose box is then replaced by *"Chat is
-turned off for this meeting"*. On that client:
+meeting from its browser, Teams has turned the chat off for the VP shortly
+after it was admitted. In live meetings on 2026-11-14 it did so 20 to 27
+seconds after admission, even though the meeting's own **Meeting chat** setting
+was **On**; the compose box was then replaced by *"Chat is turned off for this
+meeting"*. In six live runs on 2026-11-15, with test clients and Virtual
+Participants on the same client, the chat stayed open in every run, for up to
+five and a half minutes and twelve posts. Why it was turned off on 2026-11-14
+is not known. So the VP behaves on Teams as on Zoom and Google Meet, and
+handles the chat being turned off when it happens:
 
-- **The introduction gives no chat commands.** The sentences of the
-  introduction that quote an `LMA` command (*"LMA leave"*, *"@LMA help"*) are
-  left out, and the first is replaced by *"A meeting organizer can remove
-  me from the participant list."* An introduction with no such sentence is
-  posted as written.
-- **The notice follows the introduction at once**, with its reply line and,
-  under the owner-attests rule, the line saying that recording starts when the
-  LMA user confirms in LMA. In a live meeting a test client posting this way
-  had all three messages in the chat about four seconds after admission. On
-  every other platform the notice is posted at the same point.
+- **The introduction and the notice are the same as on every other
+  platform.** The configured introduction is posted with its chat commands,
+  and the notice follows it at once, with its reply line and, under the
+  owner-attests rule, the line saying that recording starts when the LMA user
+  confirms in LMA.
 - **Once the chat is turned off**, which the VP looks for with its periodic
-  check of the chat pane as well as when a post fails, it logs it once, posts
-  nothing more, and
-  does not try the notice again. A notice that was not posted before then is
-  not recorded as posted, so a notify meeting stays `pending`. The VP's detail
-  line on the Virtual Participants page ends with *"The meeting chat is turned
-  off for the Virtual Participant, so it cannot post or read chat messages."*
-  The VP cannot turn the chat back on, so it does not look again.
+  check of the chat pane (every 12 seconds) as well as when a post fails, it
+  logs it once, posts nothing more, and does not try the notice again. A notice
+  that was not posted before then is not recorded as posted, so a notify
+  meeting stays `pending`. The VP's detail line on the Virtual Participants
+  page ends with *"The meeting chat is turned off for the Virtual Participant,
+  so it cannot post or read chat messages."* The VP cannot turn the chat back
+  on, so it does not look again.
+- **The People pane is still read** when the chat is off, because it does not
+  need the chat (see [Who is present](#who-is-present)). A chat found turned
+  off after the People pane closes is treated as the chat being turned off, not
+  as the People pane having taken its place, so it does not stop the VP from
+  reading the participant list.
 
 What still works when the chat is off: consent and objections said aloud
 (unless **Read spoken replies** is off), the owner's **Attest that everyone
 agreed** on the meeting page, and an objection recorded on the meeting page.
 The chat commands (`LMA leave`, `LMA pause`, `LMA start`, `LMA help`) and
 replies typed in the chat do not: remove the VP from the meeting's participant
-list, or end it from LMA. Where who replied matters, choose the owner-attests
-rule for Teams meetings.
+list, or end it from LMA. Where who replied matters and the chat may be turned
+off, choose the owner-attests rule for Teams meetings.
 
 ### What each platform supports
 
@@ -781,7 +829,7 @@ rule for Teams meetings.
 | Chime | Shown | Read, under the active speaker | Count | Yes | The chat and the attendee list are on screen together, so one screenshot has both |
 | Zoom (browser) | Shown | Read, under the active speaker | Count | Yes | The participants pane is opened, shot and closed again |
 | Zoom (Meeting SDK) | Shown | Read, under the active speaker | Count | Yes | One screenshot of LMA's SDK page |
-| Teams (browser) | **Not shown** | Read, under the active speaker | Count | Yes, **aloud only** ("LMA, I consent"): a typed consent cannot be attributed, so not with **Read spoken replies** off | **Chat only**: the People pane is not opened, because on the anonymous join it takes the chat's place and the chat cannot be brought back, so there is no participant-list screenshot (the participant count still comes from the roster badge). The chat can be turned off for the VP soon after it joins; see [When Teams turns the chat off](#when-teams-turns-the-chat-off) |
+| Teams (browser) | Shown on the anonymous light-meetings client (read from the heading Teams shows with each message, *"<text> by <sender>"*); not shown elsewhere | Read, under the active speaker | Names, from the People pane (count and names seen when it cannot be read); see [Who is present](#who-is-present) | Yes; **aloud only** off the light-meetings client, where senders are not read | The People pane is opened, shot and closed again, and the VP checks that the chat is still there (see [Who is present](#who-is-present)). The chat can be turned off for the VP soon after it joins; see [When Teams turns the chat off](#when-teams-turns-the-chat-off) |
 | Teams (Azure Communication Services) | Shown | Read, under the active speaker | Names | Yes | One screenshot of LMA's SDK page |
 | Webex (browser) | Shown | Read, under the active speaker | **None** | **No**: see [Who is present](#who-is-present) | The participants panel is opened, shot and closed again |
 | Google Meet (browser) | Shown (read from the message group's header) | Read, under the speaking tile | Count | Yes | The People panel is opened and shot, then the chat reopened |
@@ -795,15 +843,20 @@ in a live meeting yet. On Google Meet in particular, neither the chat sender
 reading nor the speaking-tile reading has been confirmed in a live meeting (see
 [Google Meet](virtual-participant.md#google-meet) in the Virtual Participant guide), so a
 reply there could be recorded under the wrong name until they are; use the
-owner-attests rule on Meet where that matters.
+owner-attests rule on Meet where that matters. On the Teams browser join, the
+People pane's list, the message headings and their senders (the organizer's
+and an anonymous guest's) were measured in live meetings with test clients on
+2026-11-15, but the VP's own reading of them has not yet run in a live meeting.
 
 ### Evidence screenshots
 
 When the meeting's status becomes `granted` (in notify, once the notice is
 recorded as posted), and on every objection, the VP takes a screenshot of the
 meeting page with the chat open, then, where the platform allows it, opens the
-participant list, takes a second one, and puts the chat back (not on the Teams
-browser join, where the chat screenshot is the only one). The screenshots
+participant list, takes a second one, and puts the chat back. On the Teams
+browser join the participant-list screenshot is taken under the same check of
+the chat as the People pane reading, and is not taken once the VP has stopped
+opening the People pane in that meeting. The screenshots
 are taken from the meeting page itself, so nothing open in the live view covers
 them. Each is a JPEG stored in the recordings bucket under
 `lma-consent-evidence/<meeting>/` and added to the record with

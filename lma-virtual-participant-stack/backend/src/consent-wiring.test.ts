@@ -79,8 +79,12 @@ test('Google Meet reads consent replies under the chat sender, as Zoom and Chime
     const meet = source('google-meet.ts');
     assert.match(meet, /await meetingConsent\.handleChat\(sender, message\)/);
     assert.doesNotMatch(meet, /sendersHidden: true/);
-    // The Teams browser join still shows no chat sender.
-    assert.match(source('teams.ts'), /sendersHidden: true/);
+    // So does the Teams browser join on the light-meetings client, from the
+    // message heading; elsewhere on that join senders count as hidden.
+    const teams = source('teams.ts');
+    assert.match(teams, /await meetingConsent\.handleChat\(sender, message\)/);
+    assert.match(teams, /sendersHidden: !lightMeetings,/);
+    assert.doesNotMatch(teams, /sendersHidden: true/);
 });
 
 test("the flow's defaults are the ones the configuration seeder ships", () => {

@@ -232,16 +232,13 @@ export interface ConsentMeetingIo {
     /** Leaves the meeting after an objection, when the deployment says to. */
     leave(objector: string): void;
     /**
-     * The platform shows no chat sender (the Teams browser join), so a consent
-     * typed in the chat cannot be attributed; one said aloud can.
+     * The platform shows no chat sender (the Teams browser join outside the
+     * light-meetings client), so a consent typed in the chat cannot be
+     * attributed; one said aloud can. Where senders are shown, a message whose
+     * sender could not be read is passed with a null sender, and a consent in
+     * it is not recorded.
      */
     sendersHidden?: boolean;
-    /**
-     * The platform can turn the chat off for the VP shortly after it is
-     * admitted (the Teams anonymous light-meetings client), so the notice
-     * does not ask for replies typed in the chat.
-     */
-    chatMayClose?: boolean;
     /** Whether the platform shows the chat as turned off for the VP now; posting there is not tried again. */
     chatTurnedOff?(): boolean;
 }
@@ -287,23 +284,24 @@ export const REPLY_LINE = (consentPhrase: string, objectionPhrase: string): stri
 
 /**
  * Posted after every notice where the platform shows no chat sender (the
- * Teams browser join) and spoken replies are read: a typed consent cannot be
- * attributed there, one said aloud can.
+ * Teams browser join outside the light-meetings client) and spoken replies
+ * are read: a typed consent cannot be attributed there, one said aloud can.
  */
 export const SPOKEN_REPLY_LINE = (consentPhrase: string, objectionPhrase: string): string =>
     `Say "LMA, ${consentPhrase}" or "LMA, ${objectionPhrase}".`;
 
-/**
- * Posted after every notice where spoken replies are not read and the chat
- * may be turned off for the VP (chatMayClose): no reply can be read there,
- * so an objection goes through the LMA user.
- */
-export const NO_REPLY_ROUTE_LINE = (lmaUser: string): string =>
-    `If you object, tell ${lmaUser}, who can record the objection in LMA.`;
-
 /** The VP's detail line once the platform has turned the chat off for it. */
 export const CHAT_OFF_DETAIL =
     'The meeting chat is turned off for the Virtual Participant, so it cannot post or read chat messages.';
+
+/**
+ * Added to the VP's detail line, while each participant's consent is awaited,
+ * once the platform handler can no longer read the participant list (the
+ * Teams browser join, when the chat did not come back after the People pane).
+ */
+export const PARTICIPANT_LIST_LOST_DETAIL =
+    'The Virtual Participant can no longer read the participant list in this meeting, so it may not be able to confirm that everyone present has consented; ' +
+    'to start recording in a meeting like this, use the owner-attests rule.';
 
 /** Posted after every notice where spoken replies are not read. */
 export const CHAT_ONLY_REPLY_LINE = (consentPhrase: string, objectionPhrase: string, lmaUser: string): string =>
@@ -399,6 +397,9 @@ export class MeetingConsentFlow {
 
     /** The platform showed the chat as turned off for the VP: nothing more is posted there. */
     private chatOff = false;
+
+    /** The platform handler can no longer read the participant list (noteParticipantListLost). */
+    private participantListLost = false;
 
     private stopped = false;
 
@@ -576,6 +577,19 @@ export class MeetingConsentFlow {
         await this.writeDetail(this.baseDetail ?? null);
     }
 
+    /**
+     * The platform handler can no longer read the participant list for the
+     * rest of the meeting (its readRoster answers null from now on, and the
+     * roster falls back to the attendee count and the names seen). While each
+     * participant's consent is awaited the detail line says so, and names the
+     * owner-attests rule as the way to start recording.
+     */
+    async noteParticipantListLost(): Promise<void> {
+        if (this.participantListLost || !this.active || !this.io) return;
+        this.participantListLost = true;
+        await this.writeDetail(this.baseDetail ?? null);
+    }
+
     /** The meeting is over. */
     stop(): void {
         this.stopped = true;
@@ -603,8 +617,8 @@ export class MeetingConsentFlow {
         this.syncListening();
         // The notice is posted at once, before the meeting record and its
         // consent are started (several API calls, which take seconds): some
-        // platforms turn the chat off for the VP shortly after it is admitted
-        // (chatMayClose). It is recorded as posted once consent has started
+        // the Teams browser join has seen the chat turned off for the VP shortly
+        // after it was admitted. It is recorded as posted once consent has started
         // (afterStart). A mode that is not known yet posts nothing.
         if ((this.plan.mode === 'notify' || this.plan.mode === 'opt_in') && !this.offChoicePending && !this.choiceUnread) {
             this.earlyNoticeMode = this.plan.mode;
@@ -897,7 +911,6 @@ export class MeetingConsentFlow {
     /** The line that follows every notice: how to reply, in the forms this VP reads. */
     replyLine(): string {
         const [consent, objection] = this.firstPhrases();
-        if (!this.readsSpokenReplies && this.io?.chatMayClose) return NO_REPLY_ROUTE_LINE(this.deps.lmaUser);
         if (!this.readsSpokenReplies) return CHAT_ONLY_REPLY_LINE(consent, objection, this.deps.lmaUser);
         if (this.io?.sendersHidden) return SPOKEN_REPLY_LINE(consent, objection);
         return REPLY_LINE(consent, objection);
@@ -1063,8 +1076,11 @@ export class MeetingConsentFlow {
 
     private async writeDetail(detail: string | null): Promise<void> {
         this.baseDetail = detail;
+        // While each participant's consent is awaited, a participant list
+        // that can no longer be read is said too.
+        const listed = detail && this.participantListLost && this.eachParticipant && this.held ? `${detail} ${PARTICIPANT_LIST_LOST_DETAIL}` : detail;
         // Once the chat is off the detail line says so, whatever else it says.
-        const shown = this.chatOff ? (detail ? `${detail} ${CHAT_OFF_DETAIL}` : CHAT_OFF_DETAIL) : detail;
+        const shown = this.chatOff ? (listed ? `${listed} ${CHAT_OFF_DETAIL}` : CHAT_OFF_DETAIL) : listed;
         if (shown === this.lastDetail) return;
         this.lastDetail = shown;
         try {
