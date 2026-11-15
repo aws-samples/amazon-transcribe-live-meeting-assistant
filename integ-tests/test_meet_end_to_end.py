@@ -197,7 +197,31 @@ def test_vp_transcribes_speech_and_chat_from_a_google_meet(
                 if i.get("Channel") == "MEETING_CHAT" and marker in (i.get("Transcript") or "")
             ]
 
-        said = _wait_for(speech, timeout=GUEST_LEAD_IN_S + 300)
+        def left() -> Optional[str]:
+            # A VP that has left can hear nothing more, so waiting on would only
+            # run out the clock. Its row says why it left: a meeting ended for
+            # everyone by its host reads endTrigger "meet-ended-screen".
+            row = client.vp.get(vp_id)
+            if row.status in ("ENDED", "COMPLETED", "FAILED"):
+                return (
+                    f"status={row.status} endTrigger={row.endTrigger or '-'} "
+                    f"error={row.errorMessage or '-'} endReason={row.endReason or '-'}"
+                )
+            return None
+
+        def speech_or_left() -> Optional[Dict[str, str]]:
+            said_now = speech()
+            if said_now:
+                return {"said": said_now}
+            gone = left()
+            return {"left": gone} if gone else None
+
+        outcome_speech = _wait_for(speech_or_left, timeout=GUEST_LEAD_IN_S + 300) or {}
+        assert "left" not in outcome_speech, (
+            "the Virtual Participant left the meeting before the guest's conversation "
+            f"reached the transcript ({outcome_speech.get('left')})"
+        )
+        said = outcome_speech.get("said", "")
         assert said, "the guest's conversation did not reach the meeting's transcript"
         # Only now, with the VP transcribing, is it surely reading the meeting
         # chat; Meet shows a participant only messages sent after they joined.

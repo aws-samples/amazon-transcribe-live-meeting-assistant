@@ -60,6 +60,12 @@ class VpRow(BaseModel):
     vncEndpoint: str | None = None
     vncPort: int | None = None
     vncReady: bool | None = None
+    # Why the VP left: the prose shown to the user, the machine-readable exit
+    # branch from the container (e.g. "meet-ended-screen"), and the reason an
+    # outside end was asked for.
+    errorMessage: str | None = None
+    endTrigger: str | None = None
+    endReason: str | None = None
 
     # Catch-all for any extra fields returned by the API.
     extra: dict[str, Any] = Field(default_factory=dict)

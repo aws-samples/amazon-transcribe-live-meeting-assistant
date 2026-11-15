@@ -158,9 +158,32 @@ if (!inCall) {
   process.exit(2);
 }
 
+// The screens Meet shows once the call is over for this guest, as the VP's
+// handler reads them (google-meet-page.ts MEET_SCREEN_PHRASES ended/removed).
+const CALL_OVER = [
+  'the call has ended', 'this call has ended', 'the meeting has ended', 'this meeting has ended',
+  'ended the call for everyone', 'ended the meeting for everyone', 'call ended for everyone',
+  "you've been removed from the meeting", 'you have been removed from the meeting',
+  "you've been removed from the call", 'removed you from the meeting', 'removed you from the call',
+];
+async function callOver() {
+  // Still in the call while its Leave call button is there, whatever the chat says.
+  if (await page.getByRole('button', { name: /leave call/i }).count().catch(() => 0)) return null;
+  const text = ((await page.locator('body').innerText().catch(() => '')) || '').toLowerCase();
+  return CALL_OVER.find((phrase) => text.includes(phrase)) || null;
+}
+
 let done = 0;
 const deadline = Date.now() + MAX_MINUTES * 60 * 1000;
 while (Date.now() < deadline) {
+  // A meeting ended for everyone leaves the guest on an end screen, where its
+  // audio plays to nobody: say so and stop, rather than run out the clock.
+  const over = await callOver();
+  if (over) {
+    log('CALL ENDED:', over);
+    await context.close();
+    process.exit(3);
+  }
   let lines = [];
   try {
     const r = await fetch(process.env.CMDS_URL);
