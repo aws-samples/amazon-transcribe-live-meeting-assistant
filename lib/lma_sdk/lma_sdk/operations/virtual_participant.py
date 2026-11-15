@@ -121,6 +121,9 @@ query GetVirtualParticipant($id: ID!) {
     vncEndpoint
     vncPort
     vncReady
+    errorMessage
+    endTrigger
+    endReason
   }
 }
 """.strip()

@@ -21,7 +21,8 @@
 //   shot         upload a screenshot to SHOT_URL
 //   leave        leave the meeting and exit
 //
-// The log lines "IN CALL" and "GAVE UP" are read by meeting_guest.py.
+// The log lines "IN CALL" and "GAVE UP" are read by meeting_guest.py. "CALL ENDED"
+// (exit code 3), when Meet ends the call, is for a person reading the task log.
 import { launchPersistentContext } from 'cloakbrowser';
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), '[guest]', ...a);
@@ -158,9 +159,36 @@ if (!inCall) {
   process.exit(2);
 }
 
+// The screens Meet shows once the call is over for this guest, as the VP's
+// handler reads them (google-meet-page.ts MEET_SCREEN_PHRASES ended/removed).
+const CALL_OVER = [
+  'the call has ended', 'this call has ended', 'the meeting has ended', 'this meeting has ended',
+  'ended the call for everyone', 'ended the meeting for everyone', 'call ended for everyone',
+  "you've been removed from the meeting", 'you have been removed from the meeting',
+  "you've been removed from the call", 'removed you from the meeting', 'removed you from the call',
+];
+async function callOver() {
+  // Still in the call while its Leave call button is there, whatever the chat says.
+  if (await page.getByRole('button', { name: /leave call/i }).count().catch(() => 0)) return null;
+  // Normalised as the VP's normalizeMeetText does: Meet writes "you’ve" with a typographic apostrophe.
+  const text = ((await page.locator('body').innerText().catch(() => '')) || '')
+    .replace(/[\u2018\u2019\u02bc]/g, "'")
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+  return CALL_OVER.find((phrase) => text.includes(phrase)) || null;
+}
+
 let done = 0;
 const deadline = Date.now() + MAX_MINUTES * 60 * 1000;
 while (Date.now() < deadline) {
+  // A meeting ended for everyone leaves the guest on an end screen, where its
+  // audio plays to nobody: say so and stop, rather than run out the clock.
+  const over = await callOver();
+  if (over) {
+    log('CALL ENDED:', over);
+    await context.close();
+    process.exit(3);
+  }
   let lines = [];
   try {
     const r = await fetch(process.env.CMDS_URL);

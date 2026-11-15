@@ -859,7 +859,14 @@ nightly_integ_tests:
     - apt-get update -y
     # curl is used by the after_script's Slack post, and is installed here (not
     # there) so an after_script never has to install anything.
-    - apt-get install -y make git curl
+    - apt-get install -y make git curl unzip
+    # The AWS CLI, for the failure triage agent: every read it is allowed
+    # (failure_agent.py _ALLOWED_TOOLS) is an `aws` command, so without the
+    # CLI it can read no logs at all. The tests themselves use boto3.
+    - CLI_ARCH=$(case "$(uname -m)" in aarch64|arm64) echo aarch64;; *) echo x86_64;; esac)
+    - curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$CLI_ARCH.zip" -o awscliv2.zip
+    - unzip -q awscliv2.zip && ./aws/install && rm -rf awscliv2.zip aws
+    - aws --version
     - make setup-python
     - make setup-cli-dev
     # pycognito + websockets, needed by the audio streaming test. If these are
