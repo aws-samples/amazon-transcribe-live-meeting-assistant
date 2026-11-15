@@ -363,6 +363,25 @@ test('a sender is never taken from the text of a message', () => {
     assert.deepEqual(merger.merge([read('hi by Ana', 'Bo')]), [read('hi by Ana', 'Bo')], 'a row author that the text does not end in is not a heading');
 });
 
+test('each copy pairs once: a repeated short message from two people keeps both, each under its own sender', () => {
+    let now = 1000;
+    const merger = new ChatCopyMerger(() => now);
+    // Alice's heading read before her body; then Bob's body and heading together.
+    assert.deepEqual(merger.merge([read('ok by Alice', 'Alice')]), [read('ok', 'Alice')]);
+    now += 2000;
+    assert.deepEqual(merger.merge([read('ok'), read('ok by Bob', 'Bob')]), [read('ok', 'Bob')], "Bob's message is kept");
+    now += 2000;
+    assert.deepEqual(merger.merge([read('ok')]), [], "Alice's body, read late, is not a second message");
+});
+
+test("a heading completes its own earlier body, not another person's in the same read", () => {
+    let now = 1000;
+    const merger = new ChatCopyMerger(() => now);
+    assert.deepEqual(merger.merge([read('ok')]), [read('ok')], "Alice's body, before its heading");
+    now += 2000;
+    assert.deepEqual(merger.merge([read('ok by Alice', 'Alice'), read('ok'), read('ok by Bob', 'Bob')]), [read('ok', 'Bob')]);
+});
+
 test('teams.ts reads the chat through ChatCopyMerger', () => {
     assert.match(teamsSource(), /const fresh = chatCopies\.merge\(\s+await page\.evaluate\(\(extra\) => \(window as any\)\.__lmaScrapeMessages\(extra\), aiMessageSelector\),\s+\);/);
 });

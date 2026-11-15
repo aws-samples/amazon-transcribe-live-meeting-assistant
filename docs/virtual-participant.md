@@ -1090,7 +1090,7 @@ measured in a live meeting yet:
 | --- | --- | --- | --- |
 | Zoom (browser) | From the message's label (English labels) | The message element's id | Left out, as is a message whose label shows no recipient |
 | Zoom (Meeting SDK) | From the SDK | From the SDK, where it sends one | Left out, as is a message that names no receiver |
-| Teams (browser) | The message's author, where the row shows it. The anonymous light-meetings client shows each message twice, its text and a heading that repeats it as *"<text> by <sender>"*; the VP reads the two as one message, with the text as typed and the sender Teams shows on the heading's row; a name is never taken from the text of a message (seen in a live meeting) | The message element's id, else the text | None in a meeting chat |
+| Teams (browser) | The message's author, where the row shows it. The anonymous light-meetings client shows each message twice, its text and a heading that repeats it as *"<text> by <sender>"*; the VP reads the two as one message, with the text as typed and the sender Teams shows on the heading's row; a name is never taken from the text of a message. Each copy pairs with one other copy at most, so the same words from two people stay two messages. A message whose text is read in an earlier read than its heading keeps no sender, as it has been passed on by then (seen in a live meeting) | The message element's id, else the text | None in a meeting chat |
 | Teams (Azure Communication Services) | From the chat service | From the chat service | None in a meeting chat |
 | Webex | Not added to the transcript (see above) | | |
 | Google Meet | From the message group's header | Meet's message id | None in a meeting chat |

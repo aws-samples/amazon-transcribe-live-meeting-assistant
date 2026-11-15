@@ -273,20 +273,29 @@ export const CHAT_COPY_WINDOW_MS = 15_000;
 /**
  * The anonymous light-meetings client renders each chat message twice: its
  * body ("Great evening!"), and a heading that repeats it with its sender
- * ("Great evening! by Strahan, Bob"), which the reader can find without the
- * row it belongs to. Seen in a live meeting, where every message reached the
- * transcript twice, once with no sender. This makes one message of the two:
- * the body's text, with the sender the heading names.
+ * ("Great evening! by Strahan, Bob"). Seen in a live meeting, where every
+ * message reached the transcript twice, once with no sender. This makes one
+ * message of the two: the body's text, with the sender Teams shows on the
+ * heading's row.
  *
  * A reading is a heading only when the reader found its author on the row
  * and its text ends in " by <author>"; the sender is always that author,
  * never a name taken from a message's text. A message that only ends in
- * "by <name>" is kept as it is. Two bodies with the same text are never
- * merged.
+ * "by <name>" is kept as it is.
+ *
+ * The two copies of a message can be read in different polls, so each copy
+ * read without its other half is remembered for CHAT_COPY_WINDOW_MS, and is
+ * paired at most once: a heading first completes the oldest body still
+ * waiting for one, then a body in the same read; a body first matches the
+ * oldest heading still waiting for one. Two bodies with the same text are
+ * never merged, and a message whose body was read before its heading keeps
+ * no sender (it has been passed on by then).
  */
 export class ChatCopyMerger {
+    /** Bodies passed on with no sender, waiting for their heading. */
     private bodies: Array<{ text: string; at: number }> = [];
 
+    /** Headings passed on as messages, waiting for their body. */
     private headings: Array<{ text: string; at: number }> = [];
 
     constructor(private readonly clock: () => number = Date.now) {}
@@ -295,41 +304,44 @@ export class ChatCopyMerger {
         const now = this.clock();
         this.bodies = this.bodies.filter((b) => now - b.at <= CHAT_COPY_WINDOW_MS);
         this.headings = this.headings.filter((h) => now - h.at <= CHAT_COPY_WINDOW_MS);
-        const recentBody = (text: string) => this.bodies.some((b) => b.text === text);
-        // Only a reading whose row names its author is a heading, and the
-        // sender is that author: a name is never taken from a message's text.
-        const headingOf = (m: ScrapedChatMessage): { body: string; sender: string } | null => {
-            if (!m.author || !m.text.endsWith(` by ${m.author}`)) return null;
-            const body = m.text.slice(0, -` by ${m.author}`.length).trim();
-            return body ? { body, sender: m.author } : null;
+        const take = (list: Array<{ text: string; at: number }>, text: string): boolean => {
+            const at = list.findIndex((entry) => entry.text === text);
+            if (at < 0) return false;
+            list.splice(at, 1);
+            return true;
         };
-        const bodies: ScrapedChatMessage[] = [];
-        const headings: Array<{ message: ScrapedChatMessage; body: string; sender: string }> = [];
-        for (const m of read) {
-            const h = headingOf(m);
-            if (h && h.body !== m.text) headings.push({ message: m, ...h });
-            else bodies.push({ ...m });
-        }
-        const kept: ScrapedChatMessage[] = [];
-        for (const m of bodies) {
-            // Its heading was read earlier, and made the message then.
-            if (this.headings.some((h) => h.text === m.text)) continue;
-            this.bodies.push({ text: m.text, at: now });
-            kept.push(m);
-        }
-        for (const h of headings) {
-            const body = kept.find((m) => m.text === h.body && !m.author);
-            if (body) {
-                body.author = h.message.author ?? h.sender;
-                body.id = body.id ?? h.message.id;
-                body.time = body.time ?? h.message.time;
-                continue;
+        // In the order the page lists them, so a copy pairs with its own.
+        const items = read.map((message) => {
+            const suffix = message.author ? ` by ${message.author}` : '';
+            const body = suffix && message.text.endsWith(suffix) ? message.text.slice(0, -suffix.length).trim() : '';
+            return { message: { ...message }, heading: body ? { body, sender: message.author as string } : null, done: false };
+        });
+        const out = new Map<number, ScrapedChatMessage>();
+        items.forEach((item, index) => {
+            if (!item.heading) return;
+            // Its body was passed on in an earlier read.
+            if (take(this.bodies, item.heading.body)) {
+                item.done = true;
+                return;
             }
-            // Its body was read, in this read or an earlier one.
-            if (bodies.some((m) => m.text === h.body) || recentBody(h.body)) continue;
-            kept.push({ ...h.message, text: h.body, author: h.message.author ?? h.sender });
-            this.headings.push({ text: h.body, at: now });
-        }
-        return kept;
+            const body = items.findIndex((other) => !other.heading && !other.done && !other.message.author && other.message.text === item.heading?.body);
+            if (body >= 0) {
+                items[body].done = true;
+                item.done = true;
+                out.set(body, { ...items[body].message, author: item.heading.sender });
+                return;
+            }
+            item.done = true;
+            out.set(index, { ...item.message, text: item.heading.body, author: item.heading.sender });
+            this.headings.push({ text: item.heading.body, at: now });
+        });
+        items.forEach((item, index) => {
+            if (item.done) return;
+            // Its heading was passed on as the message in an earlier read.
+            if (!item.message.author && take(this.headings, item.message.text)) return;
+            if (!item.message.author) this.bodies.push({ text: item.message.text, at: now });
+            out.set(index, item.message);
+        });
+        return [...out.entries()].sort((a, b) => a[0] - b[0]).map(([, message]) => message);
     }
 }
