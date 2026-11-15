@@ -27,6 +27,7 @@ import {
     chatWatchAction,
     AsyncLock,
     ChatCopyMerger,
+    ScrapedChatMessage,
     composerHoldsMessage,
     introForChatlessClient,
     isChatPaneButton,
@@ -2128,10 +2129,10 @@ export default class Teams {
             if (page.isClosed()) return;
             try {
                 // One message of a body and the heading that repeats it with
-                // its sender (ChatCopyMerger).
-                const fresh = chatCopies.merge(
-                    await page.evaluate((extra) => (window as any).__lmaScrapeMessages(extra), aiMessageSelector),
-                );
+                // its sender (ChatCopyMerger), on the light-meetings client only:
+                // elsewhere a message ending in "by <its author>" is as typed.
+                const scraped: ScrapedChatMessage[] = await page.evaluate((extra) => (window as any).__lmaScrapeMessages(extra), aiMessageSelector);
+                const fresh = isLightMeetingsUrl(page.url()) ? chatCopies.merge(scraped) : scraped;
                 const history = firstRead;
                 firstRead = false;
                 if (fresh.length) {

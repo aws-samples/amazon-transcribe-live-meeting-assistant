@@ -382,6 +382,6 @@ test("a heading completes its own earlier body, not another person's in the same
     assert.deepEqual(merger.merge([read('ok by Alice', 'Alice'), read('ok'), read('ok by Bob', 'Bob')]), [read('ok', 'Bob')]);
 });
 
-test('teams.ts reads the chat through ChatCopyMerger', () => {
-    assert.match(teamsSource(), /const fresh = chatCopies\.merge\(\s+await page\.evaluate\(\(extra\) => \(window as any\)\.__lmaScrapeMessages\(extra\), aiMessageSelector\),\s+\);/);
+test('teams.ts reads the chat through ChatCopyMerger on the light-meetings client only', () => {
+    assert.match(teamsSource(), /const fresh = isLightMeetingsUrl\(page\.url\(\)\) \? chatCopies\.merge\(scraped\) : scraped;/);
 });
