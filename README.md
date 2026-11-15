@@ -1,63 +1,67 @@
-# Live Meeting Assistant (LMA) with Amazon Transcribe, Amazon Bedrock, Amazon Quick Suite, and Strands Agents
+# Live Meeting Assistant (LMA)
 
-_Companion AWS blog post: [Live Meeting Assistant with Amazon Transcribe, Amazon Bedrock, and Strands Agents](http://www.amazon.com/live-meeting-assistant)_
+**An AI teammate in your meetings, not just a note taker.** LMA joins your Zoom, Microsoft Teams, Google Meet, Webex and Amazon Chime meetings. It transcribes and translates them live and names every speaker, including people sharing one conference-room microphone. It answers questions as the meeting happens, and leaves you with summaries, actions, agenda coverage and searchable slides. A consent record on every meeting shows who agreed. It runs entirely in your own AWS account, built on Amazon Bedrock, the Strands Agents SDK and Amazon Transcribe.
 
-_See [CHANGELOG](./CHANGELOG.md) for latest features and fixes._
+_Latest release: **v0.4.0**. See the [CHANGELOG](./CHANGELOG.md) for what's new, and the [v0.4.0 upgrade notes](./docs/stack-updates-and-upgrades.md#v040) before updating an existing stack._
 
-**Questions?** [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/aws-samples/amazon-transcribe-live-meeting-assistant)
+**📖 [Documentation](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/)** · **🎬 [LMA in Action](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/lma-in-action/)**, an illustrated tour · **[Demo videos](./docs/demo-videos.md)** · [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/aws-samples/amazon-transcribe-live-meeting-assistant)
 
-## Introduction
+## See it in action
 
-You've likely experienced the challenge of taking notes during a meeting while trying to pay attention to the conversation. You've probably also experienced the need to quickly fact-check something that's been said, or look up information to answer a question that's just been asked in the call. Or maybe you have a team member that always joins meetings late, and expects you to send them a quick summary over chat to catch them up.
+**Live Meeting Assistant: an AI teammate in your meetings** (about 8 minutes). LMA is invited to a meeting from a pasted invitation, posts its consent notice, names the voices in a shared room, answers questions in the meeting chat, and leaves a summary that tracks the agenda.
 
-All of this, and more, is now possible with the Live Meeting Assistant (LMA).
+https://github.com/user-attachments/assets/ccb1e079-3a9e-4e94-990a-c39043b659dd
 
-Check out our demo to see many of the latest features.
+More demos, including meeting consent and compliance, an AI coach for a requirements workshop, and what's new in 0.4.0, are on the [Demo videos](./docs/demo-videos.md) page.
 
-https://github.com/user-attachments/assets/7642f659-ed9e-4abf-8baf-2f6fb27b08cb
+## What it does
 
+**It joins the meeting for you, on any platform**
+- **Virtual Participant:** paste a meeting link and a Virtual Participant joins Zoom, Teams, Google Meet, Webex or Chime as a guest, now or at a scheduled time. It introduces itself in the chat and leaves when the meeting ends. ([Virtual Participant](./docs/virtual-participant.md))
+- **Capture without a bot:** stream from the web app's Stream Audio tab, the Chrome extension, or the native **Desktop Capture App** for macOS and Windows. ([Meeting Sources](./docs/meeting-sources.md))
 
+**A live transcript, in the language you read best**
+- **Live transcript:** each line appears seconds after it's spoken, labelled with its speaker, with live translation into 75+ languages. Search it, filter by speaker, and play the recording from any line. ([Transcription & Translation](./docs/transcription-and-translation.md))
+- **Speakers named in a shared room:** when several people share one room microphone, LMA tells the voices apart and names each one from what they say, showing the quote it used. With voice enrollment (Beta), LMA users can enroll their own voice so that LMA recognises them in later meetings. ([Voice Enrollment](./docs/voice-enrollment.md))
+- **Choice of speech engine:** Amazon Transcribe by default, or an on-demand engine that runs open speech models on AWS Lambda MicroVMs in your account, one per meeting. ([On-demand ASR](./docs/microvm-asr.md))
+- **Meeting chat in the transcript:** on Zoom, Teams and Meet, messages sent to everyone become transcript lines under their sender. ([Meeting chat](./docs/virtual-participant.md#meeting-chat-in-the-transcript))
 
-## Key Features
+**Ask anything, while it still matters**
+- **Meeting assistant:** an agent with tools, not a chatbot over a transcript. It searches this meeting, past meetings, your documents and the web, with quick actions such as *summarize so far*, *list actions*, and *flag actions with no owner or due date*. ([Meeting Assistant](./docs/meeting-assistant.md))
+- **Ask from the meeting chat:** anyone in the meeting can type `LMA what was just discussed?` and the answer is posted back to the chat. Chat commands (`LMA help`, `LMA pause`, `LMA leave` and more) control the Virtual Participant. ([Chat commands](./docs/virtual-participant.md#in-meeting-chat-commands))
+- **Voice assistant and live interpreter:** Amazon Nova Sonic or ElevenLabs voice answers, an optional animated avatar, and a translator mode that interprets aloud between two languages. ([Voice Assistant](./docs/voice-assistant.md))
+- **MCP, both ways:** add tools from Model Context Protocol servers such as Salesforce or your own. LMA is itself an MCP server, so Amazon Quick Suite, Claude Desktop or your own agents can search meetings and send a Virtual Participant. ([MCP Servers](./docs/mcp-servers.md))
 
-- **Live transcription with speaker attribution** — Powered by Amazon Transcribe with custom vocabulary and language model support
-- **Live translation** — 75+ languages via Amazon Translate
-- **AI meeting assistant** — Strands Agents SDK with Amazon Bedrock, with built-in tools for transcript search, web search, document search, and meeting history
-- **MCP server integration** — Extend the assistant with external tools (Salesforce, Amazon Quick Suite, custom servers)
-- **On-demand and automatic summaries** — Generate summaries, action items, and insights during and after meetings
-- **Virtual Participant** — Headless Chrome bot joins Zoom, Teams, Chime, WebEx and Google Meet meetings
-- **Desktop Capture App** — Native macOS / Windows menu-bar app captures system + microphone audio (and optionally screen video) for meetings joined from a native desktop app — no browser tab, no bot
-- **Voice assistant** — Nova Sonic 2 or ElevenLabs voice responses with optional Simli animated avatar
-- **Translator Mode** — Real-time bidirectional AI interpreter that joins meetings via the Virtual Participant and speaks each utterance in the other language
-- **Meetings Query Tool** — Semantic search across all past meeting transcripts via Bedrock Knowledge Base
-- **Embeddable components** — iframe integration for embedding LMA in external applications
-- **Meeting recording** — Optional stereo audio recordings stored in S3, plus optional MP4 video recording from the Virtual Participant or Desktop Capture App
-- **Meeting inventory** — Searchable list of all meetings with sharing and access control
+**A record you can act on**
+- **Summaries and agendas:** summaries, decisions and action items, plus which agenda items were covered, touched on or missed. Summaries are Markdown you can edit, regenerate, download or share. ([Summaries](./docs/transcript-summarization.md), [Agendas](./docs/meeting-agenda.md))
+- **Searchable slides:** LMA keeps key frames of the shared screen from the meeting video, reads the text on them, and links each one to the moment it was shown. ([Meeting Video](./docs/meeting-video.md))
+- **Ask across all your meetings:** the Meetings Query Tool answers from every meeting you can see and cites them. ([Meetings Query Tool](./docs/meetings-query-tool.md))
 
-## Documentation
+**Consent and retention you can prove**
+- **Meeting consent:** Off, Notify or Opt-in for each meeting. LMA posts its notice, any objection stops capture, and every meeting keeps a consent record of the notice, the replies (typed or spoken) and the evidence. ([Meeting Consent](./docs/meeting-consent.md))
+- **Retention:** keep records and transcripts for as many days as you choose, or delete each transcript once its summary is written. Organisation presets set consent, retention and privacy together. ([Privacy & Data Handling](./docs/privacy-and-data-handling.md))
+- **Cost per meeting:** each meeting shows an itemised estimate of what it cost. ([Meeting Cost Estimate](./docs/meeting-cost-estimate.md))
 
-**📖 Browse the docs site: [aws-samples.github.io/amazon-transcribe-live-meeting-assistant](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/)**
-
-Full documentation source: [docs/INDEX.md](./docs/INDEX.md)
-
-Quick links:
-- [Prerequisites & Deployment](./docs/prerequisites-and-deployment.md)
-- [Quick Start Guide](./docs/quick-start-guide.md)
-- [Meeting Assistant](./docs/meeting-assistant.md)
-- [Meeting Sources](./docs/meeting-sources.md) — compare all capture options
-- [Virtual Participant](./docs/virtual-participant.md)
-- [Desktop Capture App](./docs/desktop-capture-app.md)
-- [Voice Assistant](./docs/voice-assistant.md)
-- [MCP Servers](./docs/mcp-servers.md)
-- [Developer Guide](./docs/developer-guide.md)
+**Yours to run, yours to shape**
+- **Your account, your models:** meetings, recordings and models stay in your AWS account and Region, encrypted with your own key. Choose the Bedrock models for the assistant and summaries, and add guardrails.
+- **One Configuration page:** named configuration profiles, edited as a form, JSON or YAML, with revision history. ([Configuration Guide](./docs/configuration-guide.md))
+- **Operations:** a troubleshooting agent that explains failures from the logs, plus CloudWatch alarms and a dashboard. ([Troubleshooting Agent](./docs/troubleshooting-agent.md), [Monitoring](./docs/monitoring.md))
+- **Embeddable:** put the transcript, assistant or Virtual Participant views into your own web applications. ([Embeddable Components](./docs/embeddable-components.md))
+- **Open source** under MIT-0: change the prompts, quick actions, summary sections or the code.
 
 ## Architecture
 
-   <img src="./images/lma-architecture.png" alt="LMA Architecture"/>
+<img src="./images/lma-architecture.png" alt="LMA Architecture"/>
 
-The LMA user starts a meeting session using the Stream Audio tab, the Chrome extension, the native Desktop Capture App, or the Virtual Participant feature. A secure WebSocket connection streams two-channel audio to a Fargate-based WebSocket server, which relays it to Amazon Transcribe. Transcription results flow through Kinesis Data Streams to the Call Event Processor Lambda, which integrates with the Strands Agents SDK, Amazon Bedrock, and optionally Bedrock Knowledge Bases. Results are persisted to DynamoDB and pushed to the React web UI in real time via AppSync GraphQL subscriptions.
+A meeting is captured by:
+- the Virtual Participant, which runs on AWS Lambda MicroVMs by default;
+- the Stream Audio tab;
+- the Chrome extension;
+- the Desktop Capture App.
 
-For full architecture details, see [Infrastructure & Security](./docs/infrastructure-and-security.md).
+Audio streams over a secure WebSocket to the transcriber service on AWS Fargate. That service sends it to the meeting's speech engine: Amazon Transcribe, or an on-demand ASR MicroVM. Transcript segments, chat lines and events flow through Amazon Kinesis Data Streams to the Call Event Processor Lambda. That Lambda works with the Strands Agents SDK, Amazon Bedrock and, optionally, Bedrock Knowledge Bases. Results are stored in Amazon DynamoDB and pushed to the React web app in real time through AWS AppSync subscriptions.
+
+See [Infrastructure & Security](./docs/infrastructure-and-security.md) for the full architecture.
 
 ## Quick Deploy
 
@@ -68,17 +72,26 @@ For full architecture details, see [Infrastructure & Security](./docs/infrastruc
 | Asia Pacific (Tokyo) | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://ap-northeast-1.console.aws.amazon.com/cloudformation/home?region=ap-northeast-1#/stacks/create/review?templateURL=https://s3.ap-northeast-1.amazonaws.com/aws-bigdata-blog-replica-ap-northeast-1/artifacts/lma/lma-main.yaml&stackName=LMA) |
 | Europe (Ireland) | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://eu-west-1.console.aws.amazon.com/cloudformation/home?region=eu-west-1#/stacks/create/review?templateURL=https://s3.eu-west-1.amazonaws.com/aws-bigdata-blog-replica-eu-west-1/artifacts/lma/lma-main.yaml&stackName=LMA) |
 
-See [Prerequisites & Deployment](./docs/prerequisites-and-deployment.md) for full deployment instructions.
+Deployment takes about 35–40 minutes. Start with the [Quick Start Guide](./docs/quick-start-guide.md) and [Prerequisites & Deployment](./docs/prerequisites-and-deployment.md). If you're updating a stack from 0.3.x, read the [v0.4.0 upgrade notes](./docs/stack-updates-and-upgrades.md#v040) first: several stack parameters moved to the Configuration page.
 
-You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited.
+You are responsible for complying with legal, corporate and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record or transcribe calls if otherwise prohibited. LMA's [meeting consent](./docs/meeting-consent.md) features help you inform participants and record their agreement.
 
-## Cost Assessment
+## Cost
 
-- Base infrastructure: ~$10/month (Fargate WebSocket server + VPC networking)
-- VP EC2 instances: ~$33/month per warm instance
-- Per-meeting usage: ~$0.17 per 5-minute call (varies by options)
+You pay for the AWS services a deployment and its meetings use, in your own account:
+- **Base infrastructure:** about $10/month for the transcriber service on Fargate and VPC networking, plus a small fixed amount for the CloudWatch alarms and dashboard.
+- **Per meeting:** speech recognition, Bedrock model tokens, the voice assistant, and the Virtual Participant's compute, which runs on AWS Lambda MicroVMs by default and is billed while it is in a meeting.
 
-See [Troubleshooting](./docs/troubleshooting.md#cost-assessment) for detailed cost breakdown and service pricing links.
+Each meeting's page shows an itemised [cost estimate](./docs/meeting-cost-estimate.md). See [Troubleshooting › Cost Assessment](./docs/troubleshooting.md#cost-assessment) for service pricing links.
+
+## Documentation
+
+The [documentation site](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/) is built from [docs/INDEX.md](./docs/INDEX.md). Good starting points:
+- [Quick Start Guide](./docs/quick-start-guide.md) and [Prerequisites & Deployment](./docs/prerequisites-and-deployment.md)
+- [Meeting Sources](./docs/meeting-sources.md), comparing every way to capture a meeting
+- [Virtual Participant](./docs/virtual-participant.md) and [Meeting Consent](./docs/meeting-consent.md)
+- [Meeting Assistant](./docs/meeting-assistant.md), [Voice Assistant](./docs/voice-assistant.md) and [MCP Servers](./docs/mcp-servers.md)
+- [Configuration Guide](./docs/configuration-guide.md) and [Developer Guide](./docs/developer-guide.md)
 
 ## Contributing
 
