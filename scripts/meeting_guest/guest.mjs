@@ -21,7 +21,8 @@
 //   shot         upload a screenshot to SHOT_URL
 //   leave        leave the meeting and exit
 //
-// The log lines "IN CALL" and "GAVE UP" are read by meeting_guest.py.
+// The log lines "IN CALL" and "GAVE UP" are read by meeting_guest.py. "CALL ENDED"
+// (exit code 3), when Meet ends the call, is for a person reading the task log.
 import { launchPersistentContext } from 'cloakbrowser';
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), '[guest]', ...a);
@@ -169,7 +170,11 @@ const CALL_OVER = [
 async function callOver() {
   // Still in the call while its Leave call button is there, whatever the chat says.
   if (await page.getByRole('button', { name: /leave call/i }).count().catch(() => 0)) return null;
-  const text = ((await page.locator('body').innerText().catch(() => '')) || '').toLowerCase();
+  // Normalised as the VP's normalizeMeetText does: Meet writes "you’ve" with a typographic apostrophe.
+  const text = ((await page.locator('body').innerText().catch(() => '')) || '')
+    .replace(/[\u2018\u2019\u02bc]/g, "'")
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
   return CALL_OVER.find((phrase) => text.includes(phrase)) || null;
 }
 

@@ -218,8 +218,7 @@ def test_vp_transcribes_speech_and_chat_from_a_google_meet(
 
         outcome_speech = _wait_for(speech_or_left, timeout=GUEST_LEAD_IN_S + 300) or {}
         assert "left" not in outcome_speech, (
-            "the Virtual Participant left the meeting before the guest's conversation "
-            f"reached the transcript ({outcome_speech.get('left')})"
+            f"the Virtual Participant left the meeting ({outcome_speech.get('left')})"
         )
         said = outcome_speech.get("said", "")
         assert said, "the guest's conversation did not reach the meeting's transcript"
