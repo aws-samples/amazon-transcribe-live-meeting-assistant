@@ -267,6 +267,16 @@ export interface ScrapedChatMessage {
     links: string[];
 }
 
+/**
+ * The part of a heading's text before the "..." or "…" Teams puts where it
+ * shortens a long message, or null when the heading is not shortened (or too
+ * little of it is left to tell messages apart).
+ */
+export function shortenedPrefix(text: string): string | null {
+    const m = text.match(/^(.*\S)\s*(?:\.\.\.|…)$/);
+    return m && m[1].length >= 20 ? m[1] : null;
+}
+
 /** How long a message's other copy is looked for in a later read. */
 export const CHAT_COPY_WINDOW_MS = 15_000;
 
@@ -289,7 +299,10 @@ export const CHAT_COPY_WINDOW_MS = 15_000;
  * waiting for one, then a body in the same read; a body first matches the
  * oldest heading still waiting for one. Two bodies with the same text are
  * never merged, and a message whose body was read before its heading keeps
- * no sender (it has been passed on by then).
+ * no sender (it has been passed on by then). Teams shortens a long message in
+ * its heading ("Hope you can see me here.. this is my 2nd p... by <sender>"),
+ * so a heading ending in "..." matches a body that starts with what is left,
+ * and is never passed on as a message itself.
  */
 export class ChatCopyMerger {
     /** Bodies passed on with no sender, waiting for their heading. */
@@ -298,12 +311,16 @@ export class ChatCopyMerger {
     /** Headings passed on as messages, waiting for their body. */
     private headings: Array<{ text: string; at: number }> = [];
 
+    /** Shortened headings, not passed on, whose sender is given to their body when it is read. */
+    private shortened: Array<{ text: string; sender: string; at: number }> = [];
+
     constructor(private readonly clock: () => number = Date.now) {}
 
     merge(read: ScrapedChatMessage[]): ScrapedChatMessage[] {
         const now = this.clock();
         this.bodies = this.bodies.filter((b) => now - b.at <= CHAT_COPY_WINDOW_MS);
         this.headings = this.headings.filter((h) => now - h.at <= CHAT_COPY_WINDOW_MS);
+        this.shortened = this.shortened.filter((h) => now - h.at <= CHAT_COPY_WINDOW_MS);
         const take = (list: Array<{ text: string; at: number }>, text: string): boolean => {
             const at = list.findIndex((entry) => entry.text === text);
             if (at < 0) return false;
@@ -319,12 +336,16 @@ export class ChatCopyMerger {
         const out = new Map<number, ScrapedChatMessage>();
         items.forEach((item, index) => {
             if (!item.heading) return;
+            const prefix = shortenedPrefix(item.heading.body);
+            const matches = (text: string) => (prefix ? text.startsWith(prefix) : text === item.heading?.body);
             // Its body was passed on in an earlier read.
-            if (take(this.bodies, item.heading.body)) {
+            const earlier = this.bodies.findIndex((b) => matches(b.text));
+            if (earlier >= 0) {
+                this.bodies.splice(earlier, 1);
                 item.done = true;
                 return;
             }
-            const body = items.findIndex((other) => !other.heading && !other.done && !other.message.author && other.message.text === item.heading?.body);
+            const body = items.findIndex((other) => !other.heading && !other.done && !other.message.author && matches(other.message.text));
             if (body >= 0) {
                 items[body].done = true;
                 item.done = true;
@@ -332,6 +353,11 @@ export class ChatCopyMerger {
                 return;
             }
             item.done = true;
+            if (prefix) {
+                // Not the message as typed: its body, when read, carries the sender.
+                this.shortened.push({ text: prefix, sender: item.heading.sender, at: now });
+                return;
+            }
             out.set(index, { ...item.message, text: item.heading.body, author: item.heading.sender });
             this.headings.push({ text: item.heading.body, at: now });
         });
@@ -339,6 +365,11 @@ export class ChatCopyMerger {
             if (item.done) return;
             // Its heading was passed on as the message in an earlier read.
             if (!item.message.author && take(this.headings, item.message.text)) return;
+            const short = item.message.author ? -1 : this.shortened.findIndex((h) => item.message.text.startsWith(h.text));
+            if (short >= 0) {
+                item.message.author = this.shortened[short].sender;
+                this.shortened.splice(short, 1);
+            }
             if (!item.message.author) this.bodies.push({ text: item.message.text, at: now });
             out.set(index, item.message);
         });

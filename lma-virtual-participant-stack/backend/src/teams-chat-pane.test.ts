@@ -24,6 +24,7 @@ import {
     CHATLESS_REMOVAL_LINE,
     CHAT_COPY_WINDOW_MS,
     ChatCopyMerger,
+    shortenedPrefix,
     TEAMS_FAILED_MARKER_SETTLE_MS,
     introForChatlessClient,
     isLightMeetingsUrl,
@@ -380,6 +381,29 @@ test("a heading completes its own earlier body, not another person's in the same
     assert.deepEqual(merger.merge([read('ok')]), [read('ok')], "Alice's body, before its heading");
     now += 2000;
     assert.deepEqual(merger.merge([read('ok by Alice', 'Alice'), read('ok'), read('ok by Bob', 'Bob')]), [read('ok', 'Bob')]);
+});
+
+test('a heading Teams shortened matches its long message, in the same read or either order', () => {
+    let now = 1000;
+    const merger = new ChatCopyMerger(() => now);
+    const long = 'Hope you can see me here.. this is my 2nd post..';
+    const heading = read('Hope you can see me here.. this is my 2nd p... by Strahan, Bob', 'Strahan, Bob');
+    assert.deepEqual(merger.merge([heading, read(long)]), [read(long, 'Strahan, Bob')]);
+    now += 2000;
+    assert.deepEqual(merger.merge([read('Another long message that Teams will shorten')]), [read('Another long message that Teams will shorten')]);
+    now += 2000;
+    assert.deepEqual(merger.merge([read('Another long message that Teams w... by Bo', 'Bo')]), [], 'its body was passed on already');
+    now += 2000;
+    assert.deepEqual(merger.merge([read('A third long message, heading read first by... by Bo', 'Bo')]), [], 'a shortened heading is not passed on');
+    now += 2000;
+    assert.deepEqual(merger.merge([read('A third long message, heading read first by the reader')]), [read('A third long message, heading read first by the reader', 'Bo')]);
+});
+
+test('shortenedPrefix', () => {
+    assert.equal(shortenedPrefix('Hope you can see me here.. this is my 2nd p...'), 'Hope you can see me here.. this is my 2nd p');
+    assert.equal(shortenedPrefix('Hope you can see me here… '.trim()), 'Hope you can see me here');
+    assert.equal(shortenedPrefix('ok...'), null, 'too little left');
+    assert.equal(shortenedPrefix('Hope you can see me here'), null);
 });
 
 test('teams.ts reads the chat through ChatCopyMerger on the light-meetings client only', () => {
