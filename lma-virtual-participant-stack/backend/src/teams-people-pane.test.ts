@@ -12,6 +12,7 @@
  * clicks themselves need a live meeting.
  */
 import { strict as assert } from 'node:assert';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import {
     parsePeopleTree,
@@ -126,4 +127,9 @@ test('once disabled, the People pane is never opened again and no list is answer
     guard.noteRead(['Cy']);
     assert.equal(guard.next(), 'off');
     assert.equal(guard.cached, null);
+});
+
+test('teams.ts leaves out the name the VP joined Teams under, as well as the configured one', () => {
+    const source = readFileSync(new URL('../src/teams.ts', import.meta.url), 'utf8');
+    assert.match(source, /const ownNames = \[details\.lmaIdentity, details\.scribeIdentity, details\.scribeName, sanitizeTeamsDisplayName\(details\.scribeIdentity\)\];/);
 });

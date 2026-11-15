@@ -655,7 +655,9 @@ export default class Teams {
         const step = this.peopleGuard.next();
         if (step === 'off') return null;
         if (step === 'cached') return this.peopleGuard.cached;
-        const ownNames = [details.lmaIdentity, details.scribeIdentity, details.scribeName];
+        // The name Teams shows for the VP is the one it joined under, which
+        // sanitizeTeamsDisplayName may have changed from the configured one.
+        const ownNames = [details.lmaIdentity, details.scribeIdentity, details.scribeName, sanitizeTeamsDisplayName(details.scribeIdentity)];
         return this.chatLock.runIfFree(async () => {
             const opened = await this.openPeoplePane(page);
             let rows: PeopleTreeRow[] | null = null;
