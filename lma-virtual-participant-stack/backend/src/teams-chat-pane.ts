@@ -278,11 +278,11 @@ export const CHAT_COPY_WINDOW_MS = 15_000;
  * transcript twice, once with no sender. This makes one message of the two:
  * the body's text, with the sender the heading names.
  *
- * A heading is told from a message that happens to end in "by <name>" only by
- * its body: a reading is taken as a heading when the same read, or one in the
- * last CHAT_COPY_WINDOW_MS, has a message whose text is the part before
- * " by ", or when the reader found an author and the text ends in
- * " by <author>". Two bodies with the same text are never merged.
+ * A reading is a heading only when the reader found its author on the row
+ * and its text ends in " by <author>"; the sender is always that author,
+ * never a name taken from a message's text. A message that only ends in
+ * "by <name>" is kept as it is. Two bodies with the same text are never
+ * merged.
  */
 export class ChatCopyMerger {
     private bodies: Array<{ text: string; at: number }> = [];
@@ -295,19 +295,13 @@ export class ChatCopyMerger {
         const now = this.clock();
         this.bodies = this.bodies.filter((b) => now - b.at <= CHAT_COPY_WINDOW_MS);
         this.headings = this.headings.filter((h) => now - h.at <= CHAT_COPY_WINDOW_MS);
-        const texts = new Set(read.map((m) => m.text));
         const recentBody = (text: string) => this.bodies.some((b) => b.text === text);
+        // Only a reading whose row names its author is a heading, and the
+        // sender is that author: a name is never taken from a message's text.
         const headingOf = (m: ScrapedChatMessage): { body: string; sender: string } | null => {
-            if (m.author && m.text.endsWith(` by ${m.author}`)) {
-                const body = m.text.slice(0, -` by ${m.author}`.length).trim();
-                if (body) return { body, sender: m.author };
-            }
-            for (let at = m.text.indexOf(' by '); at > 0; at = m.text.indexOf(' by ', at + 1)) {
-                const body = m.text.slice(0, at).trim();
-                const sender = m.text.slice(at + 4).trim();
-                if (body && sender && (texts.has(body) || recentBody(body))) return { body, sender };
-            }
-            return null;
+            if (!m.author || !m.text.endsWith(` by ${m.author}`)) return null;
+            const body = m.text.slice(0, -` by ${m.author}`.length).trim();
+            return body ? { body, sender: m.author } : null;
         };
         const bodies: ScrapedChatMessage[] = [];
         const headings: Array<{ message: ScrapedChatMessage; body: string; sender: string }> = [];

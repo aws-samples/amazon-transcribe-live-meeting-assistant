@@ -331,7 +331,7 @@ test('a message and the heading that repeats it with its sender are one message,
     assert.deepEqual(merger.merge([read('Great evening!'), read('Great evening! by Strahan, Bob', 'Strahan, Bob')]), [
         read('Great evening!', 'Strahan, Bob'),
     ]);
-    assert.deepEqual(merger.merge([read('testing again by Strahan, Bob'), read('testing again')]), [read('testing again', 'Strahan, Bob')]);
+    assert.deepEqual(merger.merge([read('testing again by Strahan, Bob', 'Strahan, Bob'), read('testing again')]), [read('testing again', 'Strahan, Bob')]);
 });
 
 test('a heading read after its message, or before it, does not make a second message', () => {
@@ -355,6 +355,12 @@ test('a message that only ends in "by" a name, and two people sending the same w
     assert.deepEqual(merger.merge([read('ok')]), [read('ok')]);
     now += CHAT_COPY_WINDOW_MS + 1;
     assert.deepEqual(merger.merge([read('Hello everyone by Bo', 'Bo')]), [read('Hello everyone', 'Bo')], 'outside the window it is a message of its own');
+});
+
+test('a sender is never taken from the text of a message', () => {
+    const merger = new ChatCopyMerger(() => 1000);
+    assert.deepEqual(merger.merge([read('hello'), read('hello by Strahan, Bob')]), [read('hello'), read('hello by Strahan, Bob')]);
+    assert.deepEqual(merger.merge([read('hi by Ana', 'Bo')]), [read('hi by Ana', 'Bo')], 'a row author that the text does not end in is not a heading');
 });
 
 test('teams.ts reads the chat through ChatCopyMerger', () => {
