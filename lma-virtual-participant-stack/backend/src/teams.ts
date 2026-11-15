@@ -631,6 +631,10 @@ export default class Teams {
                         'the People pane is not opened again in this meeting, so the participant list is not read and not shown in the consent evidence.',
                 );
                 await this.dumpSideRail(page);
+                // The chat is gone as surely as when Teams turns it off: nothing
+                // more is posted, and the detail line says so in every mode.
+                this.chatTurnedOff = true;
+                void meetingConsent.noteChatTurnedOff();
                 void meetingConsent.noteParticipantListLost();
             }
         } catch (e) {
