@@ -24,6 +24,15 @@
 /** A failed message's "Retry" button in the chat. */
 export const TEAMS_FAILED_MESSAGE_RETRY_SELECTOR = '[data-tid="message-failed-retry"]';
 
+/**
+ * How long a Retry button seen right after a post is given to go away before
+ * the post counts as failed. On the anonymous light-meetings client a Retry
+ * button showed after every post in a live meeting, every message of which
+ * reached the chat, and was gone before the next post: it is shown while a
+ * message is still being sent, not only once it has failed.
+ */
+export const TEAMS_FAILED_MARKER_SETTLE_MS = 5000;
+
 /** What is read of a candidate toolbar chat button before it is clicked. */
 export interface ChatButtonInfo {
     aria?: string;

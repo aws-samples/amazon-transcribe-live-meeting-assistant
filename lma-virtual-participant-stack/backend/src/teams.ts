@@ -35,6 +35,7 @@ import {
     PostTargetInfo,
     TEAMS_CHAT_TURNED_OFF_SELECTOR,
     TEAMS_CHAT_WATCH_MS,
+    TEAMS_FAILED_MARKER_SETTLE_MS,
     TEAMS_FAILED_MESSAGE_RETRY_SELECTOR,
 } from './teams-chat-pane.js';
 
@@ -679,6 +680,22 @@ export default class Teams {
             .catch(() => 0);
     }
 
+    // The start of the message each new Retry button belongs to, as far as the
+    // page shows it, for the log. Never throws.
+    private async failedMarkerContext(page: Page): Promise<string[]> {
+        return page
+            .evaluate((selector: string) => {
+                const out: string[] = [];
+                for (const el of Array.from(document.querySelectorAll(selector))) {
+                    if (el.getAttribute('data-lma-seen')) continue;
+                    const row = el.closest('[data-mid], [data-tid="chat-pane-message"], [data-tid="chat-pane-item"], [role="listitem"]');
+                    out.push(((row as HTMLElement | null)?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 40));
+                }
+                return out;
+            }, TEAMS_FAILED_MESSAGE_RETRY_SELECTOR)
+            .catch(() => [] as string[]);
+    }
+
     // Diagnostic dump of the in-meeting top toolbar buttons (chat/people/etc.)
     // so we can pin the real chat-toggle selector for the light-meetings client.
     // Best-effort, never throws.
@@ -976,10 +993,20 @@ export default class Teams {
                 }
                 await new Promise((resolve) => setTimeout(resolve, 150));
             }
-            const failedNow = await this.newFailedMessageCount(page);
+            let failedNow = await this.newFailedMessageCount(page);
+            if (failedNow > 0) {
+                // A Retry button can show while a message is still being sent
+                // (TEAMS_FAILED_MARKER_SETTLE_MS): only one still there after
+                // the wait counts.
+                log.info(`[teams-chat] ${failedNow} Retry button(s) right after posting (${(await this.failedMarkerContext(page)).join(' | ') || 'no message text readable'}); checking again in ${TEAMS_FAILED_MARKER_SETTLE_MS / 1000} s.`);
+                await new Promise((resolve) => setTimeout(resolve, TEAMS_FAILED_MARKER_SETTLE_MS));
+                failedNow = await this.newFailedMessageCount(page);
+            }
             if (failedNow > 0) {
                 all = false;
                 log.warn(`[teams-chat] ${failedNow} message(s) show as failed to send.`);
+            } else {
+                log.info('[teams-chat] no message shows as failed to send.');
             }
             if (await this.chatShownTurnedOff(page)) {
                 // Turned off while posting: what was submitted after it went nowhere.
